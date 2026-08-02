@@ -3406,7 +3406,14 @@ impl Verifier<'_> {
             CastOp::UiToFp | CastOp::SiToFp => int(self, from) && float(self, to),
             CastOp::PtrToInt | CastOp::PtrToAddr => pointer(self, from) && int(self, to),
             CastOp::IntToPtr => int(self, from) && pointer(self, to),
-            CastOp::AddrSpaceCast => pointer(self, from) && pointer(self, to),
+            // Crossing address spaces is the whole of what this cast does,
+            // so one that stays in its own space is not this cast: upstream
+            // calls it an invalid opcode rather than a no-op.
+            CastOp::AddrSpaceCast => {
+                pointer(self, from)
+                    && pointer(self, to)
+                    && self.address_space_of(from) != self.address_space_of(to)
+            }
             // A bitcast reinterprets the same bits, so it may not cross
             // between a pointer and anything else, may not change an address
             // space (that is what addrspacecast is for), and may not apply to
@@ -3825,6 +3832,12 @@ impl Verifier<'_> {
                 if field_of(fields, shape).is_some() && !array {
                     self.report(format!("{shape} appears on a type that is not an array"));
                 }
+            }
+            // An array says what it is an array of. It is the only composite
+            // tag that has to: a structure, a union and an enumeration are
+            // each read without one.
+            if array && field_of(fields, "baseType").is_none() {
+                self.report("an array type has no baseType");
             }
             // A null among the elements names no member.
             if let Some(field) = field_of(fields, "elements")

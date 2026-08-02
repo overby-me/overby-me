@@ -1761,6 +1761,26 @@ and the matrix agrees on all six rows.
 The probe found a rule on the way. `uselistorder_bb` is a top-level
 directive: written among the instructions, upstream calls it an unknown
 opcode, where ours took it in either place.
+Then the three rules the audit had recorded, and the first thing measuring
+them settled was that there were only two. The probe that found them ran
+`opt -S` without `-passes=verify`, so it had been asking a question the
+verifier never heard: asked again with the verifier on, the alias scope
+rule was already there and already right, both at one operand and at four.
+That is twice now that a wrong oracle has manufactured a finding, and both
+times the tell was the same, a result too tidy for how little had been
+looked at.
+The two that are real are small. `addrspacecast` has to cross address
+spaces, since crossing them is the whole of what it does, and upstream says
+so in two places rather than one: an instruction is caught on verifying, an
+expression as it folds while being read, which is why the rule is written
+twice here too. It looks through a vector, so a cast between two vectors of
+pointers answers the way the pointers do. And `DW_TAG_array_type` has to
+name a `baseType:`, alone among the composite tags: a structure, a union,
+an enumeration, a class and a variant part are each read without one, which
+is measured rather than assumed.
+No bound moves for any of it. The suites do not test these shapes, which is
+what the fixture audit exists to catch and why the rules were found by
+asking upstream about our own tests rather than by running its.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

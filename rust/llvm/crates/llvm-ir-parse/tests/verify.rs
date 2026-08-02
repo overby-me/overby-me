@@ -60,6 +60,25 @@ fn the_corpus_verifies() {
 /// produce, so a rule that stops firing fails loudly rather than quietly
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
+    // Crossing address spaces is the whole of what an addrspacecast does,
+    // so one that stays in its own space is not that cast. Written as an
+    // instruction it is caught on verifying, where an expression is caught
+    // as it folds while being read.
+    (
+        "define void @f(ptr %p) {\nentry:\n  %q = addrspacecast ptr %p to ptr\n  ret void\n}\n",
+        "casts between the wrong kinds of type",
+    ),
+    // A vector of pointers answers the same way the pointers do.
+    (
+        "define void @f(<2 x ptr> %p) {\nentry:\n  %q = addrspacecast <2 x ptr> %p to <2 x ptr>\n  ret void\n}\n",
+        "casts between the wrong kinds of type",
+    ),
+    // An array says what it is an array of, and it is the only composite
+    // tag that has to.
+    (
+        "!t = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_array_type, size: 32)\n!llvm.module.flags = !{!99}\n!99 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+        "an array type has no baseType",
+    ),
     // The declared half of the tied-position rule. A declaration nothing
     // calls is never looked at, upstream included, so the mismatch is
     // reported at the call.
@@ -1203,6 +1222,17 @@ const REJECTED: &[(&str, &str)] = &[
         "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %target\ntarget:\n  ret void\n  uselistorder label %target, { 2, 0 }\n}\n",
         "expected distinct uselistorder indexes in range [0, size)",
     ),
+    // Crossing address spaces is the whole of what an addrspacecast does, so
+    // one that stays in its own space is not that cast. An expression folds
+    // as it is read and says so there; an instruction says so on verifying.
+    (
+        "@r = global i32 0\n@a = global ptr addrspacecast (ptr @r to ptr)\n",
+        "invalid cast opcode for cast",
+    ),
+    (
+        "@r = addrspace(3) global i32 0\n@a = global ptr addrspace(3) addrspacecast (ptr addrspace(3) @r to ptr addrspace(3))\n",
+        "invalid cast opcode for cast",
+    ),
     (
         "!named = !{!{i32 1}}\n",
         "a named metadata list holds references, not nodes",
@@ -1619,6 +1649,15 @@ const VERIFIES: &[&str] = &[
     // The address a function takes of its own block, read by the
     // `indirectbr` that also lists the block as a destination.
     "define void @f() {\nentry:\n  indirectbr ptr blockaddress(@f, %target), [ label %target ]\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // An addrspacecast that does cross, in both directions and through a
+    // vector of pointers.
+    "@r = addrspace(3) global i32 0\n@a = global ptr addrspacecast (ptr addrspace(3) @r to ptr)\n",
+    "define void @f(<2 x ptr> %p) {\nentry:\n  %q = addrspacecast <2 x ptr> %p to <2 x ptr addrspace(3)>\n  ret void\n}\n",
+    // Only an array has to name a base type; the other composite tags are
+    // each read without one.
+    "!t = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_structure_type, size: 32)\n!llvm.module.flags = !{!99}\n!99 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+    "!t = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_enumeration_type, size: 32)\n!llvm.module.flags = !{!99}\n!99 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+    "!t = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_array_type, size: 32, baseType: !98)\n!98 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n!llvm.module.flags = !{!99}\n!99 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
     // A block labelled `1:` keeps no name and answers to its slot number,
     // which is the name a `blockaddress` writes for it too. One branch and
     // one address make two.

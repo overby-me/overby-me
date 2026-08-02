@@ -146,6 +146,17 @@ impl Parser {
         }
     }
 
+    /// The address space a pointer type names, looking through a vector so
+    /// that a cast between vectors of pointers answers the same way a cast
+    /// between the pointers themselves does.
+    fn address_space(&self, ty: TypeId) -> Option<u32> {
+        let inner = match self.module.ctx.type_kind(ty) {
+            TypeKind::Vector { element, .. } => *element,
+            _ => ty,
+        };
+        self.module.ctx.type_kind(inner).pointer_address_space()
+    }
+
     /// The indices of a walk that answers with a vector, each written the way
     /// upstream writes it: as a vector, except where it names a struct field.
     fn widen_gep_indices(
@@ -886,12 +897,22 @@ impl Parser {
             other => match CastOp::from_keyword(other) {
                 Some(op) => {
                     self.require(Token::LeftParen)?;
-                    let (_, operand) = self.parse_typed_constant()?;
+                    let (source, operand) = self.parse_typed_constant()?;
                     if !self.eat_word("to") {
                         return self.error("expected 'to' in a cast expression");
                     }
                     let target = self.parse_type()?;
                     self.require(Token::RightParen)?;
+                    // Crossing address spaces is the whole of what this cast
+                    // does, so one that stays in its own space is not this
+                    // cast at all. Upstream says so while reading rather than
+                    // when verifying, an expression having to fold as it is
+                    // read.
+                    if op == CastOp::AddrSpaceCast
+                        && self.address_space(source) == self.address_space(target)
+                    {
+                        return self.error("invalid cast opcode for cast");
+                    }
                     if let Some(ty) = expected
                         && target != ty
                     {
