@@ -126,6 +126,15 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     crate::components::widgets::ErrorState {
                         title: t("error.somethingWentWrong"),
                         small: true,
+                        // This list is the first thing a signed-in reader sees, and
+                        // the way it fails is a dropped request rather than a bad
+                        // one -- a phone changing cell on the way into the venue.
+                        // Without this the only way back is reloading the page.
+                        // Bumping the data version rather than re-running just this
+                        // resource is deliberate: it is what pull-to-refresh means
+                        // here, and a connection that dropped one query usually
+                        // dropped its neighbours too.
+                        on_retry: move |_| crate::session::bump_data_version(),
                     }
                 }
             }
@@ -195,6 +204,10 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     crate::components::widgets::ErrorState {
                         title: t("error.somethingWentWrong"),
                         small: true,
+                        // Both lists come from the ONE resource above, so a dropped
+                        // request puts a dead card in each; retrying from either
+                        // brings both back.
+                        on_retry: move |_| crate::session::bump_data_version(),
                     }
                 }
             }
