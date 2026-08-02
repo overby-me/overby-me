@@ -1052,10 +1052,13 @@ html {
 	background: var(--md-surface-container-high);
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-2);
-	/* Clips so the bottom row's touch and hover states cannot square off the
-	   dock's rounded corners. The search dropdown has to escape this (see
-	   `.compact-dock .search-results`). */
-	overflow: hidden;
+	/* Deliberately NOT `overflow: hidden`. A rounded clip here is applied to
+	   position:fixed descendants by WebKit (Chromium exempts them), and the
+	   search dropdown is a descendant — on iOS that clipped it away entirely, so
+	   results were rendered, Enter opened the first one, and nothing was ever
+	   drawn. The bottom row keeps its own clip instead (`.compact-dock .nav-bar`),
+	   which is all the corners ever needed. */
+	overflow: visible;
 	/* Height of one tier (search, apps). The dropdown above measures the dock by
 	   it, so the three stay in step. */
 	--dock-tier: 56px;
@@ -1100,6 +1103,13 @@ html {
 	/* A hairline splits the two functions without breaking the single surface. */
 	border-top: 1px solid
 		color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
+	/* The clip the dock used to do for everyone, kept where it was actually
+	   needed: this row's touch and hover states are the only thing that can
+	   square off the dock's bottom corners. Nothing here is fixed-positioned, so
+	   confining it costs nothing. */
+	overflow: hidden;
+	border-end-start-radius: var(--md-sys-shape-corner-extra-large);
+	border-end-end-radius: var(--md-sys-shape-corner-extra-large);
 }
 .app-shell[data-size-class="compact"] .compact-dock .nav-bar-item {
 	padding: var(--md-sys-spacing-1) 0;
@@ -6397,26 +6407,30 @@ a.list-item:hover {
 	margin-bottom: var(--md-sys-spacing-2);
 	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
-/* On compact the search sits in the bottom dock, which clips (its rounded
-   corners need it), and this dropdown opens ABOVE the search row: absolutely
-   positioned it fell outside the dock's box and was clipped away, so results
-   were rendered and never seen. Fixed positioning leaves the dock's box behind
-   and anchors to the viewport instead, spanning the dock's own inset and sitting
-   one step above its top edge (two tiers + the dock's own bottom offset). */
+/* On compact the search sits in the bottom dock and this dropdown opens ABOVE
+   the search row. It stays absolutely positioned against `.search-box` (the base
+   rule): the dock is already placed correctly — lifted clear of the keyboard,
+   slid away on scroll — so anchoring to the search row inherits all of that and
+   needs no arithmetic. An earlier version fixed it to the viewport at
+   `--dock-tier * 2`, which assumed a two-tier dock and left it floating 64px
+   high whenever the navigation tier was absent.
+
+   That only works because the dock no longer clips; see `.compact-dock`. */
 .compact-dock .search-results {
-	position: fixed;
-	left: var(--md-sys-spacing-2);
-	right: var(--md-sys-spacing-2);
-	/* Sits above the dock, so it has to clear the keyboard by the same amount —
-	   otherwise the results appear behind it while you are typing at them. */
-	bottom: calc(
-		var(--dock-tier) *
-		2 +
-		var(--md-sys-spacing-2) *
-		2 +
-		var(--md-sys-keyboard-inset)
+	/* Never taller than the room above the dock. With the keyboard up on a small
+	   phone (a 568pt screen loses 216pt to it) a 300px list runs off the TOP of
+	   the screen, and a viewport edge is not a scroll container — those rows are
+	   simply unreachable. Sized for the worst case, a two-tier dock, so it is
+	   conservative rather than wrong when the navigation tier is there.
+	   `min()` with `dvh` is Safari 15.4+; older engines fall back to the flat
+	   300px above, which is exactly today's behaviour. */
+	max-height: min(
+		300px,
+		calc(
+			100dvh - var(--md-sys-keyboard-inset) - var(--dock-tier) * 2 -
+				var(--md-sys-spacing-6)
+		)
 	);
-	margin-bottom: 0;
 }
 
 /* DESIGN (functional): a clear no-results row in the search dropdown. */
