@@ -81,10 +81,12 @@ impl OfficeViewer {
     fn from_key(key: &str) -> Self {
         match key {
             "google" => OfficeViewer::Google,
-            "native" => OfficeViewer::Native,
-            // Microsoft is what everybody had before the choice existed, so an
-            // unset or unreadable preference keeps what they were used to.
-            _ => OfficeViewer::Microsoft,
+            "microsoft" => OfficeViewer::Microsoft,
+            // This app renders the document itself, which is the one option
+            // that sends the file to nobody, so it is what an unset or
+            // unreadable preference gets. A preference already stored is still
+            // read back and still honoured.
+            _ => OfficeViewer::Native,
         }
     }
 }
@@ -210,14 +212,34 @@ pub fn type_label(mime: &str, file_name: &str) -> String {
 /// one — that is the same rule `renders_natively` follows.
 pub fn viewers_for(mime: &str) -> Vec<OfficeViewer> {
     let mut out = Vec::new();
+    // This app first, where it can do the job: it is the default, and the first
+    // entry is the one a reader reaches for. The other two are the fallbacks
+    // for a file it renders badly, which is what the gap notice offers them for.
+    if renders_natively(mime) {
+        out.push(OfficeViewer::Native);
+    }
     if !is_opendocument(mime) {
         out.push(OfficeViewer::Microsoft);
     }
     out.push(OfficeViewer::Google);
-    if renders_natively(mime) {
-        out.push(OfficeViewer::Native);
-    }
     out
+}
+
+/// The viewer actually used for `mime`.
+///
+/// A preference is remembered across files, and not every viewer can open every
+/// file: this app does not render an OpenDocument SPREADSHEET, and Microsoft's
+/// viewer does not render OpenDocument at all. So a choice that cannot open
+/// what is in front of it gives way to the first one that can, rather than
+/// producing somebody else's error page.
+pub fn effective_viewer(chosen: OfficeViewer, mime: &str) -> OfficeViewer {
+    let offered = viewers_for(mime);
+    match offered.contains(&chosen) {
+        true => chosen,
+        // Google reads both families, so it is always in the list and this
+        // never falls through; the default is there to keep it total.
+        false => offered.first().copied().unwrap_or(OfficeViewer::Google),
+    }
 }
 
 /// Whether `mime` is the spreadsheet the native path renders as a grid rather
@@ -242,7 +264,7 @@ pub static OFFICE_VIEWER: GlobalSignal<OfficeViewer> = Signal::global(|| {
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|s| s.get_item("wiki_office_viewer").ok().flatten())
         .map(|v| OfficeViewer::from_key(&v))
-        .unwrap_or(OfficeViewer::Microsoft)
+        .unwrap_or(OfficeViewer::Native)
 });
 
 /// Choose a viewer, and remember it.
@@ -439,22 +461,62 @@ mod tests {
     }
 
     #[test]
-    fn ooxml_is_offered_all_three() {
+    fn ooxml_is_offered_all_three_with_this_app_first() {
         use super::{viewers_for, OfficeViewer};
         let docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         assert_eq!(
             viewers_for(docx),
             vec![
+                OfficeViewer::Native,
                 OfficeViewer::Microsoft,
-                OfficeViewer::Google,
-                OfficeViewer::Native
-            ]
+                OfficeViewer::Google
+            ],
+            "this app is the default, so it is the first thing offered"
         );
         // A format nothing here reads keeps the two embedded viewers.
         let legacy = "application/msword";
         assert_eq!(
             viewers_for(legacy),
             vec![OfficeViewer::Microsoft, OfficeViewer::Google]
+        );
+    }
+
+    /// A preference is remembered across files, and no viewer opens every
+    /// format. A choice that cannot open what is in front of it must give way
+    /// rather than produce somebody else's error page.
+    #[test]
+    fn a_viewer_that_cannot_open_the_file_gives_way() {
+        use super::{effective_viewer, OfficeViewer, ODS, ODT};
+        let docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        // The ordinary case: the choice stands.
+        for chosen in [
+            OfficeViewer::Native,
+            OfficeViewer::Microsoft,
+            OfficeViewer::Google,
+        ] {
+            assert_eq!(effective_viewer(chosen, docx), chosen);
+        }
+
+        // An OpenDocument SPREADSHEET: this app does not read one yet, and
+        // Microsoft's viewer does not read OpenDocument at all. Google does.
+        assert_eq!(
+            effective_viewer(OfficeViewer::Native, ODS),
+            OfficeViewer::Google
+        );
+        assert_eq!(
+            effective_viewer(OfficeViewer::Microsoft, ODS),
+            OfficeViewer::Google
+        );
+        // An OpenDocument TEXT this app does read, so Microsoft gives way to it.
+        assert_eq!(
+            effective_viewer(OfficeViewer::Microsoft, ODT),
+            OfficeViewer::Native
+        );
+        // And a legacy .doc, which this app does not read, goes to Microsoft.
+        assert_eq!(
+            effective_viewer(OfficeViewer::Native, "application/msword"),
+            OfficeViewer::Microsoft
         );
     }
 
@@ -482,24 +544,28 @@ mod tests {
         }
     }
 
-    /// The stored preference round-trips, and anything else is Microsoft — which
-    /// is what every reader had before this choice existed, so an unset or
-    /// corrupt value must not change what they see.
+    /// Every stored preference round-trips, so nobody who has chosen a viewer
+    /// loses it. Anything else is this app: it renders the document here and
+    /// sends the file to nobody, which is the right thing to do by default.
     #[test]
-    fn an_unknown_preference_falls_back_to_what_people_had() {
+    fn a_stored_preference_survives_and_anything_else_is_this_app() {
         use super::OfficeViewer;
-        assert_eq!(
-            OfficeViewer::from_key(OfficeViewer::Google.key()),
-            OfficeViewer::Google
-        );
-        assert_eq!(
-            OfficeViewer::from_key(OfficeViewer::Microsoft.key()),
-            OfficeViewer::Microsoft
-        );
+        for viewer in [
+            OfficeViewer::Google,
+            OfficeViewer::Microsoft,
+            OfficeViewer::Native,
+        ] {
+            assert_eq!(
+                OfficeViewer::from_key(viewer.key()),
+                viewer,
+                "{:?} must round-trip through storage",
+                viewer
+            );
+        }
         for junk in ["", "libreoffice", "GOOGLE", "null"] {
             assert_eq!(
                 OfficeViewer::from_key(junk),
-                OfficeViewer::Microsoft,
+                OfficeViewer::Native,
                 "{junk:?}"
             );
         }
@@ -1063,7 +1129,13 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 },
                                 OfficeLink::Ready(url) => {
                                     let encoded = String::from(&js_sys::encode_uri_component(&url));
-                                    let embed = viewer_embed_url(OFFICE_VIEWER(), &encoded);
+                                    // Not the raw preference: reaching here means
+                                    // the native path declined this format, and
+                                    // Microsoft cannot read OpenDocument either.
+                                    let embed = viewer_embed_url(
+                                        effective_viewer(OFFICE_VIEWER(), file_mime),
+                                        &encoded,
+                                    );
                                     rsx! {
                                         div { class: "viewport-frame",
                                             iframe {
