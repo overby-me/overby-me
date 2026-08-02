@@ -24,6 +24,8 @@
 use dioxus::prelude::*;
 use serde::Deserialize;
 
+use crate::i18n::t;
+
 /// English Metric Units per point. OOXML measures everything in EMU: 914400 to
 /// the inch, and 72 points to the inch.
 const EMU_PER_POINT: f64 = 12700.0;
@@ -326,6 +328,28 @@ pub fn DeckView(deck: Deck) -> Element {
                                 loading: "lazy",
                                 decoding: "async",
                             }
+                        } else if shape.image_path.as_deref().is_some_and(|p| !p.is_empty()) {
+                            // A picture the browser cannot decode. Office keeps
+                            // pasted figures as EMF, which nothing renders and
+                            // which carries no fallback of its own, so there are
+                            // no pixels to draw here and never will be.
+                            //
+                            // Its BOX is drawn regardless, where and how big the
+                            // author put it. Skipping the shape entirely left a
+                            // silent hole under a caption that promises a figure
+                            // ("Figur 7 ..."), which reads as the app losing the
+                            // picture rather than as a viewer that cannot show
+                            // this one. The banner above the document counts them
+                            // too; this says WHICH.
+                            div {
+                                key: "e{j}",
+                                class: "pptx-img-missing",
+                                style: "{shape_box(&shape, &deck)}",
+                                title: "{t(\"file.imageNotDrawable\")}",
+                                role: "img",
+                                aria_label: "{t(\"file.imageNotDrawable\")}",
+                                span { class: "material-icons", "image_not_supported" }
+                            }
                         } else if shape.text_body.is_some() {
                             div {
                                 key: "e{j}",
@@ -470,6 +494,47 @@ mod tests {
         assert_eq!(shape.width, 1_235_676.0);
         assert!(shape.src.is_none(), "the bytes are attached separately");
         assert!(shape.text_body.is_none());
+    }
+
+    /// A figure pasted into PowerPoint from Excel is stored as EMF, which no
+    /// browser decodes and which carries no fallback of its own. It is not
+    /// collected, so the shape keeps a picture path and never gets bytes — the
+    /// exact state the slide draws a placeholder box for, rather than skipping
+    /// the shape and leaving a hole under the caption that announces it.
+    #[test]
+    fn an_emf_picture_is_never_collected_but_stays_a_picture() {
+        let emf = Shape {
+            image_path: Some("ppt/media/image23.emf".into()),
+            mime_type: Some("image/x-emf".into()),
+            ..Default::default()
+        };
+        assert!(!super::super::docx::is_drawable("image/x-emf"));
+        assert_eq!(
+            picture_of(&emf),
+            Some(("ppt/media/image23.emf", "image/x-emf"))
+        );
+
+        let mut deck = Deck {
+            slides: vec![Slide {
+                elements: vec![emf],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // The package is never opened for it: EMF is filtered out before any
+        // reading, so an empty one is enough to show nothing was wanted.
+        assert!(
+            collect_images(&deck, &[]).is_empty(),
+            "nothing to fetch: the browser could not draw it anyway"
+        );
+        attach_images(&mut deck, &Default::default());
+        let shape = &deck.slides[0].elements[0];
+        assert!(shape.src.is_none(), "no bytes, so no <img>");
+        assert!(
+            shape.image_path.as_deref().is_some_and(|p| !p.is_empty()),
+            "still a picture, so its box is still drawn"
+        );
+        assert!(shape.text_body.is_none(), "and it is not a text shape");
     }
 
     /// A 10 x 7.5 inch slide, which is what PowerPoint calls 4:3.

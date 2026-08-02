@@ -8322,6 +8322,41 @@ a.list-item:hover {
 	position: absolute;
 	transform-origin: center;
 }
+
+/* A picture the browser cannot decode (Office keeps pasted figures as EMF).
+   Occupies the box the author gave it, so the slide keeps its shape and the
+   reader can see WHERE the figure belongs. Quiet, like the gap banner: nothing
+   has gone wrong with the file, this viewer just cannot draw this one. */
+.pptx-img-missing {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--md-surface-container-low);
+	border: 1px dashed var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-small);
+	color: var(--md-on-surface-variant);
+	/* Before the icon font arrives the span is its ligature NAME in full, which
+	   is far wider than a small placeholder. Size containment does not clip, so
+	   this does: a picture's box should never spill across the slide. */
+	overflow: hidden;
+	/* Its OWN box is the container the glyph below measures itself against.
+	   Without this the nearest one is `.pptx-slide`, and every placeholder on a
+	   slide came out the same size however big its picture was. Safe to contain:
+	   the box is absolutely sized from the author's percentages, never from what
+	   is inside it. */
+	container-type: size;
+}
+/* Sized off the box rather than the type scale: these range from a small inline
+   figure to a full-slide screenshot, and a fixed glyph would swamp the former
+   and vanish in the latter. Floored and capped so it stays an icon either way. */
+.pptx-img-missing .material-icons {
+	font-size: clamp(
+		var(--md-sys-typescale-title-medium-size),
+		30cqmin,
+		var(--md-sys-typescale-display-small-size)
+	);
+}
 .pptx-para {
 	margin: 0;
 	line-height: 1.25;
