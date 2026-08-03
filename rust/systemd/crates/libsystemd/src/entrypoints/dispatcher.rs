@@ -70,6 +70,15 @@ pub enum Event {
         ok: bool,
         message: String,
     },
+    /// Stop a unit and its stop closure in dependency order on the
+    /// dispatcher (docs/EVENT-LOOP.md inc 3): dependents' chains finalize
+    /// before the unit's own chain starts, PropagatesStopTo= targets stop
+    /// afterwards, and the optional control job finishes when the root's
+    /// chain completes.
+    StopUnitTree {
+        root: UnitId,
+        job: Option<crate::units::jobs::JobId>,
+    },
 }
 
 /// A helper-command continuation parked between steps, keyed by the
@@ -87,6 +96,16 @@ enum PendingHelper {
         cmd: crate::units::Commandline,
         child: std::process::Child,
         timeout: Option<std::time::Duration>,
+    },
+    /// An ExecStop=/ExecStopPost= helper of a stop chain.
+    StopHelper {
+        chain: crate::units::ServiceStopChain,
+        cmd: crate::units::Commandline,
+        child: std::process::Child,
+    },
+    /// A stop chain awaiting its main process's exit under TimeoutStopSec.
+    StopMain {
+        chain: crate::units::ServiceStopChain,
     },
 }
 
@@ -117,6 +136,23 @@ struct StartWait {
 }
 
 type StartWaits = std::collections::HashMap<UnitId, StartWait>;
+
+/// Dependency-ordered stop scheduling state (docs/EVENT-LOOP.md inc 3):
+/// dependents' chains must finalize before their unit's chain starts.
+#[derive(Default)]
+struct StopGraph {
+    /// Unit -> number of its dependents in the closure not yet finalized.
+    pending_counts: std::collections::HashMap<UnitId, usize>,
+    /// Finalizing child -> parents whose counts it decrements.
+    parents: std::collections::HashMap<UnitId, Vec<UnitId>>,
+    /// Unit -> PropagatesStopTo= targets, each started as its own tree
+    /// after the unit finalizes.
+    propagate_after: std::collections::HashMap<UnitId, Vec<UnitId>>,
+    /// Root unit -> control job finished when that root's chain completes.
+    root_jobs: std::collections::HashMap<UnitId, crate::units::jobs::JobId>,
+    /// Units with a live chain or queued in the graph, for dedup.
+    active: std::collections::HashSet<UnitId>,
+}
 
 /// Global producer handle, for senders that may hold a RuntimeInfo read
 /// guard (a second same-thread read acquisition deadlocks against a queued
@@ -222,6 +258,7 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
         let mut chains: std::collections::HashMap<i32, PendingEntry> =
             std::collections::HashMap::new();
         let mut start_waits: StartWaits = StartWaits::new();
+        let mut stop_graph = StopGraph::default();
         loop {
             let next_deadline = chains
                 .values()
@@ -232,10 +269,21 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
             let event = handle.pop_blocking_until(next_deadline);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match event {
-                    Some(event) => dispatch_one(event, &run_info, &mut chains, &mut start_waits),
+                    Some(event) => dispatch_one(
+                        event,
+                        &run_info,
+                        &mut chains,
+                        &mut start_waits,
+                        &mut stop_graph,
+                    ),
                     // The deadline wheel fired with no event.
                     None => {
-                        expire_due_chains(&run_info, &mut chains, &mut start_waits);
+                        expire_due_chains(
+                            &run_info,
+                            &mut chains,
+                            &mut start_waits,
+                            &mut stop_graph,
+                        );
                         expire_due_start_waits(&run_info, &mut chains, &mut start_waits);
                     }
                 }
@@ -266,6 +314,7 @@ fn dispatch_one(
     run_info: &ArcMutRuntimeInfo,
     chains: &mut std::collections::HashMap<i32, PendingEntry>,
     start_waits: &mut StartWaits,
+    stop_graph: &mut StopGraph,
 ) {
     match event {
         Event::Notify {
@@ -322,6 +371,30 @@ fn dispatch_one(
                         );
                         route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
                     }
+                    PendingHelper::StopHelper {
+                        mut chain,
+                        cmd,
+                        child,
+                    } => {
+                        let outcome = crate::units::service_stop_chain_helper_exited(
+                            &mut chain, &cmd, child, code, run_info,
+                        );
+                        route_stop_outcome(outcome, chain, chains, stop_graph, run_info);
+                    }
+                    PendingHelper::StopMain { mut chain } => {
+                        // The chain owns finalization; the exit head's
+                        // bookkeeping (ExecMainStatus recording) still runs,
+                        // and the blocking tail is deliberately not spawned.
+                        {
+                            let guard = acquire_read(run_info, &chain.id, pid);
+                            let _ = crate::services::service_exit_head(
+                                pid, &chain.id, &code, &guard, run_info,
+                            );
+                        }
+                        let outcome =
+                            crate::units::service_stop_chain_main_exited(&mut chain, run_info);
+                        route_stop_outcome(outcome, chain, chains, stop_graph, run_info);
+                    }
                 }
                 return;
             }
@@ -371,6 +444,9 @@ fn dispatch_one(
                     fail_start_with_poststop(&unit, message, run_info, chains, start_waits);
                 }
             }
+        }
+        Event::StopUnitTree { root, job } => {
+            begin_stop_tree(root, job, run_info, chains, stop_graph);
         }
     }
 }
@@ -679,6 +755,7 @@ fn expire_due_chains(
     run_info: &ArcMutRuntimeInfo,
     chains: &mut std::collections::HashMap<i32, PendingEntry>,
     start_waits: &mut StartWaits,
+    stop_graph: &mut StopGraph,
 ) {
     let now = std::time::Instant::now();
     let due: Vec<i32> = chains
@@ -716,7 +793,207 @@ fn expire_due_chains(
                 );
                 route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
             }
+            PendingHelper::StopHelper { mut chain, cmd, .. } => {
+                // A stop helper overrunning its window: SIGKILL it, record
+                // the error, skip the rest of its phase like a bad exit.
+                unsafe {
+                    libc::kill(raw_pid, libc::SIGKILL);
+                }
+                chain.errors.push(format!("{cmd} timed out"));
+                let outcome =
+                    crate::units::service_stop_chain_helper_timeout_skip(&mut chain, run_info);
+                route_stop_outcome(outcome, chain, chains, stop_graph, run_info);
+            }
+            PendingHelper::StopMain { mut chain } => {
+                let outcome = crate::units::service_stop_chain_main_timeout(
+                    &mut chain,
+                    nix::unistd::Pid::from_raw(raw_pid),
+                    run_info,
+                );
+                route_stop_outcome(outcome, chain, chains, stop_graph, run_info);
+            }
         }
+    }
+}
+
+/// Build a stop transaction's closure and start its leaf chains. The
+/// closure follows required_by, part_of_by and bound_by edges (those units
+/// stop BEFORE the one they depend on), counts each unit's in-closure
+/// dependents, and records PropagatesStopTo= targets for post-finalize
+/// trees, mirroring deactivate_unit_recursive's order.
+fn begin_stop_tree(
+    root: UnitId,
+    job: Option<crate::units::jobs::JobId>,
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    stop_graph: &mut StopGraph,
+) {
+    if stop_graph.active.contains(&root) {
+        // Already stopping in another transaction; a duplicate control job
+        // completes now rather than dangling.
+        if let Some(job_id) = job {
+            let ri = crate::units::dispatcher_read(run_info);
+            ri.jobs
+                .lock_poisoned()
+                .finish(job_id, crate::units::jobs::JobResult::Done);
+        }
+        return;
+    }
+    if let Some(job_id) = job {
+        stop_graph.root_jobs.insert(root.clone(), job_id);
+    }
+    let mut members: Vec<UnitId> = Vec::new();
+    let mut edges: Vec<(UnitId, UnitId)> = Vec::new();
+    {
+        let ri = crate::units::dispatcher_read(run_info);
+        let mut queue = std::collections::VecDeque::from([root.clone()]);
+        let mut visited: std::collections::HashSet<UnitId> =
+            std::collections::HashSet::new();
+        while let Some(id) = queue.pop_front() {
+            if !visited.insert(id.clone()) {
+                continue;
+            }
+            let Some(unit) = ri.unit_table.get(&id) else {
+                continue;
+            };
+            let already_stopped = matches!(
+                &*unit.common.status.read_poisoned(),
+                crate::units::UnitStatus::Stopped(..)
+                    | crate::units::UnitStatus::NeverStarted
+            );
+            if already_stopped {
+                continue;
+            }
+            members.push(id.clone());
+            let deps = &unit.common.dependencies;
+            for child in deps
+                .required_by
+                .iter()
+                .chain(deps.part_of_by.iter())
+                .chain(deps.bound_by.iter())
+            {
+                edges.push((child.clone(), id.clone()));
+                queue.push_back(child.clone());
+            }
+            let propagate: Vec<UnitId> = deps.propagates_stop_to.clone();
+            if !propagate.is_empty() {
+                stop_graph.propagate_after.insert(id.clone(), propagate);
+            }
+        }
+    }
+    if members.is_empty() {
+        finish_stop_root(&root, run_info, stop_graph);
+        return;
+    }
+    for id in &members {
+        stop_graph.active.insert(id.clone());
+        stop_graph.pending_counts.entry(id.clone()).or_insert(0);
+    }
+    for (child, parent) in edges {
+        if stop_graph.active.contains(&child) && stop_graph.active.contains(&parent) {
+            *stop_graph.pending_counts.entry(parent.clone()).or_insert(0) += 1;
+            stop_graph.parents.entry(child).or_default().push(parent);
+        }
+    }
+    let leaves: Vec<UnitId> = members
+        .iter()
+        .filter(|id| stop_graph.pending_counts.get(*id).copied().unwrap_or(0) == 0)
+        .cloned()
+        .collect();
+    for id in leaves {
+        start_stop_chain(id, run_info, chains, stop_graph);
+    }
+}
+
+fn start_stop_chain(
+    id: UnitId,
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    stop_graph: &mut StopGraph,
+) {
+    let mut chain = crate::units::ServiceStopChain {
+        id,
+        phase: crate::units::StopPhase::ExecStop(0),
+        errors: Vec::new(),
+        job: None,
+    };
+    let outcome = crate::units::service_stop_chain_step(&mut chain, run_info);
+    route_stop_outcome(outcome, chain, chains, stop_graph, run_info);
+}
+
+fn route_stop_outcome(
+    outcome: crate::units::StopStepOutcome,
+    chain: crate::units::ServiceStopChain,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    stop_graph: &mut StopGraph,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    match outcome {
+        crate::units::StopStepOutcome::ForkedHelper {
+            pid,
+            child,
+            cmd,
+            timeout,
+        } => {
+            chains.insert(
+                pid.as_raw(),
+                PendingEntry {
+                    deadline: timeout.map(|t| std::time::Instant::now() + t),
+                    kind: PendingHelper::StopHelper { chain, cmd, child },
+                },
+            );
+        }
+        crate::units::StopStepOutcome::AwaitingMain { pid, timeout } => {
+            chains.insert(
+                pid.as_raw(),
+                PendingEntry {
+                    deadline: timeout.map(|t| std::time::Instant::now() + t),
+                    kind: PendingHelper::StopMain { chain },
+                },
+            );
+        }
+        crate::units::StopStepOutcome::Finished => {
+            on_stop_chain_finished(chain.id, run_info, chains, stop_graph);
+        }
+    }
+}
+
+fn on_stop_chain_finished(
+    id: UnitId,
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    stop_graph: &mut StopGraph,
+) {
+    stop_graph.active.remove(&id);
+    stop_graph.pending_counts.remove(&id);
+    finish_stop_root(&id, run_info, stop_graph);
+    if let Some(parents) = stop_graph.parents.remove(&id) {
+        for parent in parents {
+            let ready = match stop_graph.pending_counts.get_mut(&parent) {
+                Some(count) => {
+                    *count = count.saturating_sub(1);
+                    *count == 0
+                }
+                None => false,
+            };
+            if ready {
+                start_stop_chain(parent, run_info, chains, stop_graph);
+            }
+        }
+    }
+    if let Some(targets) = stop_graph.propagate_after.remove(&id) {
+        for target in targets {
+            begin_stop_tree(target, None, run_info, chains, stop_graph);
+        }
+    }
+}
+
+fn finish_stop_root(id: &UnitId, run_info: &ArcMutRuntimeInfo, stop_graph: &mut StopGraph) {
+    if let Some(job_id) = stop_graph.root_jobs.remove(id) {
+        let ri = crate::units::dispatcher_read(run_info);
+        ri.jobs
+            .lock_poisoned()
+            .finish(job_id, crate::units::jobs::JobResult::Done);
     }
 }
 

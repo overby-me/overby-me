@@ -10616,6 +10616,18 @@ pub fn execute_command(
                         .ok()
                         .inspect(|jid| registry.set_running(*jid))
                 };
+                // With a live dispatcher the stop runs as a dependency-
+                // ordered chain transaction (docs/EVENT-LOOP.md inc 3); the
+                // graph finishes the job when the root's chain completes.
+                // Without one (tests, early boot) the background thread path
+                // remains.
+                if let Some(handle) = crate::entrypoints::dispatcher::global() {
+                    handle.send_normal(crate::entrypoints::dispatcher::Event::StopUnitTree {
+                        root: id,
+                        job: stop_job_id,
+                    });
+                    continue;
+                }
                 std::thread::spawn(move || {
                     let result = {
                         let ri = run_info_clone.read_poisoned();

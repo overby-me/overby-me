@@ -10,8 +10,6 @@
 //! graph; this module owns one unit's chain. Wired by the control Stop
 //! routing; without a live dispatcher the inline path in
 //! `deactivate_unit_recursive` remains the only stop path.
-#![allow(dead_code)]
-
 use log::{trace, warn};
 
 use crate::lock_ext::{MutexExt, RwLockExt};
@@ -332,6 +330,17 @@ pub(crate) fn service_stop_chain_main_timeout(
     }
     chain.errors.push("stop timed out".to_owned());
     chain.phase = StopPhase::Poststop(0);
+    service_stop_chain_step(chain, run_info)
+}
+
+/// A stop helper overran its window and was SIGKILLed by the wheel: skip
+/// the rest of its phase (the error was recorded by the caller) and
+/// advance.
+pub(crate) fn service_stop_chain_helper_timeout_skip(
+    chain: &mut ServiceStopChain,
+    run_info: &ArcMutRuntimeInfo,
+) -> StopStepOutcome {
+    skip_current_stop_phase(chain);
     service_stop_chain_step(chain, run_info)
 }
 
