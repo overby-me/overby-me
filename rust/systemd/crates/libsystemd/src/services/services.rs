@@ -347,7 +347,7 @@ fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Re
 }
 
 /// Check if a unit is masked (symlink to /dev/null) on disk.
-fn is_unit_masked(name: &str) -> bool {
+pub(crate) fn is_unit_masked(name: &str) -> bool {
     let runtime = std::path::Path::new("/run/systemd/system").join(name);
     if let Ok(target) = std::fs::read_link(&runtime)
         && target == std::path::Path::new("/dev/null")

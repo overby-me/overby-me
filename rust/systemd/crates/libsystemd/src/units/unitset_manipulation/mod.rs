@@ -6,6 +6,7 @@ mod insert_new;
 mod locking;
 mod remove;
 mod sanity_check;
+mod stop_chain;
 
 pub use activate::*;
 pub use deactivate::*;
@@ -13,3 +14,4 @@ pub use insert_new::*;
 pub use locking::*;
 pub use remove::*;
 pub use sanity_check::*;
+pub use stop_chain::*;
