@@ -641,6 +641,11 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 "SendSIGHUP",
                 if svc.conf.send_sighup { "yes" } else { "no" },
             );
+            insert(
+                &mut props,
+                "FileDescriptorStorePreserve",
+                format_fd_store_preserve(&svc.conf.file_descriptor_store_preserve),
+            );
             // CleanResult is always "success" (cleaning failures not tracked yet).
             //
             // Type=notify-reload reload lifecycle, computed from the already-held
@@ -2256,6 +2261,14 @@ fn insert_mount_config(props: &mut PropertyMap, conf: &MountConfig) {
 
 // ── Enum formatters ──────────────────────────────────────────────────────
 
+fn format_fd_store_preserve(p: &crate::units::FileDescriptorStorePreserve) -> &'static str {
+    match p {
+        crate::units::FileDescriptorStorePreserve::No => "no",
+        crate::units::FileDescriptorStorePreserve::Yes => "yes",
+        crate::units::FileDescriptorStorePreserve::Restart => "restart",
+    }
+}
+
 fn format_service_type(t: ServiceType) -> String {
     match t {
         ServiceType::Simple => "simple",
@@ -2411,6 +2424,14 @@ mod tests {
             format_service_type(ServiceType::NotifyReload),
             "notify-reload"
         );
+    }
+
+    #[test]
+    fn test_format_fd_store_preserve() {
+        use crate::units::FileDescriptorStorePreserve as P;
+        assert_eq!(format_fd_store_preserve(&P::No), "no");
+        assert_eq!(format_fd_store_preserve(&P::Yes), "yes");
+        assert_eq!(format_fd_store_preserve(&P::Restart), "restart");
     }
 
     #[test]
