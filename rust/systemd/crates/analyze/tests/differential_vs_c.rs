@@ -8,6 +8,7 @@
 //! there is real drift in the parser. Gated on env `SYSTEMD_ANALYZE` (path to
 //! the C binary); skips silently otherwise. Run via `just differential`.
 
+use std::collections::BTreeSet;
 use std::process::Command;
 
 fn run(bin: &str, args: &[&str]) -> (String, bool) {
@@ -295,5 +296,41 @@ fn analyze_condition_matches_c() {
         "rust vs C systemd-analyze condition drift ({}):\n{}",
         div.len(),
         div.join("\n")
+    );
+}
+
+#[test]
+fn analyze_capability_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+    // The Linux capability name<->number table gains entries between kernel and
+    // systemd releases; compare the full set of (NAME, NUMBER) pairs.
+    let pairs = |bin: &str| -> BTreeSet<(String, String)> {
+        run(bin, &["capability"])
+            .0
+            .lines()
+            .skip(1) // header: "NAME  NUMBER"
+            .filter_map(|l| {
+                let mut it = l.split_whitespace();
+                Some((it.next()?.to_string(), it.next()?.to_string()))
+            })
+            .collect()
+    };
+    let c = pairs(&c_bin);
+    let r = pairs(rust_bin);
+    assert!(!c.is_empty(), "C systemd-analyze capability produced no rows");
+
+    let only_c: Vec<_> = c.difference(&r).collect();
+    let only_r: Vec<_> = r.difference(&c).collect();
+    assert!(
+        only_c.is_empty() && only_r.is_empty(),
+        "rust vs C systemd-analyze capability drift:\n  only in C ({}): {:?}\n  only in rust ({}): {:?}",
+        only_c.len(),
+        only_c,
+        only_r.len(),
+        only_r
     );
 }
