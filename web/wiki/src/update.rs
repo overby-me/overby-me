@@ -14,9 +14,10 @@
 //! and this tab is not running it.
 //!
 //! Checks happen shortly after load, every quarter hour after that, and whenever
-//! the tab is looked at again. That last one carries most of the weight: someone
-//! coming back to a tab left open since this morning finds out then, rather than
-//! whenever the timer next comes round.
+//! the reader comes back to the page — switching tabs, refocusing the window
+//! from another application, or a back/forward-cache restore. That last group
+//! carries most of the weight: someone coming back to a tab left open since this
+//! morning finds out then, rather than whenever the timer next comes round.
 
 use std::cell::Cell;
 
@@ -45,8 +46,9 @@ const FIRST_CHECK_MS: u32 = 5_000;
 /// what this catches.
 const CHECK_INTERVAL_MS: u32 = 15 * 60 * 1000;
 
-/// The closest together two checks may fall. Only the visibility trigger can get
-/// near it; the timer above is far slower.
+/// The closest together two checks may fall. Only the return triggers can get
+/// near it, and they overlap by design (see [`install_return_checks`]); the
+/// timer above is far slower.
 const MIN_CHECK_GAP_MS: f64 = 60_000.0;
 
 /// Start watching for a newer build. Call once, from inside the Dioxus runtime.
@@ -58,7 +60,7 @@ pub fn spawn_update_check() {
     if crate::build_info::COMMIT == "unknown" {
         return;
     }
-    install_visibility_check();
+    install_return_checks();
     dioxus::core::spawn_forever(async move {
         gloo_timers::future::TimeoutFuture::new(FIRST_CHECK_MS).await;
         loop {
@@ -82,11 +84,12 @@ fn check_now() {
         return;
     }
     LAST_CHECK_MS.with(|t| t.set(now));
-    // `spawn_local`, not Dioxus's `spawn_forever`: this is also called from a
-    // `visibilitychange` callback, where no Dioxus scope is being rendered.
-    // Writing a `GlobalSignal` from there is fine (the runtime outlives the
-    // whole page), but asking Dioxus to attach a task to a scope from outside
-    // one is not something to rely on in a path that runs on every tab switch.
+    // `spawn_local`, not Dioxus's `spawn_forever`: this is also called from raw
+    // DOM listeners (see `install_return_checks`), where no Dioxus scope is
+    // being rendered. Writing a `GlobalSignal` from there is fine (the runtime
+    // outlives the whole page), but asking Dioxus to attach a task to a scope
+    // from outside one is not something to rely on in a path that runs every
+    // time the reader comes back.
     wasm_bindgen_futures::spawn_local(async move {
         let Some(deployed) = deployed_commit().await else {
             return;
@@ -101,16 +104,36 @@ fn check_now() {
     });
 }
 
-/// Check again when the tab is looked at, not only when the timer comes round.
+/// Check again when the reader comes back to the page, not only when the timer
+/// comes round.
 ///
 /// Coming back to a tab left open for hours is exactly the moment being on old
 /// code matters, and on the timer alone a reader could sit there for another
 /// quarter of an hour before being told.
-fn install_visibility_check() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+///
+/// Three events, because "coming back" happens in three ways and only one of
+/// them is a tab switch:
+///
+/// - `visibilitychange` covers switching tabs, and minimising on the platforms
+///   that report it. It does NOT fire when the reader switches to another
+///   application and the browser window stays visible, which is the common case
+///   on a desktop and was the gap this used to have.
+/// - `focus` covers exactly that: returning to the browser from something else,
+///   or from another browser window.
+/// - `pageshow` covers a restore from the back/forward cache, which on iOS
+///   frequently does not fire `visibilitychange` at all.
+///
+/// They overlap, and that costs nothing: `check_now` will not check twice
+/// within [`MIN_CHECK_GAP_MS`], nor once an update is already known.
+fn install_return_checks() {
+    let Some(win) = web_sys::window() else {
         return;
     };
-    let on_visibility = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(|| {
+    let Some(doc) = win.document() else {
+        return;
+    };
+    let on_return = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(|| {
+        // A hidden page is not being looked at, whichever event woke us.
         let hidden = web_sys::window()
             .and_then(|w| w.document())
             .is_some_and(|d| d.hidden());
@@ -118,12 +141,12 @@ fn install_visibility_check() {
             check_now();
         }
     });
-    let _ = doc.add_event_listener_with_callback(
-        "visibilitychange",
-        on_visibility.as_ref().unchecked_ref(),
-    );
-    // Lives as long as the page; nothing ever removes this listener.
-    on_visibility.forget();
+    let handler = on_return.as_ref().unchecked_ref();
+    let _ = doc.add_event_listener_with_callback("visibilitychange", handler);
+    let _ = win.add_event_listener_with_callback("focus", handler);
+    let _ = win.add_event_listener_with_callback("pageshow", handler);
+    // Lives as long as the page; nothing ever removes these listeners.
+    on_return.forget();
 }
 
 /// The commit the site is currently serving, or `None` if that cannot be
