@@ -406,3 +406,71 @@ fn compare_versions_matches_c() {
         divergences.join("\n")
     );
 }
+
+/// Run `bin args...` and capture (stdout, stderr, success) verbatim. Used by the
+/// capability oracle, which must lock the error text (stderr) too.
+fn run_full(bin: &str, args: &[&str]) -> (String, String, bool) {
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run {bin} {args:?}: {e}"));
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.success(),
+    )
+}
+
+/// Companion to `analyze_capability_matches_c` (which compares the full table's
+/// (NAME, NUMBER) pair *set*, ignoring order and whitespace). This one locks the
+/// exact output *behavior* the set comparison cannot see: stdout, stderr, and
+/// exit status are compared verbatim against C for a corpus of explicit lookups
+/// and error cases. The corpus is deliberately kernel-independent: the
+/// unqualified full table and mid-range numbers depend on the host's
+/// cap_last_cap() (C shows caps up to MAX(CAP_LAST_CAP, cap_last_cap())), so it
+/// only names capabilities <= 40 (present on any kernel since 5.9), plus bogus
+/// names and 999 (beyond the capability model, always unknown). It locks the
+/// number-sorted ordering, C's column widths, case-insensitive full-name
+/// matching, the rejection of a bare name without the "cap_" prefix, and the
+/// print-nothing-on-error behavior with C's exact "is not known." message.
+#[test]
+fn analyze_capability_output_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    let cases: &[&[&str]] = &[
+        &["capability", "cap_sys_admin"],
+        &["capability", "21"],
+        &["capability", "cap_sys_admin", "cap_chown"], // sorted by number
+        &["capability", "0", "40"],
+        &["capability", "CAP_SYS_ADMIN"], // case-insensitive
+        &["capability", "Cap_Sys_Admin"],
+        &["capability", "cap_SYS_admin"],
+        &["capability", "cap_checkpoint_restore", "cap_chown", "cap_bpf"], // sort + width
+        &["capability", "sys_admin"], // bare name (no cap_ prefix) is rejected
+        &["capability", "SYS_ADMIN"],
+        &["capability", "cap_bogus_nonexistent"],
+        &["capability", "999"], // numeric, beyond the capability model
+        &["capability", "cap_chown", "cap_bogus"], // partial list -> no output, error
+    ];
+
+    let mut divergences = Vec::new();
+    for args in cases {
+        let (r_out, r_err, r_ok) = run_full(rust_bin, args);
+        let (c_out, c_err, c_ok) = run_full(&c_bin, args);
+        if r_out != c_out || r_err != c_err || r_ok != c_ok {
+            divergences.push(format!(
+                "args={args:?}\n     rust: ok={r_ok} out={r_out:?} err={r_err:?}\n     c   : ok={c_ok} out={c_out:?} err={c_err:?}"
+            ));
+        }
+    }
+    assert!(
+        divergences.is_empty(),
+        "rust vs C systemd-analyze capability drift ({} case(s)):\n{}",
+        divergences.len(),
+        divergences.join("\n")
+    );
+}

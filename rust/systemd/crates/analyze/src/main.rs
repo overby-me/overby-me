@@ -3449,41 +3449,55 @@ fn cmd_capability(capabilities: &[String], mask: Option<&str>) {
         return;
     }
 
-    println!("{:<28} {:>6}", "NAME", "NUMBER");
-
-    if capabilities.is_empty() {
-        for &(name, num) in CAPABILITY_TABLE {
-            println!("{:<28} {:>6}", name, num);
-        }
-        return;
-    }
-
-    let mut had_error = false;
-    for s in capabilities {
-        if let Ok(num) = s.parse::<u32>() {
-            if let Some(&(name, n)) = CAPABILITY_TABLE.iter().find(|&&(_, n)| n == num) {
-                println!("{:<28} {:>6}", name, n);
+    // Resolve the rows to print. C's verb_capabilities resolves every argument
+    // first and bails out with an error, printing no table at all, on the first
+    // unknown capability; the full table is emitted in number order and an
+    // explicit list is sorted by number (table_set_sort on the number column).
+    let rows: Vec<(&str, u32)> = if capabilities.is_empty() {
+        CAPABILITY_TABLE.to_vec()
+    } else {
+        let mut rows = Vec::with_capacity(capabilities.len());
+        for s in capabilities {
+            let found = if let Ok(num) = s.parse::<u32>() {
+                CAPABILITY_TABLE.iter().find(|&&(_, n)| n == num).copied()
             } else {
-                eprintln!("Unknown capability: {s}");
-                had_error = true;
-            }
-        } else {
-            let lower = s.to_lowercase();
-            let search = if lower.starts_with("cap_") {
-                lower.clone()
-            } else {
-                format!("cap_{lower}")
+                // C's capability_from_name matches the full "cap_xxx" name
+                // case-insensitively; it does not accept a bare name without the
+                // "cap_" prefix (e.g. "sys_admin" is unknown).
+                let lower = s.to_lowercase();
+                CAPABILITY_TABLE.iter().find(|&&(n, _)| n == lower).copied()
             };
-            if let Some(&(name, num)) = CAPABILITY_TABLE.iter().find(|&&(n, _)| n == search) {
-                println!("{:<28} {:>6}", name, num);
-            } else {
-                eprintln!("Unknown capability: {s}");
-                had_error = true;
+            match found {
+                Some(row) => rows.push(row),
+                None => {
+                    // Match C's message and its print-nothing-on-error behavior.
+                    eprintln!("Capability \"{s}\" is not known.");
+                    std::process::exit(1);
+                }
             }
         }
-    }
-    if had_error {
-        std::process::exit(1);
+        rows.sort_by_key(|&(_, n)| n);
+        rows
+    };
+
+    // Column widths follow C's table formatter: NAME fits the widest name shown
+    // (never narrower than the "NAME" header), NUMBER stays right-aligned and at
+    // least as wide as its header.
+    let name_w = rows
+        .iter()
+        .map(|&(n, _)| n.len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    let num_w = rows
+        .iter()
+        .map(|&(_, n)| n.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max("NUMBER".len());
+    println!("{:<name_w$} {:>num_w$}", "NAME", "NUMBER");
+    for (name, num) in rows {
+        println!("{:<name_w$} {:>num_w$}", name, num);
     }
 }
 
