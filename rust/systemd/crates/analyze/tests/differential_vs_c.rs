@@ -41,6 +41,15 @@ fn unix_seconds(output: &str) -> Option<String> {
     })
 }
 
+/// The (NAME, CLASS) pair from a single-status `exit-status` table: the row
+/// after the header, whose first and last columns are the name and class (both
+/// "-" for a known-numeric-but-unnamed status).
+fn exit_status_name_class(output: &str) -> Option<(String, String)> {
+    let row = output.lines().nth(1)?;
+    let cols: Vec<&str> = row.split_whitespace().collect();
+    Some((cols.first()?.to_string(), cols.last()?.to_string()))
+}
+
 /// The microsecond value from a `timespan` dump: rust prints "NNN us", C prints
 /// "μs: NNN".
 fn timespan_usec(output: &str) -> Option<String> {
@@ -193,6 +202,50 @@ fn analyze_timestamp_matches_c() {
     assert!(
         div.is_empty(),
         "rust vs C systemd-analyze timestamp drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
+
+#[test]
+fn analyze_exit_status_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+    // Numeric statuses only: a non-numeric arg triggers C's strict error vs
+    // rust's lenient warn-and-continue, an intentional behavioral difference.
+    // The drift-prone data is the name/class table, so walk the ranges: libc,
+    // LSB (1-8), BSD (64-78), systemd (200-243), plus unnamed gaps and 255.
+    let mut specs: Vec<String> = Vec::new();
+    for n in [0u32, 1, 2, 3, 4, 5, 6, 7, 8] {
+        specs.push(n.to_string());
+    }
+    for n in 64..=78 {
+        specs.push(n.to_string());
+    }
+    for n in 200..=243 {
+        specs.push(n.to_string());
+    }
+    for n in [42u32, 100, 128, 199, 244, 250, 254, 255] {
+        specs.push(n.to_string());
+    }
+    let mut div = Vec::new();
+    for s in &specs {
+        let (ro, rok) = run(rust_bin, &["exit-status", s]);
+        let (co, cok) = run(&c_bin, &["exit-status", s]);
+        let rn = exit_status_name_class(&ro);
+        let cn = exit_status_name_class(&co);
+        if rn != cn || rok != cok {
+            div.push(format!(
+                "exit-status {s}:\n     rust: ok={rok} {rn:?}\n     c   : ok={cok} {cn:?}"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze exit-status drift ({}):\n{}",
         div.len(),
         div.join("\n")
     );
