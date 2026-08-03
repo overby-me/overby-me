@@ -30,7 +30,7 @@ build:
     # split-symbols.nu then moves them out of the shipped binary into a sidecar,
     # so a crash can be traced to a source line without every visitor
     # downloading 20 MB of debug info. Nothing may rewrite the wasm after that
-    # split — see the header of split-symbols.nu for what that cost us.
+    # split; see the header of split-symbols.nu for what that cost us.
     {{dx}} build --release --debug-symbols true {{remote_logging}}
     nu scripts/split-symbols.nu
     # The boot screen's download progress needs a denominator, and the network

@@ -143,7 +143,7 @@ opt-level = "z"
 # the backend resolves reported offsets against it. Line tables only, since the
 # full DWARF is ~26 MB and nothing here reads variables.
 #
-# It is not free even so — carrying the line tables through the build costs
+# It is not free even so: carrying the line tables through the build costs
 # about 9 KB gzipped, since the shipped wasm can no longer be run through
 # wasm-opt (binaryen aborts on DWARF, and optimising after the split would move
 # the code section out from under the sidecar). That buys readable stacks for

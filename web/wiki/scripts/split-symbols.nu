@@ -9,7 +9,7 @@
 #   public/symbols/<hash>.debug.wasm           the same module, DWARF intact
 #
 # Stripping only removes custom sections, so the code section keeps its offset
-# and its function indices. That is what makes the split safe — a stack frame
+# and its function indices. That is what makes the split safe: a stack frame
 # means the same thing in both files, so the symbols resolve against exactly the
 # binary the reader was running.
 #
@@ -19,7 +19,7 @@
 # 10707 functions, 425 vs 416 imports) and every report came back resolved to a
 # real source line in an unrelated crate. It was removed rather than reordered:
 # binaryen aborts on a module that still holds DWARF, even with `-g`. It cost
-# 9 KB gzipped — 0.5% of what a reader downloads — which is not worth a crash
+# 9 KB gzipped (0.5% of what a reader downloads), which is not worth a crash
 # report that lies. `assert_pair` below fails the build if it happens again.
 #
 # The pair is keyed by dx's own content hash, already in the filename and already
@@ -108,7 +108,7 @@ def assert_pair [shipped: string, sidecar: string] {
     print $"  shipped  ($a)"
     print $"  sidecar  ($b)"
     print "A reported frame would resolve to whatever function now sits at that"
-    print "address. Something rewrote the module after the split — move it before."
+    print "address. Something rewrote the module after the split; move it before."
     exit 1
 }
 

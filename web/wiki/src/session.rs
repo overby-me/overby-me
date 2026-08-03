@@ -452,7 +452,7 @@ pub async fn run_token_refresh() {
         }
         // Never start one on the way into the background. NHost rotates the
         // token server-side before it answers, so a request iOS kills in flight
-        // leaves this tab holding a dead one — and the next attempt signs a
+        // leaves this tab holding a dead one, and the next attempt signs a
         // perfectly good session out. The nudge covers coming back, and
         // `ensure_fresh_token` covers anything that needs a token before then.
         if !nudged && page_hidden() {
