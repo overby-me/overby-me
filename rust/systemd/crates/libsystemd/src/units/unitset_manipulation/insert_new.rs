@@ -685,8 +685,8 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
             dep_before,
             dep_requires,
             dep_wants,
-            dep_required_by,
-            dep_wanted_by,
+            _dep_required_by,
+            _dep_wanted_by,
             dep_conflicts,
             dep_conflicted_by,
             dep_binds_to,
@@ -711,12 +711,18 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
                 if dep_wants.contains(&unit.id) {
                     unit.common.dependencies.wanted_by.push(new_id.clone());
                 }
-                if dep_required_by.contains(&unit.id) {
-                    unit.common.dependencies.requires.push(new_id.clone());
-                }
-                if dep_wanted_by.contains(&unit.id) {
-                    unit.common.dependencies.wants.push(new_id.clone());
-                }
+                // NOTE: [Install] WantedBy=/RequiredBy= must NOT create a live
+                // forward dependency on the target. They are enable-time
+                // metadata: `systemctl enable` writes the `.wants/`/`.requires/`
+                // symlink (control.rs enable), and directory_deps scans those
+                // symlinks into real edges. Wiring `target.wants += new` here
+                // made a never-enabled unit (e.g. one created by `systemctl
+                // edit --full` with WantedBy=multi-user.target) a live want of
+                // the target, so it got started whenever the target
+                // re-activated — surfacing as the intermittent 26-SYSTEMCTL
+                // is-active failure. The reverse-index maintenance below
+                // (dep_wants -> wanted_by, dep_requires -> required_by) stays;
+                // only the forward-edge synthesis is removed.
                 if dep_conflicts.contains(&unit.id) {
                     unit.common.dependencies.conflicted_by.push(new_id.clone());
                 }

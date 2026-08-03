@@ -477,20 +477,6 @@ after re-running the *same* configuration, never on the strength of the name alo
   tree. Timing-sensitive by construction, since the subtest is about a service that
   refuses to stop.
 - **07-PID1** `testcase_delegate_subgroup_control`.
-- **26-SYSTEMCTL** `assert_rc 3 systemctl --quiet is-active "$UNIT_NAME"`, on the
-  freshly-`edit`ed never-started unit. Reads back exit 0 (active) instead of 3.
-  Load-sensitive: green on ~6 lightly-loaded runs this session, then red on
-  three consecutive runs once the host was under heavy build contention.
-  Bisected pre-existing (identical failure on the parent commit ec448fea, so
-  NOT the stop-chain work). Partially chased 2026-08-03: the client
-  `is-active` default was `"active"` on a result-less reply and is now
-  `"inactive"` (a correctness fix, but NOT the cause here — the server really
-  returns "active"), and the server only returns "active" for `Started(_)`,
-  yet the unit shows no activation in the journal and every fresh-load default
-  is `NeverStarted`. So the unit's table status is genuinely `Started` by a
-  path not yet found (candidate: an `[Install] WantedBy=` mis-treated as a
-  runtime dependency during a daemon-reload-triggered target re-evaluation
-  under load). Tracked for real root-cause; do not treat as a mere flake.
 - **16-EXTEND-TIMEOUT** and **59-RELOADING-RESTART**, since the inc 2 slice-3
   tree (60471c75): roughly every other run, with a shared signature of
   dispatcher event application stalling for seconds under simultaneous-start
