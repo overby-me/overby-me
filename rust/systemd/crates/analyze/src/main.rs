@@ -536,7 +536,9 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
     // Relative: "+5min", "-2h"
     if let Some(rest) = input.strip_prefix('+') {
         let span = TimeSpan::parse(rest)?;
-        return Ok(SystemTime::now() + Duration::from_micros(span.usec));
+        return SystemTime::now()
+            .checked_add(Duration::from_micros(span.usec))
+            .ok_or_else(|| "Timestamp would overflow".to_string());
     }
     if let Some(rest) = input.strip_prefix('-') {
         let span = TimeSpan::parse(rest)?;
@@ -562,7 +564,10 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
             .map_err(|_| format!("Invalid epoch timestamp: {rest}"))?;
         let micros = parse_fractional_micros(frac)
             .ok_or_else(|| format!("Invalid epoch timestamp: {rest}"))?;
-        return Ok(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_micros(micros));
+        return UNIX_EPOCH
+            .checked_add(Duration::from_secs(secs))
+            .and_then(|t| t.checked_add(Duration::from_micros(micros)))
+            .ok_or_else(|| format!("Invalid epoch timestamp: {rest}"));
     }
 
     // YYYY-MM-DD HH:MM:SS
@@ -632,7 +637,13 @@ fn try_parse_datetime(input: &str) -> Option<SystemTime> {
     let month: u32 = date_parts[1].parse().ok()?;
     let day: u32 = date_parts[2].parse().ok()?;
 
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    // Reject years outside C's accepted range. Below 1970 is before the epoch
+    // (unrepresentable as a non-negative UNIX time) and above 9999 is C's
+    // 4-digit-year limit; both also overflow the civil-date arithmetic below.
+    if !(1970..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
         return None;
     }
 
@@ -3384,6 +3395,67 @@ fn cmd_capability(capabilities: &[String], mask: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_timestamp_year_bounds() {
+        // Out of C's [1970, 9999] range must be rejected, not overflow-panic.
+        assert!(parse_timestamp("1969-06-15 00:00:00 UTC").is_err());
+        assert!(parse_timestamp("10000-01-01 00:00:00 UTC").is_err());
+        assert!(parse_timestamp("999999999999-01-01 00:00:00").is_err());
+        // The boundaries are accepted.
+        assert!(parse_timestamp("1970-01-01 00:00:00 UTC").is_ok());
+        assert!(parse_timestamp("9999-12-31 23:59:59 UTC").is_ok());
+    }
+
+    #[test]
+    fn fuzz_time_parsers_never_panic() {
+        // parse_timestamp and TimeSpan::parse take user/unit-file strings and do
+        // arithmetic that must not overflow-panic (an out-of-range year, a huge
+        // "+N" offset, and a huge "@epoch" all did). Fuzz both with random
+        // time-ish strings under catch_unwind, with a 30s wall-clock guard.
+        const TOKENS: &[&str] = &[
+            "-", ":", ".", " ", "T", "UTC", "@", "+", "!", "/", "ago", "now",
+            "today", "tomorrow", "yesterday", "epoch", "0", "1970", "2024", "9999",
+            "10000", "999999999999", "-5", "01", "12", "31", "24", "60",
+            "18446744073709551615", "s", "min", "h", "d", "w", "month", "y", "ms",
+            "us", "5min", "1h30", "Mon", "500000", "1.5", "@0", "@1704110400",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x71e5_7a3b_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let ntok = (next() % 8) as usize;
+                let mut input = String::new();
+                for _ in 0..ntok {
+                    if next() % 6 == 0 {
+                        input.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        input.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let buf = input.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = parse_timestamp(&input);
+                    let _ = TimeSpan::parse(&input);
+                });
+                assert!(res.is_ok(), "time parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "time-parser fuzz did not finish in 30s -- an input hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
 
     // ── Plot tests ────────────────────────────────────────────────────────
 
