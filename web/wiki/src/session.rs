@@ -67,15 +67,43 @@ pub static PENDING_CLAIM: GlobalSignal<Option<String>> = Signal::global(|| None)
 ///   captures its own dependencies / reads signals inside.
 ///
 /// Use it for every read-side data resource so a refresh works everywhere.
+///
+/// It also opens with the answer this read gave last time, so a view that has
+/// just been mounted draws immediately instead of holding a spinner for a round
+/// trip (see [`crate::query_cache`], and the dependency note below). The value
+/// is a `Signal<Option<T>>` rather than a `Resource<T>`, which reads the same
+/// way: `.read()` and `.peek()` both give `Option<T>`.
+///
+/// **Dependencies are part of the cache key**, including the access token, so no
+/// two identities ever share an answer. A dependency that is only a refresh
+/// counter is in there too, which is harmless but worth knowing: after a
+/// mutation bumps one, the next fresh mount opens on the answer from before the
+/// mutation and corrects it a round trip later.
 #[macro_export]
 macro_rules! use_data_resource {
     (|($($dep:ident),* $(,)?)| $body:expr) => {{
         let __data_version = $crate::session::DATA_VERSION();
-        use_resource(use_reactive!(|($($dep,)* __data_version)| {
+        let __site = concat!(file!(), ":", line!());
+        let __key = $crate::query_cache::key(__site, &format!("{:?}", ($(&$dep,)*)));
+        let __res = use_resource(use_reactive!(|($($dep,)* __data_version)| {
             let _ = __data_version;
-            $body
-        }))
+            // Stamped with the key it was started under. The resource keeps its
+            // previous value while re-running, so without this a dependency
+            // change would file the outgoing answer under the incoming key.
+            let __stamp = $crate::query_cache::key(__site, &format!("{:?}", ($(&$dep,)*)));
+            // Built HERE, not inside the block below: the call site's own
+            // clones have to happen in the closure, or its captures would be
+            // moved out of an FnMut.
+            let __fut = $body;
+            async move { (__stamp, __fut.await) }
+        }));
+        $crate::query_cache::use_cached(__key, __res)
     }};
+    // NOT cached, and cannot be: this form takes its dependencies from inside
+    // the closure, so there is nothing here to key an answer by. Keyed only by
+    // call site, one profile would open on another's data and a search on the
+    // previous query's results. Use the dependency form above for a read that
+    // should open on its last answer.
     (move || $body:expr) => {
         use_resource(move || {
             // Subscribe this resource to the data version so it refetches on a

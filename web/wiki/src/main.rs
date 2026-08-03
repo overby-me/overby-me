@@ -19,6 +19,7 @@ mod nhost;
 /// Last-read pages kept in localStorage, served when nothing can be reached.
 mod offline;
 mod pwa;
+mod query_cache;
 mod route;
 mod session;
 pub mod snackbar;

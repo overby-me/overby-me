@@ -322,7 +322,8 @@ pub struct BallotRules {
 /// A server-side page filter for a node's members: each `Option<bool>` narrows the
 /// query when `Some`, plus a free-text `search` matched case-insensitively against
 /// name or email. Plain data so the UI never has to touch GraphQL.
-#[derive(Default, Clone, PartialEq)]
+// Debug so it can key a cached read (see `use_data_resource!`).
+#[derive(Default, Clone, PartialEq, Debug)]
 pub struct MemberPageFilter {
     pub owner: Option<bool>,
     pub active: Option<bool>,
