@@ -76,10 +76,13 @@ async fn render_inner(
         return Err(AppError::BadRequest("metafile too large".into()));
     }
 
+    // `..Default::default()` on purpose: the renderer keeps adding opt-in
+    // options (transparent backgrounds, pattern-brush filtering) and naming
+    // every field would turn each of those into a build break here.
     let options = emfsdk::render::RenderOptions {
         target_width_px: Some(TARGET_WIDTH_PX),
-        target_height_px: None,
         max_pixels: Some(MAX_PIXELS),
+        ..Default::default()
     };
     // Rendering is CPU-bound and the runtime is shared, so it goes to a blocking
     // thread rather than stalling every other request on this container.

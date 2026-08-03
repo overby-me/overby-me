@@ -22,6 +22,13 @@ axum = "0.8.6"
 # Renders Word/PowerPoint metafile figures (EMF/EMF+/WMF) to PNG, which no
 # browser can draw. Here rather than in the wasm: the renderer is ~400 KB
 # gzipped, and the app is already the heaviest thing a delegate downloads.
+#
+# Pinned to the RELEASE, deliberately. Upstream main renders a figure this
+# version refuses (a palettised bitmap inside a vector drawing), but it also
+# changed font selection to honour the family the metafile names, and a
+# metafile names Windows fonts: on a machine without them the text comes out
+# all-caps with boxes for the Danish letters. A refused figure falls back to a
+# labelled placeholder; an unreadable one does not.
 emfsdk = { version = "0.2", default-features = false, features = ["render"] }
 # Just the pure-Rust stream combinators (buffer_unordered) for concurrent push
 # fan-out; no executor/thread-pool pulled in.
