@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Read};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A single journal entry.
@@ -505,8 +505,23 @@ pub fn from_export_format<R: BufRead>(reader: &mut R) -> io::Result<Option<Journ
                 ));
             }
 
-            let mut data = vec![0u8; data_len];
-            reader.read_exact(&mut data)?;
+            // Read the claimed bytes WITHOUT pre-allocating them. `data_len` is
+            // attacker-controlled (this parser consumes network-received journal
+            // streams), so a truncated input claiming up to the 256 MiB cap must
+            // not let a few bytes on the wire force a 256 MiB allocate-and-zero.
+            // take()+read_to_end grows the buffer only as the data actually
+            // arrives, matching how C systemd-journal-remote reads incrementally.
+            let mut data = Vec::new();
+            let got = reader.by_ref().take(data_len as u64).read_to_end(&mut data)?;
+            if got != data_len {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!(
+                        "binary field '{}' truncated: claimed {} bytes, got {}",
+                        key, data_len, got
+                    ),
+                ));
+            }
 
             // Read trailing newline
             let mut nl = [0u8; 1];
@@ -739,6 +754,102 @@ mod tests {
         assert_eq!(bytes, &[0x00, 0x01, 0x02, 0xff]);
         // Lossy string should still work
         assert!(entry.field("BINARY_DATA").is_some());
+    }
+
+    #[test]
+    fn export_binary_field_truncation_errors_without_preallocating() {
+        // A tiny input claiming a huge binary field must fail fast with a
+        // truncation error and must NOT pre-allocate the claimed size (a
+        // 14-byte -> 256 MiB memory amplification on a network-facing parser).
+        let mut input = Vec::new();
+        input.extend_from_slice(b"HUGE\n"); // binary field: a line with no '='
+        input.extend_from_slice(&(256u64 * 1024 * 1024).to_le_bytes()); // claim 256 MiB
+        input.extend_from_slice(b"only a few bytes"); // far less than claimed
+        let mut reader = Cursor::new(input);
+        let res = from_export_format(&mut reader);
+        assert!(
+            matches!(&res, Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof),
+            "expected UnexpectedEof truncation error, got {:?}",
+            res.as_ref().map(std::option::Option::is_some)
+        );
+    }
+
+    #[test]
+    fn fuzz_from_export_format_never_panics() {
+        // Robustness net (task #22): the journal export parser consumes
+        // network-received streams, so it must never panic or hang on malformed
+        // input. Deterministically seeded mutation of a valid corpus; every
+        // parse runs inside catch_unwind under a per-input time budget. A small
+        // LCG keeps it reproducible without an RNG crate.
+        let mut corpus: Vec<u8> = Vec::new();
+        {
+            let mut e = JournalEntry::new();
+            e.set_field("MESSAGE", "hello world");
+            e.set_field("PRIORITY", "6");
+            e.set_field("_PID", "1234");
+            // A value with '\n' and '=' forces binary (length-prefixed) framing.
+            e.set_field_bytes("BINARY", vec![0u8, 1, 2, 255, b'\n', b'=']);
+            corpus.extend_from_slice(&e.to_export_format("s=abc;i=1;b=2;m=3;t=4;x=5"));
+            let mut e2 = JournalEntry::new();
+            e2.set_field("MESSAGE", "second");
+            corpus.extend_from_slice(&e2.to_export_format("s=abc;i=2"));
+        }
+
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as u32
+        };
+
+        for _ in 0..20_000 {
+            let mut buf = corpus.clone();
+            let muts = 1 + (next() % 8) as usize;
+            for _ in 0..muts {
+                if buf.is_empty() {
+                    break;
+                }
+                match next() % 5 {
+                    0 => {
+                        let i = (next() as usize) % buf.len();
+                        buf[i] ^= (next() & 0xff) as u8;
+                    }
+                    1 => {
+                        let i = (next() as usize) % buf.len();
+                        buf.remove(i);
+                    }
+                    2 => {
+                        let i = (next() as usize) % (buf.len() + 1);
+                        buf.insert(i, (next() & 0xff) as u8);
+                    }
+                    3 => {
+                        let i = (next() as usize) % buf.len();
+                        buf.truncate(i);
+                    }
+                    _ => {
+                        let i = (next() as usize) % buf.len();
+                        let b = buf[i];
+                        buf.insert(i, b);
+                    }
+                }
+            }
+
+            let input = buf.clone();
+            let start = std::time::Instant::now();
+            let res = std::panic::catch_unwind(move || {
+                let mut reader = Cursor::new(input);
+                let _ = parse_export_entries(&mut reader);
+            });
+            assert!(
+                res.is_ok(),
+                "from_export_format panicked on mutated input: {buf:?}"
+            );
+            assert!(
+                start.elapsed().as_secs() < 2,
+                "from_export_format ran too long (amplification/hang?) on: {buf:?}"
+            );
+        }
     }
 
     #[test]
