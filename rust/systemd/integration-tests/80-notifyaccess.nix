@@ -21,6 +21,8 @@
         systemctl stop testnotify-none.service 2>/dev/null
         systemctl stop testnotify-exec.service 2>/dev/null
         systemctl stop testnotify-status.service 2>/dev/null
+        systemctl stop testnotify-reload-timeout.service 2>/dev/null
+        systemctl stop testnotify-reload-ok.service 2>/dev/null
         rm -f /run/systemd/system/testnotify-*.service
         systemctl daemon-reload
     }
@@ -98,6 +100,54 @@
     assert_eq "$(systemctl show testnotify-status.service -P StatusBusError)" "org.freedesktop.DBus.Error.InvalidArgs"
     assert_eq "$(systemctl show testnotify-status.service -P StatusVarlinkError)" "org.varlink.service.InvalidParameter"
     systemctl stop testnotify-status.service
+
+    : "Type=notify-reload — SubState reload lifecycle and ReloadResult=timeout"
+    cat > /run/systemd/system/testnotify-reload-timeout.service <<EOF
+    [Service]
+    Type=notify-reload
+    NotifyAccess=all
+    TimeoutStartSec=5
+    ExecStart=/usr/bin/bash -c 'trap "systemd-notify --reloading" SIGHUP; systemd-notify --ready; while :; do sleep 0.2; done'
+    EOF
+    cat > /run/systemd/system/testnotify-reload-ok.service <<EOF
+    [Service]
+    Type=notify-reload
+    NotifyAccess=all
+    TimeoutStartSec=30
+    ExecStart=/usr/bin/bash -c 'trap "systemd-notify --reloading; systemd-notify --ready" SIGHUP; systemd-notify --ready; while :; do sleep 0.2; done'
+    EOF
+    systemctl daemon-reload
+    systemctl start testnotify-reload-timeout.service testnotify-reload-ok.service
+    timeout 30 bash -c 'while [ "$(systemctl is-active testnotify-reload-timeout.service)" != active ]; do sleep 0.5; done'
+    timeout 30 bash -c 'while [ "$(systemctl is-active testnotify-reload-ok.service)" != active ]; do sleep 0.5; done'
+
+    # Timeout path: RELOADING=1 arrives but READY=1 never does, so after
+    # TimeoutStartSec the reload gives up: SubState returns to running and
+    # ReloadResult becomes timeout.
+    systemctl reload --no-block testnotify-reload-timeout.service
+    # Poll briefly for the reload phase to appear. The property read is
+    # non-blocking, so a single contended sample can momentarily miss it, and
+    # RELOADING=1 may arrive between samples (reload-signal -> reload-notify).
+    found=0
+    n=0
+    while [ "$n" -lt 20 ]; do
+        sub=$(systemctl show testnotify-reload-timeout.service -P SubState)
+        case "$sub" in reload-signal|reload-notify) found=1; break ;; esac
+        n=$((n + 1))
+        sleep 0.2
+    done
+    echo "reload-timeout SubState during reload = $sub (want reload-signal or reload-notify)"
+    test "$found" = 1
+    timeout 25 bash -c 'while [ "$(systemctl show testnotify-reload-timeout.service -P SubState)" != running ]; do sleep 1; done'
+    assert_eq "$(systemctl show testnotify-reload-timeout.service -P ReloadResult)" "timeout"
+
+    # Success path: the reload signal handler sends RELOADING=1 then READY=1,
+    # so the reload completes with SubState running and ReloadResult success.
+    systemctl reload --no-block testnotify-reload-ok.service
+    timeout 25 bash -c 'while [ "$(systemctl show testnotify-reload-ok.service -P SubState)" != running ]; do sleep 0.5; done'
+    assert_eq "$(systemctl show testnotify-reload-ok.service -P ReloadResult)" "success"
+
+    systemctl stop testnotify-reload-timeout.service testnotify-reload-ok.service
 
     touch /testok
     TESTEOF

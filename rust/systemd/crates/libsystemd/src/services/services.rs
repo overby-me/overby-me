@@ -445,6 +445,12 @@ pub struct Service {
     /// Set to true when the service sends RELOADING=1 via sd_notify.
     /// Cleared when the service sends READY=1 again after reload completes.
     pub reloading: bool,
+    /// When the current Type=notify-reload reload started (its reload signal
+    /// was sent, or RELOADING=1 was received for a self-initiated reload).
+    /// None when no reload is in progress. Drives the reload-signal/reload-notify
+    /// SubState and lets ReloadResult=timeout be detected lazily at
+    /// property-read time against get_start_timeout(), with no timer thread.
+    pub reload_started: Option<std::time::Instant>,
     /// Set to true when the service sends STOPPING=1 via sd_notify.
     pub stopping: bool,
     /// When STOPPING=1 arrived. Once a service enters its stop phase it is no

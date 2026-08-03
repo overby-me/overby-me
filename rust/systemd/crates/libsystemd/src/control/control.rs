@@ -5049,6 +5049,7 @@ fn create_transient_unit(
                     process_group: None,
                     signaled_ready: false,
                     reloading: false,
+                    reload_started: None,
                     stopping: false,
                     stopping_timestamp: None,
                     watchdog_last_ping: None,
@@ -9077,6 +9078,16 @@ pub fn execute_command(
                         "Unit {unit_name} has no main PID, cannot send SIGHUP."
                     ));
                 };
+                // Anchor the reload before signalling so SubState reports
+                // reload-signal and the reload timeout is measured from now.
+                // Reset `reloading` in case a previous reload timed out without
+                // ever sending READY=1. Set before the signal so the service's
+                // RELOADING=1 (which sets `reloading`) is not clobbered.
+                if let Specific::Service(svc) = &unit.specific {
+                    let mut st = svc.state.write_poisoned();
+                    st.srvc.reload_started = Some(std::time::Instant::now());
+                    st.srvc.reloading = false;
+                }
                 if unsafe { libc::kill(pid, libc::SIGHUP) } != 0 {
                     let err = std::io::Error::last_os_error();
                     return Err(format!(

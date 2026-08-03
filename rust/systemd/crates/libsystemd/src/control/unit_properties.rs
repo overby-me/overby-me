@@ -295,6 +295,10 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         {
             insert(&mut props, "SubState", "exited");
         }
+        // Note: the Type=notify-reload reload SubState overlay is applied later,
+        // inside the Specific::Service arm, using the non-blocking state guard
+        // taken there (state_ref). Doing a fresh blocking svc.state read here
+        // would risk the `systemctl show` hang the arm's try_read guards against.
     }
 
     // ── Lifecycle timestamps ─────────────────────────────────────────
@@ -637,10 +641,39 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 "SendSIGHUP",
                 if svc.conf.send_sighup { "yes" } else { "no" },
             );
-            // CleanResult / ReloadResult — always "success" (cleaning/reload
-            // failures not tracked yet)
+            // CleanResult is always "success" (cleaning failures not tracked yet).
+            //
+            // Type=notify-reload reload lifecycle, computed from the already-held
+            // non-blocking state guard (state_ref) so no extra svc.state lock is
+            // taken: a second read here while state_guard holds the try_read can
+            // deadlock under writer contention, and a blocking read would hang
+            // `systemctl show`. SubState reports reload-signal once the reload
+            // signal is sent, reload-notify after the service answers RELOADING=1,
+            // and returns to running with ReloadResult=timeout if READY=1 does not
+            // arrive within the start timeout. If state_ref is None (contended),
+            // fall through to the plain "success"/default, matching the arm.
             insert(&mut props, "CleanResult", "success");
-            insert(&mut props, "ReloadResult", "success");
+            let mut reload_result = "success";
+            if svc.conf.srcv_type == crate::units::ServiceType::NotifyReload
+                && let Some(state) = state_ref
+                && let Some(started) = state.srvc.reload_started
+                && (state.srvc.pid.is_some() || state.srvc.main_pid.is_some())
+            {
+                let timed_out = matches!(
+                    state.srvc.get_start_timeout(&svc.conf),
+                    Some(t) if started.elapsed() > t
+                );
+                let sub = if timed_out {
+                    reload_result = "timeout";
+                    "running"
+                } else if state.srvc.reloading {
+                    "reload-notify"
+                } else {
+                    "reload-signal"
+                };
+                insert(&mut props, "SubState", sub);
+            }
+            insert(&mut props, "ReloadResult", reload_result);
         }
         Specific::Socket(sock) => {
             insert_socket_config(&mut props, &sock.conf);

@@ -946,10 +946,19 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
                 srvc.reloading = false;
                 trace!("Service {name}: reload complete (READY=1 after RELOADING=1)");
             }
+            // A completed reload clears the reload-in-progress anchor, so
+            // SubState returns to running and the reload timeout stops.
+            srvc.reload_started = None;
         }
         "RELOADING" => {
             if split.len() > 1 && split[1] == "1" {
                 srvc.reloading = true;
+                // Anchor the reload timeout if this RELOADING= was not already
+                // anchored by a `systemctl reload` (which sets it when it sends
+                // the reload signal), e.g. a service reloading itself.
+                if srvc.reload_started.is_none() {
+                    srvc.reload_started = Some(std::time::Instant::now());
+                }
                 // Per sd_notify(3), RELOADING=1 implies the service is not
                 // ready during reload. The service will send READY=1 again
                 // when reload completes.
@@ -1200,6 +1209,7 @@ mod tests {
             process_group: None,
             signaled_ready: false,
             reloading: false,
+            reload_started: None,
             stopping: false,
             stopping_timestamp: None,
             watchdog_last_ping: None,
@@ -2246,11 +2256,15 @@ mod tests {
         handle_notification_message("RELOADING=1", &mut srvc, "test.service");
         assert!(srvc.reloading);
         assert!(!srvc.signaled_ready);
+        // RELOADING=1 anchors the reload so SubState/ReloadResult can be derived.
+        assert!(srvc.reload_started.is_some());
 
         // 6. Service finishes reload
         handle_notification_message("READY=1", &mut srvc, "test.service");
         handle_notification_message("STATUS=Running (reloaded)", &mut srvc, "test.service");
         assert!(!srvc.reloading);
+        // A completed reload clears the anchor (SubState returns to running).
+        assert!(srvc.reload_started.is_none());
         assert!(srvc.signaled_ready);
 
         // 7. Service stops gracefully

@@ -428,6 +428,7 @@ mod tests {
             process_group: None,
             signaled_ready: false,
             reloading: false,
+            reload_started: None,
             stopping: false,
             stopping_timestamp: None,
             watchdog_last_ping: None,
