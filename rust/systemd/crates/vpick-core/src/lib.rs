@@ -122,29 +122,116 @@ pub fn compare_versions(a: &str, b: &str) -> i32 {
     }
 }
 
+/// Compare two version strings using systemd's `strverscmp_improved`
+/// (src/fundamental/string-util-fundamental.c). Segments are numeric or
+/// alphabetic; `~` marks a pre-release (oldest), `-`/`^`/`.` are ordered
+/// separators, numeric segments outrank alpha, leading zeros are ignored, and a
+/// longer string is newer except when the extra part is `~`-prefixed. All other
+/// characters are treated as separators. Returns -1 (a<b), 0 (a==b), 1 (a>b).
+/// Shared logic with `systemd-analyze compare-versions` (kept in sync by hand).
 fn compare_kernel_versions(a: &str, b: &str) -> i32 {
-    fn split(s: &str) -> Vec<u32> {
-        s.split(|c: char| !c.is_ascii_digit() && c != '.')
-            .next()
-            .unwrap_or("")
-            .split('.')
-            .filter_map(|p| p.parse::<u32>().ok())
-            .collect()
+    fn is_valid(c: u8) -> bool {
+        c.is_ascii_digit() || c.is_ascii_alphabetic() || matches!(c, b'~' | b'-' | b'^' | b'.')
     }
-    let av = split(a);
-    let bv = split(b);
-    let len = av.len().max(bv.len());
-    for i in 0..len {
-        let x = av.get(i).copied().unwrap_or(0);
-        let y = bv.get(i).copied().unwrap_or(0);
-        if x < y {
-            return -1;
+    // Current byte, or NUL past the end (mirrors C's NUL-terminated scan).
+    fn at(s: &[u8], k: usize) -> u8 {
+        if k < s.len() { s[k] } else { 0 }
+    }
+
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut i = 0;
+    let mut j = 0;
+    loop {
+        // Drop leading invalid characters (treated as separators).
+        while i < a.len() && !is_valid(a[i]) {
+            i += 1;
         }
-        if x > y {
-            return 1;
+        while j < b.len() && !is_valid(b[j]) {
+            j += 1;
+        }
+
+        // '~': a segment prefixed with it is the oldest.
+        if at(a, i) == b'~' || at(b, j) == b'~' {
+            let r = cmp(at(a, i) != b'~', at(b, j) != b'~');
+            if r != 0 {
+                return r;
+            }
+            i += 1;
+            j += 1;
+        }
+
+        // If either reached the end, the longer one is newer (after the '~' check).
+        if at(a, i) == 0 || at(b, j) == 0 {
+            return cmp(at(a, i), at(b, j));
+        }
+
+        // Ordered separators: '-' (version/release), '^' (patched), '.' (point).
+        for sep in [b'-', b'^', b'.'] {
+            if at(a, i) == sep || at(b, j) == sep {
+                let r = cmp(at(a, i) != sep, at(b, j) != sep);
+                if r != 0 {
+                    return r;
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+
+        if at(a, i).is_ascii_digit() || at(b, j).is_ascii_digit() {
+            // Numeric segments; an empty one is older than a numeric one.
+            let mut ii = i;
+            while ii < a.len() && a[ii].is_ascii_digit() {
+                ii += 1;
+            }
+            let mut jj = j;
+            while jj < b.len() && b[jj].is_ascii_digit() {
+                jj += 1;
+            }
+            let r = cmp(i != ii, j != jj);
+            if r != 0 {
+                return r;
+            }
+            // Ignore leading zeros, then compare by length, then lexically.
+            while i < ii && a[i] == b'0' {
+                i += 1;
+            }
+            while j < jj && b[j] == b'0' {
+                j += 1;
+            }
+            let r = cmp(ii - i, jj - j);
+            if r != 0 {
+                return r;
+            }
+            let r = cmp(&a[i..ii], &b[j..jj]);
+            if r != 0 {
+                return r;
+            }
+            i = ii;
+            j = jj;
+        } else {
+            // Alphabetic segments compared lexically, then longer is newer.
+            let mut ii = i;
+            while ii < a.len() && a[ii].is_ascii_alphabetic() {
+                ii += 1;
+            }
+            let mut jj = j;
+            while jj < b.len() && b[jj].is_ascii_alphabetic() {
+                jj += 1;
+            }
+            let n = (ii - i).min(jj - j);
+            let r = cmp(&a[i..i + n], &b[j..j + n]);
+            if r != 0 {
+                return r;
+            }
+            let r = cmp(ii - i, jj - j);
+            if r != 0 {
+                return r;
+            }
+            i = ii;
+            j = jj;
         }
     }
-    0
 }
 
 fn cmp<T: Ord>(a: T, b: T) -> i32 {
@@ -557,6 +644,12 @@ mod tests {
         assert!(compare_versions("7.7.0", "7.6.0") > 0);
         assert_eq!(compare_versions("33.5", "33.5"), 0);
         assert!(compare_versions("", "1.0") < 0);
+        // strverscmp_improved cases the old naive impl misordered (matches C):
+        assert!(compare_versions("1~rc1", "1") < 0);
+        assert!(compare_versions("1.0-1", "1.0-2") < 0);
+        assert!(compare_versions("123", "123-a") < 0);
+        assert!(compare_versions("123.a-1", "123a-1") < 0);
+        assert_eq!(compare_versions("007", "7"), 0);
     }
 
     #[test]
