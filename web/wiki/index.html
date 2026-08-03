@@ -12,9 +12,10 @@
           that is the state it exists to cover: the seconds between the browser
           having the document and the app being able to draw. Anything loaded
           from a file would arrive too late to help, so the colours are literals
-          rather than tokens - they are the same two the generated theme uses
-          (assets/m3-theme.css), and if that theme is ever reseeded these want
-          changing with it.
+          rather than tokens - they are the generated theme's own primary (the
+          figure) and tertiary (the progress ring), light and dark, copied from
+          assets/m3-theme.css. If that theme is ever reseeded these want changing
+          with it.
 
           The shape is the Material 3 Expressive loading indicator: a form that
           morphs while it turns, rather than a spinner. Done with border-radius
@@ -96,9 +97,14 @@
                 stroke-width: 4;
                 stroke-linecap: round;
             }
-            #boot-track { stroke: rgba(0, 109, 57, 0.18); }
+            /* The ring is the ACCENT (M3 tertiary, the Radikale magenta), not
+               the primary the figure is drawn in. Two roles, two colours: the
+               figure says which app this is, the ring says how far in it is.
+               Hard-coded because the theme's variables arrive with the app, and
+               this screen is what stands in for the app until then. */
+            #boot-track { stroke: rgba(181, 18, 104, 0.18); }
             #boot-arc {
-                stroke: #006d39;
+                stroke: #b51268;
                 /* The dash pattern is measured in circumference: 2 pi r, r = 42.
                    A full dash with a full offset draws nothing; the loader walks
                    the offset down to zero. Keep in step with BOOT_ARC below. */
@@ -107,13 +113,13 @@
                 transition: stroke-dashoffset 140ms linear;
             }
             @media (prefers-color-scheme: dark) {
-                #boot-track { stroke: rgba(104, 221, 143, 0.22); }
-                #boot-arc { stroke: #68dd8f; }
+                #boot-track { stroke: rgba(255, 176, 203, 0.22); }
+                #boot-arc { stroke: #ffb0cb; }
             }
-            html[data-theme="dark"] #boot-track { stroke: rgba(104, 221, 143, 0.22); }
-            html[data-theme="dark"] #boot-arc { stroke: #68dd8f; }
-            html[data-theme="light"] #boot-track { stroke: rgba(0, 109, 57, 0.18); }
-            html[data-theme="light"] #boot-arc { stroke: #006d39; }
+            html[data-theme="dark"] #boot-track { stroke: rgba(255, 176, 203, 0.22); }
+            html[data-theme="dark"] #boot-arc { stroke: #ffb0cb; }
+            html[data-theme="light"] #boot-track { stroke: rgba(181, 18, 104, 0.18); }
+            html[data-theme="light"] #boot-arc { stroke: #b51268; }
 
             /* Turning is the part that reads as motion; keep the morph, which is
                slow and soft, and drop the spin. The ARC keeps moving: it is
