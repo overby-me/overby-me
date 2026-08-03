@@ -268,9 +268,9 @@ enum Command {
         /// Capability name(s) or number(s) to look up (omit for full table)
         capabilities: Vec<String>,
 
-        /// Look up capabilities from a hex mask
+        /// Parse the single positional argument as a numeric capability mask
         #[arg(short = 'm', long)]
-        mask: Option<String>,
+        mask: bool,
     },
 }
 
@@ -1489,8 +1489,8 @@ fn main() {
         Some(Command::ExitStatus { ref statuses }) => cmd_exit_status(statuses),
         Some(Command::Capability {
             ref capabilities,
-            ref mask,
-        }) => cmd_capability(capabilities, mask.as_deref()),
+            mask,
+        }) => cmd_capability(capabilities, mask),
     }
 }
 
@@ -3422,38 +3422,47 @@ const CAPABILITY_TABLE: &[(&str, u32)] = &[
     ("cap_checkpoint_restore", 40),
 ];
 
-fn cmd_capability(capabilities: &[String], mask: Option<&str>) {
-    if let Some(hex) = mask {
-        let hex = hex.strip_prefix("0x").unwrap_or(hex);
-        let mask_val = match u64::from_str_radix(hex, 16) {
-            Ok(v) => v,
-            Err(_) => {
-                eprintln!("Invalid capability mask: {hex}");
-                std::process::exit(1);
-            }
-        };
-        // Print capabilities matching the mask
-        let mut found = false;
-        for &(name, num) in CAPABILITY_TABLE {
-            if num < 64 && (mask_val & (1u64 << num)) != 0 {
-                if found {
-                    print!(" ");
-                }
-                print!("{name}");
-                found = true;
-            }
-        }
-        if found {
-            println!();
-        }
-        return;
-    }
+fn cmd_capability(capabilities: &[String], mask: bool) {
+    // The highest capability number rust knows. C uses MAX(CAP_LAST_CAP,
+    // cap_last_cap()) which also probes the running kernel, so on a newer kernel
+    // C may accept a higher number than rust does.
+    let last_cap = CAPABILITY_TABLE.iter().map(|&(_, n)| n).max().unwrap_or(0);
 
     // Resolve the rows to print. C's verb_capabilities resolves every argument
     // first and bails out with an error, printing no table at all, on the first
-    // unknown capability; the full table is emitted in number order and an
-    // explicit list is sorted by number (table_set_sort on the number column).
-    let rows: Vec<(&str, u32)> = if capabilities.is_empty() {
+    // unknown capability; every mode emits the table sorted by number (the full
+    // table is naturally ordered, the others via table_set_sort).
+    let rows: Vec<(&str, u32)> = if mask {
+        // Mask mode: `-m`/`--mask` is a flag; the single positional argument is a
+        // hex capability mask and each set bit selects that capability.
+        if capabilities.len() != 1 {
+            eprintln!("Exactly 1 positional argument expected.");
+            std::process::exit(1);
+        }
+        let arg = &capabilities[0];
+        let hex = arg.strip_prefix("0x").unwrap_or(arg);
+        let Ok(mut cap_mask) = u64::from_str_radix(hex, 16) else {
+            eprintln!("Capability mask \"{arg}\" is not valid.");
+            std::process::exit(1);
+        };
+        let mut rows = Vec::new();
+        let mut c: u32 = 0;
+        while cap_mask != 0 {
+            if cap_mask & 1 != 0 {
+                if c > last_cap {
+                    eprintln!("Capability {c} is not known.");
+                    std::process::exit(1);
+                }
+                if let Some(&row) = CAPABILITY_TABLE.iter().find(|&&(_, n)| n == c) {
+                    rows.push(row);
+                }
+            }
+            c += 1;
+            cap_mask >>= 1;
+        }
+        rows.sort_by_key(|&(_, n)| n);
+        rows
+    } else if capabilities.is_empty() {
         CAPABILITY_TABLE.to_vec()
     } else {
         let mut rows = Vec::with_capacity(capabilities.len());

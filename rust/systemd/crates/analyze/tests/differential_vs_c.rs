@@ -455,6 +455,14 @@ fn analyze_capability_output_matches_c() {
         &["capability", "cap_bogus_nonexistent"],
         &["capability", "999"], // numeric, beyond the capability model
         &["capability", "cap_chown", "cap_bogus"], // partial list -> no output, error
+        // Mask mode: -m/--mask is a flag, the positional is a hex mask.
+        &["capability", "--mask", "0x3"], // bits 0,1
+        &["capability", "--mask", "3c00"], // bits 10-13, no 0x prefix
+        &["capability", "-m", "0000000000003c00"], // leading zeros, short flag
+        &["capability", "--mask", "0"], // no bits set -> header only
+        &["capability", "--mask"], // missing positional
+        &["capability", "--mask", "0x3", "0x4"], // too many positionals
+        &["capability", "--mask", "zzz"], // unparseable mask
     ];
 
     let mut divergences = Vec::new();
