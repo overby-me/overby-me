@@ -2104,7 +2104,15 @@ fn handle_response(
 
     match command {
         "is-active" => {
-            let state = result.and_then(|v| v.as_str()).unwrap_or("active");
+            // A success response whose result field is missing or not a
+            // string means the unit's state could not be read (e.g. a
+            // contended control-socket reply after a just-edited unit's
+            // daemon-reload). is-active must fail closed there: an
+            // unreadable state is not active, so default to inactive
+            // (exit 3), never active (exit 0), matching upstream's
+            // conservative answer. The old "active" default surfaced as
+            // the load-sensitive 26-SYSTEMCTL is-active flake.
+            let state = result.and_then(|v| v.as_str()).unwrap_or("inactive");
             if !quiet {
                 println!("{}", state);
             }
