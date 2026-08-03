@@ -127,6 +127,7 @@ pub fn apply_init_scope_resource_controls(
         "MemoryMax",
         "MemorySwapMax",
     ];
+    const CPU_KEYS: &[&str] = &["CPUWeight", "CPUQuota"];
 
     // Collect the last value seen per key from init.scope.d/*.conf across the
     // unit dirs, with later dirs and lexicographically-later files overriding
@@ -149,7 +150,7 @@ pub fn apply_init_scope_resource_controls(
             };
             for line in content.lines() {
                 let line = line.trim();
-                for &key in MEMORY_KEYS {
+                for &key in MEMORY_KEYS.iter().chain(CPU_KEYS) {
                     if let Some(v) = line.strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
                         values.insert(key, v.trim().to_owned());
                     }
@@ -158,15 +159,19 @@ pub fn apply_init_scope_resource_controls(
         }
     }
 
-    for (key, val) in &values {
-        let limit = match crate::units::unit_parsing::parse_memory_limit(val) {
-            Ok(Some(limit)) => limit,
-            _ => {
-                warn!("init.scope: ignoring invalid {key}={val}");
-                continue;
-            }
+    let log = |key: &str, val: &str, res: Result<(), CgroupError>| match res {
+        Ok(()) => trace!("init.scope: applied {key}={val}"),
+        Err(e) => warn!("init.scope: failed to apply {key}={val}: {e:?}"),
+    };
+
+    // Memory controls parse to a MemoryLimit.
+    for &key in MEMORY_KEYS {
+        let Some(val) = values.get(key) else { continue };
+        let Ok(Some(limit)) = crate::units::unit_parsing::parse_memory_limit(val) else {
+            warn!("init.scope: ignoring invalid {key}={val}");
+            continue;
         };
-        let res = match *key {
+        let res = match key {
             "MemoryMin" => cgroup2::set_memory_min(&init_scope, &limit),
             "MemoryLow" => cgroup2::set_memory_low(&init_scope, &limit),
             "MemoryHigh" => cgroup2::set_memory_high(&init_scope, &limit),
@@ -174,9 +179,20 @@ pub fn apply_init_scope_resource_controls(
             "MemorySwapMax" => cgroup2::set_memory_swap_max(&init_scope, &limit),
             _ => continue,
         };
-        match res {
-            Ok(()) => trace!("init.scope: applied {key}={val}"),
-            Err(e) => warn!("init.scope: failed to apply {key}={val}: {e:?}"),
+        log(key, val, res);
+    }
+
+    // CPUWeight= is a bare weight; CPUQuota= is a percentage (e.g. `50%`).
+    if let Some(val) = values.get("CPUWeight") {
+        match val.parse::<u64>() {
+            Ok(w) => log("CPUWeight", val, cgroup2::set_cpu_weight(&init_scope, w)),
+            Err(_) => warn!("init.scope: ignoring invalid CPUWeight={val}"),
+        }
+    }
+    if let Some(val) = values.get("CPUQuota") {
+        match val.strip_suffix('%').unwrap_or(val).trim().parse::<u64>() {
+            Ok(pct) => log("CPUQuota", val, cgroup2::set_cpu_quota(&init_scope, pct)),
+            Err(_) => warn!("init.scope: ignoring invalid CPUQuota={val}"),
         }
     }
 }
