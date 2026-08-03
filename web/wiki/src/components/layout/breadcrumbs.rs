@@ -634,8 +634,11 @@ pub(super) fn context_apps(
     apps.push((
         home_icon,
         home_label,
+        // Back to the page they were reading, not the top of the group. Falls
+        // back to the context root the first time, and whenever the reader has
+        // not been in this app yet (see nav_memory).
         Route::PathPage {
-            segments: ctx_path.clone(),
+            segments: crate::nav_memory::destination(&ctx_path, None),
             app: None,
         },
         // The editor / sort sub-apps operate on this content, so the entry stays
@@ -650,7 +653,7 @@ pub(super) fn context_apps(
             "app/feed",
             t("layout.feed"),
             Route::PathPage {
-                segments: ctx_path.clone(),
+                segments: crate::nav_memory::destination(&ctx_path, Some("feed")),
                 app: Some("feed".to_string()),
             },
             current_app.as_deref() == Some("feed"),
@@ -675,7 +678,7 @@ pub(super) fn context_apps(
                 icon,
                 label,
                 Route::PathPage {
-                    segments: ctx_path.clone(),
+                    segments: crate::nav_memory::destination(&ctx_path, Some(app)),
                     app: Some(app.to_string()),
                 },
                 current_app.as_deref() == Some(app),
@@ -686,7 +689,7 @@ pub(super) fn context_apps(
                 "app/member",
                 t("common.members"),
                 Route::PathPage {
-                    segments: ctx_path.clone(),
+                    segments: crate::nav_memory::destination(&ctx_path, Some("member")),
                     app: Some("member".to_string()),
                 },
                 current_app.as_deref() == Some("member"),
@@ -699,7 +702,7 @@ pub(super) fn context_apps(
             "app/follow",
             t("mime.follow"),
             Route::PathPage {
-                segments: ctx_path.clone(),
+                segments: crate::nav_memory::destination(&ctx_path, Some("follow")),
                 app: Some("follow".to_string()),
             },
             current_app.as_deref() == Some("follow"),
@@ -710,7 +713,7 @@ pub(super) fn context_apps(
                 "app/admin",
                 t("console.title"),
                 Route::PathPage {
-                    segments: ctx_path.clone(),
+                    segments: crate::nav_memory::destination(&ctx_path, Some("admin")),
                     app: Some("admin".to_string()),
                 },
                 current_app.as_deref() == Some("admin"),
@@ -730,7 +733,7 @@ pub(super) fn context_apps(
                 "app/bin",
                 t("bin.title"),
                 Route::PathPage {
-                    segments: ctx_path.clone(),
+                    segments: crate::nav_memory::destination(&ctx_path, Some("bin")),
                     app: Some("bin".to_string()),
                 },
                 current_app.as_deref() == Some("bin"),
@@ -749,7 +752,7 @@ pub(super) fn context_apps(
                 "app/feedback",
                 t("feedback.view"),
                 Route::PathPage {
-                    segments: ctx_path.clone(),
+                    segments: crate::nav_memory::destination(&ctx_path, Some("feedback")),
                     app: Some("feedback".to_string()),
                 },
                 current_app.as_deref() == Some("feedback"),

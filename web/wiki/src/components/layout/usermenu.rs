@@ -225,6 +225,9 @@ pub(super) fn UserMenu() -> Element {
                                 // nothing from the old session lingers (React clears
                                 // the GraphQL cache here).
                                 crate::components::folder::clear_selection();
+                                // Where the last reader was is not the next one's
+                                // business, and may be somewhere they cannot see.
+                                crate::nav_memory::clear();
                                 crate::session::bump_data_version();
                                 nav.push(Route::Home { app: None });
                             },

@@ -66,10 +66,61 @@ pub(super) fn NavBadge(children: Element) -> Element {
     }
 }
 
+/// Put the reader back where they were, once there is page enough to do it.
+///
+/// The content arrives after the route does, so the document is still short at
+/// this moment and scrolling now would just land at the top. Poll until it is
+/// tall enough, then jump; give up after two seconds. Any scrolling the reader
+/// does themselves cancels it, so at worst this does nothing.
+fn restore_scroll(target: f64) {
+    const POLL_MS: u32 = 50;
+    const ATTEMPTS: u32 = 40;
+    spawn(async move {
+        let Some(win) = web_sys::window() else {
+            return;
+        };
+        // Start at the top, the way an unremembered page would.
+        win.scroll_to_with_x_and_y(0.0, 0.0);
+        for _ in 0..ATTEMPTS {
+            gloo_timers::future::TimeoutFuture::new(POLL_MS).await;
+            // Anything but where we left it means the reader took over.
+            if win.scroll_y().unwrap_or(0.0).abs() > 2.0 {
+                return;
+            }
+            let Some(doc) = win.document().and_then(|d| d.document_element()) else {
+                return;
+            };
+            let reachable = doc.scroll_height() as f64
+                - win
+                    .inner_height()
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+            if reachable >= target {
+                win.scroll_to_with_x_and_y(0.0, target);
+                return;
+            }
+        }
+    });
+}
+
 /// The current context's key-path: the leading `CONTEXT_DEPTH` segments (or the
 /// first segment as a fallback until the context resolves).
 pub(super) fn context_path(segments: &[String]) -> Vec<String> {
     let depth = CONTEXT_DEPTH().max(1);
+    segments.iter().take(depth).cloned().collect()
+}
+
+/// [`context_path`] without subscribing, for the navigation effect.
+///
+/// The depth is rewritten as each route's crumbs resolve, so an effect that
+/// subscribed to it would run a second time per navigation and redo its scroll
+/// handling. It is also still the OUTGOING route's depth when the effect fires,
+/// which is exactly what recording the page being left wants; for the arriving
+/// one it is right whenever both are in the same context, and a miss only costs
+/// a fall back to the top of the page.
+fn context_path_peek(segments: &[String]) -> Vec<String> {
+    let depth = (*CONTEXT_DEPTH.peek()).max(1);
     segments.iter().take(depth).cloned().collect()
 }
 
@@ -145,14 +196,55 @@ pub fn Layout() -> Element {
     // node, so each page starts at the top rather than wherever the previous one
     // was left scrolled. Keyed on the path (not the ?app= view), so switching
     // apps in place keeps your scroll position.
-    let path_key = match &route {
-        Route::PathPage { segments, .. } => segments.join("/"),
-        _ => String::new(),
+    let (cur_segments, cur_app) = match &route {
+        Route::PathPage { segments, app } => (segments.clone(), app.clone()),
+        Route::Home { app } => (Vec::new(), app.clone()),
+        _ => (Vec::new(), None),
     };
-    use_effect(use_reactive!(|(path_key,)| {
-        let _ = &path_key;
-        if let Some(win) = web_sys::window() {
-            win.scroll_to_with_x_and_y(0.0, 0.0);
+    let path_key = cur_segments.join("/");
+    let app_key = cur_app.clone().unwrap_or_default();
+    // The route we are leaving, so it can be recorded on the way out.
+    let mut previous = use_signal(|| Option::<(Vec<String>, Option<String>)>::None);
+    use_effect(use_reactive!(|(path_key, app_key)| {
+        let Some(win) = web_sys::window() else {
+            return;
+        };
+        // Read the scroll BEFORE anything moves it: this is still the outgoing
+        // page's, which is the whole point of recording here.
+        let leaving_at = win.scroll_y().unwrap_or(0.0);
+        let leaving = previous.peek().clone();
+        if let Some((segments, app)) = &leaving {
+            crate::nav_memory::remember(
+                &context_path_peek(segments),
+                app.as_deref(),
+                segments,
+                leaving_at,
+            );
+        }
+
+        let segments: Vec<String> = if path_key.is_empty() {
+            Vec::new()
+        } else {
+            path_key.split('/').map(str::to_string).collect()
+        };
+        let app = (!app_key.is_empty()).then(|| app_key.clone());
+        let same_page = leaving
+            .as_ref()
+            .is_some_and(|(was, _)| was.join("/") == path_key);
+        previous.set(Some((segments.clone(), app.clone())));
+
+        // Switching `?app=` in place leaves the page under it alone, so the
+        // reader keeps their scroll.
+        if same_page {
+            return;
+        }
+        // A DIFFERENT node: start at the top, unless this is somewhere we have
+        // been and left part-way down, in which case go back to that.
+        match crate::nav_memory::recall(&context_path_peek(&segments), app.as_deref())
+            .filter(|spot| spot.segments == segments && spot.scroll > 1.0)
+        {
+            Some(spot) => restore_scroll(spot.scroll),
+            None => win.scroll_to_with_x_and_y(0.0, 0.0),
         }
     }));
     // Record each navigation as a diagnostics breadcrumb (remote-logging builds),

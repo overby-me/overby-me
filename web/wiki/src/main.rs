@@ -14,6 +14,7 @@ mod i18n;
 mod logging;
 /// Frontend-owned domain types (the anti-corruption seam over `graphql.rs`).
 pub mod model;
+mod nav_memory;
 mod nhost;
 /// Last-read pages kept in localStorage, served when nothing can be reached.
 mod offline;
