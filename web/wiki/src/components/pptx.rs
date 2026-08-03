@@ -205,6 +205,12 @@ pub struct TextBody {
     /// `t`, `ctr` or `b`: where the text sits in a box taller than itself.
     #[serde(default)]
     pub vertical_anchor: Option<String>,
+    /// `sp` (grow the box to the text), `norm` (shrink the text to the box) or
+    /// `none`. Under `sp` the recorded height is not a constraint the author
+    /// chose: PowerPoint COMPUTED it from its own text metrics, and a browser
+    /// laying the same words out slightly taller then had them cut off.
+    #[serde(default)]
+    pub auto_fit: Option<String>,
     /// What PowerPoint's "shrink text on overflow" settled on, as a fraction.
     ///
     /// It does NOT rewrite the sizes when it shrinks text: it leaves the
@@ -257,13 +263,31 @@ pub struct TextRun {
 /// which on a slide IS the content.
 pub fn shape_box(shape: &Shape, deck: &Deck) -> String {
     let (w, h) = (deck.slide_width.max(1.0), deck.slide_height.max(1.0));
+    // A box PowerPoint sized to its own text is a FLOOR, not a ceiling: it
+    // measured those words in its own metrics, and a browser measuring them in
+    // the browser's needs whatever room that takes. Pinning it to the recorded
+    // height sliced the second line off a caption that PowerPoint had fitted on
+    // one. Everything else keeps the height the author actually chose.
+    let grows = shape.text_body.as_ref().and_then(|b| b.auto_fit.as_deref()) == Some("sp");
+    let height = if grows { "min-height" } else { "height" };
     format!(
-        "left:{:.3}%;top:{:.3}%;width:{:.3}%;height:{:.3}%;",
+        "left:{:.3}%;top:{:.3}%;width:{:.3}%;{height}:{:.3}%;",
         shape.x / w * 100.0,
         shape.y / h * 100.0,
         shape.width / w * 100.0,
         shape.height / h * 100.0,
     )
+}
+
+/// Whether a shape may spill past the box recorded for it.
+///
+/// Only one that PowerPoint sized to its text. Clipping is right for a box the
+/// author drew, and wrong for one that is really a measurement.
+pub fn shape_overflow(shape: &Shape) -> &'static str {
+    match shape.text_body.as_ref().and_then(|b| b.auto_fit.as_deref()) {
+        Some("sp") => "overflow:visible;",
+        _ => "",
+    }
 }
 
 /// A point size as `cqw` — hundredths of the slide box's width.
@@ -435,7 +459,7 @@ pub fn DeckView(deck: Deck) -> Element {
                             div {
                                 key: "e{j}",
                                 class: "pptx-shape",
-                                style: "{shape_box(&shape, &deck)}justify-content:{vertical_anchor(shape.text_body.as_ref())};",
+                                style: "{shape_box(&shape, &deck)}{shape_overflow(&shape)}justify-content:{vertical_anchor(shape.text_body.as_ref())};",
                                 {shape_text(&shape, &deck)}
                             }
                         }
@@ -486,6 +510,51 @@ fn shape_text(shape: &Shape, deck: &Deck) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn deck_10in() -> Deck {
+        Deck {
+            slide_width: 9_144_000.0,
+            slide_height: 6_858_000.0,
+            ..Deck::default()
+        }
+    }
+
+    fn caption(auto_fit: Option<&str>) -> Shape {
+        Shape {
+            x: 0.0,
+            y: 0.0,
+            width: 4_572_000.0,
+            height: 685_800.0,
+            text_body: Some(TextBody {
+                auto_fit: auto_fit.map(str::to_string),
+                ..TextBody::default()
+            }),
+            ..Shape::default()
+        }
+    }
+
+    /// A box PowerPoint sized to its own text is a floor: it measured those
+    /// words in its metrics, and a browser needs whatever room its own take.
+    #[test]
+    fn a_grow_to_fit_box_may_get_taller() {
+        let style = shape_box(&caption(Some("sp")), &deck_10in());
+        assert!(style.contains("min-height:10.000%"), "{style}");
+        assert!(!style.contains(";height:"), "{style}");
+        assert_eq!(shape_overflow(&caption(Some("sp"))), "overflow:visible;");
+    }
+
+    /// A box the author drew keeps the size they drew, and still clips.
+    #[test]
+    fn an_authored_box_keeps_its_height() {
+        for kind in [Some("norm"), Some("none"), None] {
+            let style = shape_box(&caption(kind), &deck_10in());
+            assert!(style.contains("height:10.000%"), "{kind:?}: {style}");
+            assert!(!style.contains("min-height"), "{kind:?}: {style}");
+            assert_eq!(shape_overflow(&caption(kind)), "", "{kind:?}");
+        }
+    }
+
     use super::*;
 
     /// PowerPoint's "shrink text on overflow" leaves the author's size alone and
