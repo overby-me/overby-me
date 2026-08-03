@@ -46,6 +46,10 @@
   # developed; removed with the flag when the increment merges. No effect for
   # useUpstreamSystemd (the env var is rust-systemd-only).
   jobGraph ? false,
+  # Boot PID 1 with SYSTEMD_RS_INIT_SCOPE=1 so it applies init.scope.d/*.conf
+  # resource controls to its own init.scope cgroup (task #12). Opt-in per test
+  # while the feature is built out. No effect for useUpstreamSystemd.
+  initScope ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -154,9 +158,10 @@ in
       # i.e. rust-systemd). The env var survives the exec and rust-systemd's own
       # re-exec. Left at its default (unset) for every other test, so this is a
       # no-op unless a test opts in.
-      boot.systemdExecutable = lib.mkIf (jobGraph && !useUpstreamSystemd) (
-        lib.mkForce "${pkgs.writeShellScript "rust-systemd-jobgraph" ''
-          export SYSTEMD_RS_JOB_GRAPH=1
+      boot.systemdExecutable = lib.mkIf ((jobGraph || initScope) && !useUpstreamSystemd) (
+        lib.mkForce "${pkgs.writeShellScript "rust-systemd-flags" ''
+          ${lib.optionalString jobGraph "export SYSTEMD_RS_JOB_GRAPH=1"}
+          ${lib.optionalString initScope "export SYSTEMD_RS_INIT_SCOPE=1"}
           exec /run/current-system/systemd/lib/systemd/systemd "$@"
         ''}"
       );

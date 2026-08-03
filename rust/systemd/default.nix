@@ -502,6 +502,7 @@ in {
       useBootLoader = t.useBootLoader or false;
       expectedSkip = t.expectedSkip or false;
       jobGraph = t.jobGraph or false;
+      initScope = t.initScope or false;
     };
   in
     lib.listToAttrs (

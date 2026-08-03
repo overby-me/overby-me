@@ -11449,6 +11449,15 @@ pub fn execute_command(
                 }
             }
 
+            // Re-apply init.scope.d/*.conf resource controls on daemon-reload
+            // (task #12 slice A, gated on SYSTEMD_RS_INIT_SCOPE=1), the same way
+            // a scope's drop-ins are re-applied just above.
+            #[cfg(target_os = "linux")]
+            crate::platform::cgroups::apply_init_scope_resource_controls(
+                std::path::Path::new("/sys/fs/cgroup"),
+                &run_info.config.unit_dirs,
+            );
+
             // Detect and break ordering cycles in the updated unit table,
             // recording transaction IDs for each cycle found.
             let broken_cycles = crate::units::break_dependency_cycles(&mut run_info.unit_table);
