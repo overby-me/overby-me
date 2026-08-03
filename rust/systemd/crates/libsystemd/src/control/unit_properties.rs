@@ -567,6 +567,9 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 if let Some(ref bus_error) = state.srvc.notify_bus_error {
                     insert(&mut props, "StatusBusError", bus_error);
                 }
+                if let Some(ref varlink_error) = state.srvc.notify_varlink_error {
+                    insert(&mut props, "StatusVarlinkError", varlink_error);
+                }
                 if let Some(ref exit_status) = state.srvc.notify_exit_status {
                     insert(&mut props, "StatusExitStatus", exit_status);
                 }

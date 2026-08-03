@@ -1074,6 +1074,15 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
                 }
             }
         }
+        "VARLINKERROR" => {
+            if split.len() > 1 {
+                let error = split[1].trim();
+                if !error.is_empty() {
+                    srvc.notify_varlink_error = Some(error.to_owned());
+                    trace!("Service {name}: VARLINKERROR={error}");
+                }
+            }
+        }
         "EXIT_STATUS" => {
             if split.len() > 1 {
                 let status = split[1].trim();
@@ -1196,6 +1205,7 @@ mod tests {
             watchdog_last_ping: None,
             notify_errno: None,
             notify_bus_error: None,
+            notify_varlink_error: None,
             notify_exit_status: None,
             notify_monotonic_usec: None,
             invocation_id: None,
@@ -1953,6 +1963,7 @@ mod tests {
             "READY=1",
             "ERRNO=2",
             "BUSERROR=org.test.Error",
+            "VARLINKERROR=org.varlink.service.InvalidParameter",
             "EXIT_STATUS=42",
             "MONOTONIC_USEC=99999",
             "INVOCATION_ID=abcdef123456",
@@ -1964,6 +1975,10 @@ mod tests {
         assert!(srvc.signaled_ready);
         assert_eq!(srvc.notify_errno, Some(2));
         assert_eq!(srvc.notify_bus_error.as_deref(), Some("org.test.Error"));
+        assert_eq!(
+            srvc.notify_varlink_error.as_deref(),
+            Some("org.varlink.service.InvalidParameter")
+        );
         assert_eq!(srvc.notify_exit_status.as_deref(), Some("42"));
         assert_eq!(srvc.notify_monotonic_usec, Some(99999));
         assert_eq!(srvc.invocation_id.as_deref(), Some("abcdef123456"));

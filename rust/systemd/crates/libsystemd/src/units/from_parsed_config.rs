@@ -232,6 +232,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     watchdog_last_ping: None,
                     notify_errno: None,
                     notify_bus_error: None,
+                    notify_varlink_error: None,
                     notify_exit_status: None,
                     notify_monotonic_usec: None,
                     invocation_id: None,

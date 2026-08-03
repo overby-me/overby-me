@@ -462,6 +462,10 @@ pub struct Service {
     /// BUSERROR= from sd_notify — the last D-Bus error name reported by the service
     /// (e.g. `BUSERROR=org.freedesktop.DBus.Error.TimedOut`). Displayed in status.
     pub notify_bus_error: Option<String>,
+    /// VARLINKERROR= from sd_notify: the last Varlink error name reported by the
+    /// service (e.g. `VARLINKERROR=org.varlink.service.InvalidParameter`). Reset
+    /// together with notify_bus_error, mirroring C service.c. Displayed in status.
+    pub notify_varlink_error: Option<String>,
     /// EXIT_STATUS= from sd_notify — the last exit status reported by the service.
     /// Can be a numeric exit code or a signal name. Displayed in status.
     pub notify_exit_status: Option<String>,
