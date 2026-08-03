@@ -7,7 +7,7 @@
 use std::fs;
 use std::io::Read;
 
-use log::trace;
+use log::{trace, warn};
 
 pub(crate) mod bpf_devices;
 mod cgroup1;
@@ -92,6 +92,93 @@ pub fn move_to_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupError
         }
     }
     Ok(())
+}
+
+/// Apply resource controls from `init.scope.d/*.conf` drop-ins to the
+/// `init.scope` cgroup that PID 1 lives in, so `init.scope` can be tuned like
+/// real systemd's (e.g. `MemoryMax=` on the manager scope). Slice A of modeling
+/// init.scope as a configurable unit (task #12), gated on
+/// `SYSTEMD_RS_INIT_SCOPE=1` while the feature is built out. Best-effort: never
+/// fails the boot. The drop-ins are read with a simple KEY=VALUE scan (any
+/// section), which avoids needing a `[Scope]`-section parser that does not yet
+/// exist.
+#[cfg(target_os = "linux")]
+pub fn apply_init_scope_resource_controls(
+    base_path: &std::path::Path,
+    unit_dirs: &[std::path::PathBuf],
+) {
+    if std::env::var("SYSTEMD_RS_INIT_SCOPE").as_deref() != Ok("1") {
+        return;
+    }
+    let Some(v2_root) = detect_v2_root(base_path) else {
+        return;
+    };
+    let init_scope = v2_root.join(INIT_SCOPE_NAME);
+    if !init_scope.exists() {
+        return;
+    }
+
+    // The memory controls slice A supports, each a MemoryLimit written to its
+    // cgroup file. More controls (CPU/tasks/io) follow in later slices.
+    const MEMORY_KEYS: &[&str] = &[
+        "MemoryMin",
+        "MemoryLow",
+        "MemoryHigh",
+        "MemoryMax",
+        "MemorySwapMax",
+    ];
+
+    // Collect the last value seen per key from init.scope.d/*.conf across the
+    // unit dirs, with later dirs and lexicographically-later files overriding
+    // earlier ones (drop-in precedence).
+    let mut values: std::collections::BTreeMap<&str, String> = std::collections::BTreeMap::new();
+    for dir in unit_dirs {
+        let dropin_dir = dir.join(format!("{INIT_SCOPE_NAME}.d"));
+        let Ok(entries) = std::fs::read_dir(&dropin_dir) else {
+            continue;
+        };
+        let mut confs: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "conf"))
+            .collect();
+        confs.sort();
+        for conf in confs {
+            let Ok(content) = std::fs::read_to_string(&conf) else {
+                continue;
+            };
+            for line in content.lines() {
+                let line = line.trim();
+                for &key in MEMORY_KEYS {
+                    if let Some(v) = line.strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
+                        values.insert(key, v.trim().to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    for (key, val) in &values {
+        let limit = match crate::units::unit_parsing::parse_memory_limit(val) {
+            Ok(Some(limit)) => limit,
+            _ => {
+                warn!("init.scope: ignoring invalid {key}={val}");
+                continue;
+            }
+        };
+        let res = match *key {
+            "MemoryMin" => cgroup2::set_memory_min(&init_scope, &limit),
+            "MemoryLow" => cgroup2::set_memory_low(&init_scope, &limit),
+            "MemoryHigh" => cgroup2::set_memory_high(&init_scope, &limit),
+            "MemoryMax" => cgroup2::set_memory_max(&init_scope, &limit),
+            "MemorySwapMax" => cgroup2::set_memory_swap_max(&init_scope, &limit),
+            _ => continue,
+        };
+        match res {
+            Ok(()) => trace!("init.scope: applied {key}={val}"),
+            Err(e) => warn!("init.scope: failed to apply {key}={val}: {e:?}"),
+        }
+    }
 }
 
 pub fn move_out_of_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupError> {

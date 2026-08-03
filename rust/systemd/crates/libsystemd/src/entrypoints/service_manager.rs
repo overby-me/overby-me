@@ -1225,6 +1225,15 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
     .expect("loading unit files");
     trace!("Finished loading units");
 
+    // Apply init.scope.d/*.conf resource controls to PID 1's own init.scope
+    // cgroup (task #12 slice A, gated on SYSTEMD_RS_INIT_SCOPE=1). The cgroup
+    // was created earlier by move_to_own_cgroup; this is best-effort.
+    #[cfg(target_os = "linux")]
+    platform::cgroups::apply_init_scope_resource_controls(
+        std::path::Path::new("/sys/fs/cgroup"),
+        &conf.unit_dirs,
+    );
+
     // Break dependency cycles instead of aborting, matching systemd behavior.
     // systemd warns about cycles and removes ordering edges to break them.
     let broken_cycles = units::break_dependency_cycles(&mut unit_table);
