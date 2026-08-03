@@ -37,15 +37,12 @@
     echo "init.scope memory.max = $mm (want 536870912)"
     test "$mm" = "536870912"
 
-    # cpu.weight only exists when the cpu controller is enabled on init.scope;
-    # assert it when present (orthogonal to whether the drop-in was applied).
-    if grep -qw cpu /sys/fs/cgroup/init.scope/cgroup.controllers 2>/dev/null; then
-        cw=$(cat /sys/fs/cgroup/init.scope/cpu.weight)
-        echo "init.scope cpu.weight = $cw (want 200)"
-        test "$cw" = "200"
-    else
-        echo "cpu controller not enabled on init.scope; skipping CPUWeight assertion"
-    fi
+    # Applying a CPUWeight= drop-in must have enabled the cpu controller on
+    # init.scope (root subtree_control) so cpu.weight exists and reflects it.
+    grep -qw cpu /sys/fs/cgroup/init.scope/cgroup.controllers
+    cw=$(cat /sys/fs/cgroup/init.scope/cpu.weight)
+    echo "init.scope cpu.weight = $cw (want 200)"
+    test "$cw" = "200"
     ISEOF
   '';
 }

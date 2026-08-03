@@ -182,6 +182,19 @@ pub fn apply_init_scope_resource_controls(
         log(key, val, res);
     }
 
+    // For cpu controls to exist on init.scope, the cpu controller must be
+    // delegated from the root's subtree_control (init.scope/cpu.* only appear
+    // once the parent enables it). Enable it on demand -- only when a cpu
+    // drop-in is present -- matching systemd's lazy controller enablement. The
+    // root is exempt from the no-internal-processes rule, so this is safe even
+    // with PID 1 and kernel threads at the root. Best-effort.
+    if values.contains_key("CPUWeight") || values.contains_key("CPUQuota") {
+        let subtree = v2_root.join("cgroup.subtree_control");
+        if let Err(e) = std::fs::write(&subtree, "+cpu") {
+            warn!("init.scope: failed to enable the cpu controller at the root: {e}");
+        }
+    }
+
     // CPUWeight= is a bare weight; CPUQuota= is a percentage (e.g. `50%`).
     if let Some(val) = values.get("CPUWeight") {
         match val.parse::<u64>() {
