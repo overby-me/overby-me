@@ -450,8 +450,8 @@ pub async fn render_metafiles(
             continue;
         }
         match crate::backend_api::render_metafile(&bytes, token.unwrap_or_default()).await {
-            Ok(png) => {
-                out.insert(path, data_url("image/png", &png).into());
+            Ok((drawn, mime)) => {
+                out.insert(path, data_url(&mime, &drawn).into());
             }
             Err(e) => log::info!("metafile {path} not rendered: {e}"),
         }

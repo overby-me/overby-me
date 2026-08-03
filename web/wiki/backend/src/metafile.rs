@@ -52,9 +52,16 @@ pub async fn render(
         }
     };
     match render_inner(cfg, client, query.as_deref(), bearer, body).await {
-        Ok(png) => png_response(png),
+        Ok(out) => picture_response(out),
         Err(e) => e.respond("metafile render"),
     }
+}
+
+/// What the endpoint answers with: SVG when the emitter could draw it, PNG when
+/// only the rasteriser could.
+pub struct Rendered {
+    bytes: Vec<u8>,
+    content_type: &'static str,
 }
 
 async fn render_inner(
@@ -63,7 +70,7 @@ async fn render_inner(
     query: Option<&str>,
     bearer: Option<&str>,
     body: Bytes,
-) -> Result<Vec<u8>, AppError> {
+) -> Result<Rendered, AppError> {
     // Any signed-in caller. There is nothing here to authorise against: the
     // bytes come from the request, not from storage, so the caller is already
     // holding whatever this could tell them.
@@ -74,6 +81,17 @@ async fn render_inner(
     }
     if body.len() > MAX_INPUT_BYTES {
         return Err(AppError::BadRequest("metafile too large".into()));
+    }
+
+    // SVG first. It hands text to the browser, which picks the font each
+    // record asks for instead of drawing everything in the one generic sans the
+    // rasteriser loads, and it scales without resampling. The raster stays as
+    // the answer for anything the emitter declines.
+    if let Some(svg) = crate::metafile_svg::to_svg(&body) {
+        return Ok(Rendered {
+            bytes: svg.into_bytes(),
+            content_type: "image/svg+xml",
+        });
     }
 
     // `..Default::default()` on purpose: the renderer keeps adding opt-in
@@ -94,7 +112,10 @@ async fn render_inner(
     .map_err(|e| AppError::Upstream(format!("render task failed: {e}")))?;
 
     match decoded {
-        Ok(Some(out)) => Ok(out.data),
+        Ok(Some(out)) => Ok(Rendered {
+            bytes: out.data,
+            content_type: out.content_type,
+        }),
         // Not a metafile at all, or one this renderer does not cover. Both are
         // the caller's answer to give: the viewer falls back to the placeholder
         // it drew before this existed.
@@ -103,10 +124,10 @@ async fn render_inner(
     }
 }
 
-fn png_response(png: Vec<u8>) -> Response<Body> {
+fn picture_response(out: Rendered) -> Response<Body> {
     Response::builder()
         .status(StatusCode::OK)
-        .header("content-type", "image/png")
+        .header("content-type", out.content_type)
         // A metafile's rendering is a pure function of its bytes, and the bytes
         // live in an immutable uploaded document.
         .header("cache-control", "public, max-age=31536000, immutable")
@@ -114,6 +135,6 @@ fn png_response(png: Vec<u8>) -> Response<Body> {
         // perfectly good picture it has already downloaded. The error path gets
         // this for free through `crate::json`; a hand-built response does not.
         .header("Access-Control-Allow-Origin", "*")
-        .body(Body::from(png))
+        .body(Body::from(out.bytes))
         .unwrap_or_else(|e| AppError::Upstream(e.to_string()).respond("metafile response"))
 }

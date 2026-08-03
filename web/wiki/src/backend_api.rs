@@ -80,7 +80,7 @@ pub async fn file_bytes(file_id: &str, token: &str) -> Result<Vec<u8>, String> {
 /// to find the picture. The backend does the drawing because the renderer is
 /// ~400 KB gzipped and this wasm bundle is already the heaviest thing a
 /// delegate downloads.
-pub async fn render_metafile(bytes: &[u8], token: &str) -> Result<Vec<u8>, String> {
+pub async fn render_metafile(bytes: &[u8], token: &str) -> Result<(Vec<u8>, String), String> {
     let resp = reqwest::Client::new()
         .post(format!("{BACKEND_URL}/office/metafile"))
         .bearer_auth(token)
@@ -92,9 +92,21 @@ pub async fn render_metafile(bytes: &[u8], token: &str) -> Result<Vec<u8>, Strin
     if !resp.status().is_success() {
         return Err(format!("backend said {}", resp.status()));
     }
+    // SVG when the backend could draw the records, PNG when only its rasteriser
+    // could; the caller just needs to label the data url correctly.
+    let mime = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/png")
+        .split(';')
+        .next()
+        .unwrap_or("image/png")
+        .trim()
+        .to_string();
     resp.bytes()
         .await
-        .map(|b| b.to_vec())
+        .map(|b| (b.to_vec(), mime))
         .map_err(|e| e.to_string())
 }
 

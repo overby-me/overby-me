@@ -23,6 +23,7 @@ mod feedback;
 mod logs;
 mod members;
 mod metafile;
+mod metafile_svg;
 mod nhost;
 mod notify;
 mod oauth;
