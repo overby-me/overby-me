@@ -205,6 +205,14 @@ pub struct TextBody {
     /// `t`, `ctr` or `b`: where the text sits in a box taller than itself.
     #[serde(default)]
     pub vertical_anchor: Option<String>,
+    /// What PowerPoint's "shrink text on overflow" settled on, as a fraction.
+    ///
+    /// It does NOT rewrite the sizes when it shrinks text: it leaves the
+    /// author's size alone and records the scale beside it. So a box saying
+    /// 80pt with a scale of 0.25 is 20pt on the slide, and reading the size
+    /// without the scale drew it four times too big.
+    #[serde(default)]
+    pub font_scale: Option<f64>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -279,10 +287,19 @@ pub fn effective_font_size(
     paragraph: &TextParagraph,
     body: Option<&TextBody>,
 ) -> f64 {
-    run.font_size
+    let stated = run
+        .font_size
         .or(paragraph.def_font_size)
         .or_else(|| body.and_then(|b| b.default_font_size))
-        .unwrap_or(18.0)
+        .unwrap_or(18.0);
+    // Autofit's scale applies to whichever of the three stated it. Bounded
+    // because it comes out of the file: a zero or a negative would erase the
+    // text, and a scale above 1 is not a shrink.
+    let scale = body
+        .and_then(|b| b.font_scale)
+        .filter(|s| *s > 0.0 && *s <= 1.0)
+        .unwrap_or(1.0);
+    stated * scale
 }
 
 /// Where text sits in a box taller than the text itself.
@@ -469,6 +486,57 @@ fn shape_text(shape: &Shape, deck: &Deck) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// PowerPoint's "shrink text on overflow" leaves the author's size alone and
+    /// records the scale beside it, so the size alone is not the size drawn.
+    #[test]
+    fn autofit_shrinks_the_size_the_box_states() {
+        let body = TextBody {
+            font_scale: Some(0.25),
+            ..TextBody::default()
+        };
+        let para = TextParagraph::default();
+        let run = TextRun {
+            font_size: Some(80.0),
+            ..TextRun::default()
+        };
+        // 80pt at a quarter is 20pt, not 80.
+        assert_eq!(effective_font_size(&run, &para, Some(&body)), 20.0);
+
+        // And it applies to a size inherited from the paragraph or the body.
+        let inherited = TextParagraph {
+            def_font_size: Some(40.0),
+            ..TextParagraph::default()
+        };
+        assert_eq!(
+            effective_font_size(&TextRun::default(), &inherited, Some(&body)),
+            10.0
+        );
+    }
+
+    /// A scale out of range comes from the file and must not erase the text or
+    /// magnify it.
+    #[test]
+    fn an_impossible_scale_is_ignored() {
+        let para = TextParagraph::default();
+        let run = TextRun {
+            font_size: Some(20.0),
+            ..TextRun::default()
+        };
+        for bad in [0.0, -1.0, 4.0] {
+            let body = TextBody {
+                font_scale: Some(bad),
+                ..TextBody::default()
+            };
+            assert_eq!(
+                effective_font_size(&run, &para, Some(&body)),
+                20.0,
+                "scale {bad} should have been ignored"
+            );
+        }
+    }
+
     use super::*;
 
     /// The parser resolves a slide's background through the layout and master to
