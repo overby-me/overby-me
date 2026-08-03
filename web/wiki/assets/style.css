@@ -6014,6 +6014,16 @@ h6,
 	max-width: 100%;
 	border-radius: var(--md-sys-shape-corner-small);
 }
+/* A picture inside a RENDERED document is the author's content, not the
+   viewer's chrome, and the rule above was rounding its corners. Visible on any
+   picture that reaches the edge of its box: a full-bleed figure on a slide came
+   back with corners the deck never had. Word's pictures and its picture bullets
+   are the same case. */
+.file-viewer .pptx-img,
+.file-viewer .docx-img,
+.file-viewer .docx-bullet {
+	border-radius: 0;
+}
 
 .file-viewer video,
 .file-viewer audio {

@@ -713,16 +713,18 @@ fn NativeDocx(file_id: String, name: String) -> Element {
         // bytes are still in the package that was just parsed.
         let mut images = super::docx::collect_images(&blocks, &bytes);
         // The figures no browser draws: Word keeps pasted charts as EMF/WMF, so
-        // the backend renders those to PNG. Anything it cannot render is simply
-        // absent, and falls through to the placeholder as before.
-        images.extend(
-            super::docx::render_metafiles(
-                super::docx::collect_metafiles(&blocks),
-                &bytes,
-                Some(token.as_str()),
-            )
-            .await,
-        );
+        // the backend renders those. Anything it cannot render is simply absent,
+        // and falls through to the placeholder as before.
+        let drawn = super::docx::render_metafiles(
+            super::docx::collect_metafiles(&blocks),
+            &bytes,
+            Some(token.as_str()),
+        )
+        .await;
+        // Same as the deck: what the backend drew is no longer a gap.
+        let mut gaps = gaps;
+        gaps.drew_pictures(drawn.len());
+        images.extend(drawn);
         super::docx::attach_images(&mut blocks, &images);
         // Needs the whole document: a heading's size means something only
         // against the size of the body text around it.
@@ -865,14 +867,18 @@ fn NativePptx(file_id: String, name: String) -> Element {
         // inside the package, and the bytes are still in the package.
         let mut images = super::pptx::collect_images(&deck, &bytes);
         // Same as the Word path: EMF/WMF figures go to the backend to be drawn.
-        images.extend(
-            super::docx::render_metafiles(
-                super::pptx::collect_metafiles(&deck),
-                &bytes,
-                Some(token.as_str()),
-            )
-            .await,
-        );
+        let drawn = super::docx::render_metafiles(
+            super::pptx::collect_metafiles(&deck),
+            &bytes,
+            Some(token.as_str()),
+        )
+        .await;
+        // The gap report was taken from the model, which calls a metafile
+        // undrawable because no BROWSER draws one. The backend just did, so the
+        // banner must stop announcing figures the reader can see.
+        let mut gaps = gaps;
+        gaps.drew_pictures(drawn.len());
+        images.extend(drawn);
         super::pptx::attach_images(&mut deck, &images);
         Ok::<_, String>((deck, gaps))
     });

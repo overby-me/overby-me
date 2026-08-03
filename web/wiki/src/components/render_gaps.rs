@@ -80,6 +80,27 @@ impl GapReport {
         self.gaps.is_empty()
     }
 
+    /// Correct the picture count once it is known which pictures were actually
+    /// drawn.
+    ///
+    /// The count is taken from the model, where a metafile is a format no
+    /// browser decodes. That was the whole story until the backend started
+    /// rendering them, and afterwards the banner still announced two missing
+    /// figures on a deck that was showing both. `drawn` is what the viewer ended
+    /// up with pixels for; only what is left is a gap.
+    pub fn drew_pictures(&mut self, drawn: usize) {
+        if drawn == 0 {
+            return;
+        }
+        self.gaps.retain_mut(|gap| match gap {
+            Gap::Image(n) => {
+                *n = n.saturating_sub(drawn);
+                *n > 0
+            }
+            _ => true,
+        });
+    }
+
     /// Everything countable that will not be drawn.
     pub fn missing(&self) -> usize {
         self.gaps.iter().map(|g| g.count()).sum::<usize>()
@@ -319,6 +340,40 @@ pub fn pptx_gaps(model: &Value) -> GapReport {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The banner counted every metafile as missing, because no browser draws
+    /// one. The backend does now, and a reader looking at two rendered figures
+    /// should not be told they are absent.
+    #[test]
+    fn drawn_pictures_stop_being_gaps() {
+        let mut report = GapReport {
+            gaps: vec![Gap::Image(2), Gap::Chart(1)],
+            text_blocks: 10,
+        };
+        report.drew_pictures(2);
+        assert_eq!(report.gaps, vec![Gap::Chart(1)]);
+
+        // Drawing some of them leaves the rest counted.
+        let mut partial = GapReport {
+            gaps: vec![Gap::Image(3)],
+            text_blocks: 10,
+        };
+        partial.drew_pictures(1);
+        assert_eq!(partial.gaps, vec![Gap::Image(2)]);
+
+        // Drawing none changes nothing, and drawing more than were counted
+        // cannot underflow.
+        let mut none = GapReport {
+            gaps: vec![Gap::Image(1)],
+            text_blocks: 10,
+        };
+        none.drew_pictures(0);
+        assert_eq!(none.gaps, vec![Gap::Image(1)]);
+        none.drew_pictures(9);
+        assert!(none.gaps.is_empty());
+    }
+
     use super::*;
     use serde_json::json;
 
