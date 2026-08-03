@@ -754,6 +754,89 @@ mod first_boot_bool_tests {
     }
 }
 
+/// Parse a single `ConditionX=Y` / `AssertX=Y` spec into a [`UnitCondition`],
+/// for callers outside unit-file loading (e.g. `systemd-analyze condition`).
+/// A leading `!` on the value negates. Returns `None` for a spec without `=` or
+/// a condition name this does not model (notably `KernelVersion`), so the caller
+/// can fall back.
+fn parse_single_condition(spec: &str) -> Option<UnitCondition> {
+    let (key, raw) = spec.split_once('=')?;
+    let key = key.trim().strip_prefix('|').map(str::trim).unwrap_or(key.trim());
+    let name = key
+        .strip_prefix("Condition")
+        .or_else(|| key.strip_prefix("Assert"))?;
+    let raw = raw.trim();
+    let (value, negate) = match raw.strip_prefix('!') {
+        Some(rest) => (rest.trim().to_string(), true),
+        None => (raw.to_string(), false),
+    };
+    let first_boot_bool = || parse_first_boot_bool(&value).unwrap_or(false);
+    Some(match name {
+        "PathExists" => UnitCondition::PathExists { path: value, negate },
+        "PathExistsGlob" => UnitCondition::PathExistsGlob { pattern: value, negate },
+        "PathIsDirectory" => UnitCondition::PathIsDirectory { path: value, negate },
+        "PathIsSymbolicLink" => UnitCondition::PathIsSymbolicLink { path: value, negate },
+        "PathIsMountPoint" => UnitCondition::PathIsMountPoint { path: value, negate },
+        "PathIsReadWrite" => UnitCondition::PathIsReadWrite { path: value, negate },
+        "PathIsEncrypted" => UnitCondition::PathIsEncrypted { path: value, negate },
+        "DirectoryNotEmpty" => UnitCondition::DirectoryNotEmpty { path: value, negate },
+        "FileNotEmpty" => UnitCondition::FileNotEmpty { path: value, negate },
+        "FileIsExecutable" => UnitCondition::FileIsExecutable { path: value, negate },
+        "NeedsUpdate" => UnitCondition::NeedsUpdate { path: value, negate },
+        "Virtualization" => UnitCondition::Virtualization { value, negate },
+        "Capability" => UnitCondition::Capability { capability: value, negate },
+        "KernelModuleLoaded" => UnitCondition::KernelModuleLoaded { module: value, negate },
+        "KernelCommandLine" => UnitCondition::KernelCommandLine { argument: value, negate },
+        "ControlGroupController" => {
+            UnitCondition::ControlGroupController { controller: value, negate }
+        }
+        "Security" => UnitCondition::Security { technology: value, negate },
+        "Architecture" => UnitCondition::Architecture { arch: value, negate },
+        "Environment" => UnitCondition::Environment { expression: value, negate },
+        "Firmware" => UnitCondition::Firmware { value, negate },
+        "Host" => UnitCondition::Host { value, negate },
+        "Memory" => UnitCondition::Memory { value, negate },
+        "CPUFeature" => UnitCondition::CPUFeature { feature: value, negate },
+        "CPUs" => UnitCondition::CPUs { expression: value, negate },
+        "OSRelease" => UnitCondition::OSRelease { expression: value, negate },
+        "User" => UnitCondition::User { value, negate },
+        "Group" => UnitCondition::Group { value, negate },
+        "FirstBoot" => UnitCondition::FirstBoot { value: first_boot_bool(), negate },
+        "ACPower" => UnitCondition::ACPower { value: first_boot_bool(), negate },
+        _ => return None,
+    })
+}
+
+/// Parse and evaluate a single `ConditionX=Y` / `AssertX=Y` spec through the
+/// same [`UnitCondition::check`] logic PID 1 uses. Returns `None` for a
+/// condition this does not model (the caller can fall back). See
+/// [`parse_single_condition`].
+pub fn evaluate_condition_spec(spec: &str) -> Option<bool> {
+    parse_single_condition(spec).map(|c| c.check())
+}
+
+#[cfg(test)]
+mod condition_spec_tests {
+    use super::evaluate_condition_spec;
+
+    #[test]
+    fn evaluates_known_conditions() {
+        // /proc always exists on Linux; negation flips it; any host has a CPU.
+        assert_eq!(evaluate_condition_spec("ConditionPathExists=/proc"), Some(true));
+        assert_eq!(evaluate_condition_spec("ConditionPathExists=!/proc"), Some(false));
+        assert_eq!(evaluate_condition_spec("ConditionCPUs=>=1"), Some(true));
+    }
+
+    #[test]
+    fn returns_none_for_unmodelled_or_malformed() {
+        // KernelVersion is intentionally left to the caller's fallback.
+        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=>=1.0"), None);
+        // Unknown name, and a spec without '='.
+        assert_eq!(evaluate_condition_spec("ConditionBogusXyz=1"), None);
+        assert_eq!(evaluate_condition_spec("ConditionPathExists"), None);
+    }
+}
+
 impl UnitCondition {
     /// Evaluate the condition. Returns true if the condition is met.
     pub fn check(&self) -> bool {

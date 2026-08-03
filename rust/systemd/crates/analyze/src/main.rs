@@ -1819,7 +1819,13 @@ fn cmd_condition(expressions: &[String], unit: Option<&str>) {
 
     let mut all_met = true;
     for expr in &all_exprs {
-        let (met, reason) = evaluate_condition(expr);
+        // Prefer libsystemd's complete evaluator (the same one PID 1 uses), so
+        // every condition type it models is handled consistently. Fall back to
+        // the local evaluator for the few it does not (notably KernelVersion).
+        let (met, reason) = match libsystemd::units::evaluate_condition_spec(expr) {
+            Some(met) => (met, if met { "met" } else { "not met" }),
+            None => evaluate_condition(expr),
+        };
         let status = if met { "met" } else { "not met" };
         println!("{expr}: {status} ({reason})");
         if !met {

@@ -282,6 +282,21 @@ fn analyze_condition_matches_c() {
         "ConditionFirstBoot=no",
         "ConditionFirstBoot=yes",
         "AssertPathExists=/proc",
+        // Regression: these were "Unknown condition type" in rust `analyze`
+        // until it delegated to libsystemd's evaluator. Robust by construction:
+        // any host has >=1 CPU and <1024000T RAM; the os-release value cannot
+        // match a real distro; the rest read the same host in both binaries.
+        "ConditionCPUs=>=1",
+        "ConditionCPUs=<1",
+        "ConditionMemory=>=1",
+        "ConditionMemory=>=1024000T",
+        "ConditionOSRelease=ID=zzz-not-a-real-distro-999",
+        "ConditionControlGroupController=cpu",
+        "ConditionUser=root",
+        "ConditionUser=@system",
+        "ConditionGroup=0",
+        "ConditionSecurity=selinux",
+        "ConditionKernelCommandLine=quiet",
     ];
     let mut div = Vec::new();
     for s in specs {

@@ -11,6 +11,8 @@ mod unit;
 pub(crate) mod unit_parsing;
 mod unitset_manipulation;
 
+pub use unit_parsing::evaluate_condition_spec;
+
 pub use id::*;
 pub use jobs::*;
 pub use loading::*;
