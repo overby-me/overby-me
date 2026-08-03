@@ -284,12 +284,19 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         for id in &conf.after {
             before.push((unit.id.clone(), id.clone()));
         }
-        for id in &conf.wanted_by {
-            wanted_by.push((unit.id.clone(), id.clone()));
-        }
-        for id in &conf.required_by {
-            required_by.push((unit.id.clone(), id.clone()));
-        }
+        // NOTE: conf.wanted_by / conf.required_by come from [Install]
+        // WantedBy=/RequiredBy=, which are enable-time metadata only:
+        // `systemctl enable` writes the .wants/.requires symlink and
+        // directory_deps turns those into real edges. They must NOT be
+        // synthesized into a live `target.wants += unit` here (the loop
+        // below would do exactly that), or a never-enabled unit becomes a
+        // live want of its target and gets started on the next target
+        // activation. This is the residual half of the 26-SYSTEMCTL
+        // is-active failure (the insert_new reload path was fixed earlier;
+        // daemon-reload's full resolve runs THIS path). The reverse index
+        // (unit.wanted_by / unit.required_by) is already set from the
+        // parsed [Install] section by from_parsed_config, so dropping the
+        // synthesis loses nothing for enabled units.
         // PartOf=B on unit A means: when B stops, A stops too.
         // Collect (target, dependent) pairs so we can fill part_of_by on the target.
         for id in &conf.part_of {
