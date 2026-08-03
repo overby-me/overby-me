@@ -183,9 +183,20 @@ async fn deployed_commit() -> Option<String> {
 /// which names the OLD asset hashes — and only refresh it in the background. The
 /// reader would land back on the same build and be told again 15 minutes later.
 ///
-/// Only the shell is dropped. Everything under `/assets/` is content-hashed, so
-/// what the new shell needs it asks for by a new URL anyway, and what it does not
-/// need costs nothing to keep.
+/// The shell is cached under every URL it was ever served at, not just `/`. The
+/// host answers any deep link with `index.html` (see `assets/_redirects`), the
+/// worker files each response under the URL that was asked for, and it looks
+/// them up the same way. So a reader standing on an agenda item had a stale copy
+/// under that whole path, this deleted `/` and `/index.html`, and the reload was
+/// served the build it was meant to replace. Only the second press worked, by
+/// which time the background revalidate had quietly fixed that one path. Hence:
+/// every cached entry goes, keyed by what the cache actually holds.
+///
+/// Except `/assets/`, which is content-hashed. A changed file is a changed URL,
+/// so the new shell asks for what it needs by a name that cannot be stale, and
+/// dropping the rest would only re-download fonts and icons that were still
+/// correct. That matters here: the reader on venue wifi is the one being asked
+/// to reload.
 async fn drop_cached_shell() {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
@@ -209,9 +220,50 @@ async fn drop_cached_shell() {
         let Some(cache) = cache.dyn_ref::<web_sys::Cache>() else {
             continue;
         };
-        for entry in ["/", "/index.html"] {
-            let _ = JsFuture::from(cache.delete_with_str(entry)).await;
+        let Ok(entries) = JsFuture::from(cache.keys()).await else {
+            continue;
+        };
+        let Some(entries) = entries.dyn_ref::<js_sys::Array>() else {
+            continue;
+        };
+        for entry in entries.iter() {
+            // The entries are `Request`s. Reading `.url` reflectively keeps the
+            // `Request` binding (and its feature) out of a path that only wants
+            // a string to delete by.
+            let Some(url) = js_sys::Reflect::get(&entry, &"url".into())
+                .ok()
+                .and_then(|v| v.as_string())
+            else {
+                continue;
+            };
+            if names_its_own_content(&url) {
+                continue;
+            }
+            let _ = JsFuture::from(cache.delete_with_str(&url)).await;
         }
+    }
+}
+
+/// Whether this cached URL is safe to keep across an update, because its content
+/// hash is part of its path and a different build would ask for a different URL.
+fn names_its_own_content(url: &str) -> bool {
+    let path = cached_path(url);
+    // `/symbols/` is hashed the same way. No reader fetches it, so this is only
+    // for completeness.
+    path.starts_with("/assets/") || path.starts_with("/symbols/")
+}
+
+/// The path of a cache key, which the Cache API stores as an absolute URL.
+///
+/// Matching on the path rather than the whole string is what keeps a document at
+/// `/x/assets/y` from being mistaken for a hashed asset.
+fn cached_path(url: &str) -> &str {
+    let Some((_scheme, rest)) = url.split_once("://") else {
+        return url; // already a path, or something unparseable: treat it as one
+    };
+    match rest.find('/') {
+        Some(start) => &rest[start..],
+        None => "/",
     }
 }
 
@@ -245,5 +297,56 @@ pub fn UpdateBanner() -> Element {
                 "{t(\"update.reload\")}"
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_its_own_content as kept;
+
+    /// Hashed URLs survive the purge: a new build asks for new ones, and
+    /// re-downloading a 125 KB icon font over venue wifi helps nobody.
+    #[test]
+    fn a_hashed_asset_is_kept() {
+        assert!(kept("https://radikal.wiki/assets/style-dxh43d5a6.css"));
+        assert!(kept(
+            "https://radikal.wiki/assets/material-icons-dxhd3c.woff2"
+        ));
+        assert!(kept("https://radikal.wiki/symbols/wiki-dioxus-dxh27f.wasm"));
+    }
+
+    /// Everything the shell is served as goes, whatever URL it was cached under.
+    /// The deep path is the one that used to survive and cost a second press.
+    #[test]
+    fn every_copy_of_the_shell_is_dropped() {
+        for url in [
+            "https://radikal.wiki/",
+            "https://radikal.wiki/index.html",
+            "https://radikal.wiki/radikal_ungdom/hb5/dagsorden_1.0",
+            "https://radikal.wiki/radikal_ungdom/hb5/dagsorden_1.0?tab=2",
+            "https://radikal.wiki/?",
+            "https://radikal.wiki/user/login",
+        ] {
+            assert!(!kept(url), "{url} should have been dropped");
+        }
+    }
+
+    /// A page whose own path happens to contain `/assets/` is still a page. This
+    /// is why the check is anchored to the path and not run over the whole URL.
+    #[test]
+    fn a_page_that_merely_mentions_assets_is_not_an_asset() {
+        assert!(!kept("https://radikal.wiki/radikal_ungdom/assets/plan"));
+        assert!(!kept("https://radikal.wiki/x?next=/assets/style.css"));
+    }
+
+    /// Odd shapes must not panic, and must not be mistaken for assets.
+    #[test]
+    fn a_malformed_key_is_dropped_rather_than_kept() {
+        assert!(!kept("https://radikal.wiki"));
+        assert!(!kept(""));
+        assert!(!kept("nonsense"));
+        // A bare path, should the Cache API ever hand one back.
+        assert!(kept("/assets/style-dxh43d5a6.css"));
+        assert!(!kept("/index.html"));
     }
 }
