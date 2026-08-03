@@ -48,6 +48,38 @@ pub struct Slide {
     pub elements: Vec<Shape>,
     #[serde(default)]
     pub slide_number: Option<u32>,
+    /// What the slide is drawn ON, resolved by the parser through the layout and
+    /// master to a literal colour. Dropped before this existed, so every deck
+    /// was drawn on the APP's surface instead of its own, which in dark mode
+    /// meant a pale deck on a dark page with the author's dark text on top.
+    #[serde(default)]
+    pub background: Option<Background>,
+}
+
+/// A slide's own fill.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Background {
+    /// `RRGGBB`, already resolved from whatever theme reference stated it.
+    #[serde(default)]
+    pub color: Option<String>,
+    /// `solid` is the only kind with a colour to use; a gradient or a picture
+    /// background says nothing this can paint, and is left to the app's surface.
+    #[serde(default)]
+    pub fill_type: Option<String>,
+}
+
+impl Background {
+    /// The colour to paint, when it is one this can actually paint.
+    pub fn solid_colour(&self) -> Option<&str> {
+        if self.fill_type.as_deref() != Some("solid") {
+            return None;
+        }
+        self.color
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()))
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -321,14 +353,31 @@ pub fn DeckView(deck: Deck) -> Element {
     } else {
         (9_144_000.0, 6_858_000.0)
     };
-    let slides = deck.slides.clone();
+    // The deck's own paper, and ink to match it. A run that states no colour
+    // inherits from the slide, and inheriting the APP's text colour put
+    // near-white text on a near-white slide for a reader in dark mode.
+    // `readable_ink` picks by luminance, the same way a shaded spreadsheet cell
+    // does. Computed here because rsx has no room for it inline.
+    let slides: Vec<(Slide, String)> = deck
+        .slides
+        .iter()
+        .map(|slide| {
+            let paper = slide
+                .background
+                .as_ref()
+                .and_then(|b| b.solid_colour())
+                .map(|c| format!("background:#{c};color:{};", super::docx::readable_ink(c)))
+                .unwrap_or_default();
+            (slide.clone(), paper)
+        })
+        .collect();
     rsx! {
         div { class: "pptx-deck",
-            for (i , slide) in slides.into_iter().enumerate() {
+            for (i , (slide , paper)) in slides.into_iter().enumerate() {
                 section {
                     key: "s{i}",
                     class: "pptx-slide",
-                    style: "aspect-ratio:{w} / {h};",
+                    style: "aspect-ratio:{w} / {h};{paper}",
                     aria_label: "{i + 1}",
                     for (j , shape) in slide.elements.into_iter().enumerate() {
                         if let Some(src) = shape.src.clone() {
@@ -420,6 +469,42 @@ fn shape_text(shape: &Shape, deck: &Deck) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The parser resolves a slide's background through the layout and master to
+    /// a literal colour. This used to be dropped, so a deck was drawn on the
+    /// app's surface rather than its own.
+    #[test]
+    fn a_solid_background_is_read_off_the_slide() {
+        let slide: Slide = serde_json::from_value(serde_json::json!({
+            "elements": [],
+            "background": { "color": "FAF6F3", "fillType": "solid" }
+        }))
+        .expect("slide");
+        assert_eq!(
+            slide.background.as_ref().and_then(|b| b.solid_colour()),
+            Some("FAF6F3")
+        );
+    }
+
+    /// Only a solid fill states a colour this can paint. A gradient or picture
+    /// background names one that would be wrong on its own.
+    #[test]
+    fn only_a_solid_fill_offers_a_colour() {
+        let gradient = Background {
+            color: Some("FF0000".into()),
+            fill_type: Some("gradient".into()),
+        };
+        assert_eq!(gradient.solid_colour(), None);
+
+        // And a malformed colour is not painted either.
+        let broken = Background {
+            color: Some("nothex".into()),
+            fill_type: Some("solid".into()),
+        };
+        assert_eq!(broken.solid_colour(), None);
+    }
+
     use super::*;
 
     /// The numbers are from a real deck in the wiki: a full-bleed background
