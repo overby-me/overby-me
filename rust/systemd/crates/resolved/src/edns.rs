@@ -791,6 +791,56 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_edns_parsers_never_panic() {
+        // Robustness net (task #22): EDNS option parsing consumes
+        // attacker-controlled OPT-record data. ClientSubnet::parse,
+        // OptRecord::parse and parse_edns_options must never panic or hang on
+        // malformed input (random + mutated blobs; catch_unwind on a worker
+        // thread joined under a wall-clock budget).
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x0ed0_5eed_0ed0_5eed;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let len = (next() % 160) as usize;
+                let mut buf: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+                let muts = (next() % 6) as usize;
+                for _ in 0..muts {
+                    if buf.is_empty() {
+                        break;
+                    }
+                    let i = (next() as usize) % buf.len();
+                    match next() % 3 {
+                        0 => buf[i] ^= (next() & 0xff) as u8,
+                        1 => buf.truncate(i),
+                        _ => buf.insert(i, (next() & 0xff) as u8),
+                    }
+                }
+                let input = buf.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = ClientSubnet::parse(&input);
+                    let _ = OptRecord::parse(&input);
+                    let _ = parse_edns_options(&input);
+                });
+                assert!(res.is_ok(), "edns parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "edns fuzz did not finish in 30s -- a malformed option hangs the parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
+    #[test]
     fn test_edns_flags_do_bit() {
         let flags = EdnsFlags { dnssec_ok: true };
         assert_eq!(flags.to_u16(), 0x8000);
