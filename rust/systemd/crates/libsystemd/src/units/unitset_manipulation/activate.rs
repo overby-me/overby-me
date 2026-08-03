@@ -1116,6 +1116,119 @@ fn find_startable_units(
     startable
 }
 
+/// Classify a just-activated service's deferral, all under the caller's
+/// already-held table read guard (a second read acquisition would risk the
+/// writer-preferring rwlock deadlock): whether the start is still pending (the
+/// unit is left `Starting`), and if so whether it deferred at the
+/// `ExecCondition=`/`ExecStartPre=` helper phase (`is_prestart_chain`) or as a
+/// multi-command `Type=oneshot` preliminary-exec phase (`is_oneshot_prelim`).
+/// Both use the lock-free `main_pid` atomic so no per-unit state lock is taken
+/// under the table guard. Shared by the pool path and the increment-4 job-graph
+/// drain so the two cannot diverge (docs/EVENT-LOOP.md).
+fn detect_deferred_kind(ri: &RuntimeInfo, id: &UnitId) -> (bool, bool, bool) {
+    let is_deferred = ri
+        .unit_table
+        .get(id)
+        .is_some_and(|unit| matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting));
+    let is_oneshot_prelim = if let Some(unit) = ri.unit_table.get(id)
+        && let Specific::Service(svc) = &unit.specific
+    {
+        svc.conf.srcv_type == crate::units::ServiceType::OneShot
+            && svc.conf.exec.len() > 1
+            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+    } else {
+        false
+    };
+    let is_prestart_chain = if let Some(unit) = ri.unit_table.get(id)
+        && let Specific::Service(svc) = &unit.specific
+    {
+        (!svc.conf.exec_condition.is_empty() || !svc.conf.startpre.is_empty())
+            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+    } else {
+        false
+    };
+    (is_deferred, is_prestart_chain, is_oneshot_prelim)
+}
+
+/// Park a deferred service start on the dispatcher: send the
+/// `StartServiceChain` / `StartOneshotChain` / `StartServiceWait` event that
+/// matches the deferral kind, after waking the notification reader so it
+/// collects the new service's socket (docs/EVENT-LOOP.md inc 2). Extracted from
+/// `activate_units_recursive` so the increment-4 job-graph drain reuses the
+/// exact parking path rather than diverging from it. `next_services_ids` is the
+/// before-chain to dispatch when the start completes (the pool passes the real
+/// dependents; the job graph passes empty and schedules dependents itself).
+#[allow(clippy::too_many_arguments)]
+fn park_deferred_start(
+    id: UnitId,
+    is_prestart_chain: bool,
+    is_oneshot_prelim: bool,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<UnitId>>,
+    errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
+    run_info: ArcMutRuntimeInfo,
+    unit_name: &str,
+) {
+    // Wake the global notification handler so it re-collects sockets (including
+    // the new service's notification socket) and can process READY=1.
+    {
+        let ri = run_info.read_poisoned();
+        ri.notify_eventfds();
+    }
+    info!("activate_units_recursive: {unit_name} deferred start, parking on the dispatcher");
+    if is_prestart_chain {
+        // The ExecCondition=/ExecStartPre= phase runs as a dispatcher chain;
+        // its main phase then routes to the oneshot chain or a start wait.
+        let dispatcher = {
+            let ri = run_info.read_poisoned();
+            ri.dispatcher.clone()
+        };
+        dispatcher.send_normal(crate::entrypoints::dispatcher::Event::StartServiceChain(
+            ServiceStartChain {
+                id,
+                next_services_ids,
+                filter_ids,
+                errors,
+                source,
+                phase: StartChainPhase::Condition(0),
+            },
+        ));
+    } else if is_oneshot_prelim {
+        // Hand the exec chain to the dispatcher: each preliminary command is
+        // forked initiate-only and advanced by its ChildExit event.
+        let dispatcher = {
+            let ri = run_info.read_poisoned();
+            ri.dispatcher.clone()
+        };
+        dispatcher.send_normal(crate::entrypoints::dispatcher::Event::StartOneshotChain(
+            OneshotChainStart {
+                id,
+                next_services_ids,
+                filter_ids,
+                errors,
+                source,
+            },
+        ));
+    } else {
+        // Park the deferred start; the dispatcher re-evaluates it on
+        // Notify/ChildExit events and enforces its timeouts.
+        match crate::entrypoints::dispatcher::global() {
+            Some(handle) => handle.send_normal(
+                crate::entrypoints::dispatcher::Event::StartServiceWait(StartWaitParams {
+                    id,
+                    next_services_ids: Some(next_services_ids),
+                    filter_ids,
+                    errors,
+                    source,
+                    check_starting: false,
+                }),
+            ),
+            None => error!("no dispatcher to park the deferred start of {unit_name}"),
+        }
+    }
+}
+
 /// Start all units in `ids_to_start` and push jobs into the threadpool to start all following units.
 ///
 /// Only do so for the units in `filter_ids`
@@ -1221,52 +1334,10 @@ fn activate_units_recursive(
                         false
                     };
 
-                    // Check if READY=1 wait was deferred (unit still Starting).
-                    let is_deferred = if let Some(unit) =
-                        ri_guard.unit_table.get(&id_saved)
-                    {
-                        matches!(
-                            &*unit.common.status.read_poisoned(),
-                            UnitStatus::Starting
-                        )
-                    } else {
-                        false
-                    };
-
-                    // Distinguish a deferred multi-command oneshot (its
-                    // preliminary ExecStart= commands were deferred and no main
-                    // PID has been forked yet) from a deferred notify/main wait,
-                    // so we route to the correct background driver.
-                    let is_oneshot_prelim = if let Some(unit) =
-                        ri_guard.unit_table.get(&id_saved)
-                        && let Specific::Service(svc) = &unit.specific
-                    {
-                        // Use the lock-free common.main_pid atomic (0 = no main
-                        // forked yet) rather than svc.state: acquiring the
-                        // per-unit state lock while holding the table read guard
-                        // deadlocks against a fast-exiting service's exit handler
-                        // (which holds state.write and wants table.write).
-                        svc.conf.srcv_type == crate::units::ServiceType::OneShot
-                            && svc.conf.exec.len() > 1
-                            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
-                    } else {
-                        false
-                    };
-
-                    // A service with ExecCondition=/ExecStartPre= whose start
-                    // deferred at the helper phase (StartResult::DeferredPrestart):
-                    // config plus no-main-pid is unambiguous for the pool path,
-                    // because Service::start always defers before running the
-                    // helpers with this source. Same lock-free main_pid read as
-                    // above.
-                    let is_prestart_chain = if let Some(unit) = ri_guard.unit_table.get(&id_saved)
-                        && let Specific::Service(svc) = &unit.specific
-                    {
-                        (!svc.conf.exec_condition.is_empty() || !svc.conf.startpre.is_empty())
-                            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
-                    } else {
-                        false
-                    };
+                    // Classify the deferral under the guard we already hold
+                    // (shared with the increment-4 job-graph drain).
+                    let (is_deferred, is_prestart_chain, is_oneshot_prelim) =
+                        detect_deferred_kind(&ri_guard, &id_saved);
 
                     // Drop the read lock before triggering OnFailure= (which
                     // may need a write lock via find_or_load_unit).
@@ -1276,90 +1347,17 @@ fn activate_units_recursive(
                     }
 
                     if is_deferred {
-                        // Wake the global notification handler so it re-collects
-                        // sockets (including the new service's notification
-                        // socket) and can process READY=1 notifications.
-                        {
-                            let ri = run_info_copy.read_poisoned();
-                            ri.notify_eventfds();
-                        }
-
-                        // Type=notify service with deferred READY=1 wait.
-                        // Spawn a background thread (NOT in the thread pool,
-                        // so tpool.join() won't wait for it) to poll for
-                        // signaled_ready and dispatch the before-chain.
-                        info!(
-                            "activate_units_recursive: {} deferred notify wait, spawning background thread",
-                            unit_name
+                        park_deferred_start(
+                            id_saved.clone(),
+                            is_prestart_chain,
+                            is_oneshot_prelim,
+                            next_services_ids,
+                            filter_ids_copy.clone(),
+                            errors_copy.clone(),
+                            source,
+                            run_info_copy.clone(),
+                            &unit_name,
                         );
-                        let run_info_bg = run_info_copy;
-                        let id_bg = id_saved;
-                        let filter_ids_bg = filter_ids_copy;
-                        let errors_bg = errors_copy;
-                        if is_prestart_chain {
-                            // The ExecCondition=/ExecStartPre= phase runs as a
-                            // dispatcher chain; its main phase then routes to
-                            // the oneshot chain or a start wait
-                            // (docs/EVENT-LOOP.md inc 2).
-                            let dispatcher = {
-                                let ri = run_info_bg.read_poisoned();
-                                ri.dispatcher.clone()
-                            };
-                            dispatcher.send_normal(
-                                crate::entrypoints::dispatcher::Event::StartServiceChain(
-                                    ServiceStartChain {
-                                        id: id_bg,
-                                        next_services_ids,
-                                        filter_ids: filter_ids_bg,
-                                        errors: errors_bg,
-                                        source,
-                                        phase: StartChainPhase::Condition(0),
-                                    },
-                                ),
-                            );
-                        } else if is_oneshot_prelim {
-                            // Hand the exec chain to the dispatcher: each
-                            // preliminary command is forked initiate-only and
-                            // advanced by its ChildExit event, with the
-                            // per-command timeout on the dispatcher's deadline
-                            // wheel (docs/EVENT-LOOP.md inc 2).
-                            let dispatcher = {
-                                let ri = run_info_bg.read_poisoned();
-                                ri.dispatcher.clone()
-                            };
-                            dispatcher.send_normal(
-                                crate::entrypoints::dispatcher::Event::StartOneshotChain(
-                                    OneshotChainStart {
-                                        id: id_bg,
-                                        next_services_ids,
-                                        filter_ids: filter_ids_bg,
-                                        errors: errors_bg,
-                                        source,
-                                    },
-                                ),
-                            );
-                        } else {
-                            // Park the deferred start on the dispatcher; it
-                            // re-evaluates on Notify/ChildExit events and
-                            // enforces the timeouts (docs/EVENT-LOOP.md inc 2).
-                            match crate::entrypoints::dispatcher::global() {
-                                Some(handle) => handle.send_normal(
-                                    crate::entrypoints::dispatcher::Event::StartServiceWait(
-                                        StartWaitParams {
-                                            id: id_bg,
-                                            next_services_ids: Some(next_services_ids),
-                                            filter_ids: filter_ids_bg,
-                                            errors: errors_bg,
-                                            source,
-                                            check_starting: false,
-                                        },
-                                    ),
-                                ),
-                                None => error!(
-                                    "no dispatcher to park the deferred start of {unit_name}"
-                                ),
-                            }
-                        }
                     } else {
                         // Normal path: dispatch before-chain immediately.
                         if !next_services_ids.is_empty() {
