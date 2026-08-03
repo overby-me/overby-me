@@ -948,9 +948,9 @@ fn pid1_specific_setup() {
     // Real systemd generates this file very early (via systemd-machine-id-setup
     // or first-boot logic).  We generate a random one if it doesn't exist.
     let machine_id_path = std::path::Path::new("/etc/machine-id");
-    if !machine_id_path.exists()
-        || std::fs::metadata(machine_id_path).map_or(true, |m| m.len() == 0)
-    {
+    let is_first_boot = !machine_id_path.exists()
+        || std::fs::metadata(machine_id_path).map_or(true, |m| m.len() == 0);
+    if is_first_boot {
         // Generate a random 128-bit ID formatted as 32 hex chars + newline
         let mut buf = [0u8; 16];
         if let Ok(f) = std::fs::File::open("/dev/urandom") {
@@ -962,6 +962,17 @@ fn pid1_specific_setup() {
                     eprintln!("rust-systemd: generated /etc/machine-id");
                 }
             }
+        }
+
+        // Record first-boot-ness in the flag file that ConditionFirstBoot=
+        // reads, matching C's in_first_boot(). Once machine-id exists the
+        // machine-id heuristic no longer holds, so the persistent flag on the
+        // /run tmpfs (gone by the next boot) is what carries first-boot-ness
+        // through the rest of this boot. Best-effort: never fail the boot over
+        // it, and skip on re-exec (the original boot already wrote it).
+        if !is_reexec {
+            let _ = std::fs::create_dir_all("/run/systemd");
+            let _ = std::fs::write("/run/systemd/first-boot", []);
         }
     }
 

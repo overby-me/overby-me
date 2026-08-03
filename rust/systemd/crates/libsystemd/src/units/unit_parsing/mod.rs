@@ -724,6 +724,36 @@ fn detect_virtualization() -> Option<DetectedVirt> {
     None
 }
 
+/// Parse a boolean the way C's `parse_boolean()` does (case-sensitive), for the
+/// `$SYSTEMD_FIRST_BOOT` override. `None` means "not a boolean", so the caller
+/// falls back to the `/run/systemd/first-boot` flag, exactly like C.
+fn parse_first_boot_bool(s: &str) -> Option<bool> {
+    match s.trim() {
+        "1" | "yes" | "y" | "true" | "t" | "on" => Some(true),
+        "0" | "no" | "n" | "false" | "f" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod first_boot_bool_tests {
+    use super::parse_first_boot_bool;
+
+    #[test]
+    fn parses_c_boolean_tokens() {
+        for t in ["1", "yes", "y", "true", "t", "on"] {
+            assert_eq!(parse_first_boot_bool(t), Some(true), "{t}");
+        }
+        for f in ["0", "no", "n", "false", "f", "off"] {
+            assert_eq!(parse_first_boot_bool(f), Some(false), "{f}");
+        }
+        // Non-booleans return None so the caller falls back to the flag file.
+        assert_eq!(parse_first_boot_bool("Yes"), None);
+        assert_eq!(parse_first_boot_bool(""), None);
+        assert_eq!(parse_first_boot_bool("maybe"), None);
+    }
+}
+
 impl UnitCondition {
     /// Evaluate the condition. Returns true if the condition is met.
     pub fn check(&self) -> bool {
@@ -771,12 +801,17 @@ impl UnitCondition {
                 if *negate { !result } else { result }
             }
             UnitCondition::FirstBoot { value, negate } => {
-                // systemd considers it "first boot" when /etc/machine-id
-                // does not exist or is empty (uninitialized).
-                let is_first_boot = match std::fs::metadata("/etc/machine-id") {
-                    Ok(meta) => meta.len() == 0,
-                    Err(_) => true, // file doesn't exist → first boot
-                };
+                // Match C's in_first_boot(): the $SYSTEMD_FIRST_BOOT override,
+                // else the /run/systemd/first-boot flag PID 1 writes on a
+                // genuine first boot. Not keyed off /etc/machine-id, which PID 1
+                // generates early enough that it is already present by the time
+                // conditions are evaluated.
+                let is_first_boot = std::env::var("SYSTEMD_FIRST_BOOT")
+                    .ok()
+                    .and_then(|e| parse_first_boot_bool(&e))
+                    .unwrap_or_else(|| {
+                        std::path::Path::new("/run/systemd/first-boot").exists()
+                    });
                 let result = if *value {
                     is_first_boot
                 } else {
