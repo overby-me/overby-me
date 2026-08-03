@@ -26,6 +26,37 @@ just difftest-report              # JUnit + JSON + Markdown into result/
 just difftest-update-snapshots    # approve current outputs as golden
 ```
 
+### In-process differential oracles
+
+A lighter-weight, host-independent complement runs a corpus through both the rust
+binary and the corresponding C binary in the same process and asserts they agree. Each
+oracle is a `#[test]` gated on an env var naming the C binary, so plain `cargo test` and
+CI without the C tools skip it silently. `just differential` resolves the C binaries
+from `nixpkgs#systemd` and sets every gate:
+
+```sh
+just differential
+```
+
+Covered so far: journal export-format parsing (`systemd-journal-remote`), unit-name
+escaping (`systemd-escape`), `systemd-analyze` `timespan` / `calendar` / `timestamp` /
+`exit-status`, and the `systemd-id128 show` table. These found and fixed two real drift
+bugs (a unitless `timespan` read as microseconds instead of seconds; a UTC-suffixed
+`timestamp` silently zeroing its seconds) and freeze several already-faithful tables.
+
+Each oracle compares the *semantic* result, not raw stdout, and deliberately does not
+flag these intentional differences:
+
+- **Presentation.** Labels and column widths differ; `timespan` compares the μs value,
+  `calendar`/`timestamp` the `Normalized form:` line, `exit-status` the name/class
+  columns. rust's `timestamp` also prints an extra `(in UTC):` line, and the wall-clock
+  `From now:` line is not compared.
+- **Lenient vs strict arguments.** `systemd-analyze exit-status` warns and continues on a
+  non-numeric argument where C errors and aborts, so the corpus feeds only numeric
+  statuses.
+- **No timezone database.** `systemd-analyze timestamp` evaluates in UTC and rejects a
+  non-UTC zone rather than misparsing it; the corpus uses UTC-anchored inputs.
+
 ## Integration tests
 
 Boots a NixOS VM with rust-systemd as PID 1, installs the upstream systemd test scripts

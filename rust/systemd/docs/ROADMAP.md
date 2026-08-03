@@ -147,6 +147,13 @@ file tree snapshot, D-Bus property map), a `DiffResult` of `Identical` /
 non-determinism, snapshot approval, JUnit and JSON reports, and a `#[difftest]`
 registration macro. A golden-file corpus is in place.
 
+Built since: a lighter-weight **in-process oracle suite** (`just differential`, see
+`docs/TESTING.md`) runs a corpus through both the rust and C binaries in one process and
+asserts semantic agreement, gated on env vars naming the C binaries. It covers the
+journal export parser, `systemd-escape`, `systemd-analyze` time/exit-status parsers, and
+the `systemd-id128` table, and has already turned two upstream drifts into fixes. Its
+intentional-divergence list is documented inline rather than in a separate file.
+
 Still unbuilt:
 
 - **Dual-VM environment.** One VM on real systemd, one on rust-systemd, from identical
@@ -154,5 +161,8 @@ Still unbuilt:
   `default.nix` already registers a `c-systemd-test-<name>` variant of every integration
   test, which covers the single-VM comparison case; the dual-VM runner is for
   daemon-level state comparison that a single VM cannot express.
-- **CI integration.** Per-change runs, a version matrix to catch systemd-release
-  regressions, and a tracked `known-divergences.toml` so only new divergences fail.
+- **CI integration.** The in-process oracles above run under `cargo test` and skip
+  without the C tools; what remains is a scheduled job that pins several upstream systemd
+  releases, runs `just differential` against each, and fails only on a *new* divergence
+  (a tracked `known-divergences` list). The intentional differences are documented in
+  `docs/TESTING.md` today; promote them to a machine-checked list when the schedule lands.
