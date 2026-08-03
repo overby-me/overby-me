@@ -901,6 +901,100 @@ pub fn as_fixed_interval(spec: &CalendarSpec) -> Option<std::time::Duration> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn fuzz_calendar_parser_never_panics() {
+        // parse() handles OnCalendar= from unit files, and next_elapse() does
+        // civil-date arithmetic that must not overflow-panic or loop forever.
+        // Fuzz both with random calendar strings and random, often out-of-range
+        // base times; the 30s guard also catches a non-terminating next_elapse.
+        const TOKENS: &[&str] = &[
+            "minutely", "hourly", "daily", "monthly", "weekly", "yearly",
+            "quarterly", "semiannually", "annually", "Mon", "Fri", "Sat,Sun",
+            "Mon..Fri", "*-*-*", "*:0/15", "00:00:00", "12:00", "*-*-1", "*-01~01",
+            "2025-*-*", "*/2", "0/5", "..", "/", "-", ":", "~", ",", "*", "60",
+            "99", "13", "32", " ", "  ", "\t", "UTC", "@1234", "+", "0", "999999999",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xca1e_0da7_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let ntok = (next() % 12) as usize;
+                let mut input = String::new();
+                for _ in 0..ntok {
+                    if next() % 6 == 0 {
+                        input.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        input.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let after = DateTime {
+                    year: (next() % 12000) as i32 - 2000,
+                    month: next() % 20,
+                    day: next() % 40,
+                    hour: next() % 30,
+                    minute: next() % 70,
+                    second: next() % 70,
+                };
+                let buf = input.clone();
+                let res = std::panic::catch_unwind(move || {
+                    if let Ok(spec) = CalendarSpec::parse(&input) {
+                        let _ = spec.next_elapse(after);
+                    }
+                });
+                assert!(
+                    res.is_ok(),
+                    "calendar parser panicked on: {buf:?} after={after:?}"
+                );
+            }
+
+            // Exercise next_elapse directly on specs that definitely parse,
+            // chaining each result forward to stress the civil-date arithmetic
+            // across leap years and month/century boundaries (and to surface a
+            // non-terminating search, caught by the 30s guard).
+            const VALID: &[&str] = &[
+                "daily", "weekly", "monthly", "yearly", "hourly", "*-*-* 12:00:00",
+                "Mon..Fri 09:00:00", "*-02-29", "*:0/15", "Mon *-*-1..7 00:00:00",
+                "*-12-31 23:59:59", "*-*-01 00:00:00",
+            ];
+            for spec_str in VALID {
+                let Ok(spec) = CalendarSpec::parse(spec_str) else {
+                    continue;
+                };
+                let mut dt = DateTime {
+                    year: 1970 + (next() % 400) as i32,
+                    month: 1 + next() % 12,
+                    day: 1 + next() % 28,
+                    hour: next() % 24,
+                    minute: next() % 60,
+                    second: next() % 60,
+                };
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    for _ in 0..2000 {
+                        match spec.next_elapse(dt) {
+                            Some(n) => dt = n,
+                            None => break,
+                        }
+                    }
+                }));
+                assert!(res.is_ok(), "next_elapse panicked for spec {spec_str:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "calendar fuzz did not finish in 30s -- a malformed spec hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
     // -- Parsing tests --
 
     #[test]
