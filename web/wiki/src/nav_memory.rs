@@ -1,33 +1,28 @@
-//! Where the reader was, per context and app.
+//! Where the reader was: which page, and how far down it.
 //!
-//! The app rail is a CONTEXT rail: every entry targets the context root, and it
-//! has to, because an app renders the node it sits on and a speaker list hanging
-//! off a document is not the group's speaker list. That is right for going TO an
-//! app and wrong for coming BACK. A delegate three levels into an agenda who
-//! checks the speaker list and returns landed at the top of the group, having
-//! lost both the page they were reading and their place on it.
+//! Two separate questions, kept apart because they have different keys.
 //!
-//! So each (context, app) pair remembers the last route seen in it and the
-//! scroll it was left at. The rail consults that on the way back.
+//! **Which page**, per context and app. The app rail is a CONTEXT rail: every
+//! entry targets the context root, and it has to, because an app renders the
+//! node it sits on and a speaker list hanging off a document is not the group's
+//! speaker list. That is right going TO an app and wrong coming BACK. A delegate
+//! three levels into an agenda who checked the speaker list returned to the top
+//! of the group, having lost the page they were reading. Held in memory only:
+//! this is "where was I a moment ago", not a preference.
 //!
-//! Deliberately in memory only: this is "where was I a moment ago", not a
-//! preference, and a remembered path that outlived the tab would be a surprise
-//! rather than a convenience.
+//! **How far down**, per URL, in `sessionStorage`. Not `history.state`, which
+//! the router owns and which back/forward would break if we clobbered it. One
+//! key per URL covers all three ways of coming back to a page at once: the rail,
+//! browser back/forward, and a reload, since sessionStorage outlives a reload
+//! and dies with the tab.
 
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
 
-/// A place in a context's app.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Spot {
-    /// The full route path, which is at or below the context root.
-    pub segments: Vec<String>,
-    /// Window scroll when the reader left it.
-    pub scroll: f64,
-}
+static SPOTS: GlobalSignal<HashMap<String, Vec<String>>> = Signal::global(HashMap::new);
 
-static SPOTS: GlobalSignal<HashMap<String, Spot>> = Signal::global(HashMap::new);
+const SCROLL_PREFIX: &str = "wiki_scroll:";
 
 /// One key per context and app view.
 ///
@@ -37,53 +32,89 @@ fn key(ctx: &[String], app: Option<&str>) -> String {
     format!("{}\u{1}{}", ctx.join("/"), app.unwrap_or(""))
 }
 
-/// Record where the reader is in this context's app.
+/// Record which page the reader was on in this context's app.
 ///
-/// Only routes at or below the context root are worth remembering; anything
-/// else is a different context and belongs to its own key.
-pub fn remember(ctx: &[String], app: Option<&str>, segments: &[String], scroll: f64) {
+/// Only routes at or below the context root are worth recording; anything else
+/// is a different context and belongs to its own key.
+pub fn remember(ctx: &[String], app: Option<&str>, segments: &[String]) {
     if ctx.is_empty() || !segments.starts_with(ctx) {
         return;
     }
-    let spot = Spot {
-        segments: segments.to_vec(),
-        scroll,
-    };
     let slot = key(ctx, app);
     // Only write a change. The rail subscribes to this, and re-rendering it to
     // store the value it already held would be a render for nothing.
-    if SPOTS.peek().get(&slot) == Some(&spot) {
+    if SPOTS.peek().get(&slot).is_some_and(|held| held == segments) {
         return;
     }
-    SPOTS.write().insert(slot, spot);
-}
-
-/// Where the reader last was in this context's app, if they have been.
-///
-/// `peek`: the caller is the navigation effect, which also writes here, and a
-/// subscription would make that effect re-trigger itself.
-pub fn recall(ctx: &[String], app: Option<&str>) -> Option<Spot> {
-    SPOTS.peek().get(&key(ctx, app)).cloned()
+    SPOTS.write().insert(slot, segments.to_vec());
 }
 
 /// The route to send the rail's entry for `app` to: where the reader was, or the
 /// context root if they have not been there.
 ///
-/// Subscribes on purpose. The spot is recorded in an effect, which runs after
+/// Subscribes on purpose. The page is recorded in an effect, which runs after
 /// the render that navigated, so a rail that only peeked would draw its links
 /// from the previous page's memory and send a quick tap to the wrong place.
 pub fn destination(ctx: &[String], app: Option<&str>) -> Vec<String> {
     SPOTS
         .read()
         .get(&key(ctx, app))
-        .map(|spot| spot.segments.clone())
+        .cloned()
         .unwrap_or_else(|| ctx.to_vec())
 }
 
+fn session_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.session_storage().ok().flatten()
+}
+
+/// Note how far down `url` was left.
+///
+/// Rounded to whole pixels: this is a place to return to, not a measurement,
+/// and a fractional tail would only churn the store.
+pub fn stash_scroll(url: &str, y: f64) {
+    let Some(store) = session_storage() else {
+        return;
+    };
+    let _ = store.set_item(&format!("{SCROLL_PREFIX}{url}"), &y.round().to_string());
+}
+
+/// How far down `url` was left, if the reader has been there this session.
+pub fn stashed_scroll(url: &str) -> Option<f64> {
+    session_storage()?
+        .get_item(&format!("{SCROLL_PREFIX}{url}"))
+        .ok()
+        .flatten()?
+        .parse::<f64>()
+        .ok()
+}
+
+/// The current URL as the router writes it: path plus query, which is the key
+/// the scroll is filed under.
+pub fn current_url() -> Option<String> {
+    let loc = web_sys::window()?.location();
+    Some(format!("{}{}", loc.pathname().ok()?, loc.search().ok()?))
+}
+
 /// Forget everything. Called on sign-out, so the next reader does not inherit
-/// the last one's place in a context they may not even see.
+/// the last one's places, which may be in a context they cannot even see.
 pub fn clear() {
     SPOTS.write().clear();
+    let Some(store) = session_storage() else {
+        return;
+    };
+    // Collect first: removing while walking the store would shift the indices
+    // under the walk and skip half the keys.
+    let mut ours = Vec::new();
+    for i in 0..store.length().unwrap_or(0) {
+        if let Ok(Some(k)) = store.key(i) {
+            if k.starts_with(SCROLL_PREFIX) {
+                ours.push(k);
+            }
+        }
+    }
+    for k in ours {
+        let _ = store.remove_item(&k);
+    }
 }
 
 #[cfg(test)]

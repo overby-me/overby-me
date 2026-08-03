@@ -43,6 +43,11 @@ static NEAR_BOTTOM: GlobalSignal<bool> = Signal::global(|| false);
 /// time the reader arrives.
 const NEAR_BOTTOM_PX: f64 = 800.0;
 
+/// How often the scroll position is filed for the current URL, so a reload comes
+/// back to it. Only a reload reads a value this stale; every navigation files
+/// the exact one on its way out.
+const STASH_EVERY_MS: f64 = 250.0;
+
 /// Whether the compact bottom dock should be hidden right now (hide-on-scroll).
 pub fn dock_hidden() -> bool {
     DOCK_HIDDEN()
@@ -72,6 +77,10 @@ fn install_listener() {
     let Some(win) = web_sys::window() else { return };
     // Last observed scroll position, for the dock's scroll-direction detection.
     let mut last_y = 0.0f64;
+    // When this page's scroll was last filed, so a reload lands where the reader
+    // is. Throttled: navigating away files the exact position anyway (see
+    // Layout), so this only has to be recent, not current.
+    let mut last_stash = 0.0f64;
     let cb = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
         let Some(w) = web_sys::window() else { return };
         let y = w.scroll_y().unwrap_or(0.0);
@@ -123,6 +132,14 @@ fn install_listener() {
         let near = doc_h - (y + inner_h) < NEAR_BOTTOM_PX;
         if near != *NEAR_BOTTOM.peek() {
             *NEAR_BOTTOM.write() = near;
+        }
+
+        let now_ms = js_sys::Date::now();
+        if now_ms - last_stash > STASH_EVERY_MS {
+            last_stash = now_ms;
+            if let Some(url) = crate::nav_memory::current_url() {
+                crate::nav_memory::stash_scroll(&url, y);
+            }
         }
     });
     let _ = win.add_event_listener_with_callback("scroll", cb.as_ref().unchecked_ref());

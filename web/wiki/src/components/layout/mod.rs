@@ -203,23 +203,22 @@ pub fn Layout() -> Element {
     };
     let path_key = cur_segments.join("/");
     let app_key = cur_app.clone().unwrap_or_default();
-    // The route we are leaving, so it can be recorded on the way out.
-    let mut previous = use_signal(|| Option::<(Vec<String>, Option<String>)>::None);
+    // The route we are leaving: its path, its app, and the URL its scroll is
+    // filed under.
+    let mut previous = use_signal(|| Option::<(Vec<String>, Option<String>, String)>::None);
     use_effect(use_reactive!(|(path_key, app_key)| {
         let Some(win) = web_sys::window() else {
             return;
         };
         // Read the scroll BEFORE anything moves it: this is still the outgoing
-        // page's, which is the whole point of recording here.
+        // page's. The scroll listener files it continuously while the reader is
+        // there, but its last write can be up to a throttle window old, and the
+        // moment they leave is exactly the one worth being exact about.
         let leaving_at = win.scroll_y().unwrap_or(0.0);
         let leaving = previous.peek().clone();
-        if let Some((segments, app)) = &leaving {
-            crate::nav_memory::remember(
-                &context_path_peek(segments),
-                app.as_deref(),
-                segments,
-                leaving_at,
-            );
+        if let Some((segments, app, url)) = &leaving {
+            crate::nav_memory::remember(&context_path_peek(segments), app.as_deref(), segments);
+            crate::nav_memory::stash_scroll(url, leaving_at);
         }
 
         let segments: Vec<String> = if path_key.is_empty() {
@@ -230,21 +229,22 @@ pub fn Layout() -> Element {
         let app = (!app_key.is_empty()).then(|| app_key.clone());
         let same_page = leaving
             .as_ref()
-            .is_some_and(|(was, _)| was.join("/") == path_key);
-        previous.set(Some((segments.clone(), app.clone())));
+            .is_some_and(|(was, _, _)| was.join("/") == path_key);
+        let url = crate::nav_memory::current_url().unwrap_or_default();
+        previous.set(Some((segments.clone(), app.clone(), url.clone())));
 
         // Switching `?app=` in place leaves the page under it alone, so the
         // reader keeps their scroll.
         if same_page {
             return;
         }
-        // A DIFFERENT node: start at the top, unless this is somewhere we have
-        // been and left part-way down, in which case go back to that.
-        match crate::nav_memory::recall(&context_path_peek(&segments), app.as_deref())
-            .filter(|spot| spot.segments == segments && spot.scroll > 1.0)
-        {
-            Some(spot) => restore_scroll(spot.scroll),
-            None => win.scroll_to_with_x_and_y(0.0, 0.0),
+        // A DIFFERENT node: start at the top, unless this is a page left
+        // part-way down earlier in the session, in which case go back to it.
+        // Keyed on the URL, so this covers the app rail bringing us back, the
+        // browser's own back and forward, and a reload, all the same way.
+        match crate::nav_memory::stashed_scroll(&url) {
+            Some(y) if y > 1.0 => restore_scroll(y),
+            _ => win.scroll_to_with_x_and_y(0.0, 0.0),
         }
     }));
     // Record each navigation as a diagnostics breadcrumb (remote-logging builds),
