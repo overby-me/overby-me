@@ -18,7 +18,7 @@
 use clap::{Parser, Subcommand};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 
 // ---------------------------------------------------------------------------
 // Id128 type
@@ -1965,8 +1965,10 @@ enum JsonMode {
 }
 
 fn print_json(entries: &[(&str, Id128)], mode: PrintMode, pretty: bool) {
-    let sep = if pretty { ",\n  " } else { "," };
-    let start = if pretty { "[\n  " } else { "[" };
+    // C's sd-json pretty printer indents with tabs (one per nesting level) and
+    // puts a space on each side of the ':'; short form is fully compact.
+    let sep = if pretty { ",\n\t" } else { "," };
+    let start = if pretty { "[\n\t" } else { "[" };
     let end = if pretty { "\n]" } else { "]" };
 
     let items: Vec<String> = entries
@@ -1978,7 +1980,7 @@ fn print_json(entries: &[(&str, Id128)], mode: PrintMode, pretty: bool) {
                 PrintMode::Id128
             });
             if pretty {
-                format!("{{\n    \"name\" : \"{name}\",\n    \"id\" : \"{id_str}\"\n  }}")
+                format!("{{\n\t\t\"name\" : \"{name}\",\n\t\t\"id\" : \"{id_str}\"\n\t}}")
             } else {
                 format!("{{\"name\":\"{name}\",\"id\":\"{id_str}\"}}")
             }
@@ -2110,7 +2112,13 @@ fn main() {
     };
 
     let json_mode = if cli.json_short {
-        JsonMode::Pretty
+        // C's `-j` is SD_JSON_FORMAT_PRETTY_AUTO: pretty on a TTY, but compact
+        // (short) when stdout is redirected.
+        if std::io::stdout().is_terminal() {
+            JsonMode::Pretty
+        } else {
+            JsonMode::Short
+        }
     } else if let Some(ref fmt) = cli.json {
         match fmt.as_str() {
             "pretty" => JsonMode::Pretty,

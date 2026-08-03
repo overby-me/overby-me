@@ -166,6 +166,13 @@ fn id128_output_format_matches_c() {
         &["show", "root-alpha", "-u"],
         &["show", "root-alpha", "--no-legend"],
         &["show", "-u"], // full static table, auto-width
+        // JSON: `-j` is PRETTY_AUTO so under a pipe it is compact (short); the
+        // explicit modes lock the tab-indented pretty form and the short form.
+        &["show", "root-alpha", "-j"],
+        &["show", "root-alpha", "--json=short"],
+        &["show", "root-alpha", "--json=pretty"],
+        &["show", "root-alpha", "root-alpha-verity", "--json=pretty"],
+        &["show", "--json=pretty"],
     ];
 
     let mut divergences = Vec::new();
