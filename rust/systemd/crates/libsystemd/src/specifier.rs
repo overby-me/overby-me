@@ -676,6 +676,59 @@ mod tests {
         SpecifierContext::for_test()
     }
 
+    #[test]
+    fn fuzz_specifier_resolver_never_panics() {
+        // resolve_specifiers expands %-specifiers in unit-file values at load
+        // time; a malformed specifier (a trailing '%', '%' before a non-ASCII
+        // byte, a long run of '%') must not panic -- a unit file drives it.
+        const TOKENS: &[&str] = &[
+            "%", "%%", "%i", "%n", "%N", "%p", "%P", "%f", "%s", "%u", "%U", "%g",
+            "%G", "%H", "%m", "%b", "%v", "%h", "%t", "%T", "%V", "%j", "%J", "%x",
+            "%Z", "%", "\\", "foo", "bar-baz", "/path/%i", " ", "\t", "@", "€", "..",
+        ];
+        let c = ctx();
+        let handle = std::thread::spawn(move || {
+            let mut state: u64 = 0x5eec_1f1e_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let mut content = String::new();
+                for _ in 0..(next() % 20) {
+                    if next() % 5 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let unit = ["foo.service", "a@b.service", "x", "", "@.service"]
+                    [(next() as usize) % 5];
+                let inst = ["", "inst", "a-b", "%n", "€"][(next() as usize) % 5];
+                let buf = content.clone();
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = resolve_specifiers(&content, unit, inst, &c);
+                    let _ = has_unresolved_specifiers(&content);
+                }));
+                assert!(
+                    res.is_ok(),
+                    "specifier resolver panicked on: {buf:?} unit={unit:?} inst={inst:?}"
+                );
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "specifier fuzz did not finish in 30s -- an input hangs the resolver"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
     // --- basic identity specifiers ---
 
     #[test]
