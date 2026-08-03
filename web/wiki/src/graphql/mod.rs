@@ -63,6 +63,54 @@ fn is_jwt_error(msg: &str) -> bool {
     msg.to_ascii_lowercase().contains("jwt")
 }
 
+/// How long to wait before each further attempt at a read whose request never
+/// completed, in milliseconds. Two retries, so three attempts in all.
+///
+/// A phone on venue wifi drops a request now and then, and until now the
+/// reader's entire answer was an error card asking them to tap retry, on the
+/// home screen, on first load, before they had done anything. The tap worked,
+/// which is the tell: nothing was wrong except that one request. So the app
+/// makes the taps itself, and only tells them if all three fail.
+///
+/// Short enough that three attempts still fit inside a reader's patience, and
+/// spread enough to outlast a hand-off between two access points.
+const RETRY_DELAYS_MS: &[u32] = &[300, 900];
+
+/// Whether an operation changes anything.
+///
+/// A transport failure means no answer came back, NOT that the server did
+/// nothing: the request may well have arrived and been applied. Retrying a read
+/// costs a round trip, while retrying a mutation could post a second comment or
+/// cast a second vote. So only reads are retried.
+fn is_mutation(query: &str) -> bool {
+    query.trim_start().starts_with("mutation")
+}
+
+/// Run `attempt`, retrying a read that failed because the request never
+/// completed.
+///
+/// Only the offline class is retried. A refusal is an answer, and a broken
+/// response is a bug: asking either of them again just asks again.
+async fn retry_offline_reads<T, F, Fut>(query: &str, mut attempt: F) -> Result<T, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let mut result = attempt().await;
+    if is_mutation(query) {
+        return result;
+    }
+    for delay in RETRY_DELAYS_MS {
+        match &result {
+            Err(msg) if crate::errors::classify(msg) == crate::errors::Failure::Offline => {}
+            _ => break,
+        }
+        gloo_timers::future::TimeoutFuture::new(*delay).await;
+        result = attempt().await;
+    }
+    result
+}
+
 async fn execute_once<Q, V>(
     access_token: Option<&str>,
     operation: &cynic::Operation<Q, V>,
@@ -138,7 +186,9 @@ where
     Q: serde::de::DeserializeOwned + 'static,
     V: serde::Serialize,
 {
-    let result = match execute_once(access_token, &operation).await {
+    let first =
+        retry_offline_reads(&operation.query, || execute_once(access_token, &operation)).await;
+    let result = match first {
         Err(msg) if is_jwt_error(&msg) => {
             // The token likely lapsed (e.g. the tab was backgrounded past expiry).
             // Refresh once and retry with the new token before surfacing the error
@@ -247,7 +297,8 @@ pub async fn execute_raw(
     access_token: Option<&str>,
     query: &str,
 ) -> Result<serde_json::Value, String> {
-    let result = match execute_raw_once(access_token, query).await {
+    let first = retry_offline_reads(query, || execute_raw_once(access_token, query)).await;
+    let result = match first {
         Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
             Some(fresh) if Some(fresh.as_str()) != access_token => {
                 execute_raw_once(Some(&fresh), query).await
@@ -345,7 +396,11 @@ async fn execute_raw_vars_inner(
     variables: serde_json::Value,
     report: bool,
 ) -> Result<serde_json::Value, String> {
-    let result = match execute_raw_vars_once(access_token, query, &variables).await {
+    let first = retry_offline_reads(query, || {
+        execute_raw_vars_once(access_token, query, &variables)
+    })
+    .await;
+    let result = match first {
         Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
             Some(fresh) if Some(fresh.as_str()) != access_token => {
                 execute_raw_vars_once(Some(&fresh), query, &variables).await
@@ -376,6 +431,24 @@ fn offline_copy<T: serde::de::DeserializeOwned>(key: &str, error: &str) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What decides whether a dropped request is tried again. A mutation read as
+    /// a query could cast a second vote, so the keyword is the whole safeguard:
+    /// cynic writes it for typed mutations, GraphQL requires it for raw ones,
+    /// and only a query may use the anonymous `{ ... }` shorthand.
+    #[test]
+    fn only_a_read_is_retried() {
+        assert!(is_mutation(
+            "mutation InsertNode($k: String) { insert_nodes { id } }"
+        ));
+        assert!(is_mutation("\n  mutation { insert_nodes { id } }"));
+
+        assert!(!is_mutation("query HomeEvents { nodes { id } }"));
+        assert!(!is_mutation("{ nodes { id } }"));
+        assert!(!is_mutation("subscription Feed { nodes { id } }"));
+        // Not fooled by the word appearing somewhere it is not the operation.
+        assert!(!is_mutation("query M { members_mutation_response { id } }"));
+    }
 
     /// The bin's list query names types Hasura actually defines.
     ///
