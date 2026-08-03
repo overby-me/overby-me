@@ -112,6 +112,21 @@ pub fn collect_images(deck: &Deck, package: &[u8]) -> super::docx::Images {
     super::docx::read_images(wanted, package)
 }
 
+/// The metafile pictures the deck draws, for the backend to render.
+pub fn collect_metafiles(deck: &Deck) -> Vec<(String, String)> {
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    for slide in &deck.slides {
+        for shape in &slide.elements {
+            if let Some((path, mime)) = picture_of(shape) {
+                if super::docx::is_metafile(mime) && !wanted.iter().any(|(p, _)| p == path) {
+                    wanted.push((path.to_string(), mime.to_string()));
+                }
+            }
+        }
+    }
+    wanted
+}
+
 /// Give every picture shape the bytes it draws.
 pub fn attach_images(deck: &mut Deck, images: &super::docx::Images) {
     for slide in &mut deck.slides {

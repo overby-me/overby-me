@@ -158,8 +158,7 @@ async fn insert_feedback_node(
     // to survive here or not at all.
     // Automatic reports group; a person's account of what happened does not. The
     // stored field stays `crashDigest` so rows filed before this keep matching.
-    let digest =
-        matches!(report.kind, "crash" | "error").then(|| crash_digest(report.message));
+    let digest = matches!(report.kind, "crash" | "error").then(|| crash_digest(report.message));
     if let Some(digest) = &digest {
         if let Some((id, data)) = find_crash(cfg, client, &root_id, digest).await? {
             return bump_crash(cfg, client, &id, data, owner_id).await;

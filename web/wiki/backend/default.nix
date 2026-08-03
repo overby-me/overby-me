@@ -53,12 +53,31 @@ in {
     rustPlatform,
     dockerTools,
     cacert,
+    runCommand,
+    liberation_ttf,
+    carlito,
     ...
-  }:
+  }: let
+    # Fonts for the metafile renderer (src/metafile.rs). `fontdb` reads
+    # `/usr/share/fonts` and nothing else on Linux, so a package under
+    # `contents` would land at `/share/fonts` and be invisible: a pasted table
+    # would render as ruled lines with no words in them.
+    #
+    # Metric-compatible substitutes, not just any fonts: Office documents ask
+    # for Arial and Calibri, and a metafile positions each text run itself, so a
+    # face of different widths puts the words in the wrong places rather than
+    # merely looking different. Liberation Sans matches Arial, Carlito matches
+    # Calibri.
+    fonts = runCommand "wiki-backend-fonts" {} ''
+      mkdir -p $out/usr/share/fonts
+      cp ${liberation_ttf}/share/fonts/truetype/*.ttf $out/usr/share/fonts/
+      cp ${carlito}/share/fonts/truetype/*.ttf $out/usr/share/fonts/
+    '';
+  in
     dockerTools.buildLayeredImage {
       name = "wiki-backend";
       tag = "latest";
-      contents = [cacert];
+      contents = [cacert fonts];
       config = {
         Cmd = ["${mkBackend {inherit lib rustPlatform;}}/bin/wiki-backend"];
         ExposedPorts = {"8080/tcp" = {};};

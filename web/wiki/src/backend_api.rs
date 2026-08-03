@@ -74,6 +74,30 @@ pub async fn file_bytes(file_id: &str, token: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Render one Windows metafile (EMF/EMF+/WMF) to PNG.
+///
+/// The bytes go up because the caller already has them: it opened the package
+/// to find the picture. The backend does the drawing because the renderer is
+/// ~400 KB gzipped and this wasm bundle is already the heaviest thing a
+/// delegate downloads.
+pub async fn render_metafile(bytes: &[u8], token: &str) -> Result<Vec<u8>, String> {
+    let resp = reqwest::Client::new()
+        .post(format!("{BACKEND_URL}/office/metafile"))
+        .bearer_auth(token)
+        .header("content-type", "application/octet-stream")
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("backend said {}", resp.status()));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| e.to_string())
+}
+
 /// A backend-hosted URL for a document, for the Microsoft Office web viewer.
 ///
 /// That viewer fetches the document from MICROSOFT'S servers, so neither a

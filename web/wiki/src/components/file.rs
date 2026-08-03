@@ -697,7 +697,8 @@ fn NativeOdt(file_id: String, name: String) -> Element {
 fn NativeDocx(file_id: String, name: String) -> Element {
     let token = crate::session::use_session().read().access_token.clone();
     let parsed = crate::use_data_resource!(|(file_id, token)| async move {
-        let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
+        let token = token.unwrap_or_default();
+        let bytes = crate::backend_api::file_bytes(&file_id, &token).await?;
         // The parser hands back the document model as JSON; only the parts this
         // renders are deserialised (see components::docx).
         let json = docx_parser::parse_docx_native(&bytes)?;
@@ -710,7 +711,18 @@ fn NativeDocx(file_id: String, name: String) -> Element {
                 .map_err(|e| e.to_string())?;
         // The model names its pictures by their path inside the package; the
         // bytes are still in the package that was just parsed.
-        let images = super::docx::collect_images(&blocks, &bytes);
+        let mut images = super::docx::collect_images(&blocks, &bytes);
+        // The figures no browser draws: Word keeps pasted charts as EMF/WMF, so
+        // the backend renders those to PNG. Anything it cannot render is simply
+        // absent, and falls through to the placeholder as before.
+        images.extend(
+            super::docx::render_metafiles(
+                super::docx::collect_metafiles(&blocks),
+                &bytes,
+                Some(token.as_str()),
+            )
+            .await,
+        );
         super::docx::attach_images(&mut blocks, &images);
         // Needs the whole document: a heading's size means something only
         // against the size of the body text around it.
@@ -843,14 +855,24 @@ fn NativeXlsx(file_id: String, name: String) -> Element {
 fn NativePptx(file_id: String, name: String) -> Element {
     let token = crate::session::use_session().read().access_token.clone();
     let parsed = crate::use_data_resource!(|(file_id, token)| async move {
-        let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
+        let token = token.unwrap_or_default();
+        let bytes = crate::backend_api::file_bytes(&file_id, &token).await?;
         let json = pptx_parser::parse_pptx_native(&bytes)?;
         let raw: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         let gaps = super::render_gaps::pptx_gaps(&raw);
         let mut deck: super::pptx::Deck = serde_json::from_value(raw).map_err(|e| e.to_string())?;
         // Same as the Word path: the model names its pictures by their path
         // inside the package, and the bytes are still in the package.
-        let images = super::pptx::collect_images(&deck, &bytes);
+        let mut images = super::pptx::collect_images(&deck, &bytes);
+        // Same as the Word path: EMF/WMF figures go to the backend to be drawn.
+        images.extend(
+            super::docx::render_metafiles(
+                super::pptx::collect_metafiles(&deck),
+                &bytes,
+                Some(token.as_str()),
+            )
+            .await,
+        );
         super::pptx::attach_images(&mut deck, &images);
         Ok::<_, String>((deck, gaps))
     });

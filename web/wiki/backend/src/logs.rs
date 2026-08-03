@@ -142,8 +142,7 @@ mod stack_shape_tests {
         .expect("a list of frames is resolvable");
         assert!(as_frames);
         assert_eq!(
-            joined,
-            "at foo (a.rs:1)\n@https://x/assets/app_bg-dxhabc.wasm:wasm-function[42]:0x1",
+            joined, "at foo (a.rs:1)\n@https://x/assets/app_bg-dxhabc.wasm:wasm-function[42]:0x1",
             "frames are joined for the resolver, which works on whole stacks"
         );
         // ...and it comes back as a list, not as one line.

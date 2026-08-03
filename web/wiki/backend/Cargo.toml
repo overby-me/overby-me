@@ -19,6 +19,10 @@ path = "src/main.rs"
 # are pure Rust, so the minimal rustls container needs nothing new.
 addr2line = "0.24"
 axum = "0.8.6"
+# Renders Word/PowerPoint metafile figures (EMF/EMF+/WMF) to PNG, which no
+# browser can draw. Here rather than in the wasm: the renderer is ~400 KB
+# gzipped, and the app is already the heaviest thing a delegate downloads.
+emfsdk = { version = "0.2", default-features = false, features = ["render"] }
 # Just the pure-Rust stream combinators (buffer_unordered) for concurrent push
 # fan-out; no executor/thread-pool pulled in.
 futures = { version = "0.3", default-features = false, features = [

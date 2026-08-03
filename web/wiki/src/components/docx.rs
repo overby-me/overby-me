@@ -347,6 +347,23 @@ pub fn picture_of(run: &Run) -> Option<(&str, &str)> {
 /// list item, and a document here draws the same two 1 KB JPEGs fifteen times.
 /// Undrawable formats are skipped rather than embedded as bytes no browser can
 /// decode; so is anything the package turns out not to contain.
+/// The metafile pictures a document draws, for the backend to render.
+pub fn collect_metafiles(blocks: &[Block]) -> Vec<(String, String)> {
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    let mut want = |picture: Option<(&str, &str)>| {
+        if let Some((path, mime)) = picture {
+            if is_metafile(mime) && !wanted.iter().any(|(p, _)| p == path) {
+                wanted.push((path.to_string(), mime.to_string()));
+            }
+        }
+    };
+    for_each_paragraph(blocks, &mut |p| {
+        want(p.numbering.as_ref().and_then(|n| n.picture()));
+        p.runs.iter().for_each(|run| want(picture_of(run)));
+    });
+    wanted
+}
+
 pub fn collect_images(blocks: &[Block], package: &[u8]) -> Images {
     let mut wanted: Vec<(String, String)> = Vec::new();
     let mut want = |picture: Option<(&str, &str)>| {
@@ -388,6 +405,55 @@ pub fn read_images(wanted: Vec<(String, String)>, package: &[u8]) -> Images {
             .is_ok();
         if read && !bytes.is_empty() {
             out.insert(path, data_url(&mime, &bytes).into());
+        }
+    }
+    out
+}
+
+/// Windows' own vector formats, which Word and PowerPoint keep pasted figures
+/// in and which no browser draws.
+///
+/// Not [`is_drawable`], because nothing here can draw them: they go to the
+/// backend, which renders them to PNG (see [`render_metafiles`]).
+pub fn is_metafile(mime: &str) -> bool {
+    matches!(
+        mime.trim().to_ascii_lowercase().as_str(),
+        "image/x-emf" | "image/emf" | "image/x-wmf" | "image/wmf" | "application/x-msmetafile"
+    )
+}
+
+/// Every metafile picture a document draws, rendered to PNG by the backend.
+///
+/// One request each, and a failure is simply left out: the viewer already draws
+/// a labelled placeholder in the shape's box for a picture it has no pixels
+/// for, which is the right answer for a figure this cannot render either.
+pub async fn render_metafiles(
+    wanted: Vec<(String, String)>,
+    package: &[u8],
+    token: Option<&str>,
+) -> Images {
+    let mut out = Images::new();
+    if wanted.is_empty() {
+        return out;
+    }
+    let Ok(mut zip) = zip::ZipArchive::new(std::io::Cursor::new(package)) else {
+        return out;
+    };
+    for (path, _mime) in wanted {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let read = zip
+            .by_name(&path)
+            .map(|mut entry| entry.read_to_end(&mut bytes))
+            .is_ok();
+        if !read || bytes.is_empty() {
+            continue;
+        }
+        match crate::backend_api::render_metafile(&bytes, token.unwrap_or_default()).await {
+            Ok(png) => {
+                out.insert(path, data_url("image/png", &png).into());
+            }
+            Err(e) => log::info!("metafile {path} not rendered: {e}"),
         }
     }
     out

@@ -22,6 +22,7 @@ mod error;
 mod feedback;
 mod logs;
 mod members;
+mod metafile;
 mod nhost;
 mod notify;
 mod oauth;
@@ -70,6 +71,10 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
     // consumes req). Kept off the query dispatch below for the same reason.
     if path == "/log" {
         return logs::ingest(cfg, client, req).await;
+    }
+    // EMF/WMF rendering reads the metafile from the body (consumes req too).
+    if path == "/office/metafile" {
+        return metafile::render(cfg, client, req, bearer_owned.as_deref()).await;
     }
 
     // Extract the rest as `&str` (Send) — never hold a `&Request` across an await,
