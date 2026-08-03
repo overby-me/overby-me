@@ -44,3 +44,6 @@ differential:
     # unit-name escaping vs systemd-escape
     SYSTEMD_ESCAPE="$sysd/bin/systemd-escape" \
       cargo test -p systemd-escape --test differential_vs_c -- --nocapture
+    # timespan / calendar parsing vs systemd-analyze
+    SYSTEMD_ANALYZE="$sysd/bin/systemd-analyze" \
+      cargo test -p systemd-analyze --test differential_vs_c -- --nocapture

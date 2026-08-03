@@ -4,8 +4,8 @@
 //! compares stdout and success/failure. A divergence is real upstream drift in
 //! the unit-name escaping rules. Gated on the env var `SYSTEMD_ESCAPE` (path to
 //! the C binary); skips silently otherwise, so plain `cargo test` / CI without
-//! the C tools is unaffected. Run it via `just differential-parsers`, which
-//! resolves the C binary from nixpkgs#systemd.
+//! the C tools is unaffected. Run it via `just differential`, which resolves
+//! the C binary from nixpkgs#systemd.
 
 use std::process::Command;
 
@@ -23,7 +23,7 @@ fn run(bin: &str, args: &[&str]) -> (String, bool) {
 #[test]
 fn escape_matches_c_systemd() {
     let Ok(c_bin) = std::env::var("SYSTEMD_ESCAPE") else {
-        eprintln!("skip differential: SYSTEMD_ESCAPE unset (run `just differential-parsers`)");
+        eprintln!("skip differential: SYSTEMD_ESCAPE unset (run `just differential`)");
         return;
     };
     // Cargo builds the crate's binary and exposes its path to integration tests.

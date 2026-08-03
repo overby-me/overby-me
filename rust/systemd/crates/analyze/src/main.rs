@@ -330,9 +330,12 @@ impl TimeSpan {
             return Ok(TimeSpan { usec: u64::MAX });
         }
 
-        // Try parsing as a plain number (treated as microseconds)
+        // A plain number with no unit is seconds, matching C `systemd-analyze
+        // timespan` (parse_time's default unit): `timespan 5` is 5 s, not 5 us.
         if let Ok(v) = input.parse::<u64>() {
-            return Ok(TimeSpan { usec: v });
+            return Ok(TimeSpan {
+                usec: v.saturating_mul(USEC_PER_SEC),
+            });
         }
 
         let mut total: u64 = 0;
@@ -483,9 +486,11 @@ fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
         }
     }
 
-    // If no unit, assume microseconds
+    // If no unit is given, assume seconds -- matching C `systemd-analyze
+    // timespan` (parse_time's default unit), where e.g. `timespan 5` is 5 s,
+    // not 5 us.
     if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
-        return Ok((1, 0));
+        return Ok((USEC_PER_SEC, 0));
     }
 
     Err(format!("Unknown time unit in: {s}"))
@@ -3538,8 +3543,10 @@ mod tests {
 
     #[test]
     fn test_timespan_parse_bare_number() {
+        // A bare number is seconds, matching C `systemd-analyze timespan`
+        // (verified against the C binary in tests/differential_vs_c.rs).
         let ts = TimeSpan::parse("5000000").unwrap();
-        assert_eq!(ts.usec, 5_000_000);
+        assert_eq!(ts.usec, 5_000_000 * USEC_PER_SEC);
     }
 
     #[test]
@@ -3965,8 +3972,9 @@ mod tests {
 
     #[test]
     fn test_parse_time_unit_empty() {
+        // No unit defaults to seconds, matching C `systemd-analyze timespan`.
         let (mult, len) = parse_time_unit("").unwrap();
-        assert_eq!(mult, 1);
+        assert_eq!(mult, USEC_PER_SEC);
         assert_eq!(len, 0);
     }
 
