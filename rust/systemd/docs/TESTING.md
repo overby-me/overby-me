@@ -13,6 +13,24 @@ cargo test -p libsystemd -- journal
 
 About 9,700 test functions across 93 crates.
 
+### Robustness fuzzers
+
+Several parsers that consume attacker-influenced or corrupt input carry an in-tree,
+dependency-free fuzzer: a seeded LCG assembles random inputs, each is run through the
+parser under `std::panic::catch_unwind`, and a worker thread is joined under a 30s
+wall-clock budget so a hang (not just a panic) fails the test. They take no new
+dependencies and run in a few seconds each. Grep for `fn fuzz_`:
+
+- binary journal objects (`c_journal`, `entry`) and the export format,
+- the unit-file parser (`parse_file` + `parse_service`, including size/rlimit values),
+- the calendar parser (`CalendarSpec::parse` + chained `next_elapse`),
+- the `systemd-analyze` time parsers (`parse_timestamp`, `TimeSpan::parse`),
+- the resolved/networkd wire parsers.
+
+The time fuzzer caught a real overflow panic on an out-of-range year, and the journal
+fuzzers caught amplification and underflow DoS bugs; the rest were clean nets. When adding
+a parser over untrusted bytes, add a matching fuzzer.
+
 ## Differential tests
 
 `crates/difftest` runs identical input through rust-systemd and through real systemd and
