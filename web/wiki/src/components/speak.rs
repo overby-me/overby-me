@@ -287,11 +287,38 @@ fn SpeakList(
     let mut join_open = use_signal(|| false);
 
     // Tick once a second so the countdown updates (cancelled on unmount).
+    //
+    // Only while a clock is actually running. This used to tick unconditionally,
+    // so every device showing this screen re-rendered the whole queue once a
+    // second whether or not there was anything to count down. In a hall that is
+    // 500 phones doing it, on the one screen they all sit on.
+    //
+    // `was_live` carries one tick past the end so the view lands on 0 rather
+    // than freezing at 1, and `peek` keeps the loop from subscribing to the
+    // state it is watching.
     let mut tick = use_signal(|| 0u32);
     use_future(move || async move {
+        let mut was_live = false;
         loop {
             gloo_timers::future::TimeoutFuture::new(1000).await;
-            tick += 1;
+            let live = {
+                let snapshot = state.peek();
+                snapshot
+                    .as_ref()
+                    .and_then(|loaded| loaded.as_ref().ok())
+                    .and_then(|found| found.as_ref())
+                    .is_some_and(|(_, time, updated_at, _)| {
+                        remaining_seconds(
+                            *time,
+                            updated_at,
+                            crate::session::server_clock_offset_ms(),
+                        ) > 0
+                    })
+            };
+            if should_tick(live, was_live) {
+                tick += 1;
+            }
+            was_live = live;
         }
     });
 
@@ -1006,6 +1033,14 @@ fn remaining_seconds(time: f64, updated_at: &str, offset_ms: f64) -> i64 {
     )
 }
 
+/// Whether the countdown loop should wake the view this second.
+///
+/// One tick past the end (`was_live`), so a clock that just expired renders 0
+/// instead of freezing on 1, and none at all while no clock is running.
+fn should_tick(live: bool, was_live: bool) -> bool {
+    live || was_live
+}
+
 /// Pure countdown maths (testable off-browser).
 fn remaining_seconds_at(time: f64, updated_ms: f64, now_ms: f64) -> i64 {
     if time <= 0.0 || updated_ms.is_nan() {
@@ -1054,6 +1089,37 @@ mod tests {
         assert_eq!(remaining_seconds_at(5.0, 100_000.0, 110_000.0), 0);
         // No limit set -> 0.
         assert_eq!(remaining_seconds_at(0.0, 100_000.0, 100_000.0), 0);
+    }
+
+    /// Ticks a sequence of per-second "is a clock running" answers through the
+    /// same predicate the loop uses, and counts the re-renders it asks for.
+    fn ticks(lives: &[bool]) -> usize {
+        let mut was_live = false;
+        let mut count = 0;
+        for &live in lives {
+            if should_tick(live, was_live) {
+                count += 1;
+            }
+            was_live = live;
+        }
+        count
+    }
+
+    #[test]
+    fn the_queue_only_re_renders_while_a_clock_runs() {
+        // The reason this exists: an idle queue used to re-render every second
+        // on every device in the hall, for nothing.
+        assert_eq!(ticks(&[false; 300]), 0, "an idle queue must sit still");
+
+        // A three-second clock gets its three seconds plus one more, so the
+        // view lands on 0 instead of freezing on 1.
+        assert_eq!(ticks(&[true, true, true, false, false, false]), 4);
+
+        // Starting a clock later resumes ticking, and stopping it settles again.
+        assert_eq!(ticks(&[false, false, true, true, false, false]), 3);
+
+        // A clock still running keeps every second.
+        assert_eq!(ticks(&[true; 10]), 10);
     }
 
     #[test]
