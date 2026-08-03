@@ -3399,6 +3399,68 @@ mod tests {
     use super::*;
     use crate::units::{RLimitValue, ResourceLimit};
 
+    #[test]
+    fn fuzz_unit_parser_never_panics() {
+        // Robustness net: parse_file + parse_service run over unit files that a
+        // corrupt or hostile drop-in could supply; a panic there is a PID 1 DoS.
+        // Assemble random unit-file text from interesting tokens (section
+        // headers, keys, operators, specifiers, escapes) plus stray bytes, and
+        // assert neither parser panics or hangs.
+        const TOKENS: &[&str] = &[
+            "[Unit]", "[Service]", "[Install]", "[Socket]", "[Timer]", "[Mount]",
+            "[Path]", "[Slice]", "[Scope]", "[Automount]", "[Swap]", "[]", "[",
+            "Description=", "ExecStart=", "ExecStop=", "ExecStartPre=", "Type=",
+            "Type=oneshot", "Type=notify", "Type=bogus", "WantedBy=", "After=",
+            "Requires=", "Wants=", "RemainAfterExit=", "Restart=", "RestartSec=",
+            "TimeoutSec=", "Environment=", "EnvironmentFile=", "User=", "Group=",
+            "ConditionPathExists=", "ConditionKernelVersion=", "ConditionFirstBoot=",
+            "AssertPathExists=", "ConditionKernelVersion=>=5.10",
+            "ConditionKernelVersion=!<4.0", "ConditionCPUs=>=1", "ConditionMemory=1G",
+            "OnCalendar=", "ListenStream=", "What=", "Where=", "=", "!", ">=", "<=",
+            "<>", "!=", "/bin/true", "%i", "%n", "%%", "yes", "no", "0", "999", "-",
+            ":", ";", "#c", "\\", "\"", "'", "..", "  ", "\t", "\n", "\n\n", "@", "€",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x51ed_1234_dead_beef;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let ntok = (next() % 40) as usize;
+                let mut content = String::new();
+                for _ in 0..ntok {
+                    if next() % 6 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let buf = content.clone();
+                let res = std::panic::catch_unwind(move || {
+                    if let Ok(parsed) = parse_file(&content) {
+                        let _ = crate::units::parse_service(
+                            parsed,
+                            &std::path::PathBuf::from("/x.service"),
+                        );
+                    }
+                });
+                assert!(res.is_ok(), "unit parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "unit-parser fuzz did not finish in 30s -- a malformed unit hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
     // ── Helper to build the Option<Vec<(u32, String)>> input ──────────
     fn single_val(s: &str) -> Option<Vec<(u32, String)>> {
         Some(vec![(0, s.to_owned())])
