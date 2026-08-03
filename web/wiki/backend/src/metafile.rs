@@ -107,11 +107,10 @@ fn png_response(png: Vec<u8>) -> Response<Body> {
         // A metafile's rendering is a pure function of its bytes, and the bytes
         // live in an immutable uploaded document.
         .header("cache-control", "public, max-age=31536000, immutable")
+        // The app is on another origin, so without this the browser discards a
+        // perfectly good picture it has already downloaded. The error path gets
+        // this for free through `crate::json`; a hand-built response does not.
+        .header("Access-Control-Allow-Origin", "*")
         .body(Body::from(png))
-        .unwrap_or_else(|_| {
-            Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::empty())
-                .expect("empty body")
-        })
+        .unwrap_or_else(|e| AppError::Upstream(e.to_string()).respond("metafile response"))
 }
