@@ -21,6 +21,7 @@ mod offline;
 mod pwa;
 mod query_cache;
 mod route;
+mod runtime;
 mod session;
 pub mod snackbar;
 mod subscription;
@@ -172,6 +173,11 @@ fn stylesheets_applied(doc: &web_sys::Document) -> bool {
 
 #[component]
 fn App() -> Element {
+    // Hand the runtime to the raw JS callbacks (scroll, focus, socket messages),
+    // which the browser calls with nothing of ours on the stack. Here because
+    // this is the outermost place that is unambiguously inside it.
+    use_hook(crate::runtime::remember);
+
     // Initialize global state once, *inside* the Dioxus runtime. Writing to a
     // `GlobalSignal` (SESSION / LANG) from `main` before `launch` panics with
     // "Must be called from inside a Dioxus runtime" — and did so non-obviously

@@ -84,17 +84,21 @@ fn install_listeners() {
         let start_y = start_y.clone();
         let active = active.clone();
         let cb = Closure::wrap(Box::new(move |e: web_sys::Event| {
-            let Ok(te) = e.dyn_into::<web_sys::TouchEvent>() else {
-                return;
-            };
-            if !at_top() {
-                active.set(false);
-                return;
-            }
-            if let Some(t) = te.touches().get(0) {
-                start_y.set(t.client_y() as f64);
-                active.set(true);
-            }
+            // The browser calls this, so the runtime has to be put back before
+            // touching a signal (see `crate::runtime`).
+            crate::runtime::enter(|| {
+                let Ok(te) = e.dyn_into::<web_sys::TouchEvent>() else {
+                    return;
+                };
+                if !at_top() {
+                    active.set(false);
+                    return;
+                }
+                if let Some(t) = te.touches().get(0) {
+                    start_y.set(t.client_y() as f64);
+                    active.set(true);
+                }
+            });
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("touchstart", cb.as_ref().unchecked_ref());
         cb.forget();
@@ -105,22 +109,26 @@ fn install_listeners() {
         let start_y = start_y.clone();
         let active = active.clone();
         let cb = Closure::wrap(Box::new(move |e: web_sys::Event| {
-            if !active.get() {
-                return;
-            }
-            let Ok(te) = e.dyn_into::<web_sys::TouchEvent>() else {
-                return;
-            };
-            let Some(t) = te.touches().get(0) else {
-                return;
-            };
-            let dy = t.client_y() as f64 - start_y.get();
-            if dy > 0.0 && at_top() {
-                set_pull((dy * DAMPING).min(MAX_PULL));
-            } else {
-                active.set(false);
-                set_pull(0.0);
-            }
+            // The browser calls this, so the runtime has to be put back before
+            // touching a signal (see `crate::runtime`).
+            crate::runtime::enter(|| {
+                if !active.get() {
+                    return;
+                }
+                let Ok(te) = e.dyn_into::<web_sys::TouchEvent>() else {
+                    return;
+                };
+                let Some(t) = te.touches().get(0) else {
+                    return;
+                };
+                let dy = t.client_y() as f64 - start_y.get();
+                if dy > 0.0 && at_top() {
+                    set_pull((dy * DAMPING).min(MAX_PULL));
+                } else {
+                    active.set(false);
+                    set_pull(0.0);
+                }
+            });
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("touchmove", cb.as_ref().unchecked_ref());
         cb.forget();
@@ -130,15 +138,19 @@ fn install_listeners() {
     {
         let active = active.clone();
         let cb = Closure::wrap(Box::new(move |_e: web_sys::Event| {
-            if !active.get() {
-                return;
-            }
-            active.set(false);
-            if *PULL_DISTANCE.peek() >= THRESHOLD {
-                trigger_refresh();
-            } else {
-                set_pull(0.0);
-            }
+            // The browser calls this, so the runtime has to be put back before
+            // touching a signal (see `crate::runtime`).
+            crate::runtime::enter(|| {
+                if !active.get() {
+                    return;
+                }
+                active.set(false);
+                if *PULL_DISTANCE.peek() >= THRESHOLD {
+                    trigger_refresh();
+                } else {
+                    set_pull(0.0);
+                }
+            });
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("touchend", cb.as_ref().unchecked_ref());
         cb.forget();
@@ -148,27 +160,31 @@ fn install_listeners() {
     {
         let wheel_epoch = wheel_epoch.clone();
         let cb = Closure::wrap(Box::new(move |e: web_sys::Event| {
-            if *PTR_REFRESHING.peek() {
-                return;
-            }
-            let Ok(we) = e.dyn_into::<web_sys::WheelEvent>() else {
-                return;
-            };
-            let dy = we.delta_y();
-            if dy < 0.0 && at_top() {
-                let cur = *PULL_DISTANCE.peek();
-                let dist = (cur + (-dy) * DAMPING).min(MAX_PULL);
-                set_pull(dist);
-                if dist >= THRESHOLD {
-                    trigger_refresh();
-                } else {
-                    let next = wheel_epoch.get().wrapping_add(1);
-                    wheel_epoch.set(next);
-                    schedule_wheel_decay(wheel_epoch.clone(), next);
+            // The browser calls this, so the runtime has to be put back before
+            // touching a signal (see `crate::runtime`).
+            crate::runtime::enter(|| {
+                if *PTR_REFRESHING.peek() {
+                    return;
                 }
-            } else if dy > 0.0 {
-                set_pull(0.0);
-            }
+                let Ok(we) = e.dyn_into::<web_sys::WheelEvent>() else {
+                    return;
+                };
+                let dy = we.delta_y();
+                if dy < 0.0 && at_top() {
+                    let cur = *PULL_DISTANCE.peek();
+                    let dist = (cur + (-dy) * DAMPING).min(MAX_PULL);
+                    set_pull(dist);
+                    if dist >= THRESHOLD {
+                        trigger_refresh();
+                    } else {
+                        let next = wheel_epoch.get().wrapping_add(1);
+                        wheel_epoch.set(next);
+                        schedule_wheel_decay(wheel_epoch.clone(), next);
+                    }
+                } else if dy > 0.0 {
+                    set_pull(0.0);
+                }
+            });
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("wheel", cb.as_ref().unchecked_ref());
         cb.forget();

@@ -86,10 +86,14 @@ fn check_now() {
     LAST_CHECK_MS.with(|t| t.set(now));
     // `spawn_local`, not Dioxus's `spawn_forever`: this is also called from raw
     // DOM listeners (see `install_return_checks`), where no Dioxus scope is
-    // being rendered. Writing a `GlobalSignal` from there is fine (the runtime
-    // outlives the whole page), but asking Dioxus to attach a task to a scope
-    // from outside one is not something to rely on in a path that runs every
-    // time the reader comes back.
+    // being rendered, and asking Dioxus to attach a task to a scope from outside
+    // one is not something to rely on in a path that runs every time the reader
+    // comes back.
+    //
+    // The write below then needs the runtime handed back explicitly. This is a
+    // future rather than a callback, so it resumes after an await on the
+    // microtask queue — later than, and unprotected by, whatever guard the
+    // caller held.
     wasm_bindgen_futures::spawn_local(async move {
         let Some(deployed) = deployed_commit().await else {
             return;
@@ -99,7 +103,7 @@ fn check_now() {
                 "running {} but {deployed} is deployed",
                 crate::build_info::COMMIT
             );
-            *UPDATE_AVAILABLE.write() = true;
+            crate::runtime::enter(|| *UPDATE_AVAILABLE.write() = true);
         }
     });
 }
@@ -138,7 +142,9 @@ fn install_return_checks() {
             .and_then(|w| w.document())
             .is_some_and(|d| d.hidden());
         if !hidden {
-            check_now();
+            // The browser calls this, so the runtime has to be put back before
+            // `check_now` reads `UPDATE_AVAILABLE` (see `crate::runtime`).
+            crate::runtime::enter(check_now);
         }
     });
     let handler = on_return.as_ref().unchecked_ref();

@@ -82,65 +82,69 @@ fn install_listener() {
     // Layout), so this only has to be recent, not current.
     let mut last_stash = 0.0f64;
     let cb = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        let Some(w) = web_sys::window() else { return };
-        let y = w.scroll_y().unwrap_or(0.0);
+        // The browser calls this, so the runtime has to be put back before
+        // touching a signal (see `crate::runtime`).
+        crate::runtime::enter(|| {
+            let Some(w) = web_sys::window() else { return };
+            let y = w.scroll_y().unwrap_or(0.0);
 
-        let now = y > SHOW_AFTER;
-        if now != *VISIBLE.peek() {
-            *VISIBLE.write() = now;
-        }
-
-        // Hide-on-scroll for the compact bottom dock: hide when scrolling down
-        // past a small threshold, reveal on scroll up or near the top of the page.
-        //
-        // Never while the keyboard is up. Focusing a field makes iOS scroll the
-        // page to reveal it, which reads here as scrolling down — so tapping the
-        // search box slid the dock, and the box with it, off the screen.
-        let dy = y - last_y;
-        let hidden_now = if *KEYBOARD_OPEN.peek() || y <= DOCK_SHOW_ABOVE {
-            false
-        } else if dy > DOCK_SCROLL_DELTA {
-            true
-        } else if dy < -DOCK_SCROLL_DELTA {
-            false
-        } else {
-            *DOCK_HIDDEN.peek()
-        };
-        if hidden_now != *DOCK_HIDDEN.peek() {
-            *DOCK_HIDDEN.write() = hidden_now;
-        }
-        last_y = y;
-
-        let doc_h = w
-            .document()
-            .and_then(|d| d.document_element())
-            .map(|e| e.scroll_height() as f64)
-            .unwrap_or(0.0);
-        let inner_h = w
-            .inner_height()
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let scrollable = (doc_h - inner_h).max(1.0);
-        let pct = (y / scrollable * 100.0).clamp(0.0, 100.0).round() as i32;
-        if pct != *PROGRESS.peek() {
-            *PROGRESS.write() = pct;
-        }
-
-        // Endless lists fetch their next page from here rather than installing a
-        // second scroll listener (this one already runs on every scroll event).
-        let near = doc_h - (y + inner_h) < NEAR_BOTTOM_PX;
-        if near != *NEAR_BOTTOM.peek() {
-            *NEAR_BOTTOM.write() = near;
-        }
-
-        let now_ms = js_sys::Date::now();
-        if now_ms - last_stash > STASH_EVERY_MS {
-            last_stash = now_ms;
-            if let Some(url) = crate::nav_memory::current_url() {
-                crate::nav_memory::stash_scroll(&url, y);
+            let now = y > SHOW_AFTER;
+            if now != *VISIBLE.peek() {
+                *VISIBLE.write() = now;
             }
-        }
+
+            // Hide-on-scroll for the compact bottom dock: hide when scrolling down
+            // past a small threshold, reveal on scroll up or near the top of the page.
+            //
+            // Never while the keyboard is up. Focusing a field makes iOS scroll the
+            // page to reveal it, which reads here as scrolling down — so tapping the
+            // search box slid the dock, and the box with it, off the screen.
+            let dy = y - last_y;
+            let hidden_now = if *KEYBOARD_OPEN.peek() || y <= DOCK_SHOW_ABOVE {
+                false
+            } else if dy > DOCK_SCROLL_DELTA {
+                true
+            } else if dy < -DOCK_SCROLL_DELTA {
+                false
+            } else {
+                *DOCK_HIDDEN.peek()
+            };
+            if hidden_now != *DOCK_HIDDEN.peek() {
+                *DOCK_HIDDEN.write() = hidden_now;
+            }
+            last_y = y;
+
+            let doc_h = w
+                .document()
+                .and_then(|d| d.document_element())
+                .map(|e| e.scroll_height() as f64)
+                .unwrap_or(0.0);
+            let inner_h = w
+                .inner_height()
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let scrollable = (doc_h - inner_h).max(1.0);
+            let pct = (y / scrollable * 100.0).clamp(0.0, 100.0).round() as i32;
+            if pct != *PROGRESS.peek() {
+                *PROGRESS.write() = pct;
+            }
+
+            // Endless lists fetch their next page from here rather than installing a
+            // second scroll listener (this one already runs on every scroll event).
+            let near = doc_h - (y + inner_h) < NEAR_BOTTOM_PX;
+            if near != *NEAR_BOTTOM.peek() {
+                *NEAR_BOTTOM.write() = near;
+            }
+
+            let now_ms = js_sys::Date::now();
+            if now_ms - last_stash > STASH_EVERY_MS {
+                last_stash = now_ms;
+                if let Some(url) = crate::nav_memory::current_url() {
+                    crate::nav_memory::stash_scroll(&url, y);
+                }
+            }
+        });
     });
     let _ = win.add_event_listener_with_callback("scroll", cb.as_ref().unchecked_ref());
     cb.forget();
@@ -178,15 +182,19 @@ fn install_focus_listener() {
         return;
     };
     let focus_in = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(|| {
-        if !focus_is_text_entry() {
-            return;
-        }
-        if !*KEYBOARD_OPEN.peek() {
-            *KEYBOARD_OPEN.write() = true;
-        }
-        if *DOCK_HIDDEN.peek() {
-            *DOCK_HIDDEN.write() = false;
-        }
+        // The browser calls this, so the runtime has to be put back before
+        // touching a signal (see `crate::runtime`).
+        crate::runtime::enter(|| {
+            if !focus_is_text_entry() {
+                return;
+            }
+            if !*KEYBOARD_OPEN.peek() {
+                *KEYBOARD_OPEN.write() = true;
+            }
+            if *DOCK_HIDDEN.peek() {
+                *DOCK_HIDDEN.write() = false;
+            }
+        });
     });
     let focus_out = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(|| {
         // Deferred: focusout fires before focusin when moving between two
@@ -194,9 +202,13 @@ fn install_focus_listener() {
         // between them hide the dock.
         if let Some(win) = web_sys::window() {
             let later = wasm_bindgen::closure::Closure::once_into_js(move || {
-                if !focus_is_text_entry() && *KEYBOARD_OPEN.peek() {
-                    *KEYBOARD_OPEN.write() = false;
-                }
+                // The browser calls this, so the runtime has to be put back before
+                // touching a signal (see `crate::runtime`).
+                crate::runtime::enter(|| {
+                    if !focus_is_text_entry() && *KEYBOARD_OPEN.peek() {
+                        *KEYBOARD_OPEN.write() = false;
+                    }
+                });
             });
             let _ =
                 win.set_timeout_with_callback_and_timeout_and_arguments_0(later.unchecked_ref(), 0);
@@ -274,18 +286,23 @@ fn update_keyboard_inset() {
             .set_property("--md-sys-keyboard-inset", &format!("{inset}px"));
     }
 
-    // Only ever RAISE the flag here. Lowering it is focusout's job: the inset
-    // reads 0 for the whole moment between the tap and the keyboard animating
-    // in, and clearing it then would reopen the very window this guards.
-    if inset > 0.0 && !*KEYBOARD_OPEN.peek() {
-        *KEYBOARD_OPEN.write() = true;
-    }
-    // Bring the dock back the moment the keyboard appears, rather than waiting
-    // for a scroll to re-evaluate: it may well have been hidden before the field
-    // was tapped, and the field is inside it.
-    if inset > 0.0 && *DOCK_HIDDEN.peek() {
-        *DOCK_HIDDEN.write() = false;
-    }
+    // Reached from a visualViewport listener, so the runtime has to be put back
+    // for the signals below (see `crate::runtime`). Also called once directly at
+    // install, from inside it, which `enter` leaves alone.
+    crate::runtime::enter(|| {
+        // Only ever RAISE the flag here. Lowering it is focusout's job: the inset
+        // reads 0 for the whole moment between the tap and the keyboard animating
+        // in, and clearing it then would reopen the very window this guards.
+        if inset > 0.0 && !*KEYBOARD_OPEN.peek() {
+            *KEYBOARD_OPEN.write() = true;
+        }
+        // Bring the dock back the moment the keyboard appears, rather than waiting
+        // for a scroll to re-evaluate: it may well have been hidden before the field
+        // was tapped, and the field is inside it.
+        if inset > 0.0 && *DOCK_HIDDEN.peek() {
+            *DOCK_HIDDEN.write() = false;
+        }
+    });
 }
 
 #[component]
