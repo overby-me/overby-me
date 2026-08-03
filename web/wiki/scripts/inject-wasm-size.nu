@@ -1,6 +1,17 @@
 #!/usr/bin/env nu
 
-# Write the shipped wasm's byte count into the built index.html.
+# Write the shipped wasm's byte count into the built index.html, and preload it.
+#
+# dx preloads the 17 KB glue script but not the 2 MB wasm, so the browser only
+# learns about the big download once the glue has arrived and run: one extra
+# round trip, on exactly the connection where round trips hurt (a hall full of
+# phones on one access point). The filename is content-hashed, so the link has
+# to be injected here rather than written into the source page.
+#
+# `as="fetch"` with `crossorigin` because that is what the glue's own request
+# is: a plain `fetch()`, which is CORS mode with `same-origin` credentials. Get
+# either half wrong and the preload does not match, so the wasm downloads TWICE
+# and this makes things worse. Verified in a browser, counting requests.
 #
 # The boot screen shows download progress, and it needs a denominator it cannot
 # get from the network: the bundle is served gzipped and chunked, so there is no
@@ -65,10 +76,25 @@ def main [
         exit 1
     }
 
-    (
+    # Beside dx's own preload of the glue, so both start at once.
+    let href = $"/./assets/($wasms | first)"
+    let preload = $"<link rel=\"preload\" as=\"fetch\" type=\"application/wasm\" href=\"($href)\" crossorigin>"
+    if not ($html | str contains "</head>") {
+        print $"($index) has no </head> to inject the preload before"
+        exit 1
+    }
+    let with_preload = if ($html | str contains $href) and ($html | str contains "rel=\"preload\" as=\"fetch\"") {
+        print "wasm preload already present"
         $html
+    } else {
+        $html | str replace "</head>" $"($preload)</head>"
+    }
+
+    (
+        $with_preload
         | str replace $marker $"window.__WASM_BYTES__ = ($bytes);"
         | save --force --raw $index
     )
     print $"wasm size  ($bytes) bytes  ($wasms | first)  -> ($index)"
+    print $"wasm preload  ($href)"
 }
