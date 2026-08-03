@@ -1327,6 +1327,86 @@ mod tests {
         buf
     }
 
+    #[test]
+    fn fuzz_dns_message_parse_never_panics() {
+        // Robustness net (task #22): DnsMessage::parse consumes attacker-
+        // controlled network packets and drives parse_name (compression
+        // pointers) and question parsing, so it must never panic or hang on
+        // malformed input. Deterministically seeded mutation of a valid query
+        // plus pure-random packets (with injected 0xC0 compression pointers to
+        // stress parse_name); every parse runs in catch_unwind. The whole loop
+        // runs on a worker thread joined under a wall-clock budget so a parser
+        // that infinite-loops fails the test instead of hanging the suite.
+        let handle = std::thread::spawn(|| {
+            let seed = build_test_query();
+            let mut state: u64 = 0xdead_beef_cafe_1234;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for iter in 0..50_000u32 {
+                let mut buf = if iter % 2 == 0 {
+                    seed.clone()
+                } else {
+                    let len = (next() % 96) as usize;
+                    (0..len).map(|_| (next() & 0xff) as u8).collect::<Vec<u8>>()
+                };
+                let muts = 1 + (next() % 10) as usize;
+                for _ in 0..muts {
+                    if buf.is_empty() {
+                        break;
+                    }
+                    match next() % 6 {
+                        0 => {
+                            let i = (next() as usize) % buf.len();
+                            buf[i] ^= (next() & 0xff) as u8;
+                        }
+                        1 => {
+                            let i = (next() as usize) % buf.len();
+                            buf.remove(i);
+                        }
+                        2 => {
+                            let i = (next() as usize) % (buf.len() + 1);
+                            buf.insert(i, (next() & 0xff) as u8);
+                        }
+                        3 => {
+                            let i = (next() as usize) % buf.len();
+                            buf.truncate(i);
+                        }
+                        4 => {
+                            // Inject a compression pointer to stress parse_name.
+                            let i = (next() as usize) % buf.len();
+                            buf[i] = 0xC0;
+                        }
+                        _ => {
+                            let i = (next() as usize) % buf.len();
+                            let b = buf[i];
+                            buf.insert(i, b);
+                        }
+                    }
+                }
+                let input = buf.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = DnsMessage::parse(&input);
+                });
+                assert!(res.is_ok(), "DnsMessage::parse panicked on: {buf:?}");
+            }
+        });
+        // Generous wall-clock budget: the 50k parses take well under a second
+        // when the parser terminates; anything near this means an infinite loop.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "DnsMessage::parse fuzz did not finish in 30s -- a malformed packet hangs the parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
     /// Build a minimal DNS response
     fn build_test_response(query_id: u16) -> Vec<u8> {
         let mut buf = Vec::new();
