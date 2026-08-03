@@ -26,7 +26,11 @@ const MAX_PULL: f64 = 110.0;
 /// Resistance applied to the raw drag / scroll delta for a natural rubber feel.
 const DAMPING: f64 = 0.5;
 
-fn at_top() -> bool {
+/// Whether the window is scrolled to the very top.
+///
+/// Shared with the feed, which uses it to decide whether new arrivals can be
+/// spliced in without moving anything the reader is looking at.
+pub(crate) fn at_top() -> bool {
     web_sys::window()
         .map(|w| w.scroll_y().unwrap_or(0.0) <= 0.0)
         .unwrap_or(false)

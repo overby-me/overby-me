@@ -61,12 +61,14 @@ const FEED_PAGE: i32 = 12;
 pub fn FeedList(
     #[props(default)] context_id: Option<String>,
     #[props(default)] autoload: bool,
-    /// Insert new arrivals the moment they land, rather than offering them.
+    /// Always insert new arrivals the moment they land, rather than offering
+    /// them.
     ///
     /// True for the room's screen and the chair's console, where the newest
-    /// thing IS the point and nobody is scrolling; false on a page someone is
-    /// reading, where content appearing above the line they are on moves that
-    /// line, so arrivals wait behind a count they can tap.
+    /// thing IS the point and nobody is scrolling. Elsewhere it is decided per
+    /// arrival: a reader sitting at the top gets them spliced in anyway, since
+    /// nothing above them moves, and only one scrolled into the list is offered
+    /// a count to tap.
     #[props(default)]
     instant: bool,
 ) -> Element {
@@ -229,7 +231,14 @@ pub fn FeedList(
                 if fresh.is_empty() {
                     return;
                 }
-                if instant {
+                // A reader at the very top has nothing above them to displace,
+                // so hand them the arrivals: that is what a live feed should
+                // look like. Only someone scrolled into the list gets the pill,
+                // because rows appearing above their line would move it, and
+                // WebKit does not implement scroll anchoring to hold the view.
+                // Checked here, after the fetch, so it reflects where the reader
+                // is when the rows are actually ready.
+                if instant || crate::components::pull_refresh::at_top() {
                     let mut list = items.write();
                     for (i, node) in fresh.into_iter().enumerate() {
                         list.insert(i, node);
@@ -332,7 +341,8 @@ pub fn FeedList(
 
     rsx! {
         if waiting_count > 0 {
-            // Offered, not inserted: the reader decides when the list moves.
+            // Only reached by a reader scrolled into the list: they are the one
+            // whose line would move, so they decide when it does.
             button {
                 class: "btn btn-tonal feed-new-pill",
                 onclick: move |_| show_pending(),
