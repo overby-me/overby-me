@@ -20,6 +20,7 @@
         systemctl stop testnotify-all.service 2>/dev/null
         systemctl stop testnotify-none.service 2>/dev/null
         systemctl stop testnotify-exec.service 2>/dev/null
+        systemctl stop testnotify-status.service 2>/dev/null
         rm -f /run/systemd/system/testnotify-*.service
         systemctl daemon-reload
     }
@@ -82,6 +83,21 @@
     (! systemctl start testnotify-none.service)
     assert_eq "$(systemctl is-failed testnotify-none.service)" "failed"
     systemctl reset-failed testnotify-none.service 2>/dev/null || true
+
+    : "Status-error triad — ERRNO=/BUSERROR=/VARLINKERROR= reported via systemctl show"
+    cat > /run/systemd/system/testnotify-status.service <<EOF
+    [Service]
+    Type=notify
+    NotifyAccess=all
+    ExecStart=/usr/bin/bash -c 'systemd-notify --ready ERRNO=1 BUSERROR=org.freedesktop.DBus.Error.InvalidArgs VARLINKERROR=org.varlink.service.InvalidParameter && sleep infinity'
+    EOF
+    systemctl daemon-reload
+    systemctl start testnotify-status.service
+    timeout 30 bash -c 'while [ "$(systemctl is-active testnotify-status.service)" != active ]; do sleep 0.5; done'
+    assert_eq "$(systemctl show testnotify-status.service -P StatusErrno)" "1"
+    assert_eq "$(systemctl show testnotify-status.service -P StatusBusError)" "org.freedesktop.DBus.Error.InvalidArgs"
+    assert_eq "$(systemctl show testnotify-status.service -P StatusVarlinkError)" "org.varlink.service.InvalidParameter"
+    systemctl stop testnotify-status.service
 
     touch /testok
     TESTEOF
