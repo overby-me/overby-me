@@ -553,13 +553,16 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
             .ok_or_else(|| "Timestamp would be before UNIX epoch".to_string());
     }
 
-    // "@EPOCH_SECONDS"
+    // "@EPOCH_SECONDS" with an optional fractional part ("@1700000000.5").
     if let Some(rest) = input.strip_prefix('@') {
-        let secs: u64 = rest
-            .trim()
+        let rest = rest.trim();
+        let (whole, frac) = rest.split_once('.').unwrap_or((rest, ""));
+        let secs: u64 = whole
             .parse()
             .map_err(|_| format!("Invalid epoch timestamp: {rest}"))?;
-        return Ok(UNIX_EPOCH + Duration::from_secs(secs));
+        let micros = parse_fractional_micros(frac)
+            .ok_or_else(|| format!("Invalid epoch timestamp: {rest}"))?;
+        return Ok(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_micros(micros));
     }
 
     // YYYY-MM-DD HH:MM:SS
@@ -570,7 +573,51 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
     Err(format!("Failed to parse timestamp: {input}"))
 }
 
+/// Parse the fractional-seconds digits after a '.' into microseconds, matching
+/// C's microsecond precision: pad or truncate to 6 digits (".5" -> 500000).
+/// Returns None if the fraction contains a non-digit.
+fn parse_fractional_micros(frac: &str) -> Option<u64> {
+    if frac.is_empty() {
+        return Some(0);
+    }
+    if !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let digits: String = frac.chars().take(6).collect();
+    format!("{digits:0<6}").parse().ok()
+}
+
+/// A bare 3-letter weekday abbreviation (case-insensitive), as C emits and
+/// accepts at the front of a timestamp. A trailing comma is not accepted (C
+/// rejects "Mon, ...").
+fn is_weekday_abbrev(s: &str) -> bool {
+    ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        .iter()
+        .any(|w| s.eq_ignore_ascii_case(w))
+}
+
 fn try_parse_datetime(input: &str) -> Option<SystemTime> {
+    // Strip a trailing "UTC" zone token. We evaluate in UTC (there is no zone
+    // database here), and without this the zone is glued onto the last time
+    // field and silently parsed away: "23:59:59 UTC" -> seconds "59 UTC" -> 0.
+    let input = input.trim();
+    let input = match input.rsplit_once(' ') {
+        Some((head, tz)) if tz.eq_ignore_ascii_case("UTC") => head.trim_end(),
+        _ => input,
+    };
+
+    // Strip an optional leading weekday ("Mon 2024-01-01 ..."), which C emits
+    // and accepts. C validates it against the date; remember it and reject a
+    // mismatch once the date is known.
+    let expected_dow = match input.split_once(' ') {
+        Some((wd, _)) if is_weekday_abbrev(wd) => Some(wd),
+        _ => None,
+    };
+    let input = match input.split_once(' ') {
+        Some((wd, rest)) if is_weekday_abbrev(wd) => rest.trim_start(),
+        _ => input,
+    };
+
     let parts: Vec<&str> = input.splitn(2, [' ', 'T']).collect();
 
     let date_str = parts.first()?;
@@ -592,16 +639,35 @@ fn try_parse_datetime(input: &str) -> Option<SystemTime> {
     let time_parts: Vec<&str> = time_str.split(':').collect();
     let hour: u32 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minute: u32 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let second: u32 = time_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // The seconds field may carry a fractional part ("07.500000"). Reject a
+    // non-numeric seconds field (e.g. an unsupported zone) instead of silently
+    // treating it as 0, which used to drop the seconds entirely.
+    let (second, micros): (u32, u64) = match time_parts.get(2) {
+        Some(s) => {
+            let (whole, frac) = s.split_once('.').unwrap_or((s, ""));
+            (whole.parse().ok()?, parse_fractional_micros(frac)?)
+        }
+        None => (0, 0),
+    };
 
     if hour > 23 || minute > 59 || second > 60 {
         return None;
     }
 
     let days = days_from_civil(year, month, day);
+
+    // Reject a leading weekday that does not match the date, as C does.
+    if let Some(wd) = expected_dow {
+        let dow = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+        let actual = dow[weekday_from_days(days) as usize % 7];
+        if !wd.eq_ignore_ascii_case(actual) {
+            return None;
+        }
+    }
+
     let secs = days as u64 * 86400 + hour as u64 * 3600 + minute as u64 * 60 + second as u64;
 
-    Some(UNIX_EPOCH + Duration::from_secs(secs))
+    Some(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_micros(micros))
 }
 
 /// Convert a civil date to days since UNIX epoch (Howard Hinnant algorithm).
@@ -1646,10 +1712,21 @@ fn cmd_timestamp(expressions: &[String]) {
         match parse_timestamp(expr) {
             Ok(ts) => {
                 let dur = ts.duration_since(UNIX_EPOCH).unwrap_or_default();
+                // C `format_timestamp` renders time 0 as "-" (an unset stamp).
+                let normalized = if dur.is_zero() {
+                    "-".to_string()
+                } else {
+                    format_timestamp(ts)
+                };
                 println!("  Original form: {expr}");
-                println!("Normalized form: {}", format_timestamp(ts));
-                println!("       (in UTC): {}", format_timestamp(ts));
-                println!("   UNIX seconds: @{}", dur.as_secs());
+                println!("Normalized form: {normalized}");
+                println!("       (in UTC): {normalized}");
+                let micros = dur.subsec_micros();
+                if micros == 0 {
+                    println!("   UNIX seconds: @{}", dur.as_secs());
+                } else {
+                    println!("   UNIX seconds: @{}.{:06}", dur.as_secs(), micros);
+                }
                 let from_now = if let Ok(d) = ts.duration_since(SystemTime::now()) {
                     format!("in {}", format_usec(d.as_micros() as u64))
                 } else if let Ok(d) = SystemTime::now().duration_since(ts) {
@@ -3713,6 +3790,44 @@ mod tests {
         // 2023-11-14 12:00:00 UTC = 1699963200
         assert!(dur.as_secs() > 1_699_900_000);
         assert!(dur.as_secs() < 1_700_100_000);
+    }
+
+    #[test]
+    fn test_timestamp_utc_suffix_keeps_seconds() {
+        // Regression: a trailing " UTC" used to glue onto the seconds field and
+        // zero it out ("23:59:59 UTC" -> 23:59:00). Verified against C.
+        let ts = parse_timestamp("2024-12-31 23:59:59 UTC").unwrap();
+        let dur = ts.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(dur.as_secs(), 1_735_689_599);
+    }
+
+    #[test]
+    fn test_timestamp_fractional_seconds() {
+        let ts = parse_timestamp("2024-01-01 12:00:00.5 UTC").unwrap();
+        let dur = ts.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(dur.as_secs(), 1_704_110_400);
+        assert_eq!(dur.subsec_micros(), 500_000);
+    }
+
+    #[test]
+    fn test_timestamp_epoch_fractional() {
+        let ts = parse_timestamp("@1704110400.25").unwrap();
+        let dur = ts.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(dur.as_secs(), 1_704_110_400);
+        assert_eq!(dur.subsec_micros(), 250_000);
+    }
+
+    #[test]
+    fn test_timestamp_leading_weekday() {
+        // 2024-01-01 is a Monday: the correct weekday is accepted, ...
+        let ts = parse_timestamp("Mon 2024-01-01 12:00:00 UTC").unwrap();
+        assert_eq!(ts.duration_since(UNIX_EPOCH).unwrap().as_secs(), 1_704_110_400);
+    }
+
+    #[test]
+    fn test_timestamp_wrong_weekday_rejected() {
+        // ... and a wrong weekday is rejected, matching C.
+        assert!(parse_timestamp("Tue 2024-01-01 12:00:00 UTC").is_err());
     }
 
     #[test]

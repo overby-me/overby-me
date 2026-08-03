@@ -31,6 +31,16 @@ fn normalized_form(output: &str) -> Option<String> {
     })
 }
 
+/// The "UNIX seconds:" line value (e.g. "@1704110400"), identical label in
+/// rust and C. Timezone-independent, so a deterministic anchor for `timestamp`.
+fn unix_seconds(output: &str) -> Option<String> {
+    output.lines().find_map(|l| {
+        l.trim()
+            .strip_prefix("UNIX seconds:")
+            .map(|s| s.trim().to_string())
+    })
+}
+
 /// The microsecond value from a `timespan` dump: rust prints "NNN us", C prints
 /// "μs: NNN".
 fn timespan_usec(output: &str) -> Option<String> {
@@ -134,6 +144,55 @@ fn analyze_timespan_matches_c() {
     assert!(
         div.is_empty(),
         "rust vs C systemd-analyze timespan drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
+
+#[test]
+fn analyze_timestamp_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+    // Absolute timestamps only: relative forms ("tomorrow", "+1h", "now") depend
+    // on the wall clock and would race between the two binaries. These have a
+    // fixed epoch, so `Normalized form:` and `UNIX seconds:` are deterministic.
+    let specs = [
+        "2024-01-01 12:00:00 UTC",
+        "2024-06-15 08:30:00 UTC",
+        "2024-01-01 UTC",
+        "Mon 2024-01-01 12:00:00 UTC",
+        // 2024-01-01 is a Monday, so this wrong weekday must be rejected by both.
+        "Tue 2024-01-01 12:00:00 UTC",
+        "2024-02-29 12:00:00 UTC",
+        "2024-12-31 23:59:59 UTC",
+        "1970-01-01 00:00:00 UTC",
+        "2038-01-19 03:14:07 UTC",
+        "2100-01-01 00:00:00 UTC",
+        "2024-01-01 12:00:00.500000 UTC",
+        "@0",
+        "@1704110400",
+        "@1000000000",
+    ];
+    let mut div = Vec::new();
+    for s in specs {
+        let (ro, rok) = run(rust_bin, &["timestamp", s]);
+        let (co, cok) = run(&c_bin, &["timestamp", s]);
+        let rn = normalized_form(&ro);
+        let cn = normalized_form(&co);
+        let ru = unix_seconds(&ro);
+        let cu = unix_seconds(&co);
+        if rn != cn || ru != cu || rok != cok {
+            div.push(format!(
+                "timestamp {s:?}:\n     rust: ok={rok} norm={rn:?} unix={ru:?}\n     c   : ok={cok} norm={cn:?} unix={cu:?}"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze timestamp drift ({}):\n{}",
         div.len(),
         div.join("\n")
     );
