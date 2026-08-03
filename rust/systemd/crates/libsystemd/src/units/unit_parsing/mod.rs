@@ -312,6 +312,13 @@ pub enum UnitCondition {
     /// left-hand side of an assignment) or a key=value assignment (checked for an exact match).
     /// Reads from /proc/cmdline (or /proc/1/cmdline in containers). See systemd.unit(5).
     KernelCommandLine { argument: String, negate: bool },
+    /// ConditionKernelVersion=>=5.10 (true if the running kernel is >= 5.10)
+    /// ConditionKernelVersion=!<4.0 (true if the kernel is NOT < 4.0)
+    /// Compares the running kernel release (/proc/sys/kernel/osrelease) against
+    /// an expression: an operator (`<`, `<=`, `=`/`==`, `!=`/`<>`, `>=`, `>`)
+    /// followed by a version, or with no operator a shell-style glob match.
+    /// See systemd.unit(5).
+    KernelVersion { expression: String, negate: bool },
     /// ConditionDirectoryNotEmpty=/some/path (true if path exists as a directory and is not empty)
     /// ConditionDirectoryNotEmpty=!/some/path (true if path does NOT exist, is not a directory, or is empty)
     /// Checks whether the specified path exists, is a directory, and contains
@@ -787,6 +794,7 @@ fn parse_single_condition(spec: &str) -> Option<UnitCondition> {
         "Capability" => UnitCondition::Capability { capability: value, negate },
         "KernelModuleLoaded" => UnitCondition::KernelModuleLoaded { module: value, negate },
         "KernelCommandLine" => UnitCondition::KernelCommandLine { argument: value, negate },
+        "KernelVersion" => UnitCondition::KernelVersion { expression: value, negate },
         "ControlGroupController" => {
             UnitCondition::ControlGroupController { controller: value, negate }
         }
@@ -815,22 +823,121 @@ pub fn evaluate_condition_spec(spec: &str) -> Option<bool> {
     parse_single_condition(spec).map(|c| c.check())
 }
 
+/// Read the running kernel release (e.g. "6.1.0-foo"), the value C's
+/// ConditionKernelVersion compares against (uname release, exposed at
+/// /proc/sys/kernel/osrelease).
+fn kernel_release_string() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Compare two version strings by numeric dotted components: negative if
+/// `a < b`, 0 if equal, positive if `a > b`. A non-numeric suffix (e.g. the
+/// "-rc1" in "5.10.0-rc1") is ignored, and missing components count as 0.
+fn compare_kernel_versions(a: &str, b: &str) -> i32 {
+    fn split(s: &str) -> Vec<u32> {
+        s.split(|c: char| !c.is_ascii_digit() && c != '.')
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    }
+    let av = split(a);
+    let bv = split(b);
+    for i in 0..av.len().max(bv.len()) {
+        let x = av.get(i).copied().unwrap_or(0);
+        let y = bv.get(i).copied().unwrap_or(0);
+        if x < y {
+            return -1;
+        }
+        if x > y {
+            return 1;
+        }
+    }
+    0
+}
+
+/// Shell-style glob match (only `*` wildcards), used by ConditionKernelVersion
+/// when the expression carries no comparison operator.
+fn matches_kernel_glob(pattern: &str, version: &str) -> bool {
+    if !pattern.contains('*') {
+        return version.contains(pattern);
+    }
+    let mut pos = 0usize;
+    for (i, part) in pattern.split('*').enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !version[pos..].starts_with(part) {
+                return false;
+            }
+            pos += part.len();
+        } else {
+            match version[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Evaluate a `ConditionKernelVersion` expression (the leading `!` already
+/// stripped into `negate` by the parser): an operator (`<`, `<=`, `=`/`==`,
+/// `!=`/`<>`, `>=`, `>`) plus a version, or a glob when no operator is present.
+fn eval_kernel_version_expr(expression: &str) -> bool {
+    let rest = expression.trim();
+    let (op, version) = if let Some(r) = rest.strip_prefix("<=") {
+        ("<=", r.trim())
+    } else if let Some(r) = rest.strip_prefix(">=") {
+        (">=", r.trim())
+    } else if let Some(r) = rest.strip_prefix("==") {
+        ("==", r.trim())
+    } else if let Some(r) = rest.strip_prefix("!=") {
+        ("!=", r.trim())
+    } else if let Some(r) = rest.strip_prefix("<>") {
+        ("!=", r.trim())
+    } else if let Some(r) = rest.strip_prefix('<') {
+        ("<", r.trim())
+    } else if let Some(r) = rest.strip_prefix('>') {
+        (">", r.trim())
+    } else if let Some(r) = rest.strip_prefix('=') {
+        ("==", r.trim())
+    } else {
+        return matches_kernel_glob(rest, &kernel_release_string());
+    };
+    let cmp = compare_kernel_versions(&kernel_release_string(), version);
+    match op {
+        "<" => cmp < 0,
+        "<=" => cmp <= 0,
+        "==" => cmp == 0,
+        "!=" => cmp != 0,
+        ">=" => cmp >= 0,
+        ">" => cmp > 0,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod condition_spec_tests {
     use super::evaluate_condition_spec;
 
     #[test]
     fn evaluates_known_conditions() {
-        // /proc always exists on Linux; negation flips it; any host has a CPU.
+        // /proc always exists on Linux; negation flips it; any host has a CPU
+        // and a kernel newer than 1.0.
         assert_eq!(evaluate_condition_spec("ConditionPathExists=/proc"), Some(true));
         assert_eq!(evaluate_condition_spec("ConditionPathExists=!/proc"), Some(false));
         assert_eq!(evaluate_condition_spec("ConditionCPUs=>=1"), Some(true));
+        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=>=1.0"), Some(true));
+        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=<1.0"), Some(false));
     }
 
     #[test]
-    fn returns_none_for_unmodelled_or_malformed() {
-        // KernelVersion is intentionally left to the caller's fallback.
-        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=>=1.0"), None);
+    fn returns_none_for_unknown_or_malformed() {
         // Unknown name, and a spec without '='.
         assert_eq!(evaluate_condition_spec("ConditionBogusXyz=1"), None);
         assert_eq!(evaluate_condition_spec("ConditionPathExists"), None);
@@ -966,6 +1073,10 @@ impl UnitCondition {
                                 .is_some_and(|(key, _)| key == argument)
                     })
                 };
+                if *negate { !result } else { result }
+            }
+            UnitCondition::KernelVersion { expression, negate } => {
+                let result = eval_kernel_version_expr(expression);
                 if *negate { !result } else { result }
             }
             UnitCondition::PathIsReadWrite { path, negate } => {

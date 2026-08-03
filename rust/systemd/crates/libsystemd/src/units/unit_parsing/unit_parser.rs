@@ -257,6 +257,7 @@ pub fn parse_unit_section(
     let condition_kernel_module_loaded = section.remove("CONDITIONKERNELMODULELOADED");
     let condition_directory_not_empty = section.remove("CONDITIONDIRECTORYNOTEMPTY");
     let condition_kernel_command_line = section.remove("CONDITIONKERNELCOMMANDLINE");
+    let condition_kernel_version = section.remove("CONDITIONKERNELVERSION");
     let condition_control_group_controller = section.remove("CONDITIONCONTROLGROUPCONTROLLER");
     let condition_path_is_read_write = section.remove("CONDITIONPATHISREADWRITE");
     let condition_needs_update = section.remove("CONDITIONNEEDSUPDATE");
@@ -289,6 +290,7 @@ pub fn parse_unit_section(
     let assert_kernel_module_loaded = section.remove("ASSERTKERNELMODULELOADED");
     let assert_directory_not_empty = section.remove("ASSERTDIRECTORYNOTEMPTY");
     let assert_kernel_command_line = section.remove("ASSERTKERNELCOMMANDLINE");
+    let assert_kernel_version = section.remove("ASSERTKERNELVERSION");
     let assert_control_group_controller = section.remove("ASSERTCONTROLGROUPCONTROLLER");
     let assert_path_is_read_write = section.remove("ASSERTPATHISREADWRITE");
     let assert_needs_update = section.remove("ASSERTNEEDSUPDATE");
@@ -491,6 +493,7 @@ pub fn parse_unit_section(
         condition_path_is_symbolic_link,
         condition_user,
         condition_group,
+        condition_kernel_version,
     );
 
     let assertions = parse_condition_or_assert_entries(
@@ -523,6 +526,7 @@ pub fn parse_unit_section(
         assert_path_is_symbolic_link,
         assert_user,
         assert_group,
+        assert_kernel_version,
     );
 
     let success_action = match success_action {
@@ -832,6 +836,7 @@ fn parse_condition_or_assert_entries(
     path_is_symbolic_link: Option<Vec<(u32, String)>>,
     user: Option<Vec<(u32, String)>>,
     group: Option<Vec<(u32, String)>>,
+    kernel_version: Option<Vec<(u32, String)>>,
 ) -> Vec<super::UnitCondition> {
     let mut out = Vec::new();
 
@@ -1117,6 +1122,17 @@ fn parse_condition_or_assert_entries(
         };
         if !value.is_empty() {
             out.push(super::UnitCondition::Group { value, negate });
+        }
+    }
+    for (_, raw) in kernel_version.unwrap_or_default() {
+        let trimmed = raw.trim();
+        let (expression, negate) = if let Some(stripped) = trimmed.strip_prefix('!') {
+            (stripped.trim().to_owned(), true)
+        } else {
+            (trimmed.to_owned(), false)
+        };
+        if !expression.is_empty() {
+            out.push(super::UnitCondition::KernelVersion { expression, negate });
         }
     }
 

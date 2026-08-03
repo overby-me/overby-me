@@ -31003,6 +31003,43 @@ fn test_condition_first_boot_yes_parsed() {
 }
 
 #[test]
+fn test_condition_kernel_version_parsed() {
+    // Regression: ConditionKernelVersion= was not wired into the unit parser at
+    // all, so the condition was silently dropped and never gated the unit.
+    let test_service_str = r#"
+    [Unit]
+    ConditionKernelVersion = >=5.10
+    ConditionKernelVersion = !<4.0
+
+    [Service]
+    ExecStart = /bin/myservice
+    "#;
+
+    let parsed_file = crate::units::parse_file(test_service_str).unwrap();
+    let service = crate::units::parse_service(
+        parsed_file,
+        &std::path::PathBuf::from("/path/to/unitfile.service"),
+    )
+    .unwrap();
+
+    assert_eq!(service.common.unit.conditions.len(), 2);
+    match &service.common.unit.conditions[0] {
+        crate::units::UnitCondition::KernelVersion { expression, negate } => {
+            assert_eq!(expression, ">=5.10");
+            assert!(!negate);
+        }
+        other => panic!("Expected KernelVersion condition, got {:?}", other),
+    }
+    match &service.common.unit.conditions[1] {
+        crate::units::UnitCondition::KernelVersion { expression, negate } => {
+            assert_eq!(expression, "<4.0", "a leading ! must strip into negate");
+            assert!(*negate);
+        }
+        other => panic!("Expected negated KernelVersion condition, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_condition_first_boot_no_parsed() {
     let test_service_str = r#"
     [Unit]
