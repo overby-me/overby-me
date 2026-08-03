@@ -298,12 +298,32 @@ pub fn Layout() -> Element {
             _ => vec![],
         };
         let token = SESSION.read().access_token.clone();
-        crate::use_data_resource!(|(segments, token)| async move {
-            *NAV_CRUMBS_LOADING.write() = true;
-            let crumbs = graphql::path_crumbs(token.as_deref(), &segments)
+        // Returns the crumbs rather than writing them, so the read cache has
+        // something worth holding. Delivered by side effect they were invisible
+        // to it, and every navigation showed the OUTGOING path's trail for a
+        // round trip, even for a page visited a minute ago.
+        let resolved = crate::use_data_resource!(|(segments, token)| async move {
+            graphql::path_crumbs(token.as_deref(), &segments)
                 .await
-                .unwrap_or_default();
-            *CONTEXT_DEPTH.write() = model::deepest_context_depth(&crumbs);
+                .unwrap_or_default()
+        });
+        // Publish whatever is current for this path, cached or fresh.
+        use_effect(move || {
+            let crumbs = resolved.read().clone();
+            // Nothing known for this path YET, which is what the bar reads as
+            // "still resolving" rather than "does not resolve". A cached trail
+            // counts as known: it is this path's, not the last one's.
+            let waiting = crumbs.is_none();
+            if *NAV_CRUMBS_LOADING.peek() != waiting {
+                *NAV_CRUMBS_LOADING.write() = waiting;
+            }
+            let Some(crumbs) = crumbs else {
+                return;
+            };
+            let depth = model::deepest_context_depth(&crumbs);
+            if *CONTEXT_DEPTH.peek() != depth {
+                *CONTEXT_DEPTH.write() = depth;
+            }
             // Reflect the current node in the browser tab title.
             let title = match crumbs.last() {
                 Some(c) => format!("{} · RadikalWiki", c.name),
@@ -313,7 +333,6 @@ pub fn Layout() -> Element {
                 doc.set_title(&title);
             }
             *NAV_CRUMBS.write() = crumbs;
-            *NAV_CRUMBS_LOADING.write() = false;
         });
     }
 
@@ -338,6 +357,10 @@ pub fn Layout() -> Element {
             invite_refresh,
         );
         let rev = *invite_refresh.read();
+        // Delivered by side effect on purpose, unlike the crumbs above: this
+        // lives in the Layout, which never remounts, and its dependencies do
+        // not change within a session, so returning it to be cached would buy
+        // nothing.
         crate::use_data_resource!(|(uid, email, token, rev)| async move {
             let _ = rev;
             if let (Some(uid), Some(email)) = (uid, email) {
