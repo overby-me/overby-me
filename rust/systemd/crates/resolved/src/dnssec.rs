@@ -1598,6 +1598,55 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_dnssec_rdata_parsers_never_panic() {
+        // Robustness net (task #22): DNSSEC rdata parsers (DNSKEY/RRSIG/DS/NSEC/
+        // NSEC3, the type-bitmap and uncompressed-name helpers) parse
+        // attacker-controlled RR data from DNS responses -- a historically buggy
+        // offset/length surface. None must panic or hang on malformed rdata.
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xd0ec_5ec5_1234_abcd;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..40_000u32 {
+                let len = (next() % 256) as usize;
+                let rdata: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+                let start = if rdata.is_empty() {
+                    0
+                } else {
+                    (next() as usize) % (rdata.len() + 8)
+                };
+                let input = rdata.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = DnskeyRecord::parse("example.com", 3600, &input);
+                    let _ = RrsigRecord::parse("example.com", 3600, &input);
+                    let _ = DsRecord::parse("example.com", 3600, &input);
+                    let _ = NsecRecord::parse("example.com", 3600, &input);
+                    let _ = Nsec3Record::parse("example.com", 3600, &input);
+                    let _ = parse_type_bit_maps(&input);
+                    let _ = parse_name_uncompressed(&input, start);
+                });
+                assert!(
+                    res.is_ok(),
+                    "dnssec parser panicked: rdata={rdata:?} start={start}"
+                );
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "dnssec fuzz did not finish in 30s -- a malformed rdata hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
+    #[test]
     fn test_algorithm_unknown() {
         let alg = DnssecAlgorithm::from_u8(99);
         assert_eq!(alg, DnssecAlgorithm::Unknown(99));
