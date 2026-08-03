@@ -1,7 +1,11 @@
 {
   name = "80-NOTIFYACCESS";
   # Custom test: verify NotifyAccess= enforcement via SCM_CREDENTIALS.
-  # Skip upstream test (uses systemd-run --wait, busctl, Type=notify-reload).
+  # Substitutes the upstream script. Its remaining unmet needs are the
+  # Type=notify-reload reload substates (reload-signal/reload-notify) with
+  # ReloadResult=timeout, plus the TEST-80-NOTIFYACCESS.units fixtures. The
+  # status-error triad (ERRNO=/BUSERROR=/VARLINKERROR=) and the NOTIFYACCESS=
+  # runtime override now work.
   patchScript = ''
         cat > TEST-80-NOTIFYACCESS.sh << 'TESTEOF'
     #!/usr/bin/env bash
