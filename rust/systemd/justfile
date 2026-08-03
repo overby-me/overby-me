@@ -47,3 +47,6 @@ differential:
     # timespan / calendar parsing vs systemd-analyze
     SYSTEMD_ANALYZE="$sysd/bin/systemd-analyze" \
       cargo test -p systemd-analyze --test differential_vs_c -- --nocapture
+    # well-known / GPT-partition-type ID table vs systemd-id128
+    SYSTEMD_ID128="$sysd/bin/systemd-id128" \
+      cargo test -p systemd-id128 --test differential_vs_c -- --nocapture
