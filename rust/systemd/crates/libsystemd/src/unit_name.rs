@@ -133,6 +133,17 @@ pub fn unit_name_unescape(s: &str) -> Option<String> {
 /// Returns `None` for invalid paths (relative paths like `.` or `..`,
 /// paths that resolve to nothing meaningful, or paths exceeding length limits).
 pub fn unit_name_path_escape_checked(path: &str) -> Option<String> {
+    // C's unit_name_path_escape() runs path_simplify() then treats the
+    // empty-or-root result as the root escape "-". The empty string simplifies
+    // to empty, so C escapes it to "-" (the caller may still warn that this is
+    // not reversible). Note this must come before the relative-path rejection,
+    // and it must key off the *original* input being empty rather than the
+    // normalized form: normalize_path() also reduces "." to empty, but a bare
+    // "." is a non-absolute path C rejects, so it must fall through below.
+    if path.is_empty() {
+        return Some("-".to_string());
+    }
+
     // Relative paths (not starting with /) are invalid for path escaping
     if !path.starts_with('/') {
         return None;
@@ -552,6 +563,23 @@ mod tests {
         assert_eq!(unit_name_path_escape("/foo/bar"), "foo-bar");
         assert_eq!(unit_name_path_escape("/foo//bar/"), "foo-bar");
         assert_eq!(unit_name_path_escape("/foo bar/baz"), r"foo\x20bar-baz");
+    }
+
+    #[test]
+    fn test_path_escape_checked_empty_and_relative() {
+        // C's unit_name_path_escape() maps the empty input (empty-or-root after
+        // path_simplify) to the root escape "-", exiting 0. A bare "." or a
+        // relative path is non-absolute and rejected (C exits 1 -> None here).
+        assert_eq!(unit_name_path_escape_checked(""), Some("-".to_string()));
+        assert_eq!(unit_name_path_escape_checked("/"), Some("-".to_string()));
+        assert_eq!(unit_name_path_escape_checked("."), None);
+        assert_eq!(unit_name_path_escape_checked(".."), None);
+        assert_eq!(unit_name_path_escape_checked("foo"), None);
+        assert_eq!(unit_name_path_escape_checked("/foo/../bar"), None);
+        assert_eq!(
+            unit_name_path_escape_checked("/dev/sda1"),
+            Some("dev-sda1".to_string())
+        );
     }
 
     #[test]

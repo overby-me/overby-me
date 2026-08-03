@@ -126,6 +126,16 @@ fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
             let escaped = unit_name::unit_name_path_escape_checked(input)
                 .ok_or_else(|| format!("Invalid path: {input}"))?;
 
+            // Mirror C's escape-tool: when the escape succeeds for an input that
+            // isn't a valid file system path, warn that it is not reversible.
+            // The only such input that still escapes (to "-") is the empty
+            // string; a valid absolute path escapes without a warning.
+            if input.is_empty() {
+                eprintln!(
+                    "Input '{input}' is not a valid file system path, escaping is likely not going to be reversible."
+                );
+            }
+
             // Apply --template if given
             if let Some(template) = &cli.template {
                 if !unit_name::is_template(template) {
