@@ -1750,6 +1750,50 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
+    fn fuzz_ipv6_ra_parsers_never_panic() {
+        // Robustness net (task #22): IPv6 Router Advertisement parsing consumes
+        // attacker-controlled multicast RA packets. parse_ra and its option
+        // sub-parsers (prefix/MTU/RDNSS/DNSSL/dns-names/route/ipv6) must never
+        // panic or hang on malformed input; the sub-parsers are also driven
+        // directly so deep paths are covered.
+        let handle = std::thread::spawn(|| {
+            let src = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+            let mut state: u64 = 0x4a06_5eed_1234_abcd;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let len = (next() % 256) as usize;
+                let input: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+                let buf = input.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = parse_ra(&input, src);
+                    let _ = parse_prefix_info(&input);
+                    let _ = parse_mtu_option(&input);
+                    let _ = parse_rdnss(&input);
+                    let _ = parse_dnssl(&input);
+                    let _ = parse_dns_names(&input);
+                    let _ = parse_route_info(&input);
+                    let _ = parse_ipv6(&input);
+                });
+                assert!(res.is_ok(), "ipv6_ra parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "ipv6_ra fuzz did not finish in 30s -- a malformed RA hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
+    #[test]
     fn test_stable_privacy_iid_deterministic() {
         let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0, 1, 0, 0, 0, 0);
         let secret = b"test-secret-key-1234567890abcdef";
