@@ -1478,11 +1478,30 @@ fn deferred_start_fail_cleanup(
 pub(crate) fn dispatcher_read(
     run_info: &ArcMutRuntimeInfo,
 ) -> std::sync::RwLockReadGuard<'_, crate::runtime_info::RuntimeInfo> {
+    let spin_start = std::time::Instant::now();
+    let mut warned = false;
     loop {
         match run_info.try_read() {
-            Ok(guard) => return guard,
+            Ok(guard) => {
+                if warned {
+                    crate::entrypoints::kmsg(&format!(
+                        "DISPATCHER-READ recovered after {:?}",
+                        spin_start.elapsed()
+                    ));
+                }
+                return guard;
+            }
             Err(std::sync::TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
+                // A long spin here is the dispatcher-throughput stall that
+                // flakes 16/59: make it self-diagnosing in kmsg instead of
+                // silent (the margin analysis lives in the task ledger).
+                if !warned && spin_start.elapsed() >= std::time::Duration::from_millis(500) {
+                    warned = true;
+                    crate::entrypoints::kmsg(
+                        "DISPATCHER-READ stalled >500ms behind a queued writer",
+                    );
+                }
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
         }
