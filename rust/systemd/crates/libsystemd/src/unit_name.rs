@@ -257,6 +257,10 @@ fn unit_name_mangle_escape(s: &str) -> String {
         if i == 0 && c == '.' {
             // Leading dot must be escaped
             result.push_str(&format!("\\x{:02x}", c as u32));
+        } else if c == '/' {
+            // A path separator mangles to '-', not \x2f: C's do_escape_mangle
+            // maps '/' -> '-' (only --path escaping keeps the byte value).
+            result.push('-');
         } else if is_valid_char(c) || c == '-' || c == '@' || c == '\\' {
             result.push(c);
         } else {

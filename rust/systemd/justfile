@@ -26,16 +26,21 @@ difftest-update-snapshots:
 difftest-list:
     cargo test --package difftest -- --list
 
-# Run the in-process differential parser oracles against the C systemd binaries
-# (task #22/#21). Resolves systemd-journal-remote + journalctl from nixpkgs and
-# runs the `differential_*` tests, which skip when those env vars are unset. This
-# turns upstream parser drift into a failing test without a VM.
-differential-parsers:
+# Run the in-process differential oracles against the C systemd binaries
+# (task #22/#21): compare rust-systemd against the same input through real
+# systemd. Resolves the C binaries from nixpkgs and sets the env vars that gate
+# each differential test (they skip when unset), turning upstream drift into a
+# failing test without a VM.
+differential:
     #!/usr/bin/env bash
     set -euo pipefail
     nix build --no-link 'nixpkgs#systemd'
     sysd=$(nix eval --raw 'nixpkgs#systemd.outPath')
     echo "using C systemd at $sysd"
+    # journal export-format parser vs systemd-journal-remote
     SYSTEMD_JOURNAL_REMOTE="$sysd/lib/systemd/systemd-journal-remote" \
       JOURNALCTL="$sysd/bin/journalctl" \
       cargo test -p libsystemd differential_ -- --nocapture
+    # unit-name escaping vs systemd-escape
+    SYSTEMD_ESCAPE="$sysd/bin/systemd-escape" \
+      cargo test -p systemd-escape --test differential_vs_c -- --nocapture
