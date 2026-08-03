@@ -589,6 +589,19 @@ fn start_service_with_filedescriptors(
         }
     }
 
+    // RestrictFileSystems= is parsed and reported over D-Bus but is not enforced
+    // yet (no LSM-BPF filesystem filter is applied). Warn once so the running
+    // security posture is not silently weaker than the unit's config implies.
+    if !conf.exec_config.restrict_file_systems.is_empty() {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            log::warn!(
+                "RestrictFileSystems= is set (e.g. on {name}) but is not enforced yet; \
+                 no filesystem-type restriction is applied"
+            );
+        });
+    }
+
     // We first exec into our own executable again and apply this config
     // We transfer the config via a anonymous shared memory file
     let mut exec_helper_conf = crate::entrypoints::ExecHelperConfig {
