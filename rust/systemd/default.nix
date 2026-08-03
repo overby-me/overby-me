@@ -501,6 +501,7 @@ in {
       allowReboot = t.allowReboot or false;
       useBootLoader = t.useBootLoader or false;
       expectedSkip = t.expectedSkip or false;
+      jobGraph = t.jobGraph or false;
     };
   in
     lib.listToAttrs (

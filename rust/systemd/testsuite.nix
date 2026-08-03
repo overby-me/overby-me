@@ -40,6 +40,12 @@
   # re-established exactly like the first boot. Needed by multi-boot reboot
   # tests; implies allowReboot. Opt-in per test (slower: builds a disk image).
   useBootLoader ? false,
+  # Boot PID 1 with SYSTEMD_RS_JOB_GRAPH=1 so it takes the increment-4
+  # job-graph activation path (docs/EVENT-LOOP.md) instead of the default
+  # fixpoint sweep. Opt-in per test for A/B comparison while the increment is
+  # developed; removed with the flag when the increment merges. No effect for
+  # useUpstreamSystemd (the env var is rust-systemd-only).
+  jobGraph ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -141,6 +147,19 @@ in
         then pkgs.systemd
         else rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
+
+      # Increment-4 A/B: when jobGraph is set, PID 1 is exec'd through a wrapper
+      # that exports SYSTEMD_RS_JOB_GRAPH=1 before handing off to the real
+      # binary at the stage-2 default path (which resolves to systemd.package,
+      # i.e. rust-systemd). The env var survives the exec and rust-systemd's own
+      # re-exec. Left at its default (unset) for every other test, so this is a
+      # no-op unless a test opts in.
+      boot.systemdExecutable = lib.mkIf (jobGraph && !useUpstreamSystemd) (
+        lib.mkForce "${pkgs.writeShellScript "rust-systemd-jobgraph" ''
+          export SYSTEMD_RS_JOB_GRAPH=1
+          exec /run/current-system/systemd/lib/systemd/systemd "$@"
+        ''}"
+      );
 
       # Replace the upstream bash stage-2-init.sh with a version that
       # strips the racy `exec > >(tee -i /proc/self/fd/"$logOutFd" |
