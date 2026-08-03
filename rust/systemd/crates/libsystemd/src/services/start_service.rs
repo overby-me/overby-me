@@ -589,17 +589,28 @@ fn start_service_with_filedescriptors(
         }
     }
 
-    // RestrictFileSystems= is parsed and reported over D-Bus but is not enforced
-    // yet (no LSM-BPF filesystem filter is applied). Warn once so the running
-    // security posture is not silently weaker than the unit's config implies.
-    if !conf.exec_config.restrict_file_systems.is_empty() {
-        static WARNED: std::sync::Once = std::sync::Once::new();
-        WARNED.call_once(|| {
-            log::warn!(
-                "RestrictFileSystems= is set (e.g. on {name}) but is not enforced yet; \
-                 no filesystem-type restriction is applied"
-            );
-        });
+    // RestrictFileSystems= and RestrictNetworkInterfaces= are parsed and reported
+    // over D-Bus but not enforced yet (no LSM-BPF filter is applied). Warn once
+    // so the running security posture is not silently weaker than the unit's
+    // config implies.
+    {
+        let mut unenforced: Vec<&str> = Vec::new();
+        if !conf.exec_config.restrict_file_systems.is_empty() {
+            unenforced.push("RestrictFileSystems=");
+        }
+        if !conf.restrict_network_interfaces.is_empty() {
+            unenforced.push("RestrictNetworkInterfaces=");
+        }
+        if !unenforced.is_empty() {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            let joined = unenforced.join(", ");
+            WARNED.call_once(|| {
+                log::warn!(
+                    "{joined} is set (e.g. on {name}) but is not enforced yet; \
+                     no LSM-BPF restriction is applied"
+                );
+            });
+        }
     }
 
     // We first exec into our own executable again and apply this config
