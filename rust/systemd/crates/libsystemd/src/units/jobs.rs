@@ -209,6 +209,48 @@ impl JobRegistry {
         }
     }
 
+    /// Mark an installed `Waiting` job ready to dispatch by appending it to
+    /// the run queue. The dispatcher enqueues a job once its ordering
+    /// prerequisites are met (`unstarted_deps` empty); increment 4's drain
+    /// step pops it with [`Self::pop_ready`]. Idempotent: a job already in the
+    /// queue is not duplicated, and a job that is not installed or no longer
+    /// `Waiting` is ignored (finished jobs are already retained out of the
+    /// queue by [`Self::finish`]).
+    pub fn enqueue(&mut self, id: JobId) {
+        if self
+            .jobs
+            .get(&id)
+            .is_some_and(|job| job.state == JobState::Waiting)
+            && !self.run_queue.contains(&id)
+        {
+            self.run_queue.push_back(id);
+        }
+    }
+
+    /// Pop the next ready job from the run queue and flip it to `Running`,
+    /// returning its ID for the dispatcher to run the initiate half of. Skips
+    /// stale entries (a job cancelled between enqueue and dispatch, defended
+    /// against even though [`Self::finish`] retains them out). Returns `None`
+    /// when the queue holds no dispatchable job.
+    pub fn pop_ready(&mut self) -> Option<JobId> {
+        while let Some(id) = self.run_queue.pop_front() {
+            if let Some(job) = self.jobs.get_mut(&id)
+                && job.state == JobState::Waiting
+            {
+                job.state = JobState::Running;
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// Whether the run queue currently holds any job. The dispatcher uses this
+    /// to decide whether a drain pass is worth taking.
+    #[must_use]
+    pub fn run_queue_is_empty(&self) -> bool {
+        self.run_queue.is_empty()
+    }
+
     /// Complete and uninstall a job. Idempotent: finishing an ID that is no
     /// longer installed returns `None` and has no effect, so every owner may
     /// call it defensively.
@@ -334,6 +376,17 @@ impl Drop for JobHandle {
     }
 }
 
+/// Whether the increment-4 job-graph dispatch path is enabled. While the
+/// increment is developed it is opt-in via `SYSTEMD_RS_JOB_GRAPH=1` so the
+/// default boot stays on the fixpoint-sweep activation path for A/B
+/// comparison; the flag (and the old path) are deleted when the increment
+/// merges (docs/EVENT-LOOP.md, "Inc 4"). Matches the `SYSTEMD_RS_REEXEC`
+/// idiom read in service_manager.rs / signal_handler.rs.
+#[must_use]
+pub fn job_graph_enabled() -> bool {
+    std::env::var("SYSTEMD_RS_JOB_GRAPH").is_ok_and(|v| v == "1")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{JobKind, JobMode, JobRegistry, JobResult, JobState};
@@ -449,5 +502,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(reg.get(a).unwrap().source, ActivationSource::NonBlocking);
+    }
+
+    // --- increment 4: run-queue dispatch primitives ---
+
+    #[test]
+    fn enqueue_then_pop_ready_marks_running_in_fifo_order() {
+        let mut reg = JobRegistry::new();
+        let a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        let b = create(&mut reg, "b.service", JobKind::Start, JobMode::Replace).unwrap();
+        assert!(reg.run_queue_is_empty());
+        reg.enqueue(a);
+        reg.enqueue(b);
+        assert!(!reg.run_queue_is_empty());
+        // FIFO: a before b, each flipped Waiting -> Running on pop.
+        assert_eq!(reg.pop_ready(), Some(a));
+        assert_eq!(reg.get(a).unwrap().state, JobState::Running);
+        assert_eq!(reg.get(b).unwrap().state, JobState::Waiting);
+        assert_eq!(reg.pop_ready(), Some(b));
+        assert_eq!(reg.pop_ready(), None);
+        assert!(reg.run_queue_is_empty());
+    }
+
+    #[test]
+    fn enqueue_is_idempotent_and_ignores_non_waiting() {
+        let mut reg = JobRegistry::new();
+        let a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        // Queuing the same Waiting job twice does not duplicate it.
+        reg.enqueue(a);
+        reg.enqueue(a);
+        assert_eq!(reg.pop_ready(), Some(a));
+        assert_eq!(reg.pop_ready(), None);
+        // Now Running: re-enqueue is a no-op (only Waiting jobs are queued).
+        reg.enqueue(a);
+        assert!(reg.run_queue_is_empty());
+        // An unknown id is ignored too.
+        reg.enqueue(9999);
+        assert!(reg.run_queue_is_empty());
+    }
+
+    #[test]
+    fn pop_ready_skips_finished_stale_entries() {
+        let mut reg = JobRegistry::new();
+        let a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        let b = create(&mut reg, "b.service", JobKind::Start, JobMode::Replace).unwrap();
+        reg.enqueue(a);
+        reg.enqueue(b);
+        // finish() retains a out of the run queue, so it is gone cleanly.
+        reg.finish(a, JobResult::Canceled);
+        // Force a stale entry (an id no longer installed) to prove pop_ready
+        // defends against one regardless, and still returns the live job.
+        reg.run_queue.push_front(a);
+        assert_eq!(reg.pop_ready(), Some(b));
+        assert_eq!(reg.pop_ready(), None);
     }
 }
