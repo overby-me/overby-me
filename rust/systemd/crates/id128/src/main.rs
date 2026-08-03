@@ -1871,15 +1871,32 @@ fn read_invocation_id() -> Result<Id128, String> {
 // Output formatting
 // ---------------------------------------------------------------------------
 
+/// Port of C's `id128_pretty_print_sample` (src/shared/id128-print.c): the
+/// `--pretty` sample block for `id`, using `name` as the C macro identifier.
+/// This emits the non-terminal form (no ANSI highlighting, plain link text),
+/// which is what C produces when stdout is not a TTY.
+fn print_pretty_sample(name: &str, id: Id128) {
+    let hex = id.to_hex();
+    println!("As string:");
+    println!("{hex}");
+    println!();
+    println!("As UUID:");
+    println!("{}", id.to_uuid());
+    println!();
+    println!("As systemd-id128(1) macro:");
+    println!("#define {name} SD_ID128_MAKE({})", id.to_make());
+    println!();
+    println!("As Python constant:");
+    println!(">>> import uuid");
+    println!(">>> {name} = uuid.UUID('{hex}')");
+}
+
 fn print_id(id: Id128, mode: PrintMode, value_only: bool, name: Option<&str>) {
     match mode {
-        PrintMode::Pretty => {
-            let label = name.unwrap_or("XYZ").to_uppercase().replace('-', "_");
-            println!("As string:");
-            println!("SD_ID128_CONST_STR(\"{}\")", id.to_uuid());
-            println!("As macro:");
-            println!("#define MESSAGE_{} SD_ID128_MAKE({})", label, id.to_make());
-        }
+        // C's id128_pretty_print always names the sample "XYZ" for the
+        // machine-id/boot-id/invocation-id/new verbs (the show table uses the
+        // entry name instead; see print_show_table).
+        PrintMode::Pretty => print_pretty_sample("XYZ", id),
         _ => {
             let formatted = id.format(mode);
             if !value_only && let Some(name) = name {
@@ -1902,26 +1919,34 @@ fn print_show_table(
         JsonMode::Off => {
             if mode == PrintMode::Pretty {
                 for (i, (name, uuid)) in entries.iter().enumerate() {
+                    // C's show_one derives the macro name from the entry name
+                    // (dashes to underscores, upper-cased) and prints a trailing
+                    // blank line after every sample except the first.
+                    let label = name.to_uppercase().replace('-', "_");
+                    print_pretty_sample(&label, *uuid);
                     if i > 0 {
                         println!();
                     }
-                    let label = name.to_uppercase().replace('-', "_");
-                    println!("/* {label} {} */", uuid.to_uuid());
-                    println!(
-                        "#define SD_ID128_CONST_STR_{label}  SD_ID128_MAKE_STR({})",
-                        uuid.to_make()
-                    );
                 }
             } else if value_only {
                 for (_, uuid) in entries {
                     println!("{}", uuid.format(mode));
                 }
             } else {
+                // C builds the table with table_set_width(0), i.e. the NAME
+                // column fits the widest name shown (never narrower than the
+                // "NAME" header) with a single-space separator before the ID.
+                let name_w = entries
+                    .iter()
+                    .map(|(n, _)| n.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max("NAME".len());
                 if !no_legend {
-                    println!("NAME{:width$}ID", "", width = 28);
+                    println!("{:<name_w$} ID", "NAME");
                 }
                 for (name, uuid) in entries {
-                    println!("{name:<32}{}", uuid.format(mode));
+                    println!("{:<name_w$} {}", name, uuid.format(mode));
                 }
             }
         }

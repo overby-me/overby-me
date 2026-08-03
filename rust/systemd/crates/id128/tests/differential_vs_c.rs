@@ -126,3 +126,62 @@ fn id128_app_specific_matches_c() {
     }
     assert!(c_successes > 0, "no app-specific derivation succeeded; corpus is vacuous");
 }
+
+/// Run `bin args...` and capture (stdout, stderr, success) verbatim.
+fn run_full(bin: &str, args: &[&str]) -> (String, String, bool) {
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run {bin} {args:?}: {e}"));
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.success(),
+    )
+}
+
+/// Locks the exact CLI output the pair-set `show` test cannot see: the
+/// `--pretty` sample block (C's id128_pretty_print_sample: "As string/UUID/
+/// systemd-id128(1) macro/Python constant", named XYZ for the id verbs and after
+/// the entry for `show`), and the `show` table's auto-sized NAME column. The
+/// machine-id/boot-id verbs read host state but both binaries read the SAME
+/// host, so the derivation is deterministic; the `show` table is a static
+/// (well-known + GPT) map with no kernel probe.
+#[test]
+fn id128_output_format_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ID128") else {
+        eprintln!("skip differential: SYSTEMD_ID128 unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-id128");
+
+    let cases: &[&[&str]] = &[
+        &["machine-id", "-p"],
+        &["boot-id", "-p"],
+        &["machine-id", "-u"],
+        &["machine-id", "-P"],
+        &["show", "root-alpha", "-p"],
+        &["show", "root-alpha", "root-alpha-verity", "-p"], // multi-entry blanks
+        &["show", "root-alpha"],
+        &["show", "root-alpha", "-u"],
+        &["show", "root-alpha", "--no-legend"],
+        &["show", "-u"], // full static table, auto-width
+    ];
+
+    let mut divergences = Vec::new();
+    for args in cases {
+        let (r_out, r_err, r_ok) = run_full(rust_bin, args);
+        let (c_out, c_err, c_ok) = run_full(&c_bin, args);
+        if r_out != c_out || r_err != c_err || r_ok != c_ok {
+            divergences.push(format!(
+                "args={args:?}\n     rust: ok={r_ok} out={r_out:?} err={r_err:?}\n     c   : ok={c_ok} out={c_out:?} err={c_err:?}"
+            ));
+        }
+    }
+    assert!(
+        divergences.is_empty(),
+        "rust vs C systemd-id128 output drift ({} case(s)):\n{}",
+        divergences.len(),
+        divergences.join("\n")
+    );
+}
