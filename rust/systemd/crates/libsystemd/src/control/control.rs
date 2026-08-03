@@ -5987,6 +5987,130 @@ fn normalize_markers(existing: u32, new: u32) -> u32 {
     markers
 }
 
+/// Synchronous `systemctl stop` via the dispatcher stop tree
+/// (docs/EVENT-LOOP.md inc 3). Each unit's stop closure runs as a
+/// dependency-ordered tree on the dispatcher; the control handler blocks on
+/// the Stop job's waiter so the client contract ("returns when stopped") is
+/// preserved, without holding a read guard across the deactivation. Mirrors
+/// the inline `Command::Stop` arm's semantics: service-before-socket order
+/// (already applied by the caller), the frozen-unit error, the
+/// deactivation-in-progress/irreversible conflict flags that a concurrent
+/// `StartNoBlock` reads, the restart-requested cancel, and the transient
+/// runtime-fragment removal.
+fn stop_units_via_tree(
+    actual_names: &[String],
+    irreversible: bool,
+    stop_jmode: crate::units::jobs::JobMode,
+    run_info: &ArcMutRuntimeInfo,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering::SeqCst;
+
+    // Expand names to ids under a brief guard, preserving the frozen-unit
+    // error, the multi-match error, and the not-found skip.
+    let mut ids_to_stop: Vec<crate::units::UnitId> = Vec::new();
+    {
+        let ri = run_info.read_poisoned();
+        for unit_name in actual_names {
+            let units = find_units_with_name(unit_name, &ri.unit_table);
+            if units.is_empty() {
+                continue;
+            }
+            if units.len() > 1 && !is_glob_pattern(unit_name) {
+                let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
+                return Err(format!(
+                    "More than one unit found with name: {unit_name}: {names:?}"
+                ));
+            }
+            for u in &units {
+                let freezer_state = crate::control::unit_properties::get_freezer_state_pub(u);
+                if matches!(
+                    freezer_state,
+                    crate::units::FreezerState::Frozen | crate::units::FreezerState::FrozenByParent
+                ) {
+                    return Err(format!("Unit {} is frozen, cannot stop.", u.id.name));
+                }
+            }
+            ids_to_stop.extend(units.iter().map(|u| u.id.clone()));
+        }
+    }
+
+    for id in ids_to_stop {
+        // Pre-flight under a brief guard: arm the conflict flags a
+        // concurrent StartNoBlock reads, and create the Stop job with a
+        // waiter the tree signals on completion.
+        let rx = {
+            let ri = run_info.read_poisoned();
+            if let Some(unit) = ri.unit_table.get(&id) {
+                unit.common.deactivation_in_progress.store(true, SeqCst);
+                unit.common.deactivation_irreversible.store(irreversible, SeqCst);
+                unit.common
+                    .start_requested_during_deactivation
+                    .store(false, SeqCst);
+            }
+            let mut registry = ri.jobs.lock().unwrap();
+            let job_id = registry.create(
+                id.clone(),
+                crate::units::jobs::JobKind::Stop,
+                crate::units::ActivationSource::Regular,
+                stop_jmode,
+            )?;
+            registry.set_running(job_id);
+            let (tx, rx) = std::sync::mpsc::channel();
+            registry.add_waiter(job_id, tx);
+            drop(registry);
+            if let Some(handle) = crate::entrypoints::dispatcher::global() {
+                handle.send_normal(crate::entrypoints::dispatcher::Event::StopUnitTree {
+                    root: id.clone(),
+                    job: Some(job_id),
+                });
+            }
+            rx
+        };
+
+        // Block until the tree finishes the job, bounded so a stuck stop
+        // cannot hang the control connection forever.
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(120));
+
+        // Post under a brief guard: clear the conflict flags, apply the
+        // restart-requested cancel, and remove a transient unit's runtime
+        // fragment.
+        let ri = run_info.read_poisoned();
+        let restart_requested = if let Some(unit) = ri.unit_table.get(&id) {
+            let requested = unit
+                .common
+                .start_requested_during_deactivation
+                .load(SeqCst);
+            unit.common.deactivation_in_progress.store(false, SeqCst);
+            unit.common.deactivation_irreversible.store(false, SeqCst);
+            unit.common
+                .start_requested_during_deactivation
+                .store(false, SeqCst);
+            requested
+        } else {
+            false
+        };
+        // A start requested during a non-irreversible stop cancels it: the
+        // unit is restored to Started and the client sees the cancel.
+        if restart_requested && !irreversible {
+            if let Some(unit) = ri.unit_table.get(&id) {
+                let mut status = unit.common.status.write_poisoned();
+                *status = crate::units::UnitStatus::Started(crate::units::StatusStarted::Running);
+            }
+            return Err(format!("Job for {} canceled.", id.name));
+        }
+        // A stopped transient unit loses its runtime fragment (so
+        // `systemctl cat` fails) but stays loaded until reset-failed or
+        // daemon-reload, matching the inline arm.
+        if let Some(unit) = ri.unit_table.get(&id)
+            && let Some(path) = unit.common.unit.fragment_path.as_ref()
+            && path.starts_with("/run/systemd/transient")
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+    Ok(())
+}
+
 pub fn execute_command(
     cmd: Command,
     run_info: ArcMutRuntimeInfo,
@@ -10471,6 +10595,16 @@ pub fn execute_command(
                 let b_is_socket = b.ends_with(".socket");
                 a_is_socket.cmp(&b_is_socket)
             });
+
+            // With a live dispatcher, run each stop as a dependency-ordered
+            // tree transaction and block on the job waiter, so no read guard
+            // is held across the deactivation (docs/EVENT-LOOP.md inc 3,
+            // invariant I1). Without one (tests, early boot) the inline
+            // recursive path below runs unchanged.
+            if crate::entrypoints::dispatcher::global().is_some() {
+                stop_units_via_tree(&actual_names, irreversible, stop_jmode, &run_info)?;
+                return Ok(result_vec);
+            }
 
             {
             let run_info = &*run_info.read_poisoned();
