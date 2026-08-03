@@ -305,7 +305,7 @@ fn AddCandidateButton(
                     }
                     Err(e) => {
                         pending.write().retain(|p| p.key != key);
-                        log::error!("add candidate failed: {e}");
+                        crate::errors::log_handled("add candidate failed", &e);
                         crate::snackbar::show_snackbar(&e);
                     }
                 }
@@ -433,7 +433,7 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                     Err(e) => {
                         // Close the dialog and surface the error instead of leaving
                         // the user staring at an open dialog with no feedback.
-                        log::error!("add amendment failed: {e}");
+                        crate::errors::log_handled("add amendment failed", &e);
                         open.set(false);
                         crate::snackbar::show_snackbar(&e);
                     }

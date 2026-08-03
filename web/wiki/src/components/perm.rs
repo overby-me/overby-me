@@ -28,7 +28,7 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
     let load = perms.read().clone();
     let failed = matches!(load, Some(Err(_)));
     if let Some(Err(e)) = &load {
-        log::error!("permissions load failed: {e}");
+        crate::errors::log_handled("permissions load failed", e);
     }
     let mut perms = load.and_then(|r| r.ok()).unwrap_or_default();
     perms.sort_by(|a, b| {

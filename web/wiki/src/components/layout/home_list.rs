@@ -121,7 +121,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 p { class: "body-medium list-subheader", "…" }
             },
             Some(Err(e)) => {
-                log::error!("home groups load failed: {e}");
+                crate::errors::log_handled("home groups load failed", e);
                 rsx! {
                     crate::components::widgets::ErrorState {
                         title: t("error.somethingWentWrong"),
@@ -199,7 +199,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 p { class: "body-medium list-subheader", "…" }
             },
             Some(Err(e)) => {
-                log::error!("home events load failed: {e}");
+                crate::errors::log_handled("home events load failed", e);
                 rsx! {
                     crate::components::widgets::ErrorState {
                         title: t("error.somethingWentWrong"),
@@ -413,7 +413,7 @@ fn NewContextButton(
                     }
                     Err(e) => {
                         busy.set(false);
-                        log::error!("create context failed: {e}");
+                        crate::errors::log_handled("create context failed", e);
                         error.set(t("layout.createFailed"));
                     }
                 }
@@ -586,7 +586,7 @@ pub(super) fn InvitedContextItem(invite: model::InvitationFields) -> Element {
                     Ok(_) => crate::session::bump_data_version(),
                     Err(e) => {
                         dismissed.set(false);
-                        log::error!("decline invitation failed: {e}");
+                        crate::errors::log_handled("decline invitation failed", e);
                         crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                     }
                 }

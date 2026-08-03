@@ -77,7 +77,7 @@ pub fn FeedbackDialog() -> Element {
                                 image_name.set(name);
                             }
                             Err(e) => {
-                                log::error!("feedback screenshot upload failed: {e}");
+                                crate::errors::log_handled("feedback screenshot upload failed", e);
                                 show_snackbar(&t("error.somethingWentWrong"));
                             }
                         }
@@ -126,7 +126,7 @@ pub fn FeedbackDialog() -> Element {
                     show_snackbar(&t("feedback.sent"));
                 }
                 Err(e) => {
-                    log::error!("feedback submit failed: {e}");
+                    crate::errors::log_handled("feedback submit failed", e);
                     show_snackbar(&t("error.somethingWentWrong"));
                 }
             }

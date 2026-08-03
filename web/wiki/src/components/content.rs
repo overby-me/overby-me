@@ -411,7 +411,7 @@ pub fn ContentApp(
                                                 Ok(_) => crate::session::bump_data_version(),
                                                 Err(e) => {
                                                     attachable_opt.set(None);
-                                                    log::error!("lock toggle failed: {e}");
+                                                    crate::errors::log_handled("lock toggle failed", e);
                                                     crate::snackbar::show_snackbar(
                                                         &t("error.somethingWentWrong"),
                                                     );
@@ -483,7 +483,7 @@ pub fn ContentApp(
                                                 ));
                                             }
                                             Err(e) => {
-                                                log::error!("submit failed: {e}");
+                                                crate::errors::log_handled("submit failed", e);
                                                 crate::snackbar::show_snackbar(&t(
                                                     "error.somethingWentWrong",
                                                 ));

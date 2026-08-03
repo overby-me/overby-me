@@ -270,7 +270,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                     },
                     // Error: never looks like an empty thread (log the detail).
                     Some(Err(e)) => {
-                        log::error!("Loading comments failed: {e}");
+                        crate::errors::log_handled("Loading comments failed", e);
                         rsx! {
                             crate::components::widgets::ErrorState {
                                 title: t("error.somethingWentWrong"),
@@ -621,7 +621,7 @@ fn CommentThread(
                                                         crate::session::bump_data_version();
                                                     }
                                                     Err(e) => {
-                                                        log::error!("delete comment failed: {e}");
+                                                        crate::errors::log_handled("delete comment failed", e);
                                                         crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                     }
                                                 }
@@ -850,7 +850,7 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                                         refresh += 1;
                                     }
                                     Err(e) => {
-                                        log::error!("reaction failed: {e}");
+                                        crate::errors::log_handled("reaction failed", e);
                                         crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                     }
                                 }
@@ -911,7 +911,7 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                                                             refresh += 1;
                                                         }
                                                         Err(e) => {
-                                                            log::error!("reaction failed: {e}");
+                                                            crate::errors::log_handled("reaction failed", e);
                                                             crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                         }
                                                     }
@@ -983,7 +983,7 @@ fn CommentComposer(
             let bytes = match fd.read_bytes().await {
                 Ok(b) => b,
                 Err(e) => {
-                    log::error!("read attachment failed: {e}");
+                    crate::errors::log_handled("read attachment failed", e);
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                     return;
                 }
@@ -1091,7 +1091,7 @@ fn CommentComposer(
                     }
                 }
                 Err(e) => {
-                    log::error!("comment post failed: {e}");
+                    crate::errors::log_handled("comment post failed", e);
                     // Roll back the optimistic row and restore the unsent text —
                     // and the attachment, which is already uploaded, so a retry
                     // does not ask for the photo again.

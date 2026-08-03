@@ -470,7 +470,7 @@ pub fn FolderApp(
                                                 Ok(_) => crate::session::bump_data_version(),
                                                 Err(e) => {
                                                     attachable_opt.set(None);
-                                                    log::error!("lock toggle failed: {e}");
+                                                    crate::errors::log_handled("lock toggle failed", e);
                                                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                 }
                                             }
@@ -601,7 +601,7 @@ pub fn FolderApp(
                                                 crate::snackbar::show_snackbar(&t("content.submit"));
                                             }
                                             Err(e) => {
-                                                log::error!("folder submit failed: {e}");
+                                                crate::errors::log_handled("folder submit failed", e);
                                                 crate::snackbar::show_snackbar(&t(
                                                     "error.somethingWentWrong",
                                                 ));
@@ -1012,7 +1012,7 @@ fn FolderAdd(
                     }
                     Err(e) => {
                         pending.write().retain(|p| p.key != key);
-                        log::error!("add child failed: {e}");
+                        crate::errors::log_handled("add child failed", e);
                         crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                     }
                 }

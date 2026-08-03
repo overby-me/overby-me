@@ -16,7 +16,7 @@ fn applied<T>(result: Result<T, String>, mut refresh: Signal<u32>, mut busy: Sig
     match result {
         Ok(_) => refresh += 1,
         Err(e) => {
-            log::error!("speak mutation failed: {e}");
+            crate::errors::log_handled("speak mutation failed", e);
             crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
         }
     }
@@ -140,7 +140,7 @@ fn AddSpeakerListButton(context_id: String) -> Element {
                 }
                 Err(e) => {
                     busy.set(false);
-                    log::error!("create speaker list failed: {e}");
+                    crate::errors::log_handled("create speaker list failed", e);
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                 }
             }
@@ -328,7 +328,7 @@ fn SpeakList(
     let load: Option<Result<Option<_>, String>> = state.read().clone();
     let load_failed = matches!(load, Some(Err(_)));
     if let Some(Err(e)) = &load {
-        log::error!("speaker list load failed: {e}");
+        crate::errors::log_handled("speaker list load failed", e);
     }
     let st = load.and_then(|r| r.ok()).flatten();
     let mutable = st.as_ref().map(|s| s.0).unwrap_or(false);
@@ -538,7 +538,7 @@ fn SpeakList(
                                                             Err(e) => {
                                                                 reorder.write().remove(&id);
                                                                 busy.set(false);
-                                                                log::error!("reorder failed: {e}");
+                                                                crate::errors::log_handled("reorder failed", e);
                                                                 crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                             }
                                                         }
@@ -573,7 +573,7 @@ fn SpeakList(
                                                             Err(e) => {
                                                                 reorder.write().remove(&id);
                                                                 busy.set(false);
-                                                                log::error!("reorder failed: {e}");
+                                                                crate::errors::log_handled("reorder failed", e);
                                                                 crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                             }
                                                         }
@@ -600,7 +600,7 @@ fn SpeakList(
                                                             Ok(_) => refresh += 1,
                                                             Err(e) => {
                                                                 removed.write().remove(&id);
-                                                                log::error!("remove speaker failed: {e}");
+                                                                crate::errors::log_handled("remove speaker failed", e);
                                                                 crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                             }
                                                         }
@@ -663,7 +663,7 @@ fn SpeakList(
                                                     Ok(_) => refresh += 1,
                                                     Err(e) => {
                                                         removed.write().remove(&cur);
-                                                        log::error!("next speaker failed: {e}");
+                                                        crate::errors::log_handled("next speaker failed", e);
                                                         crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                     }
                                                 }
@@ -738,7 +738,7 @@ fn SpeakList(
                                                 let mut ok = true;
                                                 for id in ids {
                                                     if let Err(e) = graphql::delete_node(token.as_deref(), &id).await {
-                                                        log::error!("clear queue failed: {e}");
+                                                        crate::errors::log_handled("clear queue failed", e);
                                                         ok = false;
                                                         break;
                                                     }
@@ -890,7 +890,7 @@ fn SpeakList(
                                                             Err(e) => {
                                                                 // Roll back the optimistic row.
                                                                 pending.write().retain(|p| p.key != key);
-                                                                log::error!("join speaker failed: {e}");
+                                                                crate::errors::log_handled("join speaker failed", e);
                                                                 crate::snackbar::show_snackbar(&t(
                                                                     "error.somethingWentWrong",
                                                                 ));

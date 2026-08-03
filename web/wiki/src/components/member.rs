@@ -67,7 +67,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let load = roster.read().clone();
     let roster_failed = matches!(load, Some(Err(_)));
     if let Some(Err(e)) = &load {
-        log::error!("roster load failed: {e}");
+        crate::errors::log_handled("roster load failed", e);
     }
     let (rows, total) = load.and_then(|r| r.ok()).unwrap_or_default();
 

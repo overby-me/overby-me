@@ -45,7 +45,7 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
     let load = items.read().clone();
     let failed = matches!(load, Some(Err(_)));
     if let Some(Err(e)) = &load {
-        log::error!("bin load failed: {e}");
+        crate::errors::log_handled("bin load failed", e);
     }
     let loading = load.is_none();
     let items: Vec<graphql::DeletedNodeFields> = load.and_then(|r| r.ok()).unwrap_or_default();

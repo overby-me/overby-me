@@ -97,6 +97,26 @@ pub fn classify(msg: &str) -> Failure {
 /// message; twelve is a fault of its own.
 const THROTTLE_MS: f64 = 8000.0;
 
+/// Log a failure the caller has already dealt with on screen, at the level its
+/// kind deserves.
+///
+/// A render site that reaches for `log::error!` directly undoes the judgement
+/// this module exists to make. `logging.rs` ships warn and error to the log
+/// sink, so a dropped connection filed at error becomes a stored fault report
+/// per reader per bad moment, which at a congress is the whole hall reporting
+/// that the wifi is bad. Worse, these sit in render bodies, so they fire again
+/// on every re-render for as long as the error card is on screen.
+///
+/// [`crate::graphql::execute`] has already logged the same failure with its
+/// classification. This is the caller's own note, at a level that matches.
+pub fn log_handled(what: &str, msg: impl std::fmt::Display) {
+    let msg = msg.to_string();
+    match classify(&msg) {
+        Failure::Broken => log::error!("{what}: {msg}"),
+        failure => log::info!("{what} ({}): {msg}", failure.label()),
+    }
+}
+
 thread_local! {
     static LAST_SHOWN: std::cell::Cell<f64> = const { std::cell::Cell::new(f64::NEG_INFINITY) };
 }

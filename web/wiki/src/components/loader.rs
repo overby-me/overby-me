@@ -180,7 +180,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
         }
         Some(Err(e)) => {
             // Log the detail; show a friendly state, never a raw debug dump.
-            log::error!("resolve node: {e}");
+            crate::errors::log_handled("resolve node", &e);
             // A refusal is not a fault. Signed out, most pages answer "you may
             // not", and telling that reader something went wrong is both untrue
             // and unhelpful: nothing is broken and retrying will not fix it. Say

@@ -10,10 +10,14 @@
 //! match &*resource.read() {
 //!     Some(Ok(data)) if !data.is_empty() => rsx! { /* rows */ },
 //!     Some(Ok(_))    => rsx! { div { class: "card", EmptyState { icon: "inbox", message: t("..."), small: true } } },
-//!     Some(Err(e))   => { log::error!("{e}"); rsx! { div { class: "card accent-error", ErrorState { title: t("error.somethingWentWrong"), small: true } } } },
+//!     Some(Err(e))   => { crate::errors::log_handled("thing load failed", e); rsx! { div { class: "card accent-error", ErrorState { title: t("error.somethingWentWrong"), small: true } } } },
 //!     None           => rsx! { Spinner {} },  // or a shape-matched skeleton
 //! }
 //! ```
+//!
+//! `log_handled` rather than `log::error!`: this arm is a render body, so it
+//! runs again on every re-render while the card is up, and error is the level
+//! that leaves the device. See [`crate::errors::log_handled`].
 
 use dioxus::prelude::*;
 

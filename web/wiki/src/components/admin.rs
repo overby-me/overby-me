@@ -246,7 +246,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                     let token = session.read().access_token.clone();
                                     spawn(async move {
                                         if let Err(e) = graphql::set_screen_focus(token.as_deref(), &ctx, None).await {
-                                            log::error!("clear screen focus failed: {e}");
+                                            crate::errors::log_handled("clear screen focus failed", e);
                                         }
                                     });
                                 }
@@ -282,7 +282,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                                 let token = session.read().access_token.clone();
                                                 spawn(async move {
                                                     if let Err(e) = graphql::set_screen_focus(token.as_deref(), &ctx, Some(&anchor)).await {
-                                                        log::error!("set screen focus failed: {e}");
+                                                        crate::errors::log_handled("set screen focus failed", e);
                                                     }
                                                 });
                                             }
@@ -412,7 +412,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                     match graphql::set_screen_feed(token.as_deref(), &ctx, next).await {
                                         Ok(_) => crate::session::bump_data_version(),
                                         Err(e) => {
-                                            log::error!("screen feed toggle failed: {e}");
+                                            crate::errors::log_handled("screen feed toggle failed", e);
                                             crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                         }
                                     }
@@ -479,7 +479,7 @@ fn AgendaLevel(
     let load = children.read().clone();
     let failed = matches!(load, Some(Err(_)));
     if let Some(Err(e)) = &load {
-        log::error!("agenda level load failed: {e}");
+        crate::errors::log_handled("agenda level load failed", e);
     }
     let items: Vec<_> = load
         .and_then(|r| r.ok())

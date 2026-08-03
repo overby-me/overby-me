@@ -566,7 +566,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     if let Err(e) =
                         graphql::set_node_authors(token.as_deref(), &node_id, &author_list).await
                     {
-                        log::error!("Saving authors failed: {e}");
+                        crate::errors::log_handled("Saving authors failed", e);
                         show_snackbar(&t("error.somethingWentWrong"));
                         saving.set(false);
                         return;
@@ -634,7 +634,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     }
                     Ok(false) => show_snackbar(&t("error.somethingWentWrong")),
                     Err(e) => {
-                        log::error!("Save failed: {e}");
+                        crate::errors::log_handled("Save failed", e);
                         show_snackbar(&t("error.somethingWentWrong"));
                     }
                 }

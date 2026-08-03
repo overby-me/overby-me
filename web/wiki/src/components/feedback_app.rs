@@ -159,7 +159,7 @@ pub fn FeedbackApp() -> Element {
     let load = items_res.read().clone();
     let failed = matches!(load, Some(Err(_)));
     if let Some(Err(e)) = &load {
-        log::error!("feedback load failed: {e}");
+        crate::errors::log_handled("feedback load failed", e);
     }
     let mut items = load.and_then(|r| r.ok()).unwrap_or_default();
 
@@ -226,7 +226,7 @@ pub fn FeedbackApp() -> Element {
             match graphql::delete_node(token.as_deref(), &id).await {
                 Ok(_) => crate::session::bump_data_version(),
                 Err(e) => {
-                    log::error!("delete feedback failed: {e}");
+                    crate::errors::log_handled("delete feedback failed", e);
                     show_snackbar(&t("error.somethingWentWrong"));
                 }
             }

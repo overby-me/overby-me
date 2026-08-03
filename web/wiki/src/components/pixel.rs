@@ -1020,7 +1020,7 @@ fn CanvasRow(canvas_id: String, name: String, context_id: String, is_showing: bo
         let token = session.read().access_token.clone();
         spawn(async move {
             if let Err(e) = graphql::set_focused_canvas(token.as_deref(), &ctx, Some(&id)).await {
-                log::error!("focus canvas failed: {e}");
+                crate::errors::log_handled("focus canvas failed", e);
                 return;
             }
             crate::session::bump_data_version();
@@ -1047,7 +1047,7 @@ fn CanvasRow(canvas_id: String, name: String, context_id: String, is_showing: bo
                 }
                 Err(e) => {
                     busy.set(false);
-                    log::error!("delete canvas failed: {e}");
+                    crate::errors::log_handled("delete canvas failed", e);
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                 }
             }
@@ -1134,7 +1134,7 @@ fn AddCanvasButton(context_id: String) -> Element {
                 }
                 Err(e) => {
                     busy.set(false);
-                    log::error!("create canvas failed: {e}");
+                    crate::errors::log_handled("create canvas failed", e);
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                 }
             }

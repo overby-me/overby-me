@@ -52,7 +52,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                         ..Default::default()
                     };
                     if let Err(e) = graphql::update_node(token.as_deref(), &item.id.0, set).await {
-                        log::error!("sort: update_node failed: {e}");
+                        crate::errors::log_handled("sort: update_node failed", e);
                         ok = false;
                         break;
                     }

@@ -71,7 +71,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
             },
             Some(Err(e)) => {
                 // Log the detail; the UI shows a friendly state, never raw error text.
-                log::error!("bluesky wall fetch: {e}");
+                crate::errors::log_handled("bluesky wall fetch", e);
                 rsx! {
                     div { class: "card accent-error",
                         super::widgets::ErrorState {
