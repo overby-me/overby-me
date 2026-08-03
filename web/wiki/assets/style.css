@@ -8127,6 +8127,24 @@ a.list-item:hover {
 	margin-bottom: var(--md-sys-spacing-1);
 }
 
+/* Word's outline levels (w:ilvl). The parser hands a nested list over as one
+   flat run of paragraphs carrying their level, so the step and the marker are
+   set per item rather than by nesting: every level used to draw identically,
+   which read as one long list instead of two. The markers follow what Word
+   draws at each depth. */
+.docx-list .docx-li-2 {
+	margin-inline-start: var(--md-sys-spacing-6);
+	list-style-type: circle;
+}
+.docx-list .docx-li-3 {
+	margin-inline-start: calc(var(--md-sys-spacing-6) * 2);
+	list-style-type: square;
+}
+.docx-list .docx-li-4 {
+	margin-inline-start: calc(var(--md-sys-spacing-6) * 3);
+	list-style-type: square;
+}
+
 /* A picture out of the document. The size Word recorded arrives inline, in
    points; this is what is true of every picture whatever its size.
 

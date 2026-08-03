@@ -154,6 +154,12 @@ impl Numbering {
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
+    /// What the parser tagged this run as. Only `break` matters here: OOXML
+    /// writes a line break as a run of its OWN (`<w:br/>`), carrying no text, so
+    /// without reading this it arrived as an empty run and vanished. That is
+    /// what dropped the newline after a bold lead-in line.
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
     #[serde(default)]
     pub text: String,
     #[serde(default)]
@@ -974,9 +980,29 @@ fn ListItem(item: Paragraph) -> Element {
                 }
             }
         }
-        None => rsx! {
-            li { {runs_of(&item)} }
-        },
+        None => {
+            // `w:ilvl` is the outline level of the item. Every level used to
+            // render identically, so a document's second level read as a
+            // continuation of its first. Stepped and re-marked here rather than
+            // by nesting real lists: the parser hands these over as one flat
+            // run of paragraphs, and inferring a tree from the levels would
+            // invent structure the document did not state.
+            let level = item
+                .numbering
+                .as_ref()
+                .and_then(|n| n.level)
+                .unwrap_or(0)
+                .clamp(0, 8);
+            let class = match level {
+                0 => "docx-li",
+                1 => "docx-li docx-li-2",
+                2 => "docx-li docx-li-3",
+                _ => "docx-li docx-li-4",
+            };
+            rsx! {
+                li { class, {runs_of(&item)} }
+            }
+        }
     }
 }
 
@@ -1084,6 +1110,12 @@ fn runs_of(p: &Paragraph) -> Element {
 
 #[component]
 fn RunSpan(run: Run) -> Element {
+    // A break is the whole run. Page and column breaks become the same line
+    // break: a reading column has no pages to break, and losing the line as
+    // well would run two of the author's lines together.
+    if run.kind.as_deref() == Some("break") {
+        return rsx! { br {} };
+    }
     // A picture is a whole run, never text with a picture in it.
     if let Some(src) = run.src.clone() {
         let style = image_style(&run);
@@ -1135,6 +1167,42 @@ fn RunSpan(run: Run) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The parser tags a line break as a run of its own. Pinned because the
+    /// field is `type`, which needs a serde rename, and getting it wrong is
+    /// silent: the run deserialises with no text and simply disappears.
+    #[test]
+    fn a_break_run_is_recognised_by_its_tag() {
+        let run: Run = serde_json::from_value(serde_json::json!({
+            "type": "break",
+            "breakType": "line"
+        }))
+        .expect("break run");
+        assert_eq!(run.kind.as_deref(), Some("break"));
+        assert!(run.text.is_empty());
+
+        // An ordinary run must not be mistaken for one.
+        let plain: Run = serde_json::from_value(serde_json::json!({
+            "type": "text",
+            "text": "hello"
+        }))
+        .expect("text run");
+        assert_ne!(plain.kind.as_deref(), Some("break"));
+    }
+
+    /// A second-level bullet has to keep its level, or it renders as a
+    /// continuation of the first.
+    #[test]
+    fn a_nested_item_keeps_its_outline_level() {
+        let n: Numbering = serde_json::from_value(serde_json::json!({
+            "format": "bullet",
+            "level": 1
+        }))
+        .expect("numbering");
+        assert_eq!(n.level, Some(1));
+    }
+
     use super::*;
 
     #[test]
