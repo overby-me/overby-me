@@ -23,13 +23,22 @@ axum = "0.8.6"
 # browser can draw. Here rather than in the wasm: the renderer is ~400 KB
 # gzipped, and the app is already the heaviest thing a delegate downloads.
 #
-# Pinned to the RELEASE, deliberately. Upstream main renders a figure this
-# version refuses (a palettised bitmap inside a vector drawing), but it also
-# changed font selection to honour the family the metafile names, and a
-# metafile names Windows fonts: on a machine without them the text comes out
-# all-caps with boxes for the Danish letters. A refused figure falls back to a
-# labelled placeholder; an unreadable one does not.
-emfsdk = { version = "0.2", default-features = false, features = ["render"] }
+# A FORK of the v0.2.0 tag, carrying one fix: `dib_to_png` decoded only 24- and
+# 32-bit bitmaps, so a figure holding a palettised one failed outright with
+# "unsupported BI_RGB bit depth: 4" and fell back to a placeholder.
+#
+# Forked rather than tracking upstream main, which fixes the same bug and is
+# not usable: it also changed font selection to try the family the metafile
+# NAMES before generic sans, and metafiles name Windows fonts, so both figures
+# come out all-caps with boxes where the Danish letters should be. Verified
+# against the two real files, and against a font set matching this container's.
+#
+# Pinned to a rev, like dioxus-primitives in the frontend: a branch would let
+# `cargo update` float and stale the Nix outputHashes in default.nix. Drop the
+# fork once a release carries the bitmap fix without the font regression.
+emfsdk = { git = "https://github.com/overby-me/emfsdk", rev = "4e4269f9ed35d2a204dba9880060ea17cf0fc9e4", default-features = false, features = [
+  "render"
+] }
 # Just the pure-Rust stream combinators (buffer_unordered) for concurrent push
 # fan-out; no executor/thread-pool pulled in.
 futures = { version = "0.3", default-features = false, features = [

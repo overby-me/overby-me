@@ -16,7 +16,14 @@ let
           ./src
         ];
       };
-      cargoLock.lockFile = ./Cargo.lock;
+      cargoLock = {
+        lockFile = ./Cargo.lock;
+        # The metafile renderer is a pinned git fork (see Cargo.toml), so its
+        # checkout needs an explicit FOD hash to vendor reproducibly.
+        outputHashes = {
+          "emfsdk-0.2.0" = "sha256-UvdZXTczvGL2vRl4CWfTXKiFjLBaM5Uvup9+62YJ8O8=";
+        };
+      };
       # Run the unit tests as part of the package build: there is no separate
       # CI executor for them (the tangled microVM cannot compile this dep
       # tree), so the Nix build is where they actually run.
