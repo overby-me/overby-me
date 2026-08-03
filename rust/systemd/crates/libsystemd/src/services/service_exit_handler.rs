@@ -378,6 +378,100 @@ pub fn service_exit_handler_new_thread(
     });
 }
 
+/// Apply the failure-time policies a service owes when its *start* fails and
+/// the exit tail is not the owner. A failed start is finalized on the
+/// dispatcher by `deferred_start_fail_cleanup` (e.g. a `Type=notify` main that
+/// exits before `READY=1`, a failed `ExecStartPre=`/`ExecCondition=`), where
+/// the exit tail — which normally owns a service's `OnFailure=` and `Restart=`
+/// — never runs. So this, the single finalizer, fires both:
+///
+///   * `OnFailure=` (a failed start is a failure; `OnSuccess=` is never fired
+///     here), and
+///   * `Restart=`: upstream re-enters `SERVICE_AUTO_RESTART` on a failed start
+///     exactly as on a failed run, so a `Restart=always`/`on-failure` service
+///     that never reached active still restarts.
+///
+/// Both run on spawned threads; the caller is the dispatcher and must not
+/// block. `run_info` is an already-held read guard; `arc_run_info` is cloned
+/// for the threads.
+pub(crate) fn on_service_start_failed(
+    srvc_id: &UnitId,
+    run_info: &RuntimeInfo,
+    arc_run_info: &ArcMutRuntimeInfo,
+) {
+    let Some(unit) = run_info.unit_table.get(srvc_id) else {
+        return;
+    };
+    let Specific::Service(svc) = &unit.specific else {
+        return;
+    };
+
+    // OnFailure=: fire before any restart-policy early return, since it
+    // applies regardless of Restart=. trigger_on_success_failure_units spawns
+    // its own threads, so this does not block the dispatcher.
+    let on_failure = unit.common.unit.on_failure.clone();
+    if !on_failure.is_empty() {
+        let code = ChildTermination::Exit(svc.state.read_poisoned().srvc.main_exit_status.unwrap_or(1));
+        let mon = build_monitor_env(&srvc_id.name, &code, false);
+        trigger_on_success_failure_units(&on_failure, &srvc_id.name, "OnFailure", arc_run_info, mon);
+    }
+
+    // Only the policies that restart on failure apply to a failed start;
+    // Restart=on-success/on-abnormal/on-abort/on-watchdog do not treat a
+    // start failure as their trigger.
+    if !matches!(
+        svc.conf.restart,
+        ServiceRestart::Always | ServiceRestart::OnFailure
+    ) {
+        return;
+    }
+    // An explicit stop mid-start must not be turned into a restart.
+    if svc.state.read_poisoned().srvc.manual_stop {
+        return;
+    }
+
+    let restart_sec = if svc.conf.restart_steps > 0 {
+        let restart_count = svc.state.read_poisoned().common.restart_count;
+        compute_graduated_restart_delay(
+            &svc.conf.restart_sec,
+            &svc.conf.restart_max_delay_sec,
+            svc.conf.restart_steps,
+            restart_count,
+        )
+    } else {
+        svc.conf.restart_sec.clone()
+    };
+
+    // Flip to Restarting so SubState shows "auto-restart", `systemctl start`
+    // can shortcut the pending restart, and handle_pending_restart proceeds.
+    *unit.common.status.write_poisoned() = UnitStatus::Restarting;
+    svc.state.write_poisoned().common.restart_count += 1;
+    unit.common
+        .n_restarts
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let pending = PendingRestart {
+        srvc_id: srvc_id.clone(),
+        name: srvc_id.name.clone(),
+        restart_sec,
+        reactivate_deps: Vec::new(),
+        deactivate_deps: Vec::new(),
+        is_oneshot: false,
+        required_by_deps: Vec::new(),
+    };
+    let arc = arc_run_info.clone();
+    let thread_name = format!("start-fail-restart-{}", srvc_id.name);
+    if let Err(e) = std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || handle_pending_restart(pending, &arc))
+    {
+        error!(
+            "failed to spawn start-failure restart for {}: {e}",
+            srvc_id.name
+        );
+    }
+}
+
 /// Handle the RestartSec sleep and reactivation for a service that needs to
 /// restart. This runs OUTSIDE any RuntimeInfo lock to avoid blocking other
 /// threads (especially `find_or_load_unit` which needs a write lock to load

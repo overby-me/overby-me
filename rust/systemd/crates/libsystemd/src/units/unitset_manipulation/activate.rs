@@ -1457,14 +1457,27 @@ fn deferred_start_fail_cleanup(
             state.srvc.stderr = None;
             drop(state);
         }
-        // Transition to Stopped/Failed.
-        let mut status = unit.common.status.write_poisoned();
-        if matches!(&*status, UnitStatus::Starting) {
-            *status = UnitStatus::Stopped(
-                crate::units::status::StatusStopped::StoppedUnexpected,
-                vec![UnitOperationErrorReason::GenericStartError(reason)],
-            );
+        // Transition to Stopped/Failed. Scope the status guard so it drops
+        // before the restart scheduler below reacquires it.
+        {
+            let mut status = unit.common.status.write_poisoned();
+            if matches!(&*status, UnitStatus::Starting) {
+                *status = UnitStatus::Stopped(
+                    crate::units::status::StatusStopped::StoppedUnexpected,
+                    vec![UnitOperationErrorReason::GenericStartError(reason)],
+                );
+            }
         }
+        // A failed start still owes OnFailure= and Restart=: the exit tail
+        // normally fires them for a service, but a deferred start failure is
+        // finalized here on the dispatcher where the tail never runs (the
+        // notify-before-READY case is suppressed there, and a start job never
+        // reaches the runtime exit path). This finalizer is the single owner,
+        // so it fires OnFailure= and, per Restart=, flips the unit from the
+        // failed status above to Restarting and reactivates it after
+        // RestartSec on spawned threads. OnSuccess= is never fired for a
+        // failed start.
+        crate::services::on_service_start_failed(id, &ri, run_info);
     }
 }
 
