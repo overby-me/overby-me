@@ -24,6 +24,11 @@
 
     retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
 
+    : "init.scope is registered as an active unit (slice B)"
+    a=$(systemctl is-active init.scope || true)
+    echo "init.scope is-active = $a (want active)"
+    test "$a" = "active"
+
     : "init.scope.d resource controls are applied to PID 1's init.scope cgroup"
     mkdir -p /run/systemd/system/init.scope.d
     cat > /run/systemd/system/init.scope.d/50-test.conf << EOF

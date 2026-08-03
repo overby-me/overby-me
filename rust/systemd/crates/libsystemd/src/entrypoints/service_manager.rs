@@ -1225,6 +1225,12 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
     .expect("loading unit files");
     trace!("Finished loading units");
 
+    // Register init.scope as a (service-shaped) active unit so `systemctl
+    // is-active/status init.scope` work (task #12 slice B, gated on
+    // SYSTEMD_RS_INIT_SCOPE=1). Must run before dependency processing below.
+    #[cfg(target_os = "linux")]
+    register_init_scope_unit(&mut unit_table);
+
     // Apply init.scope.d/*.conf resource controls to PID 1's own init.scope
     // cgroup (task #12 slice A, gated on SYSTEMD_RS_INIT_SCOPE=1). The cgroup
     // was created earlier by move_to_own_cgroup; this is best-effort.
@@ -1371,4 +1377,47 @@ use clap::Parser;
 struct CliArgs {
     #[arg(short, long)]
     dry_run: bool,
+}
+
+/// Register `init.scope` (the scope PID 1 lives in) as a unit in the table,
+/// already active, so `systemctl is-active/status init.scope` work. rust has no
+/// Scope unit variant, so init.scope is modelled as a no-ExecStart service (as
+/// transient scopes are); it is active because PID 1 is in it, not because the
+/// manager started it. Gated on SYSTEMD_RS_INIT_SCOPE=1 (task #12 slice B).
+#[cfg(target_os = "linux")]
+fn register_init_scope_unit(unit_table: &mut std::collections::HashMap<units::UnitId, units::Unit>) {
+    if std::env::var("SYSTEMD_RS_INIT_SCOPE").as_deref() != Ok("1") {
+        return;
+    }
+    let content = "[Unit]\n\
+        Description=System and Service Manager\n\
+        [Service]\n\
+        Type=oneshot\n\
+        RemainAfterExit=yes\n";
+    let Ok(parsed) = units::parse_file(content) else {
+        return;
+    };
+    let Ok(pconf) = units::parse_service(
+        parsed,
+        &std::path::PathBuf::from("/run/systemd/init.scope"),
+    ) else {
+        return;
+    };
+    let Ok(mut unit) = units::from_parsed_config::unit_from_parsed_service(pconf) else {
+        return;
+    };
+    if unit_table.contains_key(&unit.id) {
+        return;
+    }
+    // A scope adopts an already-running process, so it is active as constructed.
+    *unit.common.status.write().unwrap() =
+        units::UnitStatus::Started(units::StatusStarted::Running);
+    // Point the cgroup at the real init.scope: make_cgroup_path would put it
+    // under system.slice, but init.scope lives at the cgroup root.
+    if let units::Specific::Service(s) = &mut unit.specific {
+        s.conf.platform_specific.cgroup_path =
+            std::path::PathBuf::from("/sys/fs/cgroup/init.scope");
+    }
+    eprintln!("rust-systemd: registered init.scope unit");
+    unit_table.insert(unit.id.clone(), unit);
 }
