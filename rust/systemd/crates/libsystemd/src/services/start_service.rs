@@ -1314,3 +1314,54 @@ pub fn start_service(
     start_service_with_filedescriptors(self_path, srvc, conf, name, fd_store)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod env_file_fuzz {
+    use super::parse_environment_file;
+
+    #[test]
+    fn fuzz_parse_environment_file_never_panics_or_hangs() {
+        // parse_environment_file reads EnvironmentFile= content (KEY=VALUE with
+        // quoting, escapes, comments and an `export` prefix). Malformed content
+        // must not panic, and its hand-rolled peekable char loop must not spin
+        // forever on an input that fails to advance.
+        const TOKENS: &[&str] = &[
+            "KEY=", "=", "export ", "FOO=bar", "\"", "'", "\\", "\\\n", "#c", ";c",
+            "\n", "\n\n", " ", "\t", "=val", "A=\"unbalanced", "B='", "C=a b c",
+            "%", "€", "\\x", "==", "KEY", "\r",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xe0f1_1e5f_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let mut content = String::new();
+                for _ in 0..(next() % 24) {
+                    if next() % 5 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let buf = content.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = parse_environment_file(&content);
+                });
+                assert!(res.is_ok(), "parse_environment_file panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "env-file fuzz did not finish in 30s -- an input hangs the parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+}
