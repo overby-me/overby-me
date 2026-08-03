@@ -736,8 +736,20 @@ pub fn run_style(run: &Run) -> String {
     let mut css = String::new();
     // `auto` is not a colour: it means the consumer decides, and forcing it to
     // black would make a document unreadable in the dark theme.
+    //
+    // Nor, in practice, is literal black. Word writes 000000 for ordinary body
+    // text as readily as it writes auto — this handlingsplan states it on 15 of
+    // its list paragraphs — and a reader in the dark theme got black text on a
+    // dark surface. Dropping it lets the text inherit the surface it is
+    // actually on, which is the theme's ink, or a shaded table cell's own
+    // readable ink where there is one.
+    //
+    // The cost is a document that deliberately set black against something
+    // light this renderer does not paint. It could not have shown that in the
+    // dark theme anyway, and every other colour is still honoured exactly.
     if let Some(c) = run.color.as_deref() {
-        if c != "auto" && c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        let default_ink = c == "auto" || c == "000000";
+        if !default_ink && c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()) {
             css.push_str(&format!("color:#{c};"));
         }
     }
@@ -1168,6 +1180,44 @@ fn RunSpan(run: Run) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Word writes literal black for ordinary body text, so honouring it put
+    /// black on the dark theme's dark surface. It means the same as `auto`.
+    #[test]
+    fn a_documents_default_ink_is_left_to_the_reader() {
+        for stated in ["auto", "000000"] {
+            let run = Run {
+                color: Some(stated.to_string()),
+                ..Run::default()
+            };
+            assert!(
+                !run_style(&run).contains("color:"),
+                "{stated} should inherit the surface"
+            );
+        }
+    }
+
+    /// Every other colour a document states is still its own.
+    #[test]
+    fn a_stated_colour_is_still_honoured() {
+        let run = Run {
+            color: Some("2F5496".into()),
+            ..Run::default()
+        };
+        assert!(
+            run_style(&run).contains("color:#2F5496;"),
+            "{:?}",
+            run_style(&run)
+        );
+
+        // Including one that is merely dark, which is a choice rather than a
+        // default.
+        let dark = Run {
+            color: Some("212121".into()),
+            ..Run::default()
+        };
+        assert!(run_style(&dark).contains("color:#212121;"));
+    }
 
     /// The parser tags a line break as a run of its own. Pinned because the
     /// field is `type`, which needs a serde rename, and getting it wrong is
