@@ -853,6 +853,104 @@ mod tests {
     }
 
     #[test]
+    fn differential_export_vs_c_journal_remote() {
+        // Differential oracle (task #22): rust from_export_format vs the C
+        // systemd-journal-remote. Gated on env SYSTEMD_JOURNAL_REMOTE (the C
+        // binary) and JOURNALCTL (default "journalctl"); skips silently
+        // otherwise (plain CI without the C tools). A user-field-set divergence
+        // between rust's parse and the C round-trip is a real drift bug.
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let Ok(jr) = std::env::var("SYSTEMD_JOURNAL_REMOTE") else {
+            eprintln!("skip differential: SYSTEMD_JOURNAL_REMOTE unset");
+            return;
+        };
+        let journalctl = std::env::var("JOURNALCTL").unwrap_or_else(|_| "journalctl".to_string());
+
+        let entry = |i: u64, extra: &str| -> String {
+            format!(
+                "__CURSOR=s=a;i={i};b=b;m={i};t={i};x={i}\n\
+                 __REALTIME_TIMESTAMP={}\n\
+                 __MONOTONIC_TIMESTAMP={i}\n\
+                 _BOOT_ID=0123456789abcdef0123456789abcdef\n\
+                 {extra}\n\n",
+                1_700_000_000_000_000u64 + i
+            )
+        };
+        let cases = [
+            "MESSAGE=hello world\nPRIORITY=6",
+            "MESSAGE=value with = equals\nPRIORITY=5",
+            "MESSAGE=\nPRIORITY=4",
+            "MESSAGE=trailing spaces   \nFOO=bar",
+            "MESSAGE=tab\there\nPRIORITY=3",
+        ];
+        let mut corpus = String::new();
+        for (i, c) in cases.iter().enumerate() {
+            corpus.push_str(&entry(i as u64, c));
+        }
+
+        let dir = std::env::temp_dir().join(format!("rs-jr-diff-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let out = dir.join("out.journal");
+        let _ = std::fs::remove_file(&out);
+        let mut child = Command::new(&jr)
+            .arg("-o")
+            .arg(&out)
+            .arg("--split-mode=none")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn journal-remote");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(corpus.as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success(), "journal-remote failed");
+
+        let readback = Command::new(&journalctl)
+            .arg("--file")
+            .arg(&out)
+            .arg("--output=export")
+            .stderr(Stdio::null())
+            .output()
+            .expect("spawn journalctl");
+        let c_export = readback.stdout;
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let rust_entries = parse_export_entries(&mut Cursor::new(corpus.as_bytes())).unwrap();
+        let c_entries = parse_export_entries(&mut Cursor::new(&c_export[..])).unwrap();
+
+        assert_eq!(
+            rust_entries.len(),
+            c_entries.len(),
+            "entry-count drift: rust parsed {} entries, C stored {}\nC export:\n{}",
+            rust_entries.len(),
+            c_entries.len(),
+            String::from_utf8_lossy(&c_export)
+        );
+
+        let user_fields = |e: &JournalEntry| -> std::collections::BTreeMap<String, Vec<u8>> {
+            e.fields
+                .iter()
+                .filter(|(k, _)| !k.starts_with("__"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        };
+        for (i, (r, c)) in rust_entries.iter().zip(c_entries.iter()).enumerate() {
+            let rf = user_fields(r);
+            let cf = user_fields(c);
+            assert_eq!(
+                rf, cf,
+                "user-field drift at entry {i}:\n  rust={rf:?}\n  c   ={cf:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_priority() {
         let mut entry = JournalEntry::new();
         entry.set_field("PRIORITY", "3");
