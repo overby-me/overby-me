@@ -250,3 +250,50 @@ fn analyze_exit_status_matches_c() {
         div.join("\n")
     );
 }
+
+#[test]
+fn analyze_condition_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+    // The two binaries format condition output very differently, so compare the
+    // pass/fail verdict (exit 0 vs non-zero). Both read the same host, so a
+    // host-state condition agrees unless the detection or parsing has drifted.
+    // Kept host-independent by construction: any real kernel is >=1.0 and
+    // <999.0; the probe paths are universal; architecture agrees on any host
+    // since both read the same machine.
+    let specs = [
+        "ConditionKernelVersion=>=1.0",
+        "ConditionKernelVersion=<1.0",
+        "ConditionKernelVersion=>=999.0",
+        "ConditionKernelVersion=!=999.99",
+        "ConditionKernelVersion=<999.0",
+        "ConditionArchitecture=x86-64",
+        "ConditionArchitecture=arm64",
+        "ConditionPathExists=/proc",
+        "ConditionPathExists=/nonexistent-differential-xyz",
+        "ConditionPathExists=!/nonexistent-differential-xyz",
+        "ConditionPathIsDirectory=/proc",
+        "ConditionPathIsDirectory=/nonexistent-differential-xyz",
+        // Regression: FirstBoot was an unhandled condition in rust `analyze`.
+        "ConditionFirstBoot=no",
+        "ConditionFirstBoot=yes",
+        "AssertPathExists=/proc",
+    ];
+    let mut div = Vec::new();
+    for s in specs {
+        let rok = run(rust_bin, &["condition", s]).1;
+        let cok = run(&c_bin, &["condition", s]).1;
+        if rok != cok {
+            div.push(format!("condition {s:?}: rust_pass={rok} c_pass={cok}"));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze condition drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}

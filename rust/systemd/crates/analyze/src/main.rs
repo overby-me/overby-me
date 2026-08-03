@@ -958,6 +958,16 @@ fn evaluate_condition(expr: &str) -> (bool, &'static str) {
             let result = normalised == want;
             if np { !result } else { result }
         }
+        "ConditionFirstBoot" | "AssertFirstBoot" => {
+            // C's condition_test_first_boot: compare the requested boolean to
+            // in_first_boot() -- the $SYSTEMD_FIRST_BOOT override, else the
+            // /run/systemd/first-boot flag PID 1 writes on a genuine first
+            // boot. Deliberately not keyed off /etc/machine-id.
+            match parse_boolean_c(value) {
+                Some(want) => in_first_boot() == want,
+                None => false,
+            }
+        }
         _ => {
             return (false, "Unknown condition type");
         }
@@ -969,6 +979,27 @@ fn evaluate_condition(expr: &str) -> (bool, &'static str) {
     } else {
         (false, "not met")
     }
+}
+
+/// Parse a boolean the way C's `parse_boolean()` does (case-sensitive).
+fn parse_boolean_c(s: &str) -> Option<bool> {
+    match s.trim() {
+        "1" | "yes" | "y" | "true" | "t" | "on" => Some(true),
+        "0" | "no" | "n" | "false" | "f" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether this is a first boot, matching C's `in_first_boot()`: the
+/// `$SYSTEMD_FIRST_BOOT` override, else the `/run/systemd/first-boot` flag that
+/// PID 1 writes on a genuine first boot.
+fn in_first_boot() -> bool {
+    if let Ok(e) = std::env::var("SYSTEMD_FIRST_BOOT") {
+        if let Some(b) = parse_boolean_c(&e) {
+            return b;
+        }
+    }
+    Path::new("/run/systemd/first-boot").exists()
 }
 
 /// Evaluate a `ConditionKernelVersion=` / `AssertKernelVersion=` expression.
@@ -4000,6 +4031,32 @@ mod tests {
         let (met, reason) = evaluate_condition("ConditionFoo=bar");
         assert!(!met);
         assert!(reason.contains("Unknown"));
+    }
+
+    #[test]
+    fn test_condition_first_boot_handled() {
+        // Regression: FirstBoot used to fall through to "Unknown condition
+        // type". It must now be recognized and produce a real verdict.
+        for expr in ["ConditionFirstBoot=no", "AssertFirstBoot=yes"] {
+            let (_, reason) = evaluate_condition(expr);
+            assert!(
+                reason == "met" || reason == "not met",
+                "{expr} should be handled, got: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_boolean_c() {
+        for t in ["1", "yes", "y", "true", "t", "on"] {
+            assert_eq!(parse_boolean_c(t), Some(true), "{t}");
+        }
+        for f in ["0", "no", "n", "false", "f", "off"] {
+            assert_eq!(parse_boolean_c(f), Some(false), "{f}");
+        }
+        // Case-sensitive and strict, like C's parse_boolean().
+        assert_eq!(parse_boolean_c("Yes"), None);
+        assert_eq!(parse_boolean_c("maybe"), None);
     }
 
     // Boot timing tests
