@@ -3419,6 +3419,9 @@ mod tests {
             "OnCalendar=", "ListenStream=", "What=", "Where=", "=", "!", ">=", "<=",
             "<>", "!=", "/bin/true", "%i", "%n", "%%", "yes", "no", "0", "999", "-",
             ":", ";", "#c", "\\", "\"", "'", "..", "  ", "\t", "\n", "\n\n", "@", "€",
+            "MemoryMax=", "MemoryHigh=", "LimitAS=", "LimitNOFILE=", "TasksMax=",
+            "RestartSec=", "999999999999999999999", "E", "P", "Ti", "Gi", "K",
+            "infinity", "50%", "100000000000000000000000000000000",
         ];
         let handle = std::thread::spawn(|| {
             let mut state: u64 = 0x51ed_1234_dead_beef;
