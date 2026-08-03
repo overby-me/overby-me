@@ -349,3 +349,60 @@ fn analyze_capability_matches_c() {
         only_r
     );
 }
+
+/// `compare-versions` implements systemd's strverscmp_improved. Both the printed
+/// relation (stdout) and the exit-status encoding (success: exit 0 for `==`,
+/// non-zero for `<`/`>`, and for the operator form whether the comparison holds)
+/// must match C. A divergence is real drift in the version-ordering algorithm.
+#[test]
+fn compare_versions_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    // Pairs exercising '~' pre-releases, '-'/'^'/'.' separators, numeric-vs-alpha
+    // segments, leading zeros, and the documented ascending sort order.
+    let cases: &[&[&str]] = &[
+        &["compare-versions", "1", "2"],
+        &["compare-versions", "2", "1"],
+        &["compare-versions", "2.0", "2.0"],
+        &["compare-versions", "1.0-1", "1.0-2"],
+        &["compare-versions", "1~rc1", "1"],
+        &["compare-versions", "4.5~alpha1", "4.5"],
+        &["compare-versions", "007", "7"],
+        &["compare-versions", "122.1", "123~rc1-1"],
+        &["compare-versions", "123~rc1-1", "123"],
+        &["compare-versions", "123", "123-a"],
+        &["compare-versions", "123-1", "123-1.1"],
+        &["compare-versions", "123-1.1", "123^post1"],
+        &["compare-versions", "123^post1", "123.a-1"],
+        &["compare-versions", "123.1-1", "123a-1"],
+        &["compare-versions", "123a-1", "124-1"],
+        &["compare-versions", "5.11.0", "5.11.1"],
+        &["compare-versions", "6.1", "6.1.0"],
+        // Operator form: no stdout, exit reflects whether the comparison holds.
+        &["compare-versions", "1", "lt", "2"],
+        &["compare-versions", "2", "lt", "1"],
+        &["compare-versions", "1~rc1", "lt", "1"],
+        &["compare-versions", "5", "ge", "5"],
+    ];
+
+    let mut divergences = Vec::new();
+    for args in cases {
+        let (rust_out, rust_ok) = run(rust_bin, args);
+        let (c_out, c_ok) = run(&c_bin, args);
+        if rust_out != c_out || rust_ok != c_ok {
+            divergences.push(format!(
+                "args={args:?}\n     rust: ok={rust_ok} out={rust_out:?}\n     c   : ok={c_ok} out={c_out:?}"
+            ));
+        }
+    }
+    assert!(
+        divergences.is_empty(),
+        "rust vs C systemd-analyze compare-versions drift ({} case(s)):\n{}",
+        divergences.len(),
+        divergences.join("\n")
+    );
+}
