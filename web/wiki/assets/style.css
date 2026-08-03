@@ -3815,8 +3815,7 @@ select:focus {
 	border-end-start-radius: var(--md-sys-shape-corner-small);
 }
 .m3-split-menu .material-icons {
-	transition:
-		transform var(--md-sys-motion-duration-medium1)
+	transition: transform var(--md-sys-motion-duration-medium1)
 		var(--md-sys-motion-spring-spatial-fast);
 }
 .m3-split-menu.open .material-icons {
@@ -4737,22 +4736,58 @@ h6,
 }
 
 /* Loading spinner */
-/* DESIGN (expressive loader): a filled primary blob that spins while morphing
-   its border-radius between organic shapes — the M3 2025 "expressive" loading
-   feel, replacing the plain border-spin ring. (prefers-reduced-motion collapses
-   it to a static shape via the global rule above.) */
-/* M3 Expressive loading indicator (the component that replaces the indeterminate
-   circular progress indicator for waits under five seconds). It "uses shape and
-   motion to capture attention" — a sequence of shapes rather than a ring, which
-   is what this already was; what it lacked was the CONTAINED variant and a
-   cadence that actually visits distinct shapes rather than wobbling around one.
-   Web has no official implementation, so this is the spec applied by hand. */
+/* DESIGN (expressive loader): the M3 Expressive progress indicator, which is a
+   WAVY ring with an active arc travelling around it. The wave is the whole point
+   of the expressive update: a plain arc says "waiting", a wave says the app is
+   working. There is no official web implementation, so this is the spec applied
+   by hand.
+
+   HOW. CSS has no "circle, but sinusoidal", so the shape is an SVG path used as
+   a mask: r(t) = 18 + 1.9 * sin(8t), stroked and closed. The mask carries only
+   geometry, so both colours stay CSS custom properties and the indicator follows
+   the theme in either scheme. Generated, not hand-written, because the numbers
+   are the design: see scripts/gen-wave-ring.nu to change the wave.
+
+   A mask applies to an element's children as well, so the track is this
+   element's own background and the active arc is a conic sweep in ::after; both
+   come out cut to the same wavy ring, and the arc can never drift off it.
+
+   Two speeds, because one would look mechanical: the arc laps the ring every
+   1.4s while the ring itself turns once every 6s, which slides the crests under
+   the arc and makes the wave read as travelling rather than painted on.
+
+   prefers-reduced-motion collapses both to their end state via the global rule
+   above, leaving a static wavy ring with a solid arc. */
 .spinner {
+	/* radius 18.0, amplitude 1.9, 8 crests, stroke 4.4. Regenerate: nu scripts/gen-wave-ring.nu */
+	--m3-wave-ring: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath d='M42.0,24.0L42.7,24.92L43.25,25.9L43.54,26.9L43.52,27.88L43.16,28.8L42.51,29.62L41.63,30.31L40.63,30.89L39.61,31.39L38.69,31.85L37.93,32.35L37.39,32.94L37.05,33.68L36.88,34.57L36.8,35.6L36.73,36.73L36.58,37.88L36.27,38.95L35.77,39.87L35.06,40.55L34.16,40.94L33.12,41.06L32.01,40.93L30.89,40.63L29.82,40.26L28.84,39.94L27.95,39.76L27.14,39.79L26.38,40.07L25.63,40.58L24.85,41.25L24.0,42.0L23.08,42.7L22.1,43.25L21.1,43.54L20.12,43.52L19.2,43.16L18.38,42.51L17.69,41.63L17.11,40.63L16.61,39.61L16.15,38.69L15.65,37.93L15.06,37.39L14.32,37.05L13.43,36.88L12.4,36.8L11.27,36.73L10.12,36.58L9.05,36.27L8.13,35.77L7.45,35.06L7.06,34.16L6.94,33.12L7.07,32.01L7.37,30.89L7.74,29.82L8.06,28.84L8.24,27.95L8.21,27.14L7.93,26.38L7.42,25.63L6.75,24.85L6.0,24.0L5.3,23.08L4.75,22.1L4.46,21.1L4.48,20.12L4.84,19.2L5.49,18.38L6.37,17.69L7.37,17.11L8.39,16.61L9.31,16.15L10.07,15.65L10.61,15.06L10.95,14.32L11.12,13.43L11.2,12.4L11.27,11.27L11.42,10.12L11.73,9.05L12.23,8.13L12.94,7.45L13.84,7.06L14.88,6.94L15.99,7.07L17.11,7.37L18.18,7.74L19.16,8.06L20.05,8.24L20.86,8.21L21.62,7.93L22.37,7.42L23.15,6.75L24.0,6.0L24.92,5.3L25.9,4.75L26.9,4.46L27.88,4.48L28.8,4.84L29.62,5.49L30.31,6.37L30.89,7.37L31.39,8.39L31.85,9.31L32.35,10.07L32.94,10.61L33.68,10.95L34.57,11.12L35.6,11.2L36.73,11.27L37.88,11.42L38.95,11.73L39.87,12.23L40.55,12.94L40.94,13.84L41.06,14.88L40.93,15.99L40.63,17.11L40.26,18.18L39.94,19.16L39.76,20.05L39.79,20.86L40.07,21.62L40.58,22.37L41.25,23.15L42.0,24.0Z' fill='none' stroke='%23000' stroke-width='4.4' stroke-linejoin='round'/%3E%3C/svg%3E");
+	position: relative;
 	width: var(--spinner-size, 44px);
 	height: var(--spinner-size, 44px);
-	background: var(--md-primary);
-	border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
-	animation: m3-morph-spin 2.4s ease-in-out infinite;
+	background: var(--md-secondary-container);
+	/* Round first, so a browser that cannot mask degrades to a spinning two-tone
+	   disc rather than to a square. */
+	border-radius: var(--md-sys-shape-corner-full);
+	-webkit-mask: var(--m3-wave-ring) center / contain no-repeat;
+	mask: var(--m3-wave-ring) center / contain no-repeat;
+	animation: spin 6s linear infinite;
+}
+
+/* The active indicator. Solid at the head and fading out behind it, so the arc
+   reads as moving and neither end shows the hard radial cut a plain conic sector
+   would leave. */
+.spinner::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: conic-gradient(
+		from 0deg,
+		transparent 0 42%,
+		var(--md-primary) 78%,
+		var(--md-primary)
+	);
+	animation: spin 1.4s linear infinite;
 }
 /* Contained: the indicator on its own surface, for when it sits over content
    rather than in a cleared space (pull-to-refresh, a busy row). */
@@ -4780,30 +4815,7 @@ h6,
 	--spinner-size: 1.125rem; /* 18px, the small inline-icon step */
 }
 
-@keyframes m3-morph-spin {
-	0% {
-		border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
-		transform: rotate(0deg) scale(1);
-	}
-	25% {
-		border-radius: 68% 32% 34% 66% / 63% 34% 66% 37%;
-		transform: rotate(90deg) scale(1.08);
-	}
-	50% {
-		border-radius: 34% 66% 68% 32% / 38% 62% 38% 62%;
-		transform: rotate(180deg) scale(1);
-	}
-	75% {
-		border-radius: 58% 42% 37% 63% / 66% 58% 42% 34%;
-		transform: rotate(270deg) scale(1.08);
-	}
-	100% {
-		border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
-		transform: rotate(360deg) scale(1);
-	}
-}
-
-/* Kept for any other spinning affordance that still references it. */
+/* Both halves of the loading indicator turn, at their own speeds. */
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
@@ -6437,8 +6449,11 @@ a.list-item:hover {
 	max-height: min(
 		300px,
 		calc(
-			100dvh - var(--md-sys-keyboard-inset) - var(--dock-tier) * 2 -
-				var(--md-sys-spacing-6)
+			100dvh -
+			var(--md-sys-keyboard-inset) -
+			var(--dock-tier) *
+			2 -
+			var(--md-sys-spacing-6)
 		)
 	);
 }
@@ -7402,9 +7417,11 @@ a.list-item:hover {
 	--spinner-size: var(--md-sys-typescale-title-large-size);
 	transition: transform 0.12s ease;
 }
-/* Still a shape while the finger is down — it is a gesture, not a wait. The
-   morph starts when the refresh does, which is what says the pull was taken. */
-.ptr-indicator:not(.refreshing) .spinner {
+/* Still a shape while the finger is down: it is a gesture, not a wait. The
+   motion starts when the refresh does, which is what says the pull was taken.
+   Both halves, or the arc would keep travelling under a held finger. */
+.ptr-indicator:not(.refreshing) .spinner,
+.ptr-indicator:not(.refreshing) .spinner::after {
 	animation-play-state: paused;
 }
 
@@ -8076,7 +8093,11 @@ a.list-item:hover {
 }
 
 .search-scope-clear:hover {
-	background: color-mix(in srgb, var(--md-on-secondary-container) 12%, transparent);
+	background: color-mix(
+		in srgb,
+		var(--md-on-secondary-container) 12%,
+		transparent
+	);
 }
 
 .search-scope-clear .material-icons {
@@ -8297,7 +8318,6 @@ a.list-item:hover {
 	white-space: nowrap;
 	text-align: left;
 }
-
 
 /* The row numbers and column letters, so a reader can name a cell. They stay
    put while the grid scrolls under them, which is the whole point of having
