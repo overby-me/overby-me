@@ -324,6 +324,106 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
     }
 }
 
+/// Task #25: recvmsg a single service's notify socket right now and apply it.
+/// Used on the dispatcher's start-timeout path to rescue a sent-but-unread
+/// EXTEND_TIMEOUT_USEC / READY when the notification reader was starved by the
+/// activation storm and never collected the datagram. By the base start deadline
+/// the storm has subsided, so the yield-to-writers spinning read acquires
+/// quickly; it drains every pending datagram into the buffer, then applies it
+/// via [`apply_notify`]. FDSTORE fds are closed rather than stored — this path
+/// only cares about the timeout-relevant READY/EXTEND transitions.
+pub(crate) fn drain_unit_notify_socket(unit_id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    {
+        // Yield to writers, like the reader, until the table is readable.
+        let run_info_locked = loop {
+            match run_info.try_read() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        };
+        let Some(srvc_unit) = run_info_locked.unit_table.get(unit_id) else {
+            return;
+        };
+        let Specific::Service(srvc) = &srvc_unit.specific else {
+            return;
+        };
+        let mut_state = &mut *srvc.state.write_poisoned();
+        let Some(fd) = mut_state.srvc.notifications.as_ref().map(|s| s.as_raw_fd()) else {
+            return;
+        };
+
+        let old_flags = match nix::fcntl::fcntl(
+            unsafe { borrow_fd(fd) },
+            nix::fcntl::FcntlArg::F_GETFL,
+        ) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut nb = nix::fcntl::OFlag::from_bits_truncate(old_flags);
+        nb.insert(nix::fcntl::OFlag::O_NONBLOCK);
+        if nix::fcntl::fcntl(unsafe { borrow_fd(fd) }, nix::fcntl::FcntlArg::F_SETFL(nb)).is_err() {
+            return;
+        }
+
+        let mut buf = [0u8; 4096];
+        let mut cmsg_buf = nix::cmsg_space!([RawFd; 8], libc::ucred);
+        loop {
+            let mut iov = [std::io::IoSliceMut::new(&mut buf[..])];
+            match nix::sys::socket::recvmsg::<()>(
+                fd,
+                &mut iov,
+                Some(&mut cmsg_buf),
+                nix::sys::socket::MsgFlags::MSG_CMSG_CLOEXEC
+                    | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
+            ) {
+                Ok(msg) => {
+                    let bytes = msg.bytes;
+                    if bytes == 0 {
+                        break;
+                    }
+                    let mut sender_pid: Option<libc::pid_t> = None;
+                    if let Ok(cmsgs) = msg.cmsgs() {
+                        for cmsg in cmsgs {
+                            match cmsg {
+                                nix::sys::socket::ControlMessageOwned::ScmRights(fds) => {
+                                    for f in fds {
+                                        let _ = nix::unistd::close(f);
+                                    }
+                                }
+                                nix::sys::socket::ControlMessageOwned::ScmCredentials(cred) => {
+                                    sender_pid = Some(cred.pid());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    let access =
+                        crate::services::effective_notify_access(&mut_state.srvc, &srvc.conf);
+                    if !check_notify_access(access, sender_pid, &mut_state.srvc, &srvc_unit.id.name) {
+                        continue;
+                    }
+                    let note = String::from_utf8_lossy(&buf[..bytes]).to_string();
+                    mut_state.srvc.notifications_buffer.push_str(&note);
+                    if !note.ends_with('\n') {
+                        mut_state.srvc.notifications_buffer.push('\n');
+                    }
+                }
+                Err(nix::errno::Errno::EAGAIN) => break,
+                Err(_) => break,
+            }
+        }
+        let _ = nix::fcntl::fcntl(
+            unsafe { borrow_fd(fd) },
+            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::from_bits_truncate(old_flags)),
+        );
+    }
+    // Drain the now-populated buffer (READY=/EXTEND_TIMEOUT_USEC= transitions).
+    apply_notify(unit_id, "", Vec::new(), run_info);
+}
+
 /// Apply one forwarded notification event on the dispatcher: drain the
 /// service's notifications_buffer (state transitions such as READY=1,
 /// MAINPID= and RELOADING=), keep the active-enter timestamp consistent,

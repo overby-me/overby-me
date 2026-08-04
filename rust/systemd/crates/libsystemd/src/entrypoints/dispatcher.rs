@@ -683,7 +683,10 @@ fn expire_due_start_waits(
                 // effective-deadline re-check above then saves the start.
                 if !wait.grace_used {
                     wait.grace_used = true;
-                    crate::notification_handler::apply_notify(&id, "", Vec::new(), run_info);
+                    // Recvmsg the unit's notify socket directly: a starved reader
+                    // may have left the EXTEND_TIMEOUT_USEC/READY unread in the
+                    // socket, where a buffer-only apply_notify would miss it.
+                    crate::notification_handler::drain_unit_notify_socket(&id, run_info);
                     {
                         let ri = crate::units::dispatcher_read(run_info);
                         ri.notify_eventfds();
