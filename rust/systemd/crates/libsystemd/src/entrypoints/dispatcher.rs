@@ -446,6 +446,14 @@ fn dispatch_one(
                     // The head recorded main_exit_status: a parked oneshot,
                     // forking or exec start may now have its verdict.
                     if let Some(wait) = start_waits.remove(&id) {
+                        // Task #25: a notify service may have sent READY=1 or a
+                        // MAINPID= (handing off to a child) just before this pid
+                        // exited, but under start-storm the reader was starved
+                        // and left the datagram unread in the socket. Recvmsg and
+                        // apply it now, so a healthy start is not failed as
+                        // "exited before READY" when the SIGCHLD merely raced the
+                        // notify (upstream orders notify at -5 before SIGCHLD -4).
+                        crate::notification_handler::drain_unit_notify_socket(&id, run_info);
                         progress_start_wait(wait, false, run_info, chains, start_waits);
                     }
                 }
