@@ -165,12 +165,23 @@ file tree snapshot, D-Bus property map), a `DiffResult` of `Identical` /
 non-determinism, snapshot approval, JUnit and JSON reports, and a `#[difftest]`
 registration macro. A golden-file corpus is in place.
 
-Built since: a lighter-weight **in-process oracle suite** (`just differential`, see
-`docs/TESTING.md`) runs a corpus through both the rust and C binaries in one process and
-asserts semantic agreement, gated on env vars naming the C binaries. It covers the
-journal export parser, `systemd-escape`, `systemd-analyze` time/exit-status parsers, and
-the `systemd-id128` table, and has already turned two upstream drifts into fixes. Its
-intentional-divergence list is documented inline rather than in a separate file.
+Built since: a lighter-weight **per-tool differential suite** (`just differential`, see
+`docs/TESTING.md`) runs a corpus through both the rust and C binaries and asserts
+agreement, gated on env vars naming the C binaries. It began as in-process oracles
+(journal export parser, `systemd-escape`, `systemd-analyze` time/exit parsers, the
+`systemd-id128` table) and now spans ten crates through `crates/*/tests/differential_vs_c.rs`:
+`analyze`, `creds`, `escape`, `fstab-generator`, `id128`, `network-generator`, `sysctl`,
+`systemctl`, `sysusers`, and `tmpfiles`. It has turned a steady stream of upstream drifts
+into fixes, most recently the tmpfiles ACL application (ported to libacl), `unit_name`
+mangling, and a run of generator bugs: the kernel `ip=` short/full MTU-MAC fields and
+bracketed IPv6 addresses (which had produced garbage `.network` units), the fstab
+`x-systemd.device-timeout` option, and fstab fsck dependencies wrongly added for
+non-checkable file systems (tmpfs, bind, network, read-only). The pure-transform surfaces
+and both generators are now faithful to C 260.2, with `systemd-network-generator` output
+byte-identical. Remaining differences are cosmetic byte-order (a few fstab `[Unit]`/
+`Options=` details) or environmental (C omits the fsck dependency when `fsck.<fstype>` is
+absent from `$PATH`, which holds at real boot); the intentional-divergence list is
+documented inline.
 
 Still unbuilt:
 
