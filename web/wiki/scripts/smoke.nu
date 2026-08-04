@@ -32,8 +32,8 @@
 const PAGES = [
     [path, expect, why];
     ["/", "RadikalWiki", "the welcome page renders for someone with no account"]
-    ["/radikal_ungdom/hb1/dagsorden_1.0", "Dagsorden", "a public document resolves and shows its content"]
-    ["/radikal_ungdom/hb1/eksterne_resolutioner", "Genindstillinger", "a public folder lists its children"]
+    ["/blog", "Hello World!", "a public context lists its children"]
+    ["/blog/hello_world!", "Test!", "a public document resolves and shows its content"]
     ["/user/login", "", "the login route renders rather than 404ing"]
 ]
 
