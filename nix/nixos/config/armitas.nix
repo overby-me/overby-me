@@ -110,25 +110,30 @@
       # systemd-boot writes the `devicetree` line into the loader entry by
       # itself once hardware.deviceTree.name is set, which the hardware
       # module does.
+      # Verbose on purpose while this machine is being brought up.  A quiet
+      # boot here is indistinguishable from a hung one: the panel stays black
+      # from kernel handoff until the greeter either appears or does not, and
+      # there is no plymouth in between.  Once it boots reliably, put back
+      # what nixos/modules/core/boot.nix uses: consoleLogLevel = 0,
+      # initrd.verbose = false, and quiet + loglevel=3 + the rd.* params.
+      #
+      # editor stays on for the same reason.  core/boot.nix turns it off so
+      # nobody can append init=/bin/sh from the boot menu, which matters for
+      # an encrypted disk; this one is unencrypted anyway, and being able to
+      # edit the command line is the difference between diagnosing a failed
+      # boot and reinstalling to change one word.
       boot = {
         loader = {
-          timeout = 3;
+          timeout = 5;
           systemd-boot = {
             enable = true;
             configurationLimit = 10;
-            editor = false;
+            editor = true;
           };
           efi.canTouchEfiVariables = true;
         };
-        consoleLogLevel = 0;
-        initrd.verbose = false;
         kernelParams = [
           "boot.shell_on_fail"
-          "loglevel=3"
-          "quiet"
-          "rd.systemd.show_status=false"
-          "rd.udev.log_level=3"
-          "udev.log_priority=3"
         ];
       };
 
@@ -192,6 +197,33 @@
           # bluetooth.macAddress = "XX:XX:XX:XX:XX:XX";
         };
       };
+
+      # ── TPM ─────────────────────────────────────────────────────────
+      # systemd tags /dev/tpm0 and /dev/tpmrm0 and pulls in tpm2.target, and
+      # on this machine those device units never settle, so boot stalls twice
+      # for DefaultDeviceTimeoutSec (90s each) before carrying on.  Nothing
+      # here uses the TPM: the disk is unencrypted and there is no measured
+      # boot.  Turn it back on if either of those changes.
+      systemd.tpm2.enable = false;
+
+      # ── Deployment ──────────────────────────────────────────────────
+      # Authorise root so `nixos-rebuild --target-host root@armitas` works.
+      # Without it the only route in is overby.me plus an interactive sudo,
+      # which rules out non-interactive deploys, and hand-rolling one with
+      # nix copy plus switch-to-configuration silently boots the wrong
+      # generation: the bootloader menu is built from
+      # /nix/var/nix/profiles/system-*-link, so a closure that was never
+      # registered with `nix-env -p … --set` is simply not on it.
+      users.users.root.openssh.authorizedKeys.keys = [
+        inputs.self.secrets.publicKeys.overby-me-ssh-ed25519
+      ];
+
+      # ── Login ───────────────────────────────────────────────────────
+      # core/users.nix declares the account but sets no password, which on a
+      # fresh install leaves it locked for local login: the SSH key gets you
+      # in over the network, and the greeter lets nobody in at all.  Same
+      # value phone.nix uses; change it with passwd on first login.
+      users.users."overby.me".initialPassword = "changeme";
 
       # ── Networking ──────────────────────────────────────────────────
       # COSMIC's applet drives NetworkManager; iwd is the backend the
