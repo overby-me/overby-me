@@ -354,21 +354,37 @@ new. The re-sweep is the safety net for fan-in stragglers. The job graph's
 re-sweep: a completing unit wakes exactly the neighbours ordered after it,
 instead of a blind full re-walk.
 
-### The flag-on dispatch (service-only first)
+### The flag-on dispatch belongs in the existing dispatcher loop
 
-Behind `SYSTEMD_RS_JOB_GRAPH=1`, in the StartUnit monitor thread only:
+**Correction (2026-08-04, from reading the tree):** the drive must NOT be a
+per-`StartUnit` thread. The registry and its `run_queue` are process-global, so
+one drive thread per start request would race and mis-scope another request's
+jobs. The design is a *single* dispatcher (see "The dispatcher"), and that
+dispatcher already exists from inc 1/2: `entrypoints/dispatcher.rs`, the `run`
+loop at `dispatcher.rs:262` (compute `next_deadline` from its continuation
+state → `pop_blocking_until` → `dispatch_one` under `catch_unwind`), owning
+`chains` (oneshot exec chains) and `start_waits` (deferred starts). Inc 4 adds
+its run-queue drive as step 4 of that one loop, nowhere else.
 
-1. Prime: `enqueue_ready` over the closure using the `find_startable_units`
-   readiness (the initially-startable units).
-2. Dispatch: `pop_ready` each ready job and activate just that unit (the
-   existing per-unit activation the pool already calls), arming its deadline
-   with `set_deadline` from the unit's start timeout.
-3. Requeue: reuse the monitor's existing terminal-status detection as the
-   completion event — when a unit reaches Started/Stopped, `finish` its job and
+Concretely, behind `SYSTEMD_RS_JOB_GRAPH=1`:
+
+1. Producer: `StartUnit` still creates the closure's jobs (already live,
+   `control.rs:10428`) but, under the flag, instead of spawning the
+   activate-plus-poll monitor, `enqueue_ready` the initially-startable jobs
+   (`find_startable_units` readiness) and send one `Event::JobQueued` to wake the
+   dispatcher. No per-start thread.
+2. Dispatcher loop, new step 4 (after `dispatch_one`, before the next block):
+   drain the run queue — `pop_ready` each ready job, activate that one unit
+   initiate-only (`activate_unit`; park deferred starts on the *same* dispatcher
+   via `park_deferred_start` with an empty before-chain, since the graph
+   schedules dependents itself), and `set_deadline` per running job.
+3. Requeue on completion: the paths in `dispatch_one` that already flip a unit to
+   Started/Stopped (Notify READY=1, ChildExit, the start-wait/oneshot-chain
+   completions) gain one action — `finish` that unit's job and
    `requeue_after_finish` (its `Before=` neighbours, `find_startable_units`
-   readiness), then dispatch the newly-ready jobs.
-4. Terminate: loop until the registry drains; `pop_expired` against
-   `next_deadline` fires JobTimeout for anything stuck, so a wedge
+   readiness), which enqueues the newly-ready jobs for step 4's next pass.
+4. Deadlines: fold `JobRegistry::next_deadline` into the loop's `next_deadline`
+   min, and on a timeout tick `pop_expired` → finish as `Timeout`, so a wedge
    **self-terminates as a failed job instead of hanging the VM** (this is why the
    timeout wheel was built first).
 
@@ -376,10 +392,10 @@ Start **service-only** (validate on 03-jobs, whose closure is services) because
 the known wedge is target-specific: a `.target` job dispatched (Running) whose
 unit status never flips to Started, so every unit ordered after it waits forever
 and the dispatcher goes silent (`local-fs-pre.target[running/never started]`).
-Services flip Started/Stopped through the monitor's existing detection, so the
-requeue fires and the closure drains; targets need a process-less completion
-path (flip status + finish the job) that the reverted engine got wrong. Land the
-service closure first, then the process-less completion, then full boot.
+Services flip Started/Stopped through the completion paths above, so the requeue
+fires and the closure drains; targets need a process-less completion path (flip
+status + finish the job) that the reverted engine got wrong. Land the service
+closure first, then the process-less completion, then full boot.
 
 ### Falsification for the first slice
 
