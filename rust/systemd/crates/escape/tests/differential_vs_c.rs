@@ -82,3 +82,61 @@ fn escape_matches_c_systemd() {
         divergences.join("\n")
     );
 }
+
+/// Run `bin args...` and capture (stdout, stderr, success) verbatim.
+fn run_full(bin: &str, args: &[&str]) -> (String, String, bool) {
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run {bin} {args:?}: {e}"));
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.success(),
+    )
+}
+
+/// The option-validation errors are rust's own messages (not clap's), so they
+/// must match C's escape-tool byte for byte: no "Error: " prefix, C's exact
+/// text, and C's check order for multi-conflict inputs. Excludes the structural
+/// clap-vs-getopt cases (a missing --template value, and `-u --mangle` which C
+/// resolves by last-wins rather than erroring).
+#[test]
+fn escape_option_errors_match_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ESCAPE") else {
+        eprintln!("skip differential: SYSTEMD_ESCAPE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-escape");
+
+    let cases: &[&[&str]] = &[
+        &[],                                                     // Not enough arguments.
+        &["--template", "foo.service", "a"],                    // Template name ... is not valid.
+        &["--suffix", ".service", "foo"],                       // Invalid unit suffix type ".service".
+        &["--suffix", "", "foo"],                               // Invalid unit suffix type "".
+        &["--template", "getty@.service", "--suffix", "service", "x"], // may not be combined
+        &["--mangle", "--template", "getty@.service", "x"],     // not compatible with --mangle
+        &["--mangle", "--suffix", "service", "x"],              // not compatible with --mangle
+        &["--unescape", "--suffix", "service", "x"],            // --suffix is not compatible with --unescape
+        &["--path", "--mangle", "x"],                           // --path may not be combined with --mangle
+        &["--instance", "x"],                                   // must be used in conjunction with --unescape
+        &["--instance", "--template", "getty@.service", "x"],   // may not be combined with --template
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (ro, re, rok) = run_full(rust_bin, args);
+        let (co, ce, cok) = run_full(&c_bin, args);
+        if ro != co || re != ce || rok != cok {
+            div.push(format!(
+                "args={args:?}\n     rust: ok={rok} out={ro:?} err={re:?}\n     c   : ok={cok} out={co:?} err={ce:?}"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-escape option-error drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
