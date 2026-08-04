@@ -34,11 +34,23 @@ use crate::pdf_text::{Block, Extracted, Span};
 fn Spans(spans: Vec<Span>) -> Element {
     rsx! {
         for (i , span) in spans.iter().enumerate() {
-            match &span.color {
-                Some(color) => rsx! {
-                    span { key: "{i}", style: "color:{color};", "{span.text}" }
-                },
-                None => rsx! { "{span.text}" },
+            {
+                let style = match &span.color {
+                    Some(color) => format!("color:{color};"),
+                    None => String::new(),
+                };
+                // `strong` and `em` rather than a font-weight style: a document
+                // that emphasises a word means it, and the meaning should reach
+                // a screen reader too.
+                match (span.bold, span.italic) {
+                    (true, true) => rsx! {
+                        strong { key: "{i}", style: "{style}", em { "{span.text}" } }
+                    },
+                    (true, false) => rsx! { strong { key: "{i}", style: "{style}", "{span.text}" } },
+                    (false, true) => rsx! { em { key: "{i}", style: "{style}", "{span.text}" } },
+                    (false, false) if style.is_empty() => rsx! { "{span.text}" },
+                    (false, false) => rsx! { span { key: "{i}", style: "{style}", "{span.text}" } },
+                }
             }
         }
     }

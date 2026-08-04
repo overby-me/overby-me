@@ -62,6 +62,15 @@ pub struct Span {
     pub text: String,
     /// A CSS colour, or `None` for whatever the reading surface uses.
     pub color: Option<String>,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl Span {
+    /// Whether two stretches can be one span: same colour, same face.
+    fn matches(&self, other: &Span) -> bool {
+        self.color == other.color && self.bold == other.bold && self.italic == other.italic
+    }
 }
 
 /// What came out of a PDF, and how much of it there was to find.
@@ -102,6 +111,12 @@ struct Font {
     default_width: f64,
     /// No `/ToUnicode`: fall back to treating codes as an 8-bit encoding.
     win_ansi: bool,
+    /// Weight and slant, which in a PDF are properties of the FONT rather than
+    /// of the text. There is no "make this bold" operator: the writer switches
+    /// to a different font resource, and the only way to know is to ask that
+    /// resource what it is.
+    bold: bool,
+    italic: bool,
 }
 
 impl Font {
@@ -339,6 +354,37 @@ fn read_font(doc: &Document, dict: &Dictionary) -> Font {
     }
     font.win_ansi = font.to_unicode.is_empty() && !font.two_byte;
 
+    // Weight and slant, from the two places that state them. The name is the
+    // reliable one for Word, which embeds subsets called things like
+    // "BCDEEE+Calibri-Bold" or "Arial,BoldItalic"; the descriptor is the
+    // fallback and the tie-breaker.
+    let base = dict
+        .get(b"BaseFont")
+        .ok()
+        .and_then(|o| o.as_name().ok())
+        .map(|n| String::from_utf8_lossy(n).to_ascii_lowercase())
+        .unwrap_or_default();
+    font.bold = base.contains("bold") || base.contains("black") || base.contains("heavy");
+    font.italic = base.contains("italic") || base.contains("oblique");
+
+    let descriptor = descriptor_of(doc, dict);
+    if let Some(desc) = descriptor {
+        if let Ok(weight) = desc.get(b"FontWeight").and_then(number) {
+            // 600 is where the CSS scale calls it bold, and where Word's
+            // semibold styles sit.
+            font.bold = font.bold || weight >= 600.0;
+        }
+        if let Ok(flags) = desc.get(b"Flags").and_then(number) {
+            let flags = flags as u32;
+            // Bit 19 (1-based) is ForceBold, bit 7 is Italic.
+            font.bold = font.bold || flags & (1 << 18) != 0;
+            font.italic = font.italic || flags & (1 << 6) != 0;
+        }
+        if let Ok(angle) = desc.get(b"ItalicAngle").and_then(number) {
+            font.italic = font.italic || angle.abs() > 4.0;
+        }
+    }
+
     // Simple fonts carry /FirstChar + /Widths; composite ones carry /W on the
     // descendant, with /DW as the default.
     if font.two_byte {
@@ -404,6 +450,14 @@ fn read_cid_widths(doc: &Document, arr: &[Object], out: &mut HashMap<u32, f64>) 
     }
 }
 
+/// A font's descriptor, which is on the font itself for a simple font and on
+/// the descendant for a composite one.
+fn descriptor_of<'a>(doc: &'a Document, dict: &'a Dictionary) -> Option<&'a Dictionary> {
+    let holder = descendant(doc, dict).unwrap_or(dict);
+    let obj = holder.get(b"FontDescriptor").ok()?;
+    resolve(doc, obj).ok()?.as_dict().ok()
+}
+
 fn descendant<'a>(doc: &'a Document, dict: &'a Dictionary) -> Option<&'a Dictionary> {
     let obj = dict.get(b"DescendantFonts").ok()?;
     let arr = resolve(doc, obj).ok()?.as_array().ok()?;
@@ -454,6 +508,8 @@ struct Run {
     text: String,
     /// The non-stroking colour in force, or `None` for ordinary ink.
     color: Option<String>,
+    bold: bool,
+    italic: bool,
 }
 
 /// A fill colour, as CSS, or `None` when it is the document's ordinary ink.
@@ -694,6 +750,8 @@ fn show(
             size: size * scale,
             text,
             color: color.map(str::to_string),
+            bold: font.bold,
+            italic: font.italic,
         });
     }
     *tm = mul([1.0, 0.0, 0.0, 1.0, advance, 0.0], *tm);
@@ -772,8 +830,14 @@ fn join_line(runs: &[Run]) -> Option<Line> {
             && !spans.last().is_some_and(|s| s.text.ends_with(' '));
         // A run continues the one before it when the colour has not changed, so
         // a paragraph in one colour is one span rather than one per draw call.
+        let here = Span {
+            text: String::new(),
+            color: run.color.clone(),
+            bold: run.bold,
+            italic: run.italic,
+        };
         match spans.last_mut() {
-            Some(last) if last.color == run.color => {
+            Some(last) if last.matches(&here) => {
                 if wants_space {
                     last.text.push(' ');
                 }
@@ -791,10 +855,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
                     }
                 }
                 text.push_str(&run.text);
-                spans.push(Span {
-                    text,
-                    color: run.color.clone(),
-                });
+                spans.push(Span { text, ..here });
             }
         }
         prev_end = run.end_x;
@@ -837,10 +898,7 @@ fn tidy(spans: Vec<Span>) -> Vec<Span> {
             }
         }
         if !text.is_empty() {
-            out.push(Span {
-                text,
-                color: span.color,
-            });
+            out.push(Span { text, ..span });
         }
     }
     // Nothing but spaces is not a line.
@@ -895,6 +953,23 @@ fn starts_new_entry(text: &str) -> bool {
         || matches!(rest.as_slice(), ['0'..='9', '0'..='9'])
 }
 
+/// Whether this line is an entry in a table of contents.
+///
+/// Leader dots, which no ordinary sentence contains: an ellipsis is three dots
+/// or one character, and a leader runs the width of the column. Six is well
+/// clear of both.
+///
+/// Needed because a contents page defeats every other rule at once. Every line
+/// reaches the column edge, because the dots are what fill it, so nothing looks
+/// like it ended early; the lines are single-spaced, so there is no gap; and
+/// there is no time to open on. The songbook's index arrived as one paragraph
+/// per SECTION, with every song in it run together.
+fn is_index_entry(text: &str) -> bool {
+    text.as_bytes()
+        .windows(6)
+        .any(|w| w.iter().all(|b| *b == b'.'))
+}
+
 /// How far right the text column runs.
 ///
 /// Not the maximum, which one stray element pushes past the real margin, but
@@ -944,9 +1019,20 @@ fn list_marker(text: &str) -> Option<&str> {
                     return None;
                 }
                 let rest = after.trim_start();
-                // Guard against a sentence starting with a capital: a marker is
-                // short, and what follows it is not empty.
-                return (i <= 3 && !rest.is_empty()).then_some(rest);
+                // A marker is short, and what follows it is not empty.
+                if i > 3 || rest.is_empty() {
+                    return None;
+                }
+                // And what follows a NUMBER starts with a capital. Danish is
+                // full of ordinals that look exactly like list markers: "1. maj
+                // 2025", "1. udgave", "1. oplag" were all arriving as list
+                // items with the number eaten. A month and an ordinal noun are
+                // lowercase; the first word of a list item is not.
+                let numeric = t[..i].chars().all(|c| c.is_ascii_digit());
+                if numeric && !rest.starts_with(char::is_uppercase) {
+                    return None;
+                }
+                return Some(rest);
             }
             c if c.is_alphanumeric() => continue,
             _ => return None,
@@ -1014,6 +1100,7 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
                 // or the page turning over.
                 ended_early
                     || starts_new_entry(&line.text)
+                    || is_index_entry(&line.text)
                     || gap > p.size * 1.6
                     || (line.size - p.size).abs() > p.size * 0.15
                     || list_marker(&line.text).is_some()
@@ -1055,10 +1142,7 @@ fn drop_prefix(spans: Vec<Span>, n: usize) -> Vec<Span> {
         }
         let text: String = span.text.chars().skip(left).collect();
         left = 0;
-        out.push(Span {
-            text,
-            color: span.color,
-        });
+        out.push(Span { text, ..span });
     }
     tidy(out)
 }
@@ -1118,14 +1202,49 @@ mod harness {
                 seen.sort();
                 seen.dedup();
                 println!("  coloured spans={} distinct={:?}", coloured.len(), seen);
-                for b in doc.blocks.iter().take(12) {
+                let bold = doc
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.spans())
+                    .filter(|s| s.bold)
+                    .count();
+                let italic = doc
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.spans())
+                    .filter(|s| s.italic)
+                    .count();
+                let total = doc.blocks.iter().flat_map(|b| b.spans()).count();
+                println!("  spans={total} bold={bold} italic={italic}");
+                for sp in doc
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.spans())
+                    .filter(|s| s.bold)
+                    .take(6)
+                {
+                    println!("    bold: {}", sp.text.chars().take(60).collect::<String>());
+                }
+                let show: usize = std::env::var("PDF_SHOW")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(12);
+                let skip: usize = std::env::var("PDF_SKIP")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                for b in doc.blocks.iter().skip(skip).take(show) {
                     let kind = match b {
                         super::Block::Heading { level, .. } => format!("h{level}"),
                         super::Block::ListItem(_) => "li".into(),
                         super::Block::Paragraph(_) => "p".into(),
                     };
                     let t = block_text(b);
-                    println!("  {kind:<3} {}", t.chars().take(90).collect::<String>());
+                    let width: usize = std::env::var("PDF_WIDTH")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(90);
+                    println!("  {kind:<3} {}", t.chars().take(width).collect::<String>());
                 }
             }
         }
@@ -1234,6 +1353,8 @@ mod tests {
             spans: vec![Span {
                 text: text.into(),
                 color: None,
+                bold: false,
+                italic: false,
             }],
         }
     }
@@ -1305,6 +1426,8 @@ mod tests {
             blocks: vec![Block::Paragraph(vec![Span {
                 text: "noget".into(),
                 color: None,
+                bold: false,
+                italic: false,
             }])],
             pages: 2,
             pages_without_text: 0,
@@ -1347,24 +1470,39 @@ mod tests {
         assert_eq!(cmyk(0.0, 0.0, 0.0, 1.0), None);
     }
 
-    /// A colour change inside a line becomes a span boundary, so one red word in
-    /// a black sentence keeps its colour and the rest keeps none.
-    #[test]
-    fn a_colour_change_splits_the_line_and_nothing_else() {
-        let run = |x: f64, end_x: f64, text: &str, color: Option<&str>| Run {
+    /// A span with no styling but its colour, for the fixtures below.
+    fn span(text: &str, color: Option<&str>) -> Span {
+        Span {
+            text: text.into(),
+            color: color.map(str::to_string),
+            bold: false,
+            italic: false,
+        }
+    }
+
+    fn run(x: f64, end_x: f64, text: &str, color: Option<&str>, bold: bool) -> Run {
+        Run {
             x,
             end_x,
             y: 700.0,
             size: 11.0,
             text: text.into(),
             color: color.map(str::to_string),
-        };
+            bold,
+            italic: false,
+        }
+    }
+
+    /// A colour change inside a line becomes a span boundary, so one red word in
+    /// a black sentence keeps its colour and the rest keeps none.
+    #[test]
+    fn a_colour_change_splits_the_line_and_nothing_else() {
         let lines = lines_from(vec![
             // Gaps of 4pt at 11pt type: a real word space, comfortably over
             // the 0.20em the joiner asks for.
-            run(0.0, 30.0, "Vi stemte", None),
-            run(34.0, 46.0, "nej", Some("#ff0000")),
-            run(50.0, 74.0, "til forslaget", None),
+            run(0.0, 30.0, "Vi stemte", None, false),
+            run(34.0, 46.0, "nej", Some("#ff0000"), false),
+            run(50.0, 74.0, "til forslaget", None, false),
         ]);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, "Vi stemte nej til forslaget");
@@ -1375,41 +1513,40 @@ mod tests {
         assert_eq!(
             lines[0].spans,
             vec![
-                Span {
-                    text: "Vi stemte ".into(),
-                    color: None
-                },
-                Span {
-                    text: "nej ".into(),
-                    color: Some("#ff0000".into())
-                },
-                Span {
-                    text: "til forslaget".into(),
-                    color: None
-                },
+                span("Vi stemte ", None),
+                span("nej ", Some("#ff0000")),
+                span("til forslaget", None),
             ]
         );
+    }
+
+    /// A face change splits a span the same way a colour does, so a bold word
+    /// inside a sentence stays bold and nothing around it does. There is no
+    /// "make this bold" operator in a PDF: the writer switches font, and the
+    /// weight has to be read off the font resource.
+    #[test]
+    fn a_bold_word_is_its_own_span() {
+        let lines = lines_from(vec![
+            run(0.0, 30.0, "Forslaget blev", None, false),
+            run(34.0, 52.0, "vedtaget", None, true),
+            run(56.0, 70.0, "enstemmigt", None, false),
+        ]);
+        assert_eq!(lines.len(), 1);
+        let spans = &lines[0].spans;
+        assert_eq!(spans.len(), 3, "one span per face");
+        assert!(!spans[0].bold);
+        assert!(spans[1].bold, "the emphasised word keeps its weight");
+        assert!(!spans[2].bold);
+        assert_eq!(lines[0].text, "Forslaget blev vedtaget enstemmigt");
     }
 
     /// Stripping a list marker must not take the colour of the words after it.
     #[test]
     fn dropping_a_marker_keeps_the_colours_that_follow() {
-        let spans = vec![
-            Span {
-                text: "1. ".into(),
-                color: None,
-            },
-            Span {
-                text: "Rødt punkt".into(),
-                color: Some("#ff0000".into()),
-            },
-        ];
+        let spans = vec![span("1. ", None), span("Rødt punkt", Some("#ff0000"))];
         assert_eq!(
             drop_prefix(spans, 3),
-            vec![Span {
-                text: "Rødt punkt".into(),
-                color: Some("#ff0000".into())
-            }]
+            vec![span("Rødt punkt", Some("#ff0000"))]
         );
     }
 
@@ -1426,6 +1563,8 @@ mod tests {
             spans: vec![Span {
                 text: text.into(),
                 color: None,
+                bold: false,
+                italic: false,
             }],
         };
         // Column runs to 400. The first line stops at 180, far short of it.
@@ -1480,5 +1619,36 @@ mod tests {
         assert_eq!(list_marker("12.20 Valg af revisionsselskab"), None);
         // The real thing still works.
         assert_eq!(list_marker("11. Et punkt"), Some("Et punkt"));
+    }
+
+    /// A contents page defeats every other rule at once: leader dots fill each
+    /// line to the column edge, the lines are single-spaced, and there is no
+    /// time to open on. The songbook's index arrived as one paragraph per
+    /// section with every song run together inside it.
+    #[test]
+    fn leader_dots_mark_an_index_entry() {
+        assert!(is_index_entry("Kampsange...............................3"));
+        assert!(is_index_entry("Ode til Rohde......  62"));
+        // An ellipsis is not a leader, in either spelling.
+        assert!(!is_index_entry("Hør nu kampens toner..."));
+        assert!(!is_index_entry("Hør nu kampens toner…"));
+        assert!(!is_index_entry("En ganske almindelig sætning."));
+    }
+
+    /// Danish is full of ordinals that look exactly like list markers. These
+    /// were arriving as list items with the number eaten, so the songbook's
+    /// colophon read "maj 2025" and "udgave".
+    #[test]
+    fn an_ordinal_is_not_a_list_marker() {
+        assert_eq!(list_marker("1. maj 2025"), None);
+        assert_eq!(list_marker("1. udgave"), None);
+        assert_eq!(list_marker("2. oplag"), None);
+        // A real numbered item still is one: its text starts with a capital.
+        assert_eq!(list_marker("1. Første punkt"), Some("Første punkt"));
+        // And a bullet needs no such test, having no other meaning.
+        assert_eq!(
+            list_marker("- valg af dirigenter"),
+            Some("valg af dirigenter")
+        );
     }
 }
