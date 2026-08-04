@@ -1661,8 +1661,14 @@ fn cmd_calendar(expressions: &[String], iterations: u32, base_time: Option<&str>
     for expr in expressions {
         match CalendarSpec::parse(expr) {
             Ok(spec) => {
-                println!("  Original form: {}", spec.original);
-                println!("Normalized form: {}", spec.normalized());
+                // C only prints the original form when it differs from the
+                // normalized form (analyze-calendar.c), so an already-normalized
+                // spec shows just the normalized line.
+                let normalized = spec.normalized();
+                if spec.original != normalized {
+                    println!("  Original form: {}", spec.original);
+                }
+                println!("Normalized form: {normalized}");
 
                 if iterations > 0 {
                     let now = base_now;
@@ -1673,10 +1679,12 @@ fn cmd_calendar(expressions: &[String], iterations: u32, base_time: Option<&str>
                     for i in 0..iterations {
                         if let Some(next) = spec.next_elapse(ref_dt) {
                             let next_unix = CalendarSpec::datetime_to_unix(&next);
+                            // Match C's right-aligned labels: "Next elapse" and
+                            // "Iteration #N" both pad to a 15-column field.
                             let label = if i == 0 {
-                                "    Next elapse".to_string()
+                                format!("{:>15}", "Next elapse")
                             } else {
-                                format!("          Iter. #{}", i + 1)
+                                format!("{:>15}", format!("Iteration #{}", i + 1))
                             };
 
                             // Format as a human-readable UTC timestamp

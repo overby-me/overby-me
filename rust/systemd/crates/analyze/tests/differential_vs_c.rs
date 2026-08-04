@@ -481,3 +481,52 @@ fn analyze_capability_output_matches_c() {
         divergences.join("\n")
     );
 }
+
+/// The calendar output's deterministic lines must match C: the "Original form"
+/// line appears only when it differs from the normalized form, and each "Next
+/// elapse"/"Iteration #N" timestamp (computed from a fixed --base-time) matches.
+/// The "From now" line is relative to the real clock, so it is filtered out.
+#[test]
+fn analyze_calendar_form_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    // Deterministic lines only: drop "From now" (real-clock relative) and blanks.
+    let det = |bin: &str, args: &[&str]| -> String {
+        run(bin, args)
+            .0
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("From now") && !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // All cases pin --base-time so the elapse timestamps are deterministic
+    // (without it, "Next elapse" is relative to the current clock).
+    let base = "--base-time=2026-01-01 00:00:00 UTC";
+    let cases: &[&[&str]] = &[
+        &["calendar", base, "*-*-* 06:00:00"], // already normalized -> no Original form
+        &["calendar", base, "monday"],         // -> "Original form: monday"
+        &["calendar", base, "12:00"],
+        &["calendar", base, "--iterations=3", "Mon *-*-* 00:00:00"],
+        &["calendar", base, "--iterations=5", "*-*-* 06:00:00"],
+        &["calendar", base, "--iterations=2", "Sat,Sun 08:00:00"],
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (r, c) = (det(rust_bin, args), det(&c_bin, args));
+        if r != c {
+            div.push(format!("args={args:?}\n  C:\n{c}\n  R:\n{r}"));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze calendar form drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
