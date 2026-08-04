@@ -76,6 +76,12 @@ fn fstab_generator_device_nodes_match_c() {
         "LABEL=myswap none swap defaults 0 0\n",
         // A PARTUUID swap.
         "PARTUUID=aa11 none swap sw 0 0\n",
+        // Several swaps sharing the pseudo `none`/`swap` target: C keys swaps
+        // by device, never by mountpoint, so all are emitted (rust previously
+        // rejected these as a duplicate `none` mountpoint).
+        "UUID=swap-a  none swap sw       0 0\n\
+         /dev/sdc2    none swap defaults 0 0\n\
+         LABEL=swp3   swap swap pri=10   0 0\n",
     ];
 
     let mut div = Vec::new();

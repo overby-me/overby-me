@@ -168,16 +168,21 @@ fn main() -> ExitCode {
                 format!("/sysroot{}", entry.where_)
             };
         }
-        // Duplicate mountpoint detection — matches upstream.
-        if seen_mountpoints.contains(&entry.where_) {
-            eprintln!(
-                "systemd-fstab-generator: duplicate mountpoint {} in fstab, failing",
-                entry.where_
-            );
-            had_error = true;
-            continue;
+        // Duplicate mountpoint detection — matches upstream. Only real mount
+        // points (absolute paths) are deduplicated; swap entries carry a
+        // pseudo target (`none`/`swap`) and are keyed by device, so C accepts
+        // many of them.
+        if entry.where_.starts_with('/') {
+            if seen_mountpoints.contains(&entry.where_) {
+                eprintln!(
+                    "systemd-fstab-generator: duplicate mountpoint {} in fstab, failing",
+                    entry.where_
+                );
+                had_error = true;
+                continue;
+            }
+            seen_mountpoints.insert(entry.where_.clone());
         }
-        seen_mountpoints.insert(entry.where_.clone());
 
         if swap_disabled && entry.fstype == "swap" {
             continue;
