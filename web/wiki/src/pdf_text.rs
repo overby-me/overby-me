@@ -948,6 +948,31 @@ struct Rule {
     thickness: f64,
 }
 
+/// Whether a text matrix slants the letters it draws.
+///
+/// A file with no italic face to hand fakes one by shearing the matrix, and
+/// nothing in the font then says italic at all. The songbook does exactly this:
+/// its only faces are upright Times, Arial, Calibri and Cambria, and Marianne
+/// Jelved's "Æresmedlem af Radikal Ungdom" is set with `Tm 50 0 16.99 50`,
+/// nineteen degrees of slant.
+///
+/// Measured against the baseline the matrix itself sets rather than against the
+/// page, so text turned on its side is not read as italic for being sideways.
+fn slanted(m: [f64; 6]) -> bool {
+    let along_baseline = (m[0] * m[0] + m[1] * m[1]).sqrt();
+    if along_baseline <= 0.0 {
+        return false;
+    }
+    let (ux, uy) = (m[0] / along_baseline, m[1] / along_baseline);
+    // How far the letters' up-axis leans along the baseline, against how tall it
+    // stands away from it.
+    let leans = m[2] * ux + m[3] * uy;
+    let stands = (m[3] * ux - m[2] * uy).abs();
+    // A hair over five degrees. Real italics slant twelve to twenty; nothing
+    // upright slants at all.
+    stands > 0.0 && (leans / stands).abs() > 0.1
+}
+
 /// Where the current transform puts a point.
 fn put(ctm: [f64; 6], x: f64, y: f64) -> (f64, f64) {
     (
@@ -1551,7 +1576,8 @@ fn show(
                 text: std::mem::take(text),
                 color: color.map(str::to_string),
                 bold: font.bold,
-                italic: font.italic,
+                // A file may say italic in the font, or draw it with a shear.
+                italic: font.italic || slanted(at),
                 underline: false,
             });
         }
@@ -3338,6 +3364,12 @@ mod harness {
                         .iter()
                         .filter(|b| matches!(b, super::Block::Image(p) if p.path.is_some()))
                         .count();
+                    let italics = doc
+                        .blocks
+                        .iter()
+                        .flat_map(|b| b.spans())
+                        .filter(|s| s.italic)
+                        .count();
                     let underlined = doc
                         .blocks
                         .iter()
@@ -3383,7 +3415,7 @@ mod harness {
                         })
                         .count();
                     println!(
-                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} draw={drawings:<3} bullets={drawn:<4} ul={underlined:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
+                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} draw={drawings:<3} bullets={drawn:<4} ul={underlined:<4} it={italics:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
                         doc.pages,
                         doc.blocks.len(),
                         chars,
@@ -3690,6 +3722,18 @@ mod harness {
                     .take(6)
                 {
                     println!("    bold: {}", sp.text.chars().take(60).collect::<String>());
+                }
+                for sp in doc
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.spans())
+                    .filter(|s| s.italic)
+                    .take(5)
+                {
+                    println!(
+                        "    italic: {}",
+                        sp.text.chars().take(60).collect::<String>()
+                    );
                 }
                 for sp in doc
                     .blocks
@@ -4527,6 +4571,22 @@ mod tests {
         assert_eq!(index_entry("1. maj 2025"), None);
         assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
         assert_eq!(index_entry("....7"), None, "no title, no row");
+    }
+
+    /// A file with no italic face fakes one by shearing the matrix, and then
+    /// nothing in the font says italic at all.
+    #[test]
+    fn a_sheared_matrix_is_an_italic() {
+        // The songbook's own: "Æresmedlem af Radikal Ungdom", nineteen degrees.
+        assert!(slanted([50.0, 0.0, 16.992, 50.0, 186.0, -2144.0]));
+        // Upright, at any size.
+        assert!(!slanted([50.0, 0.0, 0.0, 50.0, 0.0, 0.0]));
+        assert!(!slanted([11.0, 0.0, 0.0, 11.0, 56.0, 700.0]));
+        // Turned on its side is not italic for being sideways: a watermark down
+        // the margin is upright text that has been rotated.
+        assert!(!slanted([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]));
+        // And rotated AND sheared still reads as sheared.
+        assert!(slanted([0.0, 1.0, -1.0, 0.34, 0.0, 0.0]));
     }
 
     /// A line stops short for two different reasons, and only one of them ends
