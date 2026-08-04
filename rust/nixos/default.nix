@@ -30,4 +30,7 @@
   # Rung 1b: a second rust component (systemd-sysusers) under C PID 1.
   checks.rust-rung1-sysusers = pkgs:
     import ./rung1-sysusers-test.nix {inherit pkgs;};
+  # Rung 1: the first rust DAEMON (systemd-timesyncd) under C PID 1.
+  checks.rust-rung1-timesyncd = pkgs:
+    import ./rung1-timesyncd-test.nix {inherit pkgs;};
 }
