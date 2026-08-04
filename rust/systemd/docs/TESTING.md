@@ -16,16 +16,20 @@ About 9,700 test functions across 93 crates.
 ### Robustness fuzzers
 
 Several parsers that consume attacker-influenced or corrupt input carry an in-tree,
-dependency-free fuzzer: a seeded LCG assembles random inputs, each is run through the
-parser under `std::panic::catch_unwind`, and a worker thread is joined under a 30s
-wall-clock budget so a hang (not just a panic) fails the test. They take no new
-dependencies and run in a few seconds each. Grep for `fn fuzz_`:
+dependency-free fuzzer: a seeded LCG assembles random inputs and each is run through the
+parser under `std::panic::catch_unwind`. Where a parse can loop (calendar/time
+`next_elapse` searches), a worker thread is joined under a 30s wall-clock budget so a
+hang, not just a panic, fails the test. They take no new dependencies and run in a few
+seconds each. Grep for `fn fuzz_`:
 
 - binary journal objects (`c_journal`, `entry`) and the export format,
 - the unit-file parser (`parse_file` + `parse_service`, including size/rlimit values),
 - the calendar parser (`CalendarSpec::parse` + chained `next_elapse`),
 - the `systemd-analyze` time parsers (`parse_timestamp`, `TimeSpan::parse`),
-- the resolved/networkd wire parsers.
+- the resolved/networkd wire parsers,
+- the `systemd-network-generator` kernel-command-line parser + generator
+  (`parse_cmdline` + `generate` over random `ip=`/`vlan=`/`bond=`/`rd.route=`/… soup),
+- the `systemd-fstab-generator` fstab parser + emitters (`parse_fstab` + `emit_*`).
 
 The time fuzzer caught a real overflow panic on an out-of-range year, and the journal
 fuzzers caught amplification and underflow DoS bugs; the rest were clean nets. When adding
@@ -56,11 +60,26 @@ from `nixpkgs#systemd` and sets every gate:
 just differential
 ```
 
-Covered so far: journal export-format parsing (`systemd-journal-remote`), unit-name
-escaping (`systemd-escape`), `systemd-analyze` `timespan` / `calendar` / `timestamp` /
-`exit-status`, and the `systemd-id128 show` table. These found and fixed two real drift
-bugs (a unitless `timespan` read as microseconds instead of seconds; a UTC-suffixed
-`timestamp` silently zeroing its seconds) and freeze several already-faithful tables.
+Covered so far:
+
+- journal export-format parsing (`systemd-journal-remote`);
+- unit-name escaping (`systemd-escape`: escape / path / mangle / template / suffix /
+  unescape, plus the option-validation and path-warning error paths);
+- `systemd-analyze` `timespan` / `calendar` / `timestamp` / `exit-status` /
+  `condition` / `compare-versions` / `capability` / `architectures`;
+- the `systemd-id128` `show` table, the `-a APP` app-specific derivation, and the
+  pretty / JSON output formats;
+- the `systemd-creds list` empty-set `ENXIO` exit contract;
+- `systemd-network-generator`: `ip=`, `ifname=`, `net.ifname_policy=`, `net.ifnames=`,
+  and `rd.route=` (whole generated `.network`/`.link` file trees, byte-for-byte);
+- `systemd-fstab-generator`: device-node canonicalization, `blockdev@` ordering,
+  `SourcePath`/`Documentation`/`Where`/`Type`, and the `.requires`/`.wants` symlink tree.
+
+Together these have found and fixed roughly two dozen real drift bugs, from a unitless
+`timespan` read as microseconds instead of seconds and a UTC-suffixed `timestamp`
+silently zeroing its seconds, to `systemd-network-generator` dropping an `rd.route=`
+that shared an interface with `ip=`, and `systemd-fstab-generator` leaving `UUID=`
+device specs unresolved and never ordering mounts after their `blockdev@` target.
 
 Each oracle compares the *semantic* result, not raw stdout, and deliberately does not
 flag these intentional differences:
@@ -74,6 +93,15 @@ flag these intentional differences:
   statuses.
 - **No timezone database.** `systemd-analyze timestamp` evaluates in UTC and rejects a
   non-UTC zone rather than misparsing it; the corpus uses UTC-anchored inputs.
+- **Environment-gated wiring.** `systemd-fstab-generator`'s fsck dependencies (both the
+  per-mount `systemd-fsck@` and the root `systemd-fsck-root.service`) are gated in C on
+  `sysfs_check()`, so their presence depends on the host and is excluded; the oracle
+  compares a per-unit set of the environment-independent fields plus the non-fsck symlink
+  tree, so header field order and section layout are also ignored.
+- **Unported network-generator shapes.** `systemd-network-generator` `vlan=`/`bond=`/
+  `bridge=`/`team=` still emit one descriptive file per aspect (`71-<type>-…`) rather than
+  C's per-interface merged `70-<ifname>.netdev`/`.network`, so those items are not yet in
+  the corpus. `ip=`/`ifname=`/`net.ifname_policy=`/`rd.route=` are byte-faithful.
 
 ## Integration tests
 
