@@ -27,4 +27,7 @@
   # C systemd manager. Boots with C PID 1 but the rust systemd-tmpfiles.
   checks.rust-rung1-tmpfiles = pkgs:
     import ./rung1-tmpfiles-test.nix {inherit pkgs;};
+  # Rung 1b: a second rust component (systemd-sysusers) under C PID 1.
+  checks.rust-rung1-sysusers = pkgs:
+    import ./rung1-sysusers-test.nix {inherit pkgs;};
 }
