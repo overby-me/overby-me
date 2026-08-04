@@ -47,6 +47,14 @@ fn network_generator_matches_c() {
         &["ip=eth0:dhcp"],
         &["ip=eth0:dhcp6"],
         &["ip=eth0:auto6"],
+        // Short form with trailing [:<mtu>[:<macaddr>]] -> [Link] MTUBytes/
+        // MACAddress. rust once dropped these or misparsed the mac as full-form
+        // fields (garbage Name=/DNS=).
+        &["ip=eth0:dhcp:1500"],
+        &["ip=eth0:auto6:9000"],
+        &["ip=eth0:dhcp:1500:00:11:22:33:44:55"],
+        &["ip=eth0:dhcp::00:11:22:33:44:55"],
+        &["ip=10.0.0.5:dhcp:1500"],
         &["ip=10.0.0.5::10.0.0.1:255.255.255.0::eth0:off"],
         &["ip=192.168.1.10::192.168.1.1:255.255.255.0:myhost:eth1:none"],
         &["ip=dhcp", "nameserver=8.8.8.8", "nameserver=1.1.1.1"],

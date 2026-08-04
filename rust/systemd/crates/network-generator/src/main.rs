@@ -58,6 +58,10 @@ struct IpConfig {
     dns1: String,
     /// NTP server.
     ntp0: String,
+    /// Link MTU from the `ip=` short form's `[:<mtu>]` field.
+    mtu: String,
+    /// Link MAC from the `ip=` short form's `[:<macaddr>]` field.
+    mac: String,
 }
 
 /// Parsed `rd.route=` parameter: `<net>/<mask>:<gateway>[:<interface>]`.
@@ -265,6 +269,27 @@ fn strip_param<'a>(token: &'a str, prefix: &str) -> Option<&'a str> {
     token.strip_prefix(prefix)
 }
 
+/// Whether `s` is a recognized `ip=` autoconf method. C keys the short form
+/// `ip=<device>:<method>[:<mtu>[:<mac>]]` off the second colon-field being one
+/// of these, so it is what distinguishes the short form from the full
+/// `ip=<client>:<peer>:...` form.
+fn is_autoconf_method(s: &str) -> bool {
+    matches!(
+        s.to_ascii_lowercase().as_str(),
+        "dhcp"
+            | "dhcp6"
+            | "auto6"
+            | "on"
+            | "any"
+            | "off"
+            | "none"
+            | "ibft"
+            | "link6"
+            | "link-local"
+            | "either6"
+    )
+}
+
 /// Parse `ip=` value.
 ///
 /// Supported forms:
@@ -279,6 +304,27 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
 
     // Check for simple keyword form (no colons, or single colon device:method).
     let parts: Vec<&str> = val.split(':').collect();
+
+    // Short form: ip=<device>:<method>[:<mtu>[:<macaddr>]]. C keys off the
+    // second field being an autoconf method (regardless of whether the first
+    // field looks like an IP), so this must be checked before the full form.
+    // The remainder after the method is [<mtu>][:<macaddr>]: the mtu is the
+    // first colon-delimited word, and everything after it (which may itself
+    // contain the MAC's colons) is the MAC address.
+    if parts.len() >= 2 && is_autoconf_method(parts[1]) {
+        let mut ip = IpConfig {
+            device: parts[0].to_string(),
+            autoconf: parts[1].to_lowercase(),
+            ..Default::default()
+        };
+        if parts.len() > 2 {
+            let rest = parts[2..].join(":");
+            let (mtu, mac) = rest.split_once(':').unwrap_or((rest.as_str(), ""));
+            ip.mtu = mtu.to_string();
+            ip.mac = mac.to_string();
+        }
+        return Some(ip);
+    }
 
     match parts.len() {
         1 => {
@@ -303,24 +349,6 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
                         log::warn!("Unrecognized ip= value: {}", val);
                         None
                     }
-                }
-            }
-        }
-        2 => {
-            // ip=<device>:<method>
-            let device = parts[0];
-            let method = parts[1].to_lowercase();
-            match method.as_str() {
-                "dhcp" | "dhcp6" | "auto6" | "on" | "any" | "off" | "none" | "ibft" => {
-                    Some(IpConfig {
-                        device: device.to_string(),
-                        autoconf: method,
-                        ..Default::default()
-                    })
-                }
-                _ => {
-                    log::warn!("Unrecognized ip= device method: {}:{}", device, method);
-                    None
                 }
             }
         }
@@ -897,8 +925,17 @@ fn emit_network(
         writeln!(content, "Name={ifname}").unwrap();
     }
 
-    // [Link] (MAC/MTU are not set from these inputs, so it stays empty).
+    // [Link]: MAC then MTU from an ip= short form (that order matches C's
+    // link_dump); empty otherwise.
     writeln!(content, "\n[Link]").unwrap();
+    if let Some(ip) = ip {
+        if !ip.mac.is_empty() {
+            writeln!(content, "MACAddress={}", ip.mac).unwrap();
+        }
+        if !ip.mtu.is_empty() {
+            writeln!(content, "MTUBytes={}", ip.mtu).unwrap();
+        }
+    }
 
     // [Network] — entry order matches C's network_dump: DHCP, LinkLocal, RA,
     // DNS, VLAN, Bridge, Bond, NTP.
