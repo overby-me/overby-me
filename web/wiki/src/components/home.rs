@@ -87,18 +87,31 @@ pub fn HomeApp() -> Element {
                     if !members.is_empty() {
                         div { class: "chip-row chip-row-authors",
                             for member in members.iter() {
-                                super::loader::UserPopover {
-                                    key: "{member.id.0}",
-                                    name: member.label(),
-                                    avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()).unwrap_or_default(),
-                                    user_id: member.user.as_ref().map(|u| u.id.0.clone()),
-                                    super::widgets::Chip {
-                                        icon: super::loader::mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
-                                        label: member.label(),
-                                        title: t("member.author"),
-                                        // The author's profile picture (e.g. their
-                                        // linked Bluesky avatar) shows on the chip.
-                                        avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()),
+                                {
+                                    // A visitor cannot read anyone's user row, so
+                                    // without this the welcome page named its author
+                                    // beside a grey silhouette (loader::member_avatar).
+                                    let face = super::loader::member_avatar(
+                                        member,
+                                        root_node.as_ref().and_then(|n| n.owner_id.as_ref()),
+                                        root_node.as_ref().and_then(|n| n.author_name.as_deref()),
+                                        root_node.as_ref().and_then(|n| n.author_avatar.as_deref()),
+                                    );
+                                    rsx! {
+                                        super::loader::UserPopover {
+                                            key: "{member.id.0}",
+                                            name: member.label(),
+                                            avatar_url: face.clone(),
+                                            user_id: member.user.as_ref().map(|u| u.id.0.clone()),
+                                            super::widgets::Chip {
+                                                icon: super::loader::mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                                                label: member.label(),
+                                                title: t("member.author"),
+                                                // The author's profile picture (e.g. their
+                                                // linked Bluesky avatar) shows on the chip.
+                                                avatar_url: Some(face.clone()),
+                                            }
+                                        }
                                     }
                                 }
                             }

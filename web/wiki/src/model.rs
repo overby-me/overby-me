@@ -60,6 +60,10 @@ pub struct NodeWithChildren {
     pub created_at: Option<Timestamptz>,
     /// The creating user (fallback author label when no explicit author chip).
     pub owner: Option<UserRef>,
+    /// The author's name and picture, readable even where `owner` and
+    /// `members.user` are not. See [`crate::components::loader::member_avatar`].
+    pub author_name: Option<String>,
+    pub author_avatar: Option<String>,
 }
 
 /// A context anyone may read, whether or not they have an account: the rows of

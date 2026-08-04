@@ -74,6 +74,11 @@ pub fn ContentApp(
     let mut deleting = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
+    // Stood in for a member's own picture where the users rule hides it, which
+    // is every reader who is not in this context (see `loader::member_avatar`).
+    let owner_id = node.owner_id.clone();
+    let author_name = node.author_name.clone();
+    let author_avatar = node.author_avatar.clone();
     let created = node.created_at.as_ref().map(|t| t.0.clone());
     let data = node.data.map(|d| d.0);
     // Owner-only actions (mirrors the React ContentToolbar gating): a node/context
@@ -594,18 +599,28 @@ pub fn ContentApp(
                                 mime: member.node.as_ref().and_then(|n| n.mime_id.clone()).unwrap_or_default(),
                             }
                         } else {
-                            super::loader::UserPopover {
-                                key: "{member.id.0}",
-                                name: member.label(),
-                                avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()).unwrap_or_default(),
-                                user_id: member.user.as_ref().map(|u| u.id.0.clone()),
-                                super::widgets::Chip {
-                                    icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
-                                    label: member.label(),
-                                    title: t("member.author"),
-                                    // The author's profile picture (e.g. their linked
-                                    // Bluesky avatar) shows on the chip itself.
-                                    avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()),
+                            {
+                                let face = super::loader::member_avatar(
+                                    member,
+                                    owner_id.as_ref(),
+                                    author_name.as_deref(),
+                                    author_avatar.as_deref(),
+                                );
+                                rsx! {
+                                    super::loader::UserPopover {
+                                        key: "{member.id.0}",
+                                        name: member.label(),
+                                        avatar_url: face.clone(),
+                                        user_id: member.user.as_ref().map(|u| u.id.0.clone()),
+                                        super::widgets::Chip {
+                                            icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                                            label: member.label(),
+                                            title: t("member.author"),
+                                            // The author's profile picture (e.g. their linked
+                                            // Bluesky avatar) shows on the chip itself.
+                                            avatar_url: Some(face.clone()),
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -126,6 +126,8 @@ impl From<NodeWithChildren> for model::NodeWithChildren {
             attachable: n.attachable,
             created_at: n.created_at.map(Into::into),
             owner: n.owner.map(Into::into),
+            author_name: n.author_name,
+            author_avatar: n.author_avatar,
         }
     }
 }
@@ -498,6 +500,13 @@ pub struct NodeWithChildren {
     pub created_at: Option<Timestamptz>,
     // The creating user (fallback author label when no explicit author chip).
     pub owner: Option<UserRef>,
+    // The author's name and picture as computed fields, which see past the row
+    // rule on `users` that `owner` and `members.user` above are subject to. That
+    // rule only reveals someone you share a context with, so on a page open to
+    // VISITORS every author chip fell back to a grey silhouette. Name and
+    // picture only; the email stays behind the rule.
+    pub author_name: Option<String>,
+    pub author_avatar: Option<String>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]

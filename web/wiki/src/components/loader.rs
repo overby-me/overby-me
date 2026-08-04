@@ -613,6 +613,50 @@ pub fn feedback_glyph() -> Element {
 /// Content for a user's `.avatar`: their profile image (e.g. the linked Bluesky
 /// picture, from `users.avatarUrl`) if set, otherwise `fallback` (an icon or
 /// initial). Place the result inside an `.avatar` element.
+/// The picture to show for one of a node's authors.
+///
+/// A member's own `user` row is only readable by someone who shares a context
+/// with them. On a page open to VISITORS that row is null, so every author chip
+/// fell back to a grey silhouette: the welcome page said "Niclas Overby" beside
+/// an anonymous outline, and so did every public document.
+///
+/// The node's `author_name` and `author_avatar` are computed fields that see
+/// past that rule, carrying the name and picture only (the email stays behind
+/// it). They describe ONE person, the node's author, so they stand in only for
+/// the member who is that person: a co-author whose own row is hidden still gets
+/// the fallback glyph, which is honest, since we genuinely do not know their
+/// face.
+///
+/// Matched by id where the ids are readable and by name where they are not. A
+/// document open to visitors is the second case: its members come back with a
+/// name and nothing else.
+pub fn member_avatar(
+    member: &crate::model::MemberFields,
+    owner_id: Option<&crate::model::Uuid>,
+    author_name: Option<&str>,
+    author_avatar: Option<&str>,
+) -> String {
+    let own = member
+        .user
+        .as_ref()
+        .map(|u| u.avatar_url.clone())
+        .unwrap_or_default();
+    if !own.is_empty() {
+        return own;
+    }
+    let is_author = match (member.node_id.as_ref(), owner_id) {
+        (Some(nid), Some(oid)) => nid.0 == oid.0,
+        _ => {
+            let label = member.label();
+            !label.is_empty() && author_name == Some(label.as_str())
+        }
+    };
+    if is_author {
+        return author_avatar.unwrap_or_default().to_string();
+    }
+    String::new()
+}
+
 pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
     // NHost gives every user a gravatar URL (with `default=blank`, i.e. usually a
     // blank image), so only a non-gravatar URL — e.g. the linked Bluesky picture —
@@ -1496,5 +1540,87 @@ fn NodeNotFound() -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod avatar_tests {
+    use crate::model::{MemberFields, UserRef, Uuid};
+
+    fn member(name: &str, node_id: Option<&str>, own_avatar: Option<&str>) -> MemberFields {
+        MemberFields {
+            id: Uuid("m1".into()),
+            name: Some(name.into()),
+            email: None,
+            accepted: true,
+            active: true,
+            owner: false,
+            hidden: false,
+            node_id: node_id.map(|s| Uuid(s.into())),
+            user: own_avatar.map(|a| UserRef {
+                id: Uuid("u1".into()),
+                display_name: name.into(),
+                avatar_url: a.into(),
+            }),
+            node: None,
+        }
+    }
+
+    /// A member's own picture wins wherever it is readable.
+    #[test]
+    fn a_readable_picture_is_used_as_is() {
+        let m = member("Niclas", Some("u1"), Some("a-face-we-can-read"));
+        let got = super::member_avatar(
+            &m,
+            Some(&Uuid("u1".into())),
+            Some("Niclas"),
+            Some("the-authors-face"),
+        );
+        assert_eq!(got, "a-face-we-can-read");
+    }
+
+    /// Signed out, the user row is null, and the node's computed author fields
+    /// stand in for the member who IS the author.
+    #[test]
+    fn the_author_gets_the_computed_picture_when_their_row_is_hidden() {
+        // Ids readable: matched by id.
+        let by_id = member("Niclas", Some("u1"), None);
+        assert_eq!(
+            super::member_avatar(
+                &by_id,
+                Some(&Uuid("u1".into())),
+                Some("Niclas"),
+                Some("the-authors-face")
+            ),
+            "the-authors-face"
+        );
+        // Ids not readable, which is a public document: matched by name.
+        let by_name = member("Niclas", None, None);
+        assert_eq!(
+            super::member_avatar(&by_name, None, Some("Niclas"), Some("the-authors-face")),
+            "the-authors-face"
+        );
+    }
+
+    /// A co-author who is not the node's author keeps the fallback glyph. We do
+    /// not know their face, and borrowing someone else's would be a lie.
+    #[test]
+    fn a_different_member_is_not_given_the_authors_face() {
+        let other = member("Someone Else", Some("u2"), None);
+        assert_eq!(
+            super::member_avatar(
+                &other,
+                Some(&Uuid("u1".into())),
+                Some("Niclas"),
+                Some("the-authors-face")
+            ),
+            ""
+        );
+        // Nameless rows must not match a nameless author field either.
+        let nameless = member("", None, None);
+        assert_eq!(
+            super::member_avatar(&nameless, None, Some(""), Some("the-authors-face")),
+            ""
+        );
     }
 }
