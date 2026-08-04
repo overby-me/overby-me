@@ -52,6 +52,13 @@ by the in-process differential oracles (`just differential`): `systemd-escape`,
 `systemd-network-generator`, and `systemd-fstab-generator`, plus in-tree
 robustness fuzzers. See `docs/TESTING.md`.
 
+Not every CLI is oracle-clean. `systemd-path` in particular is a hardcoded
+approximation rather than a port of C's path computation: measured against
+C 260.2 its name set is off (5 of C's 77 names missing, 8 extra), and its
+values are environment- and install-prefix-dependent, so it is deliberately
+outside the differential corpus. A faithful rewrite of its search-path logic
+is open work.
+
 ## Subtest registration audit, 2026-07-28
 
 Every upstream `TEST-NN-FAMILY.subtest.sh` was compared against the registered
