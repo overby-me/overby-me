@@ -530,3 +530,42 @@ fn analyze_calendar_form_matches_c() {
         div.join("\n")
     );
 }
+
+/// `systemd-analyze timespan` output is fully deterministic (no wall clock), so
+/// compare it verbatim against C: the "Original"/"μs"/"Human" vertical table
+/// with the microsecond-precise human form ("1.500000s", "1.000001s") and a
+/// blank line only between multiple inputs.
+#[test]
+fn analyze_timespan_output_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    let single = [
+        "1s", "2s", "1s 500ms", "1s 1us", "1.5s", "90s", "3661s", "1min", "61s",
+        "100ms", "500ms", "1us", "0", "infinity", "1y", "2w 3d", "1h 30min",
+        "999999", "1000000", "1000001", "59999999", "60000000", "1month",
+    ];
+    let mut cases: Vec<Vec<&str>> = single.iter().map(|s| vec!["timespan", s]).collect();
+    // Multiple inputs are separated by a blank line (none after the last).
+    cases.push(vec!["timespan", "1s", "2s", "3us"]);
+
+    let mut div = Vec::new();
+    for args in &cases {
+        let (ro, rok) = run(rust_bin, args);
+        let (co, cok) = run(&c_bin, args);
+        if ro != co || rok != cok {
+            div.push(format!(
+                "args={args:?}\n  C:\n{co}\n  R:\n{ro}"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze timespan output drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}

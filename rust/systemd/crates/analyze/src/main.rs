@@ -438,6 +438,88 @@ fn format_usec(usec: u64) -> String {
     format!("{span}")
 }
 
+/// Faithful port of C's `format_timespan` (src/basic/time-util.c): render a
+/// microsecond duration into its "1h 30min" / "1.500000s" human form. The
+/// `accuracy` (in usec) bounds the precision of the decimal shown for a
+/// sub-minute value; `systemd-analyze timespan`'s TABLE_TIMESPAN uses 1 (whole
+/// microsecond), so "1.5s" prints as "1.500000s" and "1s 1us" as "1.000001s".
+/// Kept separate from [`format_usec`] (which the boot-time reports use with a
+/// coarser, host-dependent precision).
+fn format_timespan_full(mut t: u64, accuracy: u64) -> String {
+    const TABLE: &[(&str, u64)] = &[
+        ("y", USEC_PER_YEAR),
+        ("month", USEC_PER_MONTH),
+        ("w", USEC_PER_WEEK),
+        ("d", USEC_PER_DAY),
+        ("h", USEC_PER_HOUR),
+        ("min", USEC_PER_MINUTE),
+        ("s", USEC_PER_SEC),
+        ("ms", USEC_PER_MSEC),
+        ("us", 1),
+    ];
+
+    if t == u64::MAX {
+        return "infinity".to_string();
+    }
+    if t == 0 {
+        return "0".to_string();
+    }
+
+    let mut out = String::new();
+    let mut something = false;
+    for &(suffix, unit) in TABLE {
+        if t == 0 {
+            break;
+        }
+        if t < accuracy && something {
+            break;
+        }
+        if t < unit {
+            continue;
+        }
+
+        let a = t / unit;
+        let mut b = t % unit;
+        let mut done = false;
+
+        // Show a sub-minute value with a remainder in decimal ("1.500000s").
+        if t < USEC_PER_MINUTE && b > 0 {
+            let mut j: i32 = 0;
+            let mut cc = unit;
+            while cc > 1 {
+                j += 1;
+                cc /= 10;
+            }
+            let mut cc = accuracy;
+            while cc > 1 {
+                b /= 10;
+                j -= 1;
+                cc /= 10;
+            }
+            if j > 0 {
+                if something {
+                    out.push(' ');
+                }
+                out.push_str(&format!("{a}.{b:0width$}{suffix}", width = j as usize));
+                t = 0;
+                done = true;
+            }
+        }
+
+        if !done {
+            if something {
+                out.push(' ');
+            }
+            out.push_str(&format!("{a}{suffix}"));
+            t = b;
+        }
+
+        something = true;
+    }
+
+    out
+}
+
 /// Parse a time unit suffix and return (multiplier_in_usec, chars_consumed).
 fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
     let units: &[(&str, u64)] = &[
@@ -1772,14 +1854,19 @@ fn cmd_timespan(expressions: &[String]) {
         process::exit(1);
     }
 
-    for expr in expressions {
+    for (i, expr) in expressions.iter().enumerate() {
         match TimeSpan::parse(expr) {
             Ok(span) => {
+                // C's verb_timespan prints a vertical table with the fields
+                // right-aligned to the widest label ("Original"): the raw input,
+                // the microseconds, then the human-readable form. Multiple inputs
+                // are separated by a blank line (none trails the last).
+                if i > 0 {
+                    println!();
+                }
                 println!("Original: {expr}");
-                println!("      {}:", format_usec(span.usec));
-                println!("   {} us", span.usec);
-                println!("   {span}");
-                println!();
+                println!("      μs: {}", span.usec);
+                println!("   Human: {}", format_timespan_full(span.usec, 1));
             }
             Err(e) => {
                 eprintln!("Failed to parse time span '{}': {}", expr, e);
@@ -3544,6 +3631,23 @@ fn cmd_capability(capabilities: &[String], mask: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_timespan_full() {
+        // Microsecond accuracy (matches `systemd-analyze timespan`): a whole
+        // second has no decimal, a fractional sub-minute value shows 6 decimals,
+        // and a single microsecond is not lost.
+        assert_eq!(format_timespan_full(1_000_000, 1), "1s");
+        assert_eq!(format_timespan_full(1_500_000, 1), "1.500000s");
+        assert_eq!(format_timespan_full(1_000_001, 1), "1.000001s");
+        assert_eq!(format_timespan_full(500_000, 1), "500ms");
+        assert_eq!(format_timespan_full(1, 1), "1us");
+        assert_eq!(format_timespan_full(90_000_000, 1), "1min 30s");
+        assert_eq!(format_timespan_full(0, 1), "0");
+        assert_eq!(format_timespan_full(u64::MAX, 1), "infinity");
+        // Coarser (millisecond) accuracy trims the decimal to 3 places.
+        assert_eq!(format_timespan_full(1_500_000, USEC_PER_MSEC), "1.500s");
+    }
 
     #[test]
     fn test_timestamp_year_bounds() {
