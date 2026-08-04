@@ -29,7 +29,7 @@ in {
   };
 
   packages = {
-    rust-systemd = {lib, pam, systemd, ...}:
+    rust-systemd = {lib, pam, systemd, acl, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd";
         version = "unstable";
@@ -53,6 +53,12 @@ in {
           libsystemd = {
             PAM_LIB = "${mkPamWithSystemd {inherit pam systemd;}}/lib/libpam.so.0";
           };
+          # systemd-tmpfiles shells out to setfacl for POSIX ACL rules; bake its
+          # absolute path (ACL_SETFACL) so it resolves from the boot-time
+          # systemd-tmpfiles-setup service's minimal $PATH.
+          systemd-tmpfiles = {
+            ACL_SETFACL = "${acl}/bin/setfacl";
+          };
         };
 
         meta = {
@@ -72,7 +78,7 @@ in {
     # latent manager bugs surface as visible PID 1 panics instead of the silent
     # wraparound a release build would produce.  Behavior otherwise matches the
     # release build; only optimization and these runtime checks differ.
-    rust-systemd-dev = {lib, pam, systemd, ...}:
+    rust-systemd-dev = {lib, pam, systemd, acl, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd-dev";
         version = "unstable";
@@ -96,6 +102,12 @@ in {
         crateOverrides = {
           libsystemd = {
             PAM_LIB = "${mkPamWithSystemd {inherit pam systemd;}}/lib/libpam.so.0";
+          };
+          # systemd-tmpfiles shells out to setfacl for POSIX ACL rules; bake its
+          # absolute path (ACL_SETFACL) so it resolves from the boot-time
+          # systemd-tmpfiles-setup service's minimal $PATH.
+          systemd-tmpfiles = {
+            ACL_SETFACL = "${acl}/bin/setfacl";
           };
         };
 

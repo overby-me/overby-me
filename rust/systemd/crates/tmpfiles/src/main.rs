@@ -55,6 +55,22 @@ const EXIT_FAILURE: u8 = 1;
 /// error, even though it keeps processing the rest.
 const EX_DATAERR: u8 = 65;
 
+/// Absolute path to `setfacl`, baked in from the Nix build (`ACL_SETFACL`),
+/// falling back to a bare `setfacl` resolved via `$PATH` for non-Nix builds.
+///
+/// The `a`/`A` (POSIX ACL) item types apply ACLs by invoking `setfacl`. The C
+/// systemd-tmpfiles uses libacl directly, so it needs no external binary and
+/// works from any `$PATH`; rust shells out, and the boot-time
+/// systemd-tmpfiles-setup service's `$PATH` does not contain `setfacl`, so a
+/// bare name fails to spawn (ENOENT) and the whole run fails. Baking the
+/// absolute path (mirroring `PAM_LIB` in exec_helper.rs) makes it resolve from
+/// any environment. A future change should port C's libacl path to drop the
+/// external dependency entirely.
+const SETFACL: &str = match option_env!("ACL_SETFACL") {
+    Some(p) => p,
+    None => "setfacl",
+};
+
 /// Directories to search for tmpfiles.d configuration, in priority order.
 /// Earlier directories take precedence when the same filename exists in multiple.
 const CONFIG_DIRS: &[&str] = &[
@@ -1979,13 +1995,13 @@ fn execute_create(item: &TmpfilesItem, graceful: bool, root: Option<&Path>) -> b
 
             // 'a' (no +) clears extended ACLs first; 'a+' appends/modifies
             if !item.force {
-                let _ = std::process::Command::new("setfacl")
+                let _ = std::process::Command::new(SETFACL)
                     .arg("-b")
                     .arg(path)
                     .output();
             }
 
-            let mut cmd = std::process::Command::new("setfacl");
+            let mut cmd = std::process::Command::new(SETFACL);
             if item.item_type == ItemType::SetACLRecursively {
                 cmd.arg("-R");
             }
@@ -3337,6 +3353,68 @@ mod tests {
 
         assert!(execute_create(&item, true, None));
         assert!(dir.is_dir());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_execute_set_acl() {
+        // The a/a+ (SetACL) type applies a POSIX ACL to an existing path via the
+        // SETFACL binary. Skip when setfacl/getfacl are unavailable so the test
+        // stays green in minimal environments.
+        if std::process::Command::new(SETFACL)
+            .arg("--version")
+            .output()
+            .is_err()
+            || std::process::Command::new("getfacl")
+                .arg("--version")
+                .output()
+                .is_err()
+        {
+            eprintln!("skip test_execute_set_acl: setfacl/getfacl unavailable");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-set-acl");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acl-target");
+        fs::write(&file, b"x").unwrap();
+
+        // a+ grants root (uid 0) rwx on a file we own; no name resolution needed.
+        let item = TmpfilesItem {
+            item_type: ItemType::SetACL,
+            force: true, // '+' : merge/append rather than replace
+            boot_only: false,
+            minus: false,
+            purgeable: false,
+            conditional: false,
+            path: file.clone(),
+            mode: None,
+            user: None,
+            group: None,
+            age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
+            argument: Some("u:0:rwx".to_string()),
+            source: PathBuf::from("test.conf"),
+            line_number: 1,
+        };
+
+        assert!(execute_create(&item, false, None), "SetACL apply should succeed");
+
+        let out = std::process::Command::new("getfacl")
+            .arg("-n")
+            .arg(&file)
+            .output()
+            .expect("run getfacl");
+        let acl = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            acl.contains("user:0:rwx"),
+            "expected 'user:0:rwx' in ACL, got:\n{acl}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
