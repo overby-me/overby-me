@@ -569,3 +569,54 @@ fn analyze_timespan_output_matches_c() {
         div.join("\n")
     );
 }
+
+/// `systemd-analyze timestamp` output, minus the wall-clock-relative "From now"
+/// line, is deterministic under a fixed TZ (the `run` helper pins TZ=UTC). Lock
+/// it against C: the Original/Normalized/UNIX-seconds lines, the "(in UTC)" line
+/// omitted when the rendering is already UTC, and a blank only between inputs.
+#[test]
+fn analyze_timestamp_output_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    // Drop the "From now" line (relative to the real clock).
+    let det = |bin: &str, args: &[&str]| -> String {
+        run(bin, args)
+            .0
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("From now"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let single = [
+        "2024-01-01 12:00:00 UTC",
+        "@0",
+        "@1704110400",
+        "2038-01-19 03:14:07 UTC",
+        "1970-01-01 00:00:00 UTC",
+        "2024-02-29 12:00:00 UTC",
+        "2024-01-01 12:00:00.500000 UTC",
+        "Mon 2024-01-01 12:00:00 UTC",
+        "2100-01-01 00:00:00 UTC",
+    ];
+    let mut cases: Vec<Vec<&str>> = single.iter().map(|s| vec!["timestamp", s]).collect();
+    cases.push(vec!["timestamp", "@0", "@1704110400"]); // blank between inputs
+
+    let mut div = Vec::new();
+    for args in &cases {
+        let (r, c) = (det(rust_bin, args), det(&c_bin, args));
+        if r != c {
+            div.push(format!("args={args:?}\n  C:\n{c}\n  R:\n{r}"));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze timestamp output drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}

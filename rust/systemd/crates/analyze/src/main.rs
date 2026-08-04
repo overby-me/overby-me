@@ -1942,7 +1942,7 @@ fn cmd_timestamp(expressions: &[String]) {
         process::exit(1);
     }
 
-    for expr in expressions {
+    for (i, expr) in expressions.iter().enumerate() {
         match parse_timestamp(expr) {
             Ok(ts) => {
                 let dur = ts.duration_since(UNIX_EPOCH).unwrap_or_default();
@@ -1952,9 +1952,19 @@ fn cmd_timestamp(expressions: &[String]) {
                 } else {
                     format_timestamp(ts)
                 };
+                // Multiple inputs are separated by a blank line (none trails).
+                if i > 0 {
+                    println!();
+                }
                 println!("  Original form: {expr}");
                 println!("Normalized form: {normalized}");
-                println!("       (in UTC): {normalized}");
+                // C prints the "(in UTC)" line only when the normalized form is
+                // rendered in a non-UTC local zone (to also show the UTC value).
+                // We currently render the normalized form in UTC, so it is
+                // redundant and omitted, matching C under TZ=UTC.
+                if !normalized.ends_with(" UTC") && normalized != "-" {
+                    println!("       (in UTC): {normalized}");
+                }
                 let micros = dur.subsec_micros();
                 if micros == 0 {
                     println!("   UNIX seconds: @{}", dur.as_secs());
@@ -1969,7 +1979,6 @@ fn cmd_timestamp(expressions: &[String]) {
                     "now".to_string()
                 };
                 println!("      From now: {from_now}");
-                println!();
             }
             Err(e) => {
                 eprintln!("Failed to parse timestamp '{}': {}", expr, e);
