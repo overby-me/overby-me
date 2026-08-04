@@ -714,3 +714,49 @@ fn analyze_filesystems_matches_c() {
         div.join("\n")
     );
 }
+
+/// `systemd-analyze syscall-filter` dumps the predefined seccomp syscall sets
+/// (@default, @system-service, ...) with nested "@" references printed as-is. The
+/// set data is static; the no-arg listing's "Unlisted" section / notice reads
+/// tracefs, but rust and C read the same host, so a verbatim stdout/stderr/exit
+/// comparison holds. Covers several sets (incl. nested refs), the full listing,
+/// and the "not found" error.
+#[test]
+fn analyze_syscall_filter_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    let cases: &[&[&str]] = &[
+        &["syscall-filter"], // full listing incl. Ungrouped + Unlisted/notice
+        &["syscall-filter", "@default"], // has a nested @sandbox ref
+        &["syscall-filter", "@basic-io"],
+        &["syscall-filter", "@known"], // has a nested @obsolete ref
+        &["syscall-filter", "@system-service"], // 16 nested refs
+        &["syscall-filter", "@privileged"],
+        &["syscall-filter", "@obsolete"],
+        &["syscall-filter", "@sandbox"],
+        &["syscall-filter", "@basic-io", "@aio"], // blank line between
+        &["syscall-filter", "bogus"],
+        &["syscall-filter", "@bogus"],
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (ro, re, rok) = run_full(rust_bin, args);
+        let (co, ce, cok) = run_full(&c_bin, args);
+        if ro != co || re != ce || rok != cok {
+            div.push(format!(
+                "args={args:?}\n     rust: ok={rok} err={re:?}\n     c   : ok={cok} err={ce:?}\n     (stdout diff omitted)"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze syscall-filter drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}

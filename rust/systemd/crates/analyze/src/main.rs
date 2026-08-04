@@ -285,6 +285,12 @@ enum Command {
         /// Filesystem set name(s) like @basic-api (omit for the full listing)
         filesystems: Vec<String>,
     },
+
+    /// List system calls and their predefined filter sets
+    SyscallFilter {
+        /// Syscall filter set name(s) like @basic-io (omit for the full listing)
+        syscall_filters: Vec<String>,
+    },
 }
 
 // ── Boot timing data structures ───────────────────────────────────────────
@@ -1588,6 +1594,7 @@ fn main() {
         }) => cmd_capability(capabilities, mask),
         Some(Command::Architectures { ref architectures }) => cmd_architectures(architectures),
         Some(Command::Filesystems { ref filesystems }) => cmd_filesystems(filesystems),
+        Some(Command::SyscallFilter { ref syscall_filters }) => cmd_syscall_filter(syscall_filters),
     }
 }
 
@@ -4162,6 +4169,149 @@ fn cmd_filesystems(args: &[String]) {
             println!("# Unlisted filesystems (available to the local kernel, but not included in any of the groups listed above):");
             for fs in unlisted {
                 println!("#   {fs}");
+            }
+        }
+    }
+}
+
+// ── Syscall filter sets ────────────────────────────────────────────────────
+
+// GENERATED from `systemd-analyze syscall-filter @<set>` (systemd 260.2). Do
+// not hand-edit; the differential oracle validates it against C.
+const SYSCALL_SETS: &[(&str, &str, &[&str])] = &[
+    ("@default", "System calls that are always permitted", &["@sandbox", "arch_prctl", "brk", "cacheflush", "clock_getres", "clock_getres_time64", "clock_gettime", "clock_gettime64", "clock_nanosleep", "clock_nanosleep_time64", "execve", "exit", "exit_group", "futex", "futex_time64", "futex_waitv", "get_robust_list", "get_thread_area", "getegid", "getegid32", "geteuid", "geteuid32", "getgid", "getgid32", "getgroups", "getgroups32", "getpgid", "getpgrp", "getpid", "getppid", "getrandom", "getresgid", "getresgid32", "getresuid", "getresuid32", "getrlimit", "getsid", "gettid", "gettimeofday", "getuid", "getuid32", "lsm_get_self_attr", "lsm_list_modules", "membarrier", "mmap", "mmap2", "mprotect", "mseal", "munmap", "nanosleep", "pause", "prlimit64", "restart_syscall", "riscv_flush_icache", "riscv_hwprobe", "rseq", "rt_sigreturn", "sched_getaffinity", "sched_yield", "set_robust_list", "set_thread_area", "set_tid_address", "set_tls", "sigreturn", "time", "ugetrlimit", "uretprobe"]),
+    ("@aio", "Asynchronous IO", &["io_cancel", "io_destroy", "io_getevents", "io_pgetevents", "io_pgetevents_time64", "io_setup", "io_submit", "io_uring_enter", "io_uring_register", "io_uring_setup"]),
+    ("@basic-io", "Basic IO", &["_llseek", "close", "close_range", "dup", "dup2", "dup3", "llseek", "lseek", "pread64", "preadv", "preadv2", "pwrite64", "pwritev", "pwritev2", "read", "readv", "write", "writev"]),
+    ("@chown", "Change ownership of files and directories", &["chown", "chown32", "fchown", "fchown32", "fchownat", "lchown", "lchown32"]),
+    ("@clock", "Change the system time", &["adjtimex", "clock_adjtime", "clock_adjtime64", "clock_settime", "clock_settime64", "settimeofday"]),
+    ("@cpu-emulation", "System calls for CPU emulation functionality", &["modify_ldt", "subpage_prot", "switch_endian", "vm86", "vm86old"]),
+    ("@debug", "Debugging, performance monitoring and tracing functionality", &["lookup_dcookie", "perf_event_open", "pidfd_getfd", "ptrace", "rtas", "s390_runtime_instr", "sys_debug_setcontext"]),
+    ("@file-system", "File system operations", &["access", "chdir", "chmod", "close", "creat", "faccessat", "faccessat2", "fallocate", "fchdir", "fchmod", "fchmodat", "fchmodat2", "fcntl", "fcntl64", "fgetxattr", "file_getattr", "file_setattr", "flistxattr", "fremovexattr", "fsetxattr", "fstat", "fstat64", "fstatat", "fstatat64", "fstatfs", "fstatfs64", "ftruncate", "ftruncate64", "futimesat", "getcwd", "getdents", "getdents64", "getxattr", "getxattrat", "inotify_add_watch", "inotify_init", "inotify_init1", "inotify_rm_watch", "lgetxattr", "link", "linkat", "listmount", "listxattr", "listxattrat", "llistxattr", "lremovexattr", "lsetxattr", "lstat", "lstat64", "mkdir", "mkdirat", "mknod", "mknodat", "newfstat", "newfstatat", "oldfstat", "oldlstat", "oldstat", "open", "open_tree", "openat", "openat2", "readlink", "readlinkat", "removexattr", "removexattrat", "rename", "renameat", "renameat2", "rmdir", "setxattr", "setxattrat", "stat", "stat64", "statfs", "statfs64", "statmount", "statx", "symlink", "symlinkat", "truncate", "truncate64", "unlink", "unlinkat", "utime", "utimensat", "utimensat_time64", "utimes"]),
+    ("@io-event", "Event loop system calls", &["_newselect", "epoll_create", "epoll_create1", "epoll_ctl", "epoll_ctl_old", "epoll_pwait", "epoll_pwait2", "epoll_wait", "epoll_wait_old", "eventfd", "eventfd2", "poll", "ppoll", "ppoll_time64", "pselect6", "pselect6_time64", "select"]),
+    ("@ipc", "SysV IPC, POSIX Message Queues or other IPC", &["ipc", "memfd_create", "mq_getsetattr", "mq_notify", "mq_open", "mq_timedreceive", "mq_timedreceive_time64", "mq_timedsend", "mq_timedsend_time64", "mq_unlink", "msgctl", "msgget", "msgrcv", "msgsnd", "pipe", "pipe2", "process_madvise", "process_vm_readv", "process_vm_writev", "semctl", "semget", "semop", "semtimedop", "semtimedop_time64", "shmat", "shmctl", "shmdt", "shmget"]),
+    ("@keyring", "Kernel keyring access", &["add_key", "keyctl", "request_key"]),
+    ("@memlock", "Memory locking control", &["mlock", "mlock2", "mlockall", "munlock", "munlockall"]),
+    ("@module", "Loading and unloading of kernel modules", &["delete_module", "finit_module", "init_module"]),
+    ("@mount", "Mounting and unmounting of file systems", &["chroot", "fsconfig", "fsmount", "fsopen", "fspick", "mount", "mount_setattr", "move_mount", "open_tree_attr", "pivot_root", "umount", "umount2"]),
+    ("@network-io", "Network or Unix socket IO, should not be needed if not network facing", &["accept", "accept4", "bind", "connect", "getpeername", "getsockname", "getsockopt", "listen", "recv", "recvfrom", "recvmmsg", "recvmmsg_time64", "recvmsg", "send", "sendmmsg", "sendmsg", "sendto", "setsockopt", "shutdown", "socket", "socketcall", "socketpair"]),
+    ("@obsolete", "Unusual, obsolete or unimplemented system calls", &["_sysctl", "afs_syscall", "bdflush", "break", "create_module", "ftime", "get_kernel_syms", "getpmsg", "gtty", "idle", "lock", "mpx", "prof", "profil", "putpmsg", "query_module", "security", "sgetmask", "ssetmask", "stime", "stty", "sysfs", "tuxcall", "ulimit", "uselib", "ustat", "vserver"]),
+    ("@pkey", "System calls used for memory protection keys", &["pkey_alloc", "pkey_free", "pkey_mprotect"]),
+    ("@privileged", "All system calls which need super-user capabilities", &["@chown", "@clock", "@module", "@raw-io", "@reboot", "@swap", "_sysctl", "acct", "bpf", "capset", "chroot", "fanotify_init", "fanotify_mark", "nfsservctl", "open_by_handle_at", "pivot_root", "quotactl", "quotactl_fd", "setdomainname", "setfsuid", "setfsuid32", "setgroups", "setgroups32", "sethostname", "setresuid", "setresuid32", "setreuid", "setreuid32", "setuid", "setuid32", "vhangup"]),
+    ("@process", "Process control, execution, namespacing operations", &["capget", "clone", "clone3", "execveat", "fork", "getrusage", "kill", "pidfd_open", "pidfd_send_signal", "prctl", "rt_sigqueueinfo", "rt_tgsigqueueinfo", "setns", "swapcontext", "tgkill", "times", "tkill", "unshare", "vfork", "wait4", "waitid", "waitpid"]),
+    ("@raw-io", "Raw I/O port access", &["ioperm", "iopl", "pciconfig_iobase", "pciconfig_read", "pciconfig_write", "s390_pci_mmio_read", "s390_pci_mmio_write"]),
+    ("@reboot", "Reboot and reboot preparation/kexec", &["kexec_file_load", "kexec_load", "reboot"]),
+    ("@resources", "Alter resource settings", &["ioprio_set", "mbind", "migrate_pages", "move_pages", "nice", "sched_setaffinity", "sched_setattr", "sched_setparam", "sched_setscheduler", "set_mempolicy", "set_mempolicy_home_node", "setpriority", "setrlimit"]),
+    ("@sandbox", "Sandbox functionality", &["landlock_add_rule", "landlock_create_ruleset", "landlock_restrict_self", "seccomp"]),
+    ("@setuid", "Operations for changing user/group credentials", &["setgid", "setgid32", "setgroups", "setgroups32", "setregid", "setregid32", "setresgid", "setresgid32", "setresuid", "setresuid32", "setreuid", "setreuid32", "setuid", "setuid32"]),
+    ("@signal", "Process signal handling", &["rt_sigaction", "rt_sigpending", "rt_sigprocmask", "rt_sigsuspend", "rt_sigtimedwait", "rt_sigtimedwait_time64", "sigaction", "sigaltstack", "signal", "signalfd", "signalfd4", "sigpending", "sigprocmask", "sigsuspend"]),
+    ("@swap", "Enable/disable swap devices", &["swapoff", "swapon"]),
+    ("@sync", "Synchronize files and memory to storage", &["fdatasync", "fsync", "msync", "sync", "sync_file_range", "sync_file_range2", "syncfs"]),
+    ("@system-service", "General system service operations", &["@aio", "@basic-io", "@chown", "@default", "@file-system", "@io-event", "@ipc", "@keyring", "@memlock", "@network-io", "@process", "@resources", "@setuid", "@signal", "@sync", "@timer", "arm_fadvise64_64", "capget", "capset", "copy_file_range", "fadvise64", "fadvise64_64", "flock", "get_mempolicy", "getcpu", "getpriority", "ioctl", "ioprio_get", "kcmp", "madvise", "mremap", "name_to_handle_at", "oldolduname", "olduname", "personality", "readahead", "readdir", "remap_file_pages", "sched_get_priority_max", "sched_get_priority_min", "sched_getattr", "sched_getparam", "sched_getscheduler", "sched_rr_get_interval", "sched_rr_get_interval_time64", "sched_yield", "sendfile", "sendfile64", "setfsgid", "setfsgid32", "setfsuid", "setfsuid32", "setpgid", "setsid", "splice", "sysinfo", "tee", "umask", "uname", "userfaultfd", "vmsplice"]),
+    ("@timer", "Schedule operations by time", &["alarm", "getitimer", "setitimer", "timer_create", "timer_delete", "timer_getoverrun", "timer_gettime", "timer_gettime64", "timer_settime", "timer_settime64", "timerfd_create", "timerfd_gettime", "timerfd_gettime64", "timerfd_settime", "timerfd_settime64", "times"]),
+    ("@known", "All known syscalls declared in the kernel", &["@obsolete", "_llseek", "_newselect", "accept", "accept4", "access", "acct", "add_key", "adjtimex", "alarm", "arc_gettls", "arc_settls", "arc_usr_cmpxchg", "arch_prctl", "arm_fadvise64_64", "atomic_barrier", "atomic_cmpxchg_32", "bind", "bpf", "breakpoint", "brk", "cachectl", "cacheflush", "cachestat", "capget", "capset", "chdir", "chmod", "chown", "chown32", "chroot", "clock_adjtime", "clock_adjtime64", "clock_getres", "clock_getres_time64", "clock_gettime", "clock_gettime64", "clock_nanosleep", "clock_nanosleep_time64", "clock_settime", "clock_settime64", "clone", "clone3", "close", "close_range", "connect", "copy_file_range", "creat", "delete_module", "dipc", "dup", "dup2", "dup3", "epoll_create", "epoll_create1", "epoll_ctl", "epoll_ctl_old", "epoll_pwait", "epoll_pwait2", "epoll_wait", "epoll_wait_old", "eventfd", "eventfd2", "exec_with_loader", "execv", "execve", "execveat", "exit", "exit_group", "faccessat", "faccessat2", "fadvise64", "fadvise64_64", "fallocate", "fanotify_init", "fanotify_mark", "fchdir", "fchmod", "fchmodat", "fchmodat2", "fchown", "fchown32", "fchownat", "fcntl", "fcntl64", "fdatasync", "fgetxattr", "file_getattr", "file_setattr", "finit_module", "flistxattr", "flock", "fork", "fremovexattr", "fsconfig", "fsetxattr", "fsmount", "fsopen", "fspick", "fstat", "fstat64", "fstatat64", "fstatfs", "fstatfs64", "fsync", "ftruncate", "ftruncate64", "futex", "futex_requeue", "futex_time64", "futex_wait", "futex_waitv", "futex_wake", "futimesat", "get_mempolicy", "get_robust_list", "get_thread_area", "get_tls", "getcpu", "getcwd", "getdents", "getdents64", "getdomainname", "getdtablesize", "getegid", "getegid32", "geteuid", "geteuid32", "getgid", "getgid32", "getgroups", "getgroups32", "gethostname", "getitimer", "getpagesize", "getpeername", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getrandom", "getresgid", "getresgid32", "getresuid", "getresuid32", "getrlimit", "getrusage", "getsid", "getsockname", "getsockopt", "gettid", "gettimeofday", "getuid", "getuid32", "getxattr", "getxattrat", "getxgid", "getxpid", "getxuid", "init_module", "inotify_add_watch", "inotify_init", "inotify_init1", "inotify_rm_watch", "io_cancel", "io_destroy", "io_getevents", "io_pgetevents", "io_pgetevents_time64", "io_setup", "io_submit", "io_uring_enter", "io_uring_register", "io_uring_setup", "ioctl", "ioperm", "iopl", "ioprio_get", "ioprio_set", "ipc", "kcmp", "kern_features", "kexec_file_load", "kexec_load", "keyctl", "kill", "landlock_add_rule", "landlock_create_ruleset", "landlock_restrict_self", "lchown", "lchown32", "lgetxattr", "link", "linkat", "listen", "listmount", "listns", "listxattr", "listxattrat", "llistxattr", "llseek", "lookup_dcookie", "lremovexattr", "lseek", "lsetxattr", "lsm_get_self_attr", "lsm_list_modules", "lsm_set_self_attr", "lstat", "lstat64", "madvise", "map_shadow_stack", "mbind", "membarrier", "memfd_create", "memfd_secret", "memory_ordering", "migrate_pages", "mincore", "mkdir", "mkdirat", "mknod", "mknodat", "mlock", "mlock2", "mlockall", "mmap", "mmap2", "modify_ldt", "mount", "mount_setattr", "move_mount", "move_pages", "mprotect", "mq_getsetattr", "mq_notify", "mq_open", "mq_timedreceive", "mq_timedreceive_time64", "mq_timedsend", "mq_timedsend_time64", "mq_unlink", "mremap", "mseal", "msgctl", "msgget", "msgrcv", "msgsnd", "msync", "multiplexer", "munlock", "munlockall", "munmap", "name_to_handle_at", "nanosleep", "newfstatat", "nice", "old_adjtimex", "oldfstat", "oldlstat", "oldolduname", "oldstat", "oldumount", "olduname", "open", "open_by_handle_at", "open_tree", "open_tree_attr", "openat", "openat2", "or1k_atomic", "osf_fstat", "osf_fstatfs", "osf_fstatfs64", "osf_getdirentries", "osf_getdomainname", "osf_getitimer", "osf_getrusage", "osf_getsysinfo", "osf_gettimeofday", "osf_lstat", "osf_mount", "osf_proplist_syscall", "osf_select", "osf_set_program_attributes", "osf_setitimer", "osf_setsysinfo", "osf_settimeofday", "osf_shmat", "osf_sigprocmask", "osf_sigstack", "osf_stat", "osf_statfs", "osf_statfs64", "osf_swapon", "osf_syscall", "osf_sysinfo", "osf_usleep_thread", "osf_utimes", "osf_utsname", "osf_wait4", "pause", "pciconfig_iobase", "pciconfig_read", "pciconfig_write", "perf_event_open", "perfctr", "personality", "pidfd_getfd", "pidfd_open", "pidfd_send_signal", "pipe", "pipe2", "pivot_root", "pkey_alloc", "pkey_free", "pkey_mprotect", "poll", "ppoll", "ppoll_time64", "prctl", "pread64", "preadv", "preadv2", "prlimit64", "process_madvise", "process_mrelease", "process_vm_readv", "process_vm_writev", "pselect6", "pselect6_time64", "ptrace", "pwrite64", "pwritev", "pwritev2", "quotactl", "quotactl_fd", "read", "readahead", "readdir", "readlink", "readlinkat", "readv", "reboot", "recv", "recvfrom", "recvmmsg", "recvmmsg_time64", "recvmsg", "remap_file_pages", "removexattr", "removexattrat", "rename", "renameat", "renameat2", "request_key", "restart_syscall", "riscv_flush_icache", "riscv_hwprobe", "rmdir", "rseq", "rt_sigaction", "rt_sigpending", "rt_sigprocmask", "rt_sigqueueinfo", "rt_sigreturn", "rt_sigsuspend", "rt_sigtimedwait", "rt_sigtimedwait_time64", "rt_tgsigqueueinfo", "rtas", "s390_guarded_storage", "s390_pci_mmio_read", "s390_pci_mmio_write", "s390_runtime_instr", "s390_sthyi", "sched_get_affinity", "sched_get_priority_max", "sched_get_priority_min", "sched_getaffinity", "sched_getattr", "sched_getparam", "sched_getscheduler", "sched_rr_get_interval", "sched_rr_get_interval_time64", "sched_set_affinity", "sched_setaffinity", "sched_setattr", "sched_setparam", "sched_setscheduler", "sched_yield", "seccomp", "select", "semctl", "semget", "semop", "semtimedop", "semtimedop_time64", "send", "sendfile", "sendfile64", "sendmmsg", "sendmsg", "sendto", "set_mempolicy", "set_mempolicy_home_node", "set_robust_list", "set_thread_area", "set_tid_address", "set_tls", "setdomainname", "setfsgid", "setfsgid32", "setfsuid", "setfsuid32", "setgid", "setgid32", "setgroups", "setgroups32", "sethae", "sethostname", "setitimer", "setns", "setpgid", "setpgrp", "setpriority", "setregid", "setregid32", "setresgid", "setresgid32", "setresuid", "setresuid32", "setreuid", "setreuid32", "setrlimit", "setsid", "setsockopt", "settimeofday", "setuid", "setuid32", "setxattr", "setxattrat", "sgetmask", "shmat", "shmctl", "shmdt", "shmget", "shutdown", "sigaction", "sigaltstack", "signal", "signalfd", "signalfd4", "sigpending", "sigprocmask", "sigreturn", "sigsuspend", "socket", "socketcall", "socketpair", "splice", "spu_create", "spu_run", "ssetmask", "stat", "stat64", "statfs", "statfs64", "statmount", "statx", "stime", "subpage_prot", "swapcontext", "swapoff", "swapon", "switch_endian", "symlink", "symlinkat", "sync", "sync_file_range", "sync_file_range2", "syncfs", "sys_debug_setcontext", "syscall", "sysfs", "sysinfo", "syslog", "sysmips", "tee", "tgkill", "time", "timer_create", "timer_delete", "timer_getoverrun", "timer_gettime", "timer_gettime64", "timer_settime", "timer_settime64", "timerfd", "timerfd_create", "timerfd_gettime", "timerfd_gettime64", "timerfd_settime", "timerfd_settime64", "times", "tkill", "truncate", "truncate64", "ugetrlimit", "umask", "umount", "umount2", "uname", "unlink", "unlinkat", "unshare", "uprobe", "uretprobe", "userfaultfd", "usr26", "usr32", "ustat", "utime", "utimensat", "utimensat_time64", "utimes", "utrap_install", "vfork", "vhangup", "vm86", "vm86old", "vmsplice", "wait4", "waitid", "waitpid", "write", "writev"]),
+];
+
+/// Render one syscall filter set exactly like C's dump_syscall_filter: the set
+/// name, its help comment, then each member (a syscall name or a nested "@set"
+/// reference), all printed verbatim.
+fn dump_syscall_filter_set(name: &str, comment: &str, members: &[&str]) {
+    println!("{name}");
+    println!("    # {comment}");
+    for &m in members {
+        println!("    {m}");
+    }
+}
+
+fn cmd_syscall_filter(args: &[String]) {
+    use std::collections::BTreeSet;
+
+    if !args.is_empty() {
+        for (i, name) in args.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            match SYSCALL_SETS.iter().find(|(n, _, _)| *n == name.as_str()) {
+                Some(&(n, c, m)) => dump_syscall_filter_set(n, c, m),
+                None => {
+                    eprintln!("Filter set \"{name}\" not found.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        return;
+    }
+
+    // Full listing: every set, then the ungrouped and unlisted sections. C's
+    // syscall_set_add/remove operate on DIRECT syscall members only (nested "@"
+    // references are skipped, not expanded).
+    for (i, &(n, c, m)) in SYSCALL_SETS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        dump_syscall_filter_set(n, c, m);
+    }
+
+    let direct = |m: &'static [&'static str]| m.iter().copied().filter(|s| !s.starts_with('@'));
+    let known = SYSCALL_SETS.last().map(|(_, _, m)| *m).unwrap_or(&[]);
+    let grouped: BTreeSet<&str> = SYSCALL_SETS[..SYSCALL_SETS.len().saturating_sub(1)]
+        .iter()
+        .flat_map(|(_, _, m)| direct(m))
+        .collect();
+    let mut ungrouped: Vec<&str> = direct(known).filter(|s| !grouped.contains(s)).collect();
+    ungrouped.sort_unstable();
+    println!();
+    println!("# Ungrouped System Calls (known but not included in any of the groups except @known):");
+    for s in ungrouped {
+        println!("#   {s}");
+    }
+
+    syscall_filter_unlisted();
+}
+
+/// C's load_kernel_syscalls reads the tracefs available_events list; the
+/// "Unlisted" section is the syscalls it knows that are in no group. When the
+/// file can't be read, C prints a blank line then a notice to stderr.
+fn syscall_filter_unlisted() {
+    use std::collections::BTreeSet;
+
+    let read = std::fs::read_to_string("/sys/kernel/tracing/available_events")
+        .or_else(|_| std::fs::read_to_string("/sys/kernel/debug/tracing/available_events"));
+    match read {
+        Err(e) => {
+            println!();
+            let msg = match e.raw_os_error() {
+                Some(errno) => unsafe {
+                    std::ffi::CStr::from_ptr(libc::strerror(errno))
+                        .to_string_lossy()
+                        .into_owned()
+                },
+                None => e.to_string(),
+            };
+            eprintln!(
+                "# Not showing unlisted system calls, couldn't retrieve kernel system call list: {msg}"
+            );
+        }
+        Ok(content) => {
+            let grouped: BTreeSet<&str> = SYSCALL_SETS
+                .iter()
+                .flat_map(|(_, _, m)| m.iter().copied().filter(|s| !s.starts_with('@')))
+                .collect();
+            // Some syscalls are named differently inside the kernel; C hides these.
+            let hidden = ["newuname", "newfstat", "newstat", "newlstat", "sysctl"];
+            let mut unlisted: Vec<String> = content
+                .lines()
+                .filter_map(|l| l.strip_prefix("syscalls:sys_enter_"))
+                .filter(|e| !hidden.contains(e) && !grouped.contains(*e))
+                .map(String::from)
+                .collect();
+            unlisted.sort();
+            unlisted.dedup();
+            if !unlisted.is_empty() {
+                println!();
+                println!("# Unlisted System Calls (supported by the local kernel, but not included in any of the groups listed above):");
+                for s in unlisted {
+                    println!("#   {s}");
+                }
             }
         }
     }
