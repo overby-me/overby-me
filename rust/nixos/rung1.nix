@@ -33,6 +33,8 @@ in {
       lib.mkEnableOption "running the rust systemd-sysusers as a dedicated boot oneshot under C PID 1";
     timesyncd.enable =
       lib.mkEnableOption "running the rust systemd-timesyncd daemon under C PID 1 (assumes services.timesyncd.enable)";
+    resolved.enable =
+      lib.mkEnableOption "running the rust systemd-resolved daemon under C PID 1 (assumes services.resolved.enable)";
   };
 
   config = lib.mkMerge [
@@ -66,6 +68,15 @@ in {
       systemd.services.systemd-timesyncd.serviceConfig.ExecStart = lib.mkForce [
         ""
         "${rustSystemd}/bin/systemd-timesyncd"
+      ];
+    })
+    (lib.mkIf cfg.resolved.enable {
+      # Redirect the resolved daemon (Type=notify-reload, D-Bus + varlink/monitor
+      # sockets) to the rust binary. Not boot-critical. Requires the resolved
+      # service to be enabled.
+      systemd.services.systemd-resolved.serviceConfig.ExecStart = lib.mkForce [
+        ""
+        "${rustSystemd}/bin/systemd-resolved"
       ];
     })
   ];
