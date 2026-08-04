@@ -94,6 +94,12 @@ pub(super) fn DrawerContent() -> Element {
                         segments: segments.clone(),
                     }
                 }
+            } else {
+                // Signed out this was empty: a Home bar, an account row, and no
+                // sign the site holds anything. The places open to everyone are
+                // the honest answer, and the one line under them says why the
+                // list is short.
+                PublicPlaces {}
             }
             }
             // Account menu, pinned at the bottom of the drawer.

@@ -62,6 +62,19 @@ pub struct NodeWithChildren {
     pub owner: Option<UserRef>,
 }
 
+/// A context anyone may read, whether or not they have an account: the rows of
+/// the signed-out place list. Carries only what a link needs, since that is all
+/// a visitor can do with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PublicPlace {
+    pub id: String,
+    pub name: String,
+    /// Slash-joined keys from the root, so the row can link straight there even
+    /// when the places above it are closed and cannot be walked down through.
+    pub path: String,
+    pub mime_id: String,
+}
+
 /// A node's basic fields: no children, used by search and the appbar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeFields {

@@ -3124,6 +3124,16 @@ select:focus {
 	margin-inline: 0;
 }
 
+/* Why the list of open places is as short as it is, under the list itself. It is
+   an explanation rather than a control, so it takes the muted role and sits at
+   the text indent of the rows above it rather than in a container of its own:
+   a visitor should read it once and stop noticing it. */
+.public-places-hint {
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-3);
+	color: var(--md-on-surface-variant);
+}
+
 /* Matches .card-header h3, so both section headers read at the same weight. */
 .list-section-header h4 {
 	flex: 1;

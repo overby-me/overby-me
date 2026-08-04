@@ -141,6 +141,15 @@ pub fn HomeApp() -> Element {
                     div { class: "home-mobile-list mt-1",
                         crate::components::layout::HomeList { as_cards: true }
                     }
+                } else {
+                    // The same answer the drawer gives a visitor, on the page
+                    // itself. On a phone the drawer is behind a button, and
+                    // someone who has just arrived has no reason to press it.
+                    // `home-mobile-list` drops it on wide screens, where the
+                    // drawer is already open beside this card saying the same.
+                    div { class: "home-mobile-list mt-1",
+                        crate::components::layout::PublicPlaces { as_cards: true }
+                    }
                 }
                 // No feed here: it is an app of the root now (`/?app=feed`, first
                 // on the rail), which is everything recent across the groups and

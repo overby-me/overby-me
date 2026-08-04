@@ -11,6 +11,7 @@ mod breadcrumbs;
 mod drawer;
 mod home_list;
 mod navigation;
+mod public_places;
 mod search;
 mod usermenu;
 
@@ -19,6 +20,7 @@ use breadcrumbs::*;
 use drawer::*;
 pub use home_list::HomeList;
 use navigation::*;
+pub use public_places::PublicPlaces;
 use search::*;
 use usermenu::*;
 

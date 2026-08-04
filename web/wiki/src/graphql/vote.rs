@@ -158,6 +158,16 @@ pub struct PermissionFields {
 pub struct PermissionsBoolExp {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<UuidComparisonExp>,
+    /// `public`, `member` or `owner`. Used by the signed-out place list, which
+    /// asks the permission rows themselves which contexts are open.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub role: Option<StringComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub select: Option<BooleanComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub active: Option<BooleanComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context: Option<NodesBoolExp>,
 }
 
 /// The permission rows configured on a context, for the perm overview.
@@ -171,6 +181,7 @@ pub async fn query_permissions(
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),
+        ..Default::default()
     };
     let operation = PermissionsQuery::build(PermissionsWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
