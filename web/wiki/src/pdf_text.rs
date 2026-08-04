@@ -2945,6 +2945,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let anchors = anchors_for(&places, &all_lines);
     let mut blocks = blocks_from(all_lines, &printed, &anchors);
     mend_contents_links(&mut blocks, &places, &printed, total);
+    drop_unused_anchors(&mut blocks);
     Ok(Extracted {
         blocks,
         pages: total,
@@ -3129,6 +3130,30 @@ fn mark_the_lines(lines: &mut [Line], marks: &[Mark]) {
         });
         line.bullet = found.map(|m| m.src.clone());
     }
+}
+
+/// Take out the anchors nothing points at any more.
+///
+/// A destination the file named gets an anchor whether or not the destination
+/// was any good, and the songbook's are all bad: its every contents row points
+/// into the contents page itself, so the anchors land in the middle of the list
+/// and the rows were repointed elsewhere. What is left is forty-five landing
+/// places for nobody, sitting BETWEEN the rows, and each one broke the list in
+/// two so that the gaps down the page came out uneven.
+fn drop_unused_anchors(blocks: &mut Vec<Block>) {
+    let wanted: std::collections::HashSet<&str> = blocks
+        .iter()
+        .flat_map(|b| b.spans())
+        .filter_map(|s| match &s.link {
+            Some(Link::Place(id)) => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    let wanted: std::collections::HashSet<String> = wanted.into_iter().map(String::from).collect();
+    blocks.retain(|b| match b {
+        Block::Anchor(id) => wanted.contains(id),
+        _ => true,
+    });
 }
 
 /// Put each destination on the line it points at, so the links have something
@@ -4571,6 +4596,33 @@ mod tests {
         assert_eq!(index_entry("1. maj 2025"), None);
         assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
         assert_eq!(index_entry("....7"), None, "no title, no row");
+    }
+
+    /// An anchor nobody points at is furniture in the middle of a list, and it
+    /// pushed the rows around it apart.
+    #[test]
+    fn an_anchor_nobody_points_at_is_taken_out() {
+        let row = |text: &str, to: Option<&str>| Block::IndexEntry {
+            spans: vec![Span {
+                text: text.into(),
+                color: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                link: to.map(|id| Link::Place(id.into())),
+            }],
+            page: "3".into(),
+            indent: 0,
+        };
+        let mut blocks = vec![
+            row("Kampsange", Some("pdf-t0")),
+            Block::Anchor("pdf-d7".into()),
+            row("Lokalforeningssangen", Some("pdf-t1")),
+            Block::Anchor("pdf-t0".into()),
+        ];
+        drop_unused_anchors(&mut blocks);
+        assert_eq!(blocks.len(), 3, "the stale one goes, the used one stays");
+        assert_eq!(blocks[2], Block::Anchor("pdf-t0".into()));
     }
 
     /// A file with no italic face fakes one by shearing the matrix, and then

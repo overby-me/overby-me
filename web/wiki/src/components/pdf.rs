@@ -150,13 +150,22 @@ pub fn PdfDocument(doc: Extracted) -> Element {
             (prev, next),
             (Block::ListItem { .. }, Block::ListItem { .. })
                 | (Block::IndexEntry { .. }, Block::IndexEntry { .. })
+                // An anchor is a landing place, not content, and a run of items
+                // with one dropped in the middle is still one run. Letting it
+                // break the run put a list's whole bottom margin between two
+                // rows, which is why the gaps down a contents page came out
+                // uneven.
+                | (Block::ListItem { .. } | Block::IndexEntry { .. }, Block::Anchor(_))
+                | (Block::Anchor(_), Block::ListItem { .. } | Block::IndexEntry { .. })
         )
     }
     let mut groups: Vec<Vec<Block>> = Vec::new();
     for block in doc.blocks.iter() {
+        // Against the run's KIND rather than its last block, so a run of items
+        // survives an anchor landing between two of them.
         let extend = groups
             .last()
-            .and_then(|g| g.last())
+            .and_then(|g| g.iter().rev().find(|b| !matches!(b, Block::Anchor(_))))
             .is_some_and(|prev| runs_on(prev, block));
         match extend {
             true => groups.last_mut().expect("checked").push(block.clone()),
@@ -171,6 +180,11 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     Some(Block::ListItem { .. }) => rsx! {
                         ul { key: "{i}", class: "docx-list",
                             for (j , item) in group.iter().enumerate() {
+                                // A landing place among the items: an empty item,
+                                // because a list may only hold items.
+                                if let Block::Anchor(id) = item {
+                                    li { key: "{j}", id: "{id}", class: "pdf-anchor pdf-anchor-item" }
+                                }
                                 if let Block::ListItem { spans, marker, indent } = item {
                                     match marker {
                                         // The page drew its own bullet, and here
@@ -234,6 +248,9 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         // width this is read at.
                         div { key: "{i}", class: "pdf-toc",
                             for (j , entry) in group.iter().enumerate() {
+                                if let Block::Anchor(id) = entry {
+                                    span { key: "{j}", id: "{id}", class: "pdf-anchor" }
+                                }
                                 if let Block::IndexEntry { spans, page, indent } = entry {
                                     {
                                         // The file draws its link across the whole

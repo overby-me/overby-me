@@ -8307,6 +8307,7 @@ a.list-item:hover {
 .pdf-anchor {
 	display: block;
 	height: 0;
+	list-style: none;
 	scroll-margin-top: var(--md-sys-spacing-16);
 }
 
