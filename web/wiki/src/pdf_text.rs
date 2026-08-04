@@ -139,6 +139,7 @@ pub struct Span {
     pub color: Option<String>,
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
     /// Where this stretch takes the reader, if the file made it a link.
     pub link: Option<Link>,
 }
@@ -162,6 +163,7 @@ impl Span {
         self.color == other.color
             && self.bold == other.bold
             && self.italic == other.italic
+            && self.underline == other.underline
             && self.link == other.link
     }
 }
@@ -840,6 +842,9 @@ struct Run {
     /// Set when a link annotation covers this run. Attached after the page is
     /// walked: the annotations live beside the content stream, not in it.
     link: Option<Link>,
+    /// Set when a rule is drawn under this run. A PDF has no underline as such;
+    /// it has a line under some words.
+    underline: bool,
 }
 
 /// A fill colour, as CSS, or `None` when it is the document's ordinary ink.
@@ -912,6 +917,122 @@ struct Drawn {
     /// The small marks: bullets, rules, and whatever else a page draws too small
     /// to be looked at. Sorted out against the lines afterwards.
     marks: Vec<Mark>,
+    /// The flat lines the page drew, kept for the harness to look at.
+    #[cfg(test)]
+    rules: Vec<Rule>,
+}
+
+/// A piece of a path, before anyone has said whether it will be painted.
+enum Shape {
+    Box { x: f64, y: f64, w: f64, h: f64 },
+    Line { from: (f64, f64), to: (f64, f64) },
+}
+
+/// A flat line drawn on the page. An underline is one of these under some words.
+struct Rule {
+    x0: f64,
+    x1: f64,
+    y: f64,
+    thickness: f64,
+}
+
+/// Where the current transform puts a point.
+fn put(ctm: [f64; 6], x: f64, y: f64) -> (f64, f64) {
+    (
+        ctm[0] * x + ctm[2] * y + ctm[4],
+        ctm[1] * x + ctm[3] * y + ctm[5],
+    )
+}
+
+impl Shape {
+    /// The corners this shape reaches, on the page.
+    fn corners(&self, ctm: [f64; 6]) -> [(f64, f64); 2] {
+        match self {
+            Shape::Box { x, y, w, h } => [put(ctm, *x, *y), put(ctm, x + w, y + h)],
+            Shape::Line { from, to } => [put(ctm, from.0, from.1), put(ctm, to.0, to.1)],
+        }
+    }
+
+    /// This shape as a rule when the path is STROKED: a flat segment drawn with
+    /// the pen. A stroked box is a border round something and not an underline
+    /// under anything, so it draws none.
+    fn stroked(&self, ctm: [f64; 6], pen: f64) -> Option<Rule> {
+        let Shape::Line { .. } = self else {
+            return None;
+        };
+        let [(x0, y0), (x1, y1)] = self.corners(ctm);
+        // Flat, within a hair: a diagonal is a drawing, not a rule.
+        if (y1 - y0).abs() > 0.6 {
+            return None;
+        }
+        let scale = (ctm[2].powi(2) + ctm[3].powi(2)).sqrt();
+        Some(Rule {
+            x0: x0.min(x1),
+            x1: x0.max(x1),
+            y: (y0 + y1) / 2.0,
+            thickness: (pen * scale).max(0.2),
+        })
+    }
+}
+
+/// A FILLED path as a rule, if the whole path is thin enough to be one.
+///
+/// The path entire, not its edges. Taking each edge of a filled box for a line
+/// is what turned the white box the songbook paints behind every line of lyrics
+/// into an underline under it, twenty-nine times a page: the box's top and
+/// bottom edges each looked like a hairline, and one of them always sat just
+/// under some words.
+fn filled_rule(shapes: &[Shape], ctm: [f64; 6]) -> Option<Rule> {
+    let corners: Vec<(f64, f64)> = shapes.iter().flat_map(|s| s.corners(ctm)).collect();
+    let (mut x0, mut x1) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (x, y) in corners {
+        x0 = x0.min(x);
+        x1 = x1.max(x);
+        y0 = y0.min(y);
+        y1 = y1.max(y);
+    }
+    // An underline is a hairline. Anything taller is a box, whatever is in it.
+    if !x0.is_finite() || y1 - y0 > 2.5 || x1 - x0 < 4.0 {
+        return None;
+    }
+    Some(Rule {
+        x0,
+        x1,
+        y: (y0 + y1) / 2.0,
+        thickness: (y1 - y0).max(0.2),
+    })
+}
+
+/// Whether a colour is too pale to be a mark on white paper.
+///
+/// A white rule is not an underline: it is a box drawn behind something, or a
+/// knockout, and the page shows nothing there at all.
+fn too_pale(r: f64, g: f64, b: f64) -> bool {
+    0.2126 * r + 0.7152 * g + 0.0722 * b > 0.75
+}
+
+/// Mark the runs that have a rule drawn under them.
+///
+/// Under, and only just: a rule within half a line below the baseline, thin
+/// enough to be a pen stroke rather than a box, and covering most of the run's
+/// width. A table's rules and a page's separators live further from any baseline
+/// or run the width of a column, and are left where they are.
+fn underline_runs(runs: &mut [Run], rules: &[Rule]) {
+    for run in runs.iter_mut() {
+        let width = run.end_x - run.x;
+        // A run of spaces sits over the rule between two underlined words as
+        // often as not, and a stroke under nothing is just a stray dash.
+        if width <= 0.0 || run.size <= 0.0 || run.text.trim().is_empty() {
+            continue;
+        }
+        run.underline = rules.iter().any(|rule| {
+            let under = rule.y < run.y - run.size * 0.02 && rule.y > run.y - run.size * 0.45;
+            let thin = rule.thickness < run.size * 0.2;
+            let covered = rule.x1.min(run.end_x) - rule.x0.max(run.x);
+            under && thin && covered > width * 0.6
+        });
+    }
 }
 
 /// A mark too small to be a picture, and where it sits.
@@ -941,12 +1062,20 @@ fn page_runs(
             runs: Vec::new(),
             pictures: Vec::new(),
             marks: Vec::new(),
+            #[cfg(test)]
+            rules: Vec::new(),
         };
     };
     let xobjects = page_xobjects(doc, page_id);
 
     let mut runs = Vec::new();
     let mut pictures: Vec<(f64, Picture)> = Vec::new();
+    let mut shapes: Vec<Shape> = Vec::new();
+    let mut rules: Vec<Rule> = Vec::new();
+    let mut pen = 1.0f64;
+    let mut pen_at = (0.0f64, 0.0f64);
+    let mut pale_fill = false;
+    let mut pale_stroke = false;
     let mut marks: Vec<Mark> = Vec::new();
     let mut decoded: HashMap<lopdf::ObjectId, String> = HashMap::new();
     let mut ctm = IDENTITY;
@@ -973,17 +1102,87 @@ fn page_runs(
                 ctm = c;
                 fill = f;
             }
+            // A PDF has no underline: it has a line drawn under some words. The
+            // path is gathered here and turned into rules when it is painted,
+            // because until then it may still be discarded.
+            "w" if nums.len() == 1 => pen = nums[0],
+            "re" if nums.len() == 4 => {
+                let (x, y) = (nums[0], nums[1]);
+                shapes.push(Shape::Box {
+                    x,
+                    y,
+                    w: nums[2],
+                    h: nums[3],
+                });
+            }
+            "m" if nums.len() == 2 => pen_at = (nums[0], nums[1]),
+            "l" if nums.len() == 2 => {
+                shapes.push(Shape::Line {
+                    from: pen_at,
+                    to: (nums[0], nums[1]),
+                });
+                pen_at = (nums[0], nums[1]);
+            }
+            // Painted. A fill is an AREA and counts only if the whole path is
+            // thin; a stroke is a line and counts per segment. Either way, only
+            // if it is dark enough to be seen at all.
+            "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "S" | "s" => {
+                let filling = !matches!(op.operator.as_str(), "S" | "s");
+                let stroking = !matches!(op.operator.as_str(), "f" | "F" | "f*");
+                if filling && !pale_fill {
+                    if let Some(rule) = filled_rule(&shapes, ctm) {
+                        rules.push(rule);
+                    }
+                }
+                if stroking && !pale_stroke {
+                    rules.extend(shapes.iter().filter_map(|s| s.stroked(ctm, pen)));
+                }
+                shapes.clear();
+            }
+            // Discarded, or kept only as a clip: either way it draws nothing.
+            "n" | "W" | "W*" => shapes.clear(),
             // The non-stroking colour, in each of the ways a PDF states it.
             // `sc`/`scn` take their meaning from the current colour space; the
             // operand count tells us which, and a pattern (which has a name
             // operand) is left alone rather than guessed at.
-            "g" if nums.len() == 1 => fill = ink(nums[0], nums[0], nums[0]),
-            "rg" if nums.len() == 3 => fill = ink(nums[0], nums[1], nums[2]),
-            "k" if nums.len() == 4 => fill = cmyk(nums[0], nums[1], nums[2], nums[3]),
+            "g" if nums.len() == 1 => {
+                fill = ink(nums[0], nums[0], nums[0]);
+                pale_fill = too_pale(nums[0], nums[0], nums[0]);
+            }
+            "rg" if nums.len() == 3 => {
+                fill = ink(nums[0], nums[1], nums[2]);
+                pale_fill = too_pale(nums[0], nums[1], nums[2]);
+            }
+            "k" if nums.len() == 4 => {
+                fill = cmyk(nums[0], nums[1], nums[2], nums[3]);
+                pale_fill = nums[0] + nums[1] + nums[2] + nums[3] < 0.25;
+            }
+            // The stroking colour is tracked only for how pale it is: text is
+            // filled, not stroked, so nothing else here needs it.
+            "G" if nums.len() == 1 => pale_stroke = too_pale(nums[0], nums[0], nums[0]),
+            "RG" if nums.len() == 3 => pale_stroke = too_pale(nums[0], nums[1], nums[2]),
+            "K" if nums.len() == 4 => {
+                pale_stroke = nums[0] + nums[1] + nums[2] + nums[3] < 0.25;
+            }
+            "SC" | "SCN" => match nums.len() {
+                1 => pale_stroke = too_pale(nums[0], nums[0], nums[0]),
+                3 => pale_stroke = too_pale(nums[0], nums[1], nums[2]),
+                4 => pale_stroke = nums[0] + nums[1] + nums[2] + nums[3] < 0.25,
+                _ => {}
+            },
             "sc" | "scn" => match nums.len() {
-                1 => fill = ink(nums[0], nums[0], nums[0]),
-                3 => fill = ink(nums[0], nums[1], nums[2]),
-                4 => fill = cmyk(nums[0], nums[1], nums[2], nums[3]),
+                1 => {
+                    fill = ink(nums[0], nums[0], nums[0]);
+                    pale_fill = too_pale(nums[0], nums[0], nums[0]);
+                }
+                3 => {
+                    fill = ink(nums[0], nums[1], nums[2]);
+                    pale_fill = too_pale(nums[0], nums[1], nums[2]);
+                }
+                4 => {
+                    fill = cmyk(nums[0], nums[1], nums[2], nums[3]);
+                    pale_fill = nums[0] + nums[1] + nums[2] + nums[3] < 0.25;
+                }
                 _ => {}
             },
             "cm" if nums.len() == 6 => {
@@ -1143,10 +1342,13 @@ fn page_runs(
             _ => {}
         }
     }
+    underline_runs(&mut runs, &rules);
     Drawn {
         runs,
         pictures,
         marks,
+        #[cfg(test)]
+        rules,
     }
 }
 
@@ -1191,6 +1393,7 @@ fn show(
                 color: color.map(str::to_string),
                 bold: font.bold,
                 italic: font.italic,
+                underline: false,
             });
         }
         text.clear();
@@ -1348,6 +1551,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
             color: run.color.clone(),
             bold: run.bold,
             italic: run.italic,
+            underline: run.underline,
             link: run.link.clone(),
         };
         match spans.last_mut() {
@@ -1374,7 +1578,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         }
         prev_end = run.end_x;
     }
-    let spans = mend_email_spans(tidy(spans));
+    let spans = mend_written_links(tidy(spans));
     if spans.is_empty() {
         return None;
     }
@@ -2176,9 +2380,11 @@ fn page_links(
 /// name linked to somebody else's inbox is the harm being undone. Where a line
 /// carries no address at all, a mailto on a name is left alone: that one can
 /// only be what the file says it is.
-fn mend_email_spans(spans: Vec<Span>) -> Vec<Span> {
+fn mend_written_links(spans: Vec<Span>) -> Vec<Span> {
     let text: String = spans.iter().map(|s| s.text.as_str()).collect();
-    let found = emails_in(&text);
+    let addresses = emails_in(&text);
+    let mut found = addresses.clone();
+    found.extend(urls_in(&text));
     if found.is_empty() {
         return spans;
     }
@@ -2196,16 +2402,20 @@ fn mend_email_spans(spans: Vec<Span>) -> Vec<Span> {
             ));
         }
     }
-    for (from, to, address) in &found {
+    for (from, to, href) in &found {
         for (_, span) in chars.iter_mut().take(*to).skip(*from) {
-            span.link = Some(Link::Url(format!("mailto:{address}")));
+            span.link = Some(Link::Url(href.clone()));
         }
     }
-    // And off everything else on the line: those are the stale ones.
-    for (at, (_, span)) in chars.iter_mut().enumerate() {
-        let inside = found.iter().any(|(from, to, _)| at >= *from && at < *to);
-        if !inside && matches!(&span.link, Some(Link::Url(u)) if u.starts_with("mailto:")) {
-            span.link = None;
+    // And a stale mailto comes off everything else on the line. Only mailto: a
+    // link on words that are not an address is ordinary and usually right, but
+    // an address written beside one says the file's is out of date.
+    if !addresses.is_empty() {
+        for (at, (_, span)) in chars.iter_mut().enumerate() {
+            let inside = found.iter().any(|(from, to, _)| at >= *from && at < *to);
+            if !inside && matches!(&span.link, Some(Link::Url(u)) if u.starts_with("mailto:")) {
+                span.link = None;
+            }
         }
     }
     // Back into spans, merging what still matches.
@@ -2258,7 +2468,64 @@ fn emails_in(text: &str) -> Vec<(usize, usize, String)> {
         if out.last().is_some_and(|(_, prev, _)| *prev > from) {
             continue;
         }
-        out.push((from, to, chars[from..to].iter().collect()));
+        let address: String = chars[from..to].iter().collect();
+        out.push((from, to, format!("mailto:{address}")));
+    }
+    out
+}
+
+/// Every web address WRITTEN OUT in a line, as character ranges.
+///
+/// A file often prints its links rather than making them: "kan læses her:" and
+/// then the address on the next line, with no annotation anywhere. The reader
+/// sees something that looks like a link and it does nothing, so what is
+/// written is made to work.
+fn urls_in(text: &str) -> Vec<(usize, usize, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    let opens = |at: usize, want: &str| {
+        want.chars().enumerate().all(|(k, c)| {
+            chars
+                .get(at + k)
+                .is_some_and(|g| g.eq_ignore_ascii_case(&c))
+        })
+    };
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        let prefix = ["https://", "http://", "www."]
+            .into_iter()
+            .find(|p| opens(at, p));
+        let Some(prefix) = prefix else {
+            at += 1;
+            continue;
+        };
+        // At a word boundary: not the tail of something longer.
+        if at > 0 && (chars[at - 1].is_alphanumeric() || chars[at - 1] == '.') {
+            at += 1;
+            continue;
+        }
+        let mut to = at;
+        while to < chars.len() && !chars[to].is_whitespace() {
+            to += 1;
+        }
+        // The sentence's punctuation is the sentence's.
+        while to > at
+            && matches!(
+                chars[to - 1],
+                '.' | ',' | ';' | ':' | ')' | ']' | '"' | '\'' | '»'
+            )
+        {
+            to -= 1;
+        }
+        let written: String = chars[at..to].iter().collect();
+        if written.chars().count() > prefix.chars().count() {
+            let href = match prefix {
+                "www." => format!("https://{written}"),
+                _ => written,
+            };
+            out.push((at, to, href));
+        }
+        at = to.max(at + 1);
     }
     out
 }
@@ -2700,6 +2967,56 @@ fn furniture_of(bytes: &[u8]) -> (Vec<String>, HashMap<usize, String>) {
     (gone, printed)
 }
 
+/// The operators one page runs, for when a rule turns up that the page does not
+/// show.
+#[cfg(test)]
+fn page_ops(bytes: &[u8], want: usize) -> Vec<String> {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+        if page_no + 1 != want {
+            continue;
+        }
+        let raw = doc.get_page_content(page_id);
+        let Ok(content) = lopdf::content::Content::decode(&raw) else {
+            return Vec::new();
+        };
+        return content
+            .operations
+            .iter()
+            .map(|op| {
+                let args: Vec<String> = op
+                    .operands
+                    .iter()
+                    .map(|o| format!("{o:?}").chars().take(16).collect())
+                    .collect();
+                format!("{} {}", op.operator, args.join(" "))
+            })
+            .collect();
+    }
+    Vec::new()
+}
+
+/// The flat lines one page drew, for the harness.
+#[cfg(test)]
+fn page_rules(bytes: &[u8], want: usize) -> Vec<(f64, f64, f64, f64)> {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    let mut budget = PICTURE_BUDGET;
+    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+        if page_no + 1 == want {
+            return page_runs(&doc, page_id, &mut budget, &[])
+                .rules
+                .into_iter()
+                .map(|r| (r.x0, r.x1, r.y, r.thickness))
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 /// The link boxes one page draws over itself, for the harness to show beside the
 /// runs they are supposed to land on.
 #[cfg(test)]
@@ -2796,6 +3113,12 @@ mod harness {
                 Err(e) => println!("{name:34.34} FAILED {e}"),
                 Ok(doc) => {
                     let chars: usize = doc.blocks.iter().map(|b| b.text().len()).sum();
+                    let underlined = doc
+                        .blocks
+                        .iter()
+                        .flat_map(|b| b.spans())
+                        .filter(|s| s.underline)
+                        .count();
                     let drawn = doc
                         .blocks
                         .iter()
@@ -2835,7 +3158,7 @@ mod harness {
                         })
                         .count();
                     println!(
-                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} bullets={drawn:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
+                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} bullets={drawn:<4} ul={underlined:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
                         doc.pages,
                         doc.blocks.len(),
                         chars,
@@ -2985,6 +3308,23 @@ mod harness {
         };
         let bytes = std::fs::read(&path).expect("read");
         let want = std::env::var("PDF_NEAR").unwrap_or_default();
+        if std::env::var("PDF_OPS").is_ok() {
+            for line in super::page_ops(&bytes, page).iter().take(60) {
+                println!("  op: {line}");
+            }
+        }
+        if std::env::var("PDF_OPS").is_ok() {
+            for line in super::page_ops(&bytes, page).iter() {
+                println!("  op: {line}");
+            }
+        }
+        println!("--- page {page} rules drawn ---");
+        for r in super::page_rules(&bytes, page).iter().take(14) {
+            println!(
+                "  x {:>7.1}..{:<7.1} y {:>7.1}  thick {:>5.2}",
+                r.0, r.1, r.2, r.3
+            );
+        }
         println!("--- page {page} link boxes ---");
         for (x0, y0, x1, y1, link) in super::page_areas(&bytes, page) {
             println!(
@@ -3099,6 +3439,18 @@ mod harness {
                     .take(6)
                 {
                     println!("    bold: {}", sp.text.chars().take(60).collect::<String>());
+                }
+                for sp in doc
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.spans())
+                    .filter(|s| s.underline)
+                    .take(6)
+                {
+                    println!(
+                        "    underlined: {}",
+                        sp.text.chars().take(60).collect::<String>()
+                    );
                 }
                 let show: usize = std::env::var("PDF_SHOW")
                     .ok()
@@ -3258,6 +3610,7 @@ mod tests {
             page: 1,
             text: text.into(),
             spans: vec![Span {
+                underline: false,
                 link: None,
                 text: text.into(),
                 color: None,
@@ -3348,6 +3701,7 @@ mod tests {
             blocks: vec![Block::Paragraph {
                 indent: 0,
                 spans: vec![Span {
+                    underline: false,
                     link: None,
                     text: "noget".into(),
                     color: None,
@@ -3400,6 +3754,7 @@ mod tests {
     /// A span with no styling but its colour, for the fixtures below.
     fn span(text: &str, color: Option<&str>) -> Span {
         Span {
+            underline: false,
             link: None,
             text: text.into(),
             color: color.map(str::to_string),
@@ -3410,6 +3765,7 @@ mod tests {
 
     fn run(x: f64, end_x: f64, text: &str, color: Option<&str>, bold: bool) -> Run {
         Run {
+            underline: false,
             link: None,
             x,
             end_x,
@@ -3492,6 +3848,7 @@ mod tests {
             page: 1,
             text: text.into(),
             spans: vec![Span {
+                underline: false,
                 link: None,
                 text: text.into(),
                 color: None,
@@ -3734,6 +4091,75 @@ mod tests {
         );
     }
 
+    /// A file often prints its links instead of making them.
+    #[test]
+    fn a_written_address_becomes_a_link() {
+        let found = urls_in(
+            "Samværspolitikken kan læses her: https://acrobat.adobe.com/id/urn:aaid:sc:EU:53f0eb63",
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].2,
+            "https://acrobat.adobe.com/id/urn:aaid:sc:EU:53f0eb63"
+        );
+        // A bare host gets the scheme it needs to be followable.
+        assert_eq!(
+            urls_in("se www.radikalungdom.dk for mere")[0].2,
+            "https://www.radikalungdom.dk"
+        );
+        // The sentence's punctuation stays with the sentence.
+        assert_eq!(
+            urls_in("Se https://example.dk/side.")[0].2,
+            "https://example.dk/side"
+        );
+        // And what is not an address.
+        assert!(urls_in("noget http:// andet").is_empty(), "a scheme alone");
+        assert!(urls_in("wwwwww.dk").is_empty());
+    }
+
+    /// A fill is an area. Reading its edges as lines is what put an underline
+    /// under every line of the songbook's lyrics.
+    #[test]
+    fn a_filled_box_is_not_an_underline() {
+        // The songbook's white box behind a line, as a polygon: 18.7pt tall.
+        let box_path = vec![
+            Shape::Line {
+                from: (55.7, 672.9),
+                to: (540.5, 672.9),
+            },
+            Shape::Line {
+                from: (540.5, 672.9),
+                to: (540.5, 654.2),
+            },
+            Shape::Line {
+                from: (540.5, 654.2),
+                to: (55.7, 654.2),
+            },
+        ];
+        assert!(
+            filled_rule(&box_path, IDENTITY).is_none(),
+            "a box the height of a line is a box"
+        );
+        // A hairline the same width IS a rule.
+        let hairline = vec![Shape::Box {
+            x: 55.7,
+            y: 654.2,
+            w: 484.8,
+            h: 0.8,
+        }];
+        let rule = filled_rule(&hairline, IDENTITY).expect("a hairline is a rule");
+        assert!((rule.thickness - 0.8).abs() < 0.01);
+        assert!((rule.y - 654.6).abs() < 0.01);
+    }
+
+    /// And white ink marks nothing at all.
+    #[test]
+    fn white_is_not_ink() {
+        assert!(too_pale(1.0, 1.0, 1.0), "the songbook's boxes");
+        assert!(!too_pale(0.0, 0.0, 0.0));
+        assert!(!too_pale(0.18, 0.26, 0.47), "a dark blue still marks");
+    }
+
     /// An address is found by looking either side of the @.
     #[test]
     fn an_address_is_found_in_a_line_of_prose() {
@@ -3741,13 +4167,13 @@ mod tests {
         let found = emails_in(line);
         assert_eq!(found.len(), 1);
         assert_eq!(
-            found[0].2, "msthorup@gmail.com",
-            "and not the comma after it"
+            found[0].2, "mailto:msthorup@gmail.com",
+            "the address, and not the comma after it"
         );
         // A sentence's full stop is the sentence's.
         assert_eq!(
             emails_in("Skriv til anja@example.dk.")[0].2,
-            "anja@example.dk"
+            "mailto:anja@example.dk"
         );
         // Two on a line, both found.
         assert_eq!(emails_in("a@b.dk og c@d.org").len(), 2);
@@ -3763,13 +4189,14 @@ mod tests {
     fn a_stale_email_link_is_pointed_at_the_address_it_sits_on() {
         let stale = Some(Link::Url("mailto:magnus@muj.dk".into()));
         let spans = vec![Span {
+            underline: false,
             text: "Marie Strunge Thorup, msthorup@gmail.com, 23 60 66 61".into(),
             color: None,
             bold: false,
             italic: false,
             link: stale,
         }];
-        let mended = mend_email_spans(spans);
+        let mended = mend_written_links(spans);
         let linked: Vec<(&str, &Link)> = mended
             .iter()
             .filter_map(|s| s.link.as_ref().map(|l| (s.text.as_str(), l)))
@@ -3790,13 +4217,14 @@ mod tests {
     fn a_name_linked_to_an_address_is_left_alone() {
         let link = Some(Link::Url("mailto:formand@example.dk".into()));
         let spans = vec![Span {
+            underline: false,
             text: "skriv til formanden".into(),
             color: None,
             bold: false,
             italic: false,
             link: link.clone(),
         }];
-        assert_eq!(mend_email_spans(spans.clone()), spans);
+        assert_eq!(mend_written_links(spans.clone()), spans);
     }
 
     /// A statute is written in abbreviations, and they are not bullets.

@@ -36,10 +36,16 @@ fn Spans(spans: Vec<Span>) -> Element {
     rsx! {
         for (i , span) in spans.iter().enumerate() {
             {
-                let style = match &span.color {
+                let mut style = match &span.color {
                     Some(color) => format!("color:{color};"),
                     None => String::new(),
                 };
+                // Underline is decoration rather than meaning, so it lives in
+                // the style the way the Word renderer keeps it, and every
+                // combination of weight and slant survives beside it.
+                if span.underline && span.link.is_none() {
+                    style.push_str("text-decoration:underline;");
+                }
                 // `strong` and `em` rather than a font-weight style: a document
                 // that emphasises a word means it, and the meaning should reach
                 // a screen reader too.
