@@ -53,6 +53,11 @@ fn escape_matches_c_systemd() {
         &["--template", "getty@.service", "ttyS0"],
         &["--path", "--suffix", "mount", "/var/log/journal"],
         &["--suffix", "device", "sys-devices-virtual"],
+        // The suffix must be an exact unit type name; C rejects a dotted or
+        // empty suffix (rust used to strip the dot and accept ".service").
+        &["--suffix", ".service", "foo"],
+        &["--suffix", "", "foo"],
+        &["--suffix", "bogus", "foo"],
         &["--unescape", "foo\\x2fbar"],
         &["--unescape", "-dev-sda"],
         &["--unescape", "--path", "dev-sda1"],

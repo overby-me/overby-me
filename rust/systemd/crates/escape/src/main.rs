@@ -232,6 +232,16 @@ fn main() {
         eprintln!("Error: Not a valid template unit name: {template}");
         process::exit(1);
     }
+    if let Some(suffix) = &cli.suffix
+        && !VALID_SUFFIXES.contains(&suffix.as_str())
+    {
+        // C validates the suffix once, up front, via unit_type_from_string: it
+        // must be an exact unit type name like "service", never ".service" or
+        // empty. rust previously stripped a leading dot and so accepted
+        // "--suffix .service", producing output where C errors out.
+        eprintln!("Invalid unit suffix type \"{suffix}\".");
+        process::exit(1);
+    }
 
     let inputs = if cli.strings.is_empty() {
         eprintln!("Error: no input strings provided.");
