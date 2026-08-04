@@ -79,6 +79,10 @@ pub enum Event {
         root: UnitId,
         job: Option<crate::units::jobs::JobId>,
     },
+    /// A start closure was enqueued on the run queue (increment 4): a payload-
+    /// free wake so the dispatcher takes a run-queue drive pass. The drive reads
+    /// the registry directly; the event only exists to break the block.
+    JobQueued,
 }
 
 /// A helper-command continuation parked between steps, keyed by the
@@ -335,6 +339,9 @@ fn dispatch_one(
     stop_graph: &mut StopGraph,
 ) {
     match event {
+        // Increment 4: only a wake. The run-queue drive runs after every
+        // event in the loop (step 4), so there is nothing to do on intake.
+        Event::JobQueued => {}
         Event::Notify {
             unit,
             datagram,
