@@ -8120,6 +8120,11 @@ a.list-item:hover {
    app's own type, and spacing that survives on a phone. The document is not a
    page here, so it takes the width it is given rather than a paper size. */
 .docx-doc {
+	/* One step of the indentation a document set, for the blocks that carry a
+	   depth. Quantised into this rather than kept in points: the page's inset
+	   was measured against the page's column, and a phone's column is not that.
+	   What matters is that a nested thing reads as nested. */
+	--pdf-indent-step: var(--md-sys-spacing-6);
 	max-width: 70ch;
 	margin: 0 auto;
 	color: var(--md-on-surface);
@@ -8177,6 +8182,59 @@ a.list-item:hover {
 	flex: 1;
 	height: 1px;
 	background: var(--md-outline-variant);
+}
+
+/* A contents list out of a PDF, laid out the way the page laid it out.
+
+   On the page the leader dots are what fill the gap, so every page number lands
+   on one right margin however long the title. Reflowed as text those dots are a
+   literal string in a proportional font, so each row ends wherever it ends and
+   the column the document drew is gone. So the leader is DRAWN here, as a flex
+   filler that takes whatever room is left, and the number sits after it: one
+   right edge at any width, on a phone as on a desk.
+
+   `last baseline` puts the dots and the number on a wrapped title's LAST line,
+   which is where the eye expects them; the plain `baseline` above it is what
+   older engines fall back to. */
+/* A deeply nested document (an outline four levels down is real: a policy with
+   numbered clauses and sub-clauses) would spend a quarter of a phone's width on
+   the inset alone. The depth still reads at a smaller step, and the words get
+   the room. */
+@media (max-width: 599px) {
+	.docx-doc {
+		--pdf-indent-step: var(--md-sys-spacing-3);
+	}
+}
+
+.pdf-toc {
+	margin: 0 0 var(--md-sys-spacing-4);
+}
+.pdf-toc-row {
+	display: flex;
+	align-items: baseline;
+	align-items: last baseline;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-0-5) 0;
+}
+.pdf-toc-title {
+	flex: 0 1 auto;
+}
+.pdf-toc-leader {
+	flex: 1 1 auto;
+	min-width: var(--md-sys-spacing-4);
+	/* An empty box takes its baseline from its bottom edge, so the dots land on
+	   the text baseline, which is where a row of full stops would sit. No
+	   `align-self` here on purpose: it would opt this item out of the row's
+	   `last baseline` and strand the leader on a wrapped title's first line
+	   while its number sat on the last. */
+	border-bottom: 1px dotted var(--md-outline);
+}
+.pdf-toc-page {
+	flex: 0 0 auto;
+	/* Figures of one width, so the numbers stack into a column rather than
+	   ragging by a hair the way proportional digits do. */
+	font-variant-numeric: tabular-nums;
+	color: var(--md-on-surface-variant);
 }
 
 .docx-list {

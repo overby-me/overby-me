@@ -60,15 +60,22 @@ fn Spans(spans: Vec<Span>) -> Element {
 /// Render what was read out of a PDF.
 #[component]
 pub fn PdfDocument(doc: Extracted) -> Element {
-    // Consecutive list items become one list, so a bulleted run reads as one
-    // rather than as a column of one-item lists.
+    // Consecutive items of one kind become one group, so a bulleted run reads as
+    // a single list rather than a column of one-item lists, and a contents list
+    // as one aligned table rather than a stack of unrelated rows.
+    fn runs_on(prev: &Block, next: &Block) -> bool {
+        matches!(
+            (prev, next),
+            (Block::ListItem(_), Block::ListItem(_))
+                | (Block::IndexEntry { .. }, Block::IndexEntry { .. })
+        )
+    }
     let mut groups: Vec<Vec<Block>> = Vec::new();
     for block in doc.blocks.iter() {
-        let extend = matches!(block, Block::ListItem(_))
-            && groups
-                .last()
-                .and_then(|g| g.last())
-                .is_some_and(|b| matches!(b, Block::ListItem(_)));
+        let extend = groups
+            .last()
+            .and_then(|g| g.last())
+            .is_some_and(|prev| runs_on(prev, block));
         match extend {
             true => groups.last_mut().expect("checked").push(block.clone()),
             false => groups.push(vec![block.clone()]),
@@ -98,21 +105,52 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             _ => rsx! { h5 { key: "{i}", class: "docx-h", style: "{st}", Spans { spans } } },
                         }
                     }
-                    Some(Block::Paragraph { spans, align }) => rsx! {
+                    Some(Block::Paragraph {
+                        spans,
+                        align,
+                        indent,
+                    }) => rsx! {
                         p {
                             key: "{i}",
                             class: "docx-p",
-                            style: "{align_style(*align)}",
+                            style: "{align_style(*align)}{indent_style(*indent)}",
                             Spans { spans: spans.clone() }
                         }
                     },
-                    Some(Block::PageBreak(page)) => rsx! {
+                    Some(Block::IndexEntry { .. }) => rsx! {
+                        // A contents list, laid out the way the page laid it
+                        // out: the title, a leader carrying the eye across, and
+                        // the page number on a single right margin. The leader
+                        // is drawn rather than written, so every number lands on
+                        // that margin whatever the title's length and whatever
+                        // width this is read at.
+                        div { key: "{i}", class: "pdf-toc",
+                            for (j , entry) in group.iter().enumerate() {
+                                if let Block::IndexEntry { spans, page, indent } = entry {
+                                    div {
+                                        key: "{j}",
+                                        class: "pdf-toc-row",
+                                        style: "{indent_style(*indent)}",
+                                        span { class: "pdf-toc-title", Spans { spans: spans.clone() } }
+                                        // Decoration, and nothing for a screen
+                                        // reader to announce: the row already
+                                        // says what it points at and where.
+                                        span { class: "pdf-toc-leader", aria_hidden: "true" }
+                                        span { class: "pdf-toc-page", "{page}" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Some(Block::PageBreak { ended, printed }) => rsx! {
                         // Furniture, and marked as such: a separator carries no
                         // meaning to read aloud, and the number is what makes
                         // "see page 12" mean something to someone reading this
-                        // rather than the pages.
+                        // rather than the pages. The number the page printed on
+                        // itself wins over its position in the file, because
+                        // that is the one the document's own index refers to.
                         div { key: "{i}", class: "pdf-page-break", role: "separator",
-                            span { "{page}" }
+                            span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
                         }
                     },
                     Some(Block::Image(picture)) => rsx! {
@@ -149,6 +187,17 @@ fn align_style(align: Align) -> &'static str {
     match align {
         Align::Left => "",
         Align::Center => "text-align:center;",
+    }
+}
+
+/// How far in a block was set, in steps of the indent token.
+///
+/// `inline-start` rather than `left`, so a right-to-left document indents away
+/// from its own margin rather than into the text.
+fn indent_style(indent: u8) -> String {
+    match indent {
+        0 => String::new(),
+        n => format!("margin-inline-start:calc(var(--pdf-indent-step) * {n});"),
     }
 }
 

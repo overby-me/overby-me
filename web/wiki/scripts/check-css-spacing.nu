@@ -29,7 +29,7 @@ const RSX_BASELINE = 0
 # Raw colour literals outside comments. 31 at the time of writing; the honest
 # ones are scrim/shadow alphas, and everything else is a role waiting to be
 # used. Lower this as they go.
-const COLOR_BASELINE = 31
+const COLOR_BASELINE = 30
 
 # Custom properties that are deliberately undefined: a local API a rule sets on
 # itself and reads back through `var(--name, <default>)`.

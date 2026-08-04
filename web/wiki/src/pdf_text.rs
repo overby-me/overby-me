@@ -36,15 +36,39 @@ pub enum Block {
     Paragraph {
         spans: Vec<Span>,
         align: Align,
+        /// How far the block was set in from the column, in steps of about one
+        /// line. Indentation is meaning as much as decoration: it is what marks
+        /// a quoted passage, a sub-clause or a nested entry, and a reflow that
+        /// flattens everything to the margin throws that away.
+        indent: u8,
     },
     /// A line that began with a bullet or a number, with that marker stripped.
     ListItem(Vec<Span>),
+    /// A row of a table of contents: what it points at, and the page it points
+    /// to. Kept apart from a paragraph because the two are laid out differently
+    /// and reflow differently. On the page the leader dots fill the gap so that
+    /// every number lands on one right margin; as text those dots are a literal
+    /// string in a proportional font, so the numbers land wherever they land and
+    /// the column the document drew is lost.
+    IndexEntry {
+        spans: Vec<Span>,
+        page: String,
+        indent: u8,
+    },
     /// A picture the page drew, where it drew it.
     Image(Picture),
-    /// Where one page ended and the next began, carrying the number of the page
-    /// that just finished. Furniture, not content: it exists so that "see page
-    /// 12" still means something to someone reading this instead of the pages.
-    PageBreak(usize),
+    /// Where one page ended and the next began. Furniture, not content: it
+    /// exists so that "see page 12" still means something to someone reading
+    /// this instead of the pages.
+    PageBreak {
+        /// Which page of the file just finished, counting from one.
+        ended: usize,
+        /// What that page called ITSELF, when it printed a number. Front matter
+        /// is usually unnumbered, so the two disagree: in the songbook, the
+        /// seventh page of the file is the page its own index calls 3. The
+        /// printed one is what a cross-reference means.
+        printed: Option<String>,
+    },
 }
 
 impl Block {
@@ -52,8 +76,9 @@ impl Block {
         match self {
             Block::Heading { spans, .. }
             | Block::Paragraph { spans, .. }
+            | Block::IndexEntry { spans, .. }
             | Block::ListItem(spans) => spans,
-            Block::Image(_) | Block::PageBreak(_) => &[],
+            Block::Image(_) | Block::PageBreak { .. } => &[],
         }
     }
 
@@ -1324,6 +1349,63 @@ fn is_index_entry(text: &str) -> bool {
         .any(|w| w.iter().all(|b| *b == b'.'))
 }
 
+/// Split a table-of-contents row into what it names and the page it names.
+///
+/// Read from the end, because that is where the certainty is: a number, then the
+/// leader that carried the eye to it. Anything else is a sentence that happens to
+/// end in a digit, and left alone.
+fn index_entry(text: &str) -> Option<(&str, &str)> {
+    let trimmed = text.trim_end();
+    let digits_start = trimmed
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_ascii_digit())
+        .last()
+        .map(|(i, _)| i)?;
+    let page = &trimmed[digits_start..];
+    // A page number, not a year in a title and not a whole line of digits.
+    if page.len() > 4 {
+        return None;
+    }
+    let lead = trimmed[..digits_start].trim_end();
+    // The leader itself: dots, with whatever spacing the file set them in.
+    let dots = lead
+        .chars()
+        .rev()
+        .take_while(|c| matches!(c, '.' | '\u{00B7}' | '\u{2024}' | '\u{2026}' | ' '))
+        .filter(|c| *c != ' ')
+        .count();
+    if dots < 3 {
+        return None;
+    }
+    let title = lead
+        .trim_end_matches([' ', '.', '\u{00B7}', '\u{2024}', '\u{2026}'])
+        .trim();
+    match title.is_empty() {
+        true => None,
+        false => Some((title, page)),
+    }
+}
+
+/// How far a block was set in from the column, in steps of roughly one line.
+///
+/// Quantised rather than measured to the point, because this reflows: a phone's
+/// column is not the page's, and carrying an exact 18.2pt inset into it would
+/// eat a third of the width. What survives is the DEPTH, which is what the
+/// indent meant.
+fn indent_steps(left: f64, col_left: f64, size: f64) -> u8 {
+    if !left.is_finite() || !col_left.is_finite() || size <= 0.0 {
+        return 0;
+    }
+    let inset = left - col_left;
+    // Half a line of slack: a paragraph is not indented because its first glyph
+    // is a hair right of the one above it.
+    if inset < size * 0.6 {
+        return 0;
+    }
+    ((inset / (size * 1.6)).round() as u8).clamp(1, 4)
+}
+
 /// How far right the text column runs.
 ///
 /// Not the maximum, which one stray element pushes past the real margin, but
@@ -1478,7 +1560,7 @@ fn list_marker(text: &str) -> Option<&str> {
 
 /// Turn lines into blocks: paragraphs broken on the vertical gap, headings on
 /// relative size, list items on a leading marker.
-fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
+fn blocks_from(lines: Vec<Line>, printed: &HashMap<usize, String>) -> Vec<Block> {
     let body = body_size(&lines);
     let column = column_right(&lines);
     let col_left = column_left(&lines);
@@ -1496,13 +1578,30 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
                  geometry: &mut Vec<(f64, f64)>,
                  blocks: &mut Vec<Block>| {
         let align = alignment_of(geometry, col_left, column, size);
+        // The block's own left edge is the leftmost its lines reached. Not the
+        // first line's: a paragraph whose opening line is indented has not moved
+        // as a block, and taking the first would say it had.
+        let left = geometry
+            .iter()
+            .map(|(l, _)| *l)
+            .filter(|l| l.is_finite())
+            .fold(f64::INFINITY, f64::min);
+        let indent = indent_steps(left, col_left, size);
         geometry.clear();
         let spans = tidy(std::mem::take(para));
         if spans.is_empty() {
             return;
         }
         let text: String = spans.iter().map(|s| s.text.as_str()).collect();
-        if let Some(rest) = list_marker(&text) {
+        if let Some((title, page)) = index_entry(&text) {
+            let keep = title.chars().count();
+            let page = page.to_string();
+            blocks.push(Block::IndexEntry {
+                spans: keep_prefix(spans, keep),
+                page,
+                indent,
+            });
+        } else if let Some(rest) = list_marker(&text) {
             // Drop the marker from the spans, keeping the colours of the words
             // that follow it.
             let dropped = text.chars().count() - rest.chars().count();
@@ -1526,7 +1625,11 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
                 align,
             });
         } else {
-            blocks.push(Block::Paragraph { spans, align });
+            blocks.push(Block::Paragraph {
+                spans,
+                align,
+                indent,
+            });
         }
     };
 
@@ -1538,7 +1641,10 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
         // silently is worse than one break too many.
         if line.page != page && line.page != 0 {
             flush(&mut para, para_size, &mut para_lines, &mut blocks);
-            blocks.push(Block::PageBreak(page));
+            blocks.push(Block::PageBreak {
+                ended: page,
+                printed: printed.get(&(page - 1)).cloned(),
+            });
             page = line.page;
             prev = None;
         }
@@ -1613,22 +1719,138 @@ fn drop_prefix(spans: Vec<Span>, n: usize) -> Vec<Span> {
     tidy(out)
 }
 
+/// Keep the first `n` characters, with the colours of what survives.
+fn keep_prefix(spans: Vec<Span>, n: usize) -> Vec<Span> {
+    let mut left = n;
+    let mut out = Vec::new();
+    for span in spans {
+        if left == 0 {
+            break;
+        }
+        let count = span.text.chars().count();
+        if count <= left {
+            left -= count;
+            out.push(span);
+            continue;
+        }
+        let text: String = span.text.chars().take(left).collect();
+        left = 0;
+        out.push(Span { text, ..span });
+    }
+    tidy(out)
+}
+
+/// Take the running heads and folios off every page, and hand back the number
+/// each page printed on itself.
+///
+/// The signal is POSITION, not words. A folio changes every page, so matching
+/// text would never catch it; what does not change is where it sits and that it
+/// sits alone. A line at the same height page after page, cut off from the body
+/// by a gap far wider than the leading, is the running head or the page number,
+/// and it is furniture: on the page it sits in the margin where the eye skips
+/// it, but a reflow drops it into the middle of the reading, every page.
+///
+/// Two guards keep this off real text. The gap, because in an ordinary document
+/// the first body line also starts at the same height on every page, and cutting
+/// THAT would behead every page. And agreement: the lines either say the same
+/// thing every time, which is a running head, or they are numbers, which is a
+/// folio. A line that varies and is not a number is prose, and stays.
+fn strip_running_furniture(pages: &mut [Vec<Line>]) -> HashMap<usize, String> {
+    /// Where a candidate sat, to a couple of points: page geometry repeats
+    /// exactly, but not always to the last decimal.
+    fn key(y: f64, top: bool) -> (i64, bool) {
+        ((y / 2.0).round() as i64, top)
+    }
+    // What each page offers up: its topmost and bottommost line, if either is
+    // stranded away from the rest.
+    let mut offered: Vec<Vec<(usize, (i64, bool))>> = Vec::new();
+    for lines in pages.iter() {
+        let text: Vec<(usize, &Line)> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.picture.is_none() && !l.text.trim().is_empty())
+            .collect();
+        let mut here = Vec::new();
+        // Lines arrive down the page, so the first is the top and the last the
+        // bottom. Three lines minimum: with two, "the rest of the page" is one
+        // line and any gap looks like a stranding.
+        if text.len() >= 3 {
+            for (at, top) in [(0usize, true), (text.len() - 1, false)] {
+                let (index, line) = text[at];
+                let neighbour = match top {
+                    true => text[1].1,
+                    false => text[text.len() - 2].1,
+                };
+                let gap = (line.y - neighbour.y).abs();
+                if gap > line.size * 2.5 {
+                    here.push((index, key(line.y, top)));
+                }
+            }
+        }
+        offered.push(here);
+    }
+    // A place is furniture when most of the document uses it.
+    let mut tally: HashMap<(i64, bool), Vec<(usize, usize)>> = HashMap::new();
+    for (page_no, here) in offered.iter().enumerate() {
+        for (index, k) in here {
+            tally.entry(*k).or_default().push((page_no, *index));
+        }
+    }
+    let with_text = pages
+        .iter()
+        .filter(|ls| ls.iter().any(|l| !l.text.trim().is_empty()))
+        .count();
+    let mut printed: HashMap<usize, String> = HashMap::new();
+    let mut condemned: Vec<(usize, usize)> = Vec::new();
+    for (_, seen) in tally {
+        if seen.len() < 3 || seen.len() * 2 < with_text {
+            continue;
+        }
+        let texts: Vec<&str> = seen
+            .iter()
+            .map(|(p, i)| pages[*p][*i].text.trim())
+            .collect();
+        // A folio is a NUMBER, with at most the decoration a designer puts round
+        // one: "3", "- 3 -", "3.". Not a word with a number in it. "Kapitel 1"
+        // repeats its position on every page and changes every page exactly as a
+        // folio does, and it is a heading.
+        let numeric = |t: &str| {
+            let digits: String = t.chars().filter(char::is_ascii_digit).collect();
+            let wordy = t.chars().any(char::is_alphabetic);
+            (!digits.is_empty() && !wordy && t.chars().count() <= 12).then_some(digits)
+        };
+        let all_numbers = texts.iter().all(|t| numeric(t).is_some());
+        let same = texts.windows(2).all(|w| w[0] == w[1]);
+        if !all_numbers && !same {
+            continue;
+        }
+        for ((page_no, index), text) in seen.iter().zip(texts.iter()) {
+            if let Some(digits) = numeric(text) {
+                printed.insert(*page_no, digits);
+            }
+            condemned.push((*page_no, *index));
+        }
+    }
+    // Back to front, so removing one does not move the next.
+    condemned.sort_unstable();
+    for (page_no, index) in condemned.into_iter().rev() {
+        pages[page_no].remove(index);
+    }
+    printed
+}
+
 /// Read a PDF and hand back what it says.
 pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let doc = Document::load_mem(bytes).map_err(|e| format!("not a readable PDF: {e}"))?;
     let pages = doc.get_pages();
     let total = pages.len();
-    let mut all_lines = Vec::new();
-    let mut empty = 0usize;
+    let mut per_page: Vec<Vec<Line>> = Vec::new();
     let mut budget = PICTURE_BUDGET;
     for (page_no, (_, page_id)) in pages.into_iter().enumerate() {
         let drawn = page_runs(&doc, page_id, &mut budget);
         let mut lines = lines_from(drawn.runs);
         for line in &mut lines {
             line.page = page_no + 1;
-        }
-        if lines.is_empty() {
-            empty += 1;
         }
         // A picture takes its place in the flow by where it was drawn, so it
         // lands between the paragraphs it sat between on the page rather than
@@ -1646,17 +1868,162 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
             });
         }
         lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
-        all_lines.extend(lines);
+        per_page.push(lines);
     }
+    let printed = strip_running_furniture(&mut per_page);
+    // Counted after the furniture goes: a page holding nothing but its own page
+    // number has nothing on it to read.
+    let empty = per_page
+        .iter()
+        .filter(|ls| {
+            ls.iter()
+                .all(|l| l.picture.is_some() || l.text.trim().is_empty())
+        })
+        .count();
+    let all_lines: Vec<Line> = per_page.into_iter().flatten().collect();
     Ok(Extracted {
-        blocks: blocks_from(all_lines),
+        blocks: blocks_from(all_lines, &printed),
         pages: total,
         pages_without_text: empty,
     })
 }
 
+/// What the furniture rule would take off this document, for the harness to
+/// show. Exactly the walk [`extract`] does, stopping at the strip.
+#[cfg(test)]
+fn furniture_of(bytes: &[u8]) -> (Vec<String>, usize) {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return (Vec::new(), 0);
+    };
+    let mut per_page: Vec<Vec<Line>> = Vec::new();
+    let mut budget = PICTURE_BUDGET;
+    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+        let drawn = page_runs(&doc, page_id, &mut budget);
+        let mut lines = lines_from(drawn.runs);
+        for line in &mut lines {
+            line.page = page_no + 1;
+        }
+        lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
+        per_page.push(lines);
+    }
+    let before: Vec<String> = per_page
+        .iter()
+        .flatten()
+        .map(|l| format!("{}|{}", l.page, l.text))
+        .collect();
+    let printed = strip_running_furniture(&mut per_page);
+    let after: std::collections::HashSet<String> = per_page
+        .iter()
+        .flatten()
+        .map(|l| format!("{}|{}", l.page, l.text))
+        .collect();
+    let gone = before.into_iter().filter(|k| !after.contains(k)).collect();
+    (gone, printed.len())
+}
+
+/// Every line of one page with the geometry it was drawn at. A lens for the
+/// harness, so the layout rules can be designed against real numbers.
+#[cfg(test)]
+fn page_lines(bytes: &[u8], want: usize) -> Vec<Line> {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    let mut budget = PICTURE_BUDGET;
+    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+        if page_no + 1 != want {
+            continue;
+        }
+        let drawn = page_runs(&doc, page_id, &mut budget);
+        let mut lines = lines_from(drawn.runs);
+        lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
+        return lines;
+    }
+    Vec::new()
+}
+
 #[cfg(test)]
 mod harness {
+    /// Every PDF in a directory, one line each, and what the furniture rule took
+    /// off it. The regression surface for a change that touches every document.
+    ///
+    ///   PDF_SWEEP=/path/to/corpus cargo test pdf_text::harness -- --nocapture
+    #[test]
+    fn sweep_a_corpus() {
+        let Ok(dir) = std::env::var("PDF_SWEEP") else {
+            return;
+        };
+        let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .expect("read the corpus")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e == "pdf"))
+            .collect();
+        paths.sort();
+        for path in paths {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let bytes = std::fs::read(&path).expect("read");
+            let (gone, numbered) = super::furniture_of(&bytes);
+            match super::extract(&bytes) {
+                Err(e) => println!("{name:34.34} FAILED {e}"),
+                Ok(doc) => {
+                    let chars: usize = doc.blocks.iter().map(|b| b.text().len()).sum();
+                    let toc = doc
+                        .blocks
+                        .iter()
+                        .filter(|b| matches!(b, super::Block::IndexEntry { .. }))
+                        .count();
+                    let indented = doc
+                        .blocks
+                        .iter()
+                        .filter(|b| match b {
+                            super::Block::Paragraph { indent, .. }
+                            | super::Block::IndexEntry { indent, .. } => *indent > 0,
+                            _ => false,
+                        })
+                        .count();
+                    println!(
+                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
+                        doc.pages,
+                        doc.blocks.len(),
+                        chars,
+                        gone.len()
+                    );
+                    // What it took, so a rule that eats prose is visible rather
+                    // than merely plausible.
+                    let mut shown: Vec<&String> = gone.iter().take(3).collect();
+                    shown.dedup();
+                    for g in shown {
+                        println!("      - {}", g.chars().take(70).collect::<String>());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every line of one page with where it sat, for designing layout rules.
+    ///
+    ///   PDF_UNDER_TEST=/path/to.pdf PDF_GEO=5 cargo test pdf_text::harness -- --nocapture
+    #[test]
+    fn look_at_one_page_geometry() {
+        let (Ok(path), Ok(page)) = (
+            std::env::var("PDF_UNDER_TEST"),
+            std::env::var("PDF_GEO").map(|v| v.parse::<usize>().unwrap_or(1)),
+        ) else {
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read");
+        println!("--- page {page} geometry (x, end, y, size) ---");
+        for l in super::page_lines(&bytes, page) {
+            println!(
+                "  {:>6.1} {:>6.1} {:>7.1} {:>4.1}  {}",
+                l.left,
+                l.right,
+                l.y,
+                l.size,
+                l.text.chars().take(78).collect::<String>()
+            );
+        }
+    }
+
     /// Run the extractor over a real file and print what it made of it. Not a
     /// test: a lens, for checking the heuristics against the actual corpus.
     ///
@@ -1666,6 +2033,9 @@ mod harness {
         let Ok(path) = std::env::var("PDF_UNDER_TEST") else {
             return;
         };
+        if std::env::var("PDF_GEO").is_ok() {
+            return;
+        }
         let bytes = std::fs::read(&path).expect("read");
         match super::extract(&bytes) {
             Err(e) => println!("FAILED {path}: {e}"),
@@ -1723,8 +2093,17 @@ mod harness {
                     let kind = match b {
                         super::Block::Heading { level, .. } => format!("h{level}"),
                         super::Block::ListItem(_) => "li".into(),
-                        super::Block::Paragraph { .. } => "p".into(),
-                        super::Block::PageBreak(n) => format!("--{n}--"),
+                        super::Block::Paragraph { indent, .. } => match indent {
+                            0 => "p".into(),
+                            n => format!("p>{n}"),
+                        },
+                        super::Block::IndexEntry { page, indent, .. } => {
+                            format!("toc>{indent} .{page}")
+                        }
+                        super::Block::PageBreak { ended, printed } => match printed {
+                            Some(p) => format!("--{ended}({p})--"),
+                            None => format!("--{ended}--"),
+                        },
                         super::Block::Image(p) => {
                             format!(
                                 "img{}x{} {} {}B",
@@ -1873,12 +2252,15 @@ mod tests {
     /// is the rule the whole reconstruction rests on.
     #[test]
     fn the_vertical_gap_decides_where_a_paragraph_ends() {
-        let blocks = blocks_from(vec![
-            line(700.0, 11.0, "Første linje i afsnittet"),
-            line(686.0, 11.0, "og anden linje."),
-            // A gap of 30 against a size of 11: a new paragraph.
-            line(656.0, 11.0, "Et nyt afsnit."),
-        ]);
+        let blocks = blocks_from(
+            vec![
+                line(700.0, 11.0, "Første linje i afsnittet"),
+                line(686.0, 11.0, "og anden linje."),
+                // A gap of 30 against a size of 11: a new paragraph.
+                line(656.0, 11.0, "Et nyt afsnit."),
+            ],
+            &HashMap::new(),
+        );
         assert_eq!(
             texts(&blocks),
             vec!["Første linje i afsnittet og anden linje.", "Et nyt afsnit.",]
@@ -1888,14 +2270,17 @@ mod tests {
     /// A larger line is a heading, and how much larger decides the level.
     #[test]
     fn size_relative_to_the_body_makes_a_heading() {
-        let blocks = blocks_from(vec![
-            // Word's own sizes: Title 28, Heading 1 16, body 11.
-            line(700.0, 28.0, "Titel"),
-            line(660.0, 16.0, "Overskrift"),
-            line(630.0, 11.0, "Brødtekst her."),
-            line(616.0, 11.0, "Mere brødtekst."),
-            line(600.0, 11.0, "Endnu mere."),
-        ]);
+        let blocks = blocks_from(
+            vec![
+                // Word's own sizes: Title 28, Heading 1 16, body 11.
+                line(700.0, 28.0, "Titel"),
+                line(660.0, 16.0, "Overskrift"),
+                line(630.0, 11.0, "Brødtekst her."),
+                line(616.0, 11.0, "Mere brødtekst."),
+                line(600.0, 11.0, "Endnu mere."),
+            ],
+            &HashMap::new(),
+        );
         assert_eq!(
             texts(&blocks),
             vec![
@@ -1912,10 +2297,13 @@ mod tests {
     /// paragraph continuing.
     #[test]
     fn a_page_break_ends_the_paragraph() {
-        let blocks = blocks_from(vec![
-            line(60.0, 11.0, "Sidste linje på siden."),
-            line(700.0, 11.0, "Første linje på næste side."),
-        ]);
+        let blocks = blocks_from(
+            vec![
+                line(60.0, 11.0, "Sidste linje på siden."),
+                line(700.0, 11.0, "Første linje på næste side."),
+            ],
+            &HashMap::new(),
+        );
         assert_eq!(blocks.len(), 2, "a page break starts a new block");
     }
 
@@ -1930,6 +2318,7 @@ mod tests {
         assert!(!scan.has_text());
         let real = Extracted {
             blocks: vec![Block::Paragraph {
+                indent: 0,
                 spans: vec![Span {
                     text: "noget".into(),
                     color: None,
@@ -2080,11 +2469,14 @@ mod tests {
             picture: None,
         };
         // Column runs to 400. The first line stops at 180, far short of it.
-        let blocks = blocks_from(vec![
-            short(700.0, 180.0, "16:30 Ankomst"),
-            short(686.0, 400.0, "17:50 Åbning af landsmødet"),
-            short(672.0, 398.0, "og en fortsættelse af samme punkt"),
-        ]);
+        let blocks = blocks_from(
+            vec![
+                short(700.0, 180.0, "16:30 Ankomst"),
+                short(686.0, 400.0, "17:50 Åbning af landsmødet"),
+                short(672.0, 398.0, "og en fortsættelse af samme punkt"),
+            ],
+            &HashMap::new(),
+        );
         assert_eq!(
             texts(&blocks),
             vec![
@@ -2279,15 +2671,152 @@ mod tests {
             spans: vec![span(text, None)],
             picture: None,
         };
-        let blocks = blocks_from(vec![
-            on_page(1, 700.0, "Sidste linje på side et"),
-            on_page(2, 700.0, "Første linje på side to"),
-        ]);
+        let blocks = blocks_from(
+            vec![
+                on_page(1, 700.0, "Sidste linje på side et"),
+                on_page(2, 700.0, "Første linje på side to"),
+            ],
+            &HashMap::new(),
+        );
         assert_eq!(blocks.len(), 3, "text, break, text");
-        assert_eq!(blocks[1], Block::PageBreak(1), "the page that just ended");
+        assert_eq!(
+            blocks[1],
+            Block::PageBreak {
+                ended: 1,
+                printed: None
+            },
+            "the page that just ended"
+        );
         assert_eq!(
             texts(&blocks),
             vec!["Sidste linje på side et", "", "Første linje på side to"]
+        );
+    }
+
+    /// A contents row is read from its end: the page number, then the leader
+    /// that carried the eye to it.
+    #[test]
+    fn a_contents_row_splits_into_what_it_names_and_where() {
+        assert_eq!(
+            index_entry("Kampsange....................3"),
+            Some(("Kampsange", "3"))
+        );
+        // The file may leave a space before the leader, or none before the
+        // number, and both are the same row.
+        assert_eq!(
+            index_entry("Radikal Ungdoms holdning til rigsfællesskabet .........19"),
+            Some(("Radikal Ungdoms holdning til rigsfællesskabet", "19"))
+        );
+        assert_eq!(
+            index_entry("Internationale................................9"),
+            Some(("Internationale", "9"))
+        );
+    }
+
+    /// And a sentence that merely ends in a digit is left alone.
+    #[test]
+    fn prose_is_not_a_contents_row() {
+        assert_eq!(index_entry("Vi mødes i 2025"), None);
+        assert_eq!(
+            index_entry("Der var engang… 7"),
+            None,
+            "one ellipsis is not a leader"
+        );
+        assert_eq!(index_entry("1. maj 2025"), None);
+        assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
+        assert_eq!(index_entry("....7"), None, "no title, no row");
+    }
+
+    /// The inset is kept as depth rather than as points: the page's column is
+    /// not the column this will be read in.
+    #[test]
+    fn an_inset_becomes_a_depth() {
+        // The songbook's index: sections at the margin, songs one step in.
+        assert_eq!(indent_steps(56.7, 56.7, 11.0), 0);
+        assert_eq!(indent_steps(74.7, 56.7, 11.0), 1);
+        // A policy's numbered clauses, two and four levels down.
+        assert_eq!(indent_steps(96.0, 56.7, 11.0), 2);
+        assert_eq!(indent_steps(132.2, 56.7, 11.0), 4);
+        // A hair of drift is not an indent, and nothing goes deeper than four.
+        assert_eq!(indent_steps(59.0, 56.7, 11.0), 0);
+        assert_eq!(indent_steps(400.0, 56.7, 11.0), 4);
+    }
+
+    /// The folio is furniture: on the page it sits in the margin where the eye
+    /// skips it, and in a reflow it lands in the middle of the reading.
+    #[test]
+    fn a_page_number_printed_every_page_is_taken_off_it() {
+        let body = |page: usize, y: f64, text: &str| Line {
+            y,
+            size: 11.0,
+            right: 400.0,
+            left: 56.0,
+            page,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            picture: None,
+        };
+        let folio = |page: usize, text: &str| Line {
+            y: 37.7,
+            size: 12.0,
+            right: 538.0,
+            left: 532.0,
+            page,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            picture: None,
+        };
+        let mut pages: Vec<Vec<Line>> = (1..=4)
+            .map(|p| {
+                vec![
+                    body(p, 700.0, "Første linje"),
+                    body(p, 680.0, "Anden linje"),
+                    body(p, 660.0, "Tredje linje"),
+                    folio(p, &format!("{}", p + 2)),
+                ]
+            })
+            .collect();
+        let printed = strip_running_furniture(&mut pages);
+
+        assert!(
+            pages.iter().all(|ls| ls.len() == 3),
+            "the folio goes, the body stays"
+        );
+        assert_eq!(printed.get(&0).map(String::as_str), Some("3"));
+        assert_eq!(printed.get(&3).map(String::as_str), Some("6"));
+    }
+
+    /// And the guard that matters: in an ordinary document the first line of
+    /// every page also sits at the same height, and cutting THAT would behead
+    /// every page.
+    #[test]
+    fn text_that_merely_repeats_its_position_is_left_alone() {
+        let line = |page: usize, y: f64, text: &str| Line {
+            y,
+            size: 11.0,
+            right: 400.0,
+            left: 56.0,
+            page,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            picture: None,
+        };
+        let mut pages: Vec<Vec<Line>> = (1..=4)
+            .map(|p| {
+                vec![
+                    // Stranded at the top the way a heading is, and different
+                    // every page, because it is the heading.
+                    line(p, 700.0, &format!("Kapitel {p}")),
+                    line(p, 600.0, "Brødtekst her"),
+                    line(p, 580.0, "og mere brødtekst"),
+                ]
+            })
+            .collect();
+        let printed = strip_running_furniture(&mut pages);
+        assert!(printed.is_empty());
+        assert!(
+            pages.iter().all(|ls| ls.len() == 3),
+            "prose that varies is not furniture"
         );
     }
 
@@ -2296,7 +2825,7 @@ mod tests {
     /// every picture in such a file, which is how a songbook lost its cover.
     #[test]
     fn a_picture_survives_a_shared_resource_dictionary() {
-        use lopdf::{Stream, dictionary};
+        use lopdf::{dictionary, Stream};
 
         let mut doc = Document::with_version("1.5");
         let image = doc.add_object(Stream::new(
@@ -2371,7 +2900,9 @@ mod tests {
     /// scan into speckle.
     #[test]
     fn shrinking_averages_what_it_covers() {
-        let stripes: Vec<u8> = (0..2000).map(|i| if i % 2 == 0 { 0 } else { 255 }).collect();
+        let stripes: Vec<u8> = (0..2000)
+            .map(|i| if i % 2 == 0 { 0 } else { 255 })
+            .collect();
         let (to_w, to_h, small) = shrink_to_fit(2000, 1, 1, &stripes).expect("too wide to keep");
         assert_eq!((to_w, to_h), (1000, 1));
         assert!(small.iter().all(|&v| v == 127), "black and white pair off");
