@@ -34,8 +34,12 @@ so a subset is never read as a total:
   (`test-execute/`, `test-fstab-generator/`, `test-network-generator-conversion/`,
   `test-sysusers/`, and so on) exercised outside the VM.
 - **rust/systemd registers 65 of the 67 families**, expanded per subtest into
-  443 `integration-tests/*.nix` wrappers. The two families not yet mirrored are
-  **TEST-69-SHUTDOWN** and **TEST-85-NETWORK**.
+  443 `integration-tests/*.nix` wrappers. The two not yet mirrored are
+  **TEST-69-SHUTDOWN** and **TEST-85-NETWORK**, both driven by systemd's newer
+  Python integration framework (TEST-69 ships only as `test/units/TEST-69-SHUTDOWN.py`
+  and TEST-85 ships no `test/units` script at all), which the shell-script harness
+  here does not run. Closing them is a harness-capability task, not a per-feature
+  gap.
 - **Pass counts are deliberately omitted here.** They require booting each VM and
   are recorded per test in the wrappers, not asserted in this file. Of the 443
   wrappers, 37 carry a real override (the classes above); that breakdown was last
