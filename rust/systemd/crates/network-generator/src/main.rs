@@ -2771,4 +2771,72 @@ mod tests {
         let netdev = &files.files["71-bond-bond0.netdev"];
         assert!(!netdev.contains("[Bond]"));
     }
+
+    /// Robustness fuzz (task #22): the kernel-command-line parser and the
+    /// generator consume fully untrusted `ip=`/`vlan=`/`bond=`/`bridge=`/
+    /// `rd.route=`/`ifname=`/`net.ifname_policy=`/... strings. Neither
+    /// `parse_cmdline` nor `generate` may panic (out-of-bounds index, integer
+    /// parse/overflow, bad slice) on any input. Feed deterministic random token
+    /// soup and assert no panic.
+    #[test]
+    fn fuzz_cmdline_parser_and_generator_never_panic() {
+        const TOKENS: &[&str] = &[
+            "ip=",
+            "ip=dhcp",
+            "ip=dhcp6",
+            "ip=auto6",
+            "ip=on",
+            "ip=off",
+            "ip=:::::",
+            "ip=eth0:dhcp",
+            "ip=1.2.3.4::5.6.7.8:24:h:eth0:none:8.8.8.8:1.1.1.1:0.pool",
+            "vlan=",
+            "vlan=v.10:eth0",
+            "vlan=eth0.4095:eth0",
+            "vlan=x:99999999999",
+            "bond=",
+            "bond=b0:e1,e2:mode=1:1500",
+            "bridge=",
+            "bridge=br0:e1,e2",
+            "team=t0:e1,e2",
+            "ifname=",
+            "ifname=lan0:00:11:22:33:44:55",
+            "net.ifnames=0",
+            "net.ifname_policy=",
+            "net.ifname_policy=keep,mac,X",
+            "nameserver=8.8.8.8",
+            "rd.peerdns=0",
+            "rd.route=",
+            "rd.route=1.2.3.0/24:9.9.9.9:eth0",
+            ":", ",", ".", "/", "=", "-", " ", "eth0", "99999999999999999999",
+            "", "\t", "%", "::", "0/0", "4095", "65536", "gw",
+        ];
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as u32
+        };
+        for _ in 0..100_000u32 {
+            let ntok = (next() % 8) as usize;
+            let mut input = String::new();
+            for _ in 0..ntok {
+                if !input.is_empty() {
+                    input.push(' ');
+                }
+                if next() % 7 == 0 {
+                    input.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                } else {
+                    input.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                }
+            }
+            let buf = input.clone();
+            let res = std::panic::catch_unwind(move || {
+                let config = parse_cmdline(&input);
+                let _ = generate(&config);
+            });
+            assert!(res.is_ok(), "cmdline parser/generator panicked on: {buf:?}");
+        }
+    }
 }

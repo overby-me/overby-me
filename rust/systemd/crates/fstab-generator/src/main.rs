@@ -1356,4 +1356,57 @@ mod tests {
                 .is_ok()
         );
     }
+
+    /// Robustness fuzz (task #22): fstab content is fully untrusted. `parse_fstab`
+    /// must not panic on any bytes, and emitting the parsed entries must not
+    /// panic either (device canonicalization, unit-name escaping, option
+    /// splitting, passno/fsck handling). Feed deterministic random field soup.
+    #[test]
+    fn fuzz_fstab_parser_and_emit_never_panic() {
+        const TOKENS: &[&str] = &[
+            "/dev/sda1", "UUID=x", "LABEL=y", "PARTUUID=z", "PARTLABEL=w", "tmpfs",
+            "none", "swap", "/", "/home", "/boot", "/usr", "ext4", "vfat", "auto",
+            "nfs", "defaults", "noauto,nofail", "sw", "x-systemd.makefs", "bg",
+            "ro", "rw", "0", "1", "2", "#c", "", " ", ":", ",", "=", "-", "/dev/",
+            "UUID=", "999999999999", "x-systemd.automount", "x-systemd.rw-only",
+        ];
+        let mut state: u64 = 0x0fed_cba9_8765_4321;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as u32
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        for _ in 0..20_000u32 {
+            let nlines = (next() % 3) as usize;
+            let mut content = String::new();
+            for _ in 0..nlines {
+                let nfields = (next() % 8) as usize;
+                for f in 0..nfields {
+                    if f > 0 {
+                        content.push(' ');
+                    }
+                    if next() % 9 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                content.push('\n');
+            }
+            let buf = content.clone();
+            let dir = tmp.path().to_path_buf();
+            let res = std::panic::catch_unwind(move || {
+                for entry in parse_fstab(&content) {
+                    let _ = if entry.fstype == "swap" {
+                        emit_swap_unit(&dir, &entry, "/etc/fstab")
+                    } else {
+                        emit_mount_unit(&dir, &entry, false, "/etc/fstab")
+                    };
+                }
+            });
+            assert!(res.is_ok(), "fstab parser/emit panicked on: {buf:?}");
+        }
+    }
 }
