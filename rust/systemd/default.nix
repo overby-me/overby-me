@@ -29,7 +29,7 @@ in {
   };
 
   packages = {
-    rust-systemd = {lib, pam, systemd, acl, ...}:
+    rust-systemd = {lib, pam, systemd, acl, shadow, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd";
         version = "unstable";
@@ -59,6 +59,11 @@ in {
           systemd-tmpfiles = {
             ACL_SETFACL = "${acl}/bin/setfacl";
           };
+          # systemd-sysusers shells out to useradd/groupadd/chage; bake shadow's
+          # bin dir (SHADOW_BIN) so they resolve from a minimal service $PATH.
+          systemd-sysusers = {
+            SHADOW_BIN = "${shadow}/bin";
+          };
         };
 
         meta = {
@@ -78,7 +83,7 @@ in {
     # latent manager bugs surface as visible PID 1 panics instead of the silent
     # wraparound a release build would produce.  Behavior otherwise matches the
     # release build; only optimization and these runtime checks differ.
-    rust-systemd-dev = {lib, pam, systemd, acl, ...}:
+    rust-systemd-dev = {lib, pam, systemd, acl, shadow, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd-dev";
         version = "unstable";
@@ -108,6 +113,11 @@ in {
           # systemd-tmpfiles-setup service's minimal $PATH.
           systemd-tmpfiles = {
             ACL_SETFACL = "${acl}/bin/setfacl";
+          };
+          # systemd-sysusers shells out to useradd/groupadd/chage; bake shadow's
+          # bin dir (SHADOW_BIN) so they resolve from a minimal service $PATH.
+          systemd-sysusers = {
+            SHADOW_BIN = "${shadow}/bin";
           };
         };
 

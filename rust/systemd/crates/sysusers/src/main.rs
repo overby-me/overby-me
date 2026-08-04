@@ -39,6 +39,23 @@ use clap::Parser;
 const EXIT_SUCCESS: u8 = 0;
 const EXIT_FAILURE: u8 = 1;
 
+/// Directory holding the shadow tools (useradd/groupadd/chage), baked in from
+/// the Nix build (`SHADOW_BIN`). Unlike C systemd-sysusers, which writes
+/// /etc/passwd and friends directly, this port shells out to those tools, so it
+/// needs them resolvable from a minimal boot service `$PATH`. Falling back to
+/// None resolves the bare name via `$PATH` for non-Nix builds. Mirrors the
+/// `ACL_SETFACL` handling in systemd-tmpfiles.
+const SHADOW_BIN: Option<&str> = option_env!("SHADOW_BIN");
+
+/// Resolve a shadow tool (`useradd`, `groupadd`, `chage`) to an absolute path
+/// when `SHADOW_BIN` was baked in, else return the bare name for `$PATH` lookup.
+fn shadow_tool(name: &str) -> String {
+    match SHADOW_BIN {
+        Some(dir) => format!("{dir}/{name}"),
+        None => name.to_string(),
+    }
+}
+
 /// Directories to search for sysusers.d configuration, in priority order.
 /// Earlier directories take precedence when the same filename exists in multiple.
 const CONFIG_DIRS: &[&str] = &[
@@ -525,7 +542,7 @@ fn create_group(name: &str, gid: Option<u32>, root: &Path, dry_run: bool, verbos
         return true;
     }
 
-    let mut cmd = Command::new("groupadd");
+    let mut cmd = Command::new(shadow_tool("groupadd"));
     cmd.arg("--system");
 
     if let Some(gid) = gid {
@@ -546,8 +563,12 @@ fn create_group(name: &str, gid: Option<u32>, root: &Path, dry_run: bool, verbos
                 }
                 true
             } else {
-                // Exit code 9 means group already exists (race condition)
-                if status.code() == Some(9) {
+                // groupadd is idempotent for an already-existing group, like C
+                // systemd-sysusers: exit 9 = group NAME already in use, exit 4 =
+                // GID already in use (e.g. a user whose primary group was created
+                // by a preceding `g` rule, or a re-run). Both mean the desired
+                // group exists, so treat them as success.
+                if matches!(status.code(), Some(9) | Some(4)) {
                     true
                 } else {
                     eprintln!(
@@ -603,7 +624,7 @@ fn create_user(
         return true;
     }
 
-    let mut cmd = Command::new("useradd");
+    let mut cmd = Command::new(shadow_tool("useradd"));
     cmd.arg("--system");
 
     if let Some(uid) = uid {
@@ -650,7 +671,7 @@ fn create_user(
                 // the lock as sp_expire=1, which `userdbctl` reports as
                 // locked=true (an unlocked account leaves the field unset).
                 if entry.locked {
-                    let mut chage = Command::new("chage");
+                    let mut chage = Command::new(shadow_tool("chage"));
                     chage.arg("-E").arg("1970-01-02");
                     if root != Path::new("/") {
                         chage.arg("--root").arg(root);
