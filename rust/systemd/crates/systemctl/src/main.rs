@@ -97,160 +97,184 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--message",
 ];
 
+/// The grouped state catalog printed by `--state=help`, mirroring C 260's
+/// per-enum string tables in enum order: unit-def.h UnitLoadState /
+/// UnitActiveState / unit-file states, then each unit type's *_state_to_string
+/// substates. Group order, headers, and member order match `systemctl
+/// --state=help` byte-for-byte (verified against the C binary).
+const STATE_HELP_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "Available unit load states:",
+        &[
+            "stub",
+            "loaded",
+            "not-found",
+            "bad-setting",
+            "error",
+            "merged",
+            "masked",
+        ],
+    ),
+    (
+        "Available unit active states:",
+        &[
+            "active",
+            "reloading",
+            "inactive",
+            "failed",
+            "activating",
+            "deactivating",
+            "maintenance",
+            "refreshing",
+        ],
+    ),
+    (
+        "Available unit file states:",
+        &[
+            "enabled",
+            "enabled-runtime",
+            "linked",
+            "linked-runtime",
+            "alias",
+            "masked",
+            "masked-runtime",
+            "static",
+            "disabled",
+            "indirect",
+            "generated",
+            "transient",
+            "bad",
+        ],
+    ),
+    (
+        "Available automount unit substates:",
+        &["dead", "waiting", "running", "failed"],
+    ),
+    (
+        "Available device unit substates:",
+        &["dead", "tentative", "plugged"],
+    ),
+    (
+        "Available mount unit substates:",
+        &[
+            "dead",
+            "mounting",
+            "mounting-done",
+            "mounted",
+            "remounting",
+            "unmounting",
+            "remounting-sigterm",
+            "remounting-sigkill",
+            "unmounting-sigterm",
+            "unmounting-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    (
+        "Available path unit substates:",
+        &["dead", "waiting", "running", "failed"],
+    ),
+    (
+        "Available scope unit substates:",
+        &[
+            "dead",
+            "start-chown",
+            "running",
+            "abandoned",
+            "stop-sigterm",
+            "stop-sigkill",
+            "failed",
+        ],
+    ),
+    (
+        "Available service unit substates:",
+        &[
+            "dead",
+            "condition",
+            "start-pre",
+            "start",
+            "start-post",
+            "running",
+            "exited",
+            "refresh-extensions",
+            "refresh-credentials",
+            "reload",
+            "reload-signal",
+            "reload-notify",
+            "reload-post",
+            "mounting",
+            "stop",
+            "stop-watchdog",
+            "stop-sigterm",
+            "stop-sigkill",
+            "stop-post",
+            "final-watchdog",
+            "final-sigterm",
+            "final-sigkill",
+            "failed",
+            "dead-before-auto-restart",
+            "failed-before-auto-restart",
+            "dead-resources-pinned",
+            "auto-restart",
+            "auto-restart-queued",
+            "cleaning",
+        ],
+    ),
+    ("Available slice unit substates:", &["dead", "active"]),
+    (
+        "Available socket unit substates:",
+        &[
+            "dead",
+            "start-pre",
+            "start-open",
+            "start-chown",
+            "start-post",
+            "listening",
+            "deferred",
+            "running",
+            "stop-pre",
+            "stop-pre-sigterm",
+            "stop-pre-sigkill",
+            "stop-post",
+            "final-sigterm",
+            "final-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    (
+        "Available swap unit substates:",
+        &[
+            "dead",
+            "activating",
+            "activating-done",
+            "active",
+            "deactivating",
+            "deactivating-sigterm",
+            "deactivating-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    ("Available target unit substates:", &["dead", "active"]),
+    (
+        "Available timer unit substates:",
+        &["dead", "waiting", "running", "elapsed", "failed"],
+    ),
+];
+
 fn print_state_help() {
-    println!("Available unit active states:");
-    for s in [
-        "active",
-        "reloading",
-        "inactive",
-        "failed",
-        "activating",
-        "deactivating",
-        "maintenance",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable unit load states:");
-    for s in [
-        "loaded",
-        "not-found",
-        "bad-setting",
-        "error",
-        "masked",
-        "stub",
-        "merged",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable unit file states:");
-    for s in [
-        "enabled",
-        "enabled-runtime",
-        "linked",
-        "linked-runtime",
-        "alias",
-        "masked",
-        "masked-runtime",
-        "static",
-        "disabled",
-        "indirect",
-        "generated",
-        "transient",
-        "bad",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable automount unit substates:");
-    for s in ["dead", "waiting", "running", "failed"] {
-        println!("{s}");
-    }
-    println!("\nAvailable device unit substates:");
-    for s in ["dead", "tentative", "plugged"] {
-        println!("{s}");
-    }
-    println!("\nAvailable mount unit substates:");
-    for s in [
-        "dead",
-        "mounting",
-        "mounting-done",
-        "mounted",
-        "remounting",
-        "unmounting",
-        "remounting-sigterm",
-        "remounting-sigkill",
-        "unmounting-sigterm",
-        "unmounting-sigkill",
-        "failed",
-        "cleaning",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable path unit substates:");
-    for s in ["dead", "waiting", "running", "failed"] {
-        println!("{s}");
-    }
-    println!("\nAvailable scope unit substates:");
-    for s in [
-        "dead",
-        "start-chown",
-        "running",
-        "abandoned",
-        "stop-sigterm",
-        "stop-sigkill",
-        "failed",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable service unit substates:");
-    for s in [
-        "dead",
-        "condition",
-        "start-pre",
-        "start",
-        "start-post",
-        "running",
-        "exited",
-        "reload",
-        "stop",
-        "stop-watchdog",
-        "stop-sigterm",
-        "stop-sigkill",
-        "stop-post",
-        "final-watchdog",
-        "final-sigterm",
-        "final-sigkill",
-        "failed",
-        "auto-restart",
-        "cleaning",
-        "dead-before-auto-restart",
-        "dead-resources-pinned",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable slice unit substates:");
-    for s in ["dead", "active"] {
-        println!("{s}");
-    }
-    println!("\nAvailable socket unit substates:");
-    for s in [
-        "dead",
-        "start-chown",
-        "start-pre",
-        "start-post",
-        "listening",
-        "running",
-        "stop-pre",
-        "stop-pre-sigterm",
-        "stop-pre-sigkill",
-        "stop-post",
-        "final-sigterm",
-        "final-sigkill",
-        "failed",
-        "cleaning",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable swap unit substates:");
-    for s in [
-        "dead",
-        "activating",
-        "activating-done",
-        "active",
-        "deactivating",
-        "deactivating-sigterm",
-        "deactivating-sigkill",
-        "failed",
-        "cleaning",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable target unit substates:");
-    for s in ["dead", "active"] {
-        println!("{s}");
-    }
-    println!("\nAvailable timer unit substates:");
-    for s in ["dead", "waiting", "running", "elapsed", "failed"] {
-        println!("{s}");
+    // C separates the groups with a blank line and prints no leading or
+    // trailing blank; reproduce that exactly.
+    for (i, (header, members)) in STATE_HELP_GROUPS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        println!("{header}");
+        for s in *members {
+            println!("{s}");
+        }
     }
 }
 
@@ -2768,6 +2792,52 @@ mod tests {
         assert_eq!(signal_to_string(rtmin), "RTMIN+0");
         assert_eq!(signal_to_string(rtmin + 1), "RTMIN+1");
         assert_eq!(signal_to_string(rtmax), format!("RTMIN+{}", rtmax - rtmin));
+    }
+
+    #[test]
+    fn test_state_help_groups_match_c() {
+        // C `systemctl --state=help` prints 14 groups: load/active/file states
+        // then per-type substates. Pin the group order, the members that rust
+        // had previously omitted, and the exact rendered line count.
+        assert_eq!(STATE_HELP_GROUPS.len(), 14);
+
+        // Load states come first (rust used to print active first) with `stub`
+        // leading the UnitLoadState enum.
+        assert_eq!(STATE_HELP_GROUPS[0].0, "Available unit load states:");
+        assert_eq!(STATE_HELP_GROUPS[0].1[0], "stub");
+        assert_eq!(STATE_HELP_GROUPS[1].0, "Available unit active states:");
+        assert!(STATE_HELP_GROUPS[1].1.contains(&"refreshing"));
+
+        let group = |header: &str| {
+            STATE_HELP_GROUPS
+                .iter()
+                .find(|(h, _)| *h == header)
+                .unwrap()
+                .1
+        };
+        // Service substates rust had been missing (all real systemd 260 states).
+        let service = group("Available service unit substates:");
+        for s in [
+            "refresh-extensions",
+            "refresh-credentials",
+            "reload-signal",
+            "reload-notify",
+            "reload-post",
+            "mounting",
+            "failed-before-auto-restart",
+            "auto-restart-queued",
+        ] {
+            assert!(service.contains(&s), "service substates missing {s}");
+        }
+        // Socket substates rust had been missing.
+        let socket = group("Available socket unit substates:");
+        assert!(socket.contains(&"start-open"));
+        assert!(socket.contains(&"deferred"));
+
+        // The full render is 14 headers + 13 inter-group blanks + all members,
+        // which must equal the 148 lines C emits.
+        let members: usize = STATE_HELP_GROUPS.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(14 + 13 + members, 148);
     }
 
     #[test]
