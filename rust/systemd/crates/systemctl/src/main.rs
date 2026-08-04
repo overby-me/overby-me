@@ -254,43 +254,39 @@ fn print_state_help() {
     }
 }
 
+/// Standard signal short names (no "SIG" prefix), indexed by signal number.
+/// Index 0 and any gap are empty and fall through to the numeric/RT rendering.
+/// This matches C's per-arch static signal table on Linux (x86_64/generic).
+const SIGNAL_STATIC_NAMES: [&str; 32] = [
+    "", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV", "USR2",
+    "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU",
+    "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS",
+];
+
+/// Render a signal number exactly as C `signal_to_string` (basic/signal-util.c)
+/// does: the bare short name for the standard signals, "RTMIN+n" for the
+/// realtime range SIGRTMIN..=SIGRTMAX, and the raw number for everything else
+/// (signal 0, and the glibc-reserved slots between __SIGRTMIN and SIGRTMIN, i.e.
+/// 32 and 33 on x86_64).
+fn signal_to_string(signo: i32) -> String {
+    if signo >= 1 && (signo as usize) < SIGNAL_STATIC_NAMES.len() {
+        let name = SIGNAL_STATIC_NAMES[signo as usize];
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    if signo >= libc::SIGRTMIN() && signo <= libc::SIGRTMAX() {
+        return format!("RTMIN+{}", signo - libc::SIGRTMIN());
+    }
+    signo.to_string()
+}
+
 fn print_signal_help() {
-    println!("Available signals:");
-    let signals = [
-        ("SIGHUP", 1),
-        ("SIGINT", 2),
-        ("SIGQUIT", 3),
-        ("SIGILL", 4),
-        ("SIGTRAP", 5),
-        ("SIGABRT", 6),
-        ("SIGBUS", 7),
-        ("SIGFPE", 8),
-        ("SIGKILL", 9),
-        ("SIGUSR1", 10),
-        ("SIGSEGV", 11),
-        ("SIGUSR2", 12),
-        ("SIGPIPE", 13),
-        ("SIGALRM", 14),
-        ("SIGTERM", 15),
-        ("SIGSTKFLT", 16),
-        ("SIGCHLD", 17),
-        ("SIGCONT", 18),
-        ("SIGSTOP", 19),
-        ("SIGTSTP", 20),
-        ("SIGTTIN", 21),
-        ("SIGTTOU", 22),
-        ("SIGURG", 23),
-        ("SIGXCPU", 24),
-        ("SIGXFSZ", 25),
-        ("SIGVTALRM", 26),
-        ("SIGPROF", 27),
-        ("SIGWINCH", 28),
-        ("SIGIO", 29),
-        ("SIGPWR", 30),
-        ("SIGSYS", 31),
-    ];
-    for (name, num) in &signals {
-        println!("{num:>2}) {name}");
+    // C `systemctl --signal=help` dumps the signal string table via
+    // DUMP_STRING_TABLE(signal, int, _NSIG): one entry per line for numbers
+    // 0..=SIGRTMAX, with no header. Match it byte-for-byte.
+    for signo in 0..=libc::SIGRTMAX() {
+        println!("{}", signal_to_string(signo));
     }
 }
 
@@ -2753,5 +2749,43 @@ mod tests {
                 "scope",
             ]
         );
+    }
+
+    #[test]
+    fn test_signal_to_string_matches_c() {
+        // Bare short names for the standard signals (no "SIG" prefix).
+        assert_eq!(signal_to_string(1), "HUP");
+        assert_eq!(signal_to_string(9), "KILL");
+        assert_eq!(signal_to_string(15), "TERM");
+        assert_eq!(signal_to_string(31), "SYS");
+        // Signal 0 and the glibc-reserved slots render as raw numbers.
+        assert_eq!(signal_to_string(0), "0");
+        assert_eq!(signal_to_string(32), "32");
+        assert_eq!(signal_to_string(33), "33");
+        // Realtime range renders as RTMIN+n from SIGRTMIN upward.
+        let rtmin = libc::SIGRTMIN();
+        let rtmax = libc::SIGRTMAX();
+        assert_eq!(signal_to_string(rtmin), "RTMIN+0");
+        assert_eq!(signal_to_string(rtmin + 1), "RTMIN+1");
+        assert_eq!(signal_to_string(rtmax), format!("RTMIN+{}", rtmax - rtmin));
+    }
+
+    #[test]
+    fn test_signal_help_list_shape() {
+        // The full --signal=help list is numbers 0..=SIGRTMAX, no "SIG" prefix,
+        // no header, no "N)" numbering (the old rust format had all three).
+        let list: Vec<String> = (0..=libc::SIGRTMAX()).map(signal_to_string).collect();
+        assert_eq!(list.len(), (libc::SIGRTMAX() + 1) as usize);
+        assert_eq!(list[0], "0");
+        assert_eq!(list[1], "HUP");
+        for entry in &list {
+            assert!(!entry.starts_with("SIG"), "no SIG prefix: {entry:?}");
+            assert!(!entry.contains(')'), "no N) numbering: {entry:?}");
+            assert!(!entry.is_empty());
+        }
+        // Last entry is the top of the realtime range.
+        let rtmin = libc::SIGRTMIN();
+        let rtmax = libc::SIGRTMAX();
+        assert_eq!(list[rtmax as usize], format!("RTMIN+{}", rtmax - rtmin));
     }
 }
