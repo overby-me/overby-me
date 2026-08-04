@@ -8160,6 +8160,25 @@ a.list-item:hover {
 .docx-doc .docx-h:first-child {
 	margin-top: 0;
 }
+/* Where a page ended in the reflowed PDF view. Furniture: a hairline with the
+   number sitting on it, quiet enough to skim past and precise enough that "see
+   page 12" still means something to someone reading this instead of the pages. */
+.pdf-page-break {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-3);
+	margin: var(--md-sys-spacing-5) 0;
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-small-size);
+}
+.pdf-page-break::before,
+.pdf-page-break::after {
+	content: "";
+	flex: 1;
+	height: 1px;
+	background: var(--md-outline-variant);
+}
+
 .docx-list {
 	margin: 0 0 var(--md-sys-spacing-3);
 	padding-left: var(--md-sys-spacing-6);

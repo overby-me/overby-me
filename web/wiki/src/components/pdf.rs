@@ -5,11 +5,12 @@
 //! is readable on a phone instead of being a page-sized image in a scrolling
 //! box, and the browser's find works across the whole document.
 //!
-//! It costs everything a page has and a paragraph does not: no page breaks, no
-//! margins, no columns, no figures, no tables yet. What comes out is the text,
-//! its headings, its lists and the colours it was written in, in reading order.
-//! For the agendas, motions and appendices this wiki holds that is the useful
-//! half; for a poster it is not, and the browser's viewer is one tap away.
+//! It costs what a page has and a paragraph does not: margins, columns, and
+//! tables so far. What comes out is the text, its headings, its lists, the
+//! colours and weights it was written in, the pictures it drew, how each block
+//! sat across its column, and where the pages ended. For the agendas, motions
+//! and appendices this wiki holds that is the useful half; for a poster it is
+//! not, and the browser's viewer is one tap away.
 //!
 //! It borrows the Word renderer's classes on purpose, `docx-doc` and `docx-h`
 //! and the rest, because it is the same job: a document read on a screen rather
@@ -23,7 +24,7 @@
 use dioxus::prelude::*;
 
 use crate::i18n::t;
-use crate::pdf_text::{Block, Extracted, Span};
+use crate::pdf_text::{Align, Block, Extracted, Span};
 
 /// One block's words, keeping the colours the document set.
 ///
@@ -85,19 +86,34 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             }
                         }
                     },
-                    Some(Block::Heading { level, spans }) => {
+                    Some(Block::Heading { level, spans, .. }) => {
                         // The levels are relative sizes within the document, not
                         // an outline the file declared, so they start at h3:
                         // this sits under the page's own heading.
                         let spans = spans.clone();
+                        let st = align_style(group[0].align());
                         match level {
-                            1 => rsx! { h3 { key: "{i}", class: "docx-h", Spans { spans } } },
-                            2 => rsx! { h4 { key: "{i}", class: "docx-h", Spans { spans } } },
-                            _ => rsx! { h5 { key: "{i}", class: "docx-h", Spans { spans } } },
+                            1 => rsx! { h3 { key: "{i}", class: "docx-h", style: "{st}", Spans { spans } } },
+                            2 => rsx! { h4 { key: "{i}", class: "docx-h", style: "{st}", Spans { spans } } },
+                            _ => rsx! { h5 { key: "{i}", class: "docx-h", style: "{st}", Spans { spans } } },
                         }
                     }
-                    Some(Block::Paragraph(spans)) => rsx! {
-                        p { key: "{i}", class: "docx-p", Spans { spans: spans.clone() } }
+                    Some(Block::Paragraph { spans, align }) => rsx! {
+                        p {
+                            key: "{i}",
+                            class: "docx-p",
+                            style: "{align_style(*align)}",
+                            Spans { spans: spans.clone() }
+                        }
+                    },
+                    Some(Block::PageBreak(page)) => rsx! {
+                        // Furniture, and marked as such: a separator carries no
+                        // meaning to read aloud, and the number is what makes
+                        // "see page 12" mean something to someone reading this
+                        // rather than the pages.
+                        div { key: "{i}", class: "pdf-page-break", role: "separator",
+                            span { "{page}" }
+                        }
                     },
                     Some(Block::Image(picture)) => rsx! {
                         // Drawn at the size the page drew it, but never wider
@@ -124,6 +140,15 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                 p { class: "body-small", {t_pages(doc.pages)} }
             }
         }
+    }
+}
+
+/// Only a stated alignment is written. Left is the default, and saying so would
+/// override a right-to-left document that never asked for it.
+fn align_style(align: Align) -> &'static str {
+    match align {
+        Align::Left => "",
+        Align::Center => "text-align:center;",
     }
 }
 

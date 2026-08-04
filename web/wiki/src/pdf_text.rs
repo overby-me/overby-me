@@ -31,21 +31,37 @@ pub enum Block {
     Heading {
         level: u8,
         spans: Vec<Span>,
+        align: Align,
     },
-    Paragraph(Vec<Span>),
+    Paragraph {
+        spans: Vec<Span>,
+        align: Align,
+    },
     /// A line that began with a bullet or a number, with that marker stripped.
     ListItem(Vec<Span>),
     /// A picture the page drew, where it drew it.
     Image(Picture),
+    /// Where one page ended and the next began, carrying the number of the page
+    /// that just finished. Furniture, not content: it exists so that "see page
+    /// 12" still means something to someone reading this instead of the pages.
+    PageBreak(usize),
 }
 
 impl Block {
     pub fn spans(&self) -> &[Span] {
         match self {
-            Block::Heading { spans, .. } | Block::Paragraph(spans) | Block::ListItem(spans) => {
-                spans
-            }
-            Block::Image(_) => &[],
+            Block::Heading { spans, .. }
+            | Block::Paragraph { spans, .. }
+            | Block::ListItem(spans) => spans,
+            Block::Image(_) | Block::PageBreak(_) => &[],
+        }
+    }
+
+    /// How this block sat across its column.
+    pub fn align(&self) -> Align {
+        match self {
+            Block::Heading { align, .. } | Block::Paragraph { align, .. } => *align,
+            _ => Align::Left,
         }
     }
 
@@ -65,6 +81,17 @@ pub struct Picture {
     /// at: a 27-pixel logo placed across half a page is still half a page.
     pub width: f64,
     pub height: f64,
+}
+
+/// How a block sat across its column.
+///
+/// Per paragraph, not per page, which is what lets it survive reflow: a centred
+/// title stays centred at any width, where a preserved page layout would not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Align {
+    #[default]
+    Left,
+    Center,
 }
 
 /// A stretch of one colour within a block.
@@ -987,6 +1014,11 @@ struct Line {
     text: String,
     /// The same words, keeping where the colour changed.
     spans: Vec<Span>,
+    /// Where the line STARTED, which together with `right` says how it sat
+    /// across the column.
+    left: f64,
+    /// Which page drew it, 1-based.
+    page: usize,
     /// Set when this "line" is a picture rather than words. It takes its place
     /// in the flow by where it was drawn, like everything else.
     picture: Option<Picture>,
@@ -1087,12 +1119,16 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         .iter()
         .map(|r| r.end_x)
         .fold(f64::NEG_INFINITY, f64::max);
+    let left = runs.iter().map(|r| r.x).fold(f64::INFINITY, f64::min);
     Some(Line {
         y: first.y,
         size,
         right,
         text,
         spans,
+        left,
+        // Filled in by the caller, which is the only place that knows.
+        page: 0,
         picture: None,
     })
 }
@@ -1207,6 +1243,87 @@ fn column_right(lines: &[Line]) -> f64 {
     rights[rights.len() * 9 / 10]
 }
 
+/// Where the text column starts. The mirror of [`column_right`]: a low
+/// percentile rather than the minimum, so one line hanging into the margin does
+/// not move the whole page.
+fn column_left(lines: &[Line]) -> f64 {
+    let mut lefts: Vec<f64> = lines
+        .iter()
+        .filter(|l| l.picture.is_none())
+        .map(|l| l.left)
+        .filter(|v| v.is_finite())
+        .collect();
+    if lefts.is_empty() {
+        return 0.0;
+    }
+    lefts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    lefts[lefts.len() / 10]
+}
+
+/// How a BLOCK sat across its column, from the geometry of all its lines.
+///
+/// One line cannot tell you this, which is what the first attempt got wrong. An
+/// indented paragraph has both edges pulled in and its midpoint near the
+/// column's, and so does a centred one. What separates them is that a centred
+/// block's lines each start somewhere DIFFERENT, while an indented block's all
+/// start at the same place.
+///
+/// A single line has no such evidence, so it must be short as well as centred:
+/// a title is a few words in the middle of the measure, an indented body line
+/// runs most of the way across it.
+///
+/// There is no right-alignment here, and no variant for one. A table cell starts
+/// well inside the column and ends near its right edge, which is exactly what a
+/// right-aligned line looks like, and until the table itself is recognised the
+/// two cannot be told apart. Inferring it turned eleven rows of an activity plan
+/// into right-aligned paragraphs. When tables land they can bring it back.
+fn alignment_of(lines: &[(f64, f64)], col_left: f64, col_right: f64, size: f64) -> Align {
+    if lines.is_empty() || col_right <= col_left {
+        return Align::Left;
+    }
+    let mid = (col_left + col_right) / 2.0;
+    let width = col_right - col_left;
+    let usable: Vec<&(f64, f64)> = lines
+        .iter()
+        .filter(|(l, r)| l.is_finite() && r.is_finite() && r > l)
+        .collect();
+    if usable.is_empty() {
+        return Align::Left;
+    }
+    // Every line has to sit about the middle, or this is not centred text.
+    if !usable
+        .iter()
+        .all(|(l, r)| ((l + r) / 2.0 - mid).abs() < size * 1.5)
+    {
+        return Align::Left;
+    }
+    // And every line has to be pulled in from both margins.
+    if !usable
+        .iter()
+        .all(|(l, r)| l - col_left > size && col_right - r > size)
+    {
+        return Align::Left;
+    }
+    if usable.len() == 1 {
+        let (l, r) = usable[0];
+        return match r - l < width * 0.6 {
+            true => Align::Center,
+            false => Align::Left,
+        };
+    }
+    // Several lines: their left edges must VARY, which is what centring does and
+    // indenting does not.
+    let min_left = usable.iter().map(|(l, _)| *l).fold(f64::INFINITY, f64::min);
+    let max_left = usable
+        .iter()
+        .map(|(l, _)| *l)
+        .fold(f64::NEG_INFINITY, f64::max);
+    match max_left - min_left > size {
+        true => Align::Center,
+        false => Align::Left,
+    }
+}
+
 /// A leading bullet or number, and the text after it.
 fn list_marker(text: &str) -> Option<&str> {
     let t = text.trim_start();
@@ -1265,12 +1382,22 @@ fn list_marker(text: &str) -> Option<&str> {
 fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
     let body = body_size(&lines);
     let column = column_right(&lines);
+    let col_left = column_left(&lines);
     let mut blocks: Vec<Block> = Vec::new();
     let mut para: Vec<Span> = Vec::new();
     let mut para_size = body;
     let mut prev: Option<&Line> = None;
 
-    let flush = |para: &mut Vec<Span>, size: f64, blocks: &mut Vec<Block>| {
+    // A block's alignment is its FIRST line's: a centred title's second line is
+    // centred too, and a left paragraph's last line is short without meaning
+    // anything by it.
+    let mut para_lines: Vec<(f64, f64)> = Vec::new();
+    let flush = |para: &mut Vec<Span>,
+                 size: f64,
+                 geometry: &mut Vec<(f64, f64)>,
+                 blocks: &mut Vec<Block>| {
+        let align = alignment_of(geometry, col_left, column, size);
+        geometry.clear();
         let spans = tidy(std::mem::take(para));
         if spans.is_empty() {
             return;
@@ -1294,16 +1421,30 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
             } else {
                 3
             };
-            blocks.push(Block::Heading { level, spans });
+            blocks.push(Block::Heading {
+                level,
+                spans,
+                align,
+            });
         } else {
-            blocks.push(Block::Paragraph(spans));
+            blocks.push(Block::Paragraph { spans, align });
         }
     };
 
     let lines_ref = lines;
+    let mut page = lines_ref.first().map(|l| l.page).unwrap_or(1);
     for line in &lines_ref {
+        // A page turning over ends whatever was being built: a paragraph that
+        // continues across the break is rare, and running two pages together
+        // silently is worse than one break too many.
+        if line.page != page && line.page != 0 {
+            flush(&mut para, para_size, &mut para_lines, &mut blocks);
+            blocks.push(Block::PageBreak(page));
+            page = line.page;
+            prev = None;
+        }
         if let Some(picture) = &line.picture {
-            flush(&mut para, para_size, &mut blocks);
+            flush(&mut para, para_size, &mut para_lines, &mut blocks);
             blocks.push(Block::Image(picture.clone()));
             prev = None;
             continue;
@@ -1334,7 +1475,7 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
             }
         };
         if starts_new {
-            flush(&mut para, para_size, &mut blocks);
+            flush(&mut para, para_size, &mut para_lines, &mut blocks);
         }
         if para.is_empty() {
             para_size = line.size;
@@ -1345,9 +1486,10 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
             }
         }
         para.extend(line.spans.iter().cloned());
+        para_lines.push((line.left, line.right));
         prev = Some(line);
     }
-    flush(&mut para, para_size, &mut blocks);
+    flush(&mut para, para_size, &mut para_lines, &mut blocks);
     blocks
 }
 
@@ -1379,9 +1521,12 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let total = pages.len();
     let mut all_lines = Vec::new();
     let mut empty = 0usize;
-    for (_, page_id) in pages {
+    for (page_no, (_, page_id)) in pages.into_iter().enumerate() {
         let drawn = page_runs(&doc, page_id);
         let mut lines = lines_from(drawn.runs);
+        for line in &mut lines {
+            line.page = page_no + 1;
+        }
         if lines.is_empty() {
             empty += 1;
         }
@@ -1393,6 +1538,8 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 y,
                 size: picture.height.max(1.0),
                 right: f64::NEG_INFINITY,
+                left: f64::INFINITY,
+                page: page_no + 1,
                 text: String::new(),
                 spans: Vec::new(),
                 picture: Some(picture),
@@ -1476,7 +1623,8 @@ mod harness {
                     let kind = match b {
                         super::Block::Heading { level, .. } => format!("h{level}"),
                         super::Block::ListItem(_) => "li".into(),
-                        super::Block::Paragraph(_) => "p".into(),
+                        super::Block::Paragraph { .. } => "p".into(),
+                        super::Block::PageBreak(n) => format!("--{n}--"),
                         super::Block::Image(p) => {
                             format!(
                                 "img{}x{} {} {}B",
@@ -1492,7 +1640,14 @@ mod harness {
                         .ok()
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(90);
-                    println!("  {kind:<3} {}", t.chars().take(width).collect::<String>());
+                    let a = match b.align() {
+                        super::Align::Center => " [center]",
+                        super::Align::Left => "",
+                    };
+                    println!(
+                        "  {kind:<3}{a} {}",
+                        t.chars().take(width).collect::<String>()
+                    );
                 }
             }
         }
@@ -1597,6 +1752,8 @@ mod tests {
             y,
             size,
             right: 400.0,
+            left: 0.0,
+            page: 1,
             text: text.into(),
             spans: vec![Span {
                 text: text.into(),
@@ -1672,12 +1829,15 @@ mod tests {
         };
         assert!(!scan.has_text());
         let real = Extracted {
-            blocks: vec![Block::Paragraph(vec![Span {
-                text: "noget".into(),
-                color: None,
-                bold: false,
-                italic: false,
-            }])],
+            blocks: vec![Block::Paragraph {
+                spans: vec![Span {
+                    text: "noget".into(),
+                    color: None,
+                    bold: false,
+                    italic: false,
+                }],
+                align: Align::Left,
+            }],
             pages: 2,
             pages_without_text: 0,
         };
@@ -1808,6 +1968,8 @@ mod tests {
             y,
             size: 11.0,
             right,
+            left: 0.0,
+            page: 1,
             text: text.into(),
             spans: vec![Span {
                 text: text.into(),
@@ -1961,6 +2123,71 @@ mod tests {
             bmp_data_url(2, 2, 2, &[0; 8]),
             None,
             "two components is not a colour space we read"
+        );
+    }
+
+    /// A centred title stays centred at any width, which is the part of page
+    /// composition that survives reflow.
+    #[test]
+    fn a_short_line_in_the_middle_is_centred() {
+        // Column runs 72..472, so its middle is 272 and its width is 400.
+        let (l, r) = (72.0, 472.0);
+        assert_eq!(alignment_of(&[(200.0, 344.0)], l, r, 11.0), Align::Center);
+        // A full-width line is left, however you look at it.
+        assert_eq!(alignment_of(&[(72.0, 470.0)], l, r, 11.0), Align::Left);
+        // The last line of a left paragraph: starts at the margin, ends early.
+        assert_eq!(alignment_of(&[(72.0, 200.0)], l, r, 11.0), Align::Left);
+        assert_eq!(alignment_of(&[], l, r, 11.0), Align::Left);
+    }
+
+    /// The distinction one line cannot make. An indented block and a centred
+    /// block both sit about the middle with both edges pulled in; what tells
+    /// them apart is that centred lines each START somewhere different.
+    ///
+    /// Got this wrong first time round, and a policy document full of indented
+    /// paragraphs came out centred.
+    #[test]
+    fn an_indented_block_is_not_a_centred_one() {
+        let (l, r) = (72.0, 472.0);
+        // Every line starts at 122 and ends raggedly: indented, not centred.
+        let indented = [(122.0, 430.0), (122.0, 419.0), (122.0, 400.0)];
+        assert_eq!(alignment_of(&indented, l, r, 11.0), Align::Left);
+        // Lines that each begin somewhere else, about the same middle: centred.
+        let centred = [(150.0, 394.0), (180.0, 364.0), (120.0, 424.0)];
+        assert_eq!(alignment_of(&centred, l, r, 11.0), Align::Center);
+    }
+
+    /// A single line that runs most of the way across is an indented line, not a
+    /// title, whatever its midpoint says.
+    #[test]
+    fn a_long_lone_line_is_not_a_title() {
+        let (l, r) = (72.0, 472.0);
+        assert_eq!(alignment_of(&[(100.0, 444.0)], l, r, 11.0), Align::Left);
+    }
+
+    /// The page turning over ends whatever was being built, and leaves a mark
+    /// carrying the number of the page that just finished.
+    #[test]
+    fn a_page_ending_leaves_a_mark() {
+        let on_page = |page: usize, y: f64, text: &str| Line {
+            y,
+            size: 11.0,
+            right: 400.0,
+            left: 0.0,
+            page,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            picture: None,
+        };
+        let blocks = blocks_from(vec![
+            on_page(1, 700.0, "Sidste linje på side et"),
+            on_page(2, 700.0, "Første linje på side to"),
+        ]);
+        assert_eq!(blocks.len(), 3, "text, break, text");
+        assert_eq!(blocks[1], Block::PageBreak(1), "the page that just ended");
+        assert_eq!(
+            texts(&blocks),
+            vec!["Sidste linje på side et", "", "Første linje på side to"]
         );
     }
 }
