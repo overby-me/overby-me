@@ -405,3 +405,35 @@ run it against the flag, and require the same green as the flag-off run. Keep
 every change strictly inside the `job_graph_enabled()` branch so flag-off boot is
 untouched; revert the branch on a wedge (the scheduler core and producer stay
 regardless).
+
+## Inc 4 validation status, 2026-08-04
+
+The drive (single-dispatcher run-queue + bounded-pool activation + writer-yielding
+`dispatcher_read`) boots end-to-end behind `SYSTEMD_RS_JOB_GRAPH=1`:
+`rust-systemd-test-01-basic-jobgraph` and `-15-dropin-jobgraph` both pass the full
+upstream scripts (multi-user.target reached, `/testok` written, no panic). Those
+two variants stay in the tree as the standing evidence.
+
+Two gaps surfaced widening to the rest of the standing gate set, and both variants
+were reverted pending fixes (do not re-add them until green):
+
+- **Intermittent boot stall (03-jobs).** 03-jobs uses the same machine config as
+  01-basic yet its boot stalled at `wait_for_unit(multi-user.target)`: after the
+  sysinit frontier (~13s) units only advanced at ~180s intervals — each hanging
+  until its own start timeout fired rather than completing. No `DISPATCHER-READ`
+  stalls, so this is not writer starvation; it is a deferred-start completion race
+  (a notify/oneshot/forking start parked with an empty before-chain does not get
+  flipped to Started on its event, so it hangs until the start timeout). It is
+  non-deterministic — the same closure boots on 01-basic. This race must be fixed
+  before the drive is trustworthy for boot.
+- **Runtime non-Start jobs (26-systemctl).** 26 boots fine but hangs at the
+  runtime `io.systemd.Manager.EnqueueMarkedJobs` subtest: the flag leaves
+  `drive_run_queue` running after boot for *all* jobs, and it only knows how to
+  `activate_unit` (a Start), so marked Reload/Restart jobs never clear from
+  `list-jobs`. The drive should either handle every `JobKind` or, for this
+  increment, own only `Start` jobs and leave Reload/Restart/Stop to the existing
+  control path.
+
+Net: boot through the job graph is demonstrated but not yet robust. The next
+slices are the deferred-start completion race and the `JobKind::Start` scoping,
+each re-validated against a re-added variant.
