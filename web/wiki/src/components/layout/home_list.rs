@@ -6,12 +6,18 @@ use crate::i18n::{t, t_with};
 use crate::route::Route;
 use crate::session::use_session;
 
-/// The result of loading the user's contexts: (groups, events, pending invites).
-type ContextLists = (
-    Vec<model::ContextNodeFields>,
-    Vec<model::ContextNodeFields>,
-    Vec<model::InvitationFields>,
-);
+/// Everywhere the signed-in reader can go, in one load: the places they belong
+/// to, by kind, and the ones they have been offered.
+///
+/// A struct rather than the tuple this was, because a third kind of place made
+/// `Some(Ok((_, events, _)))` a puzzle to read at every use.
+#[derive(Clone, PartialEq, Default)]
+struct Places {
+    groups: Vec<model::ContextNodeFields>,
+    events: Vec<model::ContextNodeFields>,
+    sites: Vec<model::ContextNodeFields>,
+    invites: Vec<model::InvitationFields>,
+}
 
 /// HomeList — shows the user's groups and events, loaded from GraphQL. Pending
 /// invitations appear inline at the top of the matching list (group or event),
@@ -46,14 +52,20 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
         let _ = refresh.read();
         async move {
             let Some(user_id) = user_id else {
-                return Ok::<ContextLists, String>((Vec::new(), Vec::new(), Vec::new()));
+                return Ok::<Places, String>(Places::default());
             };
             let groups = graphql::query_contexts(token.as_deref(), &user_id, "wiki/group").await?;
             let events = graphql::query_contexts(token.as_deref(), &user_id, "wiki/event").await?;
+            let sites = graphql::query_contexts(token.as_deref(), &user_id, "wiki/site").await?;
             let invites = graphql::query_invitations(token.as_deref(), &user_id, &email)
                 .await
                 .unwrap_or_default();
-            Ok((groups, events, invites))
+            Ok(Places {
+                groups,
+                events,
+                sites,
+                invites,
+            })
         }
     });
 
@@ -85,200 +97,45 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let can_group = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/group");
     let can_event = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/event");
 
-    // Keep each list short by default (newest first) and let the user expand to
-    // the full list — the roster of past events especially can be long.
-    const LIST_LIMIT: usize = 4;
-    let mut groups_expanded = use_signal(|| false);
-    let mut events_expanded = use_signal(|| false);
+    let can_site = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/site");
 
     let state = contexts.read().clone();
-    // Pending invitations, split into the list they belong to (group vs event) so
-    // each shows inline at the top of that list.
+    // One resource backs all three lists, so one failure is one failure. It used
+    // to be logged from inside each list body, which meant a render-time log per
+    // section per re-render for a single dropped request.
+    let loading = state.is_none();
+    let failed = matches!(state, Some(Err(_)));
+    if let Some(Err(e)) = &state {
+        crate::errors::log_handled("home places load failed", e);
+    }
+    let places = state.and_then(|r| r.ok()).unwrap_or_default();
+
+    // Pending invitations, split into the list they belong to, so each shows
+    // inline at the top of that one.
     let invited_by_mime = |mime: &str| -> Vec<model::InvitationFields> {
-        match &state {
-            Some(Ok((_, _, invites))) => invites
-                .iter()
-                .filter(|i| i.parent.as_ref().and_then(|p| p.mime_id.as_deref()) == Some(mime))
-                .cloned()
-                .collect(),
-            _ => Vec::new(),
-        }
+        places
+            .invites
+            .iter()
+            .filter(|i| i.parent.as_ref().and_then(|p| p.mime_id.as_deref()) == Some(mime))
+            .cloned()
+            .collect()
     };
     let invited_groups = invited_by_mime("wiki/group");
     let invited_events = invited_by_mime("wiki/event");
+    let invited_sites = invited_by_mime("wiki/site");
 
     // The groups a new event may be placed under (see NewContextButton).
-    let group_choices: Vec<model::ContextNodeFields> = match &state {
-        Some(Ok((groups, _, _))) => groups.clone(),
-        _ => Vec::new(),
-    };
+    let group_choices = places.groups.clone();
 
-    // The two section bodies (shared between the drawer's bare list and the home's
-    // two-card layout).
-    let groups_body = rsx! {
-        {match &state {
-            None => rsx! {
-                p { class: "body-medium list-subheader", "…" }
-            },
-            Some(Err(e)) => {
-                crate::errors::log_handled("home groups load failed", e);
-                rsx! {
-                    crate::components::widgets::ErrorState {
-                        title: t("error.somethingWentWrong"),
-                        small: true,
-                        // This list is the first thing a signed-in reader sees, and
-                        // the way it fails is a dropped request rather than a bad
-                        // one -- a phone changing cell on the way into the venue.
-                        // Without this the only way back is reloading the page.
-                        // Bumping the data version rather than re-running just this
-                        // resource is deliberate: it is what pull-to-refresh means
-                        // here, and a connection that dropped one query usually
-                        // dropped its neighbours too.
-                        on_retry: move |_| crate::session::bump_data_version(),
-                    }
-                }
-            }
-            Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
-                // This list is a card on the home page and a bare list in the
-                // drawer. Cards get the orb empty state the rest of the app uses;
-                // the drawer keeps the compact line, where an orb would be a lot
-                // of furniture in a narrow rail.
-                if as_cards {
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "groups" }
-                        }
-                        p { class: "empty-state-body", "{t(\"layout.noGroups\")}" }
-                    }
-                } else {
-                    p { class: "body-medium list-subheader", "{t(\"layout.noGroups\")}" }
-                }
-            },
-            Some(Ok((groups, _, _))) => {
-                let expanded = *groups_expanded.read();
-                let total = groups.len();
-                let visible: Vec<model::ContextNodeFields> = if expanded {
-                    groups.clone()
-                } else {
-                    groups.iter().take(LIST_LIMIT).cloned().collect()
-                };
-                rsx! {
-                    div { class: "list",
-                        // Invitations first — they need action.
-                        for inv in invited_groups.iter() {
-                            InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
-                        }
-                        for node in visible.iter() {
-                            ContextItem { key: "{node.id.0}", node: node.clone() }
-                        }
-                    }
-                    if total > LIST_LIMIT {
-                        button {
-                            class: "btn btn-text",
-                            // Stop the click reaching the drawer's close-on-item handler,
-                            // so expanding the list on mobile doesn't dismiss the drawer.
-                            onclick: move |evt: Event<MouseData>| {
-                                evt.stop_propagation();
-                                let e = *groups_expanded.read();
-                                groups_expanded.set(!e);
-                            },
-                            if expanded {
-                                "{t(\"layout.showLess\")}"
-                            } else {
-                                "{t_with(\"layout.showAll\", &[(\"count\", &total.to_string())])}"
-                            }
-                        }
-                    }
-                }
-            }
-        }}
-    };
-    let events_body = rsx! {
-        {match &state {
-            None => rsx! {
-                p { class: "body-medium list-subheader", "…" }
-            },
-            Some(Err(e)) => {
-                crate::errors::log_handled("home events load failed", e);
-                rsx! {
-                    crate::components::widgets::ErrorState {
-                        title: t("error.somethingWentWrong"),
-                        small: true,
-                        // Both lists come from the ONE resource above, so a dropped
-                        // request puts a dead card in each; retrying from either
-                        // brings both back.
-                        on_retry: move |_| crate::session::bump_data_version(),
-                    }
-                }
-            }
-            Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
-                // As above: orb in the card, compact line in the drawer.
-                if as_cards {
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "event" }
-                        }
-                        p { class: "empty-state-body", "{t(\"layout.noEvents\")}" }
-                    }
-                } else {
-                    p { class: "body-medium list-subheader", "{t(\"layout.noEvents\")}" }
-                }
-            },
-            Some(Ok((_, events, _))) => {
-                let expanded = *events_expanded.read();
-                let total = events.len();
-                rsx! {
-                    // Invited events first (no year bucket — they need action).
-                    if !invited_events.is_empty() {
-                        div { class: "list",
-                            for inv in invited_events.iter() {
-                                InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
-                            }
-                        }
-                    }
-                    // Collapsed: just the newest few, flat. Expanded: the full list
-                    // bucketed by year (the historical view).
-                    if expanded {
-                        for (year , items) in group_by_year(events) {
-                            div { key: "{year}",
-                                p { class: "title-small list-subheader", "{year}" }
-                                div { class: "list",
-                                    for node in items.iter() {
-                                        ContextItem { key: "{node.id.0}", node: node.clone() }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        div { class: "list",
-                            for node in events.iter().take(LIST_LIMIT) {
-                                ContextItem { key: "{node.id.0}", node: node.clone() }
-                            }
-                        }
-                    }
-                    if total > LIST_LIMIT {
-                        button {
-                            class: "btn btn-text",
-                            onclick: move |evt: Event<MouseData>| {
-                                evt.stop_propagation();
-                                let e = *events_expanded.read();
-                                events_expanded.set(!e);
-                            },
-                            if expanded {
-                                "{t(\"layout.showLess\")}"
-                            } else {
-                                "{t_with(\"layout.showAll\", &[(\"count\", &total.to_string())])}"
-                            }
-                        }
-                    }
-                }
-            }
-        }}
-    };
+    // DESIGN: on the home app (as_cards) each kind of place is its own card with
+    // an icon-avatar header, so they read as distinct home sections rather than
+    // one long list. The drawer keeps the compact bare list.
+    //
+    // Sites show only when there are some, when one has been offered, or when
+    // this reader could make one. A site is rare beside groups and events, and a
+    // permanently empty third heading in a narrow drawer is furniture.
+    let show_sites = !places.sites.is_empty() || !invited_sites.is_empty() || can_site;
 
-    // DESIGN: on the home app (as_cards), Groups and Events are SEPARATE cards,
-    // each with its own icon-avatar header — so they read as distinct home sections
-    // rather than one bare list. The drawer keeps the compact bare list.
     if as_cards {
         rsx! {
             div { class: "card",
@@ -290,7 +147,13 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                         NewContextButton { mime: "wiki/group".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
                     }
                 }
-                div { class: "home-section-body", {groups_body} }
+                div { class: "home-section-body",
+                    ContextSection {
+                        nodes: places.groups.clone(), invites: invited_groups.clone(),
+                        empty_text: t("layout.noGroups"), empty_icon: "groups".to_string(),
+                        loading, failed, as_cards,
+                    }
+                }
             }
             div { class: "card mt-1",
                 div { class: "card-header",
@@ -301,7 +164,32 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                         NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone(), groups: group_choices.clone() }
                     }
                 }
-                div { class: "home-section-body", {events_body} }
+                div { class: "home-section-body",
+                    ContextSection {
+                        nodes: places.events.clone(), invites: invited_events.clone(),
+                        empty_text: t("layout.noEvents"), empty_icon: "event".to_string(),
+                        by_year: true, loading, failed, as_cards,
+                    }
+                }
+            }
+            if show_sites {
+                div { class: "card mt-1",
+                    div { class: "card-header",
+                        div { class: "avatar small", span { class: "material-icons", "web" } }
+                        h3 { class: "title-large", "{t(\"layout.sites\")}" }
+                        if can_site {
+                            div { class: "flex-grow" }
+                            NewContextButton { mime: "wiki/site".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                        }
+                    }
+                    div { class: "home-section-body",
+                        ContextSection {
+                            nodes: places.sites.clone(), invites: invited_sites.clone(),
+                            empty_text: t("layout.noSites"), empty_icon: "web".to_string(),
+                            loading, failed, as_cards,
+                        }
+                    }
+                }
             }
         }
     } else {
@@ -314,7 +202,11 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                         NewContextButton { mime: "wiki/group".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
                     }
                 }
-                {groups_body}
+                ContextSection {
+                    nodes: places.groups.clone(), invites: invited_groups.clone(),
+                    empty_text: t("layout.noGroups"), empty_icon: "groups".to_string(),
+                    loading, failed, as_cards,
+                }
                 div { class: "list-section-header mt-1",
                     div { class: "avatar small", span { class: "material-icons", "event" } }
                     h4 { class: "title-medium", "{t(\"layout.events\")}" }
@@ -322,7 +214,140 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                         NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone(), groups: group_choices.clone() }
                     }
                 }
-                {events_body}
+                ContextSection {
+                    nodes: places.events.clone(), invites: invited_events.clone(),
+                    empty_text: t("layout.noEvents"), empty_icon: "event".to_string(),
+                    by_year: true, loading, failed, as_cards,
+                }
+                if show_sites {
+                    div { class: "list-section-header mt-1",
+                        div { class: "avatar small", span { class: "material-icons", "web" } }
+                        h4 { class: "title-medium", "{t(\"layout.sites\")}" }
+                        if can_site {
+                            NewContextButton { mime: "wiki/site".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                        }
+                    }
+                    ContextSection {
+                        nodes: places.sites.clone(), invites: invited_sites.clone(),
+                        empty_text: t("layout.noSites"), empty_icon: "web".to_string(),
+                        loading, failed, as_cards,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One list of places under its heading: the invitations that need answering,
+/// then the places themselves, shortened to the newest few with a way to see the
+/// rest.
+///
+/// This was written out once per kind, and adding a third would have been a
+/// third copy of eighty lines of rsx that differed in a label, a glyph, and
+/// whether the expanded list buckets by year.
+#[component]
+fn ContextSection(
+    nodes: Vec<model::ContextNodeFields>,
+    invites: Vec<model::InvitationFields>,
+    /// What to say when there is nothing, and the glyph for the card variant's
+    /// orb.
+    empty_text: String,
+    empty_icon: String,
+    /// Bucket the expanded list by year. Events only: the roster of past meetings
+    /// is long and reads as history, where a handful of groups or sites does not.
+    #[props(default)]
+    by_year: bool,
+    loading: bool,
+    failed: bool,
+    as_cards: bool,
+) -> Element {
+    // Keep the list short by default (newest first) and let the reader open it.
+    const LIST_LIMIT: usize = 4;
+    let mut expanded = use_signal(|| false);
+
+    if loading {
+        return rsx! {
+            p { class: "body-medium list-subheader", "…" }
+        };
+    }
+    if failed {
+        return rsx! {
+            crate::components::widgets::ErrorState {
+                title: t("error.somethingWentWrong"),
+                small: true,
+                // This list is the first thing a signed-in reader sees, and the
+                // way it fails is a dropped request rather than a bad one: a
+                // phone changing cell on the way into the venue. Without this the
+                // only way back is reloading the page. Bumping the data version
+                // rather than re-running one resource is deliberate: it is what
+                // pull-to-refresh means here, and a connection that dropped one
+                // query usually dropped its neighbours too.
+                on_retry: move |_| crate::session::bump_data_version(),
+            }
+        };
+    }
+    if nodes.is_empty() && invites.is_empty() {
+        // Cards get the orb empty state the rest of the app uses; the drawer
+        // keeps the compact line, where an orb would be a lot of furniture in a
+        // narrow rail.
+        return rsx! {
+            if as_cards {
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "{empty_icon}" }
+                    }
+                    p { class: "empty-state-body", "{empty_text}" }
+                }
+            } else {
+                p { class: "body-medium list-subheader", "{empty_text}" }
+            }
+        };
+    }
+
+    let is_expanded = *expanded.read();
+    let total = nodes.len();
+    rsx! {
+        // Invitations first: they need answering.
+        if !invites.is_empty() {
+            div { class: "list",
+                for inv in invites.iter() {
+                    InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                }
+            }
+        }
+        if is_expanded && by_year {
+            for (year , items) in group_by_year(&nodes) {
+                div { key: "{year}",
+                    p { class: "title-small list-subheader", "{year}" }
+                    div { class: "list",
+                        for node in items.iter() {
+                            ContextItem { key: "{node.id.0}", node: node.clone() }
+                        }
+                    }
+                }
+            }
+        } else {
+            div { class: "list",
+                for node in nodes.iter().take(if is_expanded { total } else { LIST_LIMIT }) {
+                    ContextItem { key: "{node.id.0}", node: node.clone() }
+                }
+            }
+        }
+        if total > LIST_LIMIT {
+            button {
+                class: "btn btn-text",
+                // Stop the click reaching the drawer's close-on-item handler, so
+                // expanding the list on mobile does not dismiss the drawer.
+                onclick: move |evt: Event<MouseData>| {
+                    evt.stop_propagation();
+                    let e = *expanded.read();
+                    expanded.set(!e);
+                },
+                if is_expanded {
+                    "{t(\"layout.showLess\")}"
+                } else {
+                    "{t_with(\"layout.showAll\", &[(\"count\", &total.to_string())])}"
+                }
             }
         }
     }
