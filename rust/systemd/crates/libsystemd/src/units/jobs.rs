@@ -347,6 +347,50 @@ impl JobRegistry {
         queued
     }
 
+    /// Set (or refresh) a job's timeout deadline. The dispatcher assigns one
+    /// when it begins running a job (the unit's start or stop timeout, or
+    /// `JobTimeoutSec=` when set); [`Self::next_deadline`] then bounds the
+    /// dispatcher's block and [`Self::pop_expired`] fires the timeouts
+    /// (docs/EVENT-LOOP.md, "Timeouts"). A refresh must be monotone at the call
+    /// site (EXTEND_TIMEOUT_USEC only ever pushes the deadline later), matching
+    /// the rule the deferred start waits already hold. A no-op for an unknown
+    /// id.
+    pub fn set_deadline(&mut self, id: JobId, deadline: std::time::Instant) {
+        if let Some(job) = self.jobs.get_mut(&id) {
+            job.deadline = Some(deadline);
+        }
+    }
+
+    /// The earliest deadline among installed jobs, or `None` when no job carries
+    /// one. The dispatcher blocks on its event channel until the next event or
+    /// this instant, whichever is sooner (dispatcher loop step 5).
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<std::time::Instant> {
+        self.jobs.values().filter_map(|job| job.deadline).min()
+    }
+
+    /// Report the jobs whose deadline is at or before `now`, clearing it so each
+    /// fires exactly once even if the caller defers the finish. The dispatcher
+    /// raises JobTimeout for every returned id, routing it to the timeout
+    /// cleanup (upstream `job_timeout`, absorbing `deferred_start_fail_cleanup`)
+    /// and finishing the job as `Timeout`. Returned in job-creation order so a
+    /// batch of simultaneous timeouts fires deterministically.
+    pub fn pop_expired(&mut self, now: std::time::Instant) -> Vec<JobId> {
+        let mut expired: Vec<JobId> = self
+            .jobs
+            .iter()
+            .filter(|(_, job)| job.deadline.is_some_and(|d| d <= now))
+            .map(|(id, _)| *id)
+            .collect();
+        expired.sort_unstable();
+        for id in &expired {
+            if let Some(job) = self.jobs.get_mut(id) {
+                job.deadline = None;
+            }
+        }
+        expired
+    }
+
     #[must_use]
     pub fn get(&self, id: JobId) -> Option<&Job> {
         self.jobs.get(&id)
@@ -828,5 +872,43 @@ mod tests {
         assert!(pos("m2.service") < pos("local-fs-pre.target"));
         assert!(pos("local-fs-pre.target") < pos("s.service"));
         assert!(reg.is_empty(), "no orphaned job left installed");
+    }
+
+    // --- increment 4: job-timeout deadlines (the dispatcher timer wheel) ---
+
+    #[test]
+    fn next_deadline_is_none_until_set_and_ignores_unknown_ids() {
+        let mut reg = JobRegistry::new();
+        assert_eq!(reg.next_deadline(), None);
+        // Setting a deadline on an id that is not installed is a no-op.
+        reg.set_deadline(9999, std::time::Instant::now());
+        assert_eq!(reg.next_deadline(), None);
+        // An installed job with no deadline yet still yields None.
+        let _a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        assert_eq!(reg.next_deadline(), None);
+    }
+
+    #[test]
+    fn deadlines_report_earliest_and_expire_once_in_order() {
+        use std::time::{Duration, Instant};
+        let mut reg = JobRegistry::new();
+        let a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        let b = create(&mut reg, "b.service", JobKind::Start, JobMode::Replace).unwrap();
+        let c = create(&mut reg, "c.service", JobKind::Start, JobMode::Replace).unwrap();
+        let base = Instant::now();
+        // a and b are near-term (b sooner than a); c is far out.
+        reg.set_deadline(a, base + Duration::from_millis(50));
+        reg.set_deadline(b, base + Duration::from_millis(10));
+        reg.set_deadline(c, base + Duration::from_secs(3600));
+        // next_deadline is the earliest across all installed jobs (b's).
+        assert_eq!(reg.next_deadline(), Some(base + Duration::from_millis(10)));
+        // By base+100ms both a and b have expired, returned in job-id order; c
+        // has not.
+        let expired = reg.pop_expired(base + Duration::from_millis(100));
+        assert_eq!(expired, vec![a, b]);
+        // Cleared on report: a second pop at the same instant finds nothing new.
+        assert!(reg.pop_expired(base + Duration::from_millis(100)).is_empty());
+        // c's deadline stands and is now the earliest.
+        assert_eq!(reg.next_deadline(), Some(base + Duration::from_secs(3600)));
     }
 }
