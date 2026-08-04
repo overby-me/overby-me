@@ -314,3 +314,78 @@ deadlocks or stalls in two consecutive outside-in audits) or 01-basic boot time
 regresses more than 25% with no recovery path, stop the series, keep jobs plus
 the dispatcher for the control plane only, and take the decision back to the
 roadmap.
+
+## Inc 4 reconstruction plan, 2026-08-04
+
+The first inc-4 engine attempt (`drain_job_graph` + `spawn_graph_activation` +
+`activate_via_job_graph`) wedged and was reverted in the working copy without a
+commit, so it is **not recoverable from git** (0 hits across all refs and
+dangling objects). This section reconstructs the remaining work from the current
+tree so the next attempt starts concrete, not from memory.
+
+### What already exists (do not rebuild)
+
+- **The scheduler core is complete and dormant**, in `units/jobs.rs`, all
+  unit-tested with injected graph/readiness relations (no live table needed):
+  run-queue readiness (`enqueue_ready`, `pop_ready`, `enqueue`), the
+  event-driven requeue rule (`requeue_after_finish`, upstream
+  `job_finish_and_invalidate`), and the timeout wheel (`set_deadline`,
+  `next_deadline`, `pop_expired`). `pure_scheduler_drains_a_target_closure_in_
+  dependency_order` proves the core threads a target closure to completion. None
+  of it is wired into activation yet; `job_graph_enabled()` is checked nowhere in
+  live code, so flag-on currently equals flag-off.
+- **The producer already exists and is live**, not behind the flag: the
+  `--no-block` StartUnit path (`control/control.rs:10428`) collects the start
+  subgraph (`collect_unit_start_subgraph`), creates a `Start` job per unit, and
+  runs a monitor thread that flips each job Waiting→Running and finishes it as
+  its unit reaches a terminal status. So `list-jobs` already reflects the real
+  closure. What this path does **not** do is let the jobs *drive* activation:
+  actual dispatch is still the fixpoint sweep.
+
+### The seam to replace
+
+Dispatch today is `activate_needed_units_with_source` (`activate.rs:919`): a
+32-thread pool running a fixpoint loop of `find_startable_units` (the readiness
+frontier — `unstarted_deps` empty, the same predicate the job graph injects) →
+`activate_units_recursive` (activate the frontier on the pool, propagating each
+unit's before-chain as it completes) → re-sweep until a full pass starts nothing
+new. The re-sweep is the safety net for fan-in stragglers. The job graph's
+`requeue_after_finish` is precisely the event-driven replacement for that
+re-sweep: a completing unit wakes exactly the neighbours ordered after it,
+instead of a blind full re-walk.
+
+### The flag-on dispatch (service-only first)
+
+Behind `SYSTEMD_RS_JOB_GRAPH=1`, in the StartUnit monitor thread only:
+
+1. Prime: `enqueue_ready` over the closure using the `find_startable_units`
+   readiness (the initially-startable units).
+2. Dispatch: `pop_ready` each ready job and activate just that unit (the
+   existing per-unit activation the pool already calls), arming its deadline
+   with `set_deadline` from the unit's start timeout.
+3. Requeue: reuse the monitor's existing terminal-status detection as the
+   completion event — when a unit reaches Started/Stopped, `finish` its job and
+   `requeue_after_finish` (its `Before=` neighbours, `find_startable_units`
+   readiness), then dispatch the newly-ready jobs.
+4. Terminate: loop until the registry drains; `pop_expired` against
+   `next_deadline` fires JobTimeout for anything stuck, so a wedge
+   **self-terminates as a failed job instead of hanging the VM** (this is why the
+   timeout wheel was built first).
+
+Start **service-only** (validate on 03-jobs, whose closure is services) because
+the known wedge is target-specific: a `.target` job dispatched (Running) whose
+unit status never flips to Started, so every unit ordered after it waits forever
+and the dispatcher goes silent (`local-fs-pre.target[running/never started]`).
+Services flip Started/Stopped through the monitor's existing detection, so the
+requeue fires and the closure drains; targets need a process-less completion
+path (flip status + finish the job) that the reverted engine got wrong. Land the
+service closure first, then the process-less completion, then full boot.
+
+### Falsification for the first slice
+
+Add a `jobGraph` variant of 03-jobs (mind that `default.nix` `testArgs` is a
+**closed key set** — a new test param is silently dropped unless added there),
+run it against the flag, and require the same green as the flag-off run. Keep
+every change strictly inside the `job_graph_enabled()` branch so flag-off boot is
+untouched; revert the branch on a wedge (the scheduler core and producer stay
+regardless).
