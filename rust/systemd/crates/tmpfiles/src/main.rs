@@ -130,8 +130,9 @@ fn acl_set_file_from_text(path: &Path, acl_type: libc::c_uint, text: &str) -> Re
 
     macro_rules! sym {
         ($name:literal, $ty:ty) => {{
-            let s =
-                unsafe { libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char) };
+            let s = unsafe {
+                libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char)
+            };
             if s.is_null() {
                 unsafe { libc::dlclose(handle) };
                 return Err(format!("dlsym({}) failed", $name));
@@ -164,6 +165,93 @@ fn acl_set_file_from_text(path: &Path, acl_type: libc::c_uint, text: &str) -> Re
         Some(e) => Err(format!("acl_set_file({}) failed: {e}", path.display())),
         None => Ok(()),
     }
+}
+
+/// The three categories C's `parse_acl` (src/shared/acl-util.c) splits a
+/// tmpfiles `a`/`A` ACL argument into, each as comma-joined text ready for
+/// `acl_from_text` (or `None` when that category is empty).
+///
+/// A tmpfiles ACL argument is a comma-separated list of entries, each
+/// `type:qualifier:perms` (three colon-separated fields), optionally prefixed
+/// with `default:` / `d:` to target the default ACL (four fields). An uppercase
+/// `X` in the permission field means "execute only where it already applies"
+/// and is resolved per inode, so such access entries are kept apart from the
+/// rest and their mask is computed only after that decision.
+#[derive(Debug, Default, PartialEq, Eq)]
+#[allow(dead_code)]
+struct ParsedAcl {
+    /// Plain access entries: `acl_from_text` then [`ACL_TYPE_ACCESS`].
+    access: Option<String>,
+    /// Access entries whose permission field carried an uppercase `X`, lowered
+    /// to `x` here; the execute bit is applied conditionally per inode.
+    access_exec: Option<String>,
+    /// Default entries, `default:` / `d:` prefix removed: `acl_from_text` then
+    /// [`ACL_TYPE_DEFAULT`].
+    default: Option<String>,
+}
+
+/// Split a tmpfiles ACL argument into access / access-exec / default text,
+/// faithfully to C systemd's `parse_acl`.
+///
+/// Mirrors the C control flow: the outer split on `,` coalesces separators (C
+/// uses `strv_split`, i.e. `EXTRACT_RETAIN_ESCAPE`, so empty entries are
+/// dropped); the inner split on `:` keeps empty fields (C adds
+/// `EXTRACT_DONT_COALESCE_SEPARATORS`, so `u::rwx` stays three fields); the
+/// uppercase-`X`-to-`x` substitution runs on the permission field of every
+/// entry; a three-field entry whose text changed under that substitution is an
+/// exec entry, otherwise a plain access entry; a four-field entry must begin
+/// with `default` or `d` and becomes a default entry with that prefix dropped.
+/// Returns an error (C's `-EINVAL`) for an entry with fewer than three or more
+/// than four fields, or a four-field entry with a bad prefix.
+///
+/// Intentional simplification: C splits with `EXTRACT_RETAIN_ESCAPE`, so a
+/// backslash-escaped colon inside a field would not act as a separator. POSIX
+/// user and group names cannot contain `:` or `\`, and `acl_from_text` rejects
+/// such text regardless, so this port splits on the raw `:`; the only
+/// observable difference is which layer reports the error, and both reject.
+#[allow(dead_code)]
+fn parse_acl_text(text: &str) -> Result<ParsedAcl, String> {
+    let mut access: Vec<String> = Vec::new();
+    let mut access_exec: Vec<String> = Vec::new();
+    let mut default: Vec<String> = Vec::new();
+
+    // The outer split coalesces separators, so drop empty entries (leading,
+    // trailing, and doubled commas), matching C's `strv_split`.
+    for entry in text.split(',').filter(|e| !e.is_empty()) {
+        let fields: Vec<&str> = entry.split(':').collect();
+        let n = fields.len();
+        if !(3..=4).contains(&n) {
+            return Err(format!(
+                "invalid ACL entry {entry:?}: expected 3 or 4 colon-separated fields, got {n}"
+            ));
+        }
+
+        // Lower `X` to `x` in the permission field (always the last one). A
+        // change means the entry carried an uppercase, conditional `X`.
+        let perms = fields[n - 1].replace('X', "x");
+        let had_upper_x = perms != fields[n - 1];
+
+        if n == 4 {
+            if !matches!(fields[0], "default" | "d") {
+                return Err(format!(
+                    "invalid ACL entry {entry:?}: a 4-field entry must start with \"default\" or \"d\""
+                ));
+            }
+            // Drop the default prefix; keep the remaining three fields.
+            default.push(format!("{}:{}:{}", fields[1], fields[2], perms));
+        } else if had_upper_x {
+            access_exec.push(format!("{}:{}:{}", fields[0], fields[1], perms));
+        } else {
+            access.push(format!("{}:{}:{}", fields[0], fields[1], perms));
+        }
+    }
+
+    let join = |v: Vec<String>| (!v.is_empty()).then(|| v.join(","));
+    Ok(ParsedAcl {
+        access: join(access),
+        access_exec: join(access_exec),
+        default: join(default),
+    })
 }
 
 /// Directories to search for tmpfiles.d configuration, in priority order.
@@ -3502,6 +3590,112 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_acl_text_categorization() {
+        // Faithful to C parse_acl: split a tmpfiles ACL argument into access /
+        // access-exec / default text pieces. Pure, needs no libacl.
+        let p = |s: &str| parse_acl_text(s).expect("valid ACL text");
+
+        // Plain access entries pass through unchanged, comma-joined.
+        let a = p("u:0:rwx,g:100:r-x,m::rwx");
+        assert_eq!(a.access.as_deref(), Some("u:0:rwx,g:100:r-x,m::rwx"));
+        assert_eq!(a.access_exec, None);
+        assert_eq!(a.default, None);
+
+        // An owner entry with an empty qualifier keeps its three fields.
+        assert_eq!(p("u::rw-").access.as_deref(), Some("u::rw-"));
+
+        // Both default prefixes drop to the same three-field entry.
+        assert_eq!(p("d:g:0:r-x").default.as_deref(), Some("g:0:r-x"));
+        assert_eq!(p("default:g:0:r-x").default.as_deref(), Some("g:0:r-x"));
+
+        // An uppercase X routes the entry to access_exec, lowered to x.
+        let x = p("u:0:rwX");
+        assert_eq!(x.access, None);
+        assert_eq!(x.access_exec.as_deref(), Some("u:0:rwx"));
+
+        // A default entry with uppercase X is lowered but stays a default
+        // (defaults have no per-inode exec handling).
+        let dx = p("d:u:0:rwX");
+        assert_eq!(dx.default.as_deref(), Some("u:0:rwx"));
+        assert_eq!(dx.access_exec, None);
+
+        // Mixed input lands in all three buckets.
+        let m = p("u:0:rwx,d:g:0:r-x,u:100:rwX");
+        assert_eq!(m.access.as_deref(), Some("u:0:rwx"));
+        assert_eq!(m.default.as_deref(), Some("g:0:r-x"));
+        assert_eq!(m.access_exec.as_deref(), Some("u:100:rwx"));
+
+        // The outer split coalesces separators (empty entries dropped).
+        assert_eq!(
+            p("u:0:rwx,,g:0:r-x").access.as_deref(),
+            Some("u:0:rwx,g:0:r-x")
+        );
+        assert_eq!(p(",u:0:rwx,").access.as_deref(), Some("u:0:rwx"));
+
+        // Empty text is not an error: no entries in any bucket.
+        assert_eq!(parse_acl_text("").unwrap(), ParsedAcl::default());
+    }
+
+    #[test]
+    fn test_parse_acl_text_errors() {
+        // Too few fields, too many fields, and a 4-field entry with a bad
+        // prefix are all rejected (C returns -EINVAL).
+        assert!(parse_acl_text("u:0").is_err());
+        assert!(parse_acl_text("u:0:rwx:extra:more").is_err());
+        assert!(parse_acl_text("bogus:u:0:rwx").is_err());
+        // A malformed entry anywhere in the list fails the whole parse.
+        assert!(parse_acl_text("u:0:rwx,g:0").is_err());
+    }
+
+    #[test]
+    fn test_parse_acl_text_feeds_libacl() {
+        // The access text parse_acl_text emits must be valid acl_from_text
+        // input: parse a complete access ACL, apply the access piece via the
+        // libacl FFI, and confirm with getfacl. Skips like the FFI test.
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_parse_acl_text_feeds_libacl: getfacl unavailable");
+            return;
+        }
+        let parsed = parse_acl_text("u::rw-,g::r--,o::r--,u:0:rwx,m::rwx").expect("valid");
+        assert_eq!(parsed.default, None);
+        assert_eq!(parsed.access_exec, None);
+        let access = parsed.access.expect("access entries");
+
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-parse-acl");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acl-target");
+        fs::write(&file, b"x").unwrap();
+
+        match acl_set_file_from_text(&file, ACL_TYPE_ACCESS, &access) {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_parse_acl_text_feeds_libacl: {e}");
+                let _ = fs::remove_dir_all(&dir);
+                return;
+            }
+            Err(e) => panic!("acl_set_file_from_text failed: {e}"),
+        }
+
+        let out = std::process::Command::new("getfacl")
+            .arg("-n")
+            .arg(&file)
+            .output()
+            .expect("run getfacl");
+        let acl = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            acl.contains("user:0:rwx"),
+            "expected 'user:0:rwx' from the parsed access piece, got:\n{acl}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_execute_set_acl() {
         // The a/a+ (SetACL) type applies a POSIX ACL to an existing path via the
         // SETFACL binary. Skip when setfacl/getfacl are unavailable so the test
@@ -3547,7 +3741,10 @@ mod tests {
             line_number: 1,
         };
 
-        assert!(execute_create(&item, false, None), "SetACL apply should succeed");
+        assert!(
+            execute_create(&item, false, None),
+            "SetACL apply should succeed"
+        );
 
         let out = std::process::Command::new("getfacl")
             .arg("-n")
