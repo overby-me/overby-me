@@ -236,7 +236,26 @@ fn split_fields(line: &str) -> Vec<String> {
 }
 
 /// Parse a single sysusers.d line.
+/// Test-only 3-argument shim so the unit tests below don't each have to thread
+/// a `&mut bool` invalid-config flag through every call.
+#[cfg(test)]
 fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersEntry> {
+    parse_line_inner(line, source, line_number, &mut false)
+}
+
+/// Parse a single sysusers.d line.
+///
+/// On a config syntax error (too few fields, unknown type, invalid ID) this
+/// sets `*invalid` so the caller can abort before writing anything and exit
+/// non-zero, matching C `systemd-sysusers`, which propagates the parse error out
+/// of `read_config_file`/`parse_arguments` (`if (r < 0) return r;`) before any
+/// account is created. Empty lines and comments are skipped without setting it.
+fn parse_line_inner(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    invalid: &mut bool,
+) -> Option<SysusersEntry> {
     let trimmed = line.trim();
 
     // Skip empty lines and comments
@@ -251,6 +270,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
             source.display(),
             line_number,
         );
+        *invalid = true;
         return None;
     }
 
@@ -277,6 +297,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
                 line_number,
                 other,
             );
+            *invalid = true;
             return None;
         }
     };
@@ -295,6 +316,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
                 line_number,
                 id_str,
             );
+            *invalid = true;
             return None;
         }
     };
@@ -346,7 +368,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
 /// Parse a sysusers.d config file.
 ///
 /// A path of `-` reads from stdin (matches upstream `systemd-sysusers -`).
-fn parse_config_file(path: &Path) -> io::Result<Vec<SysusersEntry>> {
+fn parse_config_file(path: &Path, invalid: &mut bool) -> io::Result<Vec<SysusersEntry>> {
     let reader: Box<dyn BufRead> = if path == Path::new("-") {
         Box::new(io::BufReader::new(io::stdin()))
     } else {
@@ -358,7 +380,7 @@ fn parse_config_file(path: &Path) -> io::Result<Vec<SysusersEntry>> {
         let line = line?;
         let line_number = line_idx + 1;
 
-        if let Some(entry) = parse_line(&line, path, line_number) {
+        if let Some(entry) = parse_line_inner(&line, path, line_number, invalid) {
             entries.push(entry);
         }
     }
@@ -962,9 +984,13 @@ fn run() -> u8 {
     // Collect entries from all sources
     let mut all_entries: Vec<SysusersEntry> = Vec::new();
 
+    // Set when any source has a config syntax error; fatal, like C (see below).
+    let mut invalid_config = false;
+
     // Process inline configurations first
     for inline in &cli.inline_config {
-        if let Some(entry) = parse_line(inline, Path::new("<inline>"), 0) {
+        if let Some(entry) = parse_line_inner(inline, Path::new("<inline>"), 0, &mut invalid_config)
+        {
             all_entries.push(entry);
         }
     }
@@ -987,7 +1013,7 @@ fn run() -> u8 {
     }
 
     for path in &config_files {
-        match parse_config_file(path) {
+        match parse_config_file(path, &mut invalid_config) {
             Ok(entries) => {
                 if verbose {
                     eprintln!(
@@ -1002,6 +1028,18 @@ fn run() -> u8 {
                 eprintln!("systemd-sysusers: Failed to read {}: {}", path.display(), e);
             }
         }
+    }
+
+    // A config syntax error is fatal in C systemd-sysusers: `parse_line`'s
+    // error propagates out of `read_config_file`/`parse_arguments`
+    // (`if (r < 0) return r;`) before any account is created, and the tool exits
+    // non-zero. sysusers has no soft "note it and continue" mode
+    // (`assert(!invalid_config)` in the C parser), unlike tmpfiles. Match that:
+    // abort before processing rather than skipping the bad line and exiting 0.
+    // This check must precede the empty-entries check so an all-invalid config
+    // (e.g. a single unknown-type line) still fails instead of reporting success.
+    if invalid_config {
+        return EXIT_FAILURE;
     }
 
     if all_entries.is_empty() {
@@ -1189,6 +1227,32 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_flag_matches_c_classification() {
+        // C systemd-sysusers treats every parse error as fatal: `parse_line`
+        // returns a negative errno that aborts the read before any account is
+        // written (exit 1). Verify each syntax error sets the invalid flag while
+        // valid, empty, and comment lines leave it clear.
+        let src = Path::new("test.conf");
+        let check = |line: &str| {
+            let mut invalid = false;
+            let _ = parse_line_inner(line, src, 1, &mut invalid);
+            invalid
+        };
+
+        // Fatal: too few fields, unknown type, invalid ID specification.
+        assert!(check("u"), "too few fields must be fatal");
+        assert!(check("q foo 1234"), "unknown type must be fatal");
+        assert!(check("u foo notanuid"), "invalid ID must be fatal");
+
+        // Not a parse error: well-formed lines, blanks, and comments.
+        assert!(!check("u foo 1234"), "valid line must not be fatal");
+        assert!(!check("g grp -"), "valid group line must not be fatal");
+        assert!(!check(""), "empty line must not be fatal");
+        assert!(!check("   "), "whitespace line must not be fatal");
+        assert!(!check("# comment"), "comment must not be fatal");
+    }
+
+    #[test]
     fn test_parse_line_uid_gid() {
         let entry = parse_line("u myuser 500:600 \"My User\"", Path::new("test.conf"), 1).unwrap();
         assert_eq!(entry.id, IdSpec::UidGid(500, 600));
@@ -1263,7 +1327,7 @@ mod tests {
         writeln!(f, "r - 900-999").unwrap();
         drop(f);
 
-        let entries = parse_config_file(&path).unwrap();
+        let entries = parse_config_file(&path, &mut false).unwrap();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].entry_type, EntryType::CreateGroup);
         assert_eq!(entries[0].name, "myapp-group");
