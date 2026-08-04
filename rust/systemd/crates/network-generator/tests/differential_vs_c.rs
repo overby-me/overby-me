@@ -72,6 +72,12 @@ fn network_generator_matches_c() {
         &["team=team0:eth5,eth6"], // not a C option -> nothing generated
         &["bond=bond0:eth1,eth2", "ip=eth1:dhcp"], // member merges DHCP + Bond=
         &["vlan=vlan10:eth0", "ip=eth0:dhcp", "rd.route=10.0.0.0/8:1.2.3.4:eth0"], // triple merge
+        // context_merge_networks: the deviceless nameserver=/rd.route=/rd.peerdns
+        // bucket merges into every device network (or is emitted alone).
+        &["nameserver=8.8.8.8"], // -> 71-default with DNS
+        &["bond=bond0:eth1,eth2", "nameserver=8.8.8.8"], // DNS merged into members
+        &["ip=eth0:dhcp", "rd.route=10.0.0.0/8:1.2.3.4"], // unbound route merges into eth0
+        &["bond=bond0:eth1", "rd.peerdns=0"], // UseDNS merged into the member
     ];
 
     let mut div = Vec::new();

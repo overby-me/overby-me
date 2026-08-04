@@ -768,21 +768,52 @@ fn generate(config: &CmdlineConfig) -> GeneratedFiles {
         ifnames.insert(k.clone());
     }
 
+    // C's context_merge_networks: the deviceless "" bucket holds nameserver= DNS,
+    // unbound rd.route= routes, and rd.peerdns (dhcp_use_dns). When any device
+    // network exists, that bucket's DNS/routes/peerdns are merged into EACH
+    // device network and the bucket is dropped; otherwise it is emitted alone as
+    // 71-default.
     let default_extra = NetworkExtra::default();
-    let no_routes: Vec<&RouteConfig> = Vec::new();
-    for ifname in &ifnames {
-        let ip = config.ip_configs.iter().find(|ip| &ip.device == ifname);
-        let ex = extra.get(ifname).unwrap_or(&default_extra);
-        let rts = routes_by_device.get(ifname).unwrap_or(&no_routes);
-        emit_network(
-            &mut files,
-            ifname,
-            ip,
-            ex,
-            &config.nameservers,
-            config.peer_dns,
-            rts,
-        );
+    let unbound_routes: Vec<&RouteConfig> =
+        routes_by_device.get("").cloned().unwrap_or_default();
+    let deviceless_ip = config.ip_configs.iter().find(|ip| ip.device.is_empty());
+    let device_ifnames: Vec<&String> = ifnames.iter().filter(|n| !n.is_empty()).collect();
+
+    if device_ifnames.is_empty() {
+        // No device network: emit the default bucket if it carries anything.
+        let has_default = deviceless_ip.is_some()
+            || !config.nameservers.is_empty()
+            || !unbound_routes.is_empty()
+            || config.peer_dns.is_some();
+        if has_default {
+            emit_network(
+                &mut files,
+                "",
+                deviceless_ip,
+                &default_extra,
+                &config.nameservers,
+                config.peer_dns,
+                &unbound_routes,
+            );
+        }
+    } else {
+        for ifname in device_ifnames {
+            let ip = config.ip_configs.iter().find(|ip| &ip.device == ifname);
+            let ex = extra.get(ifname).unwrap_or(&default_extra);
+            // The device's own routes, followed by the merged unbound routes.
+            let mut rts: Vec<&RouteConfig> =
+                routes_by_device.get(ifname).cloned().unwrap_or_default();
+            rts.extend(unbound_routes.iter().copied());
+            emit_network(
+                &mut files,
+                ifname,
+                ip,
+                ex,
+                &config.nameservers,
+                config.peer_dns,
+                &rts,
+            );
+        }
     }
 
     files
@@ -928,9 +959,12 @@ fn emit_network(
         if !ip.dns1.is_empty() {
             writeln!(content, "DNS={}", ip.dns1).unwrap();
         }
-        for ns in nameservers {
-            writeln!(content, "DNS={ns}").unwrap();
-        }
+    }
+    // nameserver= entries apply to every network C emits (including bond/bridge
+    // members and vlan parents that carry no ip= config), so they are listed
+    // outside the ip= block, after any inline ip= DNS and before VLAN/Bond.
+    for ns in nameservers {
+        writeln!(content, "DNS={ns}").unwrap();
     }
     for v in &extra.vlans {
         writeln!(content, "VLAN={v}").unwrap();
@@ -949,15 +983,16 @@ fn emit_network(
 
     // [DHCP]
     writeln!(content, "\n[DHCP]").unwrap();
-    if let Some(ip) = ip {
-        if !ip.hostname.is_empty() {
-            writeln!(content, "Hostname={}", ip.hostname).unwrap();
-        }
-        match peer_dns {
-            Some(true) => writeln!(content, "UseDNS=yes").unwrap(),
-            Some(false) => writeln!(content, "UseDNS=no").unwrap(),
-            None => {}
-        }
+    if let Some(ip) = ip
+        && !ip.hostname.is_empty()
+    {
+        writeln!(content, "Hostname={}", ip.hostname).unwrap();
+    }
+    // rd.peerdns= (UseDNS) is a global that C merges into every network.
+    match peer_dns {
+        Some(true) => writeln!(content, "UseDNS=yes").unwrap(),
+        Some(false) => writeln!(content, "UseDNS=no").unwrap(),
+        None => {}
     }
 
     // [Address]/[Route] for a static ip=.
