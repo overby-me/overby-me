@@ -645,6 +645,35 @@ fn has_opt(opts: &[&str], name: &str) -> bool {
     opts.contains(&name)
 }
 
+/// Whether a `systemd-fsck@` dependency should be added for this mount,
+/// mirroring C's `generator_write_fsck_deps` structural checks. The
+/// fsck-existence check (`fsck.<fstype>` present) is environmental and omitted:
+/// it holds at real boot where rust and C agree.
+fn fsck_applies(entry: &FstabEntry, node: &str) -> bool {
+    // Only a real device node can be checked. This also covers the non-block
+    // pseudo and network file systems (tmpfs, nfs, cifs, 9p, ...), whose `what`
+    // is not a /dev path.
+    if !node.starts_with("/dev/") {
+        return false;
+    }
+    // Bind mounts have no backing device to check.
+    if parse_csv(&entry.options)
+        .iter()
+        .any(|o| *o == "bind" || *o == "rbind")
+    {
+        return false;
+    }
+    // Network file systems are never block-checked (guards a /dev-shaped nfs=).
+    if is_network_fs(&entry.fstype) {
+        return false;
+    }
+    // Read-only file systems are never checked.
+    !matches!(
+        entry.fstype.as_str(),
+        "DM_verity_hash" | "cramfs" | "erofs" | "iso9660" | "squashfs"
+    )
+}
+
 fn emit_mount_unit(
     out_dir: &Path,
     entry: &FstabEntry,
@@ -800,14 +829,19 @@ fn emit_mount_unit(
         unit.push_str("ReadWriteOnly=yes\n");
     }
 
-    // fsck: when passno >= 1 and non-root, add Requires=systemd-fsck@<esc>.
-    // The instance is the canonical device node (same as What=), matching C.
-    if entry.passno >= 1 && !is_rootfs && entry.where_ != "/usr" {
+    // fsck: when passno >= 1, add a systemd-fsck@ dependency -- but only for a
+    // real, checkable file system. C's generator_write_fsck_deps structurally
+    // skips non-block-backed (tmpfs/nfs/cifs/...), read-only (squashfs/iso9660/
+    // ...), bind, and non-device mounts; adding systemd-fsck@ for those emits a
+    // dependency that cannot be satisfied and would fail the mount. The instance
+    // is the canonical device node (same as What=), matching C.
+    let want_fsck = entry.passno >= 1 && fsck_applies(entry, &node);
+    if want_fsck && !is_rootfs && entry.where_ != "/usr" {
         let fsck_unit = format!("systemd-fsck@{}.service", unit_name_path_escape(&node));
         unit.push_str(&format!(
             "\n[Unit]\nRequires={fsck_unit}\nAfter={fsck_unit}\n"
         ));
-    } else if entry.passno >= 1 && entry.where_ == "/usr" {
+    } else if want_fsck && entry.where_ == "/usr" {
         let fsck_unit = format!("systemd-fsck@{}.service", unit_name_path_escape(&node));
         unit.push_str(&format!("\n[Unit]\nWants={fsck_unit}\nAfter={fsck_unit}\n"));
     }
@@ -1171,6 +1205,58 @@ mod tests {
             "the timeout must land in the drop-in, got: {dropin}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fsck_structural_skips() {
+        // A systemd-fsck@ dependency is added only for a real, checkable block
+        // file system, not for bind / pseudo / network / read-only mounts
+        // (matching C's generator_write_fsck_deps structural skips). A bogus
+        // fsck dependency would be unsatisfiable and fail the mount.
+        let mk = |what: &str, where_: &str, fstype: &str, options: &str| FstabEntry {
+            what: what.into(),
+            where_: where_.into(),
+            fstype: fstype.into(),
+            options: options.into(),
+            _dump: 0,
+            passno: 2,
+        };
+        let emit = |e: &FstabEntry| -> String {
+            let dir = std::env::temp_dir().join(format!(
+                "fstabgen-fsck-{}-{}",
+                std::process::id(),
+                e.where_.replace('/', "_")
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            emit_mount_unit(&dir, e, false, "/etc/fstab").unwrap();
+            let name = format!("{}.mount", unit_name_path_escape(&e.where_));
+            let s = std::fs::read_to_string(dir.join(&name)).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            s
+        };
+        // A real block file system is checked.
+        assert!(
+            emit(&mk("/dev/sda2", "/home", "ext4", "defaults")).contains("systemd-fsck@"),
+            "ext4"
+        );
+        // Structural skips: no fsck dependency.
+        assert!(
+            !emit(&mk("/src", "/dst", "none", "bind")).contains("systemd-fsck@"),
+            "bind"
+        );
+        assert!(
+            !emit(&mk("tmpfs", "/t", "tmpfs", "defaults")).contains("systemd-fsck@"),
+            "tmpfs"
+        );
+        assert!(
+            !emit(&mk("//srv/s", "/mnt", "cifs", "defaults")).contains("systemd-fsck@"),
+            "cifs"
+        );
+        assert!(
+            !emit(&mk("/dev/sda1", "/b", "squashfs", "defaults")).contains("systemd-fsck@"),
+            "squashfs"
+        );
     }
 
     #[test]
