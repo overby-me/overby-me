@@ -71,6 +71,101 @@ const SETFACL: &str = match option_env!("ACL_SETFACL") {
     None => "setfacl",
 };
 
+// ── libacl FFI (foundation) ─────────────────────────────────────────────────
+//
+// The `a`/`A` item types apply POSIX ACLs. Today they shell out to `setfacl`
+// (SETFACL above); C systemd-tmpfiles uses libacl directly. These bindings
+// dlopen libacl at runtime (via the baked ACL_LIB path, mirroring PAM_LIB in
+// libsystemd/exec_helper.rs) so a later change can drop the external setfacl
+// dependency and be faithful to C. NOT YET wired into the SetACL arm -- setfacl
+// still does the work -- so these are #[allow(dead_code)] for now. The next step
+// is porting C's parse_acl (split access vs default `d:` entries) and
+// path_set_acl (merge for `a+` via acl_get_file, acl_calc_mask, then
+// acl_set_file with ACL_TYPE_ACCESS/ACL_TYPE_DEFAULT).
+
+/// Absolute path to libacl, baked from the Nix build (`ACL_LIB`), else the soname.
+#[allow(dead_code)]
+const ACL_LIB_PATH: &str = match option_env!("ACL_LIB") {
+    Some(p) => p,
+    None => "libacl.so.1",
+};
+
+/// `acl_type_t` values from `<sys/acl.h>`.
+#[allow(dead_code)]
+const ACL_TYPE_ACCESS: libc::c_uint = 0x8000;
+#[allow(dead_code)]
+const ACL_TYPE_DEFAULT: libc::c_uint = 0x4000;
+
+/// `acl_t` is an opaque handle.
+#[allow(dead_code)]
+type AclT = *mut libc::c_void;
+#[allow(dead_code)]
+type AclFromTextFn = unsafe extern "C" fn(*const libc::c_char) -> AclT;
+#[allow(dead_code)]
+type AclSetFileFn = unsafe extern "C" fn(*const libc::c_char, libc::c_uint, AclT) -> libc::c_int;
+#[allow(dead_code)]
+type AclFreeFn = unsafe extern "C" fn(*mut libc::c_void) -> libc::c_int;
+
+/// Apply a complete POSIX ACL (setfacl text form) to `path` via libacl, with no
+/// external binary. `acl_type` is [`ACL_TYPE_ACCESS`] or [`ACL_TYPE_DEFAULT`].
+///
+/// The text must be a full, valid ACL for the type (base user/group/other
+/// entries plus a mask when there are named entries); splitting a tmpfiles ACL
+/// argument into access/default parts and computing the mask is a later step.
+#[allow(dead_code)]
+fn acl_set_file_from_text(path: &Path, acl_type: libc::c_uint, text: &str) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_lib = std::ffi::CString::new(ACL_LIB_PATH)
+        .map_err(|_| "ACL_LIB path contains a NUL byte".to_string())?;
+    let c_text =
+        std::ffi::CString::new(text).map_err(|_| "ACL text contains a NUL byte".to_string())?;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "path contains a NUL byte".to_string())?;
+
+    let handle = unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_NOW) };
+    if handle.is_null() {
+        return Err(format!("dlopen({ACL_LIB_PATH}) failed"));
+    }
+
+    macro_rules! sym {
+        ($name:literal, $ty:ty) => {{
+            let s =
+                unsafe { libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char) };
+            if s.is_null() {
+                unsafe { libc::dlclose(handle) };
+                return Err(format!("dlsym({}) failed", $name));
+            }
+            unsafe { std::mem::transmute::<*mut libc::c_void, $ty>(s) }
+        }};
+    }
+
+    let acl_from_text = sym!("acl_from_text", AclFromTextFn);
+    let acl_set_file = sym!("acl_set_file", AclSetFileFn);
+    let acl_free = sym!("acl_free", AclFreeFn);
+
+    let acl = unsafe { acl_from_text(c_text.as_ptr()) };
+    if acl.is_null() {
+        let e = std::io::Error::last_os_error();
+        unsafe { libc::dlclose(handle) };
+        return Err(format!("acl_from_text({text:?}) failed: {e}"));
+    }
+
+    let rc = unsafe { acl_set_file(c_path.as_ptr(), acl_type, acl) };
+    // Capture errno before the cleanup calls can reset it.
+    let err = (rc != 0).then(std::io::Error::last_os_error);
+
+    unsafe {
+        acl_free(acl);
+        libc::dlclose(handle);
+    }
+
+    match err {
+        Some(e) => Err(format!("acl_set_file({}) failed: {e}", path.display())),
+        None => Ok(()),
+    }
+}
+
 /// Directories to search for tmpfiles.d configuration, in priority order.
 /// Earlier directories take precedence when the same filename exists in multiple.
 const CONFIG_DIRS: &[&str] = &[
@@ -3353,6 +3448,55 @@ mod tests {
 
         assert!(execute_create(&item, true, None));
         assert!(dir.is_dir());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_libacl_set_file_from_text() {
+        // Foundation for the setfacl->libacl port: apply a complete POSIX ACL via
+        // the libacl FFI (dlopen) and confirm with getfacl. Skips gracefully when
+        // libacl cannot be dlopened (no ACL_LIB baked and no libacl.so.1 on the
+        // loader path) or getfacl is unavailable, so it stays green in minimal
+        // environments; it runs for real when ACL_LIB is baked (the Nix build).
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_libacl_set_file_from_text: getfacl unavailable");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-libacl");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acl-target");
+        fs::write(&file, b"x").unwrap();
+
+        // A complete access ACL: base user/group/other entries + a mask + a
+        // named user (root). libacl requires the full valid ACL to set it.
+        let text = "u::rw-,g::r--,o::r--,u:0:rwx,m::rwx";
+        match acl_set_file_from_text(&file, ACL_TYPE_ACCESS, text) {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_libacl_set_file_from_text: {e}");
+                let _ = fs::remove_dir_all(&dir);
+                return;
+            }
+            Err(e) => panic!("acl_set_file_from_text failed: {e}"),
+        }
+
+        let out = std::process::Command::new("getfacl")
+            .arg("-n")
+            .arg(&file)
+            .output()
+            .expect("run getfacl");
+        let acl = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            acl.contains("user:0:rwx"),
+            "expected 'user:0:rwx' via libacl, got:\n{acl}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

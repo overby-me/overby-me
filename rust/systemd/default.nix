@@ -58,6 +58,7 @@ in {
           # systemd-tmpfiles-setup service's minimal $PATH.
           systemd-tmpfiles = {
             ACL_SETFACL = "${acl}/bin/setfacl";
+            ACL_LIB = "${acl.out}/lib/libacl.so.1";
           };
           # systemd-sysusers shells out to useradd/groupadd/chage; bake shadow's
           # bin dir (SHADOW_BIN) so they resolve from a minimal service $PATH.
@@ -113,6 +114,7 @@ in {
           # systemd-tmpfiles-setup service's minimal $PATH.
           systemd-tmpfiles = {
             ACL_SETFACL = "${acl}/bin/setfacl";
+            ACL_LIB = "${acl.out}/lib/libacl.so.1";
           };
           # systemd-sysusers shells out to useradd/groupadd/chage; bake shadow's
           # bin dir (SHADOW_BIN) so they resolve from a minimal service $PATH.
