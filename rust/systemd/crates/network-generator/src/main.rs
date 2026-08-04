@@ -34,10 +34,6 @@ use std::process;
 const DEFAULT_OUTPUT_DIR: &str = "/run/systemd/network";
 const PROC_CMDLINE: &str = "/proc/cmdline";
 
-/// Prefix for generated files (71- ensures they come after default configs but
-/// before administrator overrides at 80+).
-const FILE_PREFIX: &str = "71";
-
 // ── Data model ─────────────────────────────────────────────────────────────
 
 /// Parsed kernel `ip=` parameter.
@@ -102,6 +98,25 @@ struct BridgeConfig {
 struct TeamConfig {
     name: String,
     members: Vec<String>,
+}
+
+/// Per-interface `[Network]` settings accumulated from `vlan=`/`bond=`/`bridge=`.
+/// C keys its Networks by interface name and merges these with any `ip=` config
+/// into a single `70-<ifname>.network`.
+#[derive(Debug, Default)]
+struct NetworkExtra {
+    vlans: Vec<String>,
+    bridge: Option<String>,
+    bond: Option<String>,
+}
+
+/// A `.netdev` device (`vlan`/`bond`/`bridge`), emitted as `70-<name>.netdev`.
+#[derive(Debug)]
+struct NetDev {
+    kind: String,
+    name: String,
+    mtu: String,
+    vlan_id: Option<u16>,
 }
 
 /// Parsed `ifname=` parameter: `<interface>:<mac>`.
@@ -671,25 +686,6 @@ fn looks_like_ip(s: &str) -> bool {
 fn generate(config: &CmdlineConfig) -> GeneratedFiles {
     let mut files = GeneratedFiles::new();
 
-    // Track which devices are slaves/members of aggregate devices so we don't
-    // generate standalone .network files for them.
-    let mut aggregate_slaves: BTreeSet<String> = BTreeSet::new();
-    for bond in &config.bonds {
-        for slave in &bond.slaves {
-            aggregate_slaves.insert(slave.clone());
-        }
-    }
-    for bridge in &config.bridges {
-        for member in &bridge.members {
-            aggregate_slaves.insert(member.clone());
-        }
-    }
-    for team in &config.teams {
-        for member in &team.members {
-            aggregate_slaves.insert(member.clone());
-        }
-    }
-
     // Generate .link files for ifname= parameters.
     for ifn in &config.ifnames {
         generate_ifname(&mut files, ifn);
@@ -703,31 +699,52 @@ fn generate(config: &CmdlineConfig) -> GeneratedFiles {
     // net.ifnames= is consumed by udev, not this generator; C's
     // systemd-network-generator writes no file for it, so neither do we.
 
-    // Generate VLAN .netdev and .network files.
+    // Build netdevs and per-interface [Network] membership from vlan=/bond=/
+    // bridge=. Each creates a 70-<name>.netdev; the parent (vlan) or each member
+    // (bond/bridge) gets a VLAN=/Bond=/Bridge= entry merged into its .network.
+    // team= is NOT a C kernel-command-line option, so C emits nothing for it.
+    let mut netdevs: Vec<NetDev> = Vec::new();
+    let mut extra: BTreeMap<String, NetworkExtra> = BTreeMap::new();
     for vlan in &config.vlans {
-        generate_vlan(&mut files, vlan);
+        netdevs.push(NetDev {
+            kind: "vlan".to_string(),
+            name: vlan.name.clone(),
+            mtu: String::new(),
+            vlan_id: Some(vlan.id),
+        });
+        extra
+            .entry(vlan.parent.clone())
+            .or_default()
+            .vlans
+            .push(vlan.name.clone());
     }
-
-    // Generate bond .netdev, slave .network, and bond .network files.
     for bond in &config.bonds {
-        generate_bond(&mut files, bond);
+        netdevs.push(NetDev {
+            kind: "bond".to_string(),
+            name: bond.name.clone(),
+            mtu: bond.mtu.clone(),
+            vlan_id: None,
+        });
+        for slave in &bond.slaves {
+            extra.entry(slave.clone()).or_default().bond = Some(bond.name.clone());
+        }
     }
-
-    // Generate bridge .netdev, member .network, and bridge .network files.
     for bridge in &config.bridges {
-        generate_bridge(&mut files, bridge);
+        netdevs.push(NetDev {
+            kind: "bridge".to_string(),
+            name: bridge.name.clone(),
+            mtu: String::new(),
+            vlan_id: None,
+        });
+        for member in &bridge.members {
+            extra.entry(member.clone()).or_default().bridge = Some(bridge.name.clone());
+        }
+    }
+    for nd in &netdevs {
+        emit_netdev(&mut files, nd);
     }
 
-    // Generate team .netdev, member .network, and team .network files.
-    for team in &config.teams {
-        generate_team(&mut files, team);
-    }
-
-    // Group rd.route= entries by device ("" = unbound, applying to the
-    // deviceless default network). C merges routes into the interface's own
-    // .network; because systemd applies only one matching .network per link, a
-    // route emitted as a separate file is silently ignored when the interface
-    // also has an ip= config, so we merge instead.
+    // Group rd.route= by device ("" = unbound / deviceless default network).
     let mut routes_by_device: BTreeMap<String, Vec<&RouteConfig>> = BTreeMap::new();
     for route in &config.routes {
         routes_by_device
@@ -736,34 +753,36 @@ fn generate(config: &CmdlineConfig) -> GeneratedFiles {
             .push(route);
     }
 
-    // Generate .network files for ip= parameters, merging in any routes bound to
-    // the same device (the deviceless default network absorbs unbound routes).
-    let mut devices_with_ip: BTreeSet<String> = BTreeSet::new();
+    // Every interface that needs a .network: any with an ip= config, a
+    // vlan/bond/bridge membership, or a route. C keys its Networks by interface
+    // and merges all of these into one 70-<ifname>.network (or 71-default for
+    // the deviceless set), because systemd applies only one .network per link.
+    let mut ifnames: BTreeSet<String> = BTreeSet::new();
     for ip in &config.ip_configs {
-        devices_with_ip.insert(ip.device.clone());
-        let empty: Vec<&RouteConfig> = Vec::new();
-        let dev_routes = routes_by_device.get(&ip.device).unwrap_or(&empty);
-        generate_ip_network(
-            &mut files,
-            ip,
-            &config.nameservers,
-            config.peer_dns,
-            &aggregate_slaves,
-            dev_routes,
-        );
+        ifnames.insert(ip.device.clone());
+    }
+    for k in extra.keys() {
+        ifnames.insert(k.clone());
+    }
+    for k in routes_by_device.keys() {
+        ifnames.insert(k.clone());
     }
 
-    // Routes for a device (or the unbound set) with no ip= config to merge into
-    // still need their own .network file so the route is not dropped.
-    for (device, routes) in &routes_by_device {
-        if devices_with_ip.contains(device) {
-            continue; // already merged into the ip= network above
-        }
-        if device.is_empty() {
-            generate_catchall_routes(&mut files, routes);
-        } else if !aggregate_slaves.contains(device) {
-            generate_route_only_network(&mut files, device, routes, &[]);
-        }
+    let default_extra = NetworkExtra::default();
+    let no_routes: Vec<&RouteConfig> = Vec::new();
+    for ifname in &ifnames {
+        let ip = config.ip_configs.iter().find(|ip| &ip.device == ifname);
+        let ex = extra.get(ifname).unwrap_or(&default_extra);
+        let rts = routes_by_device.get(ifname).unwrap_or(&no_routes);
+        emit_network(
+            &mut files,
+            ifname,
+            ip,
+            ex,
+            &config.nameservers,
+            config.peer_dns,
+            rts,
+        );
     }
 
     files
@@ -833,251 +852,38 @@ fn generate_ifname_policy(files: &mut GeneratedFiles, pol: &IfnamePolicyConfig) 
     );
 }
 
-/// Generate .netdev and parent .network files for a VLAN.
-fn generate_vlan(files: &mut GeneratedFiles, vlan: &VlanConfig) {
-    let safe_name = sanitize_name(&vlan.name);
-
-    // .netdev file
-    let netdev_name = format!("{}-vlan-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: vlan={}:{}",
-        vlan.name, vlan.parent
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", vlan.name).unwrap();
-    writeln!(content, "Kind=vlan").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[VLAN]").unwrap();
-    writeln!(content, "Id={}", vlan.id).unwrap();
-    files.add(netdev_name, content);
-
-    // Parent .network file to attach the VLAN.
-    let network_name = format!("{}-vlan-{}-parent.network", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(content, "# Parent network for VLAN {}", vlan.name).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "Name={}", vlan.parent).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Network]").unwrap();
-    writeln!(content, "VLAN={}", vlan.name).unwrap();
-    files.add(network_name, content);
-}
-
-/// Generate .netdev, slave .network, and bond .network files.
-fn generate_bond(files: &mut GeneratedFiles, bond: &BondConfig) {
-    let safe_name = sanitize_name(&bond.name);
-
-    // .netdev file
-    let netdev_name = format!("{}-bond-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: bond={}:{}",
-        bond.name,
-        bond.slaves.join(",")
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", bond.name).unwrap();
-    writeln!(content, "Kind=bond").unwrap();
-    if !bond.mtu.is_empty() {
-        writeln!(content, "MTUBytes={}", bond.mtu).unwrap();
-    }
-
-    // Parse bond options (comma-separated key=value or dracut-style).
-    if !bond.options.is_empty() {
-        writeln!(content).unwrap();
-        writeln!(content, "[Bond]").unwrap();
-        let bond_opts = parse_bond_options(&bond.options);
-        for (key, value) in &bond_opts {
-            writeln!(content, "{}={}", key, value).unwrap();
-        }
-    }
-
-    files.add(netdev_name, content);
-
-    // Slave .network files.
-    for slave in &bond.slaves {
-        let slave_name = format!(
-            "{}-bond-{}-slave-{}.network",
-            FILE_PREFIX,
-            safe_name,
-            sanitize_name(slave)
-        );
-        let mut content = String::new();
-        writeln!(
-            content,
-            "# Automatically generated by systemd-network-generator"
-        )
-        .unwrap();
-        writeln!(content, "# Bond {} slave: {}", bond.name, slave).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Match]").unwrap();
-        writeln!(content, "Name={}", slave).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Network]").unwrap();
-        writeln!(content, "Bond={}", bond.name).unwrap();
-        files.add(slave_name, content);
-    }
-}
-
-/// Generate .netdev, member .network, and bridge .network files.
-fn generate_bridge(files: &mut GeneratedFiles, bridge: &BridgeConfig) {
-    let safe_name = sanitize_name(&bridge.name);
-
-    // .netdev file
-    let netdev_name = format!("{}-bridge-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: bridge={}:{}",
-        bridge.name,
-        bridge.members.join(",")
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", bridge.name).unwrap();
-    writeln!(content, "Kind=bridge").unwrap();
-    files.add(netdev_name, content);
-
-    // Member .network files.
-    for member in &bridge.members {
-        let member_name = format!(
-            "{}-bridge-{}-member-{}.network",
-            FILE_PREFIX,
-            safe_name,
-            sanitize_name(member)
-        );
-        let mut content = String::new();
-        writeln!(
-            content,
-            "# Automatically generated by systemd-network-generator"
-        )
-        .unwrap();
-        writeln!(content, "# Bridge {} member: {}", bridge.name, member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Match]").unwrap();
-        writeln!(content, "Name={}", member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Network]").unwrap();
-        writeln!(content, "Bridge={}", bridge.name).unwrap();
-        files.add(member_name, content);
-    }
-}
-
-/// Generate .netdev, member .network, and team .network files.
-/// Teams in networkd are implemented as bonds (there's no native team kind).
-fn generate_team(files: &mut GeneratedFiles, team: &TeamConfig) {
-    let safe_name = sanitize_name(&team.name);
-
-    // .netdev file — use bond kind as networkd has no native team support
-    let netdev_name = format!("{}-team-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: team={}:{}",
-        team.name,
-        team.members.join(",")
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", team.name).unwrap();
-    writeln!(content, "Kind=bond").unwrap();
-    files.add(netdev_name, content);
-
-    // Member .network files.
-    for member in &team.members {
-        let member_name = format!(
-            "{}-team-{}-member-{}.network",
-            FILE_PREFIX,
-            safe_name,
-            sanitize_name(member)
-        );
-        let mut content = String::new();
-        writeln!(
-            content,
-            "# Automatically generated by systemd-network-generator"
-        )
-        .unwrap();
-        writeln!(content, "# Team {} member: {}", team.name, member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Match]").unwrap();
-        writeln!(content, "Name={}", member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Network]").unwrap();
-        writeln!(content, "Bond={}", team.name).unwrap();
-        files.add(member_name, content);
-    }
-}
-
-/// Generate a .network file for an `ip=` configuration.
-fn generate_ip_network(
+/// Emit one merged `70-<ifname>.network` (or `71-default.network` when
+/// deviceless), matching C's network_dump. The `[Network]` section carries the
+/// `ip=` DHCP/DNS/NTP settings, the `VLAN=`/`Bridge=`/`Bond=` membership from
+/// vlan=/bond=/bridge=, and trailing `[Route]` blocks from rd.route=. C keys its
+/// Networks by interface, so all of these merge into a single file per link.
+fn emit_network(
     files: &mut GeneratedFiles,
-    ip: &IpConfig,
+    ifname: &str,
+    ip: Option<&IpConfig>,
+    extra: &NetworkExtra,
     nameservers: &[String],
     peer_dns: Option<bool>,
-    aggregate_slaves: &BTreeSet<String>,
     routes: &[&RouteConfig],
 ) {
-    // Skip if this device is a bond slave / bridge member.
-    if !ip.device.is_empty() && aggregate_slaves.contains(&ip.device) {
+    // ibft interfaces are brought up by the initrd; C emits no .network.
+    if ip.is_some_and(|ip| ip.autoconf == "ibft") {
         return;
     }
 
-    let is_dhcp6 = ip.autoconf == "dhcp6";
-    let is_auto6 = ip.autoconf == "auto6";
-    let is_off = matches!(ip.autoconf.as_str(), "off" | "none");
-    let is_static = is_off && !ip.client_ip.is_empty();
-    let is_ibft = ip.autoconf == "ibft";
-
-    // Don't generate anything for ibft — it's handled separately.
-    if is_ibft {
-        return;
-    }
-
-    // Filename mirrors C's systemd-network-generator: "70-<ifname>.network"
-    // when an interface is named, else "71-default.network" (the "70" prefix
-    // gives a named interface priority over the catch-all default).
-    let (prefix, suffix) = if ip.device.is_empty() {
-        ("71", "default".to_string())
+    // "70-<ifname>.network" for a named interface, else "71-default.network"
+    // (the "70" prefix gives a named interface priority over the catch-all).
+    // C uses the raw interface name in the filename (e.g. "70-eth0.100.network").
+    let (prefix, suffix) = if ifname.is_empty() {
+        ("71", "default")
     } else {
-        ("70", sanitize_name(&ip.device))
+        ("70", ifname)
     };
     let filename = format!("{prefix}-{suffix}.network");
 
+    let is_off = ip.is_some_and(|ip| matches!(ip.autoconf.as_str(), "off" | "none"));
+    let is_static = is_off && ip.is_some_and(|ip| !ip.client_ip.is_empty());
+
     let mut content = String::new();
     writeln!(
         content,
@@ -1086,88 +892,89 @@ fn generate_ip_network(
     .unwrap();
     writeln!(content).unwrap();
 
-    // The section layout mirrors C's network_dump (network-generator.c):
-    // [Match], then an always-present [Link] (MAC/MTU are not set from ip=, so
-    // it stays empty), [Network], and an always-present [DHCP], followed by
-    // per-address [Address] and per-route [Route] blocks.
-
     // [Match]
     writeln!(content, "[Match]").unwrap();
-    if ip.device.is_empty() {
-        // No interface named: match every physical (non-loopback) interface.
+    if ifname.is_empty() {
         writeln!(content, "Kind=!*").unwrap();
         writeln!(content, "Type=!loopback").unwrap();
     } else {
-        writeln!(content, "Name={}", ip.device).unwrap();
+        writeln!(content, "Name={ifname}").unwrap();
     }
 
-    // [Link]
+    // [Link] (MAC/MTU are not set from these inputs, so it stays empty).
     writeln!(content, "\n[Link]").unwrap();
 
-    // [Network]
+    // [Network] — entry order matches C's network_dump: DHCP, LinkLocal, RA,
+    // DNS, VLAN, Bridge, Bond, NTP.
     writeln!(content, "\n[Network]").unwrap();
-    let dhcp = if is_dhcp6 {
-        "ipv6"
-    } else if is_auto6 || is_off {
-        "no"
-    } else if ip.autoconf == "dhcp" {
-        "ipv4"
-    } else {
-        // "on"/"any"/unspecified.
-        "yes"
-    };
-    writeln!(content, "DHCP={dhcp}").unwrap();
-    // C emits LinkLocalAddressing=no + IPv6AcceptRA=no for the off/none types
-    // (which cover a static assignment), but not for auto6/dhcp.
-    if is_off {
-        writeln!(content, "LinkLocalAddressing=no").unwrap();
-        writeln!(content, "IPv6AcceptRA=no").unwrap();
+    if let Some(ip) = ip {
+        let dhcp = if ip.autoconf == "dhcp6" {
+            "ipv6"
+        } else if ip.autoconf == "auto6" || is_off {
+            "no"
+        } else if ip.autoconf == "dhcp" {
+            "ipv4"
+        } else {
+            "yes"
+        };
+        writeln!(content, "DHCP={dhcp}").unwrap();
+        if is_off {
+            writeln!(content, "LinkLocalAddressing=no").unwrap();
+            writeln!(content, "IPv6AcceptRA=no").unwrap();
+        }
+        if !ip.dns0.is_empty() {
+            writeln!(content, "DNS={}", ip.dns0).unwrap();
+        }
+        if !ip.dns1.is_empty() {
+            writeln!(content, "DNS={}", ip.dns1).unwrap();
+        }
+        for ns in nameservers {
+            writeln!(content, "DNS={ns}").unwrap();
+        }
     }
-    // DNS servers (from ip= inline + nameserver=) are always listed; whether
-    // DHCP-provided DNS is used is a separate UseDNS= in [DHCP].
-    if !ip.dns0.is_empty() {
-        writeln!(content, "DNS={}", ip.dns0).unwrap();
+    for v in &extra.vlans {
+        writeln!(content, "VLAN={v}").unwrap();
     }
-    if !ip.dns1.is_empty() {
-        writeln!(content, "DNS={}", ip.dns1).unwrap();
+    if let Some(bridge) = &extra.bridge {
+        writeln!(content, "Bridge={bridge}").unwrap();
     }
-    for ns in nameservers {
-        writeln!(content, "DNS={ns}").unwrap();
+    if let Some(bond) = &extra.bond {
+        writeln!(content, "Bond={bond}").unwrap();
     }
-    if !ip.ntp0.is_empty() {
+    if let Some(ip) = ip
+        && !ip.ntp0.is_empty()
+    {
         writeln!(content, "NTP={}", ip.ntp0).unwrap();
     }
 
     // [DHCP]
     writeln!(content, "\n[DHCP]").unwrap();
-    if !ip.hostname.is_empty() {
-        writeln!(content, "Hostname={}", ip.hostname).unwrap();
-    }
-    match peer_dns {
-        Some(true) => writeln!(content, "UseDNS=yes").unwrap(),
-        Some(false) => writeln!(content, "UseDNS=no").unwrap(),
-        None => {}
+    if let Some(ip) = ip {
+        if !ip.hostname.is_empty() {
+            writeln!(content, "Hostname={}", ip.hostname).unwrap();
+        }
+        match peer_dns {
+            Some(true) => writeln!(content, "UseDNS=yes").unwrap(),
+            Some(false) => writeln!(content, "UseDNS=no").unwrap(),
+            None => {}
+        }
     }
 
-    // [Address] block for a static address.
-    if is_static {
+    // [Address]/[Route] for a static ip=.
+    if let Some(ip) = ip
+        && is_static
+    {
         let address = format_address(&ip.client_ip, &ip.netmask);
         writeln!(content, "\n[Address]").unwrap();
         writeln!(content, "Address={address}").unwrap();
+        if !ip.gateway.is_empty() {
+            writeln!(content, "\n[Route]").unwrap();
+            writeln!(content, "Gateway={}", ip.gateway).unwrap();
+        }
     }
 
-    // [Route] block for a static gateway.
-    if is_static && !ip.gateway.is_empty() {
-        writeln!(content, "\n[Route]").unwrap();
-        writeln!(content, "Gateway={}", ip.gateway).unwrap();
-    }
-
-    // [Route] blocks for rd.route= entries bound to this device (or, for the
-    // deviceless default network, the unbound routes). C merges these into the
-    // interface's .network rather than a separate file, so that systemd (which
-    // applies only one matching .network per link) still honors them. C keeps
-    // its route list head-first (LIST_PREPEND), so it emits them in reverse of
-    // the command-line order.
+    // [Route] blocks for rd.route= entries. C keeps its route list head-first
+    // (LIST_PREPEND), so it emits them in reverse of the command-line order.
     for route in routes.iter().rev() {
         writeln!(content, "\n[Route]").unwrap();
         writeln!(content, "Destination={}", route.destination).unwrap();
@@ -1177,61 +984,29 @@ fn generate_ip_network(
     files.add(filename, content);
 }
 
-/// Generate a .network file that only carries routes for a device.
-fn generate_route_only_network(
-    files: &mut GeneratedFiles,
-    device: &str,
-    routes: &[&RouteConfig],
-    unbound_routes: &[&RouteConfig],
-) {
-    let filename = format!("{}-route-{}.network", FILE_PREFIX, sanitize_name(device));
+/// Emit a `70-<name>.netdev` matching C's netdev_dump: Kind, Name, optional
+/// MTUBytes, and a `[VLAN] Id` section for vlan kinds. C emits no `[Bond]`
+/// section, so bond options are dropped.
+fn emit_netdev(files: &mut GeneratedFiles, nd: &NetDev) {
+    // C uses the raw device name (e.g. "70-eth0.100.netdev").
+    let filename = format!("70-{}.netdev", nd.name);
     let mut content = String::new();
     writeln!(
         content,
         "# Automatically generated by systemd-network-generator"
     )
     .unwrap();
-    writeln!(content, "# from kernel command line rd.route= parameters").unwrap();
     writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "Name={}", device).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Network]").unwrap();
-
-    for route in routes.iter().chain(unbound_routes.iter()) {
-        writeln!(content).unwrap();
-        writeln!(content, "[Route]").unwrap();
-        writeln!(content, "Destination={}", route.destination).unwrap();
-        writeln!(content, "Gateway={}", route.gateway).unwrap();
+    writeln!(content, "[NetDev]").unwrap();
+    writeln!(content, "Kind={}", nd.kind).unwrap();
+    writeln!(content, "Name={}", nd.name).unwrap();
+    if !nd.mtu.is_empty() {
+        writeln!(content, "MTUBytes={}", nd.mtu).unwrap();
     }
-
-    files.add(filename, content);
-}
-
-/// Generate a catch-all .network for unbound routes when there are no ip= configs.
-fn generate_catchall_routes(files: &mut GeneratedFiles, routes: &[&RouteConfig]) {
-    let filename = format!("{}-route-default.network", FILE_PREFIX);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(content, "# from kernel command line rd.route= parameters").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "Name=*").unwrap();
-    writeln!(content, "Type=!loopback").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Network]").unwrap();
-
-    for route in routes {
-        writeln!(content).unwrap();
-        writeln!(content, "[Route]").unwrap();
-        writeln!(content, "Destination={}", route.destination).unwrap();
-        writeln!(content, "Gateway={}", route.gateway).unwrap();
+    if let Some(id) = nd.vlan_id {
+        writeln!(content, "\n[VLAN]").unwrap();
+        writeln!(content, "Id={id}").unwrap();
     }
-
     files.add(filename, content);
 }
 
@@ -2414,23 +2189,20 @@ mod tests {
 
     #[test]
     fn test_generate_vlan() {
+        // C: a 70-<vlan>.netdev plus the parent's 70-<parent>.network with VLAN=.
+        // The raw interface name (with its dot) is used in the filename.
         let config = parse_cmdline("vlan=eth0.100:eth0");
         let files = generate(&config);
 
-        // Check .netdev file.
-        assert!(files.files.contains_key("71-vlan-eth0-100.netdev"));
-        let netdev = &files.files["71-vlan-eth0-100.netdev"];
-        assert!(netdev.contains("[NetDev]"));
-        assert!(netdev.contains("Name=eth0.100"));
-        assert!(netdev.contains("Kind=vlan"));
-        assert!(netdev.contains("[VLAN]"));
-        assert!(netdev.contains("Id=100"));
+        let netdev = &files.files["70-eth0.100.netdev"];
+        assert!(netdev.contains("[NetDev]\nKind=vlan\nName=eth0.100\n"), "{netdev}");
+        assert!(netdev.contains("[VLAN]\nId=100\n"), "{netdev}");
 
-        // Check parent .network file.
-        assert!(files.files.contains_key("71-vlan-eth0-100-parent.network"));
-        let network = &files.files["71-vlan-eth0-100-parent.network"];
-        assert!(network.contains("Name=eth0"));
-        assert!(network.contains("VLAN=eth0.100"));
+        let network = &files.files["70-eth0.network"];
+        assert!(network.contains("Name=eth0"), "{network}");
+        assert!(network.contains("VLAN=eth0.100"), "{network}");
+        // The vlan device itself gets no .network (only the netdev).
+        assert!(!files.files.contains_key("70-eth0.100.network"));
     }
 
     #[test]
@@ -2438,22 +2210,18 @@ mod tests {
         let config = parse_cmdline("bond=bond0:eth0,eth1:mode=802.3ad,miimon=100:9000");
         let files = generate(&config);
 
-        // Check .netdev file.
-        assert!(files.files.contains_key("71-bond-bond0.netdev"));
-        let netdev = &files.files["71-bond-bond0.netdev"];
-        assert!(netdev.contains("Name=bond0"));
-        assert!(netdev.contains("Kind=bond"));
-        assert!(netdev.contains("MTUBytes=9000"));
-        assert!(netdev.contains("[Bond]"));
-        assert!(netdev.contains("Mode=802.3ad"));
-        assert!(netdev.contains("MIIMonitorSec=100"));
+        let netdev = &files.files["70-bond0.netdev"];
+        assert!(netdev.contains("Kind=bond"), "{netdev}");
+        assert!(netdev.contains("Name=bond0"), "{netdev}");
+        assert!(netdev.contains("MTUBytes=9000"), "{netdev}");
+        // C's netdev_dump emits no [Bond] section, so bond options are dropped.
+        assert!(!netdev.contains("[Bond]"), "{netdev}");
 
-        // Check slave .network files.
-        assert!(files.files.contains_key("71-bond-bond0-slave-eth0.network"));
-        assert!(files.files.contains_key("71-bond-bond0-slave-eth1.network"));
-        let slave0 = &files.files["71-bond-bond0-slave-eth0.network"];
-        assert!(slave0.contains("Name=eth0"));
-        assert!(slave0.contains("Bond=bond0"));
+        // Each member gets its own 70-<member>.network with Bond=.
+        let eth0 = &files.files["70-eth0.network"];
+        assert!(eth0.contains("Name=eth0"), "{eth0}");
+        assert!(eth0.contains("Bond=bond0"), "{eth0}");
+        assert!(files.files["70-eth1.network"].contains("Bond=bond0"));
     }
 
     #[test]
@@ -2461,80 +2229,66 @@ mod tests {
         let config = parse_cmdline("bridge=br0:eth0,eth1");
         let files = generate(&config);
 
-        // Check .netdev file.
-        assert!(files.files.contains_key("71-bridge-br0.netdev"));
-        let netdev = &files.files["71-bridge-br0.netdev"];
-        assert!(netdev.contains("Name=br0"));
-        assert!(netdev.contains("Kind=bridge"));
+        let netdev = &files.files["70-br0.netdev"];
+        assert!(netdev.contains("Kind=bridge"), "{netdev}");
+        assert!(netdev.contains("Name=br0"), "{netdev}");
 
-        // Check member .network files.
-        assert!(
-            files
-                .files
-                .contains_key("71-bridge-br0-member-eth0.network")
-        );
-        assert!(
-            files
-                .files
-                .contains_key("71-bridge-br0-member-eth1.network")
-        );
-        let member = &files.files["71-bridge-br0-member-eth0.network"];
-        assert!(member.contains("Bridge=br0"));
+        assert!(files.files["70-eth0.network"].contains("Bridge=br0"));
+        assert!(files.files["70-eth1.network"].contains("Bridge=br0"));
     }
 
     #[test]
     fn test_generate_team() {
+        // team= is not a C kernel-command-line option, so C emits nothing.
         let config = parse_cmdline("team=team0:eth0,eth1");
         let files = generate(&config);
-
-        // Teams are implemented as bonds.
-        assert!(files.files.contains_key("71-team-team0.netdev"));
-        let netdev = &files.files["71-team-team0.netdev"];
-        assert!(netdev.contains("Kind=bond"));
-
         assert!(
-            files
-                .files
-                .contains_key("71-team-team0-member-eth0.network")
+            files.files.is_empty(),
+            "{:?}",
+            files.files.keys().collect::<Vec<_>>()
         );
     }
 
     #[test]
-    fn test_generate_bond_slaves_not_standalone() {
-        // Bond slaves should not get standalone .network files from ip=.
+    fn test_bond_member_merges_ip() {
+        // A bond member that also has ip= gets ONE merged 70-<member>.network
+        // with both DHCP and Bond= (C keys Networks by interface).
         let config = parse_cmdline("bond=bond0:eth0,eth1 ip=eth0:dhcp");
         let files = generate(&config);
-        // eth0 is a bond slave; the ip=eth0:dhcp should be suppressed.
-        assert!(!files.files.contains_key("70-eth0.network"));
+        let eth0 = &files.files["70-eth0.network"];
+        assert!(eth0.contains("DHCP=ipv4"), "{eth0}");
+        assert!(eth0.contains("Bond=bond0"), "{eth0}");
     }
 
     #[test]
-    fn test_generate_bridge_members_not_standalone() {
+    fn test_bridge_member_merges_ip() {
         let config = parse_cmdline("bridge=br0:eth0 ip=eth0:dhcp");
         let files = generate(&config);
-        assert!(!files.files.contains_key("70-eth0.network"));
+        let eth0 = &files.files["70-eth0.network"];
+        assert!(eth0.contains("DHCP=ipv4"), "{eth0}");
+        assert!(eth0.contains("Bridge=br0"), "{eth0}");
     }
 
     #[test]
     fn test_generate_route_with_device() {
+        // A route-only device gets its own 70-<dev>.network with the [Route].
         let config = parse_cmdline("rd.route=10.0.0.0/8:192.168.1.1:eth0");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-route-eth0.network"));
-        let content = &files.files["71-route-eth0.network"];
-        assert!(content.contains("Name=eth0"));
-        assert!(content.contains("[Route]"));
-        assert!(content.contains("Destination=10.0.0.0/8"));
-        assert!(content.contains("Gateway=192.168.1.1"));
+        let content = &files.files["70-eth0.network"];
+        assert!(content.contains("Name=eth0"), "{content}");
+        assert!(content.contains("[Route]"), "{content}");
+        assert!(content.contains("Destination=10.0.0.0/8"), "{content}");
+        assert!(content.contains("Gateway=192.168.1.1"), "{content}");
     }
 
     #[test]
     fn test_generate_route_without_device() {
+        // An unbound route goes into the deviceless 71-default.network.
         let config = parse_cmdline("rd.route=10.0.0.0/8:192.168.1.1");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-route-default.network"));
-        let content = &files.files["71-route-default.network"];
-        assert!(content.contains("Name=*"));
-        assert!(content.contains("Destination=10.0.0.0/8"));
+        let content = &files.files["71-default.network"];
+        assert!(content.contains("Kind=!*"), "{content}");
+        assert!(content.contains("Destination=10.0.0.0/8"), "{content}");
     }
 
     #[test]
@@ -2652,19 +2406,14 @@ mod tests {
         let code = run(cmdline_file.to_str().unwrap(), &output_dir);
         assert_eq!(code, 0);
 
-        // Verify key files exist.
-        assert!(output_dir.join("70-eth0.network").exists());
-        assert!(output_dir.join("71-bond-bond0.netdev").exists());
-        assert!(output_dir.join("71-bond-bond0-slave-eth1.network").exists());
-        assert!(output_dir.join("71-bond-bond0-slave-eth2.network").exists());
-        assert!(output_dir.join("71-vlan-bond0-100.netdev").exists());
-        assert!(output_dir.join("71-vlan-bond0-100-parent.network").exists());
-        assert!(output_dir.join("71-bridge-br0.netdev").exists());
-        assert!(
-            output_dir
-                .join("71-bridge-br0-member-eth3.network")
-                .exists()
-        );
+        // Verify key files exist, in C's merged-per-interface naming.
+        assert!(output_dir.join("70-eth0.network").exists()); // ip=dhcp + route
+        assert!(output_dir.join("70-bond0.netdev").exists());
+        assert!(output_dir.join("70-eth1.network").exists()); // bond member
+        assert!(output_dir.join("70-eth2.network").exists()); // bond member
+        assert!(output_dir.join("70-bond0.100.netdev").exists()); // vlan on bond0
+        assert!(output_dir.join("70-br0.netdev").exists());
+        assert!(output_dir.join("70-eth3.network").exists()); // bridge member
         assert!(output_dir.join("70-lan0.link").exists());
         // net.ifnames= is a udev concern; the generator writes no file for it.
         assert!(!output_dir.join("71-net-ifnames.link").exists());
@@ -2674,9 +2423,18 @@ mod tests {
     fn test_generate_multiple_vlans() {
         let config = parse_cmdline("vlan=eth0.100:eth0 vlan=eth0.200:eth0");
         let files = generate(&config);
-        assert_eq!(files.files.len(), 4); // 2 netdev + 2 parent network
-        assert!(files.files.contains_key("71-vlan-eth0-100.netdev"));
-        assert!(files.files.contains_key("71-vlan-eth0-200.netdev"));
+        // Two netdevs plus ONE merged parent network carrying both VLANs.
+        assert_eq!(
+            files.files.len(),
+            3,
+            "{:?}",
+            files.files.keys().collect::<Vec<_>>()
+        );
+        assert!(files.files.contains_key("70-eth0.100.netdev"));
+        assert!(files.files.contains_key("70-eth0.200.netdev"));
+        let parent = &files.files["70-eth0.network"];
+        assert!(parent.contains("VLAN=eth0.100"), "{parent}");
+        assert!(parent.contains("VLAN=eth0.200"), "{parent}");
     }
 
     #[test]
@@ -2777,7 +2535,7 @@ mod tests {
     fn test_bond_no_options_no_bond_section() {
         let config = parse_cmdline("bond=bond0:eth0,eth1");
         let files = generate(&config);
-        let netdev = &files.files["71-bond-bond0.netdev"];
+        let netdev = &files.files["70-bond0.netdev"];
         assert!(!netdev.contains("[Bond]"));
     }
 

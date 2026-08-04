@@ -64,6 +64,14 @@ fn network_generator_matches_c() {
         &["ip=eth0:dhcp", "rd.route=10.1.0.0/16:192.168.1.1:eth0"],
         &["ip=dhcp", "rd.route=10.9.0.0/16:1.2.3.4"], // -> merged into 71-default
         &["ip=eth0:dhcp", "rd.route=10.1.0.0/16:192.168.1.1:eth0", "rd.route=10.2.0.0/16:192.168.1.1:eth0"],
+        // vlan/bond/bridge: merged per-interface 70-<ifname>.netdev/.network.
+        &["vlan=vlan10:eth0"],
+        &["vlan=eth0.100:eth0"], // dotted device name kept in the filename
+        &["bond=bond0:eth1,eth2:mode=active-backup:1500"], // options dropped like C
+        &["bridge=br0:eth3,eth4"],
+        &["team=team0:eth5,eth6"], // not a C option -> nothing generated
+        &["bond=bond0:eth1,eth2", "ip=eth1:dhcp"], // member merges DHCP + Bond=
+        &["vlan=vlan10:eth0", "ip=eth0:dhcp", "rd.route=10.0.0.0/8:1.2.3.4:eth0"], // triple merge
     ];
 
     let mut div = Vec::new();
