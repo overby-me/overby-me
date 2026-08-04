@@ -59,3 +59,6 @@ differential:
     # fstab → .mount/.swap device-node canonicalization vs systemd-fstab-generator
     SYSTEMD_FSTAB_GENERATOR="$sysd/lib/systemd/system-generators/systemd-fstab-generator" \
       cargo test -p systemd-fstab-generator --test differential_vs_c -- --nocapture
+    # --type/--signal/--state=help compiled-in string tables vs systemctl
+    SYSTEMD_SYSTEMCTL="$sysd/bin/systemctl" \
+      cargo test -p systemctl --test differential_vs_c -- --nocapture
