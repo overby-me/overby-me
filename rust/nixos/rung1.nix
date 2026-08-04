@@ -31,6 +31,8 @@ in {
       lib.mkEnableOption "running the rust systemd-tmpfiles for boot-time tmpfiles setup under C PID 1";
     sysusers.enable =
       lib.mkEnableOption "running the rust systemd-sysusers as a dedicated boot oneshot under C PID 1";
+    timesyncd.enable =
+      lib.mkEnableOption "running the rust systemd-timesyncd daemon under C PID 1 (assumes services.timesyncd.enable)";
   };
 
   config = lib.mkMerge [
@@ -56,6 +58,15 @@ in {
           ExecStart = "${rustSystemd}/bin/systemd-sysusers";
         };
       };
+    })
+    (lib.mkIf cfg.timesyncd.enable {
+      # Redirect the timesyncd daemon (Type=notify) to the rust binary. Not
+      # boot-critical, so a failure fails only this service. Requires the
+      # timesyncd service to be enabled (the NixOS default).
+      systemd.services.systemd-timesyncd.serviceConfig.ExecStart = lib.mkForce [
+        ""
+        "${rustSystemd}/bin/systemd-timesyncd"
+      ];
     })
   ];
 }
