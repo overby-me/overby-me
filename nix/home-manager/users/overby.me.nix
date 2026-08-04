@@ -31,11 +31,18 @@
       ]
     )
     # Linux-only modules: the Zen Browser app plus the home modules that rely
-    # on systemd user units (systemd, vibe).
+    # on systemd user units.
     ++ lib.optionals pkgs.stdenv.isLinux (
       with inputs.self.homeModules; [
         inputs.zen-browser.homeModules.default
         systemd
+      ]
+    )
+    # vibe is built from nix/pkgs, so no binary cache has it and an aarch64
+    # host compiles it under emulation.  It is a desktop audio visualiser,
+    # not worth that on armitas or phone.
+    ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) (
+      with inputs.self.homeModules; [
         vibe
       ]
     );
