@@ -702,4 +702,64 @@ mod tests {
         // `..` after a real component is kept (making the path invalid)
         assert_eq!(normalize_path("/../hello/.."), "hello/..");
     }
+
+    #[test]
+    fn fuzz_unit_name_functions_never_panic() {
+        // Unit names and the paths they escape come from untrusted sources (the
+        // filesystem, D-Bus, `systemd-escape`): a malformed `\xNN` run, a bare
+        // backslash, stray `@`/`-`/`.`, non-ASCII bytes, or an over-long input
+        // must never panic any of the escape/unescape/mangle/template helpers.
+        const TOKENS: &[&str] = &[
+            "\\", "\\x", "\\x2", "\\x2f", "\\xzz", "\\xGG", "-", "--", "@", "@.",
+            ".", "..", "/", "//", "foo", "a-b", "a@b", "@.service", "getty@.service",
+            ".mount", "foo.service", "\\x00", "%i", " ", "\t", "€", ":", "~", "0",
+        ];
+        let handle = std::thread::spawn(move || {
+            let mut state: u64 = 0x1234_5678_9abc_def0;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..80_000u32 {
+                let mut s = String::new();
+                for _ in 0..(next() % 24) {
+                    if next() % 4 == 0 {
+                        s.push(char::from_u32(next() % 0x120).unwrap_or('?'));
+                    } else {
+                        s.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let inst = TOKENS[(next() as usize) % TOKENS.len()];
+                let tmpl = ["getty@.service", "a@.mount", "@.service", "x", ""]
+                    [(next() as usize) % 5];
+                let input = s.clone();
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = unit_name_escape(&s);
+                    let _ = unit_name_unescape(&s);
+                    let _ = unit_name_path_escape(&s);
+                    let _ = unit_name_path_escape_checked(&s);
+                    let _ = unit_name_path_unescape(&s);
+                    let _ = unit_name_mangle(&s);
+                    let _ = unit_name_template_split(&s);
+                    let _ = is_template(&s);
+                    let _ = is_instance(&s);
+                    let _ = template_instantiate(tmpl, inst);
+                    // Round-trip: escaping then unescaping must not panic either.
+                    let _ = unit_name_unescape(&unit_name_escape(&s));
+                }));
+                assert!(res.is_ok(), "unit_name helper panicked on: {input:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "unit_name fuzz did not finish in 30s -- an input hangs a helper"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("unit_name fuzz thread panicked");
+    }
 }
