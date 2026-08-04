@@ -1209,6 +1209,38 @@ fn lines_from(mut runs: Vec<Run>) -> Vec<Line> {
     lines
 }
 
+/// How wide a gap between two runs has to be, as a fraction of the em, before it
+/// is a word break.
+///
+/// Chosen by sweeping it against poppler over seventeen real documents and
+/// counting the words the two disagree on, rather than by eye: a U with a flat
+/// bottom at 0.08 to 0.09, missed spaces above it and words coming apart below.
+/// At 0.20 the justified samværspolitik read "Der eraltid nogen at gå til",
+/// because justification compresses a word space to 0.187 of the em. The
+/// measurement is in docs/pdf-word-gap.md.
+const WORD_GAP: f64 = 0.09;
+
+/// How wide a gap between two runs has to be, as a fraction of the em, before it
+/// is a word break rather than the ordinary jitter between draw calls.
+///
+/// Overridable under test so the value can be swept against an oracle rather
+/// than argued about.
+fn word_gap() -> f64 {
+    #[cfg(test)]
+    {
+        use std::sync::OnceLock;
+        static OVERRIDE: OnceLock<Option<f64>> = OnceLock::new();
+        if let Some(v) = OVERRIDE.get_or_init(|| {
+            std::env::var("PDF_WORD_GAP")
+                .ok()
+                .and_then(|v| v.parse().ok())
+        }) {
+            return *v;
+        }
+    }
+    WORD_GAP
+}
+
 fn join_line(runs: &[Run]) -> Option<Line> {
     let first = runs.first()?;
     let mut spans: Vec<Span> = Vec::new();
@@ -1218,14 +1250,11 @@ fn join_line(runs: &[Run]) -> Option<Line> {
     sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
     for run in sorted {
         size = size.max(run.size);
-        // A fifth of the em. Measured over the corpus: at 0.25 six words across
-        // eight documents ran together, at 0.20 none did, and 0.16 and 0.12
-        // measure identically, so this is the start of a plateau rather than a
-        // knife edge. Compared against the pen's TRUE end, not a guess from the
-        // character count, which is what put spaces inside words.
+        // Compared against the pen's TRUE end, not a guess from the character
+        // count, which is what put spaces inside words. See [`WORD_GAP`].
         let gap = run.x - prev_end;
         let wants_space = prev_end.is_finite()
-            && gap > run.size * 0.20
+            && gap > run.size * word_gap()
             && !spans.last().is_some_and(|s| s.text.ends_with(' '));
         // A run continues the one before it when the colour has not changed, so
         // a paragraph in one colour is one span rather than one per draw call.
@@ -2418,6 +2447,22 @@ fn furniture_of(bytes: &[u8]) -> (Vec<String>, HashMap<usize, String>) {
     (gone, printed)
 }
 
+/// Every run one page drew, before they are joined into lines. The lens for
+/// word-gap questions: what the joiner sees is where a missing space comes from.
+#[cfg(test)]
+fn page_runs_raw(bytes: &[u8], want: usize) -> Vec<Run> {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    let mut budget = PICTURE_BUDGET;
+    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+        if page_no + 1 == want {
+            return page_runs(&doc, page_id, &mut budget).runs;
+        }
+    }
+    Vec::new()
+}
+
 /// Every line of one page with the geometry it was drawn at. A lens for the
 /// harness, so the layout rules can be designed against real numbers.
 #[cfg(test)]
@@ -2596,6 +2641,64 @@ mod harness {
             println!("  NOT ON ITS OWN TITLE: {title:<42.42} p.{page:<5} -> {target}");
         }
         println!("  {rows} contents rows, {shown} land on their own heading");
+    }
+
+    /// Just the words, for diffing against another reader.
+    ///
+    ///   PDF_UNDER_TEST=/path/to.pdf PDF_DUMP=1 cargo test pdf_text::harness -- --nocapture
+    #[test]
+    fn dump_the_words() {
+        let (Ok(path), Ok(_)) = (std::env::var("PDF_UNDER_TEST"), std::env::var("PDF_DUMP")) else {
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read");
+        let doc = super::extract(&bytes).expect("read the pdf");
+        for block in doc.blocks.iter() {
+            let text = block.text();
+            if !text.trim().is_empty() {
+                println!("{text}");
+            }
+        }
+    }
+
+    /// Every run of one page, with the gap to the run before it as a fraction of
+    /// the em. Where a missing space comes from.
+    ///
+    ///   PDF_UNDER_TEST=/path/to.pdf PDF_RUNS=1 cargo test pdf_text::harness -- --nocapture
+    #[test]
+    fn look_at_the_runs() {
+        let (Ok(path), Ok(page)) = (
+            std::env::var("PDF_UNDER_TEST"),
+            std::env::var("PDF_RUNS").map(|v| v.parse::<usize>().unwrap_or(1)),
+        ) else {
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read");
+        let want = std::env::var("PDF_NEAR").unwrap_or_default();
+        let mut runs = super::page_runs_raw(&bytes, page);
+        runs.sort_by(|a, b| {
+            b.y.partial_cmp(&a.y)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        println!("--- page {page} runs (x, end, gap/em) ---");
+        let mut prev_end = f64::NEG_INFINITY;
+        let mut prev_y = f64::NAN;
+        for r in &runs {
+            let fresh = (r.y - prev_y).abs() > 0.5;
+            let gap = match fresh {
+                true => f64::NAN,
+                false => (r.x - prev_end) / r.size,
+            };
+            prev_end = r.end_x;
+            prev_y = r.y;
+            if want.is_empty() || r.text.contains(&want) {
+                println!(
+                    "  x={:>7.2} end={:>7.2} y={:>7.1} size={:>4.1} gap={:>6.3}  {:?}",
+                    r.x, r.end_x, r.y, r.size, gap, r.text
+                );
+            }
+        }
     }
 
     /// Every line of one page with where it sat, for designing layout rules.
