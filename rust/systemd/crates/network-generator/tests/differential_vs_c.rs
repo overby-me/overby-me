@@ -52,6 +52,8 @@ fn network_generator_matches_c() {
         &["ip=dhcp", "nameserver=8.8.8.8", "nameserver=1.1.1.1"],
         &["ip=eth0:dhcp", "nameserver=8.8.8.8", "rd.peerdns=0"],
         &["ip=10.0.0.2::10.0.0.1:24::eth0:none:8.8.8.8:8.8.4.4"],
+        &["ifname=eth0:00:11:22:33:44:55"], // -> 70-eth0.link
+        &["ifname=lan0:aa:bb:cc:dd:ee:ff", "ip=dhcp"],
     ];
 
     let mut div = Vec::new();
