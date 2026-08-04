@@ -142,7 +142,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
     fn runs_on(prev: &Block, next: &Block) -> bool {
         matches!(
             (prev, next),
-            (Block::ListItem(_), Block::ListItem(_))
+            (Block::ListItem { .. }, Block::ListItem { .. })
                 | (Block::IndexEntry { .. }, Block::IndexEntry { .. })
         )
     }
@@ -162,10 +162,31 @@ pub fn PdfDocument(doc: Extracted) -> Element {
         div { class: "docx-doc",
             for (i , group) in groups.iter().enumerate() {
                 match group.first() {
-                    Some(Block::ListItem(_)) => rsx! {
+                    Some(Block::ListItem { .. }) => rsx! {
                         ul { key: "{i}", class: "docx-list",
                             for (j , item) in group.iter().enumerate() {
-                                li { key: "{j}", Spans { spans: item.spans().to_vec() } }
+                                if let Block::ListItem { spans, marker } = item {
+                                    match marker {
+                                        // The page drew its own bullet, and here
+                                        // it is a logo rather than a dot, so it
+                                        // is shown rather than stood in for. Sized
+                                        // in ems so it follows the text.
+                                        Some(src) => rsx! {
+                                            li { key: "{j}", class: "pdf-li-drawn",
+                                                img {
+                                                    class: "pdf-li-mark",
+                                                    src: "{src}",
+                                                    alt: "",
+                                                    aria_hidden: "true",
+                                                }
+                                                span { Spans { spans: spans.clone() } }
+                                            }
+                                        },
+                                        None => rsx! {
+                                            li { key: "{j}", Spans { spans: spans.clone() } }
+                                        },
+                                    }
+                                }
                             }
                         }
                     },

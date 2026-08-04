@@ -43,7 +43,12 @@ pub enum Block {
         indent: u8,
     },
     /// A line that began with a bullet or a number, with that marker stripped.
-    ListItem(Vec<Span>),
+    /// `marker` is set when the bullet was a picture rather than a character,
+    /// because some documents draw a logo where others write a dot.
+    ListItem {
+        spans: Vec<Span>,
+        marker: Option<String>,
+    },
     /// A row of a table of contents: what it points at, and the page it points
     /// to. Kept apart from a paragraph because the two are laid out differently
     /// and reflow differently. On the page the leader dots fill the gap so that
@@ -80,7 +85,7 @@ impl Block {
             Block::Heading { spans, .. }
             | Block::Paragraph { spans, .. }
             | Block::IndexEntry { spans, .. }
-            | Block::ListItem(spans) => spans,
+            | Block::ListItem { spans, .. } => spans,
             Block::Image(_) | Block::Anchor(_) | Block::PageBreak { .. } => &[],
         }
     }
@@ -904,6 +909,18 @@ struct Drawn {
     runs: Vec<Run>,
     /// (y, picture), so a picture can be ordered against the lines.
     pictures: Vec<(f64, Picture)>,
+    /// The small marks: bullets, rules, and whatever else a page draws too small
+    /// to be looked at. Sorted out against the lines afterwards.
+    marks: Vec<Mark>,
+}
+
+/// A mark too small to be a picture, and where it sits.
+struct Mark {
+    x: f64,
+    right: f64,
+    /// Halfway up it, which is what a bullet aligns to a line by.
+    middle: f64,
+    src: String,
 }
 
 fn page_runs(
@@ -923,12 +940,15 @@ fn page_runs(
         return Drawn {
             runs: Vec::new(),
             pictures: Vec::new(),
+            marks: Vec::new(),
         };
     };
     let xobjects = page_xobjects(doc, page_id);
 
     let mut runs = Vec::new();
     let mut pictures: Vec<(f64, Picture)> = Vec::new();
+    let mut marks: Vec<Mark> = Vec::new();
+    let mut decoded: HashMap<lopdf::ObjectId, String> = HashMap::new();
     let mut ctm = IDENTITY;
     // The fill colour rides with the CTM: `q`/`Q` save and restore the whole
     // graphics state, and a heading's colour set inside one would otherwise leak
@@ -1073,19 +1093,35 @@ fn page_runs(
                 if *budget == 0 {
                     continue;
                 }
-                let Some(src) = decode_image(doc, stream) else {
-                    continue;
+                // A document sets its bullet once and draws it a hundred times,
+                // so decode each image only the first time it is met.
+                let src = match decoded.get(id) {
+                    Some(src) => src.clone(),
+                    None => {
+                        let Some(src) = decode_image(doc, stream) else {
+                            continue;
+                        };
+                        decoded.insert(*id, src.clone());
+                        src
+                    }
                 };
                 // The CTM maps the unit square onto where the image goes, so its
                 // width and height fall straight out of the matrix.
                 let width = (ctm[0].powi(2) + ctm[1].powi(2)).sqrt();
                 let height = (ctm[2].powi(2) + ctm[3].powi(2)).sqrt();
-                // Below about a line of text in both directions it is furniture,
-                // not a picture: a bullet glyph, a rule, a mark in a header. The
-                // corpus is mostly these, drawn ten points square and repeated a
-                // dozen times a document, and a reflowed view is better without
-                // them. What survives is what someone put there to be looked at.
+                // Below about a line of text in both directions it is not a
+                // picture someone put there to be looked at: it is a mark. Most
+                // are furniture and go, but one drawn in the margin beside a line
+                // is that line's bullet, and this document's bullet is a logo
+                // rather than a dot, so it cannot be swapped for one. Held aside
+                // and matched against the lines once those are known.
                 if width < 24.0 && height < 24.0 {
+                    marks.push(Mark {
+                        x: ctm[4],
+                        right: ctm[4] + width,
+                        middle: ctm[5] + height / 2.0,
+                        src,
+                    });
                     continue;
                 }
                 // Past the budget the pictures stop, and stay stopped: a
@@ -1107,7 +1143,11 @@ fn page_runs(
             _ => {}
         }
     }
-    Drawn { runs, pictures }
+    Drawn {
+        runs,
+        pictures,
+        marks,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1209,6 +1249,10 @@ struct Line {
     left: f64,
     /// Which page drew it, 1-based.
     page: usize,
+    /// The mark drawn in the margin beside this line, which makes it an item of
+    /// a list. Kept as the image the document drew rather than swapped for a
+    /// dot: here it is the organisation's own logo.
+    bullet: Option<String>,
     /// Set when this "line" is a picture rather than words. It takes its place
     /// in the flow by where it was drawn, like everything else.
     picture: Option<Picture>,
@@ -1349,6 +1393,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         left,
         // Filled in by the caller, which is the only place that knows.
         page: 0,
+        bullet: None,
         picture: None,
     })
 }
@@ -1688,7 +1733,9 @@ fn blocks_from(
     let flush = |para: &mut Vec<Span>,
                  size: f64,
                  geometry: &mut Vec<(f64, f64)>,
+                 bullet: &mut Option<String>,
                  blocks: &mut Vec<Block>| {
+        let drawn_bullet = bullet.take();
         let align = alignment_of(geometry, col_left, column, size);
         // The block's own left edge is the leftmost its lines reached. Not the
         // first line's: a paragraph whose opening line is indented has not moved
@@ -1717,7 +1764,17 @@ fn blocks_from(
             // Drop the marker from the spans, keeping the colours of the words
             // that follow it.
             let dropped = text.chars().count() - rest.chars().count();
-            blocks.push(Block::ListItem(drop_prefix(spans, dropped)));
+            blocks.push(Block::ListItem {
+                spans: drop_prefix(spans, dropped),
+                marker: drawn_bullet,
+            });
+        } else if drawn_bullet.is_some() {
+            // A bullet the page DREW, so there is no marker in the text to take
+            // off: the words are the item, whole.
+            blocks.push(Block::ListItem {
+                spans,
+                marker: drawn_bullet,
+            });
         } else if size > body * 1.12 {
             // Calibrated against Word's own defaults rather than picked: on an
             // 11pt body, Title is 28 (2.5x), Heading 1 is 16 (1.45x) and
@@ -1746,13 +1803,20 @@ fn blocks_from(
     };
 
     let lines_ref = lines;
+    let mut para_bullet: Option<String> = None;
     let mut page = lines_ref.first().map(|l| l.page).unwrap_or(1);
     for (at, line) in lines_ref.iter().enumerate() {
         // An anchor goes BEFORE what it points at, so whatever was being built
         // ends here: a link should land on the start of the thing it names, not
         // in the middle of the paragraph above it.
         if let Some(here) = anchors.get(&at) {
-            flush(&mut para, para_size, &mut para_lines, &mut blocks);
+            flush(
+                &mut para,
+                para_size,
+                &mut para_lines,
+                &mut para_bullet,
+                &mut blocks,
+            );
             prev = None;
             blocks.extend(here.iter().cloned().map(Block::Anchor));
         }
@@ -1760,7 +1824,13 @@ fn blocks_from(
         // continues across the break is rare, and running two pages together
         // silently is worse than one break too many.
         if line.page != page && line.page != 0 {
-            flush(&mut para, para_size, &mut para_lines, &mut blocks);
+            flush(
+                &mut para,
+                para_size,
+                &mut para_lines,
+                &mut para_bullet,
+                &mut blocks,
+            );
             blocks.push(Block::PageBreak {
                 ended: page,
                 printed: printed.get(&(page - 1)).cloned(),
@@ -1773,7 +1843,13 @@ fn blocks_from(
             prev = None;
         }
         if let Some(picture) = &line.picture {
-            flush(&mut para, para_size, &mut para_lines, &mut blocks);
+            flush(
+                &mut para,
+                para_size,
+                &mut para_lines,
+                &mut para_bullet,
+                &mut blocks,
+            );
             blocks.push(Block::Image(picture.clone()));
             prev = None;
             continue;
@@ -1804,10 +1880,17 @@ fn blocks_from(
             }
         };
         if starts_new {
-            flush(&mut para, para_size, &mut para_lines, &mut blocks);
+            flush(
+                &mut para,
+                para_size,
+                &mut para_lines,
+                &mut para_bullet,
+                &mut blocks,
+            );
         }
         if para.is_empty() {
             para_size = line.size;
+            para_bullet = line.bullet.clone();
         } else {
             // A line break inside a paragraph is a space, not a join.
             if let Some(last) = para.last_mut() {
@@ -1818,7 +1901,13 @@ fn blocks_from(
         para_lines.push((line.left, line.right));
         prev = Some(line);
     }
-    flush(&mut para, para_size, &mut para_lines, &mut blocks);
+    flush(
+        &mut para,
+        para_size,
+        &mut para_lines,
+        &mut para_bullet,
+        &mut blocks,
+    );
     blocks
 }
 
@@ -2306,6 +2395,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
         let areas = page_links(&doc, page_id, &by_id, &mut places);
         let drawn = page_runs(&doc, page_id, &mut budget, &areas);
         let mut lines = lines_from(drawn.runs);
+        mark_the_lines(&mut lines, &drawn.marks);
         for line in &mut lines {
             line.page = page_no + 1;
         }
@@ -2321,6 +2411,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 page: page_no + 1,
                 text: String::new(),
                 spans: Vec::new(),
+                bullet: None,
                 picture: Some(picture),
             });
         }
@@ -2502,6 +2593,31 @@ fn aim_at_the_headings(blocks: &mut Vec<Block>, wanted: &[Option<(String, usize)
     }
 }
 
+/// Give each line the mark drawn in the margin beside it.
+///
+/// A page draws plenty of small things, and most are furniture: rules, a device
+/// in a header, a shadow under a box. What makes one a bullet is where it sits,
+/// which is level with a line of text and just to its left, in the margin the
+/// text is indented past. Nothing else about it says "bullet" at all: this
+/// document's is the organisation's logo, drawn ten points square.
+fn mark_the_lines(lines: &mut [Line], marks: &[Mark]) {
+    for line in lines.iter_mut() {
+        if line.picture.is_some() || !line.left.is_finite() {
+            continue;
+        }
+        let found = marks.iter().find(|m| {
+            // Level with the line: a bullet sits about the middle of the
+            // lowercase letters, above the baseline it is set on.
+            let level = m.middle > line.y - line.size * 0.2 && m.middle < line.y + line.size;
+            // And in the margin to its left, within a couple of ems: further
+            // out than that and it belongs to the page, not to this line.
+            let beside = m.right <= line.left + 1.0 && line.left - m.x < line.size * 3.0;
+            level && beside
+        });
+        line.bullet = found.map(|m| m.src.clone());
+    }
+}
+
 /// Put each destination on the line it points at, so the links have something
 /// to land on.
 ///
@@ -2680,6 +2796,19 @@ mod harness {
                 Err(e) => println!("{name:34.34} FAILED {e}"),
                 Ok(doc) => {
                     let chars: usize = doc.blocks.iter().map(|b| b.text().len()).sum();
+                    let drawn = doc
+                        .blocks
+                        .iter()
+                        .filter(|b| {
+                            matches!(
+                                b,
+                                super::Block::ListItem {
+                                    marker: Some(_),
+                                    ..
+                                }
+                            )
+                        })
+                        .count();
                     let linked = doc
                         .blocks
                         .iter()
@@ -2706,7 +2835,7 @@ mod harness {
                         })
                         .count();
                     println!(
-                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
+                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} bullets={drawn:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
                         doc.pages,
                         doc.blocks.len(),
                         chars,
@@ -2982,7 +3111,10 @@ mod harness {
                 for b in doc.blocks.iter().skip(skip).take(show) {
                     let kind = match b {
                         super::Block::Heading { level, .. } => format!("h{level}"),
-                        super::Block::ListItem(_) => "li".into(),
+                        super::Block::ListItem { marker, .. } => match marker {
+                            Some(_) => "li*".into(),
+                            None => "li".into(),
+                        },
                         super::Block::Paragraph { indent, .. } => match indent {
                             0 => "p".into(),
                             n => format!("p>{n}"),
@@ -3132,6 +3264,7 @@ mod tests {
                 bold: false,
                 italic: false,
             }],
+            bullet: None,
             picture: None,
         }
     }
@@ -3365,6 +3498,7 @@ mod tests {
                 bold: false,
                 italic: false,
             }],
+            bullet: None,
             picture: None,
         };
         // Column runs to 400. The first line stops at 180, far short of it.
@@ -3569,6 +3703,7 @@ mod tests {
             page,
             text: text.into(),
             spans: vec![span(text, None)],
+            bullet: None,
             picture: None,
         };
         let blocks = blocks_from(
@@ -3742,6 +3877,7 @@ mod tests {
             page,
             text: text.into(),
             spans: vec![span(text, None)],
+            bullet: None,
             picture: None,
         };
         let folio = |page: usize, text: &str| Line {
@@ -3752,6 +3888,7 @@ mod tests {
             page,
             text: text.into(),
             spans: vec![span(text, None)],
+            bullet: None,
             picture: None,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
@@ -3787,6 +3924,7 @@ mod tests {
             page,
             text: text.into(),
             spans: vec![span(text, None)],
+            bullet: None,
             picture: None,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)

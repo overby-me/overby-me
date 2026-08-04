@@ -8259,6 +8259,30 @@ a.list-item:hover {
 	text-underline-offset: 0.15em;
 }
 
+/* An item whose bullet the page DREW. Some documents set a logo where others
+   write a dot, and swapping it for a disc loses what the document chose. The
+   list's own marker steps aside for it, and the row hangs so wrapped lines line
+   up under the words rather than under the mark. Sized in ems so the bullet
+   follows the text at any size. */
+.docx-list li.pdf-li-drawn {
+	display: flex;
+	align-items: baseline;
+	gap: var(--md-sys-spacing-2);
+	list-style: none;
+	/* Back out the indent the list itself sets: the drawn bullet stands where
+	   the marker would have. */
+	margin-inline-start: calc(-1 * var(--md-sys-spacing-6));
+}
+.pdf-li-mark {
+	flex: 0 0 auto;
+	width: 1em;
+	height: 1em;
+	/* A bullet sits about the middle of the lowercase letters, not on the
+	   baseline its box would otherwise align to. */
+	transform: translateY(0.12em);
+	object-fit: contain;
+}
+
 /* Where a link lands. Nothing to see: it exists so the scroll has a target, and
    the margin keeps that target clear of the sticky bar above it. */
 .pdf-anchor {
