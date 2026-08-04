@@ -16,7 +16,10 @@ shipped its components. The gap lists remain authoritative for *what* is missing
    one needs.
 2. **[ARCHITECTURE.md](ARCHITECTURE.md)** is the structural gap list: the PID 1
    concurrency model and the invariants it has not yet adopted.
-3. **Differential testing** below, which is the only part of the old plan with
+3. **[PARSER-FIDELITY.md](PARSER-FIDELITY.md)** records where the unit parser
+   diverges from C on malformed or edge-case input (e.g. the strict-vs-lenient
+   error model, task #31).
+4. **Differential testing** below, which is the only part of the old plan with
    infrastructure still unbuilt.
 
 What to work on next, however, is no longer "remove the next override". That stopped
