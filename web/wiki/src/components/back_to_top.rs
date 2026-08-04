@@ -144,10 +144,14 @@ fn install_listener() {
                 *NEAR_BOTTOM.write() = near;
             }
 
-            let now_ms = js_sys::Date::now();
-            if now_ms - last_stash > STASH_EVERY_MS {
-                last_stash = now_ms;
-                if let Some(url) = crate::nav_memory::current_url() {
+            if let Some(url) = crate::nav_memory::current_url() {
+                // Every event, exactly: this is what a navigation files, and a
+                // throttled trail would have already forgotten the last moments
+                // of the scroll by then.
+                crate::nav_memory::note_scroll(&url, y);
+                let now_ms = js_sys::Date::now();
+                if now_ms - last_stash > STASH_EVERY_MS {
+                    last_stash = now_ms;
                     crate::nav_memory::stash_scroll(&url, y);
                 }
             }

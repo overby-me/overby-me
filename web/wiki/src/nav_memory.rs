@@ -67,6 +67,55 @@ fn session_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.session_storage().ok().flatten()
 }
 
+thread_local! {
+    /// Where the reader last was on each URL, updated on EVERY scroll event.
+    ///
+    /// The `sessionStorage` trail is throttled, and a throttle with no trailing
+    /// edge never records the position a reader comes to REST at: the last
+    /// sample is whichever one happened to land on a window boundary, and
+    /// everything after it is dropped. That is what made returning land in the
+    /// wrong place even once the clamp stopped erasing the value outright.
+    ///
+    /// This is a plain map write, so it can afford to run on every event and be
+    /// exact. In memory only: a reload has the throttled trail, which is what it
+    /// is for.
+    static LAST_SEEN: std::cell::RefCell<HashMap<String, f64>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// Note where the reader is now, for [`last_scroll`]. Cheap enough for every
+/// scroll event.
+pub fn note_scroll(url: &str, y: f64) {
+    LAST_SEEN.with(|m| m.borrow_mut().insert(url.to_string(), y));
+}
+
+/// Where the reader last was on `url`, exactly, if they have been there since
+/// the page loaded.
+pub fn last_scroll(url: &str) -> Option<f64> {
+    LAST_SEEN.with(|m| m.borrow().get(url).copied())
+}
+
+thread_local! {
+    /// While a restore is settling, the stored trail is not to be believed.
+    static SETTLING_UNTIL: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
+/// Hold the stored trail still for `ms` while a restore lands.
+///
+/// Putting the reader back produces scroll events of its own, and the throttled
+/// writer records whichever of them falls on a window boundary, which is an
+/// early frame rather than the destination. The position then looked like three
+/// pixels down for anyone who RELOADED just after returning to a page. The
+/// in-memory note is unaffected, so navigation was always right; this is only
+/// about what survives a reload.
+pub fn hold_trail(ms: f64) {
+    SETTLING_UNTIL.with(|c| c.set(js_sys::Date::now() + ms));
+}
+
+fn settling() -> bool {
+    SETTLING_UNTIL.with(|c| js_sys::Date::now() < c.get())
+}
+
 /// Whether `y` is worth recording as where the reader left a page.
 ///
 /// A zero the BROWSER produced is not a decision the reader made. When the page
@@ -118,7 +167,7 @@ pub fn stash_scroll(url: &str, y: f64) {
     let Some(store) = session_storage() else {
         return;
     };
-    if !worth_recording(y, stashed_scroll(url), reachable_scroll()) {
+    if settling() || !worth_recording(y, stashed_scroll(url), reachable_scroll()) {
         return;
     }
     let _ = store.set_item(&format!("{SCROLL_PREFIX}{url}"), &y.round().to_string());

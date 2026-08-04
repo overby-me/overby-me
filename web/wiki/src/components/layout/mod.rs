@@ -100,6 +100,19 @@ fn restore_scroll(target: f64) {
                     .unwrap_or(0.0);
             if reachable >= target {
                 win.scroll_to_with_x_and_y(0.0, target);
+                // File it as well as perform it. Getting here means the throttled
+                // trail still holds whatever tiny value was written on the way in
+                // (this function starts at the top), and a reload before the
+                // reader scrolls again would honour that instead of where they
+                // just landed.
+                if let Some(url) = crate::nav_memory::current_url() {
+                    crate::nav_memory::note_scroll(&url, target);
+                    crate::nav_memory::stash_scroll(&url, target);
+                    // Then hold it: the jump above generates scroll events of
+                    // its own, and the throttled writer would file an early
+                    // frame of them over what was just filed.
+                    crate::nav_memory::hold_trail(700.0);
+                }
                 return;
             }
         }
@@ -212,17 +225,18 @@ pub fn Layout() -> Element {
         let Some(win) = web_sys::window() else {
             return;
         };
-        // The outgoing page's scroll, as far as it can still be read. This runs
-        // after the new route has been committed to the DOM, so if that document
-        // is shorter the browser has already pulled the scroll down to its
-        // maximum and this reads a zero that the reader never chose. Filing it
-        // erased the position of the page being left, which is what made coming
-        // back to a context land at the top. `stash_scroll` declines a clamp and
-        // keeps the trail the scroll listener wrote while the reader was there.
-        let leaving_at = win.scroll_y().unwrap_or(0.0);
         let leaving = previous.peek().clone();
         if let Some((segments, app, url)) = &leaving {
             crate::nav_memory::remember(&context_path_peek(segments), app.as_deref(), segments);
+            // Where the reader actually was, from the listener's per-event note,
+            // NOT from the window. This effect runs after the new route has been
+            // committed to the DOM, so if that view is shorter the browser has
+            // already pulled the scroll down to the new maximum and the window
+            // reports a zero the reader never chose. Reading it filed that zero
+            // over the position of the page being left, which is what made
+            // coming back to a context land at the top.
+            let leaving_at = crate::nav_memory::last_scroll(url)
+                .unwrap_or_else(|| win.scroll_y().unwrap_or(0.0));
             crate::nav_memory::stash_scroll(url, leaving_at);
         }
 
