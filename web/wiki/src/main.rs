@@ -18,6 +18,7 @@ mod nav_memory;
 mod nhost;
 /// Last-read pages kept in localStorage, served when nothing can be reached.
 mod offline;
+mod pdf_text;
 mod pwa;
 mod query_cache;
 mod route;

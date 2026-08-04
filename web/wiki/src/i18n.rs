@@ -661,6 +661,10 @@ const EN_JSON: &str = r#"{
     },
     "file": {
         "renderedBy": "Rendered by",
+        "pdfViewerBrowser": "Your browser",
+        "pdfViewerNative": "This app (reflows)",
+        "pdfReflowed": "Reflowed from {{pages}} pages. Layout, figures and tables are not shown; open it in your browser to see the pages as they were laid out.",
+        "pdfNoText": "This PDF holds no text, only scanned images, so there is nothing to reflow. Your browser can still show the pages.",
         "viewerMicrosoft": "Microsoft Office",
         "viewerGoogle": "Google Docs",
         "viewerNative": "This app",
@@ -1256,6 +1260,10 @@ const DA_JSON: &str = r#"{
     },
     "file": {
         "renderedBy": "Vises af",
+        "pdfViewerBrowser": "Din browser",
+        "pdfViewerNative": "Denne app (ombryder)",
+        "pdfReflowed": "Ombrudt fra {{pages}} sider. Opsætning, figurer og tabeller vises ikke; åbn den i din browser for at se siderne, som de er sat op.",
+        "pdfNoText": "Denne PDF indeholder ingen tekst, kun scannede billeder, så der er intet at ombryde. Din browser kan stadig vise siderne.",
         "viewerMicrosoft": "Microsoft Office",
         "viewerGoogle": "Google Docs",
         "viewerNative": "Denne app",

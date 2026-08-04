@@ -32,6 +32,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 log = "0.4"
+lopdf = { version = "0.44.0", default-features = false, features = ["wasm_js"] }
 # Runtime Material Design 3 scheme generation from user-chosen seed colors (the
 # same material-color-utilities engine as scripts/gen-theme.ts). default-features
 # off keeps it no_std/wasm-friendly (drops ahash runtime-rng -> getrandom); libm

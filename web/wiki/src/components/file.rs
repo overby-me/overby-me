@@ -254,6 +254,67 @@ fn is_presentation(mime: &str) -> bool {
     mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 }
 
+/// Who renders a PDF.
+///
+/// A different question from [`OfficeViewer`], which is about which THIRD PARTY
+/// sees the document. A PDF already goes to nobody: every browser has a viewer
+/// built in and it renders locally. So this is fidelity against readability, and
+/// the browser keeps the default, because it is exact, it prints, and it is what
+/// a reader already expects a PDF to look like.
+///
+/// The native one is for the case the browser's viewer is bad at: a long
+/// appendix on a phone, where a fixed page in a scrolling box means pinching at
+/// six-point type. It reflows, and the browser's own find works on it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PdfViewer {
+    /// The browser's built-in viewer, in an iframe. The default.
+    Browser,
+    /// Rendered here, from the file's own bytes, as flowing text.
+    Native,
+}
+
+impl PdfViewer {
+    fn key(self) -> &'static str {
+        match self {
+            PdfViewer::Browser => "browser",
+            PdfViewer::Native => "native",
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            PdfViewer::Browser => "file.pdfViewerBrowser",
+            PdfViewer::Native => "file.pdfViewerNative",
+        }
+    }
+
+    /// Anything unrecognised is the browser: a preference that cannot be read
+    /// must not silently move a reader to the renderer that reflows.
+    fn from_key(key: &str) -> Self {
+        match key {
+            "native" => PdfViewer::Native,
+            _ => PdfViewer::Browser,
+        }
+    }
+}
+
+/// The chosen PDF viewer, remembered per device like the Office one.
+pub static PDF_VIEWER: GlobalSignal<PdfViewer> = Signal::global(|| {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item("wiki_pdf_viewer").ok().flatten())
+        .map(|v| PdfViewer::from_key(&v))
+        .unwrap_or(PdfViewer::Browser)
+});
+
+/// Choose a PDF viewer, and remember it.
+pub fn set_pdf_viewer(viewer: PdfViewer) {
+    *PDF_VIEWER.write() = viewer;
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item("wiki_pdf_viewer", viewer.key());
+    }
+}
+
 /// The chosen viewer, remembered per device.
 ///
 /// A device preference rather than an account one: it is about which service you
@@ -694,6 +755,41 @@ fn NativeOdt(file_id: String, name: String) -> Element {
 /// then expire thirty seconds later, which is exactly long enough to look at
 /// another viewer and come back to a reader that will not load.
 #[component]
+/// A PDF read here and reflowed. The browser's viewer stays the default; this
+/// is what the sheet's other option renders.
+#[component]
+fn NativePdf(file_id: String, name: String) -> Element {
+    let token = crate::session::use_session().read().access_token.clone();
+    let parsed = crate::use_data_resource!(|(file_id, token)| async move {
+        let token = token.unwrap_or_default();
+        let bytes = crate::backend_api::file_bytes(&file_id, &token).await?;
+        crate::pdf_text::extract(&bytes)
+    });
+
+    let state = parsed.read().clone();
+    match state {
+        None => rsx! {
+            div { class: "empty-state empty-state-sm",
+                div { class: "spinner spinner-sm" }
+            }
+        },
+        // A scan has no text to reflow, so say that rather than draw nothing.
+        Some(Ok(doc)) if !doc.has_text() => rsx! {
+            super::pdf::PdfHasNoText {}
+        },
+        Some(Ok(doc)) => rsx! {
+            super::pdf::PdfDocument { doc }
+        },
+        Some(Err(e)) => {
+            crate::errors::log_handled("pdf render failed", &e);
+            rsx! {
+                super::widgets::ErrorState { title: t("error.couldNotLoad"), small: true }
+            }
+        }
+    }
+}
+
+#[component]
 fn NativeDocx(file_id: String, name: String) -> Element {
     let token = crate::session::use_session().read().access_token.clone();
     let parsed = crate::use_data_resource!(|(file_id, token)| async move {
@@ -1044,10 +1140,29 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 }
                             }
                         },
-                        // Who renders it. Only for the mimes that go
-                        // through a third party at all — offering it on
-                        // a PDF or an image would be offering a choice
-                        // that changes nothing.
+                        // Who renders it. Offered where there is a real
+                        // choice: an Office document goes to a third
+                        // party unless this app reads it, and a PDF can
+                        // be shown exactly by the browser or reflowed by
+                        // this app. Not on an image, where it would be a
+                        // choice that changes nothing.
+                        if file_mime == "application/pdf" {
+                            super::widgets::SheetGroup {
+                                div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
+                                for viewer in [PdfViewer::Browser, PdfViewer::Native] {
+                                    button {
+                                        key: "{viewer.label_key()}",
+                                        class: if PDF_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },
+                                        "aria-pressed": if PDF_VIEWER() == viewer { "true" } else { "false" },
+                                        onclick: move |_| set_pdf_viewer(viewer),
+                                        span { class: "material-icons",
+                                            if PDF_VIEWER() == viewer { "radio_button_checked" } else { "radio_button_unchecked" }
+                                        }
+                                        "{t(viewer.label_key())}"
+                                    }
+                                }
+                            }
+                        }
                         if is_office_mime(file_mime) {
                             super::widgets::SheetGroup {
                                 div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
@@ -1165,6 +1280,8 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                     }
                 } else if file_mime.starts_with("audio/") {
                     audio { controls: true, "referrerpolicy": "no-referrer", src: "{file_url}" }
+                } else if file_mime == "application/pdf" && PDF_VIEWER() == PdfViewer::Native {
+                    NativePdf { file_id: file_id.to_string(), name: name.to_string() }
                 } else if file_mime == "application/pdf" {
                     // DESIGN: frame document previews like the map/graph.
                     div { class: "viewport-frame",

@@ -23,6 +23,7 @@ pub mod node;
 pub mod odf;
 pub mod optimistic;
 pub mod parent;
+pub mod pdf;
 pub mod perm;
 pub mod pixel;
 pub mod pptx;
