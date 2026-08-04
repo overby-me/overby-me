@@ -18,8 +18,10 @@ rekey:
 
 # Mobile device image building and flashing
 
+# The flake root is two levels up from nix/nixos, not one. With a single ".."
+# this landed on nix/, where `getFlake "path:..."` finds no flake.nix.
 [private]
-_flake_dir := justfile_directory() / ".."
+_flake_dir := justfile_directory() / ".." / ".."
 
 decrypt-hostkey device:
     mkdir -p /tmp/{{ device }}-hostkeys
@@ -37,3 +39,12 @@ flash device: (build-boot device) (build-rootfs device)
     fastboot flash boot result-{{ device }}-boot
     fastboot flash userdata result-{{ device }}-rootfs
     fastboot reboot
+
+# Installer ISO building
+
+# Bootable installer for armitas (Surface Pro 11, aarch64). The build host
+# needs `boot.binfmt.emulatedSystems = ["aarch64-linux"]`; write the result
+# with `dd if=result-armitas-iso/iso/*.iso of=/dev/sdX bs=4M`.
+build-iso:
+    cd {{ _flake_dir }} && nix build --print-build-logs -o result-armitas-iso \
+      .#nixosConfigurations.armitas-installer.config.system.build.isoImage
