@@ -57,6 +57,9 @@ pub enum Block {
     },
     /// A picture the page drew, where it drew it.
     Image(Picture),
+    /// A place a link in this document points at. Carries nothing to read: it
+    /// exists so the link has somewhere to land.
+    Anchor(String),
     /// Where one page ended and the next began. Furniture, not content: it
     /// exists so that "see page 12" still means something to someone reading
     /// this instead of the pages.
@@ -78,7 +81,7 @@ impl Block {
             | Block::Paragraph { spans, .. }
             | Block::IndexEntry { spans, .. }
             | Block::ListItem(spans) => spans,
-            Block::Image(_) | Block::PageBreak { .. } => &[],
+            Block::Image(_) | Block::Anchor(_) | Block::PageBreak { .. } => &[],
         }
     }
 
@@ -131,12 +134,30 @@ pub struct Span {
     pub color: Option<String>,
     pub bold: bool,
     pub italic: bool,
+    /// Where this stretch takes the reader, if the file made it a link.
+    pub link: Option<Link>,
+}
+
+/// Where a link goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Link {
+    /// Somewhere else in this same document, named by the anchor put there for
+    /// it. A contents list is the case that matters: the file already knows
+    /// which song each row points at, and a reflow that drops that leaves the
+    /// reader scrolling a hundred pages by hand.
+    Place(String),
+    /// Out on the web.
+    Url(String),
 }
 
 impl Span {
-    /// Whether two stretches can be one span: same colour, same face.
+    /// Whether two stretches can be one span: same colour, same face, same
+    /// destination.
     fn matches(&self, other: &Span) -> bool {
-        self.color == other.color && self.bold == other.bold && self.italic == other.italic
+        self.color == other.color
+            && self.bold == other.bold
+            && self.italic == other.italic
+            && self.link == other.link
     }
 }
 
@@ -811,6 +832,9 @@ struct Run {
     color: Option<String>,
     bold: bool,
     italic: bool,
+    /// Set when a link annotation covers this run. Attached after the page is
+    /// walked: the annotations live beside the content stream, not in it.
+    link: Option<Link>,
 }
 
 /// A fill colour, as CSS, or `None` when it is the document's ordinary ink.
@@ -1110,6 +1134,7 @@ fn show(
     let after = mul(mul([1.0, 0.0, 0.0, 1.0, advance, 0.0], *tm), ctm);
     if !text.trim().is_empty() {
         runs.push(Run {
+            link: None,
             x: at[4],
             end_x: after[4],
             y: at[5],
@@ -1209,6 +1234,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
             color: run.color.clone(),
             bold: run.bold,
             italic: run.italic,
+            link: run.link.clone(),
         };
         match spans.last_mut() {
             Some(last) if last.matches(&here) => {
@@ -1540,6 +1566,18 @@ fn list_marker(text: &str) -> Option<&str> {
                 if i > 3 || rest.is_empty() {
                     return None;
                 }
+                // A LETTERED marker is one letter, or a roman numeral. Any other
+                // short word before a full stop is an abbreviation, and Danish
+                // statutes are written in them: "Stk. 1" is subsection one, not
+                // a bullet whose text is "1", which is how it was arriving.
+                let head = &t[..i];
+                let lettered = head.chars().all(char::is_alphabetic);
+                let roman = head
+                    .chars()
+                    .all(|c| "ivxlcdm".contains(c.to_ascii_lowercase()));
+                if lettered && head.chars().count() > 1 && !roman {
+                    return None;
+                }
                 // And what follows a NUMBER starts with a capital. Danish is
                 // full of ordinals that look exactly like list markers: "1. maj
                 // 2025", "1. udgave", "1. oplag" were all arriving as list
@@ -1560,7 +1598,11 @@ fn list_marker(text: &str) -> Option<&str> {
 
 /// Turn lines into blocks: paragraphs broken on the vertical gap, headings on
 /// relative size, list items on a leading marker.
-fn blocks_from(lines: Vec<Line>, printed: &HashMap<usize, String>) -> Vec<Block> {
+fn blocks_from(
+    lines: Vec<Line>,
+    printed: &HashMap<usize, String>,
+    anchors: &HashMap<usize, Vec<String>>,
+) -> Vec<Block> {
     let body = body_size(&lines);
     let column = column_right(&lines);
     let col_left = column_left(&lines);
@@ -1635,7 +1677,15 @@ fn blocks_from(lines: Vec<Line>, printed: &HashMap<usize, String>) -> Vec<Block>
 
     let lines_ref = lines;
     let mut page = lines_ref.first().map(|l| l.page).unwrap_or(1);
-    for line in &lines_ref {
+    for (at, line) in lines_ref.iter().enumerate() {
+        // An anchor goes BEFORE what it points at, so whatever was being built
+        // ends here: a link should land on the start of the thing it names, not
+        // in the middle of the paragraph above it.
+        if let Some(here) = anchors.get(&at) {
+            flush(&mut para, para_size, &mut para_lines, &mut blocks);
+            prev = None;
+            blocks.extend(here.iter().cloned().map(Block::Anchor));
+        }
         // A page turning over ends whatever was being built: a paragraph that
         // continues across the break is rare, and running two pages together
         // silently is worse than one break too many.
@@ -1645,6 +1695,10 @@ fn blocks_from(lines: Vec<Line>, printed: &HashMap<usize, String>) -> Vec<Block>
                 ended: page,
                 printed: printed.get(&(page - 1)).cloned(),
             });
+            // Every page gets somewhere to land, whether or not a link names it
+            // yet: a contents row whose own link is broken is pointed here
+            // instead, by the number printed at the end of the row.
+            blocks.push(Block::Anchor(format!("pdf-page-{}", line.page)));
             page = line.page;
             prev = None;
         }
@@ -1738,6 +1792,229 @@ fn keep_prefix(spans: Vec<Span>, n: usize) -> Vec<Span> {
         out.push(Span { text, ..span });
     }
     tidy(out)
+}
+
+/// A link the page drew over part of itself: the box it covers, and where it
+/// goes.
+struct LinkArea {
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    link: Link,
+}
+
+impl LinkArea {
+    /// Whether a run of text falls under this box.
+    ///
+    /// The baseline decides it vertically, because that is the one point on a
+    /// run that is certainly inside the box a producer drew around the line;
+    /// its ascenders and descenders may not be. Horizontally, any overlap at
+    /// all: a link ends mid-run only if a producer split it there, and half a
+    /// word linked is worse than one word too many.
+    fn covers(&self, run: &Run) -> bool {
+        run.y >= self.y0 - 1.0
+            && run.y <= self.y1 + 1.0
+            && run.end_x > self.x0 + 0.5
+            && run.x < self.x1 - 0.5
+    }
+}
+
+/// Where a `/GoTo` lands: a page, and how far down it.
+type Place = (usize, f64);
+
+/// Follow a destination to the page it names and the height on that page.
+///
+/// A destination is an array whose head is the page and whose tail says where
+/// to put it on screen. Only the forms that carry a height are read for one;
+/// `/Fit` says "the whole page" and gets the top, which is the honest answer.
+fn place_of(
+    doc: &Document,
+    dest: &Object,
+    pages: &HashMap<lopdf::ObjectId, usize>,
+) -> Option<Place> {
+    let found = resolve(doc, dest).ok()?;
+    // A named destination: a name or a string, standing for an array kept in the
+    // catalogue. Word writes contents lists this way.
+    let dest = match found {
+        Object::Name(name) => named_destination(doc, name)?,
+        Object::String(bytes, _) => named_destination(doc, bytes)?,
+        // Some files wrap the array in a dictionary under /D.
+        Object::Dictionary(d) => resolve(doc, d.get(b"D").ok()?).ok()?.clone(),
+        other => other.clone(),
+    };
+    let items = dest.as_array().ok()?;
+    let page = match items.first()? {
+        Object::Reference(id) => *pages.get(&(id.0, id.1))?,
+        // A bare number is a page index, counting from zero.
+        other => number(other).ok()? as usize,
+    };
+    let top = match items.get(1).and_then(|o| o.as_name().ok()) {
+        Some(b"XYZ") => items.get(3).and_then(|o| number(o).ok()),
+        Some(b"FitH") | Some(b"FitBH") => items.get(2).and_then(|o| number(o).ok()),
+        // Fit, FitV, FitR and friends put no height on the page: take the top.
+        _ => None,
+    };
+    Some((page, top.unwrap_or(f64::INFINITY)))
+}
+
+/// Look a named destination up in the catalogue, in both places a file may keep
+/// one: the modern `/Names /Dests` name tree, and the old `/Dests` dictionary.
+fn named_destination(doc: &Document, name: &[u8]) -> Option<Object> {
+    let catalog = doc.catalog().ok()?;
+    let old = catalog
+        .get(b"Dests")
+        .ok()
+        .and_then(|o| resolve(doc, o).ok())
+        .and_then(|o| o.as_dict().ok())
+        .and_then(|dict| dict.get(name).ok())
+        .and_then(|found| resolve(doc, found).ok())
+        .cloned();
+    if old.is_some() {
+        return old;
+    }
+    let names = resolve(doc, catalog.get(b"Names").ok()?).ok()?;
+    let tree = names.as_dict().ok()?.get(b"Dests").ok()?.clone();
+    search_name_tree(doc, &tree, name, 0)
+}
+
+/// Walk a name tree for one key. The tree is sorted, but it is also small here,
+/// so this reads every leaf rather than bisecting.
+fn search_name_tree(doc: &Document, node: &Object, want: &[u8], depth: usize) -> Option<Object> {
+    // A malformed file can point a tree at itself.
+    if depth > 32 {
+        return None;
+    }
+    let node = resolve(doc, node).ok()?;
+    let dict = node.as_dict().ok()?;
+    let listed = dict
+        .get(b"Names")
+        .ok()
+        .and_then(|o| resolve(doc, o).ok())
+        .and_then(|o| o.as_array().ok().cloned());
+    if let Some(pairs) = listed {
+        for pair in pairs.chunks(2) {
+            let (Some(key), Some(value)) = (pair.first(), pair.get(1)) else {
+                continue;
+            };
+            let matches = match key {
+                Object::String(bytes, _) => bytes.as_slice() == want,
+                Object::Name(bytes) => bytes.as_slice() == want,
+                _ => false,
+            };
+            if matches {
+                return resolve(doc, value).ok().cloned();
+            }
+        }
+    }
+    let kids = resolve(doc, dict.get(b"Kids").ok()?).ok()?;
+    for kid in kids.as_array().ok()? {
+        if let Some(found) = search_name_tree(doc, kid, want, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The links one page draws over itself.
+///
+/// `places` collects the destinations as they are met and hands each one a
+/// name, so two rows pointing at the same song share an anchor.
+fn page_links(
+    doc: &Document,
+    page_id: lopdf::ObjectId,
+    pages: &HashMap<lopdf::ObjectId, usize>,
+    places: &mut Vec<Place>,
+) -> Vec<LinkArea> {
+    let Ok(page) = doc.get_dictionary(page_id) else {
+        return Vec::new();
+    };
+    let Some(annots) = page
+        .get(b"Annots")
+        .ok()
+        .and_then(|o| resolve(doc, o).ok())
+        .and_then(|o| o.as_array().ok().cloned())
+    else {
+        return Vec::new();
+    };
+    let mut areas = Vec::new();
+    for annot in annots {
+        let Some(annot) = resolve(doc, &annot)
+            .ok()
+            .and_then(|o| o.as_dict().ok().cloned())
+        else {
+            continue;
+        };
+        if annot.get(b"Subtype").and_then(Object::as_name).ok() != Some(b"Link".as_slice()) {
+            continue;
+        }
+        // The action comes first: a file may carry both, and /A is the one a
+        // viewer follows.
+        let action = annot.get(b"A").ok().and_then(|o| resolve(doc, o).ok());
+        let kind = action
+            .as_ref()
+            .and_then(|a| a.as_dict().ok())
+            .and_then(|a| a.get(b"S").and_then(Object::as_name).ok())
+            .map(<[u8]>::to_vec);
+        let link = match kind.as_deref() {
+            Some(b"URI") => action
+                .as_ref()
+                .and_then(|a| a.as_dict().ok())
+                .and_then(|a| a.get(b"URI").ok())
+                .and_then(|o| resolve(doc, o).ok())
+                .and_then(|o| o.as_str().ok().map(<[u8]>::to_vec))
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .and_then(safe_url)
+                .map(Link::Url),
+            _ => {
+                let dest = match kind.as_deref() {
+                    Some(b"GoTo") => action
+                        .as_ref()
+                        .and_then(|a| a.as_dict().ok())
+                        .and_then(|a| a.get(b"D").ok())
+                        .cloned(),
+                    // No action, or one this does not follow: the annotation may
+                    // still carry a plain destination.
+                    _ => annot.get(b"Dest").ok().cloned(),
+                };
+                dest.and_then(|d| place_of(doc, &d, pages)).map(|place| {
+                    let at = places.iter().position(|p| *p == place).unwrap_or_else(|| {
+                        places.push(place);
+                        places.len() - 1
+                    });
+                    Link::Place(format!("pdf-d{at}"))
+                })
+            }
+        };
+        let (Some(link), Ok(rect)) = (link, annot.get(b"Rect").and_then(|o| o.as_array())) else {
+            continue;
+        };
+        let corners: Vec<f64> = rect.iter().filter_map(|o| number(o).ok()).collect();
+        let [x0, y0, x1, y1] = corners[..] else {
+            continue;
+        };
+        areas.push(LinkArea {
+            x0: x0.min(x1),
+            y0: y0.min(y1),
+            x1: x0.max(x1),
+            y1: y0.max(y1),
+            link,
+        });
+    }
+    areas
+}
+
+/// Only the web schemes, and only as an absolute address.
+///
+/// A PDF can ask a viewer to open anything it likes, and this one is opening it
+/// inside a wiki someone trusts. `javascript:` and `data:` are the ones that
+/// would run in that page's own origin; a relative address would resolve
+/// against the wiki rather than against the document, and point somewhere the
+/// file never named.
+fn safe_url(url: String) -> Option<String> {
+    let head = url.trim_start().to_ascii_lowercase();
+    (head.starts_with("http://") || head.starts_with("https://") || head.starts_with("mailto:"))
+        .then_some(url)
 }
 
 /// Take the running heads and folios off every page, and hand back the number
@@ -1844,10 +2121,24 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let doc = Document::load_mem(bytes).map_err(|e| format!("not a readable PDF: {e}"))?;
     let pages = doc.get_pages();
     let total = pages.len();
+    // Which page each object id is, so a link's destination can name one.
+    let by_id: HashMap<lopdf::ObjectId, usize> = pages
+        .iter()
+        .enumerate()
+        .map(|(at, (_, id))| (*id, at))
+        .collect();
+    let mut places: Vec<Place> = Vec::new();
     let mut per_page: Vec<Vec<Line>> = Vec::new();
     let mut budget = PICTURE_BUDGET;
     for (page_no, (_, page_id)) in pages.into_iter().enumerate() {
-        let drawn = page_runs(&doc, page_id, &mut budget);
+        let mut drawn = page_runs(&doc, page_id, &mut budget);
+        // The links live beside the content stream rather than in it, so they
+        // are laid over the runs once those are known.
+        for area in page_links(&doc, page_id, &by_id, &mut places) {
+            for run in drawn.runs.iter_mut().filter(|r| area.covers(r)) {
+                run.link = Some(area.link.clone());
+            }
+        }
         let mut lines = lines_from(drawn.runs);
         for line in &mut lines {
             line.page = page_no + 1;
@@ -1881,19 +2172,225 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
         })
         .count();
     let all_lines: Vec<Line> = per_page.into_iter().flatten().collect();
+    let anchors = anchors_for(&places, &all_lines);
+    let mut blocks = blocks_from(all_lines, &printed, &anchors);
+    mend_contents_links(&mut blocks, &places, &printed, total);
     Ok(Extracted {
-        blocks: blocks_from(all_lines, &printed),
+        blocks,
         pages: total,
         pages_without_text: empty,
     })
 }
 
+/// Point a contents row at the page it names, when the file does not.
+///
+/// A contents list is the one place where a document says the same thing twice:
+/// once in the link, and once in the number printed at the end of the row. The
+/// two can be checked against each other, and they need to be, because the link
+/// is often wrong. The songbook is the case in hand: all thirty-six links on its
+/// index point back at the index itself, which poppler and this reader agree on,
+/// so following them faithfully would take the reader nowhere.
+///
+/// When both agree on a page, the file's own link is kept: it names a height on
+/// that page, so it lands on the song rather than on the page's first line.
+/// When they disagree, the printed number wins, resolved through the folios to
+/// whichever page printed it. A number that no page printed cannot be resolved,
+/// and there the file's link stands, right or wrong.
+fn mend_contents_links(
+    blocks: &mut Vec<Block>,
+    places: &[Place],
+    printed: &HashMap<usize, String>,
+    total: usize,
+) -> usize {
+    // Which page each anchor sits on, and which page printed each number.
+    let anchored: HashMap<String, usize> = places
+        .iter()
+        .enumerate()
+        .map(|(at, (page, _))| (format!("pdf-d{at}"), *page))
+        .collect();
+    let by_printed: HashMap<&str, usize> = printed
+        .iter()
+        .map(|(page, number)| (number.as_str(), *page))
+        .collect();
+    // Where a page's own folio was missed, the numbering still says where the
+    // page is: a book's printed numbers run in a straight line, so the distance
+    // from a number to the page carrying it is the same all through. Taken only
+    // when nearly every folio agrees on it, because a book whose front matter is
+    // numbered separately has no single offset and should not be guessed at.
+    let offset = {
+        let mut tally: HashMap<i64, usize> = HashMap::new();
+        for (page, number) in printed {
+            if let Ok(n) = number.parse::<i64>() {
+                *tally.entry(*page as i64 - n).or_default() += 1;
+            }
+        }
+        tally
+            .into_iter()
+            .max_by_key(|(_, seen)| *seen)
+            .filter(|(_, seen)| seen * 5 >= printed.len() * 4)
+            .map(|(offset, _)| offset)
+    };
+    let mut mended = 0usize;
+    // One slot per contents row, in order, so the second pass can line them up
+    // with the rows again. `None` where the row keeps whatever link it had.
+    let mut wanted: Vec<Option<(String, usize)>> = Vec::new();
+    for block in blocks.iter_mut() {
+        let Block::IndexEntry { spans, page, .. } = block else {
+            continue;
+        };
+        let found = by_printed.get(page.as_str()).copied().or_else(|| {
+            let at = page.parse::<i64>().ok()? + offset?;
+            (at >= 0 && (at as usize) < total).then_some(at as usize)
+        });
+        let Some(names) = found.as_ref() else {
+            wanted.push(None);
+            continue;
+        };
+        let agrees = match spans.iter().find_map(|s| s.link.as_ref()) {
+            Some(Link::Place(id)) => anchored.get(id) == Some(names),
+            // A row that leaves the document is doing something else entirely.
+            Some(Link::Url(_)) => true,
+            None => false,
+        };
+        if agrees {
+            wanted.push(None);
+            continue;
+        }
+        let link = Some(Link::Place(format!("pdf-page-{}", names + 1)));
+        for (at, span) in spans.iter_mut().enumerate() {
+            span.link = match at {
+                0 => link.clone(),
+                _ => None,
+            };
+        }
+        let title = squash(&spans.iter().map(|s| s.text.as_str()).collect::<String>());
+        wanted.push(Some((title, names + 1)));
+        mended += 1;
+    }
+    aim_at_the_headings(blocks, &wanted);
+    mended
+}
+
+/// Letters and digits only, for comparing a contents row against the heading it
+/// names. What differs between the two is punctuation and spacing.
+fn squash(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Move a mended row's target from the top of its page onto the thing it names.
+///
+/// A page number is a coarse answer: a song starting halfway down a page leaves
+/// the reader at the tail of the song before it. But the row says what it is
+/// looking for, so look for it, on the page it said. Where the words turn up,
+/// an anchor goes in front of them and the row points there instead.
+fn aim_at_the_headings(blocks: &mut Vec<Block>, wanted: &[Option<(String, usize)>]) {
+    // Where each row's own words turn up, on the page that row named.
+    let mut found: Vec<(usize, usize)> = Vec::new();
+    let mut hit = vec![false; wanted.len()];
+    let mut page = 1usize;
+    for (at, block) in blocks.iter().enumerate() {
+        if let Block::PageBreak { ended, .. } = block {
+            page = ended + 1;
+            continue;
+        }
+        // A contents row is not the heading it names, however well it matches.
+        if matches!(block, Block::IndexEntry { .. }) {
+            continue;
+        }
+        let here = squash(&block.text());
+        // Short titles match too much: "RU" opens half the songs in this book.
+        if here.len() < 6 {
+            continue;
+        }
+        for (which, want) in wanted.iter().enumerate() {
+            let Some((title, on)) = want else { continue };
+            if !hit[which] && *on == page && title.len() >= 6 && here.starts_with(title.as_str()) {
+                hit[which] = true;
+                found.push((at, which));
+                break;
+            }
+        }
+    }
+    if found.is_empty() {
+        return;
+    }
+    // Point the rows at their new anchors before anything moves.
+    let mut which = 0usize;
+    for block in blocks.iter_mut() {
+        if let Block::IndexEntry { spans, .. } = block {
+            if hit[which] {
+                if let Some(span) = spans.first_mut() {
+                    span.link = Some(Link::Place(format!("pdf-t{which}")));
+                }
+            }
+            which += 1;
+        }
+    }
+    // Then put the anchors in, back to front so the earlier indices still hold.
+    found.sort_unstable();
+    for (at, which) in found.iter().rev() {
+        blocks.insert(*at, Block::Anchor(format!("pdf-t{which}")));
+    }
+}
+
+/// Put each destination on the line it points at, so the links have something
+/// to land on.
+///
+/// A destination is a height on a page, which in a reflow is no longer a place.
+/// The nearest thing that survives is the first line at or below it: what the
+/// reader would have seen at the top of the view had they followed the link on
+/// the page. A destination past the end of its page falls to that page's first
+/// line rather than being dropped, so the link still goes roughly right.
+fn anchors_for(places: &[Place], lines: &[Line]) -> HashMap<usize, Vec<String>> {
+    let mut out: HashMap<usize, Vec<String>> = HashMap::new();
+    for (at, (page, top)) in places.iter().enumerate() {
+        // Lines run down the page, so the first one at or below the destination
+        // is the first that matches.
+        let on_page = || lines.iter().position(|l| l.page == page + 1);
+        let found = lines
+            .iter()
+            .position(|l| l.page == page + 1 && l.y <= top + 1.0)
+            .or_else(on_page);
+        if let Some(index) = found {
+            out.entry(index).or_default().push(format!("pdf-d{at}"));
+        }
+    }
+    out
+}
+
+/// Every destination this document's links name, for the harness to show.
+#[cfg(test)]
+fn places_of(bytes: &[u8]) -> Vec<(usize, Place)> {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    let pages = doc.get_pages();
+    let by_id: HashMap<lopdf::ObjectId, usize> = pages
+        .iter()
+        .enumerate()
+        .map(|(at, (_, id))| (*id, at))
+        .collect();
+    let mut places = Vec::new();
+    let mut from = Vec::new();
+    for (page_no, (_, page_id)) in pages.iter().enumerate() {
+        let before = places.len();
+        page_links(&doc, *page_id, &by_id, &mut places);
+        for _ in before..places.len() {
+            from.push(page_no);
+        }
+    }
+    from.into_iter().zip(places).collect()
+}
+
 /// What the furniture rule would take off this document, for the harness to
 /// show. Exactly the walk [`extract`] does, stopping at the strip.
 #[cfg(test)]
-fn furniture_of(bytes: &[u8]) -> (Vec<String>, usize) {
+fn furniture_of(bytes: &[u8]) -> (Vec<String>, HashMap<usize, String>) {
     let Ok(doc) = Document::load_mem(bytes) else {
-        return (Vec::new(), 0);
+        return (Vec::new(), HashMap::new());
     };
     let mut per_page: Vec<Vec<Line>> = Vec::new();
     let mut budget = PICTURE_BUDGET;
@@ -1918,7 +2415,7 @@ fn furniture_of(bytes: &[u8]) -> (Vec<String>, usize) {
         .map(|l| format!("{}|{}", l.page, l.text))
         .collect();
     let gone = before.into_iter().filter(|k| !after.contains(k)).collect();
-    (gone, printed.len())
+    (gone, printed)
 }
 
 /// Every line of one page with the geometry it was drawn at. A lens for the
@@ -1961,11 +2458,23 @@ mod harness {
         for path in paths {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             let bytes = std::fs::read(&path).expect("read");
-            let (gone, numbered) = super::furniture_of(&bytes);
+            let (gone, folios) = super::furniture_of(&bytes);
+            let numbered = folios.len();
             match super::extract(&bytes) {
                 Err(e) => println!("{name:34.34} FAILED {e}"),
                 Ok(doc) => {
                     let chars: usize = doc.blocks.iter().map(|b| b.text().len()).sum();
+                    let linked = doc
+                        .blocks
+                        .iter()
+                        .flat_map(|b| b.spans())
+                        .filter(|s| s.link.is_some())
+                        .count();
+                    let anchors = doc
+                        .blocks
+                        .iter()
+                        .filter(|b| matches!(b, super::Block::Anchor(_)))
+                        .count();
                     let toc = doc
                         .blocks
                         .iter()
@@ -1981,7 +2490,7 @@ mod harness {
                         })
                         .count();
                     println!(
-                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
+                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
                         doc.pages,
                         doc.blocks.len(),
                         chars,
@@ -1997,6 +2506,96 @@ mod harness {
                 }
             }
         }
+    }
+
+    /// Every link in a document beside what it actually lands on, which is the
+    /// only way to see that a contents row points at its own song.
+    ///
+    ///   PDF_UNDER_TEST=/path/to.pdf PDF_LINKS=1 cargo test pdf_text::harness -- --nocapture
+    #[test]
+    fn follow_every_link() {
+        let (Ok(path), Ok(_)) = (std::env::var("PDF_UNDER_TEST"), std::env::var("PDF_LINKS"))
+        else {
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read");
+        let (_, folios) = super::furniture_of(&bytes);
+        let mut numbers: Vec<&String> = folios.values().collect();
+        numbers.sort();
+        println!(
+            "  printed numbers: {} distinct of {} pages",
+            {
+                let mut u: Vec<&String> = numbers.clone();
+                u.dedup();
+                u.len()
+            },
+            folios.len()
+        );
+        for want in ["3", "15", "19", "21"] {
+            let on: Vec<usize> = folios
+                .iter()
+                .filter(|(_, v)| v.as_str() == want)
+                .map(|(k, _)| k + 1)
+                .collect();
+            println!("    \"{want}\" printed on file pages {on:?}");
+        }
+        let places = super::places_of(&bytes);
+        println!("  {} destinations, resolved by lopdf:", places.len());
+        for (from, (page, y)) in places.iter().take(6) {
+            println!(
+                "    link on page {} -> page {} at y {y}",
+                from + 1,
+                page + 1
+            );
+        }
+        let doc = super::extract(&bytes).expect("read the pdf");
+        // Where each anchor sits: the first words after it.
+        let mut lands: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for (at, block) in doc.blocks.iter().enumerate() {
+            let super::Block::Anchor(id) = block else {
+                continue;
+            };
+            let after = doc.blocks[at + 1..]
+                .iter()
+                .find(|b| !b.text().trim().is_empty())
+                .map(|b| b.text())
+                .unwrap_or_default();
+            lands.insert(id.clone(), after.chars().take(46).collect());
+        }
+        let mut shown = 0;
+        let mut rows = 0;
+        for block in doc.blocks.iter() {
+            let (title, page, link) = match block {
+                super::Block::IndexEntry { spans, page, .. } => (
+                    spans.iter().map(|s| s.text.as_str()).collect::<String>(),
+                    page.clone(),
+                    spans.iter().find_map(|s| s.link.clone()),
+                ),
+                _ => continue,
+            };
+            rows += 1;
+            let target = match &link {
+                Some(super::Link::Place(id)) => lands
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| "!! nowhere !!".into()),
+                Some(super::Link::Url(u)) => u.clone(),
+                None => "!! not linked !!".into(),
+            };
+            let title: String = title.chars().take(40).collect();
+            let squash = |s: &str| {
+                s.chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+            };
+            let exact = squash(&target).starts_with(&squash(&title)) && !title.trim().is_empty();
+            if exact {
+                shown += 1;
+                continue;
+            }
+            println!("  NOT ON ITS OWN TITLE: {title:<42.42} p.{page:<5} -> {target}");
+        }
+        println!("  {rows} contents rows, {shown} land on their own heading");
     }
 
     /// Every line of one page with where it sat, for designing layout rules.
@@ -2100,6 +2699,7 @@ mod harness {
                         super::Block::IndexEntry { page, indent, .. } => {
                             format!("toc>{indent} .{page}")
                         }
+                        super::Block::Anchor(_) => "anch".into(),
                         super::Block::PageBreak { ended, printed } => match printed {
                             Some(p) => format!("--{ended}({p})--"),
                             None => format!("--{ended}--"),
@@ -2235,6 +2835,7 @@ mod tests {
             page: 1,
             text: text.into(),
             spans: vec![Span {
+                link: None,
                 text: text.into(),
                 color: None,
                 bold: false,
@@ -2260,6 +2861,7 @@ mod tests {
                 line(656.0, 11.0, "Et nyt afsnit."),
             ],
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(
             texts(&blocks),
@@ -2279,6 +2881,7 @@ mod tests {
                 line(616.0, 11.0, "Mere brødtekst."),
                 line(600.0, 11.0, "Endnu mere."),
             ],
+            &HashMap::new(),
             &HashMap::new(),
         );
         assert_eq!(
@@ -2303,6 +2906,7 @@ mod tests {
                 line(700.0, 11.0, "Første linje på næste side."),
             ],
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(blocks.len(), 2, "a page break starts a new block");
     }
@@ -2320,6 +2924,7 @@ mod tests {
             blocks: vec![Block::Paragraph {
                 indent: 0,
                 spans: vec![Span {
+                    link: None,
                     text: "noget".into(),
                     color: None,
                     bold: false,
@@ -2371,6 +2976,7 @@ mod tests {
     /// A span with no styling but its colour, for the fixtures below.
     fn span(text: &str, color: Option<&str>) -> Span {
         Span {
+            link: None,
             text: text.into(),
             color: color.map(str::to_string),
             bold: false,
@@ -2380,6 +2986,7 @@ mod tests {
 
     fn run(x: f64, end_x: f64, text: &str, color: Option<&str>, bold: bool) -> Run {
         Run {
+            link: None,
             x,
             end_x,
             y: 700.0,
@@ -2461,6 +3068,7 @@ mod tests {
             page: 1,
             text: text.into(),
             spans: vec![Span {
+                link: None,
                 text: text.into(),
                 color: None,
                 bold: false,
@@ -2475,6 +3083,7 @@ mod tests {
                 short(686.0, 400.0, "17:50 Åbning af landsmødet"),
                 short(672.0, 398.0, "og en fortsættelse af samme punkt"),
             ],
+            &HashMap::new(),
             &HashMap::new(),
         );
         assert_eq!(
@@ -2677,8 +3286,9 @@ mod tests {
                 on_page(2, 700.0, "Første linje på side to"),
             ],
             &HashMap::new(),
+            &HashMap::new(),
         );
-        assert_eq!(blocks.len(), 3, "text, break, text");
+        assert_eq!(blocks.len(), 4, "text, break, the new page's anchor, text");
         assert_eq!(
             blocks[1],
             Block::PageBreak {
@@ -2688,9 +3298,31 @@ mod tests {
             "the page that just ended"
         );
         assert_eq!(
-            texts(&blocks),
-            vec!["Sidste linje på side et", "", "Første linje på side to"]
+            blocks[2],
+            Block::Anchor("pdf-page-2".into()),
+            "somewhere for a link to page two to land"
         );
+        assert_eq!(
+            texts(&blocks),
+            vec!["Sidste linje på side et", "", "", "Første linje på side to"]
+        );
+    }
+
+    /// A statute is written in abbreviations, and they are not bullets.
+    #[test]
+    fn an_abbreviation_is_not_a_list_marker() {
+        // The vedtægter, where every subsection opens this way. It was arriving
+        // as a bullet whose entire text was the number.
+        assert_eq!(
+            list_marker("Stk. 1 Foreningens navn er Radikal Ungdom"),
+            None
+        );
+        assert_eq!(list_marker("Nr. 4 er vedtaget"), None);
+        assert_eq!(list_marker("Bl.a. dette"), None);
+        // What a lettered marker actually looks like, and still does.
+        assert_eq!(list_marker("a) Første forslag"), Some("Første forslag"));
+        assert_eq!(list_marker("iv) Fjerde forslag"), Some("Fjerde forslag"));
+        assert_eq!(list_marker("1. Første punkt"), Some("Første punkt"));
     }
 
     /// A contents row is read from its end: the page number, then the leader

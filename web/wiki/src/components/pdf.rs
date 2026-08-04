@@ -24,7 +24,7 @@
 use dioxus::prelude::*;
 
 use crate::i18n::t;
-use crate::pdf_text::{Align, Block, Extracted, Span};
+use crate::pdf_text::{Align, Block, Extracted, Link, Span};
 
 /// One block's words, keeping the colours the document set.
 ///
@@ -43,18 +43,94 @@ fn Spans(spans: Vec<Span>) -> Element {
                 // `strong` and `em` rather than a font-weight style: a document
                 // that emphasises a word means it, and the meaning should reach
                 // a screen reader too.
-                match (span.bold, span.italic) {
+                let inner = match (span.bold, span.italic) {
                     (true, true) => rsx! {
-                        strong { key: "{i}", style: "{style}", em { "{span.text}" } }
+                        strong { style: "{style}", em { "{span.text}" } }
                     },
-                    (true, false) => rsx! { strong { key: "{i}", style: "{style}", "{span.text}" } },
-                    (false, true) => rsx! { em { key: "{i}", style: "{style}", "{span.text}" } },
+                    (true, false) => rsx! { strong { style: "{style}", "{span.text}" } },
+                    (false, true) => rsx! { em { style: "{style}", "{span.text}" } },
                     (false, false) if style.is_empty() => rsx! { "{span.text}" },
-                    (false, false) => rsx! { span { key: "{i}", style: "{style}", "{span.text}" } },
+                    (false, false) => rsx! { span { style: "{style}", "{span.text}" } },
+                };
+                match &span.link {
+                    Some(link) => rsx! { LinkTo { key: "{i}", link: link.clone(), {inner} } },
+                    None => rsx! { Fragment { key: "{i}", {inner} } },
                 }
             }
         }
     }
+}
+
+/// Wrap something in the link the document put on it.
+///
+/// A destination inside the document is scrolled to rather than navigated to.
+/// The `href` is real, so it focuses, announces and copies like a link; what is
+/// suppressed is the fragment landing in the address bar, which this app's
+/// router would read as a new place and answer by rebuilding the view: the file
+/// would be fetched and reparsed to arrive where a scroll already was.
+#[component]
+fn LinkTo(
+    link: Link,
+    /// Extra classes for when the link IS the row rather than words inside one.
+    #[props(default)]
+    class: String,
+    #[props(default)] style: String,
+    children: Element,
+) -> Element {
+    let class = format!("pdf-link {class}");
+    match link {
+        Link::Url(href) => rsx! {
+            a {
+                class: "{class}",
+                style: "{style}",
+                href: "{href}",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                {children}
+            }
+        },
+        Link::Place(id) => rsx! {
+            a {
+                class: "{class}",
+                style: "{style}",
+                href: "#{id}",
+                onclick: move |e: Event<MouseData>| {
+                    e.prevent_default();
+                    jump_to(&id);
+                },
+                {children}
+            }
+        },
+    }
+}
+
+/// Bring the anchor with this id into view.
+///
+/// `scroll-margin-top` on the anchor itself is what keeps the landing clear of
+/// the sticky bar; the same arrangement the heading navigation uses.
+fn jump_to(id: &str) {
+    let Some(target) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(id))
+    else {
+        return;
+    };
+    let opts = web_sys::ScrollIntoViewOptions::new();
+    opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+    opts.set_block(web_sys::ScrollLogicalPosition::Start);
+    target.scroll_into_view_with_scroll_into_view_options(&opts);
+}
+
+/// The same words with their links taken off, for when something around them is
+/// already the link. An anchor inside an anchor is not a thing HTML has.
+fn unlinked(spans: &[Span]) -> Vec<Span> {
+    spans
+        .iter()
+        .map(|s| Span {
+            link: None,
+            ..s.clone()
+        })
+        .collect()
 }
 
 /// Render what was read out of a PDF.
@@ -127,20 +203,42 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         div { key: "{i}", class: "pdf-toc",
                             for (j , entry) in group.iter().enumerate() {
                                 if let Block::IndexEntry { spans, page, indent } = entry {
-                                    div {
-                                        key: "{j}",
-                                        class: "pdf-toc-row",
-                                        style: "{indent_style(*indent)}",
-                                        span { class: "pdf-toc-title", Spans { spans: spans.clone() } }
-                                        // Decoration, and nothing for a screen
-                                        // reader to announce: the row already
-                                        // says what it points at and where.
-                                        span { class: "pdf-toc-leader", aria_hidden: "true" }
-                                        span { class: "pdf-toc-page", "{page}" }
+                                    {
+                                        // The file draws its link across the whole
+                                        // row, number included, so the whole row is
+                                        // the link here too: on a phone the number
+                                        // is the easiest part of it to hit.
+                                        let row = rsx! {
+                                            span { class: "pdf-toc-title", Spans { spans: unlinked(spans) } }
+                                            // Decoration, and nothing for a screen
+                                            // reader to announce: the row already
+                                            // says what it points at and where.
+                                            span { class: "pdf-toc-leader", aria_hidden: "true" }
+                                            span { class: "pdf-toc-page", "{page}" }
+                                        };
+                                        let style = indent_style(*indent);
+                                        match spans.iter().find_map(|s| s.link.clone()) {
+                                            Some(link) => rsx! {
+                                                LinkTo {
+                                                    key: "{j}",
+                                                    link,
+                                                    class: "pdf-toc-row",
+                                                    style: "{style}",
+                                                    {row}
+                                                }
+                                            },
+                                            None => rsx! {
+                                                div { key: "{j}", class: "pdf-toc-row", style: "{style}", {row} }
+                                            },
+                                        }
                                     }
                                 }
                             }
                         }
+                    },
+                    Some(Block::Anchor(id)) => rsx! {
+                        // Nothing to read: somewhere for a link to land.
+                        span { key: "{i}", id: "{id}", class: "pdf-anchor" }
                     },
                     Some(Block::PageBreak { ended, printed }) => rsx! {
                         // Furniture, and marked as such: a separator carries no

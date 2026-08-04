@@ -8229,6 +8229,44 @@ a.list-item:hover {
 	   while its number sat on the last. */
 	border-bottom: 1px dotted var(--md-outline);
 }
+/* A link the document itself drew. Coloured rather than underlined, because a
+   PDF's links are often a whole sentence and a rule under all of it reads as
+   emphasis the document never gave. */
+.pdf-link {
+	color: var(--md-primary);
+	text-decoration: none;
+}
+.pdf-link:hover,
+.pdf-link:focus-visible {
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+}
+
+/* A contents row that IS a link keeps the reading colour: colouring a hundred
+   rows makes an index look like a warning. Only the title answers to the
+   pointer, and the underline goes there rather than on the whole row, which
+   already carries a dotted leader. */
+.pdf-toc-row.pdf-link {
+	color: inherit;
+}
+.pdf-toc-row.pdf-link:hover,
+.pdf-toc-row.pdf-link:focus-visible {
+	text-decoration: none;
+}
+.pdf-toc-row.pdf-link:hover .pdf-toc-title,
+.pdf-toc-row.pdf-link:focus-visible .pdf-toc-title {
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+}
+
+/* Where a link lands. Nothing to see: it exists so the scroll has a target, and
+   the margin keeps that target clear of the sticky bar above it. */
+.pdf-anchor {
+	display: block;
+	height: 0;
+	scroll-margin-top: var(--md-sys-spacing-16);
+}
+
 .pdf-toc-page {
 	flex: 0 0 auto;
 	/* Figures of one width, so the numbers stack into a column rather than
