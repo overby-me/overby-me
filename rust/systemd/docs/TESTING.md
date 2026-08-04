@@ -71,7 +71,8 @@ Covered so far:
   pretty / JSON output formats;
 - the `systemd-creds list` empty-set `ENXIO` exit contract;
 - `systemd-network-generator`: `ip=`, `ifname=`, `net.ifname_policy=`, `net.ifnames=`,
-  and `rd.route=` (whole generated `.network`/`.link` file trees, byte-for-byte);
+  `rd.route=`, and the merged `vlan=`/`bond=`/`bridge=` per-interface `.netdev`/`.network`
+  files (whole generated file trees, byte-for-byte);
 - `systemd-fstab-generator`: device-node canonicalization, `blockdev@` ordering,
   `SourcePath`/`Documentation`/`Where`/`Type`, and the `.requires`/`.wants` symlink tree.
 
@@ -98,10 +99,13 @@ flag these intentional differences:
   `sysfs_check()`, so their presence depends on the host and is excluded; the oracle
   compares a per-unit set of the environment-independent fields plus the non-fsck symlink
   tree, so header field order and section layout are also ignored.
-- **Unported network-generator shapes.** `systemd-network-generator` `vlan=`/`bond=`/
-  `bridge=`/`team=` still emit one descriptive file per aspect (`71-<type>-…`) rather than
-  C's per-interface merged `70-<ifname>.netdev`/`.network`, so those items are not yet in
-  the corpus. `ip=`/`ifname=`/`net.ifname_policy=`/`rd.route=` are byte-faithful.
+- **Parsed-but-dropped inputs.** `systemd-network-generator` accepts `team=` and
+  `net.ifnames=` but, like C, writes no file for them (`team=` is not even a C
+  kernel-command-line option, and `net.ifnames=` is udev's concern). C also parses
+  `bond=` options and then drops them, so the `.netdev` carries no `[Bond]` section.
+  Everything the generator *does* emit — `ip=`/`ifname=`/`net.ifname_policy=`/`rd.route=`
+  and the merged `vlan=`/`bond=`/`bridge=` `70-<ifname>.netdev`/`.network` files — is
+  byte-faithful.
 
 ## Integration tests
 
