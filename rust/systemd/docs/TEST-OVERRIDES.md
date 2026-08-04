@@ -24,6 +24,30 @@ v258, but that store path's `meson.version` is 260.2).
 
 37 tests carry a real override.
 
+## Coverage denominator
+
+Honest denominators against upstream systemd 260.2 (`test/integration-tests/`),
+so a subset is never read as a total:
+
+- **Upstream integration suite: 67 families** (`TEST-01-BASIC` through
+  `TEST-89-RESOLVED-MDNS`), plus 25 standalone unit-test data directories
+  (`test-execute/`, `test-fstab-generator/`, `test-network-generator-conversion/`,
+  `test-sysusers/`, and so on) exercised outside the VM.
+- **rust/systemd registers 65 of the 67 families**, expanded per subtest into
+  443 `integration-tests/*.nix` wrappers. The two families not yet mirrored are
+  **TEST-69-SHUTDOWN** and **TEST-85-NETWORK**.
+- **Pass counts are deliberately omitted here.** They require booting each VM and
+  are recorded per test in the wrappers, not asserted in this file. Of the 443
+  wrappers, 37 carry a real override (the classes above); that breakdown was last
+  fully audited at 440 wrappers on 2026-07-26, so the three wrappers added since
+  are not yet reclassified.
+
+Separately, the parsers and CLIs are frozen against the C binaries without a VM
+by the in-process differential oracles (`just differential`): `systemd-escape`,
+`systemd-analyze`, `systemd-id128`, `systemd-creds`, `systemd-journal-remote`,
+`systemd-network-generator`, and `systemd-fstab-generator`, plus in-tree
+robustness fuzzers. See `docs/TESTING.md`.
+
 ## Subtest registration audit, 2026-07-28
 
 Every upstream `TEST-NN-FAMILY.subtest.sh` was compared against the registered
