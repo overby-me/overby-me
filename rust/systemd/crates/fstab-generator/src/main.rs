@@ -750,6 +750,14 @@ fn emit_mount_unit(
     // they stay in Options= so downstream tools (udisks2, check scripts)
     // can still see them — mount(2) ignores unknown `x-` prefixes.
     for opt in &systemd_opts {
+        // x-systemd.device-timeout is fully consumed into the <device>.device.d
+        // drop-in (JobRunningTimeoutSec), so C strips it from Options=. Every
+        // other x-systemd.*/x-initrd.*/comment= marker stays in Options= so
+        // downstream tools (udisks2, check scripts) can still see it; mount(2)
+        // ignores unknown `x-` prefixes.
+        if opt.starts_with("x-systemd.device-timeout=") {
+            continue;
+        }
         if matches!(
             *opt,
             "nofail" | "noauto" | "auto" | "_netdev" | "user" | "users" | "nouser" | "group"
@@ -1125,6 +1133,44 @@ mod tests {
         assert!(sys.contains(&"x-systemd.requires=foo.service"));
         assert!(mount.contains(&"defaults"));
         assert!(mount.contains(&"uid=1000"));
+    }
+
+    #[test]
+    fn test_device_timeout_stripped_from_options() {
+        // x-systemd.device-timeout is fully consumed into the .device.d drop-in
+        // (JobRunningTimeoutSec), so it must not remain in Options=, matching C.
+        // Every other x-systemd.* stays in Options=.
+        let dir = std::env::temp_dir().join(format!("fstabgen-devto-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = FstabEntry {
+            what: "/dev/sdx".into(),
+            where_: "/mnt/x".into(),
+            fstype: "ext4".into(),
+            options: "ro,x-systemd.device-timeout=5,x-systemd.automount".into(),
+            _dump: 0,
+            passno: 0,
+        };
+        emit_mount_unit(&dir, &entry, false, "/etc/fstab").unwrap();
+
+        let mount = std::fs::read_to_string(dir.join("mnt-x.mount")).unwrap();
+        let opts: Vec<&str> = mount
+            .lines()
+            .filter(|l| l.starts_with("Options="))
+            .collect();
+        assert_eq!(
+            opts,
+            vec!["Options=ro,x-systemd.automount"],
+            "device-timeout must be stripped from Options= (other x-systemd.* kept), got: {opts:?}"
+        );
+
+        let dropin =
+            std::fs::read_to_string(dir.join("dev-sdx.device.d/50-device-timeout.conf")).unwrap();
+        assert!(
+            dropin.contains("JobRunningTimeoutSec=5"),
+            "the timeout must land in the drop-in, got: {dropin}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
