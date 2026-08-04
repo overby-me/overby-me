@@ -279,6 +279,12 @@ enum Command {
         /// for the full table)
         architectures: Vec<String>,
     },
+
+    /// List known filesystems and their predefined sets
+    Filesystems {
+        /// Filesystem set name(s) like @basic-api (omit for the full listing)
+        filesystems: Vec<String>,
+    },
 }
 
 // ── Boot timing data structures ───────────────────────────────────────────
@@ -1581,6 +1587,7 @@ fn main() {
             mask,
         }) => cmd_capability(capabilities, mask),
         Some(Command::Architectures { ref architectures }) => cmd_architectures(architectures),
+        Some(Command::Filesystems { ref filesystems }) => cmd_filesystems(filesystems),
     }
 }
 
@@ -3820,6 +3827,343 @@ fn cmd_architectures(args: &[String]) {
     println!("{:<name_w$} SUPPORT", "NAME");
     for a in rows {
         println!("{:<name_w$} {}", ARCH_NAMES[a], support(a));
+    }
+}
+
+// ── Filesystem sets ────────────────────────────────────────────────────────
+
+// GENERATED from `systemd-analyze filesystems @<set>` (systemd 260.2). Do not
+// hand-edit; the differential oracle validates it against C. See the frontier
+// memory + src/basic/filesystem-sets.py for the upstream source of truth.
+const FS_MAGICS: &[(&str, &[u64])] = &[
+    ("adfs", &[0xadf5]),
+    ("affs", &[0xadff]),
+    ("afs", &[0x6b414653, 0x5346414f]),
+    ("anon_inodefs", &[0x9041934]),
+    ("apparmorfs", &[0x5a3c69f0]),
+    ("autofs", &[0x187]),
+    ("balloon-kvm", &[0x13661366]),
+    ("bcachefs", &[0xca451a4e]),
+    ("bdev", &[0x62646576]),
+    ("binder", &[0x6c6f6f70]),
+    ("binfmt_misc", &[0x42494e4d]),
+    ("bpf", &[0xcafe4a11]),
+    ("btrfs", &[0x9123683e]),
+    ("btrfs_test_fs", &[0x73727279]),
+    ("ceph", &[0xc36400]),
+    ("cgroup", &[0x27e0eb]),
+    ("cgroup2", &[0x63677270]),
+    ("cifs", &[0xff534d42, 0xfe534d42]),
+    ("coda", &[0x73757245]),
+    ("configfs", &[0x62656570]),
+    ("cpuset", &[0x27e0eb]),
+    ("cramfs", &[0x28cd3d45]),
+    ("dax", &[0x64646178]),
+    ("debugfs", &[0x64626720]),
+    ("devmem", &[0x454d444d]),
+    ("devpts", &[0x1cd1]),
+    ("devtmpfs", &[0x1021994]),
+    ("dmabuf", &[0x444d4142]),
+    ("ecryptfs", &[0xf15f]),
+    ("efivarfs", &[0xde5e81e4]),
+    ("efs", &[0x414a53]),
+    ("erofs", &[0xe0f5e1e2]),
+    ("exfat", &[0x2011bab0]),
+    ("ext2", &[0xef53]),
+    ("ext3", &[0xef53]),
+    ("ext4", &[0xef53]),
+    ("f2fs", &[0xf2f52010]),
+    ("fuse", &[0x65735546]),
+    ("fuseblk", &[0x65735546]),
+    ("fusectl", &[0x65735543]),
+    ("gfs", &[0x1161970]),
+    ("gfs2", &[0x1161970]),
+    ("gmem", &[0x474d454d]),
+    ("hostfs", &[0xc0ffee]),
+    ("hpfs", &[0xf995e849]),
+    ("hugetlbfs", &[0x958458f6]),
+    ("iso9660", &[0x9660]),
+    ("jffs2", &[0x72b6]),
+    ("minix", &[0x137f, 0x138f, 0x2468, 0x2478, 0x4d5a]),
+    ("mqueue", &[0x19800202]),
+    ("msdos", &[0x4d44]),
+    ("ncp", &[0x564c]),
+    ("ncpfs", &[0x564c]),
+    ("nfs", &[0x6969]),
+    ("nfs4", &[0x6969]),
+    ("nilfs2", &[0x3434]),
+    ("nsfs", &[0x6e736673]),
+    ("ntfs", &[0x5346544e]),
+    ("ntfs3", &[0x7366746e]),
+    ("nullfs", &[0x4e554c4c]),
+    ("ocfs2", &[0x7461636f]),
+    ("openpromfs", &[0x9fa1]),
+    ("orangefs", &[0x20030529]),
+    ("overlay", &[0x794c7630]),
+    ("pidfs", &[0x50494446]),
+    ("pipefs", &[0x50495045]),
+    ("ppc-cmm", &[0xc7571590]),
+    ("proc", &[0x9fa0]),
+    ("pstore", &[0x6165676c]),
+    ("pvfs2", &[0x20030529]),
+    ("qnx4", &[0x2f]),
+    ("qnx6", &[0x68191122]),
+    ("ramfs", &[0x858458f6]),
+    ("reiserfs", &[0x52654973]),
+    ("resctrl", &[0x7655821]),
+    ("rpc_pipefs", &[0x67596969]),
+    ("secretmem", &[0x5345434d]),
+    ("securityfs", &[0x73636673]),
+    ("selinuxfs", &[0xf97cff8c]),
+    ("shiftfs", &[0x6a656a62]),
+    ("smackfs", &[0x43415d53]),
+    ("smb3", &[0xff534d42]),
+    ("smbfs", &[0x517b]),
+    ("sockfs", &[0x534f434b]),
+    ("squashfs", &[0x73717368]),
+    ("sysfs", &[0x62656572]),
+    ("tmpfs", &[0x1021994]),
+    ("tracefs", &[0x74726163]),
+    ("udf", &[0x15013346]),
+    ("usbdevfs", &[0x9fa2]),
+    ("v9fs", &[0x1021997]),
+    ("vboxsf", &[0x786f4256]),
+    ("vfat", &[0x4d44]),
+    ("xenfs", &[0xabba1974]),
+    ("xfs", &[0x58465342]),
+    ("z3fold", &[0x33]),
+    ("zonefs", &[0x5a4f4653]),
+    ("zsmalloc", &[0x58295829]),
+];
+
+const MAGIC_OWNER: &[(u64, &str)] = &[
+    (0x2f, "qnx4"),
+    (0x33, "z3fold"),
+    (0x187, "autofs"),
+    (0x137f, "minix"),
+    (0x138f, "minix"),
+    (0x1cd1, "devpts"),
+    (0x2468, "minix"),
+    (0x2478, "minix"),
+    (0x3434, "nilfs2"),
+    (0x4d44, "vfat"),
+    (0x4d5a, "minix"),
+    (0x517b, "smbfs"),
+    (0x564c, "ncpfs"),
+    (0x6969, "nfs4"),
+    (0x72b6, "jffs2"),
+    (0x9660, "iso9660"),
+    (0x9fa0, "proc"),
+    (0x9fa1, "openpromfs"),
+    (0x9fa2, "usbdevfs"),
+    (0xadf5, "adfs"),
+    (0xadff, "affs"),
+    (0xef53, "ext4"),
+    (0xf15f, "ecryptfs"),
+    (0x27e0eb, "cgroup"),
+    (0x414a53, "efs"),
+    (0xc0ffee, "hostfs"),
+    (0xc36400, "ceph"),
+    (0x1021994, "tmpfs"),
+    (0x1021997, "v9fs"),
+    (0x1161970, "gfs2"),
+    (0x7655821, "resctrl"),
+    (0x9041934, "anon_inodefs"),
+    (0x13661366, "balloon-kvm"),
+    (0x15013346, "udf"),
+    (0x19800202, "mqueue"),
+    (0x20030529, "orangefs"),
+    (0x2011bab0, "exfat"),
+    (0x28cd3d45, "cramfs"),
+    (0x42494e4d, "binfmt_misc"),
+    (0x43415d53, "smackfs"),
+    (0x444d4142, "dmabuf"),
+    (0x454d444d, "devmem"),
+    (0x474d454d, "gmem"),
+    (0x4e554c4c, "nullfs"),
+    (0x50494446, "pidfs"),
+    (0x50495045, "pipefs"),
+    (0x52654973, "reiserfs"),
+    (0x5345434d, "secretmem"),
+    (0x5346414f, "afs"),
+    (0x5346544e, "ntfs"),
+    (0x534f434b, "sockfs"),
+    (0x58295829, "zsmalloc"),
+    (0x58465342, "xfs"),
+    (0x5a3c69f0, "apparmorfs"),
+    (0x5a4f4653, "zonefs"),
+    (0x6165676c, "pstore"),
+    (0x62646576, "bdev"),
+    (0x62656570, "configfs"),
+    (0x62656572, "sysfs"),
+    (0x63677270, "cgroup2"),
+    (0x64626720, "debugfs"),
+    (0x64646178, "dax"),
+    (0x65735543, "fusectl"),
+    (0x65735546, "fuse"),
+    (0x67596969, "rpc_pipefs"),
+    (0x68191122, "qnx6"),
+    (0x6a656a62, "shiftfs"),
+    (0x6b414653, "afs"),
+    (0x6c6f6f70, "binder"),
+    (0x6e736673, "nsfs"),
+    (0x73636673, "securityfs"),
+    (0x7366746e, "ntfs3"),
+    (0x73717368, "squashfs"),
+    (0x73727279, "btrfs_test_fs"),
+    (0x73757245, "coda"),
+    (0x7461636f, "ocfs2"),
+    (0x74726163, "tracefs"),
+    (0x786f4256, "vboxsf"),
+    (0x794c7630, "overlay"),
+    (0x858458f6, "ramfs"),
+    (0x9123683e, "btrfs"),
+    (0x958458f6, "hugetlbfs"),
+    (0xabba1974, "xenfs"),
+    (0xc7571590, "ppc-cmm"),
+    (0xca451a4e, "bcachefs"),
+    (0xcafe4a11, "bpf"),
+    (0xde5e81e4, "efivarfs"),
+    (0xe0f5e1e2, "erofs"),
+    (0xf2f52010, "f2fs"),
+    (0xf97cff8c, "selinuxfs"),
+    (0xf995e849, "hpfs"),
+    (0xfe534d42, "cifs"),
+    (0xff534d42, "cifs"),
+];
+
+const FS_SETS: &[(&str, &str, &[&str])] = &[
+    ("@basic-api", "Basic filesystem API", &["cgroup", "cgroup2", "devpts", "devtmpfs", "mqueue", "proc", "sysfs"]),
+    ("@anonymous", "Anonymous inodes", &["anon_inodefs", "pipefs", "sockfs"]),
+    ("@application", "Application virtual filesystems", &["autofs", "fuse", "overlay"]),
+    ("@auxiliary-api", "Auxiliary filesystem API", &["binfmt_misc", "configfs", "efivarfs", "fusectl", "hugetlbfs", "rpc_pipefs", "securityfs"]),
+    ("@common-block", "Common block device filesystems", &["btrfs", "erofs", "exfat", "ext4", "f2fs", "iso9660", "ntfs3", "squashfs", "udf", "vfat", "xfs"]),
+    ("@historical-block", "Historical block device filesystems", &["ext2", "ext3", "minix"]),
+    ("@network", "Well-known network filesystems", &["afs", "ceph", "cifs", "gfs", "gfs2", "ncp", "ncpfs", "nfs", "nfs4", "ocfs2", "orangefs", "pvfs2", "smb3", "smbfs"]),
+    ("@privileged-api", "Privileged filesystem API", &["bpf", "debugfs", "pstore", "tracefs"]),
+    ("@security", "Security/MAC API VFS", &["apparmorfs", "selinuxfs", "smackfs"]),
+    ("@temporary", "Temporary filesystems", &["ramfs", "tmpfs"]),
+    ("@known", "All known filesystems declared in the kernel", &["apparmorfs", "adfs", "affs", "afs", "anon_inodefs", "autofs", "balloon-kvm", "bcachefs", "bdev", "binder", "binfmt_misc", "bpf", "btrfs", "btrfs_test_fs", "cpuset", "ceph", "cgroup2", "cgroup", "cifs", "coda", "configfs", "cramfs", "dax", "debugfs", "devmem", "devpts", "devtmpfs", "dmabuf", "ecryptfs", "efivarfs", "efs", "erofs", "ext2", "ext3", "ext4", "exfat", "f2fs", "fuseblk", "fuse", "fusectl", "gfs", "gfs2", "gmem", "hostfs", "hpfs", "hugetlbfs", "iso9660", "jffs2", "minix", "mqueue", "msdos", "ncp", "ncpfs", "nfs", "nfs4", "nilfs2", "nsfs", "ntfs", "ntfs3", "nullfs", "ocfs2", "openpromfs", "orangefs", "overlay", "pidfs", "pipefs", "ppc-cmm", "proc", "pstore", "pvfs2", "qnx4", "qnx6", "ramfs", "resctrl", "reiserfs", "rpc_pipefs", "secretmem", "securityfs", "selinuxfs", "shiftfs", "smackfs", "smb3", "smbfs", "sockfs", "squashfs", "sysfs", "tmpfs", "tracefs", "udf", "usbdevfs", "vboxsf", "vfat", "v9fs", "xenfs", "xfs", "z3fold", "zonefs", "zsmalloc"]),
+];
+
+/// Look up a filesystem's magic numbers (empty if unknown).
+fn fs_magics(fs: &str) -> &'static [u64] {
+    FS_MAGICS
+        .iter()
+        .find(|(f, _)| *f == fs)
+        .map(|(_, m)| *m)
+        .unwrap_or(&[])
+}
+
+/// The canonical owner filesystem of a magic (C's fs_type_to_string), used for
+/// the "[owner]" alias notation.
+fn magic_owner(magic: u64) -> Option<&'static str> {
+    MAGIC_OWNER
+        .iter()
+        .find(|(m, _)| *m == magic)
+        .map(|(_, o)| *o)
+}
+
+/// A filesystem is "primary" if it owns at least one of its magics.
+fn fs_is_primary(fs: &str) -> bool {
+    fs_magics(fs).iter().any(|&m| magic_owner(m) == Some(fs))
+}
+
+/// Render one filesystem set exactly like C's dump_filesystem_set.
+fn dump_filesystem_set(name: &str, comment: &str, members: &[&str]) {
+    println!("{name}");
+    println!("    # {comment}");
+    for &fs in members {
+        // A nested "@set" reference (none are currently defined) prints as-is.
+        if fs.starts_with('@') {
+            println!("    {fs}");
+            continue;
+        }
+        print!("    {fs}");
+        let magics = fs_magics(fs);
+        for (i, &m) in magics.iter().enumerate() {
+            print!("{}", if i == 0 { " (magic: " } else { ", " });
+            print!("0x{m:x}");
+            if let Some(owner) = magic_owner(m)
+                && owner != fs
+            {
+                print!("[{owner}]");
+            }
+            if i + 1 == magics.len() {
+                print!(")");
+            }
+        }
+        println!();
+    }
+}
+
+fn cmd_filesystems(args: &[String]) {
+    use std::collections::BTreeSet;
+
+    if !args.is_empty() {
+        // Explicit set(s): error out on the first unknown one (C's ENOENT path).
+        for (i, name) in args.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            match FS_SETS.iter().find(|(n, _, _)| *n == name.as_str()) {
+                Some(&(n, c, m)) => dump_filesystem_set(n, c, m),
+                None => {
+                    eprintln!("Filesystem set \"{name}\" not found.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        return;
+    }
+
+    // Full listing: every set, then the ungrouped and unlisted sections.
+    for (i, &(n, c, m)) in FS_SETS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        dump_filesystem_set(n, c, m);
+    }
+
+    // "Ungrouped": @known members not in any *other* group, primary only.
+    let known_members = FS_SETS.last().map(|(_, _, m)| *m).unwrap_or(&[]);
+    let grouped: BTreeSet<&str> = FS_SETS[..FS_SETS.len().saturating_sub(1)]
+        .iter()
+        .flat_map(|(_, _, m)| m.iter().copied())
+        .collect();
+    let mut ungrouped: Vec<&str> = known_members
+        .iter()
+        .copied()
+        .filter(|fs| !grouped.contains(fs) && fs_is_primary(fs))
+        .collect();
+    ungrouped.sort_unstable();
+    println!();
+    println!("# Ungrouped filesystems (known but not included in any of the groups except @known):");
+    for fs in ungrouped {
+        println!("#   {fs}");
+    }
+
+    // "Unlisted": filesystems the local kernel knows that are in no group at
+    // all. Host-dependent; shown only when non-empty (matching C).
+    if let Ok(content) = std::fs::read_to_string("/proc/filesystems") {
+        let all_grouped: BTreeSet<&str> = FS_SETS
+            .iter()
+            .flat_map(|(_, _, m)| m.iter().copied())
+            .collect();
+        let mut unlisted: Vec<String> = content
+            .lines()
+            .filter_map(|l| l.split_once('\t').map(|(_, name)| name.trim().to_string()))
+            .filter(|name| !all_grouped.contains(name.as_str()))
+            .collect();
+        unlisted.sort();
+        unlisted.dedup();
+        if !unlisted.is_empty() {
+            println!();
+            println!("# Unlisted filesystems (available to the local kernel, but not included in any of the groups listed above):");
+            for fs in unlisted {
+                println!("#   {fs}");
+            }
+        }
     }
 }
 

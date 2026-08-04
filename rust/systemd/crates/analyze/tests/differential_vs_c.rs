@@ -664,3 +664,53 @@ fn analyze_architectures_matches_c() {
         div.join("\n")
     );
 }
+
+/// `systemd-analyze filesystems` dumps the predefined filesystem sets (@basic-api
+/// etc.) with each member's statfs magic(s) and "[owner]" aliases. The set data
+/// is static; the no-arg listing's trailing "Unlisted" section reads
+/// /proc/filesystems, but rust and C read the same host, so a verbatim
+/// stdout/stderr/exit comparison holds. Covers every set, the full listing, a
+/// multi-set request, and the "not found" error.
+#[test]
+fn analyze_filesystems_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    let cases: &[&[&str]] = &[
+        &["filesystems"], // full listing incl. Ungrouped/Unlisted sections
+        &["filesystems", "@basic-api"],
+        &["filesystems", "@network"], // multi-magic + [owner] aliases
+        &["filesystems", "@known"],
+        &["filesystems", "@anonymous"],
+        &["filesystems", "@application"],
+        &["filesystems", "@auxiliary-api"],
+        &["filesystems", "@common-block"],
+        &["filesystems", "@historical-block"],
+        &["filesystems", "@privileged-api"],
+        &["filesystems", "@security"],
+        &["filesystems", "@temporary"],
+        &["filesystems", "@basic-api", "@network"], // blank line between
+        &["filesystems", "bogus"],
+        &["filesystems", "@bogus"],
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (ro, re, rok) = run_full(rust_bin, args);
+        let (co, ce, cok) = run_full(&c_bin, args);
+        if ro != co || re != ce || rok != cok {
+            div.push(format!(
+                "args={args:?}\n     rust: ok={rok} err={re:?}\n     c   : ok={cok} err={ce:?}\n     (stdout diff omitted)"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze filesystems drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
