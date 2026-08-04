@@ -927,7 +927,7 @@ fn apply_locale(root: &Path, settings: &Settings, force: bool) -> io::Result<boo
     let path = root.join("etc/locale.conf");
     ensure_parent_dir(&path)?;
     fs::write(&path, format_env_file(&vars))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -963,8 +963,26 @@ fn apply_keymap(root: &Path, settings: &Settings, force: bool) -> io::Result<boo
         content.push_str(&format!("{}={}\n", key, vars[key]));
     }
     fs::write(&path, content)?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
+}
+
+/// Format the "written" line the way C's systemd-firstboot does. C logs
+/// "<etc-path> written." and systemd's logging prepends "<root>: " when a
+/// `--root` other than `/` is in effect. The localtime symlink drops the
+/// trailing period (a separate C code path).
+fn written_message(root: &Path, path: &Path, trailing_period: bool) -> String {
+    let etc = path
+        .strip_prefix(root)
+        .ok()
+        .map(|p| format!("/{}", p.display()))
+        .unwrap_or_else(|| path.display().to_string());
+    let dot = if trailing_period { "." } else { "" };
+    if root == Path::new("/") {
+        format!("{etc} written{dot}")
+    } else {
+        format!("{}: {etc} written{dot}", root.display())
+    }
 }
 
 fn apply_timezone(root: &Path, settings: &Settings, force: bool) -> io::Result<bool> {
@@ -985,7 +1003,7 @@ fn apply_timezone(root: &Path, settings: &Settings, force: bool) -> io::Result<b
 
     let target = format!("../usr/share/zoneinfo/{}", tz);
     symlink(&target, &link_path)?;
-    eprintln!("Created symlink {} → {}.", link_path.display(), target);
+    eprintln!("{}", written_message(root, &link_path, false));
     Ok(true)
 }
 
@@ -1002,7 +1020,7 @@ fn apply_hostname(root: &Path, settings: &Settings, force: bool) -> io::Result<b
     let path = root.join("etc/hostname");
     ensure_parent_dir(&path)?;
     fs::write(&path, format!("{}\n", hostname))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -1026,7 +1044,7 @@ fn apply_machine_id(root: &Path, settings: &Settings, force: bool) -> io::Result
     let path = root.join("etc/machine-id");
     ensure_parent_dir(&path)?;
     fs::write(&path, format!("{}\n", machine_id))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -1316,7 +1334,7 @@ fn apply_kernel_cmdline(root: &Path, settings: &Settings, force: bool) -> io::Re
     let path = root.join("etc/kernel/cmdline");
     ensure_parent_dir(&path)?;
     fs::write(&path, format!("{}\n", cmdline))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -2212,6 +2230,29 @@ mod tests {
                 "# Written by systemd-localed(8) or systemd-firstboot(1), read by systemd-localed\n"
             ),
             "{content}"
+        );
+    }
+
+    #[test]
+    fn test_written_message_matches_c() {
+        // Under --root, C emits "<root>: <etc-path> written." (localtime has no
+        // trailing period); with root "/", the "<root>: " prefix is dropped.
+        let root = Path::new("/mnt/img");
+        assert_eq!(
+            written_message(root, &root.join("etc/hostname"), true),
+            "/mnt/img: /etc/hostname written."
+        );
+        assert_eq!(
+            written_message(root, &root.join("etc/kernel/cmdline"), true),
+            "/mnt/img: /etc/kernel/cmdline written."
+        );
+        assert_eq!(
+            written_message(root, &root.join("etc/localtime"), false),
+            "/mnt/img: /etc/localtime written"
+        );
+        assert_eq!(
+            written_message(Path::new("/"), Path::new("/etc/hostname"), true),
+            "/etc/hostname written."
         );
     }
 
