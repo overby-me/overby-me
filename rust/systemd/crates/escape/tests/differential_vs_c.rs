@@ -58,6 +58,14 @@ fn escape_matches_c_systemd() {
         &[""],
         &["--mangle", "foo/bar baz"],
         &["--mangle", "already.service"],
+        // A leading '.' is kept by mangle (it is a valid unit-name char),
+        // unlike the default escape mode; a bare suffix has an empty name so the
+        // suffix is appended (rust once escaped the dot / stripped the suffix).
+        &["--mangle", ".hidden"],
+        &["--mangle", "..two"],
+        &["--mangle", ".a.b"],
+        &["--mangle", ".service"],
+        &["--mangle", ".mount"],
         &["--template", "getty@.service", "ttyS0"],
         &["--path", "--suffix", "mount", "/var/log/journal"],
         &["--suffix", "device", "sys-devices-virtual"],
