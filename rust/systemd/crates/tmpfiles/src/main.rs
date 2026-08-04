@@ -55,17 +55,14 @@ const EXIT_FAILURE: u8 = 1;
 /// error, even though it keeps processing the rest.
 const EX_DATAERR: u8 = 65;
 
-/// Absolute path to `setfacl`, baked in from the Nix build (`ACL_SETFACL`),
-/// falling back to a bare `setfacl` resolved via `$PATH` for non-Nix builds.
+/// Absolute path to `setfacl`, baked in from the Nix build (`ACL_SETFACL`).
 ///
-/// The `a`/`A` (POSIX ACL) item types apply ACLs by invoking `setfacl`. The C
-/// systemd-tmpfiles uses libacl directly, so it needs no external binary and
-/// works from any `$PATH`; rust shells out, and the boot-time
-/// systemd-tmpfiles-setup service's `$PATH` does not contain `setfacl`, so a
-/// bare name fails to spawn (ENOENT) and the whole run fails. Baking the
-/// absolute path (mirroring `PAM_LIB` in exec_helper.rs) makes it resolve from
-/// any environment. A future change should port C's libacl path to drop the
-/// external dependency entirely.
+/// Formerly the `a`/`A` (POSIX ACL) item types shelled out to `setfacl`; they
+/// now apply ACLs through libacl directly (see [`libacl_apply_acls`]), matching
+/// C and needing no external binary. This constant and its `ACL_SETFACL`
+/// crateOverride are now unused and are removed once the libacl path has been
+/// validated on a real boot.
+#[allow(dead_code)]
 const SETFACL: &str = match option_env!("ACL_SETFACL") {
     Some(p) => p,
     None => "setfacl",
@@ -2919,46 +2916,67 @@ fn execute_create(item: &TmpfilesItem, graceful: bool, root: Option<&Path>) -> b
                 return true;
             }
 
-            // 'a' (no +) clears extended ACLs first; 'a+' appends/modifies
-            if !item.force {
-                let _ = std::process::Command::new(SETFACL)
-                    .arg("-b")
-                    .arg(path)
-                    .output();
-            }
-
-            let mut cmd = std::process::Command::new(SETFACL);
-            if item.item_type == ItemType::SetACLRecursively {
-                cmd.arg("-R");
-            }
-            cmd.arg("-m").arg(acl_spec).arg(path);
-
-            match cmd.output() {
-                Ok(output) if output.status.success() => true,
-                Ok(output) => {
-                    if !graceful && !item.minus {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        eprintln!(
-                            "systemd-tmpfiles: Failed to set ACL on {}: {}",
-                            path.display(),
-                            stderr.trim()
-                        );
-                        return false;
-                    }
-                    true
-                }
+            // Parse the ACL argument (faithful to C parse_acl) and apply it via
+            // libacl directly, with no external setfacl. 'a' replaces the ACL
+            // (want_mask, dropping pre-existing extended entries); 'a+' merges
+            // the new entries onto the existing ACL.
+            let parsed = match parse_acl_text(acl_spec) {
+                Ok(p) => p,
                 Err(e) => {
                     if !graceful && !item.minus {
                         eprintln!(
-                            "systemd-tmpfiles: Failed to run setfacl on {}: {}",
-                            path.display(),
-                            e
+                            "systemd-tmpfiles: {}:{}: invalid ACL {acl_spec:?}: {e}",
+                            item.source.display(),
+                            item.line_number,
                         );
                         return false;
                     }
-                    true
+                    return true;
                 }
+            };
+            let want_mask = !item.force;
+
+            // Apply to one inode; returns false only on a hard (non-graceful) error.
+            let apply = |p: &Path| -> bool {
+                match libacl_apply_acls(
+                    p,
+                    parsed.access.as_deref(),
+                    parsed.access_exec.as_deref(),
+                    parsed.default.as_deref(),
+                    want_mask,
+                ) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        if !graceful && !item.minus {
+                            eprintln!(
+                                "systemd-tmpfiles: Failed to set ACL on {}: {e}",
+                                p.display(),
+                            );
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                }
+            };
+
+            let mut ok = apply(path);
+            if item.item_type == ItemType::SetACLRecursively
+                && path.is_dir()
+                && let Err(e) = walk_dir(path, &mut |p| {
+                    if !apply(p) {
+                        ok = false;
+                    }
+                })
+                && !graceful
+                && !item.minus
+            {
+                eprintln!(
+                    "systemd-tmpfiles: Failed to walk directory {}: {e}",
+                    path.display(),
+                );
             }
+            ok
         }
 
         // Types that are only relevant for --remove or --clean
@@ -4860,20 +4878,33 @@ mod tests {
 
     #[test]
     fn test_execute_set_acl() {
-        // The a/a+ (SetACL) type applies a POSIX ACL to an existing path via the
-        // SETFACL binary. Skip when setfacl/getfacl are unavailable so the test
-        // stays green in minimal environments.
-        if std::process::Command::new(SETFACL)
+        // The a/a+ (SetACL) type applies a POSIX ACL to an existing path via
+        // libacl (through execute_create's SetACL arm). Skip when getfacl is
+        // unavailable or libacl cannot be dlopened, so the test stays green in
+        // minimal environments; it runs for real where libacl is present.
+        if std::process::Command::new("getfacl")
             .arg("--version")
             .output()
             .is_err()
-            || std::process::Command::new("getfacl")
-                .arg("--version")
-                .output()
-                .is_err()
         {
-            eprintln!("skip test_execute_set_acl: setfacl/getfacl unavailable");
+            eprintln!("skip test_execute_set_acl: getfacl unavailable");
             return;
+        }
+        {
+            let probe_dir = std::env::temp_dir().join("systemd-tmpfiles-test-set-acl-probe");
+            let _ = fs::remove_dir_all(&probe_dir);
+            fs::create_dir_all(&probe_dir).unwrap();
+            let probe = probe_dir.join("p");
+            fs::write(&probe, b"x").unwrap();
+            let skip = matches!(
+                libacl_apply_acls(&probe, Some("u:0:rwx"), None, None, true),
+                Err(ref e) if e.contains("dlopen")
+            );
+            let _ = fs::remove_dir_all(&probe_dir);
+            if skip {
+                eprintln!("skip test_execute_set_acl: libacl unavailable");
+                return;
+            }
         }
 
         let dir = std::env::temp_dir().join("systemd-tmpfiles-test-set-acl");
