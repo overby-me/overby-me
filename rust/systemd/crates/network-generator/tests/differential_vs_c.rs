@@ -64,6 +64,17 @@ fn network_generator_matches_c() {
         // the MTU (rust once emitted DNS=1500 for it); an IP field is DNS.
         &["ip=10.0.0.2::10.0.0.1:24::eth0:none:1500"],
         &["ip=10.0.0.2::10.0.0.1:24::eth0:none:1500:00:11:22:33:44:55"],
+        // The ip= default gateway [Route] comes after the rd.route= [Route]
+        // blocks (C stores them in one prepended list; the gateway is last).
+        &[
+            "ip=10.0.0.2::10.0.0.1:24::eth0:none",
+            "rd.route=192.168.0.0/24:10.0.0.254:eth0",
+        ],
+        &[
+            "ip=10.0.0.2::10.0.0.1:24::eth0:none",
+            "rd.route=192.168.0.0/24:10.0.0.254:eth0",
+            "rd.route=172.16.0.0/16:10.0.0.253:eth0",
+        ],
         &["ip=10.0.0.5::10.0.0.1:255.255.255.0::eth0:off"],
         &["ip=192.168.1.10::192.168.1.1:255.255.255.0:myhost:eth1:none"],
         &["ip=dhcp", "nameserver=8.8.8.8", "nameserver=1.1.1.1"],

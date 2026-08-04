@@ -1028,17 +1028,13 @@ fn emit_network(
         None => {}
     }
 
-    // [Address]/[Route] for a static ip=.
+    // [Address] for a static ip=.
     if let Some(ip) = ip
         && is_static
     {
         let address = format_address(&ip.client_ip, &ip.netmask);
         writeln!(content, "\n[Address]").unwrap();
         writeln!(content, "Address={address}").unwrap();
-        if !ip.gateway.is_empty() {
-            writeln!(content, "\n[Route]").unwrap();
-            writeln!(content, "Gateway={}", ip.gateway).unwrap();
-        }
     }
 
     // [Route] blocks for rd.route= entries. C keeps its route list head-first
@@ -1047,6 +1043,16 @@ fn emit_network(
         writeln!(content, "\n[Route]").unwrap();
         writeln!(content, "Destination={}", route.destination).unwrap();
         writeln!(content, "Gateway={}", route.gateway).unwrap();
+    }
+
+    // The ip= default gateway route comes after the rd.route= entries: C stores
+    // it at the head of the same prepended list, so it is emitted last.
+    if let Some(ip) = ip
+        && is_static
+        && !ip.gateway.is_empty()
+    {
+        writeln!(content, "\n[Route]").unwrap();
+        writeln!(content, "Gateway={}", ip.gateway).unwrap();
     }
 
     files.add(filename, content);
