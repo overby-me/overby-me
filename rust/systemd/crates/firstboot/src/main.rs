@@ -555,6 +555,16 @@ fn load_settings_from_credentials(settings: &mut Settings) {
 // Copy from host
 // ---------------------------------------------------------------------------
 
+/// Format C's firstboot copy line: "<root>: Copied host's /<relative>." (the
+/// "<root>: " prefix is dropped when root is "/", like written_message).
+fn copied_message(root: &Path, relative: &str) -> String {
+    if root == Path::new("/") {
+        format!("Copied host's /{relative}.")
+    } else {
+        format!("{}: Copied host's /{relative}.", root.display())
+    }
+}
+
 /// Copy `/<relative>` from the host into `<root>/<relative>`, byte for byte.
 ///
 /// Returns false when there is nothing to copy, either because the host has no
@@ -576,7 +586,7 @@ fn copy_host_file_verbatim(root: &Path, relative: &str, force: bool) -> io::Resu
     {
         fs::set_permissions(&dest, fs::Permissions::from_mode(0o644))?;
     }
-    eprintln!("Copied {} to {}.", host.display(), dest.display());
+    eprintln!("{}", copied_message(root, relative));
     Ok(true)
 }
 
@@ -1570,17 +1580,24 @@ fn run(argv: &[String]) -> Result<(), String> {
     // any comments and formatting with them; the test diffs the copy against
     // the host file, so it has to match byte for byte. Parsing into settings
     // remains the fallback for when the host has no such file.
-    if args.copy_locale
-        && !copy_host_file_verbatim(root, "etc/locale.conf", args.force)
-            .map_err(|e| e.to_string())?
-    {
-        copy_locale_from_host(&mut settings);
+    // A successful verbatim copy writes the file directly (bypassing the
+    // apply_* path that sets any_applied), so track it so the "nothing to do"
+    // message is not printed after a copy actually happened.
+    let mut any_copied = false;
+    if args.copy_locale {
+        if copy_host_file_verbatim(root, "etc/locale.conf", args.force).map_err(|e| e.to_string())? {
+            any_copied = true;
+        } else {
+            copy_locale_from_host(&mut settings);
+        }
     }
-    if args.copy_keymap
-        && !copy_host_file_verbatim(root, "etc/vconsole.conf", args.force)
-            .map_err(|e| e.to_string())?
-    {
-        copy_keymap_from_host(&mut settings);
+    if args.copy_keymap {
+        if copy_host_file_verbatim(root, "etc/vconsole.conf", args.force).map_err(|e| e.to_string())?
+        {
+            any_copied = true;
+        } else {
+            copy_keymap_from_host(&mut settings);
+        }
     }
     if args.copy_timezone {
         copy_timezone_from_host(&mut settings);
@@ -1709,7 +1726,7 @@ fn run(argv: &[String]) -> Result<(), String> {
         any_applied = true;
     }
 
-    if !any_applied && !any_reset && !prompting {
+    if !any_applied && !any_reset && !any_copied && !prompting {
         eprintln!("No settings to apply.");
     }
 
@@ -2250,6 +2267,19 @@ mod tests {
         assert_eq!(
             written_message(Path::new("/"), Path::new("/etc/hostname"), true),
             "/etc/hostname written."
+        );
+    }
+
+    #[test]
+    fn test_copied_message_matches_c() {
+        // C logs "<root>: Copied host's /<relative>." (prefix dropped for "/").
+        assert_eq!(
+            copied_message(Path::new("/mnt/img"), "etc/locale.conf"),
+            "/mnt/img: Copied host's /etc/locale.conf."
+        );
+        assert_eq!(
+            copied_message(Path::new("/"), "etc/vconsole.conf"),
+            "Copied host's /etc/vconsole.conf."
         );
     }
 
