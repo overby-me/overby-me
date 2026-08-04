@@ -212,10 +212,13 @@ pub fn Layout() -> Element {
         let Some(win) = web_sys::window() else {
             return;
         };
-        // Read the scroll BEFORE anything moves it: this is still the outgoing
-        // page's. The scroll listener files it continuously while the reader is
-        // there, but its last write can be up to a throttle window old, and the
-        // moment they leave is exactly the one worth being exact about.
+        // The outgoing page's scroll, as far as it can still be read. This runs
+        // after the new route has been committed to the DOM, so if that document
+        // is shorter the browser has already pulled the scroll down to its
+        // maximum and this reads a zero that the reader never chose. Filing it
+        // erased the position of the page being left, which is what made coming
+        // back to a context land at the top. `stash_scroll` declines a clamp and
+        // keeps the trail the scroll listener wrote while the reader was there.
         let leaving_at = win.scroll_y().unwrap_or(0.0);
         let leaving = previous.peek().clone();
         if let Some((segments, app, url)) = &leaving {

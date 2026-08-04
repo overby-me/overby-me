@@ -44,8 +44,15 @@ static NEAR_BOTTOM: GlobalSignal<bool> = Signal::global(|| false);
 const NEAR_BOTTOM_PX: f64 = 800.0;
 
 /// How often the scroll position is filed for the current URL, so a reload comes
-/// back to it. Only a reload reads a value this stale; every navigation files
-/// the exact one on its way out.
+/// back to it.
+///
+/// This used to say that only a reload reads a value this stale, because every
+/// navigation files the exact one on its way out. That was the bug: by the time
+/// the navigation reads it, the page has already been replaced and the browser
+/// has clamped the scroll to the shorter document, so what it files is a zero.
+/// This throttled trail, written while the reader was actually there, is what
+/// survives; `nav_memory::worth_recording` is what stops the clamp overwriting
+/// it.
 const STASH_EVERY_MS: f64 = 250.0;
 
 /// Whether the compact bottom dock should be hidden right now (hide-on-scroll).

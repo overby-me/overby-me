@@ -67,14 +67,60 @@ fn session_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.session_storage().ok().flatten()
 }
 
+/// Whether `y` is worth recording as where the reader left a page.
+///
+/// A zero the BROWSER produced is not a decision the reader made. When the page
+/// under them shrinks, which is what switching to an app view does, the browser
+/// pulls the scroll down to the new maximum and fires a scroll event. Both the
+/// scroll listener and the navigation effect then file that as "they were at the
+/// top", and the position is destroyed by the act of leaving the page it belongs
+/// to. That is why coming back to a context landed at the top: the memory had
+/// been overwritten a frame earlier, by leaving.
+///
+/// So a zero counts only when the page could still hold what is remembered. If
+/// it cannot, the page has already shrunk and the zero is the clamp talking.
+/// Anything above the top is always the reader.
+pub(crate) fn worth_recording(y: f64, remembered: Option<f64>, reachable: f64) -> bool {
+    if y > 1.0 {
+        return true;
+    }
+    match remembered {
+        Some(prev) if prev > 1.0 => reachable >= prev,
+        _ => true,
+    }
+}
+
+/// How far down this page can be scrolled right now.
+fn reachable_scroll() -> f64 {
+    let Some(win) = web_sys::window() else {
+        return 0.0;
+    };
+    let doc_h = win
+        .document()
+        .and_then(|d| d.document_element())
+        .map(|e| e.scroll_height() as f64)
+        .unwrap_or(0.0);
+    let inner_h = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    (doc_h - inner_h).max(0.0)
+}
+
 /// Note how far down `url` was left.
 ///
 /// Rounded to whole pixels: this is a place to return to, not a measurement,
 /// and a fractional tail would only churn the store.
+///
+/// Declines to record a clamp (see [`worth_recording`]).
 pub fn stash_scroll(url: &str, y: f64) {
     let Some(store) = session_storage() else {
         return;
     };
+    if !worth_recording(y, stashed_scroll(url), reachable_scroll()) {
+        return;
+    }
     let _ = store.set_item(&format!("{SCROLL_PREFIX}{url}"), &y.round().to_string());
 }
 
@@ -120,6 +166,33 @@ pub fn clear() {
 #[cfg(test)]
 mod tests {
     use super::key;
+
+    /// A reader who scrolls back to the top of a page that is still tall means
+    /// it: record the zero, or returning would send them back down.
+    #[test]
+    fn a_reader_may_choose_the_top() {
+        assert!(super::worth_recording(0.0, Some(1200.0), 4000.0));
+        assert!(super::worth_recording(0.0, None, 4000.0));
+        assert!(super::worth_recording(0.0, Some(0.0), 0.0));
+    }
+
+    /// The zero the browser produces when the page shrinks under the reader is
+    /// not a choice, and must not erase where they actually were. This is what
+    /// made coming back to a context land at the top.
+    #[test]
+    fn a_clamp_does_not_erase_the_place() {
+        // Remembered 1200 down, but the page can now only reach 300.
+        assert!(!super::worth_recording(0.0, Some(1200.0), 300.0));
+        // Exactly reachable still counts: nothing was taken away.
+        assert!(super::worth_recording(0.0, Some(1200.0), 1200.0));
+    }
+
+    /// Any real position is the reader, whatever the page can hold.
+    #[test]
+    fn a_position_below_the_top_is_always_recorded() {
+        assert!(super::worth_recording(900.0, Some(1200.0), 300.0));
+        assert!(super::worth_recording(2.0, Some(1200.0), 0.0));
+    }
 
     #[test]
     fn an_app_view_cannot_collide_with_a_context_of_the_same_name() {
