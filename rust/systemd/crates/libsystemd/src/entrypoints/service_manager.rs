@@ -305,6 +305,13 @@ pub fn run_service_manager() {
         // Skip full activation — it would block threads waiting for READY=1
         // from notify services that already sent it to the old instance.
         info!("daemon-reexec: skipped full activation, statuses restored from state file");
+    } else if crate::units::jobs::job_graph_enabled() {
+        // Increment 4: bring the boot closure up through the single dispatcher's
+        // run-queue drive instead of the fixpoint sweep. The graph's requeue
+        // replaces the active-goal redrive, so it is not spawned here.
+        kmsg(&format!("activating target {} via job graph", target_id.name));
+        let _ = in_initrd;
+        units::activate_needed_units_via_job_graph(target_id, run_info);
     } else {
         kmsg(&format!("activating target {}", target_id.name));
         let _ = in_initrd;
