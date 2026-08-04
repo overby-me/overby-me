@@ -171,14 +171,17 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     Some(Block::ListItem { .. }) => rsx! {
                         ul { key: "{i}", class: "docx-list",
                             for (j , item) in group.iter().enumerate() {
-                                if let Block::ListItem { spans, marker } = item {
+                                if let Block::ListItem { spans, marker, indent } = item {
                                     match marker {
                                         // The page drew its own bullet, and here
                                         // it is a logo rather than a dot, so it
                                         // is shown rather than stood in for. Sized
                                         // in ems so it follows the text.
                                         Some(src) => rsx! {
-                                            li { key: "{j}", class: "pdf-li-drawn",
+                                            li {
+                                                key: "{j}",
+                                                class: "pdf-li-drawn",
+                                                style: "{indent_var(*indent)}",
                                                 img {
                                                     class: "pdf-li-mark",
                                                     src: "{src}",
@@ -189,7 +192,9 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                             }
                                         },
                                         None => rsx! {
-                                            li { key: "{j}", Spans { spans: spans.clone() } }
+                                            li { key: "{j}", style: "{indent_var(*indent)}",
+                                                Spans { spans: spans.clone() }
+                                            }
                                         },
                                     }
                                 }
@@ -312,6 +317,19 @@ fn align_style(align: Align) -> &'static str {
     match align {
         Align::Left => "",
         Align::Center => "text-align:center;",
+    }
+}
+
+/// The same depth, handed to the stylesheet as a value rather than a margin.
+///
+/// A list item's inset is not the whole story: a drawn bullet has to hang back
+/// out of it into the margin, the way a list marker does. Setting the margin
+/// here would overwrite the rule that does that, so the depth is passed in and
+/// the stylesheet adds them up.
+fn indent_var(indent: u8) -> String {
+    match indent {
+        0 => String::new(),
+        n => format!("--pdf-indent:calc(var(--pdf-indent-step) * {n});"),
     }
 }
 

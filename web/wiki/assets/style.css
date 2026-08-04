@@ -8125,6 +8125,9 @@ a.list-item:hover {
 	   was measured against the page's column, and a phone's column is not that.
 	   What matters is that a nested thing reads as nested. */
 	--pdf-indent-step: var(--md-sys-spacing-6);
+	/* How deep the block being rendered was set. Blocks that carry a depth set
+	   it on themselves; the default is the margin. */
+	--pdf-indent: 0px;
 	max-width: 70ch;
 	margin: 0 auto;
 	color: var(--md-on-surface);
@@ -8269,9 +8272,15 @@ a.list-item:hover {
 	align-items: baseline;
 	gap: var(--md-sys-spacing-2);
 	list-style: none;
-	/* Back out the indent the list itself sets: the drawn bullet stands where
-	   the marker would have. */
-	margin-inline-start: calc(-1 * var(--md-sys-spacing-6));
+	/* The depth the document set, less the indent the list itself adds: the
+	   drawn bullet stands where the marker would have, out in the margin, and
+	   the words line up at the depth. */
+	margin-inline-start: calc(var(--pdf-indent) - var(--md-sys-spacing-6));
+}
+/* And an ordinary item takes the depth as it is, its marker sitting in the
+   list's own padding. */
+.docx-list li {
+	margin-inline-start: var(--pdf-indent);
 }
 .pdf-li-mark {
 	flex: 0 0 auto;

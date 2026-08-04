@@ -48,6 +48,11 @@ pub enum Block {
     ListItem {
         spans: Vec<Span>,
         marker: Option<String>,
+        /// How far in the item was set, in the same steps a paragraph uses. A
+        /// list under an introducing line is normally set deeper than it, and
+        /// without this the bullets came out at the margin, to the LEFT of the
+        /// words introducing them.
+        indent: u8,
     },
     /// A row of a table of contents: what it points at, and the page it points
     /// to. Kept apart from a paragraph because the two are laid out differently
@@ -1971,6 +1976,7 @@ fn blocks_from(
             blocks.push(Block::ListItem {
                 spans: drop_prefix(spans, dropped),
                 marker: drawn_bullet,
+                indent,
             });
         } else if drawn_bullet.is_some() {
             // A bullet the page DREW, so there is no marker in the text to take
@@ -1978,6 +1984,7 @@ fn blocks_from(
             blocks.push(Block::ListItem {
                 spans,
                 marker: drawn_bullet,
+                indent,
             });
         } else if size > body * 1.12 {
             // Calibrated against Word's own defaults rather than picked: on an
@@ -3463,9 +3470,9 @@ mod harness {
                 for b in doc.blocks.iter().skip(skip).take(show) {
                     let kind = match b {
                         super::Block::Heading { level, .. } => format!("h{level}"),
-                        super::Block::ListItem { marker, .. } => match marker {
-                            Some(_) => "li*".into(),
-                            None => "li".into(),
+                        super::Block::ListItem { marker, indent, .. } => match marker {
+                            Some(_) => format!("li*>{indent}"),
+                            None => format!("li>{indent}"),
                         },
                         super::Block::Paragraph { indent, .. } => match indent {
                             0 => "p".into(),
