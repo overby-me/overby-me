@@ -431,7 +431,16 @@ impl DhcpPacket {
                     }
                     let prefix_len = data[i];
                     i += 1;
-                    // Number of significant octets in the destination.
+                    // RFC 3442: an IPv4 destination prefix length is 0-32. A
+                    // hostile or buggy DHCP server can send a larger value, for
+                    // which `octets` (below) would exceed the 4-byte `dest`
+                    // buffer and panic the `dest[..octets]` copy. Reject it; the
+                    // variable-length encoding cannot be resynced past a bad
+                    // entry, so stop parsing this option.
+                    if prefix_len > 32 {
+                        break;
+                    }
+                    // Number of significant octets in the destination (0-4).
                     let octets = prefix_len.div_ceil(8) as usize;
                     if i + octets + 4 > data.len() {
                         break;
@@ -1446,6 +1455,51 @@ mod tests {
         );
         assert_eq!(
             routes[1],
+            (Ipv4Addr::new(10, 0, 0, 0), 8, Ipv4Addr::new(10, 0, 0, 2))
+        );
+    }
+
+    #[test]
+    fn test_classless_routes_oversized_prefix_len_does_not_panic() {
+        // RFC 3442 caps an IPv4 prefix length at 32. A hostile DHCP server can
+        // send a larger value; before the guard, octets = ceil(prefix/8) could
+        // reach 32 while `dest` is only [u8; 4], so `dest[..octets]` panicked
+        // out of bounds (an attacker-controlled DoS). It must be rejected, not
+        // crash. Each payload is long enough that the length check passed and
+        // the old code reached the panicking copy.
+        for bad_prefix in [33u8, 40, 64, 200, 255] {
+            let octets = bad_prefix.div_ceil(8) as usize;
+            let mut data = vec![bad_prefix];
+            data.resize(1 + octets + 4, 0xab);
+            let mut pkt = DhcpPacket::new_request(1, &test_mac());
+            pkt.options.push(DhcpOption {
+                code: OPT_CLASSLESS_ROUTES,
+                data,
+            });
+            let routes = pkt.get_classless_routes();
+            assert!(
+                routes.is_empty(),
+                "bad prefix {bad_prefix} should yield no routes"
+            );
+        }
+    }
+
+    #[test]
+    fn test_classless_routes_valid_then_malformed_keeps_valid() {
+        // A valid 10.0.0.0/8 route followed by an oversized-prefix entry: the
+        // valid route parses; the malformed tail is dropped without panicking.
+        let mut data = vec![8, 10, 10, 0, 0, 2]; // /8 via 10.0.0.2
+        data.push(40); // invalid prefix length (> 32)
+        data.resize(data.len() + 9, 0);
+        let mut pkt = DhcpPacket::new_request(1, &test_mac());
+        pkt.options.push(DhcpOption {
+            code: OPT_CLASSLESS_ROUTES,
+            data,
+        });
+        let routes = pkt.get_classless_routes();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0],
             (Ipv4Addr::new(10, 0, 0, 0), 8, Ipv4Addr::new(10, 0, 0, 2))
         );
     }
