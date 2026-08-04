@@ -17,9 +17,37 @@
 //! `SYSTEMD_FSTAB_GENERATOR` (path to the C binary); skips otherwise. Run via
 //! `just differential`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
+
+/// Recursively collect the relative paths of every symlink under `dest`,
+/// excluding fsck symlinks (systemd-fsck-root.service / systemd-fsck@... — their
+/// presence is gated on C's environment-dependent sysfs_check(), so they are not
+/// comparable). The symlink target is not compared (C points into its own store
+/// prefix, rust into /lib), only the name/location.
+fn collect_symlinks(dest: &Path) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let mut stack = vec![dest.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let path = e.path();
+            let ty = e.file_type().expect("file type");
+            if ty.is_symlink() {
+                let rel = path.strip_prefix(dest).unwrap().to_string_lossy().into_owned();
+                if !rel.contains("fsck") {
+                    out.insert(rel);
+                }
+            } else if ty.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    out
+}
 
 /// Run `bin <dest> <dest> <dest>` with the fstab pinned via `SYSTEMD_FSTAB` and
 /// an empty cmdline, returning (exit-success, {unit filename -> sorted device
@@ -119,6 +147,16 @@ fn fstab_generator_device_nodes_match_c() {
         if c_ok != r_ok || c != r {
             div.push(format!(
                 "fstab={fstab:?}\n  C(ok={c_ok})={c:?}\n  R(ok={r_ok})={r:?}"
+            ));
+        }
+
+        // The .requires/.wants symlink tree (target wiring + remount-fs enable),
+        // excluding the env-gated fsck symlinks.
+        let c_links = collect_symlinks(&cr);
+        let r_links = collect_symlinks(&rr);
+        if c_links != r_links {
+            div.push(format!(
+                "fstab={fstab:?} symlinks\n  C={c_links:?}\n  R={r_links:?}"
             ));
         }
     }

@@ -208,6 +208,23 @@ fn main() -> ExitCode {
         }
     }
 
+    // In a normal boot (not initrd), enable systemd-remount-fs.service so the
+    // root and /usr filesystems are remounted with their fstab options after
+    // the initial mount. C does this unconditionally whenever it processes an
+    // fstab outside the initrd (generator_enable_remount_fs_service).
+    if !in_initrd && !skip_fstab {
+        let wants_dir = normal_dir.join("local-fs.target.wants");
+        let result = fs::create_dir_all(&wants_dir).and_then(|()| {
+            let link = wants_dir.join("systemd-remount-fs.service");
+            let _ = fs::remove_file(&link);
+            unix_fs::symlink("/lib/systemd/system/systemd-remount-fs.service", &link)
+        });
+        if let Err(e) = result {
+            eprintln!("systemd-fstab-generator: cannot enable systemd-remount-fs.service: {e}");
+            had_error = true;
+        }
+    }
+
     // Initrd `mount.usr=` / `mount.usrfstype=` / `mount.usrflags=`:
     // generate a companion pair — `sysusr-usr.mount` mounts the device
     // at `/sysusr/usr`, and `sysroot-usr.mount` bind-mounts that into
@@ -805,11 +822,10 @@ fn emit_mount_unit(
     // auto-started.  Skip if noauto.
     // Upstream semantics (see TEST-81-GENERATORS.fstab-generator.sh:
     // remote-fs.target for network / _netdev, local-fs.target otherwise;
-    // `.wants` when nofail OR (nfs && bg), else `.requires`):
-    if !is_rootfs
-        && !has_opt(&systemd_opts, "noauto")
-        && !has_opt(&systemd_opts, "x-systemd.automount")
-    {
+    // `.wants` when nofail OR (nfs && bg), else `.requires`).
+    // The root mount is wired in too (C's add_mount links every auto mount,
+    // including -.mount, into local-fs.target.requires).
+    if !has_opt(&systemd_opts, "noauto") && !has_opt(&systemd_opts, "x-systemd.automount") {
         let is_nfs_bg = matches!(entry.fstype.as_str(), "nfs" | "nfs4")
             && parse_csv(&entry.options).contains(&"bg");
         let link_dir = if has_opt(&systemd_opts, "nofail") || is_nfs_bg {
