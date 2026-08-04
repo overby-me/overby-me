@@ -328,6 +328,14 @@ fn resolve_disk_spec(spec: &str) -> String {
     }
 }
 
+/// If `node` is a `/dev/` device path, return its unit-name-escaped form for a
+/// `blockdev@<esc>.target` ordering dependency; otherwise None (tmpfs/network
+/// mounts get none). Mirrors C's generator_write_blockdev_dependency.
+fn blockdev_escape(node: &str) -> Option<String> {
+    node.starts_with("/dev/")
+        .then(|| unit_name_path_escape(node))
+}
+
 fn emit_initrd_usr_mounts(
     out_dir: &Path,
     device: &str,
@@ -621,6 +629,11 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // leaving an inline branch so the hook is obvious.
     let effective_where = entry.where_.clone();
 
+    // Canonicalize UUID=/LABEL=/PARTUUID=/PARTLABEL= to the /dev/disk/by-*/
+    // node (C's fstab_node_to_udev_node). The same node feeds What=, the
+    // blockdev@ ordering, and the fsck instance so they all agree.
+    let node = resolve_disk_spec(&entry.what);
+
     let unit_name = format!("{}.mount", unit_name_path_escape(&effective_where));
     let unit_path = out_dir.join(&unit_name);
 
@@ -678,16 +691,16 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
             unit.push_str("RequiresMountsFor=/sysroot\n");
         }
     }
+    // Order after the device's blockdev@ target so the mount waits for the
+    // kernel to settle the device (C's generator_write_blockdev_dependency).
+    // Device-backed mounts only; applies to the root mount too.
+    if let Some(esc) = blockdev_escape(&node) {
+        unit.push_str(&format!("After=blockdev@{esc}.target\n"));
+    }
     if !has_opt(&systemd_opts, "noauto") {
         // The mount is auto-started; recorded via .wants/.requires
         // symlink below, not DefaultDependencies here.
     }
-
-    // Canonicalize UUID=/LABEL=/PARTUUID=/PARTLABEL= to the corresponding
-    // /dev/disk/by-*/ device node, matching C's fstab_node_to_udev_node. The
-    // same canonical node is used for the fsck instance name below so the mount
-    // and its check reference the same device.
-    let node = resolve_disk_spec(&entry.what);
 
     unit.push_str("\n[Mount]\n");
     unit.push_str(&format!("What={node}\n"));
@@ -940,6 +953,10 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
         "SourcePath=/etc/fstab\nDocumentation=man:fstab(5) man:systemd-fstab-generator(8)\n",
     );
     unit.push_str("Before=swap.target\n");
+    // Order after the device's blockdev@ target (C's blockdev dependency).
+    if let Some(esc) = blockdev_escape(&node) {
+        unit.push_str(&format!("After=blockdev@{esc}.target\n"));
+    }
 
     unit.push_str("\n[Swap]\n");
     unit.push_str(&format!("What={node}\n"));
@@ -1158,7 +1175,30 @@ mod tests {
                 content.contains(&fsck),
                 "spec {spec}: missing {fsck} in:\n{content}"
             );
+            // Device-backed mounts order after their blockdev@ target.
+            let blockdev = format!("After=blockdev@{}.target\n", unit_name_path_escape(node));
+            assert!(
+                content.contains(&blockdev),
+                "spec {spec}: missing {blockdev} in:\n{content}"
+            );
         }
+    }
+
+    #[test]
+    fn test_emit_mount_unit_tmpfs_has_no_blockdev() {
+        // Non-device mounts (tmpfs, network) get no blockdev@ ordering.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = FstabEntry {
+            what: "tmpfs".into(),
+            where_: "/scratch".into(),
+            fstype: "tmpfs".into(),
+            options: "defaults".into(),
+            _dump: 0,
+            passno: 0,
+        };
+        emit_mount_unit(tmp.path(), &entry, false).unwrap();
+        let content = fs::read_to_string(tmp.path().join("scratch.mount")).unwrap();
+        assert!(!content.contains("blockdev@"), "{content}");
     }
 
     #[test]

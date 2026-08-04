@@ -8,19 +8,25 @@
 //! (`<dest> <dest> <dest>`), point `SYSTEMD_FSTAB` at a controlled fstab and
 //! blank the cmdline, then compare each generated unit's `What=` value.
 //!
-//! Only `What=` (and, implicitly, the swap unit filename, which encodes the
-//! device) is compared: the two generators still diverge on other cosmetic
-//! fields (SourcePath, blockdev@ ordering, section layout), tracked separately.
-//! Gated on env `SYSTEMD_FSTAB_GENERATOR` (path to the C binary); skips
-//! otherwise. Run via `just differential`.
+//! The compared fields are the device-derived ones: each unit's `What=` and its
+//! `After=blockdev@<node>.target` ordering (C's generator_write_blockdev_
+//! dependency). The two generators still diverge on other cosmetic fields
+//! (SourcePath, header field order, section layout), tracked separately, so
+//! those are excluded. Gated on env `SYSTEMD_FSTAB_GENERATOR` (path to the C
+//! binary); skips otherwise. Run via `just differential`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
 /// Run `bin <dest> <dest> <dest>` with the fstab pinned via `SYSTEMD_FSTAB` and
-/// an empty cmdline, returning (exit-success, {unit filename -> What= value}).
-fn generate_whats(bin: &str, dest: &Path, fstab: &Path) -> (bool, BTreeMap<String, String>) {
+/// an empty cmdline, returning (exit-success, {unit filename -> sorted device
+/// fields}), where the device fields are the `What=` and `After=blockdev@` lines.
+fn generate_device_fields(
+    bin: &str,
+    dest: &Path,
+    fstab: &Path,
+) -> (bool, BTreeMap<String, Vec<String>>) {
     let status = Command::new(bin)
         .arg(dest)
         .arg(dest)
@@ -39,11 +45,13 @@ fn generate_whats(bin: &str, dest: &Path, fstab: &Path) -> (bool, BTreeMap<Strin
                 continue;
             }
             let content = std::fs::read_to_string(e.path()).unwrap_or_default();
-            for line in content.lines() {
-                if let Some(v) = line.strip_prefix("What=") {
-                    map.insert(name.clone(), v.to_string());
-                }
-            }
+            let mut fields: Vec<String> = content
+                .lines()
+                .filter(|l| l.starts_with("What=") || l.starts_with("After=blockdev@"))
+                .map(|l| l.to_string())
+                .collect();
+            fields.sort();
+            map.insert(name, fields);
         }
     }
     (status.success(), map)
@@ -61,12 +69,13 @@ fn fstab_generator_device_nodes_match_c() {
     // Each case is a full fstab. Distinct mountpoints only (rust currently
     // rejects duplicate `none` swap mountpoints, tracked as a follow-up).
     let cases: &[&str] = &[
-        // Every device-spec form in one fstab.
+        // Every device-spec form in one fstab, plus a tmpfs (no blockdev@).
         "UUID=abc-123    /a  ext4  defaults          0 2\n\
          LABEL=my-root   /b  ext4  defaults          0 2\n\
          PARTUUID=DEAD99 /c  ext4  defaults          0 2\n\
          PARTLABEL=ESP   /d  vfat  defaults          0 2\n\
-         /dev/sda5       /e  ext4  defaults          0 2\n",
+         /dev/sda5       /e  ext4  defaults          0 2\n\
+         tmpfs           /t  tmpfs defaults          0 0\n",
         // Root + a plain device, mixed with a UUID mount.
         "/dev/sda1       /     ext4  defaults        0 1\n\
          UUID=1234-5678  /boot vfat  umask=0077      0 2\n",
@@ -96,8 +105,8 @@ fn fstab_generator_device_nodes_match_c() {
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(&fstab_path, fstab).unwrap();
 
-        let (c_ok, c) = generate_whats(&c_bin, &cr, &fstab_path);
-        let (r_ok, r) = generate_whats(rust_bin, &rr, &fstab_path);
+        let (c_ok, c) = generate_device_fields(&c_bin, &cr, &fstab_path);
+        let (r_ok, r) = generate_device_fields(rust_bin, &rr, &fstab_path);
         if c_ok != r_ok || c != r {
             div.push(format!(
                 "fstab={fstab:?}\n  C(ok={c_ok})={c:?}\n  R(ok={r_ok})={r:?}"
