@@ -316,6 +316,37 @@ impl JobRegistry {
         woken
     }
 
+    /// Prime the run queue when a start closure is first installed: enqueue
+    /// every installed `Waiting` job that already has all its ordering
+    /// prerequisites met, returning the IDs queued in job-creation order. This
+    /// is the one-time pump-priming pass upstream's transaction does when it
+    /// activates a closure — the jobs with no unstarted deps go straight onto
+    /// the queue. Steady-state readiness afterwards is event-driven via
+    /// [`Self::requeue_after_finish`], never a repeated fixpoint sweep. Like the
+    /// other run-queue methods, `is_ready(u)` is injected (live: `u`'s
+    /// `unstarted_deps` is empty) so the rule stays pure over the graph.
+    pub fn enqueue_ready(&mut self, is_ready: impl Fn(&UnitId) -> bool) -> Vec<JobId> {
+        // Snapshot the Waiting candidates first (in id order for a deterministic
+        // result): `enqueue` needs `&mut self`, so we cannot hold an iterator
+        // over `self.jobs` across the calls.
+        let mut candidates: Vec<(JobId, UnitId)> = self
+            .jobs
+            .iter()
+            .filter(|(_, job)| job.state == JobState::Waiting)
+            .map(|(id, job)| (*id, job.unit.clone()))
+            .collect();
+        candidates.sort_by_key(|&(id, _)| id);
+
+        let mut queued = Vec::new();
+        for (id, unit) in candidates {
+            if !self.run_queue.contains(&id) && is_ready(&unit) {
+                self.enqueue(id);
+                queued.push(id);
+            }
+        }
+        queued
+    }
+
     #[must_use]
     pub fn get(&self, id: JobId) -> Option<&Job> {
         self.jobs.get(&id)
@@ -714,5 +745,88 @@ mod tests {
         assert_eq!(woken, vec![s], "target done -> service after it ready");
         assert_eq!(reg.pop_ready(), Some(s));
         assert_eq!(reg.pop_ready(), None);
+    }
+
+    #[test]
+    fn enqueue_ready_primes_only_the_initially_ready_jobs() {
+        let mut reg = JobRegistry::new();
+        // m1 has no deps (ready); the target waits on m1 (not ready yet).
+        let m1 = create(&mut reg, "m1.service", JobKind::Start, JobMode::Replace).unwrap();
+        let _t = reg
+            .create(
+                tid("local-fs-pre.target"),
+                JobKind::Start,
+                ActivationSource::Regular,
+                JobMode::Replace,
+            )
+            .unwrap();
+        let queued = reg.enqueue_ready(|v| v.name == "m1.service");
+        assert_eq!(queued, vec![m1], "only the initially-ready job is primed");
+        assert_eq!(reg.pop_ready(), Some(m1));
+        assert_eq!(reg.pop_ready(), None); // the target was not primed
+    }
+
+    /// The pure scheduler core, composed and driven to completion with no
+    /// threads and no live table: prime with `enqueue_ready`, then loop
+    /// `pop_ready` -> complete -> `requeue_after_finish` until the queue drains.
+    /// A diamond closure (two members -> a process-less target -> a service)
+    /// must fully drain in dependency order. This is the isolation proof that
+    /// the scheduler logic threads a target correctly; the reverted engine's
+    /// wedge is therefore in the thread-activation half (a target job that never
+    /// completes), not here. Doubles as the executable spec the live wiring
+    /// must satisfy.
+    #[test]
+    fn pure_scheduler_drains_a_target_closure_in_dependency_order() {
+        use std::collections::{HashMap, HashSet};
+
+        let mut reg = JobRegistry::new();
+        create(&mut reg, "m1.service", JobKind::Start, JobMode::Replace).unwrap();
+        create(&mut reg, "m2.service", JobKind::Start, JobMode::Replace).unwrap();
+        reg.create(
+            tid("local-fs-pre.target"),
+            JobKind::Start,
+            ActivationSource::Regular,
+            JobMode::Replace,
+        )
+        .unwrap();
+        create(&mut reg, "s.service", JobKind::Start, JobMode::Replace).unwrap();
+
+        let mut before: HashMap<&str, Vec<UnitId>> = HashMap::new();
+        before.insert("m1.service", vec![tid("local-fs-pre.target")]);
+        before.insert("m2.service", vec![tid("local-fs-pre.target")]);
+        before.insert("local-fs-pre.target", vec![uid("s.service")]);
+        let ordered_after = |u: &UnitId| before.get(u.name.as_str()).cloned().unwrap_or_default();
+
+        let mut after: HashMap<&str, Vec<&str>> = HashMap::new();
+        after.insert("local-fs-pre.target", vec!["m1.service", "m2.service"]);
+        after.insert("s.service", vec!["local-fs-pre.target"]);
+        let ready_with = |finished: &HashSet<String>, v: &UnitId| {
+            after
+                .get(v.name.as_str())
+                .is_none_or(|deps| deps.iter().all(|d| finished.contains(*d)))
+        };
+
+        let mut finished: HashSet<String> = HashSet::new();
+        let mut order: Vec<String> = Vec::new();
+
+        reg.enqueue_ready(|v| ready_with(&finished, v));
+        // Every unit in this closure is process-less for the test: a popped job
+        // completes immediately and wakes its neighbours. A real dispatcher runs
+        // the initiate half here and finishes on the completion event.
+        while let Some(id) = reg.pop_ready() {
+            let unit = reg.get(id).unwrap().unit.clone();
+            reg.finish(id, JobResult::Done);
+            finished.insert(unit.name.clone());
+            order.push(unit.name.clone());
+            reg.requeue_after_finish(&unit, &ordered_after, |v| ready_with(&finished, v));
+        }
+
+        // The whole closure drained, in an order that respects every After= edge.
+        assert_eq!(order.len(), 4, "all four jobs ran: {order:?}");
+        let pos = |n: &str| order.iter().position(|x| x == n).expect("unit ran");
+        assert!(pos("m1.service") < pos("local-fs-pre.target"));
+        assert!(pos("m2.service") < pos("local-fs-pre.target"));
+        assert!(pos("local-fs-pre.target") < pos("s.service"));
+        assert!(reg.is_empty(), "no orphaned job left installed");
     }
 }
