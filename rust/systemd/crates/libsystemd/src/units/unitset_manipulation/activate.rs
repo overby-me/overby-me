@@ -1452,7 +1452,12 @@ static JOB_GRAPH_POOL: std::sync::OnceLock<ThreadPool> = std::sync::OnceLock::ne
 pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
     use crate::units::jobs::{JobId, JobResult, JobState};
 
-    let jobs = { run_info.read_poisoned().jobs.clone() };
+    // Every RuntimeInfo read here is on the dispatcher (or a pool worker it
+    // spawns), so it must yield to a queued writer via `dispatcher_read` and
+    // never block-wait: a plain read behind a writer stalls the dispatcher into
+    // the writer-starvation wedge (docs/EVENT-LOOP.md inc 2, and the 16/59
+    // dispatcher-throughput flake).
+    let jobs = { dispatcher_read(run_info).jobs.clone() };
     // Fast path: nothing enqueued means nothing to drive (the flag-off case and
     // the common flag-on idle case).
     if jobs.lock().unwrap().is_empty() {
@@ -1461,7 +1466,7 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
 
     // Phase 1: retire completed and timed-out jobs, then re-prime readiness.
     {
-        let ri = run_info.read_poisoned();
+        let ri = dispatcher_read(run_info);
         let mut reg = jobs.lock().unwrap();
 
         // The activation set for readiness is every unit that still holds a job.
@@ -1547,7 +1552,7 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
         let filter_c = filter.clone();
         let errors_c = errors.clone();
         pool.execute(move || {
-            let ri = run_info_c.read_poisoned();
+            let ri = dispatcher_read(&run_info_c);
             match activate_unit(unit_id.clone(), &ri, ActivationSource::DeferNotifyWait) {
                 Ok(StartResult::Started(_before_chain)) => {
                     let (is_deferred, is_prestart_chain, is_oneshot_prelim) =
@@ -1578,6 +1583,82 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
             }
         });
     }
+}
+
+/// Increment-4 job-graph replacement for [`activate_needed_units`], used behind
+/// `SYSTEMD_RS_JOB_GRAPH` to bring a whole start closure up through the single
+/// dispatcher instead of the fixpoint sweep. Installs a job per unit in the
+/// closure, primes the initially-startable ones and wakes the dispatcher (whose
+/// [`drive_run_queue`] activates each on the bounded pool, retires completions on
+/// its next scan, and requeues), then blocks until the registry drains so the
+/// caller keeps the synchronous activation contract. The periodic wake catches
+/// process-less completions (targets, condition-skips) that fire no event. All
+/// RuntimeInfo reads yield to writers ([`dispatcher_read`]) so this boot thread
+/// never blocks the writer that would in turn stall the dispatcher.
+pub fn activate_needed_units_via_job_graph(
+    target_id: UnitId,
+    run_info: ArcMutRuntimeInfo,
+) -> Vec<UnitOperationError> {
+    use crate::units::jobs::{JobKind, JobMode};
+
+    let jobs = { dispatcher_read(&run_info).jobs.clone() };
+
+    let subgraph = {
+        let ri = dispatcher_read(&run_info);
+        let mut ids = vec![target_id.clone()];
+        collect_unit_start_subgraph(&mut ids, &ri.unit_table);
+        ids
+    };
+    info!(
+        "activate_needed_units_via_job_graph: target={}, {} units in closure",
+        target_id.name,
+        subgraph.len()
+    );
+
+    {
+        let ri = dispatcher_read(&run_info);
+        let mut reg = jobs.lock().unwrap();
+        for uid in &subgraph {
+            let _ = reg.create(
+                uid.clone(),
+                JobKind::Start,
+                ActivationSource::Regular,
+                JobMode::Replace,
+            );
+        }
+        reg.enqueue_ready(|u| {
+            !matches!(u.kind, crate::units::UnitIdKind::Device)
+                && unstarted_deps(u, &ri, Some(&subgraph)).is_empty()
+        });
+        ri.dispatcher
+            .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+    }
+
+    // The dispatcher drive owns the closure now; block until it drains. The wake
+    // every 200ms advances process-less frontiers (which fire no completion
+    // event); real starts advance the drive through their Notify/ChildExit
+    // events. The overall deadline is a boot-wide safety net.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    loop {
+        if jobs.lock().unwrap().is_empty() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            warn!("activate_needed_units_via_job_graph: closure did not drain within 300s");
+            break;
+        }
+        {
+            let ri = dispatcher_read(&run_info);
+            ri.dispatcher
+                .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    info!(
+        "activate_needed_units_via_job_graph: {} closure settled",
+        target_id.name
+    );
+    Vec::new()
 }
 
 /// Background thread for deferred Type=notify READY=1 wait.
