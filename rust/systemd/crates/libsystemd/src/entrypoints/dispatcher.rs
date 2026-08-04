@@ -137,6 +137,12 @@ struct StartWait {
     /// Type=exec confirmation window; expiring COMPLETES the start.
     exec_confirm_at: Option<std::time::Instant>,
     dbus_done: bool,
+    /// Task #25: a one-shot grace granted when the base deadline first fires,
+    /// to let a sent-but-unapplied EXTEND_TIMEOUT_USEC/READY land before
+    /// escalating. Under activation-storm lock contention the reader recvmsg's
+    /// the datagram only once the lock frees; by the base deadline the storm has
+    /// usually subsided, so one drained re-check catches it.
+    grace_used: bool,
 }
 
 type StartWaits = std::collections::HashMap<UnitId, StartWait>;
@@ -524,6 +530,7 @@ fn register_start_wait(
         exec_confirm_at: (setup.svc_type == crate::units::ServiceType::Exec)
             .then(|| now + std::time::Duration::from_millis(500)),
         dbus_done: false,
+        grace_used: false,
     };
     progress_start_wait(wait, false, run_info, chains, start_waits);
 }
@@ -664,6 +671,34 @@ fn expire_due_start_waits(
         }
         match wait.term_sent_at {
             None => {
+                // Task #25: before escalating on the base deadline, give a
+                // sent-but-unapplied EXTEND_TIMEOUT_USEC / READY one chance to
+                // land. Under simultaneous-start load the notification reader
+                // yields to the activation writers (try_read) and so may not
+                // have recvmsg'd the datagram yet; by the base deadline the storm
+                // has usually subsided. Drain any already-buffered notification
+                // now, wake the reader to collect the socket, and grant a bounded
+                // grace once. The extension is applied either by the drain here
+                // or by the reader's Notify event during the grace, and the
+                // effective-deadline re-check above then saves the start.
+                if !wait.grace_used {
+                    wait.grace_used = true;
+                    crate::notification_handler::apply_notify(&id, "", Vec::new(), run_info);
+                    {
+                        let ri = crate::units::dispatcher_read(run_info);
+                        ri.notify_eventfds();
+                    }
+                    wait.armed_deadline = match crate::units::effective_start_deadline(
+                        &id,
+                        wait.base_deadline,
+                        run_info,
+                    ) {
+                        Some(effective) if effective > now => Some(effective),
+                        _ => Some(now + std::time::Duration::from_secs(2)),
+                    };
+                    start_waits.insert(id, wait);
+                    continue;
+                }
                 // kmsg deliberately: PID 1's log macros do not reach the
                 // console, and a start timeout firing is exactly what a
                 // wedge investigation needs to see.
