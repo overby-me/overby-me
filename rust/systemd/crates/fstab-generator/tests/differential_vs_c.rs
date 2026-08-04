@@ -8,12 +8,14 @@
 //! (`<dest> <dest> <dest>`), point `SYSTEMD_FSTAB` at a controlled fstab and
 //! blank the cmdline, then compare each generated unit's `What=` value.
 //!
-//! The compared fields are the device-derived ones: each unit's `What=` and its
-//! `After=blockdev@<node>.target` ordering (C's generator_write_blockdev_
-//! dependency). The two generators still diverge on other cosmetic fields
-//! (SourcePath, header field order, section layout), tracked separately, so
-//! those are excluded. Gated on env `SYSTEMD_FSTAB_GENERATOR` (path to the C
-//! binary); skips otherwise. Run via `just differential`.
+//! The compared fields are the environment-independent ones, as a per-unit
+//! sorted set: `What=`, `After=blockdev@<node>.target` (device ordering),
+//! `SourcePath=`, `Documentation=`, `Where=`, `Type=`. Header field *order* and
+//! section layout still differ and are ignored by the set comparison; `Options=`
+//! (diverges on the `defaults` no-op) and the fsck deps (their presence is gated
+//! on C's environment-dependent sysfs_check()) are excluded. Gated on env
+//! `SYSTEMD_FSTAB_GENERATOR` (path to the C binary); skips otherwise. Run via
+//! `just differential`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -47,7 +49,14 @@ fn generate_device_fields(
             let content = std::fs::read_to_string(e.path()).unwrap_or_default();
             let mut fields: Vec<String> = content
                 .lines()
-                .filter(|l| l.starts_with("What=") || l.starts_with("After=blockdev@"))
+                .filter(|l| {
+                    l.starts_with("What=")
+                        || l.starts_with("After=blockdev@")
+                        || l.starts_with("SourcePath=")
+                        || l.starts_with("Documentation=")
+                        || l.starts_with("Where=")
+                        || l.starts_with("Type=")
+                })
                 .map(|l| l.to_string())
                 .collect();
             fields.sort();
