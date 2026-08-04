@@ -1774,9 +1774,18 @@ fn column_right(lines: &[Line]) -> f64 {
     rights[rights.len() * 9 / 10]
 }
 
-/// Where the text column starts. The mirror of [`column_right`]: a low
-/// percentile rather than the minimum, so one line hanging into the margin does
-/// not move the whole page.
+/// Where the text column starts: the leftmost place that enough lines begin at.
+///
+/// Not a low percentile, which is what this was and which fails whenever most of
+/// a document is indented. The alkoholpolitik sets four lines at its margin and
+/// forty in a list one step in from it, so a tenth percentile lands on the LIST,
+/// calls the margin a negative indent and flattens every depth in the file to
+/// nothing: the bullets came out past the title. Nor the minimum, which one line
+/// hanging into the margin would move.
+///
+/// So: the leftmost edge that a real share of the lines share. A stray element
+/// further out is one or two lines and does not reach the share; an indented
+/// body is not the leftmost.
 fn column_left(lines: &[Line]) -> f64 {
     let mut lefts: Vec<f64> = lines
         .iter()
@@ -1788,6 +1797,24 @@ fn column_left(lines: &[Line]) -> f64 {
         return 0.0;
     }
     lefts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // A twentieth of the lines, and never fewer than three: enough that a mark
+    // or a hanging initial cannot pass for a margin.
+    let enough = ((lefts.len() as f64 * 0.05).ceil() as usize).max(3);
+    let mut at = 0;
+    while at < lefts.len() {
+        let edge = lefts[at];
+        // Within a point of each other is the same edge: a line's left is the
+        // pen's, and the pen does not land twice in exactly the same place.
+        let mut to = at;
+        while to < lefts.len() && lefts[to] - edge <= 1.0 {
+            to += 1;
+        }
+        if to - at >= enough {
+            return edge;
+        }
+        at = to;
+    }
+    // Nothing is shared by that many: fall back to where this came in.
     lefts[lefts.len() / 10]
 }
 
@@ -4283,6 +4310,40 @@ mod tests {
         assert_eq!(index_entry("1. maj 2025"), None);
         assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
         assert_eq!(index_entry("....7"), None, "no title, no row");
+    }
+
+    /// The margin is where the FEWEST lines may sit: a document whose body is
+    /// one step in still has its margin where its title is.
+    #[test]
+    fn the_margin_is_not_wherever_most_lines_start() {
+        let at = |left: f64| Line {
+            y: 700.0,
+            size: 11.0,
+            right: 500.0,
+            left,
+            page: 1,
+            text: "noget".into(),
+            spans: vec![span("noget", None)],
+            bullet: None,
+            picture: None,
+        };
+        // The alkoholpolitik: a title and three lines at the margin, and forty
+        // in a list one step in. A tenth percentile lands on the LIST, which
+        // flattened every depth in the file to nothing and put the bullets out
+        // past the title.
+        let mut lines: Vec<Line> = (0..4).map(|_| at(56.6)).collect();
+        lines.extend((0..40).map(|_| at(110.7)));
+        assert!(
+            (column_left(&lines) - 56.6).abs() < 0.01,
+            "the margin, not the body"
+        );
+        // And one line hanging out into the margin does not move it.
+        let mut stray = vec![at(12.0)];
+        stray.extend((0..20).map(|_| at(56.6)));
+        assert!(
+            (column_left(&stray) - 56.6).abs() < 0.01,
+            "one line is not a margin"
+        );
     }
 
     /// The inset is kept as depth rather than as points: the page's column is
