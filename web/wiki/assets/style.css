@@ -8292,6 +8292,16 @@ a.list-item:hover {
 	object-fit: contain;
 }
 
+/* Something the page drew rather than placed: a signature, a diagram. It takes
+   the reading colour, so it is legible on a dark surface where a black bitmap
+   would not be, and it never outgrows the column. */
+.pdf-drawing {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	color: var(--md-on-surface);
+}
+
 /* Where a link lands. Nothing to see: it exists so the scroll has a target, and
    the margin keeps that target clear of the sticky bar above it. */
 .pdf-anchor {

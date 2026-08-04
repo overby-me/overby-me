@@ -283,18 +283,35 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
                         }
                     },
-                    Some(Block::Image(picture)) => rsx! {
+                    Some(Block::Image(picture)) => match &picture.path {
+                        // The page DREW this rather than placing it: a signature
+                        // is a thousand line segments and no image at all. Drawn
+                        // here too, in the reading colour, so it survives a dark
+                        // surface as a black bitmap would not.
+                        Some(d) => rsx! {
+                            svg {
+                                key: "{i}",
+                                class: "pdf-drawing",
+                                view_box: "0 0 {picture.width} {picture.height}",
+                                width: "{picture.width}",
+                                height: "{picture.height}",
+                                role: "img",
+                                path { d: "{d}", fill: "none", stroke: "currentColor", stroke_width: "1" }
+                            }
+                        },
                         // Drawn at the size the page drew it, but never wider
                         // than the column: this reflows, and a banner laid out
                         // for A4 would otherwise push the text sideways.
-                        img {
-                            key: "{i}",
-                            class: "docx-img",
-                            src: "{picture.src}",
-                            style: "width:{picture.width}px;max-width:100%;height:auto;",
-                            alt: "",
-                            loading: "lazy",
-                        }
+                        None => rsx! {
+                            img {
+                                key: "{i}",
+                                class: "docx-img",
+                                src: "{picture.src}",
+                                style: "width:{picture.width}px;max-width:100%;height:auto;",
+                                alt: "",
+                                loading: "lazy",
+                            }
+                        },
                     },
                     None => rsx! {},
                 }

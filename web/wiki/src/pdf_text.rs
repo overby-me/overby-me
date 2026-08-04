@@ -109,9 +109,16 @@ impl Block {
     }
 }
 
-/// A picture the page drew, ready for an `<img>`.
+/// A picture the page drew, ready for an `<img>`, or a shape it drew, ready for
+/// an `<svg>`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Picture {
+    /// SVG path data, when the page DREW this instead of placing an image. A
+    /// signature is the case that matters: it arrives as a thousand little line
+    /// segments and no image at all, so there is nothing for an `<img>` to show.
+    /// Drawn rather than rasterised so it inherits the reading colour and stays
+    /// legible on a dark surface, which a black bitmap would not.
+    pub path: Option<String>,
     /// A `data:` URL. The bytes are already in hand, and a second round trip to
     /// fetch what we just parsed would be one more thing to go wrong.
     pub src: String,
@@ -980,6 +987,134 @@ impl Shape {
     }
 }
 
+/// How many segments a path needs before it is a drawing rather than furniture.
+///
+/// A rule is one segment, a box is four, a table's borders a couple of dozen.
+/// The signature in the forælder letter is one thousand one hundred and
+/// sixty-eight: whoever made it traced the handwriting in straight lines.
+const DRAWING_SEGMENTS: usize = 40;
+
+/// One stroke of a drawing, on the page: where it runs, and whether it closes
+/// into a box rather than running from one point to the other.
+struct Stroke {
+    boxed: bool,
+    from: (f64, f64),
+    to: (f64, f64),
+}
+
+/// A drawing the page made, in the page's own coordinates.
+struct Art {
+    strokes: Vec<Stroke>,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+}
+
+impl Art {
+    /// Whether these two are one drawing. A signature is written in two words
+    /// with a gap between them, painted as two paths, and the page shows one
+    /// signature: on the same band, near enough across, they belong together.
+    fn joins(&self, other: &Art) -> bool {
+        let overlap = self.y1.min(other.y1) - self.y0.max(other.y0);
+        let height = (self.y1 - self.y0).min(other.y1 - other.y0);
+        let apart = other.x0.max(self.x0) - self.x1.min(other.x1);
+        overlap > height * 0.4 && apart < 40.0
+    }
+
+    fn absorb(&mut self, other: Art) {
+        self.strokes.extend(other.strokes);
+        self.x0 = self.x0.min(other.x0);
+        self.y0 = self.y0.min(other.y0);
+        self.x1 = self.x1.max(other.x1);
+        self.y1 = self.y1.max(other.y1);
+    }
+
+    /// As SVG path data, with the page's coordinates flipped into the screen's
+    /// and sized in points, so it lands at the size it was drawn.
+    fn into_picture(self) -> Option<Picture> {
+        let (width, height) = (self.x1 - self.x0, self.y1 - self.y0);
+        if !width.is_finite() || width <= 1.0 || height <= 1.0 {
+            return None;
+        }
+        let put = |(x, y): (f64, f64)| (x - self.x0, self.y1 - y);
+        let mut d = String::new();
+        let mut pen: Option<(f64, f64)> = None;
+        for Stroke { boxed, from, to } in self.strokes {
+            let (ax, ay) = put(from);
+            let (bx, by) = put(to);
+            if boxed {
+                d.push_str(&format!("M{ax:.1} {ay:.1}H{bx:.1}V{by:.1}H{ax:.1}Z"));
+                pen = None;
+                continue;
+            }
+            // A stroke that starts where the last one ended continues it, which
+            // is what makes a thousand segments into a few pen strokes.
+            if pen != Some(from) {
+                d.push_str(&format!("M{ax:.1} {ay:.1}"));
+            }
+            d.push_str(&format!("L{bx:.1} {by:.1}"));
+            pen = Some(to);
+        }
+        Some(Picture {
+            path: Some(d),
+            src: String::new(),
+            width,
+            height,
+        })
+    }
+}
+
+/// A path as a drawing, when there is enough of it to be one.
+fn drawing_of(shapes: &[Shape], ctm: [f64; 6]) -> Option<Art> {
+    if shapes.len() < DRAWING_SEGMENTS {
+        return None;
+    }
+    let (mut x0, mut x1) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut strokes = Vec::with_capacity(shapes.len());
+    for shape in shapes {
+        let [a, b] = shape.corners(ctm);
+        for (x, y) in [a, b] {
+            x0 = x0.min(x);
+            x1 = x1.max(x);
+            y0 = y0.min(y);
+            y1 = y1.max(y);
+        }
+        strokes.push(Stroke {
+            boxed: matches!(shape, Shape::Box { .. }),
+            from: a,
+            to: b,
+        });
+    }
+    Some(Art {
+        strokes,
+        x0,
+        y0,
+        x1,
+        y1,
+    })
+}
+
+/// Put the drawings that belong together back together, then turn each into a
+/// picture placed by its top.
+fn gather_drawings(arts: Vec<Art>) -> Vec<(f64, Picture)> {
+    let mut merged: Vec<Art> = Vec::new();
+    for art in arts {
+        match merged.iter_mut().find(|kept| kept.joins(&art)) {
+            Some(kept) => kept.absorb(art),
+            None => merged.push(art),
+        }
+    }
+    merged
+        .into_iter()
+        .filter_map(|art| {
+            let top = art.y1;
+            art.into_picture().map(|picture| (top, picture))
+        })
+        .collect()
+}
+
 /// A FILLED path as a rule, if the whole path is thin enough to be one.
 ///
 /// The path entire, not its edges. Taking each edge of a filled box for a line
@@ -1076,6 +1211,7 @@ fn page_runs(
     let mut runs = Vec::new();
     let mut pictures: Vec<(f64, Picture)> = Vec::new();
     let mut shapes: Vec<Shape> = Vec::new();
+    let mut arts: Vec<Art> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
     let mut pen = 1.0f64;
     let mut pen_at = (0.0f64, 0.0f64);
@@ -1134,6 +1270,18 @@ fn page_runs(
             "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "S" | "s" => {
                 let filling = !matches!(op.operator.as_str(), "S" | "s");
                 let stroking = !matches!(op.operator.as_str(), "f" | "F" | "f*");
+                // Enough of a path is a drawing, whichever way it is painted.
+                let pale = match filling {
+                    true => pale_fill,
+                    false => pale_stroke,
+                };
+                if !pale {
+                    if let Some(art) = drawing_of(&shapes, ctm) {
+                        arts.push(art);
+                        shapes.clear();
+                        continue;
+                    }
+                }
                 if filling && !pale_fill {
                     if let Some(rule) = filled_rule(&shapes, ctm) {
                         rules.push(rule);
@@ -1341,13 +1489,19 @@ fn page_runs(
                     // The matrix places the image's BOTTOM edge; the top is what
                     // orders it against the lines around it.
                     ctm[5] + height,
-                    Picture { src, width, height },
+                    Picture {
+                        path: None,
+                        src,
+                        width,
+                        height,
+                    },
                 ));
             }
             _ => {}
         }
     }
     underline_runs(&mut runs, &rules);
+    pictures.extend(gather_drawings(arts));
     Drawn {
         runs,
         pictures,
@@ -1947,6 +2101,27 @@ fn list_marker(text: &str) -> Option<&str> {
     None
 }
 
+/// How much room the first word of this line would have wanted on the line
+/// before it, including the space in front of it.
+///
+/// Measured from the line's own ink: its width divided by its characters is
+/// what a character costs in the face it is set in, which is closer than any
+/// table of averages and needs no font metrics at this stage.
+fn next_word_width(line: &Line, fallback_size: f64) -> f64 {
+    let letters = line.text.chars().count();
+    let first = line.text.split_whitespace().next().unwrap_or_default();
+    if first.is_empty() {
+        return 0.0;
+    }
+    let per_letter = match (letters, line.right - line.left) {
+        (0, _) => fallback_size * 0.5,
+        (n, width) if width.is_finite() && width > 0.0 => width / n as f64,
+        _ => fallback_size * 0.5,
+    };
+    // The word, and the space that would have gone before it.
+    (first.chars().count() as f64 + 1.0) * per_letter
+}
+
 /// Turn lines into blocks: paragraphs broken on the vertical gap, headings on
 /// relative size, list items on a leading marker.
 fn blocks_from(
@@ -2096,15 +2271,26 @@ fn blocks_from(
             None => false,
             Some(p) => {
                 let gap = p.y - line.y;
-                // A line that stopped well short of the column did not wrap: it
-                // ended. This is what tells an agenda from a paragraph, and the
-                // vertical gap cannot, because both are single-spaced. Without
-                // it every time on a programme ran into the next entry, so a
-                // whole day arrived as one wall of text.
+                // A line that stopped short of the column may have ended on
+                // purpose, which is what tells an agenda from a paragraph, and
+                // the vertical gap cannot because both are single-spaced.
+                // Without it every time on a programme ran into the next entry
+                // and a whole day arrived as one wall of text.
                 //
-                // Two ems of slack, because a wrapped line stops a word short of
-                // the margin rather than exactly on it.
-                let ended_early = p.right.is_finite() && p.right < column - p.size * 2.0;
+                // But short of WHAT? Two ems of slack was the first answer and it
+                // is wrong for prose: a line wraps where the next word stops
+                // fitting, and Danish has some long ones. "Landsmøde skal der
+                // dog være tre..." stops sixty points short of the margin
+                // because "internationale" follows it, and the alkoholpolitik's
+                // first rule was arriving as three paragraphs.
+                //
+                // So ask whether the next line's first word would have FITTED. If
+                // it would have, the line ended because someone ended it; if it
+                // would not have, the line simply ran out of room.
+                let ended_early = p.right.is_finite() && {
+                    let room = column - p.right;
+                    room > p.size * 2.0 && room > next_word_width(line, p.size)
+                };
                 // And the other reasons: spacing, a size change, a list marker,
                 // or the page turning over.
                 ended_early
@@ -3147,6 +3333,11 @@ mod harness {
                 Err(e) => println!("{name:34.34} FAILED {e}"),
                 Ok(doc) => {
                     let chars: usize = doc.blocks.iter().map(|b| b.text().len()).sum();
+                    let drawings = doc
+                        .blocks
+                        .iter()
+                        .filter(|b| matches!(b, super::Block::Image(p) if p.path.is_some()))
+                        .count();
                     let underlined = doc
                         .blocks
                         .iter()
@@ -3192,7 +3383,7 @@ mod harness {
                         })
                         .count();
                     println!(
-                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} bullets={drawn:<4} ul={underlined:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
+                        "{name:34.34} pages={:<4} blocks={:<5} chars={:<7} toc={toc:<4} draw={drawings:<3} bullets={drawn:<4} ul={underlined:<4} linked={linked:<4} anchors={anchors:<4} indent={indented:<4} numbered={numbered:<4} stripped={}",
                         doc.pages,
                         doc.blocks.len(),
                         chars,
@@ -3308,6 +3499,32 @@ mod harness {
             println!("  NOT ON ITS OWN TITLE: {title:<42.42} p.{page:<5} -> {target}");
         }
         println!("  {rows} contents rows, {shown} land on their own heading");
+    }
+
+    /// Every drawing a document made, as a page that can be opened, so what the
+    /// renderer produces can be looked at rather than reasoned about.
+    ///
+    ///   PDF_UNDER_TEST=/path/to.pdf PDF_SVG=1 cargo test pdf_text::harness -- --nocapture > out.html
+    #[test]
+    fn draw_the_drawings() {
+        let (Ok(path), Ok(_)) = (std::env::var("PDF_UNDER_TEST"), std::env::var("PDF_SVG")) else {
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read");
+        let doc = super::extract(&bytes).expect("read the pdf");
+        println!("<!doctype html><meta charset=utf-8><body style='background:#fff;color:#111'>");
+        for block in doc.blocks.iter() {
+            let super::Block::Image(picture) = block else {
+                continue;
+            };
+            let Some(d) = &picture.path else { continue };
+            println!(
+                "<div style='border:1px dashed #ccc;margin:8px;display:inline-block'>\
+                 <svg viewBox='0 0 {} {}' width='{}' height='{}'>\
+                 <path d='{d}' fill='none' stroke='currentColor' stroke-width='1'/></svg></div>",
+                picture.width, picture.height, picture.width, picture.height
+            );
+        }
     }
 
     /// Just the words, for diffing against another reader.
@@ -4310,6 +4527,67 @@ mod tests {
         assert_eq!(index_entry("1. maj 2025"), None);
         assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
         assert_eq!(index_entry("....7"), None, "no title, no row");
+    }
+
+    /// A line stops short for two different reasons, and only one of them ends
+    /// the paragraph.
+    #[test]
+    fn a_line_that_ran_out_of_room_did_not_end() {
+        let line = |text: &str, left: f64, right: f64| Line {
+            y: 700.0,
+            size: 11.0,
+            right,
+            left,
+            page: 1,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            bullet: None,
+            picture: None,
+        };
+        // The alkoholpolitik: the line stops sixty points short because
+        // "internationale" is what comes next, and it does not fit.
+        let wrapped = line(
+            "internationale studieture. Når man er ædruvagt, skal man holde sig ædru",
+            110.7,
+            533.1,
+        );
+        assert!(
+            next_word_width(&wrapped, 11.0) > 60.0,
+            "the word wanted more room than was left"
+        );
+        // A programme: the next entry opens with a time, which would have fitted
+        // on the line before it several times over.
+        let entry = line("10.30 Oplæg ved gæstetaler", 110.7, 300.0);
+        assert!(
+            next_word_width(&entry, 11.0) < 60.0,
+            "a short word would have fitted, so the line before it ended on purpose"
+        );
+    }
+
+    /// A signature is written in two words and painted as two paths, and the
+    /// page shows one signature.
+    #[test]
+    fn two_halves_of_a_signature_are_one_drawing() {
+        let art = |x0: f64, x1: f64| Art {
+            strokes: Vec::new(),
+            x0,
+            y0: 100.0,
+            x1,
+            y1: 170.0,
+        };
+        // "Malika" and "Rosenskjold", side by side with a word's gap.
+        assert!(art(56.0, 145.0).joins(&art(160.0, 313.0)));
+        // Something on the other side of the page is not part of it.
+        assert!(!art(56.0, 145.0).joins(&art(400.0, 500.0)));
+        // Nor is something on another line.
+        let below = Art {
+            strokes: Vec::new(),
+            x0: 160.0,
+            y0: 10.0,
+            x1: 313.0,
+            y1: 80.0,
+        };
+        assert!(!art(56.0, 145.0).joins(&below));
     }
 
     /// The margin is where the FEWEST lines may sit: a document whose body is
