@@ -268,11 +268,11 @@ fn unit_name_mangle_escape(s: &str) -> String {
 
     let mut result = String::with_capacity(s.len() * 2);
 
-    for (i, c) in s.chars().enumerate() {
-        if i == 0 && c == '.' {
-            // Leading dot must be escaped
-            result.push_str(&format!("\\x{:02x}", c as u32));
-        } else if c == '/' {
+    // C's do_escape_mangle only escapes characters outside VALID_CHARS_WITH_AT
+    // and maps '/' to '-'. Unlike unit_name_escape (the default escape mode), it
+    // does NOT escape a leading '.', because '.' is a valid unit-name character.
+    for c in s.chars() {
+        if c == '/' {
             // A path separator mangles to '-', not \x2f: C's do_escape_mangle
             // maps '/' -> '-' (only --path escaping keeps the byte value).
             result.push('-');
@@ -313,12 +313,16 @@ fn unit_name_mangle_escape(s: &str) -> String {
 /// assert_eq!(unit_name_mangle("/mount/this"), "mount-this.mount");
 /// ```
 pub fn unit_name_mangle(s: &str) -> String {
-    // If the string already has a recognized unit suffix, mangle-escape the
-    // name part and keep the suffix.
+    // If the string already has a recognized unit suffix in front of a non-empty
+    // name, mangle-escape the name part and keep the suffix. A bare suffix like
+    // ".service" has an empty name, so C's unit_name_to_type() rejects it and a
+    // suffix is appended (".service" -> ".service.service"); fall through to that.
     if let Some(suffix) = recognized_suffix(s) {
         let name_part = &s[..s.len() - suffix.len()];
-        let escaped = unit_name_mangle_escape(name_part);
-        return format!("{escaped}{suffix}");
+        if !name_part.is_empty() {
+            let escaped = unit_name_mangle_escape(name_part);
+            return format!("{escaped}{suffix}");
+        }
     }
 
     // If it looks like an absolute path, determine the appropriate unit type.
@@ -630,6 +634,19 @@ mod tests {
         assert_eq!(unit_name_mangle("foo.service"), "foo.service");
         assert_eq!(unit_name_mangle("foo.socket"), "foo.socket");
         assert_eq!(unit_name_mangle("foo bar"), r"foo\x20bar.service");
+    }
+
+    #[test]
+    fn test_mangle_leading_dot() {
+        // C's do_escape_mangle keeps a leading '.', unlike the default escape
+        // mode. Values verified against systemd-escape --mangle (systemd 260).
+        assert_eq!(unit_name_mangle(".hidden"), ".hidden.service");
+        assert_eq!(unit_name_mangle("..two"), "..two.service");
+        assert_eq!(unit_name_mangle(".a.b"), ".a.b.service");
+        assert_eq!(unit_name_mangle(".-x"), ".-x.service");
+        // A bare suffix has an empty name, so the suffix is appended.
+        assert_eq!(unit_name_mangle(".service"), ".service.service");
+        assert_eq!(unit_name_mangle(".mount"), ".mount.service");
     }
 
     #[test]
