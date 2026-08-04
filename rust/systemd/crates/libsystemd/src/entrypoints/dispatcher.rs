@@ -260,11 +260,21 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
         let mut start_waits: StartWaits = StartWaits::new();
         let mut stop_graph = StopGraph::default();
         loop {
+            // Increment 4: fold the job-graph timeout wheel into the block
+            // deadline so a stuck job wakes the drive. `None` (and thus no
+            // change to the min) whenever nothing is enqueued, i.e. always with
+            // the flag off.
+            let job_deadline = if crate::units::jobs::job_graph_enabled() {
+                run_info.read_poisoned().jobs.lock().unwrap().next_deadline()
+            } else {
+                None
+            };
             let next_deadline = chains
                 .values()
                 .filter_map(|entry| entry.deadline)
                 .chain(start_waits.values().filter_map(|wait| wait.armed_deadline))
                 .chain(start_waits.values().filter_map(|wait| wait.exec_confirm_at))
+                .chain(job_deadline)
                 .min();
             let event = handle.pop_blocking_until(next_deadline);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -286,6 +296,14 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
                         );
                         expire_due_start_waits(&run_info, &mut chains, &mut start_waits);
                     }
+                }
+                // Increment 4: drive the job run queue after event intake (step 4
+                // of the loop contract). Behind the flag and a no-op when nothing
+                // is enqueued, so the flag-off loop is unchanged. Inside the
+                // catch_unwind, so a panic here routes to the emergency shell like
+                // any other dispatcher fault.
+                if crate::units::jobs::job_graph_enabled() {
+                    crate::units::drive_run_queue(&run_info);
                 }
             }));
             if let Err(panic) = result {

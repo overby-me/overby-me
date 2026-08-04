@@ -1419,6 +1419,144 @@ fn activate_units_recursive(
     }
 }
 
+/// Increment-4 job-graph drive, run as step 4 of the single dispatcher loop
+/// behind `SYSTEMD_RS_JOB_GRAPH=1` (docs/EVENT-LOOP.md, "The flag-on dispatch
+/// belongs in the existing dispatcher loop"). One pass:
+///
+/// 1. Retire every `Running` job whose unit reached a terminal status (Started
+///    or Stopped); a vanished unit's job is canceled.
+/// 2. Fire JobTimeout (`pop_expired`) for any job past its deadline, so a stuck
+///    unit self-terminates the closure instead of hanging the dispatcher.
+/// 3. Re-prime readiness (`enqueue_ready`): every `Waiting` job whose ordering
+///    prerequisites are now met joins the run queue. This is the completion
+///    requeue — running it each pass, triggered by the dispatcher's own wakes
+///    (Notify, ChildExit) rather than a per-completion hook threaded through
+///    `dispatch_one`.
+/// 4. Dispatch (`pop_ready`): activate each ready unit initiate-only, mirroring
+///    the pool path (`DeferNotifyWait` for the fork, deferred starts parked on
+///    this same dispatcher via [`park_deferred_start`] with an *empty*
+///    before-chain because the graph schedules dependents itself), and arm the
+///    job's timeout.
+///
+/// A no-op when the registry is empty, which is always the case with the flag
+/// off, so the default dispatcher loop is untouched. Activation here must never
+/// block the dispatcher; that holds for services (fork-and-return) and is why
+/// the first slice is service-only (mounts move off-thread in inc 5).
+pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
+    use crate::units::jobs::{JobId, JobResult, JobState};
+
+    let jobs = { run_info.read_poisoned().jobs.clone() };
+    // Fast path: nothing enqueued means nothing to drive (the flag-off case and
+    // the common flag-on idle case).
+    if jobs.lock().unwrap().is_empty() {
+        return;
+    }
+
+    // Phase 1: retire completed and timed-out jobs, then re-prime readiness.
+    {
+        let ri = run_info.read_poisoned();
+        let mut reg = jobs.lock().unwrap();
+
+        // The activation set for readiness is every unit that still holds a job.
+        let activation_set: Vec<UnitId> = reg.iter().map(|job| job.unit.clone()).collect();
+        let is_ready = |ri: &RuntimeInfo, u: &UnitId| {
+            !matches!(u.kind, crate::units::UnitIdKind::Device)
+                && unstarted_deps(u, ri, Some(&activation_set)).is_empty()
+        };
+
+        let running: Vec<(JobId, UnitId)> = reg
+            .iter()
+            .filter(|job| job.state == JobState::Running)
+            .map(|job| (job.id, job.unit.clone()))
+            .collect();
+        for (jid, unit_id) in running {
+            let status = ri
+                .unit_table
+                .get(&unit_id)
+                .map(|u| u.common.status.read_poisoned().clone());
+            match status {
+                // Unit removed (e.g. daemon-reload): the job can never complete.
+                None => {
+                    reg.finish(jid, JobResult::Canceled);
+                }
+                Some(UnitStatus::Started(_)) => {
+                    reg.finish(jid, JobResult::Done);
+                }
+                Some(UnitStatus::Stopped(_, errs)) => {
+                    reg.finish(
+                        jid,
+                        if errs.is_empty() {
+                            JobResult::Done
+                        } else {
+                            JobResult::Failed
+                        },
+                    );
+                }
+                // Still activating or not yet begun: leave the job running.
+                _ => {}
+            }
+        }
+
+        let now = std::time::Instant::now();
+        for jid in reg.pop_expired(now) {
+            warn!("job-graph: job {jid} exceeded its deadline, finishing as Timeout");
+            reg.finish(jid, JobResult::Timeout);
+        }
+
+        reg.enqueue_ready(|u| is_ready(&ri, u));
+    }
+
+    // Phase 2: dispatch every ready job, initiate-only. `filter_ids`/`errors`
+    // are the arguments the parked-start continuation expects; the job graph
+    // hands an empty before-chain, so `filter_ids` only scopes readiness for a
+    // continuation that will not dispatch dependents anyway.
+    let filter: Arc<Vec<UnitId>> =
+        Arc::new(jobs.lock().unwrap().iter().map(|j| j.unit.clone()).collect());
+    let errors: Arc<Mutex<Vec<UnitOperationError>>> = Arc::new(Mutex::new(Vec::new()));
+    loop {
+        let jid = { jobs.lock().unwrap().pop_ready() };
+        let Some(jid) = jid else { break };
+        let unit_id = match jobs.lock().unwrap().get(jid) {
+            Some(job) => job.unit.clone(),
+            None => continue,
+        };
+
+        let ri = run_info.read_poisoned();
+        match activate_unit(unit_id.clone(), &ri, ActivationSource::DeferNotifyWait) {
+            Ok(StartResult::Started(_before_chain)) => {
+                let (is_deferred, is_prestart_chain, is_oneshot_prelim) =
+                    detect_deferred_kind(&ri, &unit_id);
+                drop(ri);
+                if is_deferred {
+                    park_deferred_start(
+                        unit_id.clone(),
+                        is_prestart_chain,
+                        is_oneshot_prelim,
+                        Vec::new(),
+                        filter.clone(),
+                        errors.clone(),
+                        ActivationSource::Regular,
+                        run_info.clone(),
+                        &unit_id.name,
+                    );
+                }
+                let mut reg = jobs.lock().unwrap();
+                reg.set_running(jid);
+                reg.set_deadline(
+                    jid,
+                    std::time::Instant::now() + std::time::Duration::from_secs(90),
+                );
+            }
+            Err(e) => {
+                drop(ri);
+                error!("job-graph: failed to activate {}: {e}", unit_id.name);
+                trigger_on_failure_units(&unit_id, run_info);
+                jobs.lock().unwrap().finish(jid, JobResult::Failed);
+            }
+        }
+    }
+}
+
 /// Background thread for deferred Type=notify READY=1 wait.
 ///
 /// Polls `signaled_ready` (set by the global notification handler when
