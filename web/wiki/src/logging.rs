@@ -451,14 +451,24 @@ fn setup_global_error_handlers() {
             // not our code at all, but an extension or a browser-injected
             // script. Say so, rather than leaving a report that looks like a
             // failure in the app and cannot be chased.
+            //
+            // And say it at warn. Naming it opaque while still filing it as an
+            // error was having it both ways: the reader of the report is told in
+            // the same breath that something failed and that nothing can be
+            // learned about it, and it lands in the same list as a real crash.
+            // Warn keeps the record (a burst of these is still worth seeing)
+            // without claiming the app broke, which nothing here establishes.
             let opaque = stack.is_none() && ee.filename().is_empty() && ee.lineno() == 0;
-            let message = if opaque {
-                format!("UNCAUGHT (opaque, no detail from the browser): {msg}")
+            let (level, message) = if opaque {
+                (
+                    "warn",
+                    format!("UNCAUGHT (opaque, no detail from the browser): {msg}"),
+                )
             } else {
                 let at = format!("{}:{}:{}", ee.filename(), ee.lineno(), ee.colno());
-                format!("UNCAUGHT: {msg} @ {at}")
+                ("error", format!("UNCAUGHT: {msg} @ {at}"))
             };
-            queue(make_entry_with_stack("error", message, stack));
+            queue(make_entry_with_stack(level, message, stack));
         }
     });
     add_listener(et, "unhandledrejection", |ev| {
