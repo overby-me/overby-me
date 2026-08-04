@@ -62,3 +62,12 @@ differential:
     # --type/--signal/--state=help compiled-in string tables vs systemctl
     SYSTEMD_SYSTEMCTL="$sysd/bin/systemctl" \
       cargo test -p systemctl --test differential_vs_c -- --nocapture
+    # tmpfiles.d config-syntax exit codes (EX_DATAERR vs ignorable) vs systemd-tmpfiles
+    SYSTEMD_TMPFILES="$sysd/bin/systemd-tmpfiles" \
+      cargo test -p systemd-tmpfiles --test differential_vs_c -- --nocapture
+    # sysusers.d parse-error exit code (fatal, exit 1) vs systemd-sysusers
+    SYSTEMD_SYSUSERS="$sysd/bin/systemd-sysusers" \
+      cargo test -p systemd-sysusers --test differential_vs_c -- --nocapture
+    # sysctl.d not-an-assignment exit code vs systemd-sysctl
+    SYSTEMD_SYSCTL="$sysd/lib/systemd/systemd-sysctl" \
+      cargo test -p systemd-sysctl --test differential_vs_c -- --nocapture
