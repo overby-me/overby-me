@@ -680,11 +680,20 @@ pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
 ///
 /// Reactive on `file_id` and the token, so a sibling navigation re-presigns
 /// rather than serving the previous node's file. Empty `file_id` yields None.
-pub fn use_presigned_url(file_id: String) -> Option<String> {
+///
+/// And on `freshen`, which is anything the caller knows should mint a new URL.
+/// A signature lives about thirty seconds, which is long enough to open a file
+/// and nothing like long enough to come BACK to one: a reader who read a PDF in
+/// this app's renderer for a minute and then switched to the browser's got
+/// "signature already expired" from a URL that had been signed before they
+/// started reading. Passing the viewer here re-signs at the moment the choice
+/// changes, which is the moment the URL is about to be used again.
+pub fn use_presigned_url(file_id: String, freshen: String) -> Option<String> {
     let session = use_session();
     let token = session.read().access_token.clone();
     let mut url = use_signal(|| None::<String>);
-    use_effect(use_reactive!(|(file_id, token)| {
+    use_effect(use_reactive!(|(file_id, token, freshen)| {
+        let _ = &freshen;
         url.set(None);
         if file_id.is_empty() {
             return;

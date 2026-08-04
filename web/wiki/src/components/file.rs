@@ -1057,7 +1057,15 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     // and a download <a>, none of which can send the Authorization header the
     // storage service reads. Empty until it resolves, which the branches below
     // already treat as "no preview yet".
-    let file_url = super::loader::use_presigned_url(file_id.to_string()).unwrap_or_default();
+    // Re-signed when the viewer changes: a signature outlives opening a file and
+    // not coming back to one, so switching away to this app's PDF renderer and
+    // back again used to hand the iframe a URL signed minutes earlier, which the
+    // storage service answers with "signature already expired".
+    let file_url = super::loader::use_presigned_url(
+        file_id.to_string(),
+        format!("{:?}/{:?}", PDF_VIEWER(), OFFICE_VIEWER()),
+    )
+    .unwrap_or_default();
 
     // The Office viewer needs its own link (see the branch that uses it), fetched
     // only for the mimes that go through it.
