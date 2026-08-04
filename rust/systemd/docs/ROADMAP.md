@@ -51,6 +51,13 @@ follow from where it strains.
    under C PID 1 on one real, low-stakes NixOS machine, as a module override with
    generation rollback. This exercises design principle 5 for the first time and
    opens a production feedback channel that VM tests cannot provide.
+   *In progress (2026-08-04):* the in-VM precursor is green -- the
+   `rust-rung1-tmpfiles` check (`rust/nixos/rung1-tmpfiles-test.nix`) boots stock
+   C systemd as PID 1 with only `systemd-tmpfiles-setup` redirected to the rust
+   `systemd-tmpfiles`, which applies the full boot `tmpfiles.d` set (ACLs
+   included) and succeeds. Fixing it surfaced and closed a real gap (rust
+   tmpfiles now resolves `setfacl` from a baked path rather than `$PATH`). The
+   remaining step is the same override on a real machine.
 2. **Event-loop convergence**, designed in [EVENT-LOOP.md](EVENT-LOOP.md): minimal
    job objects plus a single state-changed dispatcher queue, in seven gated
    increments. Retires invariants I1-I6 wholesale and unblocks TEST-63-PATH,
