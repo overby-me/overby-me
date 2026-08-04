@@ -3335,43 +3335,64 @@ const EXIT_STATUS_TABLE: &[(&str, u8, &str)] = &[
     ("CREDENTIALS", 243, "systemd"),
     ("BPF", 244, "systemd"),
     ("KSM", 245, "systemd"),
+    ("MEMORY_THP", 246, "systemd"),
     ("EXCEPTION", 255, "systemd"),
 ];
 
 fn cmd_exit_status(statuses: &[String]) {
-    println!("{:<24} {:>6} CLASS", "NAME", "STATUS");
-
-    if statuses.is_empty() {
-        for &(name, code, class) in EXIT_STATUS_TABLE {
-            println!("{:<24} {:>6} {}", name, code, class);
-        }
-        return;
-    }
-
-    let mut had_error = false;
-    for s in statuses {
-        if let Ok(num) = s.parse::<u8>() {
-            if let Some(&(name, code, class)) =
-                EXIT_STATUS_TABLE.iter().find(|&&(_, c, _)| c == num)
-            {
-                println!("{:<24} {:>6} {}", name, code, class);
-            } else {
-                println!("{:<24} {:>6} -", "-", num);
+    // Resolve every argument first. C's verb_exit_status errors out, printing no
+    // table, on the first invalid status, and prints rows in argument order (it
+    // does not sort). A name is matched case-sensitively (exit_status_from_string
+    // uses streq); otherwise the argument must be a u8 (0..=255), which shows as
+    // "-"/"-" when no named mapping exists. Anything else is "Invalid exit
+    // status".
+    let rows: Vec<(&str, u8, &str)> = if statuses.is_empty() {
+        EXIT_STATUS_TABLE.to_vec()
+    } else {
+        let mut rows = Vec::with_capacity(statuses.len());
+        for s in statuses {
+            let resolved = EXIT_STATUS_TABLE
+                .iter()
+                .find(|&&(n, _, _)| n == s.as_str())
+                .copied()
+                .or_else(|| {
+                    s.parse::<u8>().ok().map(|num| {
+                        EXIT_STATUS_TABLE
+                            .iter()
+                            .find(|&&(_, c, _)| c == num)
+                            .copied()
+                            .unwrap_or(("-", num, "-"))
+                    })
+                });
+            match resolved {
+                Some(row) => rows.push(row),
+                None => {
+                    eprintln!("Invalid exit status \"{s}\".");
+                    std::process::exit(1);
+                }
             }
-        } else {
-            let upper = s.to_uppercase();
-            if let Some(&(name, code, class)) =
-                EXIT_STATUS_TABLE.iter().find(|&&(n, _, _)| n == upper)
-            {
-                println!("{:<24} {:>6} {}", name, code, class);
-            } else {
-                eprintln!("Unknown exit status: {s}");
-                had_error = true;
-            }
         }
-    }
-    if had_error {
-        std::process::exit(1);
+        rows
+    };
+
+    // Column widths follow C's table formatter: NAME fits the widest name shown
+    // (never narrower than its header), STATUS is right-aligned and at least as
+    // wide as "STATUS", and CLASS is the trailing column.
+    let name_w = rows
+        .iter()
+        .map(|&(n, _, _)| n.len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    let status_w = rows
+        .iter()
+        .map(|&(_, c, _)| c.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max("STATUS".len());
+    println!("{:<name_w$} {:>status_w$} CLASS", "NAME", "STATUS");
+    for (name, code, class) in rows {
+        println!("{:<name_w$} {:>status_w$} {}", name, code, class);
     }
 }
 

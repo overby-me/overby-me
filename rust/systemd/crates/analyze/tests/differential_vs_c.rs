@@ -42,15 +42,6 @@ fn unix_seconds(output: &str) -> Option<String> {
     })
 }
 
-/// The (NAME, CLASS) pair from a single-status `exit-status` table: the row
-/// after the header, whose first and last columns are the name and class (both
-/// "-" for a known-numeric-but-unnamed status).
-fn exit_status_name_class(output: &str) -> Option<(String, String)> {
-    let row = output.lines().nth(1)?;
-    let cols: Vec<&str> = row.split_whitespace().collect();
-    Some((cols.first()?.to_string(), cols.last()?.to_string()))
-}
-
 /// The microsecond value from a `timespan` dump: rust prints "NNN us", C prints
 /// "μs: NNN".
 fn timespan_usec(output: &str) -> Option<String> {
@@ -215,32 +206,40 @@ fn analyze_exit_status_matches_c() {
         return;
     };
     let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
-    // Numeric statuses only: a non-numeric arg triggers C's strict error vs
-    // rust's lenient warn-and-continue, an intentional behavioral difference.
-    // The drift-prone data is the name/class table, so walk the ranges: libc,
-    // LSB (1-8), BSD (64-78), systemd (200-243), plus unnamed gaps and 255.
-    let mut specs: Vec<String> = Vec::new();
-    for n in [0u32, 1, 2, 3, 4, 5, 6, 7, 8] {
-        specs.push(n.to_string());
+    // Compare exact stdout, stderr, and exit for every status 0..=255 (locking
+    // the whole name/class table, the auto-sized columns, and the "-"/"-" form
+    // for unnamed-but-valid codes), plus behavioral edge cases: the full table,
+    // argument order (no sort), the exact "Invalid exit status" error printed
+    // before any table, case-sensitive name matching, and a partial list that
+    // must error without printing the valid rows before it.
+    let mut cases: Vec<Vec<String>> = Vec::new();
+    for n in 0u32..=255 {
+        cases.push(vec!["exit-status".to_string(), n.to_string()]);
     }
-    for n in 64..=78 {
-        specs.push(n.to_string());
+    for extra in [
+        vec!["exit-status"],
+        vec!["exit-status", "1", "0"],
+        vec!["exit-status", "0", "1", "246"],
+        vec!["exit-status", "MEMORY_THP"],
+        vec!["exit-status", "STDOUT"],
+        vec!["exit-status", "EXCEPTION"],
+        vec!["exit-status", "SUCCESS", "FAILURE", "MEMORY_THP"],
+        vec!["exit-status", "256"],
+        vec!["exit-status", "FOOBAR"],
+        vec!["exit-status", "success"],
+        vec!["exit-status", "SUCCESS", "FOOBAR"],
+    ] {
+        cases.push(extra.into_iter().map(String::from).collect());
     }
-    for n in 200..=243 {
-        specs.push(n.to_string());
-    }
-    for n in [42u32, 100, 128, 199, 244, 250, 254, 255] {
-        specs.push(n.to_string());
-    }
+
     let mut div = Vec::new();
-    for s in &specs {
-        let (ro, rok) = run(rust_bin, &["exit-status", s]);
-        let (co, cok) = run(&c_bin, &["exit-status", s]);
-        let rn = exit_status_name_class(&ro);
-        let cn = exit_status_name_class(&co);
-        if rn != cn || rok != cok {
+    for case in &cases {
+        let args: Vec<&str> = case.iter().map(String::as_str).collect();
+        let (ro, re, rok) = run_full(rust_bin, &args);
+        let (co, ce, cok) = run_full(&c_bin, &args);
+        if ro != co || re != ce || rok != cok {
             div.push(format!(
-                "exit-status {s}:\n     rust: ok={rok} {rn:?}\n     c   : ok={cok} {cn:?}"
+                "args={case:?}\n     rust: ok={rok} out={ro:?} err={re:?}\n     c   : ok={cok} out={co:?} err={ce:?}"
             ));
         }
     }
