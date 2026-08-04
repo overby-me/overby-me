@@ -53,3 +53,6 @@ differential:
     # systemd-creds list exit-status (ENXIO) contract vs systemd-creds
     SYSTEMD_CREDS="$sysd/bin/systemd-creds" \
       cargo test -p systemd-creds --test differential_vs_c -- --nocapture
+    # kernel-command-line → .network generation vs systemd-network-generator
+    SYSTEMD_NETWORK_GENERATOR="$sysd/lib/systemd/systemd-network-generator" \
+      cargo test -p systemd-network-generator --test differential_vs_c -- --nocapture
