@@ -3558,15 +3558,24 @@ fn run() -> u8 {
         }
     }
 
-    // Deduplicate items: for types other than w+ (WriteFile with force/append),
-    // only the first entry per (path, type) is kept.  This matches systemd behaviour
-    // where earlier (higher-priority) config files win for the same path and type.
+    // Deduplicate items: for most types only the first entry per (path, type)
+    // is kept, matching systemd, which reports "Duplicate line for path,
+    // ignoring" and keeps the earlier (higher-priority) line. Two exceptions
+    // accumulate rather than dedup, again matching C:
+    //   - w+ (WriteFile with force) appends, so every entry is applied;
+    //   - ACL items (a/A, with or without +) are applied in order -- each 'a'
+    //     replaces the ACL, each 'a+' merges onto it -- so all are kept.
     {
         let mut seen: std::collections::HashSet<(PathBuf, ItemType)> =
             std::collections::HashSet::new();
         items.retain(|item| {
-            // w+ (WriteFile with force flag) entries are always kept — they append.
             if item.item_type == ItemType::WriteFile && item.force {
+                return true;
+            }
+            if matches!(
+                item.item_type,
+                ItemType::SetACL | ItemType::SetACLRecursively
+            ) {
                 return true;
             }
             // For all other types, keep only the first entry per (path, type).
