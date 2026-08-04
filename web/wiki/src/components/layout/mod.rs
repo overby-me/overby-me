@@ -252,17 +252,24 @@ pub fn Layout() -> Element {
         let url = crate::nav_memory::current_url().unwrap_or_default();
         previous.set(Some((segments.clone(), app.clone(), url.clone())));
 
-        // Switching `?app=` in place leaves the page under it alone, so the
-        // reader keeps their scroll.
-        if same_page {
-            return;
-        }
-        // A DIFFERENT node: start at the top, unless this is a page left
-        // part-way down earlier in the session, in which case go back to it.
-        // Keyed on the URL, so this covers the app rail bringing us back, the
-        // browser's own back and forward, and a reload, all the same way.
+        // Where this URL was left, if it was: the app rail bringing us back, the
+        // browser's own back and forward, and a reload all key off the same
+        // thing. Otherwise a different node starts at the top.
+        //
+        // A remembered position wins even when only `?app=` changed. That case
+        // used to return early on the grounds that switching app in place leaves
+        // the page under it alone and the reader keeps their scroll, which holds
+        // for the scroll but not for the memory: the app view REPLACES the
+        // content, so the browser clamps the scroll to the shorter document, and
+        // coming back had nothing to undo that with. AT A CONTEXT ROOT this is
+        // every rail tap, since the rail targets the context root and only the
+        // query changes, which is why the root was the one place that never came
+        // back. The early return survives for the case it was actually about:
+        // nothing remembered, so leave the scroll where it is rather than
+        // yanking a reader to the top for changing tab.
         match crate::nav_memory::stashed_scroll(&url) {
             Some(y) if y > 1.0 => restore_scroll(y),
+            _ if same_page => {}
             _ => win.scroll_to_with_x_and_y(0.0, 0.0),
         }
     }));
