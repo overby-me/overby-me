@@ -760,3 +760,53 @@ fn analyze_syscall_filter_matches_c() {
         div.join("\n")
     );
 }
+
+/// `systemd-analyze transient-settings <unittype>` lists the properties settable
+/// on a transient unit of that type, one per line, in C's bus-property-table
+/// order (a static per-type list). Compares stdout/stderr/exit verbatim for every
+/// unit type, multiple types (blank line between), and the error cases (no
+/// argument, invalid type). Streams are captured separately, so C's stdio
+/// interleaving of a mid-run error does not matter.
+#[test]
+fn analyze_transient_settings_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    let cases: &[&[&str]] = &[
+        &["transient-settings", "service"],
+        &["transient-settings", "socket"],
+        &["transient-settings", "target"],
+        &["transient-settings", "device"],
+        &["transient-settings", "mount"],
+        &["transient-settings", "automount"],
+        &["transient-settings", "timer"],
+        &["transient-settings", "swap"],
+        &["transient-settings", "path"],
+        &["transient-settings", "slice"],
+        &["transient-settings", "scope"],
+        &["transient-settings", "service", "mount"], // blank line between
+        &["transient-settings"],                     // Too few arguments.
+        &["transient-settings", "bogus"],            // Invalid unit type 'bogus'.
+        &["transient-settings", "service", "bogus", "mount"], // errors after service
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (ro, re, rok) = run_full(rust_bin, args);
+        let (co, ce, cok) = run_full(&c_bin, args);
+        if ro != co || re != ce || rok != cok {
+            div.push(format!(
+                "args={args:?}\n     rust: ok={rok} err={re:?}\n     c   : ok={cok} err={ce:?}\n     (stdout diff omitted)"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze transient-settings drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
