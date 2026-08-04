@@ -51,13 +51,21 @@ follow from where it strains.
    under C PID 1 on one real, low-stakes NixOS machine, as a module override with
    generation rollback. This exercises design principle 5 for the first time and
    opens a production feedback channel that VM tests cannot provide.
-   *In progress (2026-08-04):* the in-VM precursor is green -- the
-   `rust-rung1-tmpfiles` check (`rust/nixos/rung1-tmpfiles-test.nix`) boots stock
-   C systemd as PID 1 with only `systemd-tmpfiles-setup` redirected to the rust
-   `systemd-tmpfiles`, which applies the full boot `tmpfiles.d` set (ACLs
-   included) and succeeds. Fixing it surfaced and closed a real gap (rust
-   tmpfiles now resolves `setfacl` from a baked path rather than `$PATH`). The
-   remaining step is the same override on a real machine.
+   *In-VM precursor DONE (2026-08-04), real-machine step remains:* the reusable
+   module `rust/nixos/rung1.nix` (`services.rustSystemdRung1.*`) runs individual
+   rust components under stock C PID 1 by overriding just that component's
+   service. Green in-VM checks (`rust/nixos/rung1-*-test.nix`): **tmpfiles** and
+   **sysusers** (oneshots) and the **timesyncd**, **resolved**, and **networkd**
+   daemons -- each active/applied under C PID 1 while PID 1 stays C 260. This
+   surfaced and fixed three real rust bugs (tmpfiles `setfacl` and sysusers
+   `useradd`/`groupadd`/`chage` now resolve from baked paths rather than `$PATH`;
+   sysusers `groupadd` is idempotent on an existing GID). **udevd** was attempted
+   and backed off: rust udevd starts and loads rules under C PID 1 but does not
+   complete C's device-unit integration (the `TAG="systemd"` + `/run/udev/data`
+   + sd-device monitor protocol), so `dev-*.device` units time out -- a deep
+   hybrid gap, not a bounded fix. Finding: notify daemons work under C PID 1
+   regardless of D-Bus/sockets; only the device-unit protocol is deep. The
+   remaining step for this item is applying the module on a real machine.
 2. **Event-loop convergence**, designed in [EVENT-LOOP.md](EVENT-LOOP.md): minimal
    job objects plus a single state-changed dispatcher queue, in seven gated
    increments. Retires invariants I1-I6 wholesale and unblocks TEST-63-PATH,
