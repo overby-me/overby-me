@@ -233,6 +233,19 @@
         firewall.enable = true;
       };
 
+      # services/resolved.nix asks for strict DNS-over-TLS, which works on the
+      # other hosts because the resolved-secret.conf it drops in names
+      # upstreams that speak it.  This host has hasSecrets = false, so it
+      # inherits the strict setting with only the DHCP-provided resolvers,
+      # which do not, and every lookup fails outright: no substituters, no
+      # `nixos-rebuild --build-host`, nothing.  Opportunistic keeps DoT where
+      # it is offered and falls back to plaintext where it is not.
+      #
+      # Remove this once the host key is rekeyed into nixos/secrets and
+      # hasSecrets goes true; the secret drop-in takes precedence over
+      # resolved.conf, so strict DoT comes back on its own.
+      services.resolved.settings.Resolve.DNSOverTLS = lib.mkForce "opportunistic";
+
       # ── Swap ────────────────────────────────────────────────────────
       zram.enable = true;
 
