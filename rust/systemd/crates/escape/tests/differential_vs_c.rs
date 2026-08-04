@@ -40,6 +40,14 @@ fn escape_matches_c_systemd() {
         &["--path", "//double//slash//"],
         &["--path", "."],
         &["--path", ".."],
+        // C's --path accepts a normalized *relative* path (with a "not absolute"
+        // warning), not just absolute ones; only a path with unresolved "."/".."
+        // components is rejected.
+        &["--path", "foo"],
+        &["--path", "foo/bar"],
+        &["--path", "./foo"],
+        &["--path", "foo/"],
+        &["--path", "foo/../bar"],
         &["foo/bar.baz"],
         &["a.b-c:d"],
         &["-leading-dash"],
@@ -80,6 +88,46 @@ fn escape_matches_c_systemd() {
         "rust vs C systemd-escape drift ({} case(s)):\n{}",
         divergences.len(),
         divergences.join("\n")
+    );
+}
+
+/// When `--path` escapes an input that is not a valid (empty) or not an
+/// absolute (relative) path, C still succeeds but warns on stderr that the
+/// escaping is not reversible. Lock that stdout+stderr+exit against C for the
+/// cases that escape successfully (the reject cases' stderr text is a separate,
+/// documented follow-up; their exit status already matches).
+#[test]
+fn escape_path_warnings_match_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ESCAPE") else {
+        eprintln!("skip differential: SYSTEMD_ESCAPE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-escape");
+
+    let cases: &[&[&str]] = &[
+        &["--path", ""],       // -> "-" with a "not a valid" warning
+        &["--path", "foo"],    // -> "foo" with a "not an absolute" warning
+        &["--path", "foo/bar"],
+        &["--path", "./foo"],
+        &["--path", "foo/"],
+        &["--path", "/foo/bar"], // absolute: escapes with no warning
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (ro, re, rok) = run_full(rust_bin, args);
+        let (co, ce, cok) = run_full(&c_bin, args);
+        if ro != co || re != ce || rok != cok {
+            div.push(format!(
+                "args={args:?}\n     rust: ok={rok} out={ro:?} err={re:?}\n     c   : ok={cok} out={co:?} err={ce:?}"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-escape --path warning drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
     );
 }
 

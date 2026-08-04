@@ -129,29 +129,33 @@ pub fn unit_name_unescape(s: &str) -> Option<String> {
 /// assert_eq!(unit_name_path_escape("/foo//bar/"), "foo-bar");
 /// assert_eq!(unit_name_path_escape("/foo bar/baz"), r"foo\x20bar-baz");
 /// ```
-/// Escape a filesystem path for use in a systemd unit name.
-/// Returns `None` for invalid paths (relative paths like `.` or `..`,
-/// paths that resolve to nothing meaningful, or paths exceeding length limits).
+/// Escape a filesystem path for use in a systemd unit name, matching C's
+/// `unit_name_path_escape` (used by `systemd-escape --path`). The empty input
+/// and any root-like path escape to `-`; a *normalized* path, whether absolute
+/// (`/foo/bar`) or relative (`foo`, `foo/bar`, `./foo`), is escaped. `None` is
+/// returned only for a path that still contains `.`/`..` components after
+/// simplification (a bare `.`/`..`, or e.g. `/a/../b`) or one exceeding the unit
+/// name length limit. The caller (the CLI) still warns when the input is not a
+/// valid or not an absolute path even though escaping succeeds.
 pub fn unit_name_path_escape_checked(path: &str) -> Option<String> {
-    // C's unit_name_path_escape() runs path_simplify() then treats the
-    // empty-or-root result as the root escape "-". The empty string simplifies
-    // to empty, so C escapes it to "-" (the caller may still warn that this is
-    // not reversible). Note this must come before the relative-path rejection,
-    // and it must key off the *original* input being empty rather than the
+    // The empty string simplifies to empty, so C escapes it to "-". This must
+    // come first and key off the *original* input being empty rather than the
     // normalized form: normalize_path() also reduces "." to empty, but a bare
-    // "." is a non-absolute path C rejects, so it must fall through below.
+    // "." is a non-absolute path C rejects, handled in the branch below.
     if path.is_empty() {
         return Some("-".to_string());
     }
 
-    // Relative paths (not starting with /) are invalid for path escaping
-    if !path.starts_with('/') {
-        return None;
-    }
-
     let normalized = normalize_path(path);
     if normalized.is_empty() {
-        return Some("-".to_string());
+        // "/" (and "//", "/.", ...) collapse to root and escape to "-". A
+        // relative dotty input such as "." or "./" also simplifies to nothing
+        // but is not absolute, and C rejects it (unlike a genuine root path).
+        return if path.starts_with('/') {
+            Some("-".to_string())
+        } else {
+            None
+        };
     }
 
     // Reject paths that still contain `..` after normalization
@@ -567,15 +571,24 @@ mod tests {
 
     #[test]
     fn test_path_escape_checked_empty_and_relative() {
-        // C's unit_name_path_escape() maps the empty input (empty-or-root after
-        // path_simplify) to the root escape "-", exiting 0. A bare "." or a
-        // relative path is non-absolute and rejected (C exits 1 -> None here).
+        // The empty input and any root-like path escape to "-". A *normalized*
+        // path escapes whether absolute or relative (C accepts both, warning
+        // separately about non-absolute ones). Only a path that still contains
+        // "." / ".." after simplification is rejected (None / C exit 1).
         assert_eq!(unit_name_path_escape_checked(""), Some("-".to_string()));
         assert_eq!(unit_name_path_escape_checked("/"), Some("-".to_string()));
         assert_eq!(unit_name_path_escape_checked("."), None);
         assert_eq!(unit_name_path_escape_checked(".."), None);
-        assert_eq!(unit_name_path_escape_checked("foo"), None);
         assert_eq!(unit_name_path_escape_checked("/foo/../bar"), None);
+        assert_eq!(unit_name_path_escape_checked("foo/../bar"), None);
+        // Relative normalized paths are accepted, matching C's `--path foo`.
+        assert_eq!(unit_name_path_escape_checked("foo"), Some("foo".to_string()));
+        assert_eq!(
+            unit_name_path_escape_checked("foo/bar"),
+            Some("foo-bar".to_string())
+        );
+        assert_eq!(unit_name_path_escape_checked("./foo"), Some("foo".to_string()));
+        assert_eq!(unit_name_path_escape_checked("foo/"), Some("foo".to_string()));
         assert_eq!(
             unit_name_path_escape_checked("/dev/sda1"),
             Some("dev-sda1".to_string())

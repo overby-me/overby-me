@@ -127,12 +127,17 @@ fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
                 .ok_or_else(|| format!("Invalid path: {input}"))?;
 
             // Mirror C's escape-tool: when the escape succeeds for an input that
-            // isn't a valid file system path, warn that it is not reversible.
-            // The only such input that still escapes (to "-") is the empty
-            // string; a valid absolute path escapes without a warning.
+            // isn't a valid or isn't an absolute file system path, warn that it
+            // is not reversible. C checks path_is_valid first (only the empty
+            // string fails that here), then path_is_absolute (any relative path
+            // like "foo"). A valid absolute path escapes without a warning.
             if input.is_empty() {
                 eprintln!(
                     "Input '{input}' is not a valid file system path, escaping is likely not going to be reversible."
+                );
+            } else if !input.starts_with('/') {
+                eprintln!(
+                    "Input '{input}' is not an absolute file system path, escaping is likely not going to be reversible."
                 );
             }
 
