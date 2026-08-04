@@ -290,6 +290,27 @@ fn is_autoconf_method(s: &str) -> bool {
     )
 }
 
+/// Split an `ip=` value on ':' while keeping a bracketed IPv6 literal
+/// (`[2001:db8::1]`) as a single field with the brackets stripped. C's
+/// `extract_ip_address` accepts `[...]`-wrapped IPv6 addresses in the
+/// colon-delimited `ip=` form; a naive split on ':' shreds them (the address's
+/// own colons become field separators).
+fn split_ip_fields(val: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut cur = String::new();
+    let mut in_bracket = false;
+    for c in val.chars() {
+        match c {
+            '[' => in_bracket = true,
+            ']' => in_bracket = false,
+            ':' if !in_bracket => fields.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    fields.push(cur);
+    fields
+}
+
 /// Parse `ip=` value.
 ///
 /// Supported forms:
@@ -303,7 +324,9 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
     }
 
     // Check for simple keyword form (no colons, or single colon device:method).
-    let parts: Vec<&str> = val.split(':').collect();
+    // Split bracket-aware so `[...]`-wrapped IPv6 addresses stay one field.
+    let fields = split_ip_fields(val);
+    let parts: Vec<&str> = fields.iter().map(String::as_str).collect();
 
     // Short form: ip=<device>:<method>[:<mtu>[:<macaddr>]]. C keys off the
     // second field being an autoconf method (regardless of whether the first

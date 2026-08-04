@@ -55,6 +55,11 @@ fn network_generator_matches_c() {
         &["ip=eth0:dhcp:1500:00:11:22:33:44:55"],
         &["ip=eth0:dhcp::00:11:22:33:44:55"],
         &["ip=10.0.0.5:dhcp:1500"],
+        // Bracketed IPv6 literals in the full form. rust once shredded the
+        // address on its own colons (garbage Address=[2001/5]); now they parse.
+        &["ip=[2001:db8::1]::[2001:db8::ff]:64::eth0:none"],
+        &["ip=[2001:db8::5]::::server:eth0:none"],
+        &["ip=[fe80::1]:::::eth0:none"],
         &["ip=10.0.0.5::10.0.0.1:255.255.255.0::eth0:off"],
         &["ip=192.168.1.10::192.168.1.1:255.255.255.0:myhost:eth1:none"],
         &["ip=dhcp", "nameserver=8.8.8.8", "nameserver=1.1.1.1"],
