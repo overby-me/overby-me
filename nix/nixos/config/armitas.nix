@@ -9,22 +9,26 @@
 # ║  https://github.com/andre4ik3/nixos-surface-pro-11                    ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
 #
-# Installation:
-#   1. In Windows, disable BitLocker BEFORE anything else.  Turning off
-#      Secure Boot with it on leaves Windows unbootable.
-#   2. In Windows, note the MAC addresses from `ipconfig /all` (see
-#      nixos/hardware/surface-pro-11/networking.nix) and shrink the Windows
-#      partition.  Do NOT delete it: it is the easy way back.
-#   3. Disable Secure Boot in UEFI (hold volume-up while powering on).
-#   4. Build and write the installer:
+# Installation.  The disk is wiped, so everything below happens once and the
+# only thing typed on the tablet is a Wi-Fi password.
+#
+#   1. In Windows, while it is still there: disable BitLocker, and note the
+#      MAC addresses from `ipconfig /all` (see
+#      nixos/hardware/surface-pro-11/networking.nix).  They are the one thing
+#      that cannot be recovered afterwards.
+#   2. Disable Secure Boot in UEFI (hold volume-up while powering on).
+#   3. Build and write the installer:
 #        just -f nix/nixos/justfile build-iso
 #        sudo dd if=result-armitas-iso/iso/*.iso of=/dev/sdX bs=4M status=progress
-#   5. Boot it.  Putting USB at the top of the boot order is not enough:
-#      hold volume-up and swipe left on the USB entry each time.  At the GRUB
-#      menu press `e` and add the devicetree line, see armitas-installer.nix.
-#   6. Partition, labelling the root filesystem `nixos` and the ESP `BOOT`
-#      (or edit fileSystems below), then:
-#        nixos-install --flake .#armitas
+#   4. Boot it.  Putting USB at the top of the boot order is not enough: hold
+#      volume-up and swipe left on the USB entry each time.  The ISO carries
+#      the devicetree in its boot entry, so there is nothing to type at GRUB.
+#   5. On the tablet, join a network with `nmtui` and read off its address
+#      with `ip -brief addr`.
+#   6. From this workstation, one command does the rest:
+#        just -f nix/nixos/justfile install-armitas <tablet-ip>
+#      It partitions and formats per the disko layout below, copies the
+#      closure built here, installs, and reboots.
 #
 # Subsequent updates:
 #   nixos-rebuild switch --flake .#armitas --target-host root@armitas
@@ -58,6 +62,11 @@
   modules = [
     # ── Surface Pro 11 hardware support ───────────────────────────────
     inputs.self.hardware.surface-pro-11
+
+    # ── Disk layout ───────────────────────────────────────────────────
+    # Also generates fileSystems, so there is nothing to hand-write and
+    # nothing to keep in sync with what was actually formatted.
+    inputs.disko.nixosModules.disko
 
     # ── Home Manager ──────────────────────────────────────────────────
     inputs.home-manager.nixosModules.home-manager
@@ -123,22 +132,43 @@
         ];
       };
 
-      # ── Filesystems ─────────────────────────────────────────────────
-      # Matched by label so a fresh install needs no edit here; switch to
-      # /dev/disk/by-uuid/… from `blkid` if you prefer.  /boot is the ESP,
-      # which on this machine is the one Windows created: mount it, do not
-      # reformat it.
-      fileSystems = {
-        "/" = {
-          device = "/dev/disk/by-label/nixos";
-          fsType = "ext4";
-          options = ["noatime"];
-        };
-
-        "/boot" = {
-          device = "/dev/disk/by-label/BOOT";
-          fsType = "vfat";
-          options = ["fmask=0077" "dmask=0077"];
+      # ── Disk ────────────────────────────────────────────────────────
+      # Whole-disk GPT, no Windows, no encryption.  Encryption is left off
+      # deliberately: the GPU firmware times out a few seconds into boot, so
+      # a passphrase prompt that is not answered promptly lands you on a
+      # black screen.  disko derives fileSystems from this.
+      #
+      # DESTRUCTIVE.  `disko --mode destroy,format,mount` and nixos-anywhere
+      # both wipe /dev/nvme0n1 without asking.
+      disko.devices.disk.main = {
+        device = "/dev/nvme0n1";
+        type = "disk";
+        content = {
+          type = "gpt";
+          partitions = {
+            ESP = {
+              priority = 1;
+              type = "EF00";
+              # Roomy on purpose: systemd-boot copies a kernel and an initrd
+              # per generation to the ESP, and configurationLimit is 10.
+              size = "2G";
+              content = {
+                type = "filesystem";
+                format = "vfat";
+                mountpoint = "/boot";
+                mountOptions = ["umask=0077"];
+              };
+            };
+            root = {
+              size = "100%";
+              content = {
+                type = "filesystem";
+                format = "ext4";
+                mountpoint = "/";
+                mountOptions = ["noatime"];
+              };
+            };
+          };
         };
       };
 

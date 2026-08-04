@@ -40,11 +40,26 @@ flash device: (build-boot device) (build-rootfs device)
     fastboot flash userdata result-{{ device }}-rootfs
     fastboot reboot
 
-# Installer ISO building
+# armitas (Surface Pro 11) installation
 
-# Bootable installer for armitas (Surface Pro 11, aarch64). The build host
-# needs `boot.binfmt.emulatedSystems = ["aarch64-linux"]`; write the result
-# with `dd if=result-armitas-iso/iso/*.iso of=/dev/sdX bs=4M`.
+# Bootable installer for armitas. The build host needs
+# `boot.binfmt.emulatedSystems = ["aarch64-linux"]`; write the result with
+# `dd if=result-armitas-iso/iso/*.iso of=/dev/sdX bs=4M`.
 build-iso:
     cd {{ _flake_dir }} && nix build --print-build-logs -o result-armitas-iso \
       .#nixosConfigurations.armitas-installer.config.system.build.isoImage
+
+# Install armitas onto a Surface Pro 11 already booted into the installer
+# ISO, reachable at `target` (an IP or hostname). Partitions and formats per
+# the disko layout in nixos/config/armitas.nix, builds here rather than on
+# the tablet, and copies the closure over SSH.
+#
+# The kexec phase is skipped explicitly: nixos-anywhere only needs it to get
+# a machine that is not already running the installer into one, and its
+# generic kexec tarball knows nothing about this hardware's devicetree.
+#
+# DESTRUCTIVE: wipes /dev/nvme0n1 on the target without prompting.
+install-armitas target:
+    cd {{ _flake_dir }} && nix run github:nix-community/nixos-anywhere -- \
+      --flake .#armitas --phases disko,install,reboot \
+      --print-build-logs root@{{ target }}

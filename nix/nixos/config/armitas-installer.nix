@@ -9,18 +9,15 @@
 # Build:
 #   just -f nix/nixos/justfile build-iso
 #
-# Booting it needs one manual step.  The Surface Pro 11's UEFI hands Linux
-# no devicetree, and nixpkgs' iso-image.nix cannot emit a GRUB `devicetree`
-# line: the menu entries are generated from a hard-coded template with no
-# hook, and the fix (NixOS/nixpkgs#396334) has been open since 2025-04.  The
-# dtbs are on the ISO, so at the boot menu press `e` and insert this above
-# the `linux` line, keeping the two leading spaces:
+# The Surface Pro 11's UEFI hands Linux no devicetree, and stock nixpkgs
+# cannot put a `devicetree` line in the ISO's GRUB entry, so booting it
+# normally means editing the entry by hand at the menu.  Importing
+# nixosModules.iso-image swaps in a copy of that module carrying
+# NixOS/nixpkgs#396334, which emits the line automatically.  Nothing to type.
 #
-#   devicetree /boot/dtbs/7.1.2/qcom/x1e80100-microsoft-denali-oled.dtb
-#
-# That directory name is the kernel version, so substitute it if nixpkgs has
-# moved on; it is the only entry under /boot/dtbs on the ISO.  Drop this whole
-# dance once #396334 lands.
+# The full dtbs tree is on the media as well.  Nothing needs it to boot, but
+# if this machine ever turns out to be the LCD/X Plus model, its devicetree
+# is one `e` away at the menu: x1p64100-microsoft-denali.dtb.
 #
 # Note: this is built with nixpkgs.lib.nixosSystem rather than handed to
 # flakelight as a { system, modules } attrset, and that is load-bearing.
@@ -53,6 +50,11 @@ inputs.nixpkgs.lib.nixosSystem {
         # against 7.1.
         (modulesPath + "/installer/cd-dvd/installation-cd-minimal-new-kernel-no-zfs.nix")
         inputs.self.hardware.surface-pro-11
+
+        # Replaces nixpkgs' iso-image.nix with a devicetree-capable copy.
+        # Imported after the installer profile above, which pulls in the
+        # stock module that this one disables.
+        inputs.self.nixosModules.iso-image
       ];
 
       # Built outside flakelight's mkNixos, so flakelight's propagationModule
@@ -74,8 +76,9 @@ inputs.nixpkgs.lib.nixosSystem {
       # `nmtui` still works in the installer.
       networking.networkmanager.wifi.backend = "iwd";
 
-      # GRUB cannot load a devicetree from a menu entry, so ship the whole
-      # dtbs tree and let it be selected by hand.  See the header.
+      # The patched module already places the one devicetree the boot entry
+      # names.  This adds the rest of the tree, purely as an escape hatch for
+      # the wrong-model case described in the header.
       isoImage.contents = [
         {
           source = "${config.hardware.deviceTree.kernelPackage}/dtbs";
