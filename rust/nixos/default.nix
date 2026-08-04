@@ -36,4 +36,7 @@
   # Rung 1: a second rust DAEMON (systemd-resolved) under C PID 1.
   checks.rust-rung1-resolved = pkgs:
     import ./rung1-resolved-test.nix {inherit pkgs;};
+  # Rung 1: the network-config rust DAEMON (systemd-networkd) under C PID 1.
+  checks.rust-rung1-networkd = pkgs:
+    import ./rung1-networkd-test.nix {inherit pkgs;};
 }

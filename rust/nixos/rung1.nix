@@ -35,6 +35,8 @@ in {
       lib.mkEnableOption "running the rust systemd-timesyncd daemon under C PID 1 (assumes services.timesyncd.enable)";
     resolved.enable =
       lib.mkEnableOption "running the rust systemd-resolved daemon under C PID 1 (assumes services.resolved.enable)";
+    networkd.enable =
+      lib.mkEnableOption "running the rust systemd-networkd daemon under C PID 1 (assumes networking.useNetworkd)";
   };
 
   config = lib.mkMerge [
@@ -77,6 +79,15 @@ in {
       systemd.services.systemd-resolved.serviceConfig.ExecStart = lib.mkForce [
         ""
         "${rustSystemd}/bin/systemd-resolved"
+      ];
+    })
+    (lib.mkIf cfg.networkd.enable {
+      # Redirect the networkd daemon (Type=notify-reload, network config over
+      # netlink, D-Bus + varlink sockets) to the rust binary. Requires networkd
+      # to be the network backend (networking.useNetworkd).
+      systemd.services.systemd-networkd.serviceConfig.ExecStart = lib.mkForce [
+        ""
+        "${rustSystemd}/bin/systemd-networkd"
       ];
     })
   ];
