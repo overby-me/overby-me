@@ -706,6 +706,10 @@ fn show(
 struct Line {
     y: f64,
     size: f64,
+    /// Where the line's last glyph ended. A line that stops well short of the
+    /// column it is set in ended because the writer meant it to, and the line
+    /// after it starts something new rather than continuing.
+    right: f64,
     /// The joined text, for the heuristics that read it.
     text: String,
     /// The same words, keeping where the colour changed.
@@ -800,9 +804,14 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         return None;
     }
     let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+    let right = runs
+        .iter()
+        .map(|r| r.end_x)
+        .fold(f64::NEG_INFINITY, f64::max);
     Some(Line {
         y: first.y,
         size,
+        right,
         text,
         spans,
     })
@@ -857,11 +866,59 @@ fn body_size(lines: &[Line]) -> f64 {
     sizes[sizes.len() / 2]
 }
 
+/// Whether this line opens a new entry rather than continuing a sentence.
+///
+/// A clock time at the start of a line. Narrow and deliberately so: it exists
+/// because the thing this wiki holds most of is a programme, where every entry
+/// opens with one, and a long entry that happens to fill the column would
+/// otherwise swallow the next. The short-line rule catches the rest; this
+/// catches the case it cannot see, where the previous line legitimately reached
+/// the margin.
+fn starts_new_entry(text: &str) -> bool {
+    let t = text.trim_start();
+    let mut chars = t.chars();
+    let mut digits = 0;
+    for c in chars.by_ref() {
+        match c {
+            '0'..='9' if digits < 2 => digits += 1,
+            ':' | '.' if digits >= 1 => break,
+            _ => return false,
+        }
+    }
+    if digits == 0 {
+        return false;
+    }
+    // Exactly two digits after the separator, then a boundary: 14:30 is a time,
+    // 14.302 is not, and neither is a version number.
+    let rest: Vec<char> = chars.collect();
+    matches!(rest.as_slice(), ['0'..='9', '0'..='9', after, ..] if !after.is_ascii_digit())
+        || matches!(rest.as_slice(), ['0'..='9', '0'..='9'])
+}
+
+/// How far right the text column runs.
+///
+/// Not the maximum, which one stray element pushes past the real margin, but
+/// close to it: the line that reaches furthest among the great majority. A line
+/// ending well short of this stopped on purpose.
+fn column_right(lines: &[Line]) -> f64 {
+    let mut rights: Vec<f64> = lines
+        .iter()
+        .map(|l| l.right)
+        .filter(|r| r.is_finite())
+        .collect();
+    if rights.is_empty() {
+        return f64::INFINITY;
+    }
+    rights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    rights[rights.len() * 9 / 10]
+}
+
 /// A leading bullet or number, and the text after it.
 fn list_marker(text: &str) -> Option<&str> {
     let t = text.trim_start();
     for bullet in [
-        '\u{2022}', '\u{25CF}', '\u{25AA}', '\u{00B7}', '\u{2013}', '\u{2043}', 'o',
+        '\u{2022}', '\u{25CF}', '\u{25AA}', '\u{00B7}', '\u{2013}', '\u{2043}', '\u{2014}', '-',
+        'o',
     ] {
         if let Some(rest) = t.strip_prefix(bullet) {
             // A bare "o" is only a bullet when something follows it as a word.
@@ -879,7 +936,14 @@ fn list_marker(text: &str) -> Option<&str> {
     for (i, c) in chars {
         match c {
             '.' | ')' => {
-                let rest = t[i + c.len_utf8()..].trim_start();
+                let after = &t[i + c.len_utf8()..];
+                // A marker is FOLLOWED BY A SPACE. Without that, a time reads as
+                // one: "11.30: Udvalgscafé" was arriving as a list item saying
+                // "30: Udvalgscafé", which is both wrong and unreadable.
+                if !after.starts_with([' ', '\t']) {
+                    return None;
+                }
+                let rest = after.trim_start();
                 // Guard against a sentence starting with a capital: a marker is
                 // short, and what follows it is not empty.
                 return (i <= 3 && !rest.is_empty()).then_some(rest);
@@ -895,6 +959,7 @@ fn list_marker(text: &str) -> Option<&str> {
 /// relative size, list items on a leading marker.
 fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
     let body = body_size(&lines);
+    let column = column_right(&lines);
     let mut blocks: Vec<Block> = Vec::new();
     let mut para: Vec<Span> = Vec::new();
     let mut para_size = body;
@@ -936,10 +1001,20 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
             None => false,
             Some(p) => {
                 let gap = p.y - line.y;
-                // A new block when the lines are further apart than one line of
-                // this size, when the size changes, or when a list marker starts
-                // a line: Word's paragraph spacing is regular enough for this.
-                gap > p.size * 1.6
+                // A line that stopped well short of the column did not wrap: it
+                // ended. This is what tells an agenda from a paragraph, and the
+                // vertical gap cannot, because both are single-spaced. Without
+                // it every time on a programme ran into the next entry, so a
+                // whole day arrived as one wall of text.
+                //
+                // Two ems of slack, because a wrapped line stops a word short of
+                // the margin rather than exactly on it.
+                let ended_early = p.right.is_finite() && p.right < column - p.size * 2.0;
+                // And the other reasons: spacing, a size change, a list marker,
+                // or the page turning over.
+                ended_early
+                    || starts_new_entry(&line.text)
+                    || gap > p.size * 1.6
                     || (line.size - p.size).abs() > p.size * 0.15
                     || list_marker(&line.text).is_some()
                     // A page break: y jumps back UP the page.
@@ -1148,10 +1223,13 @@ mod tests {
         assert_eq!(list_marker("1."), None);
     }
 
+    /// A line that reached the column's right edge, so it WRAPPED. The
+    /// short-line rule is exercised by `full` below.
     fn line(y: f64, size: f64, text: &str) -> Line {
         Line {
             y,
             size,
+            right: 400.0,
             text: text.into(),
             spans: vec![Span {
                 text: text.into(),
@@ -1333,5 +1411,74 @@ mod tests {
                 color: Some("#ff0000".into())
             }]
         );
+    }
+
+    /// A line that stopped well short of the column ENDED. Without this every
+    /// entry on a programme ran into the next and a whole day arrived as one
+    /// wall of text, which is what the agenda for LM 2026 looked like.
+    #[test]
+    fn a_line_that_stops_short_ends_the_block() {
+        let short = |y: f64, right: f64, text: &str| Line {
+            y,
+            size: 11.0,
+            right,
+            text: text.into(),
+            spans: vec![Span {
+                text: text.into(),
+                color: None,
+            }],
+        };
+        // Column runs to 400. The first line stops at 180, far short of it.
+        let blocks = blocks_from(vec![
+            short(700.0, 180.0, "16:30 Ankomst"),
+            short(686.0, 400.0, "17:50 Åbning af landsmødet"),
+            short(672.0, 398.0, "og en fortsættelse af samme punkt"),
+        ]);
+        assert_eq!(
+            texts(&blocks),
+            vec![
+                "16:30 Ankomst",
+                "17:50 Åbning af landsmødet og en fortsættelse af samme punkt",
+            ],
+            "a short line ends its block; a full-width one wraps into the next"
+        );
+    }
+
+    /// The rule that catches what the short-line one cannot: an entry whose text
+    /// happens to fill the column, followed by the next entry.
+    #[test]
+    fn a_clock_time_opens_a_new_entry() {
+        assert!(starts_new_entry("16:30 Ankomst"));
+        assert!(starts_new_entry("08.00 Morgenmad"));
+        assert!(starts_new_entry(" 9:15 Morgenmad"));
+        // Not a time: a date, a decimal, a version, ordinary prose.
+        assert!(!starts_new_entry("Fredag d. 14. august:"));
+        assert!(!starts_new_entry("14.302 kroner"));
+        assert!(!starts_new_entry("2026 var et år"));
+        assert!(!starts_new_entry("Deltagere: Kristine"));
+        assert!(!starts_new_entry(""));
+    }
+
+    /// Word writes a plain hyphen for its bullets as often as a real one, and
+    /// the agenda's sub-points arrived as paragraphs until this.
+    #[test]
+    fn a_hyphen_is_a_bullet_too() {
+        assert_eq!(
+            list_marker("- Valg af dirigenter"),
+            Some("Valg af dirigenter")
+        );
+        assert_eq!(list_marker("\u{2014} Et punkt"), Some("Et punkt"));
+        // But not a hyphenated word or a minus sign.
+        assert_eq!(list_marker("-5 grader"), None);
+        assert_eq!(list_marker("noget-andet"), None);
+    }
+
+    /// A time is not a numbered list marker, however much "11." looks like one.
+    #[test]
+    fn a_time_is_not_a_list_marker() {
+        assert_eq!(list_marker("11.30: Udvalgscafé"), None);
+        assert_eq!(list_marker("12.20 Valg af revisionsselskab"), None);
+        // The real thing still works.
+        assert_eq!(list_marker("11. Et punkt"), Some("Et punkt"));
     }
 }
