@@ -1639,6 +1639,7 @@ pub fn activate_needed_units_via_job_graph(
     // event); real starts advance the drive through their Notify/ChildExit
     // events. The overall deadline is a boot-wide safety net.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    let mut tick: u32 = 0;
     loop {
         if jobs.lock().unwrap().is_empty() {
             break;
@@ -1646,6 +1647,25 @@ pub fn activate_needed_units_via_job_graph(
         if std::time::Instant::now() > deadline {
             warn!("activate_needed_units_via_job_graph: closure did not drain within 300s");
             break;
+        }
+        tick += 1;
+        // Diagnostic for the intermittent inc-4 boot stall: every ~5s name the
+        // still-pending jobs (unit=state) via kmsg so a stalled boot identifies
+        // the stuck units and whether they are Waiting (a dep never cleared) or
+        // Running (a start never completed).
+        if tick.is_multiple_of(25) {
+            let pending: Vec<String> = {
+                let reg = jobs.lock().unwrap();
+                reg.iter()
+                    .map(|j| format!("{}={:?}", j.unit.name, j.state))
+                    .collect()
+            };
+            crate::entrypoints::kmsg(&format!(
+                "JOB-GRAPH pending after {}s ({}): {:?}",
+                tick / 5,
+                pending.len(),
+                pending
+            ));
         }
         {
             let ri = dispatcher_read(&run_info);
