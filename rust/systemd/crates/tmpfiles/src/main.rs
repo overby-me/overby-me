@@ -55,19 +55,6 @@ const EXIT_FAILURE: u8 = 1;
 /// error, even though it keeps processing the rest.
 const EX_DATAERR: u8 = 65;
 
-/// Absolute path to `setfacl`, baked in from the Nix build (`ACL_SETFACL`).
-///
-/// Formerly the `a`/`A` (POSIX ACL) item types shelled out to `setfacl`; they
-/// now apply ACLs through libacl directly (see [`libacl_apply_acls`]), matching
-/// C and needing no external binary. This constant and its `ACL_SETFACL`
-/// crateOverride are now unused and are removed once the libacl path has been
-/// validated on a real boot.
-#[allow(dead_code)]
-const SETFACL: &str = match option_env!("ACL_SETFACL") {
-    Some(p) => p,
-    None => "setfacl",
-};
-
 // ── libacl FFI (foundation) ─────────────────────────────────────────────────
 //
 // The `a`/`A` item types apply POSIX ACLs. Today they shell out to `setfacl`
@@ -81,89 +68,60 @@ const SETFACL: &str = match option_env!("ACL_SETFACL") {
 // acl_set_file with ACL_TYPE_ACCESS/ACL_TYPE_DEFAULT).
 
 /// Absolute path to libacl, baked from the Nix build (`ACL_LIB`), else the soname.
-#[allow(dead_code)]
 const ACL_LIB_PATH: &str = match option_env!("ACL_LIB") {
     Some(p) => p,
     None => "libacl.so.1",
 };
 
 /// `acl_type_t` values from `<sys/acl.h>`.
-#[allow(dead_code)]
 const ACL_TYPE_ACCESS: libc::c_uint = 0x8000;
-#[allow(dead_code)]
 const ACL_TYPE_DEFAULT: libc::c_uint = 0x4000;
 
 /// `acl_tag_t` values from `<sys/acl.h>` (the type is `int`).
-#[allow(dead_code)]
 const ACL_USER_OBJ: libc::c_int = 0x01;
-#[allow(dead_code)]
 const ACL_USER: libc::c_int = 0x02;
-#[allow(dead_code)]
 const ACL_GROUP_OBJ: libc::c_int = 0x04;
-#[allow(dead_code)]
 const ACL_GROUP: libc::c_int = 0x08;
-#[allow(dead_code)]
 const ACL_MASK: libc::c_int = 0x10;
-#[allow(dead_code)]
 const ACL_OTHER: libc::c_int = 0x20;
 /// `acl_get_entry` iteration selectors.
-#[allow(dead_code)]
 const ACL_FIRST_ENTRY: libc::c_int = 0;
-#[allow(dead_code)]
 const ACL_NEXT_ENTRY: libc::c_int = 1;
 /// `acl_perm_t` bit for the execute permission (`<sys/acl.h>`).
-#[allow(dead_code)]
 const ACL_EXECUTE: libc::c_uint = 0x01;
 
 /// `acl_t` and `acl_entry_t` are opaque handles.
-#[allow(dead_code)]
 type AclT = *mut libc::c_void;
-#[allow(dead_code)]
 type AclEntryT = *mut libc::c_void;
-#[allow(dead_code)]
 type AclFromTextFn = unsafe extern "C" fn(*const libc::c_char) -> AclT;
-#[allow(dead_code)]
 type AclSetFileFn = unsafe extern "C" fn(*const libc::c_char, libc::c_uint, AclT) -> libc::c_int;
-#[allow(dead_code)]
 type AclFreeFn = unsafe extern "C" fn(*mut libc::c_void) -> libc::c_int;
 // Entry-walk and mask/base machinery for the faithful path_set_acl port.
-#[allow(dead_code)]
 type AclGetEntryFn = unsafe extern "C" fn(AclT, libc::c_int, *mut AclEntryT) -> libc::c_int;
-#[allow(dead_code)]
 type AclGetTagTypeFn = unsafe extern "C" fn(AclEntryT, *mut libc::c_int) -> libc::c_int;
-#[allow(dead_code)]
 type AclCreateEntryFn = unsafe extern "C" fn(*mut AclT, *mut AclEntryT) -> libc::c_int;
-#[allow(dead_code)]
 type AclCopyEntryFn = unsafe extern "C" fn(AclEntryT, AclEntryT) -> libc::c_int;
-#[allow(dead_code)]
 type AclFromModeFn = unsafe extern "C" fn(libc::mode_t) -> AclT;
-#[allow(dead_code)]
 type AclCalcMaskFn = unsafe extern "C" fn(*mut AclT) -> libc::c_int;
 // Conditional-execute (`X`) machinery: read the existing ACL and inspect/clear
 // the execute permission bit. `acl_permset_t` is an opaque handle.
-#[allow(dead_code)]
 type AclPermsetT = *mut libc::c_void;
-#[allow(dead_code)]
 type AclInitFn = unsafe extern "C" fn(libc::c_int) -> AclT;
-#[allow(dead_code)]
 type AclGetFileFn = unsafe extern "C" fn(*const libc::c_char, libc::c_uint) -> AclT;
-#[allow(dead_code)]
 type AclGetPermsetFn = unsafe extern "C" fn(AclEntryT, *mut AclPermsetT) -> libc::c_int;
-#[allow(dead_code)]
 type AclGetPermFn = unsafe extern "C" fn(AclPermsetT, libc::c_uint) -> libc::c_int;
-#[allow(dead_code)]
 type AclDeletePermFn = unsafe extern "C" fn(AclPermsetT, libc::c_uint) -> libc::c_int;
 // Merge machinery for the `a+` (modify) path: match entries by tag + qualifier.
 // `acl_get_qualifier` returns a heap `uid_t`/`gid_t` that must be `acl_free`d.
-#[allow(dead_code)]
 type AclGetQualifierFn = unsafe extern "C" fn(AclEntryT) -> *mut libc::c_void;
 
 /// Apply a complete POSIX ACL (setfacl text form) to `path` via libacl, with no
 /// external binary. `acl_type` is [`ACL_TYPE_ACCESS`] or [`ACL_TYPE_DEFAULT`].
 ///
 /// The text must be a full, valid ACL for the type (base user/group/other
-/// entries plus a mask when there are named entries); splitting a tmpfiles ACL
-/// argument into access/default parts and computing the mask is a later step.
+/// entries plus a mask when there are named entries). The tmpfiles arm uses the
+/// richer [`libacl_apply_acls`] instead; this thin primitive is retained only
+/// to exercise the FFI directly in unit tests.
 #[allow(dead_code)]
 fn acl_set_file_from_text(path: &Path, acl_type: libc::c_uint, text: &str) -> Result<(), String> {
     use std::os::unix::ffi::OsStrExt;
@@ -230,7 +188,6 @@ fn acl_set_file_from_text(path: &Path, acl_type: libc::c_uint, text: &str) -> Re
 /// and is resolved per inode, so such access entries are kept apart from the
 /// rest and their mask is computed only after that decision.
 #[derive(Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 struct ParsedAcl {
     /// Plain access entries: `acl_from_text` then [`ACL_TYPE_ACCESS`].
     access: Option<String>,
@@ -261,7 +218,6 @@ struct ParsedAcl {
 /// user and group names cannot contain `:` or `\`, and `acl_from_text` rejects
 /// such text regardless, so this port splits on the raw `:`; the only
 /// observable difference is which layer reports the error, and both reject.
-#[allow(dead_code)]
 fn parse_acl_text(text: &str) -> Result<ParsedAcl, String> {
     let mut access: Vec<String> = Vec::new();
     let mut access_exec: Vec<String> = Vec::new();
@@ -308,7 +264,6 @@ fn parse_acl_text(text: &str) -> Result<ParsedAcl, String> {
 
 /// libacl entry points bound once via `dlsym`, for the faithful path_set_acl
 /// port (mirrors C's `dlopen_libacl` + `sym_*` indirection).
-#[allow(dead_code)]
 struct AclFns {
     from_text: AclFromTextFn,
     set_file: AclSetFileFn,
@@ -329,7 +284,6 @@ struct AclFns {
 
 /// Bind every libacl symbol the port needs from an open `dlopen` handle. Errors
 /// on a missing symbol; the caller owns the handle and closes it.
-#[allow(dead_code)]
 fn load_acl_fns(handle: *mut libc::c_void) -> Result<AclFns, String> {
     macro_rules! sym {
         ($name:literal, $ty:ty) => {{
@@ -364,7 +318,6 @@ fn load_acl_fns(handle: *mut libc::c_void) -> Result<AclFns, String> {
 /// Port of C's `calc_acl_mask_if_needed`: compute a mask entry (via
 /// `acl_calc_mask`) when the ACL has named user/group entries but no explicit
 /// mask. A pre-existing mask is left untouched.
-#[allow(dead_code)]
 fn calc_mask_if_needed(f: &AclFns, acl: &mut AclT) -> Result<(), String> {
     let mut entry: AclEntryT = std::ptr::null_mut();
     let mut need = false;
@@ -405,7 +358,6 @@ fn calc_mask_if_needed(f: &AclFns, acl: &mut AclT) -> Result<(), String> {
 /// built from the inode's mode, which is stat'd live -- so applying the access
 /// ACL first (which rewrites the group-class bits to the mask) is reflected in
 /// a default ACL applied afterwards, exactly as C does.
-#[allow(dead_code)]
 fn add_base_if_needed(f: &AclFns, acl: &mut AclT, path: &Path) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
 
@@ -497,7 +449,6 @@ fn add_base_if_needed(f: &AclFns, acl: &mut AclT, path: &Path) -> Result<(), Str
 /// Port of C's `acl_entry_equal`: two entries are equal when they share a tag,
 /// and (for named user/group entries) the same numeric qualifier. The
 /// single-instance tags (owner, owning group, mask, other) match on tag alone.
-#[allow(dead_code)]
 fn acl_entry_equal(f: &AclFns, a: AclEntryT, b: AclEntryT) -> Result<bool, String> {
     let mut tag_a: libc::c_int = 0;
     let mut tag_b: libc::c_int = 0;
@@ -549,7 +500,6 @@ fn acl_entry_equal(f: &AclFns, a: AclEntryT, b: AclEntryT) -> Result<bool, Strin
 
 /// Port of C's `find_acl_entry`: return the entry of `acl` equal to `entry`
 /// (by [`acl_entry_equal`]), or `None` when there is none.
-#[allow(dead_code)]
 fn find_acl_entry(f: &AclFns, acl: AclT, entry: AclEntryT) -> Result<Option<AclEntryT>, String> {
     let mut i: AclEntryT = std::ptr::null_mut();
     let mut r = unsafe { (f.get_entry)(acl, ACL_FIRST_ENTRY, &mut i) };
@@ -572,7 +522,6 @@ fn find_acl_entry(f: &AclFns, acl: AclT, entry: AclEntryT) -> Result<Option<AclE
 /// and overlay every entry of `new_acl` onto it -- overwriting a matching entry
 /// or appending a new one. Returns the merged ACL, which the caller frees. This
 /// is the `a+` (modify) merge: existing entries not named in `new_acl` survive.
-#[allow(dead_code)]
 fn acls_for_file(
     f: &AclFns,
     c_path: &std::ffi::CStr,
@@ -638,7 +587,6 @@ fn acls_for_file(
 /// case -- the inverse of `want_mask` -- the entries are merged onto the ACL
 /// already on the inode and the mask is recomputed. Base entries are then
 /// filled. Split out so the caller frees `acl` on every path.
-#[allow(dead_code)]
 fn build_and_set_acl(
     f: &AclFns,
     acl: &mut AclT,
@@ -672,7 +620,6 @@ fn build_and_set_acl(
 
 /// Apply one parsed ACL type to `path` (C's path_set_acl): `acl_from_text`,
 /// then build-and-set, freeing the ACL on every exit.
-#[allow(dead_code)]
 fn apply_one_acl(
     f: &AclFns,
     path: &Path,
@@ -701,7 +648,6 @@ fn apply_one_acl(
 
 /// Whether any entry of `acl` grants execute, ignoring entries for which
 /// `skip(tag)` is true. The mask is inspected via `acl_get_perm`, matching C.
-#[allow(dead_code)]
 fn entry_has_exec(
     f: &AclFns,
     acl: AclT,
@@ -752,7 +698,6 @@ fn entry_has_exec(
 /// if the inode's existing access ACL already grants execute (skipping the mask
 /// always, and named entries in replace mode since they are about to be
 /// dropped), or if the new access entries (`parsed_access`) grant execute.
-#[allow(dead_code)]
 fn compute_has_exec(
     f: &AclFns,
     path: &Path,
@@ -789,7 +734,6 @@ fn compute_has_exec(
 
 /// Copy each entry of `src` into `dst`, dropping the execute bit when
 /// `!has_exec` -- the conditional-`X` resolution from `parse_acl_cond_exec`.
-#[allow(dead_code)]
 fn copy_exec_entries(f: &AclFns, dst: &mut AclT, src: AclT, has_exec: bool) -> Result<(), String> {
     let mut entry: AclEntryT = std::ptr::null_mut();
     let mut r = unsafe { (f.get_entry)(src, ACL_FIRST_ENTRY, &mut entry) };
@@ -837,7 +781,6 @@ fn copy_exec_entries(f: &AclFns, dst: &mut AclT, src: AclT, has_exec: bool) -> R
 /// conditional-execute entries, recompute the mask (a no-op when one already
 /// exists), fill base entries, and set the access ACL. Split from
 /// [`apply_access_acl`] so the caller frees `parsed` on every path.
-#[allow(dead_code)]
 fn build_access_and_set(
     f: &AclFns,
     parsed: &mut AclT,
@@ -900,7 +843,6 @@ fn build_access_and_set(
 /// for the non-modify (`a`) case: build the plain access entries (an empty ACL
 /// when there are none, e.g. an `X`-only argument), then hand off to
 /// [`build_access_and_set`], freeing `parsed` on every exit.
-#[allow(dead_code)]
 fn apply_access_acl(
     f: &AclFns,
     path: &Path,
@@ -951,7 +893,6 @@ fn apply_access_acl(
 /// `want_mask` selects the mode: `true` is the replace (`a`) case (build the
 /// ACL from the given entries), `false` is the modify (`a+`) case (merge the
 /// entries onto the ACL already on the inode, preserving its other entries).
-#[allow(dead_code)]
 fn libacl_apply_acls(
     path: &Path,
     access: Option<&str>,
@@ -972,7 +913,6 @@ fn libacl_apply_acls(
 
 /// The work of [`libacl_apply_acls`] against an already-open handle, split out
 /// so the single `dlclose` covers every exit.
-#[allow(dead_code)]
 fn libacl_apply_all(
     handle: *mut libc::c_void,
     path: &Path,

@@ -57,7 +57,6 @@ in {
           # absolute path (ACL_SETFACL) so it resolves from the boot-time
           # systemd-tmpfiles-setup service's minimal $PATH.
           systemd-tmpfiles = {
-            ACL_SETFACL = "${acl}/bin/setfacl";
             ACL_LIB = "${acl.out}/lib/libacl.so.1";
           };
           # systemd-sysusers shells out to useradd/groupadd/chage; bake shadow's
@@ -113,7 +112,6 @@ in {
           # absolute path (ACL_SETFACL) so it resolves from the boot-time
           # systemd-tmpfiles-setup service's minimal $PATH.
           systemd-tmpfiles = {
-            ACL_SETFACL = "${acl}/bin/setfacl";
             ACL_LIB = "${acl.out}/lib/libacl.so.1";
           };
           # systemd-sysusers shells out to useradd/groupadd/chage; bake shadow's
