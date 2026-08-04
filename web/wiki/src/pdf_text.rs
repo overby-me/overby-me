@@ -655,8 +655,117 @@ fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Option<String> {
         }
         _ => return None,
     };
-    let samples = stream.decompressed_content().ok()?;
-    bmp_data_url(width, height, comps, &samples)
+    // A stream declares its own size, and believing that is how a decompression
+    // bomb gets in: a few kilobytes that expand to gigabytes. The declared
+    // dimensions say exactly how many bytes this can legitimately be, so ask for
+    // that many and no more, with a little slack for a producer that padded.
+    let need = width.checked_mul(height)?.checked_mul(comps)?;
+    if need == 0 || need > RAW_SAMPLE_LIMIT {
+        return None;
+    }
+    let samples = stream
+        .decompressed_content_with_limit(need.saturating_add(1 << 12))
+        .ok()?;
+    match shrink_to_fit(width, height, comps, &samples) {
+        Some((width, height, samples)) => bmp_data_url(width, height, comps, &samples),
+        None => bmp_data_url(width, height, comps, &samples),
+    }
+}
+
+/// How many bytes of picture one document is worth carrying.
+///
+/// Every picture is a data URL sitting in the page's own markup, so a file made
+/// of full-page images would otherwise hand a phone hundreds of megabytes of
+/// base64 to hold at once. Past this the pictures stop and the text carries on;
+/// someone who wants the pages as pages has the browser's viewer one tap away.
+const PICTURE_BUDGET: usize = 24 << 20;
+
+/// The most raw samples worth decompressing for one picture: more than a
+/// 300-dpi A4 page in full colour, and well under what would hurt.
+const RAW_SAMPLE_LIMIT: usize = 64 << 20;
+
+/// The longest side a raw picture is scaled down to fit.
+///
+/// A JPEG arrives compressed and passes through untouched, but raw samples
+/// become a BMP, which spends a byte per component and compresses nothing, and
+/// then base64, which adds a third again. A 300-dpi A4 cover is 2481 by 3509:
+/// 26 MB of samples, 35 MB of data URL, for something a phone shows four
+/// hundred points wide. At this size it is 2.8 MB and looks the same.
+const RAW_MAX_SIDE: usize = 1000;
+
+/// Scale raw samples down to fit [`RAW_MAX_SIDE`], or `None` if they already do.
+///
+/// Each output pixel is the average of the source box it covers rather than one
+/// pixel picked out of it. Picking aliases, and what these documents put on a
+/// full page is a photograph or a scan, where that shows as speckle.
+fn shrink_to_fit(
+    width: usize,
+    height: usize,
+    comps: usize,
+    samples: &[u8],
+) -> Option<(usize, usize, Vec<u8>)> {
+    let longest = width.max(height);
+    if longest <= RAW_MAX_SIDE || samples.len() < width * height * comps {
+        return None;
+    }
+    let scale = RAW_MAX_SIDE as f64 / longest as f64;
+    let to_w = ((width as f64 * scale).round() as usize).clamp(1, width);
+    let to_h = ((height as f64 * scale).round() as usize).clamp(1, height);
+    let mut out = vec![0u8; to_w * to_h * comps];
+    for ty in 0..to_h {
+        let y0 = ty * height / to_h;
+        let y1 = ((ty + 1) * height / to_h).clamp(y0 + 1, height);
+        for tx in 0..to_w {
+            let x0 = tx * width / to_w;
+            let x1 = ((tx + 1) * width / to_w).clamp(x0 + 1, width);
+            let count = ((y1 - y0) * (x1 - x0)) as u32;
+            for c in 0..comps {
+                let mut sum = 0u32;
+                for sy in y0..y1 {
+                    let row = sy * width;
+                    for sx in x0..x1 {
+                        sum += u32::from(samples[(row + sx) * comps + c]);
+                    }
+                }
+                out[(ty * to_w + tx) * comps + c] = (sum / count) as u8;
+            }
+        }
+    }
+    Some((to_w, to_h, out))
+}
+
+/// The page's image XObjects, by the name its content stream calls them.
+///
+/// `lopdf` has `get_page_fonts` for exactly this job one resource key over, but
+/// nothing for XObjects, and reaching for `get_page_resources` alone is a trap.
+/// It hands back the `/Resources` dictionary itself only when the page wrote it
+/// inline; a page that points at a shared one, or inherits it from the page
+/// tree, gets back object ids to resolve instead, and a caller reading only the
+/// first of those two finds no pictures at all. Books built from one resource
+/// dictionary take that second path, which is how a songbook lost its cover.
+fn page_xobjects(doc: &Document, page_id: lopdf::ObjectId) -> HashMap<Vec<u8>, lopdf::ObjectId> {
+    let Ok((inline, inherited)) = doc.get_page_resources(page_id) else {
+        return HashMap::new();
+    };
+    let inherited = inherited
+        .into_iter()
+        .filter_map(|id| doc.get_dictionary(id).ok());
+    let mut named = HashMap::new();
+    // Nearest first, and first name wins: what the page itself says beats what
+    // it inherited, which is the order the page tree gives them in.
+    for resources in inline.into_iter().chain(inherited) {
+        let listed = match resources.get(b"XObject") {
+            Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).ok(),
+            Ok(Object::Dictionary(dict)) => Some(dict),
+            _ => None,
+        };
+        for (name, value) in listed.into_iter().flat_map(Dictionary::iter) {
+            if let Object::Reference(id) = value {
+                named.entry(name.to_vec()).or_insert(*id);
+            }
+        }
+    }
+    named
 }
 
 // --- Walking the page ------------------------------------------------------
@@ -748,7 +857,7 @@ struct Drawn {
     pictures: Vec<(f64, Picture)>,
 }
 
-fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Drawn {
+fn page_runs(doc: &Document, page_id: lopdf::ObjectId, budget: &mut usize) -> Drawn {
     let fonts: HashMap<Vec<u8>, Font> = match doc.get_page_fonts(page_id) {
         Ok(map) => map
             .into_iter()
@@ -762,29 +871,7 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Drawn {
             pictures: Vec::new(),
         };
     };
-    // The page's image XObjects, by the name the content stream calls them.
-    let xobjects: HashMap<Vec<u8>, lopdf::ObjectId> = doc
-        .get_page_resources(page_id)
-        .ok()
-        .and_then(|(dict, _)| dict.and_then(|d| d.get(b"XObject").ok()).cloned())
-        .and_then(|o| match o {
-            Object::Reference(id) => doc
-                .get_object(id)
-                .ok()
-                .and_then(|o| o.as_dict().ok())
-                .cloned(),
-            Object::Dictionary(d) => Some(d),
-            _ => None,
-        })
-        .map(|d| {
-            d.iter()
-                .filter_map(|(k, v)| match v {
-                    Object::Reference(id) => Some((k.to_vec(), *id)),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let xobjects = page_xobjects(doc, page_id);
 
     let mut runs = Vec::new();
     let mut pictures: Vec<(f64, Picture)> = Vec::new();
@@ -927,6 +1014,9 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Drawn {
                 {
                     continue;
                 }
+                if *budget == 0 {
+                    continue;
+                }
                 let Some(src) = decode_image(doc, stream) else {
                     continue;
                 };
@@ -942,6 +1032,15 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Drawn {
                 if width < 24.0 && height < 24.0 {
                     continue;
                 }
+                // Past the budget the pictures stop, and stay stopped: a
+                // document that hands over one whole page of raw samples has
+                // more of them coming, and decoding each one to refuse it is
+                // work nobody sees.
+                if src.len() > *budget {
+                    *budget = 0;
+                    continue;
+                }
+                *budget -= src.len();
                 pictures.push((
                     // The matrix places the image's BOTTOM edge; the top is what
                     // orders it against the lines around it.
@@ -1521,8 +1620,9 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let total = pages.len();
     let mut all_lines = Vec::new();
     let mut empty = 0usize;
+    let mut budget = PICTURE_BUDGET;
     for (page_no, (_, page_id)) in pages.into_iter().enumerate() {
-        let drawn = page_runs(&doc, page_id);
+        let drawn = page_runs(&doc, page_id, &mut budget);
         let mut lines = lines_from(drawn.runs);
         for line in &mut lines {
             line.page = page_no + 1;
@@ -2189,5 +2289,91 @@ mod tests {
             texts(&blocks),
             vec!["Sidste linje på side et", "", "Første linje på side to"]
         );
+    }
+
+    /// A page may write its resources out or point at them, and a book made of
+    /// one shared dictionary takes the second road. Reading only the first lost
+    /// every picture in such a file, which is how a songbook lost its cover.
+    #[test]
+    fn a_picture_survives_a_shared_resource_dictionary() {
+        use lopdf::{Stream, dictionary};
+
+        let mut doc = Document::with_version("1.5");
+        let image = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Image",
+                "Width" => 40,
+                "Height" => 40,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceGray",
+            },
+            vec![128u8; 40 * 40],
+        ));
+        let listed = doc.add_object(dictionary! { "Im1" => image });
+        // The whole point: a reference where a dictionary would also be legal.
+        let resources = doc.add_object(dictionary! { "XObject" => listed });
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"q 40 0 0 40 10 700 cm /Im1 Do Q".to_vec(),
+        ));
+        let pages_id = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => resources,
+            "Contents" => content,
+            "MediaBox" => vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(595),
+                Object::Integer(842),
+            ],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page)],
+                "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("writes back out");
+
+        let out = extract(&bytes).expect("reads back in");
+        let Some(Block::Image(picture)) = out.blocks.first() else {
+            panic!("expected the picture, got {:?}", out.blocks);
+        };
+        assert_eq!((picture.width, picture.height), (40.0, 40.0));
+        assert!(picture.src.starts_with("data:image/bmp;base64,"));
+    }
+
+    /// A cover scanned at 300 dpi is 26 MB of samples and 35 MB of data URL, for
+    /// something a phone shows four hundred points wide.
+    #[test]
+    fn a_full_page_picture_is_scaled_to_something_a_phone_can_hold() {
+        let (w, h) = (2481usize, 3509usize);
+        let (to_w, to_h, small) =
+            shrink_to_fit(w, h, 1, &vec![200u8; w * h]).expect("far too big to keep");
+        assert_eq!((to_w, to_h), (707, RAW_MAX_SIDE), "the aspect is kept");
+        assert_eq!(small.len(), to_w * to_h);
+        assert!(small.iter().all(|&v| v == 200), "an even field is even");
+        assert!(
+            shrink_to_fit(80, 60, 1, &vec![0u8; 80 * 60]).is_none(),
+            "what already fits is left alone"
+        );
+    }
+
+    /// Averaged, not sampled: picking one pixel per box turns the halftone in a
+    /// scan into speckle.
+    #[test]
+    fn shrinking_averages_what_it_covers() {
+        let stripes: Vec<u8> = (0..2000).map(|i| if i % 2 == 0 { 0 } else { 255 }).collect();
+        let (to_w, to_h, small) = shrink_to_fit(2000, 1, 1, &stripes).expect("too wide to keep");
+        assert_eq!((to_w, to_h), (1000, 1));
+        assert!(small.iter().all(|&v| v == 127), "black and white pair off");
     }
 }
