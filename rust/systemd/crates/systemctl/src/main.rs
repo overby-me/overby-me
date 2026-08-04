@@ -296,22 +296,28 @@ fn print_signal_help() {
 
 fn print_type_help() {
     println!("Available unit types:");
-    for t in [
-        "service",
-        "socket",
-        "target",
-        "device",
-        "mount",
-        "automount",
-        "swap",
-        "timer",
-        "path",
-        "slice",
-        "scope",
-    ] {
+    // C `systemctl --type=help` dumps the unit-type string table in UnitType
+    // enum order (unit-def.h): service, mount, swap, socket, target, device,
+    // automount, timer, path, slice, scope. Match it exactly.
+    for t in UNIT_TYPES_IN_ENUM_ORDER {
         println!("{t}");
     }
 }
+
+/// Unit type names in C's `UnitType` enum order, as printed by `--type=help`.
+const UNIT_TYPES_IN_ENUM_ORDER: [&str; 11] = [
+    "service",
+    "mount",
+    "swap",
+    "socket",
+    "target",
+    "device",
+    "automount",
+    "timer",
+    "path",
+    "slice",
+    "scope",
+];
 
 fn main() {
     // Ignore SIGPIPE so piping systemctl output to grep/head/etc. doesn't
@@ -2720,4 +2726,32 @@ fn send_tcp(addr: &str, payload: &str) -> Result<Value, Box<dyn std::error::Erro
     stream.shutdown(std::net::Shutdown::Write)?;
     let resp: Value = serde_json::from_reader(&mut stream)?;
     Ok(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unit_types_help_matches_c_enum_order() {
+        // C `systemctl --type=help` dumps the unit-type string table in UnitType
+        // enum order (unit-def.h). Pin that exact order so it cannot drift back
+        // to an arbitrary sequence.
+        assert_eq!(
+            UNIT_TYPES_IN_ENUM_ORDER,
+            [
+                "service",
+                "mount",
+                "swap",
+                "socket",
+                "target",
+                "device",
+                "automount",
+                "timer",
+                "path",
+                "slice",
+                "scope",
+            ]
+        );
+    }
 }
