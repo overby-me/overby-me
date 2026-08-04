@@ -76,8 +76,29 @@ in {
         "hid-microsoft"
       ];
 
-      # For LVM.
-      initrd.kernelModules = ["dm_mod"];
+      initrd.kernelModules = [
+        # For LVM.
+        "dm_mod"
+
+        # Load the GPU and display clock controllers before stage 2, or there
+        # is no display at all.
+        #
+        # arm-smmu is built into the kernel and probes during init.  The GPU's
+        # own SMMU at 3da0000 takes its clocks and CX power domain from gpucc,
+        # which nixpkgs builds as a module (CLK_X1E80100_GPUCC=m), so udev
+        # only loads it in stage 2.  By then the deferred-probe window has
+        # closed and the SMMU has given up:
+        #
+        #   arm-smmu 3da0000.iommu: deferred probe timeout, ignoring dependency
+        #   arm-smmu 3da0000.iommu: probe with driver arm-smmu failed with error -110
+        #
+        # The GPU then never gets an IOMMU, msm_dpu never binds, simpledrm
+        # keeps /dev/dri/card0 with no render node, and the first compositor
+        # to start spins on it at 100%+ CPU behind a black screen.  The
+        # give-away is gpucc_x1e80100 sitting in lsmod with a refcount of 0.
+        "gpucc-x1e80100"
+        "dispcc-x1e80100"
+      ];
 
       kernelParams = [
         # Carried over from upstream: ask for the deep sleep state where the
@@ -88,6 +109,19 @@ in {
         # the kernel must not gate anything it cannot account for.
         "clk_ignore_unused"
         "pd_ignore_unused"
+
+        # Do NOT add iommu.passthrough=1 here.  It was tried against USB
+        # squashfs corruption on the installer and boots to a black screen a
+        # few seconds in: the display pipeline scans out through the SMMU, so
+        # forcing every device onto an identity domain takes the panel with
+        # it.  Removing it again fixed the display.
+        #
+        # If DMA corruption does come back, the knob to reach for instead is
+        # arm-smmu.disable_bypass=0, which permits bypass only for stream IDs
+        # that never got attached to a context, rather than turning
+        # translation off machine-wide.  One SMMU instance does fail to probe
+        # here (arm-smmu 3da0000.iommu, error -110), so something is genuinely
+        # unattached.
       ];
     };
 
