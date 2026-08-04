@@ -99,6 +99,19 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     Some(Block::Paragraph(spans)) => rsx! {
                         p { key: "{i}", class: "docx-p", Spans { spans: spans.clone() } }
                     },
+                    Some(Block::Image(picture)) => rsx! {
+                        // Drawn at the size the page drew it, but never wider
+                        // than the column: this reflows, and a banner laid out
+                        // for A4 would otherwise push the text sideways.
+                        img {
+                            key: "{i}",
+                            class: "docx-img",
+                            src: "{picture.src}",
+                            style: "width:{picture.width}px;max-width:100%;height:auto;",
+                            alt: "",
+                            loading: "lazy",
+                        }
+                    },
                     None => rsx! {},
                 }
             }

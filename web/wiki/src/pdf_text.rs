@@ -35,6 +35,8 @@ pub enum Block {
     Paragraph(Vec<Span>),
     /// A line that began with a bullet or a number, with that marker stripped.
     ListItem(Vec<Span>),
+    /// A picture the page drew, where it drew it.
+    Image(Picture),
 }
 
 impl Block {
@@ -43,6 +45,7 @@ impl Block {
             Block::Heading { spans, .. } | Block::Paragraph(spans) | Block::ListItem(spans) => {
                 spans
             }
+            Block::Image(_) => &[],
         }
     }
 
@@ -50,6 +53,18 @@ impl Block {
     pub fn text(&self) -> String {
         self.spans().iter().map(|s| s.text.as_str()).collect()
     }
+}
+
+/// A picture the page drew, ready for an `<img>`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Picture {
+    /// A `data:` URL. The bytes are already in hand, and a second round trip to
+    /// fetch what we just parsed would be one more thing to go wrong.
+    pub src: String,
+    /// The size it was DRAWN at, in points, which is not the size it was stored
+    /// at: a 27-pixel logo placed across half a page is still half a page.
+    pub width: f64,
+    pub height: f64,
 }
 
 /// A stretch of one colour within a block.
@@ -492,6 +507,131 @@ fn number(obj: &Object) -> Result<f64, lopdf::Error> {
     }
 }
 
+/// Wrap raw 8-bit samples as a BMP, which every browser reads.
+///
+/// BMP rather than PNG because PNG's pixel data is zlib-wrapped and would want a
+/// deflate implementation for something the browser is about to undo anyway.
+/// A BMP is a header and the rows, bottom-up, in BGR, padded to four bytes.
+fn bmp_data_url(width: usize, height: usize, comps: usize, samples: &[u8]) -> Option<String> {
+    if width == 0 || height == 0 || !(comps == 1 || comps == 3) {
+        return None;
+    }
+    if samples.len() < width * height * comps {
+        return None;
+    }
+    let row_bytes = width * 3;
+    let padding = (4 - row_bytes % 4) % 4;
+    let pixels = (row_bytes + padding) * height;
+    let mut out = Vec::with_capacity(54 + pixels);
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&((54 + pixels) as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&54u32.to_le_bytes());
+    out.extend_from_slice(&40u32.to_le_bytes());
+    out.extend_from_slice(&(width as i32).to_le_bytes());
+    out.extend_from_slice(&(height as i32).to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&24u16.to_le_bytes());
+    for _ in 0..6 {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
+    // Bottom-up, and BGR rather than RGB: both are BMP's idea, not ours.
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let i = (y * width + x) * comps;
+            let (r, g, b) = match comps {
+                1 => (samples[i], samples[i], samples[i]),
+                _ => (samples[i], samples[i + 1], samples[i + 2]),
+            };
+            out.extend_from_slice(&[b, g, r]);
+        }
+        out.extend(std::iter::repeat_n(0u8, padding));
+    }
+    Some(format!("data:image/bmp;base64,{}", base64_encode(&out)))
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// The filters a stream declares, innermost first.
+fn filters_of(dict: &Dictionary) -> Vec<String> {
+    let Ok(obj) = dict.get(b"Filter") else {
+        return Vec::new();
+    };
+    match obj {
+        Object::Name(n) => vec![String::from_utf8_lossy(n).to_string()],
+        Object::Array(items) => items
+            .iter()
+            .filter_map(|o| o.as_name().ok())
+            .map(|n| String::from_utf8_lossy(n).to_string())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Turn an image XObject into something an `<img>` can show, or `None` for the
+/// encodings this does not read.
+///
+/// JPEG needs no work at all: the stream IS a JPEG, so it goes straight into a
+/// data URL. Anything Flate-compressed is raw samples, which become a BMP.
+/// JPEG 2000, CCITT fax and JBIG2 are declined rather than guessed at: they are
+/// scanner formats, and a scan has no text for this renderer to sit beside
+/// anyway.
+fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Option<String> {
+    let dict = &stream.dict;
+    let filters = filters_of(dict);
+    if filters.iter().any(|f| f == "DCTDecode") {
+        return Some(format!(
+            "data:image/jpeg;base64,{}",
+            base64_encode(&stream.content)
+        ));
+    }
+    if filters
+        .iter()
+        .any(|f| matches!(f.as_str(), "JPXDecode" | "CCITTFaxDecode" | "JBIG2Decode"))
+    {
+        return None;
+    }
+    let width = dict.get(b"Width").ok().and_then(|o| number(o).ok())? as usize;
+    let height = dict.get(b"Height").ok().and_then(|o| number(o).ok())? as usize;
+    let bpc = dict
+        .get(b"BitsPerComponent")
+        .ok()
+        .and_then(|o| number(o).ok())
+        .unwrap_or(8.0);
+    if bpc != 8.0 {
+        return None;
+    }
+    let comps = match dict
+        .get(b"ColorSpace")
+        .ok()
+        .and_then(|o| resolve(doc, o).ok())
+    {
+        Some(Object::Name(n)) => match n.as_slice() {
+            b"DeviceGray" | b"CalGray" | b"G" => 1,
+            b"DeviceRGB" | b"CalRGB" | b"RGB" => 3,
+            _ => return None,
+        },
+        // ICCBased carries its component count on the stream it points at.
+        Some(Object::Array(items)) => {
+            let icc = items.get(1).and_then(|o| resolve(doc, o).ok())?;
+            let n = icc
+                .as_stream()
+                .ok()?
+                .dict
+                .get(b"N")
+                .ok()
+                .and_then(|o| number(o).ok())?;
+            n as usize
+        }
+        _ => return None,
+    };
+    let samples = stream.decompressed_content().ok()?;
+    bmp_data_url(width, height, comps, &samples)
+}
+
 // --- Walking the page ------------------------------------------------------
 
 /// One run of text, where it landed and how big it was.
@@ -574,7 +714,14 @@ fn mul(m: [f64; 6], n: [f64; 6]) -> [f64; 6] {
 const IDENTITY: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
 /// Pull the positioned runs off one page.
-fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
+/// What one page drew: its text, and its pictures with where they landed.
+struct Drawn {
+    runs: Vec<Run>,
+    /// (y, picture), so a picture can be ordered against the lines.
+    pictures: Vec<(f64, Picture)>,
+}
+
+fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Drawn {
     let fonts: HashMap<Vec<u8>, Font> = match doc.get_page_fonts(page_id) {
         Ok(map) => map
             .into_iter()
@@ -583,10 +730,37 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
         Err(_) => HashMap::new(),
     };
     let Ok(content) = Content::decode(&doc.get_page_content(page_id)) else {
-        return Vec::new();
+        return Drawn {
+            runs: Vec::new(),
+            pictures: Vec::new(),
+        };
     };
+    // The page's image XObjects, by the name the content stream calls them.
+    let xobjects: HashMap<Vec<u8>, lopdf::ObjectId> = doc
+        .get_page_resources(page_id)
+        .ok()
+        .and_then(|(dict, _)| dict.and_then(|d| d.get(b"XObject").ok()).cloned())
+        .and_then(|o| match o {
+            Object::Reference(id) => doc
+                .get_object(id)
+                .ok()
+                .and_then(|o| o.as_dict().ok())
+                .cloned(),
+            Object::Dictionary(d) => Some(d),
+            _ => None,
+        })
+        .map(|d| {
+            d.iter()
+                .filter_map(|(k, v)| match v {
+                    Object::Reference(id) => Some((k.to_vec(), *id)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut runs = Vec::new();
+    let mut pictures: Vec<(f64, Picture)> = Vec::new();
     let mut ctm = IDENTITY;
     // The fill colour rides with the CTM: `q`/`Q` save and restore the whole
     // graphics state, and a heading's colour set inside one would otherwise leak
@@ -707,10 +881,51 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
                     }
                 }
             }
+            "Do" => {
+                let Some(Object::Name(name)) = op.operands.first() else {
+                    continue;
+                };
+                let Some(id) = xobjects.get(name.as_slice()) else {
+                    continue;
+                };
+                let Ok(stream) = doc.get_object(*id).and_then(|o| o.as_stream()) else {
+                    continue;
+                };
+                if stream
+                    .dict
+                    .get(b"Subtype")
+                    .ok()
+                    .and_then(|o| o.as_name().ok())
+                    != Some(b"Image")
+                {
+                    continue;
+                }
+                let Some(src) = decode_image(doc, stream) else {
+                    continue;
+                };
+                // The CTM maps the unit square onto where the image goes, so its
+                // width and height fall straight out of the matrix.
+                let width = (ctm[0].powi(2) + ctm[1].powi(2)).sqrt();
+                let height = (ctm[2].powi(2) + ctm[3].powi(2)).sqrt();
+                // Below about a line of text in both directions it is furniture,
+                // not a picture: a bullet glyph, a rule, a mark in a header. The
+                // corpus is mostly these, drawn ten points square and repeated a
+                // dozen times a document, and a reflowed view is better without
+                // them. What survives is what someone put there to be looked at.
+                if width < 24.0 && height < 24.0 {
+                    continue;
+                }
+                pictures.push((
+                    // The matrix places the image's BOTTOM edge; the top is what
+                    // orders it against the lines around it.
+                    ctm[5] + height,
+                    Picture { src, width, height },
+                ));
+            }
             _ => {}
         }
     }
-    runs
+    Drawn { runs, pictures }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -772,6 +987,9 @@ struct Line {
     text: String,
     /// The same words, keeping where the colour changed.
     spans: Vec<Span>,
+    /// Set when this "line" is a picture rather than words. It takes its place
+    /// in the flow by where it was drawn, like everything else.
+    picture: Option<Picture>,
 }
 
 /// Group runs into lines by baseline, then join each line left to right,
@@ -875,6 +1093,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         right,
         text,
         spans,
+        picture: None,
     })
 }
 
@@ -1083,6 +1302,12 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
 
     let lines_ref = lines;
     for line in &lines_ref {
+        if let Some(picture) = &line.picture {
+            flush(&mut para, para_size, &mut blocks);
+            blocks.push(Block::Image(picture.clone()));
+            prev = None;
+            continue;
+        }
         let starts_new = match prev {
             None => false,
             Some(p) => {
@@ -1155,11 +1380,25 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let mut all_lines = Vec::new();
     let mut empty = 0usize;
     for (_, page_id) in pages {
-        let runs = page_runs(&doc, page_id);
-        let lines = lines_from(runs);
+        let drawn = page_runs(&doc, page_id);
+        let mut lines = lines_from(drawn.runs);
         if lines.is_empty() {
             empty += 1;
         }
+        // A picture takes its place in the flow by where it was drawn, so it
+        // lands between the paragraphs it sat between on the page rather than
+        // being swept to the end.
+        for (y, picture) in drawn.pictures {
+            lines.push(Line {
+                y,
+                size: picture.height.max(1.0),
+                right: f64::NEG_INFINITY,
+                text: String::new(),
+                spans: Vec::new(),
+                picture: Some(picture),
+            });
+        }
+        lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
         all_lines.extend(lines);
     }
     Ok(Extracted {
@@ -1238,6 +1477,15 @@ mod harness {
                         super::Block::Heading { level, .. } => format!("h{level}"),
                         super::Block::ListItem(_) => "li".into(),
                         super::Block::Paragraph(_) => "p".into(),
+                        super::Block::Image(p) => {
+                            format!(
+                                "img{}x{} {} {}B",
+                                p.width.round(),
+                                p.height.round(),
+                                p.src.chars().take(24).collect::<String>(),
+                                p.src.len()
+                            )
+                        }
                     };
                     let t = block_text(b);
                     let width: usize = std::env::var("PDF_WIDTH")
@@ -1356,6 +1604,7 @@ mod tests {
                 bold: false,
                 italic: false,
             }],
+            picture: None,
         }
     }
 
@@ -1566,6 +1815,7 @@ mod tests {
                 bold: false,
                 italic: false,
             }],
+            picture: None,
         };
         // Column runs to 400. The first line stops at 180, far short of it.
         let blocks = blocks_from(vec![
@@ -1649,6 +1899,68 @@ mod tests {
         assert_eq!(
             list_marker("- valg af dirigenter"),
             Some("valg af dirigenter")
+        );
+    }
+
+    /// The raw-sample path. JPEG needs no encoder, being a JPEG already; this is
+    /// what everything else in the corpus needs, and a wrong stride or row order
+    /// shows up as a sheared or upside-down picture rather than an error.
+    #[test]
+    fn raw_samples_become_a_readable_bmp() {
+        use base64::Engine;
+        // Two by two: red, green / blue, white.
+        let samples = [
+            255, 0, 0, 0, 255, 0, // top row
+            0, 0, 255, 255, 255, 255, // bottom row
+        ];
+        let url = bmp_data_url(2, 2, 3, &samples).expect("encodes");
+        let b64 = url
+            .strip_prefix("data:image/bmp;base64,")
+            .expect("data url");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("valid base64");
+
+        assert_eq!(&bytes[0..2], b"BM", "the magic every reader looks for");
+        assert_eq!(u32::from_le_bytes(bytes[10..14].try_into().unwrap()), 54);
+        assert_eq!(i32::from_le_bytes(bytes[18..22].try_into().unwrap()), 2);
+        assert_eq!(i32::from_le_bytes(bytes[22..26].try_into().unwrap()), 2);
+        assert_eq!(u16::from_le_bytes(bytes[28..30].try_into().unwrap()), 24);
+
+        // Rows run bottom-up and pixels are BGR, so the FIRST row of pixel data
+        // is the image's LAST row: blue then white.
+        let row = &bytes[54..54 + 6];
+        assert_eq!(row, &[255, 0, 0, 255, 255, 255], "blue, then white");
+        // Each row is padded to a multiple of four bytes: 6 becomes 8.
+        let second = &bytes[62..62 + 6];
+        assert_eq!(second, &[0, 0, 255, 0, 255, 0], "red, then green");
+    }
+
+    /// Grey expands to grey rather than being read as a third of a colour.
+    #[test]
+    fn a_grey_image_is_not_misread() {
+        use base64::Engine;
+        let url = bmp_data_url(2, 1, 1, &[0, 255]).expect("encodes");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(url.strip_prefix("data:image/bmp;base64,").unwrap())
+            .unwrap();
+        assert_eq!(
+            &bytes[54..60],
+            &[0, 0, 0, 255, 255, 255],
+            "black, then white"
+        );
+    }
+
+    /// A truncated or impossible image is declined rather than panicking on a
+    /// slice: these bytes come from a file anyone can upload.
+    #[test]
+    fn a_broken_image_is_declined() {
+        assert_eq!(bmp_data_url(0, 4, 3, &[0; 12]), None);
+        assert_eq!(bmp_data_url(4, 4, 3, &[0; 3]), None, "not enough samples");
+        assert_eq!(
+            bmp_data_url(2, 2, 2, &[0; 8]),
+            None,
+            "two components is not a colour space we read"
         );
     }
 }
