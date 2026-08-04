@@ -951,7 +951,12 @@ fn apply_keymap(root: &Path, settings: &Settings, force: bool) -> io::Result<boo
     }
     vars.insert("KEYMAP".to_string(), keymap.clone());
 
-    let mut content = String::new();
+    // C (systemd-localed's write_vconsole_conf, shared by firstboot) prefixes
+    // vconsole.conf with this fixed header; locale.conf gets none.
+    let mut content = String::from(
+        "# Written by systemd-localed(8) or systemd-firstboot(1), read by systemd-localed\n\
+         # and systemd-vconsole-setup(8). Use localectl(1) to update this file.\n",
+    );
     let mut keys: Vec<&String> = vars.keys().collect();
     keys.sort();
     for key in keys {
@@ -2201,6 +2206,13 @@ mod tests {
         assert!(result);
         let content = fs::read_to_string(tmp.path().join("etc/vconsole.conf")).unwrap();
         assert!(content.contains("KEYMAP=de"));
+        // C prefixes vconsole.conf with the systemd-localed header; match it.
+        assert!(
+            content.starts_with(
+                "# Written by systemd-localed(8) or systemd-firstboot(1), read by systemd-localed\n"
+            ),
+            "{content}"
+        );
     }
 
     #[test]
