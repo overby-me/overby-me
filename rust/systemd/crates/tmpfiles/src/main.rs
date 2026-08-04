@@ -51,6 +51,9 @@ use clap::Parser;
 
 const EXIT_SUCCESS: u8 = 0;
 const EXIT_FAILURE: u8 = 1;
+/// `EX_DATAERR` (sysexits.h): C exits with this when a config line has a syntax
+/// error, even though it keeps processing the rest.
+const EX_DATAERR: u8 = 65;
 
 /// Directories to search for tmpfiles.d configuration, in priority order.
 /// Earlier directories take precedence when the same filename exists in multiple.
@@ -596,11 +599,23 @@ fn expand_specifiers(s: &str, root: Option<&Path>) -> String {
 }
 
 /// Parse a single tmpfiles.d configuration line.
+/// Thin wrapper used by tests: parse a line without tracking the fatal flag.
+#[cfg(test)]
 fn parse_line(
     line: &str,
     source: &Path,
     line_number: usize,
     root: Option<&Path>,
+) -> Option<TmpfilesItem> {
+    parse_line_inner(line, source, line_number, root, &mut false)
+}
+
+fn parse_line_inner(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    root: Option<&Path>,
+    fatal: &mut bool,
 ) -> Option<TmpfilesItem> {
     let trimmed = line.trim();
 
@@ -616,6 +631,8 @@ fn parse_line(
             source.display(),
             line_number,
         );
+        // C treats a syntax error as fatal to the exit code (EX_DATAERR).
+        *fatal = true;
         return None;
     }
 
@@ -654,6 +671,7 @@ fn parse_line(
                 line_number,
                 type_str,
             );
+            *fatal = true;
             return None;
         }
     };
@@ -734,6 +752,7 @@ fn parse_line(
                 line_number,
                 age_field,
             );
+            *fatal = true;
         }
         result
     } else {
@@ -814,7 +833,7 @@ fn parse_line(
 }
 
 /// Parse a tmpfiles.d config file.
-fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
+fn parse_config_stdin(root: Option<&Path>, fatal: &mut bool) -> io::Result<Vec<TmpfilesItem>> {
     let stdin = io::stdin();
     let reader = stdin.lock();
     let mut items = Vec::new();
@@ -840,7 +859,7 @@ fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
             line
         };
 
-        if let Some(item) = parse_line(&full_line, &source, line_number, root) {
+        if let Some(item) = parse_line_inner(&full_line, &source, line_number, root, fatal) {
             items.push(item);
         }
     }
@@ -848,7 +867,11 @@ fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
     Ok(items)
 }
 
-fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
+fn parse_config_file(
+    path: &Path,
+    root: Option<&Path>,
+    fatal: &mut bool,
+) -> io::Result<Vec<TmpfilesItem>> {
     let file = fs::File::open(path)?;
     let reader = io::BufReader::new(file);
     let mut items = Vec::new();
@@ -875,7 +898,7 @@ fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<Tmpfile
             line
         };
 
-        if let Some(item) = parse_line(&full_line, path, line_number, root) {
+        if let Some(item) = parse_line_inner(&full_line, path, line_number, root, fatal) {
             items.push(item);
         }
     }
@@ -2596,10 +2619,12 @@ fn run() -> u8 {
 
     // Parse all configuration
     let mut items = Vec::new();
+    // Set when a config line has a syntax error; C exits EX_DATAERR (65) for it.
+    let mut fatal_config_error = false;
 
     // Read from stdin if "-" was specified
     if has_stdin {
-        match parse_config_stdin(cli.root.as_deref()) {
+        match parse_config_stdin(cli.root.as_deref(), &mut fatal_config_error) {
             Ok(stdin_items) => {
                 if verbose {
                     eprintln!(
@@ -2616,7 +2641,7 @@ fn run() -> u8 {
     }
 
     for path in &config_files {
-        match parse_config_file(path, cli.root.as_deref()) {
+        match parse_config_file(path, cli.root.as_deref(), &mut fatal_config_error) {
             Ok(file_items) => {
                 if verbose {
                     eprintln!(
@@ -2873,6 +2898,8 @@ fn run() -> u8 {
 
     if any_failed {
         EXIT_FAILURE
+    } else if fatal_config_error {
+        EX_DATAERR
     } else {
         EXIT_SUCCESS
     }
@@ -3181,12 +3208,48 @@ mod tests {
         writeln!(f, "L /etc/localtime - - - - /usr/share/zoneinfo/UTC").unwrap();
         drop(f);
 
-        let items = parse_config_file(&path, None).unwrap();
+        let items = parse_config_file(&path, None, &mut false).unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].item_type, ItemType::CreateDirectory);
         assert_eq!(items[1].item_type, ItemType::CreateFile);
         assert_eq!(items[2].item_type, ItemType::CreateSymlink);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fatal_flag_matches_c_classification() {
+        // C exits EX_DATAERR (65) for syntax errors but 0 for a bare unknown
+        // type. parse_config_file sets `fatal` exactly for the syntax cases.
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-fatal");
+        let _ = fs::create_dir_all(&dir);
+        let write = |name: &str, body: &str| {
+            let p = dir.join(name);
+            fs::write(&p, body).unwrap();
+            p
+        };
+        let check = |p: &Path| {
+            let mut fatal = false;
+            let _ = parse_config_file(p, None, &mut fatal).unwrap();
+            fatal
+        };
+        assert!(check(&write("a.conf", "d\n")), "too few fields is fatal");
+        assert!(
+            check(&write("b.conf", "+ /p 0755 root root -\n")),
+            "no type char is fatal"
+        );
+        assert!(
+            check(&write("c.conf", "d /p 0755 root root notanage\n")),
+            "invalid age is fatal"
+        );
+        assert!(
+            !check(&write("d.conf", "X /p 0755 root root -\n")),
+            "unknown type is not fatal"
+        );
+        assert!(
+            !check(&write("e.conf", "d /p 0755 root root -\n")),
+            "valid line is not fatal"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3599,7 +3662,7 @@ mod tests {
         writeln!(f, "  1777 root root - -").unwrap();
         drop(f);
 
-        let items = parse_config_file(&path, None).unwrap();
+        let items = parse_config_file(&path, None, &mut false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].item_type, ItemType::CreateDirectory);
         assert_eq!(items[0].path, PathBuf::from("/tmp/test"));
