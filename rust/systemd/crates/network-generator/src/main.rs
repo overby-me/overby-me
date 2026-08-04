@@ -13,7 +13,6 @@
 //! - `vlan=` — VLAN device definitions
 //! - `bond=` — bond device definitions
 //! - `bridge=` — bridge device definitions
-//! - `team=` — team device definitions
 //! - `ifname=` — interface renaming by MAC address
 //! - `net.ifnames=` — predictable network interface names
 //!
@@ -93,13 +92,6 @@ struct BridgeConfig {
     members: Vec<String>,
 }
 
-/// Parsed `team=` parameter: `<teamname>:<members>`.
-#[derive(Debug, Clone)]
-struct TeamConfig {
-    name: String,
-    members: Vec<String>,
-}
-
 /// Per-interface `[Network]` settings accumulated from `vlan=`/`bond=`/`bridge=`.
 /// C keys its Networks by interface name and merges these with any `ip=` config
 /// into a single `70-<ifname>.network`.
@@ -149,7 +141,6 @@ struct CmdlineConfig {
     vlans: Vec<VlanConfig>,
     bonds: Vec<BondConfig>,
     bridges: Vec<BridgeConfig>,
-    teams: Vec<TeamConfig>,
     ifnames: Vec<IfnameConfig>,
     ifname_policies: Vec<IfnamePolicyConfig>,
     /// `net.ifnames=0` disables predictable interface names.
@@ -253,10 +244,6 @@ fn parse_cmdline(cmdline: &str) -> CmdlineConfig {
         } else if let Some(val) = strip_param(token, "bridge=") {
             if let Some(bridge) = parse_bridge_param(val) {
                 config.bridges.push(bridge);
-            }
-        } else if let Some(val) = strip_param(token, "team=") {
-            if let Some(team) = parse_team_param(val) {
-                config.teams.push(team);
             }
         } else if let Some(val) = strip_param(token, "ifname=") {
             if let Some(ifn) = parse_ifname_param(val) {
@@ -554,28 +541,6 @@ fn parse_bridge_param(val: &str) -> Option<BridgeConfig> {
     }
 
     Some(BridgeConfig { name, members })
-}
-
-/// Parse `team=<teamname>:<members>`.
-fn parse_team_param(val: &str) -> Option<TeamConfig> {
-    let parts: Vec<&str> = val.splitn(2, ':').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        log::warn!("Invalid team= value: {}", val);
-        return None;
-    }
-
-    let name = parts[0].to_string();
-    let members: Vec<String> = parts[1]
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-    if members.is_empty() {
-        log::warn!("Team has no members: {}", val);
-        return None;
-    }
-
-    Some(TeamConfig { name, members })
 }
 
 /// Parse `ifname=<interface>:<mac>`.
@@ -1082,68 +1047,6 @@ fn netmask_to_prefix(mask: &str) -> u32 {
     bits.count_ones()
 }
 
-/// Parse dracut-style bond options.
-///
-/// Dracut format: `mode=balance-rr,miimon=100,xmit_hash_policy=layer3+4`
-/// Maps to networkd [Bond] section keys.
-fn parse_bond_options(opts: &str) -> Vec<(String, String)> {
-    let mut result = Vec::new();
-    for part in opts.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        if let Some((key, value)) = part.split_once('=') {
-            let networkd_key = dracut_bond_key_to_networkd(key.trim());
-            result.push((networkd_key, value.trim().to_string()));
-        }
-    }
-    result
-}
-
-/// Map dracut/kernel bond option names to networkd [Bond] section keys.
-fn dracut_bond_key_to_networkd(key: &str) -> String {
-    // Gratuitous ARP option: "num_" + "gratuitous"[..4] + "_arp"
-    // (constructed at runtime to avoid spell-checker false positive on the abbreviation)
-    let gratuitous_arp_opt: String = format!("num_{}_arp", &"gratuitous"[..4]);
-
-    match key {
-        "mode" => "Mode".to_string(),
-        "miimon" => "MIIMonitorSec".to_string(),
-        "updelay" => "UpDelaySec".to_string(),
-        "downdelay" => "DownDelaySec".to_string(),
-        "primary" => "Primary".to_string(),
-        "primary_reselect" => "PrimaryReselectPolicy".to_string(),
-        "xmit_hash_policy" => "TransmitHashPolicy".to_string(),
-        "lacp_rate" => "LACPTransmitRate".to_string(),
-        "arp_interval" => "ArpIntervalSec".to_string(),
-        "arp_ip_target" => "ArpIpTargets".to_string(),
-        "arp_validate" => "ArpValidate".to_string(),
-        "arp_all_targets" => "ArpAllTargets".to_string(),
-        "ad_select" => "AdSelect".to_string(),
-        "fail_over_mac" => "FailOverMACPolicy".to_string(),
-        k if k == gratuitous_arp_opt => "GratuitousARP".to_string(),
-        "num_unsol_na" => "GratuitousARP".to_string(),
-        "packets_per_slave" => "PacketsPerSlave".to_string(),
-        "resend_igmp" => "ResendIGMP".to_string(),
-        "min_links" => "MinLinks".to_string(),
-        "all_slaves_active" => "AllSlavesActive".to_string(),
-        "lp_interval" => "LPInterval".to_string(),
-        _ => {
-            // Pass through with capitalized first letter as best-effort.
-            let mut chars = key.chars();
-            match chars.next() {
-                Some(c) => {
-                    let mut s = c.to_uppercase().to_string();
-                    s.push_str(chars.as_str());
-                    s
-                }
-                None => key.to_string(),
-            }
-        }
-    }
-}
-
 /// Sanitize a device/interface name for use in filenames.
 fn sanitize_name(name: &str) -> String {
     name.chars()
@@ -1262,7 +1165,6 @@ fn run_cmdline_str(cmdline: &str, output_dir: &Path) -> i32 {
         && config.vlans.is_empty()
         && config.bonds.is_empty()
         && config.bridges.is_empty()
-        && config.teams.is_empty()
         && config.ifnames.is_empty()
         && config.ifname_policies.is_empty()
         && config.net_ifnames.is_none()
@@ -1708,20 +1610,6 @@ mod tests {
         assert!(parse_bridge_param("br0:").is_none());
     }
 
-    // ── team= parsing tests ─────────────────────────────────────────
-
-    #[test]
-    fn test_parse_team_basic() {
-        let team = parse_team_param("team0:eth0,eth1").unwrap();
-        assert_eq!(team.name, "team0");
-        assert_eq!(team.members, vec!["eth0", "eth1"]);
-    }
-
-    #[test]
-    fn test_parse_team_empty() {
-        assert!(parse_team_param("team0:").is_none());
-    }
-
     // ── ifname= parsing tests ───────────────────────────────────────
 
     #[test]
@@ -1934,46 +1822,6 @@ mod tests {
     #[test]
     fn test_extract_vlan_id_no_digits() {
         assert_eq!(extract_vlan_id("myvlan"), None);
-    }
-
-    #[test]
-    fn test_parse_bond_options() {
-        let opts = parse_bond_options("mode=802.3ad,miimon=100,xmit_hash_policy=layer3+4");
-        assert_eq!(opts.len(), 3);
-        assert_eq!(opts[0], ("Mode".to_string(), "802.3ad".to_string()));
-        assert_eq!(opts[1], ("MIIMonitorSec".to_string(), "100".to_string()));
-        assert_eq!(
-            opts[2],
-            ("TransmitHashPolicy".to_string(), "layer3+4".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_bond_options_empty() {
-        let opts = parse_bond_options("");
-        assert!(opts.is_empty());
-    }
-
-    #[test]
-    fn test_dracut_bond_key_mapping() {
-        assert_eq!(dracut_bond_key_to_networkd("mode"), "Mode");
-        assert_eq!(dracut_bond_key_to_networkd("miimon"), "MIIMonitorSec");
-        assert_eq!(dracut_bond_key_to_networkd("updelay"), "UpDelaySec");
-        assert_eq!(dracut_bond_key_to_networkd("downdelay"), "DownDelaySec");
-        assert_eq!(dracut_bond_key_to_networkd("primary"), "Primary");
-        assert_eq!(
-            dracut_bond_key_to_networkd("xmit_hash_policy"),
-            "TransmitHashPolicy"
-        );
-        assert_eq!(dracut_bond_key_to_networkd("lacp_rate"), "LACPTransmitRate");
-        assert_eq!(dracut_bond_key_to_networkd("min_links"), "MinLinks");
-        let gratuitous_arp_opt = format!("num_{}_arp", &"gratuitous"[..4]);
-        assert_eq!(
-            dracut_bond_key_to_networkd(&gratuitous_arp_opt),
-            "GratuitousARP"
-        );
-        assert_eq!(dracut_bond_key_to_networkd("num_unsol_na"), "GratuitousARP");
-        assert_eq!(dracut_bond_key_to_networkd("unknown_key"), "Unknown_key");
     }
 
     // ── File generation tests ───────────────────────────────────────
