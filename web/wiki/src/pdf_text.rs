@@ -30,11 +30,38 @@ pub enum Block {
     /// `level` is 1-3, from how much larger the line is than the body text.
     Heading {
         level: u8,
-        text: String,
+        spans: Vec<Span>,
     },
-    Paragraph(String),
+    Paragraph(Vec<Span>),
     /// A line that began with a bullet or a number, with that marker stripped.
-    ListItem(String),
+    ListItem(Vec<Span>),
+}
+
+impl Block {
+    pub fn spans(&self) -> &[Span] {
+        match self {
+            Block::Heading { spans, .. } | Block::Paragraph(spans) | Block::ListItem(spans) => {
+                spans
+            }
+        }
+    }
+
+    /// The block's words, without their colours.
+    pub fn text(&self) -> String {
+        self.spans().iter().map(|s| s.text.as_str()).collect()
+    }
+}
+
+/// A stretch of one colour within a block.
+///
+/// Colour is per RUN in a PDF, not per paragraph: a document can turn one word
+/// red in the middle of a sentence, and a block that carried a single colour
+/// would lose that. `None` is the ordinary ink of the document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Span {
+    pub text: String,
+    /// A CSS colour, or `None` for whatever the reading surface uses.
+    pub color: Option<String>,
 }
 
 /// What came out of a PDF, and how much of it there was to find.
@@ -51,7 +78,11 @@ impl Extracted {
     /// Whether this is worth showing. A scan extracts nothing and must not be
     /// presented as an empty document.
     pub fn has_text(&self) -> bool {
-        self.pages_without_text < self.pages && !self.blocks.is_empty()
+        // Blocks that hold nothing but spaces are not text. A page of rules and
+        // whitespace can produce them, and "there is a block" is not the same
+        // claim as "there is something to read".
+        self.pages_without_text < self.pages
+            && self.blocks.iter().any(|b| !b.text().trim().is_empty())
     }
 }
 
@@ -421,6 +452,55 @@ struct Run {
     y: f64,
     size: f64,
     text: String,
+    /// The non-stroking colour in force, or `None` for ordinary ink.
+    color: Option<String>,
+}
+
+/// A fill colour, as CSS, or `None` when it is the document's ordinary ink.
+///
+/// Black is not a colour here, it is the default, and the same rule the Word
+/// renderer learned applies: a document that states black text and a document
+/// that states nothing look identical on paper, and forcing black makes both
+/// unreadable on a dark reading surface. So near-black is dropped and the
+/// surface decides.
+///
+/// Near-WHITE is dropped for the opposite reason. White text in a PDF sits on a
+/// coloured shape that this renderer does not draw, so keeping it would leave an
+/// invisible paragraph. Falling back to ordinary ink at least shows the words.
+fn ink(r: f64, g: f64, b: f64) -> Option<String> {
+    let (r, g, b) = (r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0));
+    // Rec. 601 luma, which is what "how dark is this" means to an eye.
+    let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    let spread = r.max(g).max(b) - r.min(g).min(b);
+    // Grey enough to be ink rather than a colour, and dark or light enough to be
+    // the page's own extremes.
+    //
+    // The dark end is 0.22 rather than something nearer zero because Office does
+    // not write body text as #000000. It writes #201f1e, and Google writes
+    // #202124: near-blacks that are the DEFAULT ink of those tools, not a choice
+    // anyone made. Found in the corpus, where they were the most common colour
+    // by far. Keeping them would pin almost every paragraph to near-black and
+    // make the whole document unreadable in the dark theme, which is the same
+    // trap the Word renderer fell into.
+    //
+    // Real colours are safe from this: the spread test lets them through first.
+    // Word's heading blue #1f3864 is dark, but its channels are 0.27 apart.
+    if spread < 0.08 && !(0.22..=0.85).contains(&luma) {
+        return None;
+    }
+    Some(format!(
+        "#{:02x}{:02x}{:02x}",
+        (r * 255.0).round() as u8,
+        (g * 255.0).round() as u8,
+        (b * 255.0).round() as u8
+    ))
+}
+
+/// CMYK as PDF states it, converted the simple way. Word writes RGB; this is
+/// for the documents that came through a print pipeline.
+fn cmyk(c: f64, m: f64, y: f64, k: f64) -> Option<String> {
+    let f = |v: f64| (1.0 - v.clamp(0.0, 1.0)) * (1.0 - k.clamp(0.0, 1.0));
+    ink(f(c), f(m), f(y))
 }
 
 /// Multiply two PDF matrices (a b c d e f).
@@ -452,7 +532,11 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
 
     let mut runs = Vec::new();
     let mut ctm = IDENTITY;
-    let mut stack: Vec<[f64; 6]> = Vec::new();
+    // The fill colour rides with the CTM: `q`/`Q` save and restore the whole
+    // graphics state, and a heading's colour set inside one would otherwise leak
+    // into the body text after it.
+    let mut fill: Option<String> = None;
+    let mut stack: Vec<([f64; 6], Option<String>)> = Vec::new();
     let mut tm = IDENTITY;
     let mut tlm = IDENTITY;
     let mut font: Option<Font> = None;
@@ -465,8 +549,25 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
     for op in content.operations {
         let nums: Vec<f64> = op.operands.iter().filter_map(|o| number(o).ok()).collect();
         match op.operator.as_str() {
-            "q" => stack.push(ctm),
-            "Q" => ctm = stack.pop().unwrap_or(IDENTITY),
+            "q" => stack.push((ctm, fill.clone())),
+            "Q" => {
+                let (c, f) = stack.pop().unwrap_or((IDENTITY, None));
+                ctm = c;
+                fill = f;
+            }
+            // The non-stroking colour, in each of the ways a PDF states it.
+            // `sc`/`scn` take their meaning from the current colour space; the
+            // operand count tells us which, and a pattern (which has a name
+            // operand) is left alone rather than guessed at.
+            "g" if nums.len() == 1 => fill = ink(nums[0], nums[0], nums[0]),
+            "rg" if nums.len() == 3 => fill = ink(nums[0], nums[1], nums[2]),
+            "k" if nums.len() == 4 => fill = cmyk(nums[0], nums[1], nums[2], nums[3]),
+            "sc" | "scn" => match nums.len() {
+                1 => fill = ink(nums[0], nums[0], nums[0]),
+                3 => fill = ink(nums[0], nums[1], nums[2]),
+                4 => fill = cmyk(nums[0], nums[1], nums[2], nums[3]),
+                _ => {}
+            },
             "cm" if nums.len() == 6 => {
                 ctm = mul([nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]], ctm);
             }
@@ -508,7 +609,15 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
                 }
                 if let Some(Object::String(bytes, _)) = op.operands.last() {
                     show(
-                        bytes, &font, size, h_scale, char_space, word_space, &mut tm, ctm,
+                        bytes,
+                        &font,
+                        size,
+                        h_scale,
+                        char_space,
+                        word_space,
+                        &mut tm,
+                        ctm,
+                        fill.as_deref(),
                         &mut runs,
                     );
                 }
@@ -518,7 +627,15 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId) -> Vec<Run> {
                     for item in items {
                         match item {
                             Object::String(bytes, _) => show(
-                                bytes, &font, size, h_scale, char_space, word_space, &mut tm, ctm,
+                                bytes,
+                                &font,
+                                size,
+                                h_scale,
+                                char_space,
+                                word_space,
+                                &mut tm,
+                                ctm,
+                                fill.as_deref(),
                                 &mut runs,
                             ),
                             other => {
@@ -550,6 +667,7 @@ fn show(
     word_space: f64,
     tm: &mut [f64; 6],
     ctm: [f64; 6],
+    color: Option<&str>,
     runs: &mut Vec<Run>,
 ) {
     let Some(font) = font else { return };
@@ -575,6 +693,7 @@ fn show(
             y: at[5],
             size: size * scale,
             text,
+            color: color.map(str::to_string),
         });
     }
     *tm = mul([1.0, 0.0, 0.0, 1.0, advance, 0.0], *tm);
@@ -587,7 +706,10 @@ fn show(
 struct Line {
     y: f64,
     size: f64,
+    /// The joined text, for the heuristics that read it.
     text: String,
+    /// The same words, keeping where the colour changed.
+    spans: Vec<Span>,
 }
 
 /// Group runs into lines by baseline, then join each line left to right,
@@ -628,7 +750,7 @@ fn lines_from(mut runs: Vec<Run>) -> Vec<Line> {
 
 fn join_line(runs: &[Run]) -> Option<Line> {
     let first = runs.first()?;
-    let mut text = String::new();
+    let mut spans: Vec<Span> = Vec::new();
     let mut prev_end = f64::NEG_INFINITY;
     let mut size: f64 = 0.0;
     let mut sorted: Vec<&Run> = runs.iter().collect();
@@ -641,21 +763,87 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         // knife edge. Compared against the pen's TRUE end, not a guess from the
         // character count, which is what put spaces inside words.
         let gap = run.x - prev_end;
-        if prev_end.is_finite() && gap > run.size * 0.20 && !text.ends_with(' ') {
-            text.push(' ');
+        let wants_space = prev_end.is_finite()
+            && gap > run.size * 0.20
+            && !spans.last().is_some_and(|s| s.text.ends_with(' '));
+        // A run continues the one before it when the colour has not changed, so
+        // a paragraph in one colour is one span rather than one per draw call.
+        match spans.last_mut() {
+            Some(last) if last.color == run.color => {
+                if wants_space {
+                    last.text.push(' ');
+                }
+                last.text.push_str(&run.text);
+            }
+            _ => {
+                let mut text = String::new();
+                // The space belongs to the run BEFORE the colour change, so a
+                // colour does not start with whitespace in it.
+                if wants_space {
+                    if let Some(last) = spans.last_mut() {
+                        last.text.push(' ');
+                    } else {
+                        text.push(' ');
+                    }
+                }
+                text.push_str(&run.text);
+                spans.push(Span {
+                    text,
+                    color: run.color.clone(),
+                });
+            }
         }
-        text.push_str(&run.text);
         prev_end = run.end_x;
     }
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.is_empty() {
+    let spans = tidy(spans);
+    if spans.is_empty() {
         return None;
     }
+    let text: String = spans.iter().map(|s| s.text.as_str()).collect();
     Some(Line {
         y: first.y,
         size,
         text,
+        spans,
     })
+}
+
+/// Collapse runs of whitespace and drop what is left empty, without losing the
+/// colour boundaries.
+fn tidy(spans: Vec<Span>) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
+    for span in spans {
+        let mut text = String::new();
+        let mut last_was_space =
+            out.last().is_some_and(|s: &Span| s.text.ends_with(' ')) || out.is_empty();
+        for c in span.text.chars() {
+            if c.is_whitespace() {
+                if !last_was_space {
+                    text.push(' ');
+                }
+                last_was_space = true;
+            } else {
+                text.push(c);
+                last_was_space = false;
+            }
+        }
+        if !text.is_empty() {
+            out.push(Span {
+                text,
+                color: span.color,
+            });
+        }
+    }
+    // Nothing but spaces is not a line.
+    if out.iter().all(|s| s.text.trim().is_empty()) {
+        return Vec::new();
+    }
+    if let Some(last) = out.last_mut() {
+        while last.text.ends_with(' ') {
+            last.text.pop();
+        }
+    }
+    out
 }
 
 /// The size most of the document is set in, which is what a heading is large
@@ -708,19 +896,21 @@ fn list_marker(text: &str) -> Option<&str> {
 fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
     let body = body_size(&lines);
     let mut blocks: Vec<Block> = Vec::new();
-    let mut para = String::new();
+    let mut para: Vec<Span> = Vec::new();
     let mut para_size = body;
     let mut prev: Option<&Line> = None;
-    let lines_ref: Vec<Line> = lines;
 
-    let flush = |para: &mut String, size: f64, blocks: &mut Vec<Block>| {
-        let text = para.trim().to_string();
-        para.clear();
-        if text.is_empty() {
+    let flush = |para: &mut Vec<Span>, size: f64, blocks: &mut Vec<Block>| {
+        let spans = tidy(std::mem::take(para));
+        if spans.is_empty() {
             return;
         }
+        let text: String = spans.iter().map(|s| s.text.as_str()).collect();
         if let Some(rest) = list_marker(&text) {
-            blocks.push(Block::ListItem(rest.to_string()));
+            // Drop the marker from the spans, keeping the colours of the words
+            // that follow it.
+            let dropped = text.chars().count() - rest.chars().count();
+            blocks.push(Block::ListItem(drop_prefix(spans, dropped)));
         } else if size > body * 1.12 {
             // Calibrated against Word's own defaults rather than picked: on an
             // 11pt body, Title is 28 (2.5x), Heading 1 is 16 (1.45x) and
@@ -734,12 +924,13 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
             } else {
                 3
             };
-            blocks.push(Block::Heading { level, text });
+            blocks.push(Block::Heading { level, spans });
         } else {
-            blocks.push(Block::Paragraph(text));
+            blocks.push(Block::Paragraph(spans));
         }
     };
 
+    let lines_ref = lines;
     for line in &lines_ref {
         let starts_new = match prev {
             None => false,
@@ -760,15 +951,41 @@ fn blocks_from(lines: Vec<Line>) -> Vec<Block> {
         }
         if para.is_empty() {
             para_size = line.size;
+        } else {
+            // A line break inside a paragraph is a space, not a join.
+            if let Some(last) = para.last_mut() {
+                last.text.push(' ');
+            }
         }
-        if !para.is_empty() {
-            para.push(' ');
-        }
-        para.push_str(&line.text);
+        para.extend(line.spans.iter().cloned());
         prev = Some(line);
     }
     flush(&mut para, para_size, &mut blocks);
     blocks
+}
+
+/// Drop the first `n` characters, keeping the colours of what survives.
+fn drop_prefix(spans: Vec<Span>, n: usize) -> Vec<Span> {
+    let mut left = n;
+    let mut out = Vec::new();
+    for span in spans {
+        if left == 0 {
+            out.push(span);
+            continue;
+        }
+        let count = span.text.chars().count();
+        if count <= left {
+            left -= count;
+            continue;
+        }
+        let text: String = span.text.chars().skip(left).collect();
+        left = 0;
+        out.push(Span {
+            text,
+            color: span.color,
+        });
+    }
+    tidy(out)
 }
 
 /// Read a PDF and hand back what it says.
@@ -816,6 +1033,16 @@ mod harness {
                     doc.blocks.len(),
                     chars
                 );
+                let coloured: Vec<String> = doc
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.spans())
+                    .filter_map(|s| s.color.clone())
+                    .collect();
+                let mut seen: Vec<String> = coloured.clone();
+                seen.sort();
+                seen.dedup();
+                println!("  coloured spans={} distinct={:?}", coloured.len(), seen);
                 for b in doc.blocks.iter().take(12) {
                     let kind = match b {
                         super::Block::Heading { level, .. } => format!("h{level}"),
@@ -829,11 +1056,8 @@ mod harness {
         }
     }
 
-    fn block_text(b: &super::Block) -> &str {
-        match b {
-            super::Block::Heading { text, .. } => text,
-            super::Block::Paragraph(t) | super::Block::ListItem(t) => t,
-        }
+    fn block_text(b: &super::Block) -> String {
+        b.text()
     }
 }
 
@@ -929,7 +1153,15 @@ mod tests {
             y,
             size,
             text: text.into(),
+            spans: vec![Span {
+                text: text.into(),
+                color: None,
+            }],
         }
+    }
+
+    fn texts(blocks: &[Block]) -> Vec<String> {
+        blocks.iter().map(|b| b.text()).collect()
     }
 
     /// Lines close together are one paragraph; a wider gap starts another. This
@@ -943,11 +1175,8 @@ mod tests {
             line(656.0, 11.0, "Et nyt afsnit."),
         ]);
         assert_eq!(
-            blocks,
-            vec![
-                Block::Paragraph("Første linje i afsnittet og anden linje.".into()),
-                Block::Paragraph("Et nyt afsnit.".into()),
-            ]
+            texts(&blocks),
+            vec!["Første linje i afsnittet og anden linje.", "Et nyt afsnit.",]
         );
     }
 
@@ -963,19 +1192,15 @@ mod tests {
             line(600.0, 11.0, "Endnu mere."),
         ]);
         assert_eq!(
-            blocks,
+            texts(&blocks),
             vec![
-                Block::Heading {
-                    level: 1,
-                    text: "Titel".into()
-                },
-                Block::Heading {
-                    level: 2,
-                    text: "Overskrift".into()
-                },
-                Block::Paragraph("Brødtekst her. Mere brødtekst. Endnu mere.".into()),
+                "Titel",
+                "Overskrift",
+                "Brødtekst her. Mere brødtekst. Endnu mere.",
             ]
         );
+        assert!(matches!(blocks[0], Block::Heading { level: 1, .. }));
+        assert!(matches!(blocks[1], Block::Heading { level: 2, .. }));
     }
 
     /// A page break sends y back UP the page, and must not be read as the
@@ -999,10 +1224,114 @@ mod tests {
         };
         assert!(!scan.has_text());
         let real = Extracted {
-            blocks: vec![Block::Paragraph("noget".into())],
+            blocks: vec![Block::Paragraph(vec![Span {
+                text: "noget".into(),
+                color: None,
+            }])],
             pages: 2,
             pages_without_text: 0,
         };
         assert!(real.has_text());
+    }
+
+    /// Black is not a colour, it is the default ink. Keeping it would force
+    /// black text onto a dark reading surface, which is the same mistake the
+    /// Word renderer had to unlearn.
+    #[test]
+    fn ordinary_ink_is_left_to_the_reading_surface() {
+        assert_eq!(ink(0.0, 0.0, 0.0), None);
+        assert_eq!(ink(0.05, 0.05, 0.05), None);
+        // Office's own body-text near-black, #201f1e, and Google's #202124.
+        // These were the most common colours in the corpus and are the default
+        // ink of those tools, not a decision.
+        assert_eq!(ink(0.125, 0.122, 0.118), None);
+        assert_eq!(ink(0.125, 0.129, 0.141), None);
+        // And white, which would otherwise be an invisible paragraph: the shape
+        // it was written on is not drawn here.
+        assert_eq!(ink(1.0, 1.0, 1.0), None);
+        // A mid grey IS a choice, and is kept.
+        assert_eq!(ink(0.5, 0.5, 0.5).as_deref(), Some("#808080"));
+    }
+
+    /// A stated colour survives, in each of the ways a PDF can state it.
+    #[test]
+    fn a_stated_colour_is_kept() {
+        assert_eq!(ink(1.0, 0.0, 0.0).as_deref(), Some("#ff0000"));
+        // Word's default heading blue, near enough. Dark, but its channels are
+        // far enough apart that the near-black rule cannot swallow it.
+        assert_eq!(ink(0.17, 0.33, 0.59).as_deref(), Some("#2b5496"));
+        // And the darkest of Word's heading blues, #1f3864, which sits below the
+        // luma cutoff and survives on spread alone.
+        assert_eq!(ink(0.122, 0.22, 0.392).as_deref(), Some("#1f3864"));
+        // CMYK cyan.
+        assert_eq!(cmyk(1.0, 0.0, 0.0, 0.0).as_deref(), Some("#00ffff"));
+        // CMYK black is still ordinary ink.
+        assert_eq!(cmyk(0.0, 0.0, 0.0, 1.0), None);
+    }
+
+    /// A colour change inside a line becomes a span boundary, so one red word in
+    /// a black sentence keeps its colour and the rest keeps none.
+    #[test]
+    fn a_colour_change_splits_the_line_and_nothing_else() {
+        let run = |x: f64, end_x: f64, text: &str, color: Option<&str>| Run {
+            x,
+            end_x,
+            y: 700.0,
+            size: 11.0,
+            text: text.into(),
+            color: color.map(str::to_string),
+        };
+        let lines = lines_from(vec![
+            // Gaps of 4pt at 11pt type: a real word space, comfortably over
+            // the 0.20em the joiner asks for.
+            run(0.0, 30.0, "Vi stemte", None),
+            run(34.0, 46.0, "nej", Some("#ff0000")),
+            run(50.0, 74.0, "til forslaget", None),
+        ]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Vi stemte nej til forslaget");
+        // The gap-space lands on the span BEFORE the change, so a colour never
+        // begins with whitespace. Where it sits is invisible either way, a space
+        // having no glyph to take the colour; what matters is that the coloured
+        // WORD is its own span and the text around it carries no colour at all.
+        assert_eq!(
+            lines[0].spans,
+            vec![
+                Span {
+                    text: "Vi stemte ".into(),
+                    color: None
+                },
+                Span {
+                    text: "nej ".into(),
+                    color: Some("#ff0000".into())
+                },
+                Span {
+                    text: "til forslaget".into(),
+                    color: None
+                },
+            ]
+        );
+    }
+
+    /// Stripping a list marker must not take the colour of the words after it.
+    #[test]
+    fn dropping_a_marker_keeps_the_colours_that_follow() {
+        let spans = vec![
+            Span {
+                text: "1. ".into(),
+                color: None,
+            },
+            Span {
+                text: "Rødt punkt".into(),
+                color: Some("#ff0000".into()),
+            },
+        ];
+        assert_eq!(
+            drop_prefix(spans, 3),
+            vec![Span {
+                text: "Rødt punkt".into(),
+                color: Some("#ff0000".into())
+            }]
+        );
     }
 }
