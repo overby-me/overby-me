@@ -723,51 +723,47 @@ fn generate(config: &CmdlineConfig) -> GeneratedFiles {
         generate_team(&mut files, team);
     }
 
-    // Generate .network files for ip= parameters.
-    for ip in &config.ip_configs {
-        generate_ip_network(
-            &mut files,
-            ip,
-            &config.nameservers,
-            config.peer_dns,
-            &aggregate_slaves,
-        );
-    }
-
-    // Generate .network files for rd.route= without a device (applies to all).
-    let unbound_routes: Vec<&RouteConfig> = config
-        .routes
-        .iter()
-        .filter(|r| r.device.is_empty())
-        .collect();
-    let bound_routes: Vec<&RouteConfig> = config
-        .routes
-        .iter()
-        .filter(|r| !r.device.is_empty())
-        .collect();
-
-    // Bound routes: add to the device's network file or generate a new one.
-    // Group by device.
+    // Group rd.route= entries by device ("" = unbound, applying to the
+    // deviceless default network). C merges routes into the interface's own
+    // .network; because systemd applies only one matching .network per link, a
+    // route emitted as a separate file is silently ignored when the interface
+    // also has an ip= config, so we merge instead.
     let mut routes_by_device: BTreeMap<String, Vec<&RouteConfig>> = BTreeMap::new();
-    for route in &bound_routes {
+    for route in &config.routes {
         routes_by_device
             .entry(route.device.clone())
             .or_default()
             .push(route);
     }
 
-    for (device, routes) in &routes_by_device {
-        // Only generate if there's no existing ip= config for this device.
-        let has_ip_config = config.ip_configs.iter().any(|ip| ip.device == *device);
-        if !has_ip_config {
-            generate_route_only_network(&mut files, device, routes, &unbound_routes);
-        }
+    // Generate .network files for ip= parameters, merging in any routes bound to
+    // the same device (the deviceless default network absorbs unbound routes).
+    let mut devices_with_ip: BTreeSet<String> = BTreeSet::new();
+    for ip in &config.ip_configs {
+        devices_with_ip.insert(ip.device.clone());
+        let empty: Vec<&RouteConfig> = Vec::new();
+        let dev_routes = routes_by_device.get(&ip.device).unwrap_or(&empty);
+        generate_ip_network(
+            &mut files,
+            ip,
+            &config.nameservers,
+            config.peer_dns,
+            &aggregate_slaves,
+            dev_routes,
+        );
     }
 
-    // If there are unbound routes but no ip= configs, we still need something.
-    // These will be handled as part of ip= generation or need a catch-all.
-    if !unbound_routes.is_empty() && config.ip_configs.is_empty() && routes_by_device.is_empty() {
-        generate_catchall_routes(&mut files, &unbound_routes);
+    // Routes for a device (or the unbound set) with no ip= config to merge into
+    // still need their own .network file so the route is not dropped.
+    for (device, routes) in &routes_by_device {
+        if devices_with_ip.contains(device) {
+            continue; // already merged into the ip= network above
+        }
+        if device.is_empty() {
+            generate_catchall_routes(&mut files, routes);
+        } else if !aggregate_slaves.contains(device) {
+            generate_route_only_network(&mut files, device, routes, &[]);
+        }
     }
 
     files
@@ -1054,6 +1050,7 @@ fn generate_ip_network(
     nameservers: &[String],
     peer_dns: Option<bool>,
     aggregate_slaves: &BTreeSet<String>,
+    routes: &[&RouteConfig],
 ) {
     // Skip if this device is a bond slave / bridge member.
     if !ip.device.is_empty() && aggregate_slaves.contains(&ip.device) {
@@ -1163,6 +1160,18 @@ fn generate_ip_network(
     if is_static && !ip.gateway.is_empty() {
         writeln!(content, "\n[Route]").unwrap();
         writeln!(content, "Gateway={}", ip.gateway).unwrap();
+    }
+
+    // [Route] blocks for rd.route= entries bound to this device (or, for the
+    // deviceless default network, the unbound routes). C merges these into the
+    // interface's .network rather than a separate file, so that systemd (which
+    // applies only one matching .network per link) still honors them. C keeps
+    // its route list head-first (LIST_PREPEND), so it emits them in reverse of
+    // the command-line order.
+    for route in routes.iter().rev() {
+        writeln!(content, "\n[Route]").unwrap();
+        writeln!(content, "Destination={}", route.destination).unwrap();
+        writeln!(content, "Gateway={}", route.gateway).unwrap();
     }
 
     files.add(filename, content);
@@ -2770,6 +2779,26 @@ mod tests {
         let files = generate(&config);
         let netdev = &files.files["71-bond-bond0.netdev"];
         assert!(!netdev.contains("[Bond]"));
+    }
+
+    #[test]
+    fn test_route_merges_into_ip_network() {
+        // A device-bound rd.route= must merge into the interface's own .network
+        // (C behavior): systemd applies only one matching .network per link, so
+        // a route emitted as a separate file would be silently dropped.
+        let config = parse_cmdline("ip=eth0:dhcp rd.route=10.1.0.0/16:192.168.1.1:eth0");
+        let files = generate(&config);
+        assert!(
+            !files.files.keys().any(|k| k.contains("route")),
+            "route must not be a separate file: {:?}",
+            files.files.keys().collect::<Vec<_>>()
+        );
+        let net = files.files.get("70-eth0.network").expect("70-eth0.network");
+        assert!(net.contains("DHCP=ipv4"), "{net}");
+        assert!(
+            net.contains("[Route]\nDestination=10.1.0.0/16\nGateway=192.168.1.1"),
+            "{net}"
+        );
     }
 
     /// Robustness fuzz (task #22): the kernel-command-line parser and the

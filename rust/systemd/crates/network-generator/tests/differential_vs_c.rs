@@ -59,6 +59,11 @@ fn network_generator_matches_c() {
         &["net.ifname_policy=path,mac,aa:bb:cc:dd:ee:ff"], // -> 71-<mac>.link
         &["net.ifnames=0"],                               // -> nothing (udev concern)
         &["net.ifnames=1"],
+        // rd.route= merges into the interface's .network (not a separate file),
+        // so a route combined with ip= for the same device is not dropped.
+        &["ip=eth0:dhcp", "rd.route=10.1.0.0/16:192.168.1.1:eth0"],
+        &["ip=dhcp", "rd.route=10.9.0.0/16:1.2.3.4"], // -> merged into 71-default
+        &["ip=eth0:dhcp", "rd.route=10.1.0.0/16:192.168.1.1:eth0", "rd.route=10.2.0.0/16:192.168.1.1:eth0"],
     ];
 
     let mut div = Vec::new();
