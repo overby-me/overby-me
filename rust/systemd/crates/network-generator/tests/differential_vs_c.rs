@@ -60,6 +60,10 @@ fn network_generator_matches_c() {
         &["ip=[2001:db8::1]::[2001:db8::ff]:64::eth0:none"],
         &["ip=[2001:db8::5]::::server:eth0:none"],
         &["ip=[fe80::1]:::::eth0:none"],
+        // Full-form trailing [:<mtu>[:<mac>]] vs [:<dns>...]. A numeric field is
+        // the MTU (rust once emitted DNS=1500 for it); an IP field is DNS.
+        &["ip=10.0.0.2::10.0.0.1:24::eth0:none:1500"],
+        &["ip=10.0.0.2::10.0.0.1:24::eth0:none:1500:00:11:22:33:44:55"],
         &["ip=10.0.0.5::10.0.0.1:255.255.255.0::eth0:off"],
         &["ip=192.168.1.10::192.168.1.1:255.255.255.0:myhost:eth1:none"],
         &["ip=dhcp", "nameserver=8.8.8.8", "nameserver=1.1.1.1"],

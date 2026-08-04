@@ -375,9 +375,10 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
                 }
             }
         }
-        7..=10 => {
+        7.. => {
             // Full form:
-            // ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>[:<dns0>[:<dns1>[:<ntp0>]]]
+            // ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>
+            //   [:<mtu>[:<macaddr>]]  OR  [:<dns0>[:<dns1>[:<ntp0>]]]
             let mut ip = IpConfig {
                 client_ip: parts[0].to_string(),
                 server_ip: parts[1].to_string(),
@@ -388,14 +389,21 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
                 autoconf: parts[6].to_lowercase(),
                 ..Default::default()
             };
-            if parts.len() > 7 {
-                ip.dns0 = parts[7].to_string();
-            }
-            if parts.len() > 8 {
-                ip.dns1 = parts[8].to_string();
-            }
-            if parts.len() > 9 {
-                ip.ntp0 = parts[9].to_string();
+            // The fields after <autoconf> are [<mtu>][:<macaddr>] or
+            // [<dns0>[:<dns1>[:<ntp0>]]]. C tries mtu/mac first, so a numeric
+            // first field is the MTU (and the rest, which may carry the MAC's
+            // own colons, is the MAC); otherwise they are DNS then NTP addresses.
+            let trailing = &parts[7..];
+            match trailing.first() {
+                Some(first) if !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()) => {
+                    ip.mtu = (*first).to_string();
+                    ip.mac = trailing[1..].join(":");
+                }
+                _ => {
+                    ip.dns0 = trailing.first().copied().unwrap_or_default().to_string();
+                    ip.dns1 = trailing.get(1).copied().unwrap_or_default().to_string();
+                    ip.ntp0 = trailing.get(2).copied().unwrap_or_default().to_string();
+                }
             }
             // Default autoconf to "none" if client IP is set and autoconf is empty
             if !ip.client_ip.is_empty() && ip.autoconf.is_empty() {
