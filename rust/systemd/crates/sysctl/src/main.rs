@@ -275,7 +275,12 @@ fn discover_config_files() -> Vec<PathBuf> {
 /// on stdin, or as an `--inline` argument). A leading `-` on the key means
 /// errors applying it are ignored. Returns `None` for blank, comment, or
 /// malformed lines (with a diagnostic for the malformed case).
-fn parse_config_line(line: &str, source: &Path, line_number: usize) -> Option<SysctlEntry> {
+fn parse_config_line(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    fatal: &mut bool,
+) -> Option<SysctlEntry> {
     let trimmed = line.trim();
 
     // Skip empty lines and comments
@@ -287,6 +292,15 @@ fn parse_config_line(line: &str, source: &Path, line_number: usize) -> Option<Sy
     let (key_part, value_part) = if let Some(pos) = trimmed.find('=') {
         (trimmed[..pos].trim(), trimmed[pos + 1..].trim())
     } else {
+        // A line with no '=' that does not start with '-' is a hard syntax error
+        // in C systemd-sysctl: parse_line returns -EINVAL ("Line is not an
+        // assignment"), which the caller accumulates with RET_GATHER into a
+        // non-zero exit while still applying the other lines. A leading '-' with
+        // no '=' is a valid negative-match option there, not an error, so it
+        // must not be marked fatal (both C and rust exit 0 for it).
+        if !trimmed.starts_with('-') {
+            *fatal = true;
+        }
         eprintln!(
             "systemd-sysctl: {}:{}: line is not a valid key=value pair, ignoring: {}",
             source.display(),
@@ -331,21 +345,35 @@ fn parse_config_line(line: &str, source: &Path, line_number: usize) -> Option<Sy
 }
 
 /// Parse sysctl settings from a buffered reader (a file or stdin).
-fn parse_config_reader<R: io::BufRead>(reader: R, source: &Path) -> io::Result<Vec<SysctlEntry>> {
+fn parse_config_reader<R: io::BufRead>(
+    reader: R,
+    source: &Path,
+    fatal: &mut bool,
+) -> io::Result<Vec<SysctlEntry>> {
     let mut entries = Vec::new();
     for (line_idx, line) in reader.lines().enumerate() {
         let line = line?;
-        if let Some(entry) = parse_config_line(&line, source, line_idx + 1) {
+        if let Some(entry) = parse_config_line(&line, source, line_idx + 1, fatal) {
             entries.push(entry);
         }
     }
     Ok(entries)
 }
 
-/// Parse a single sysctl.d config file and return sysctl entries.
+/// Test-only 1-argument wrapper so the unit tests below don't each have to
+/// thread the fatal-config flag through every call.
+#[cfg(test)]
 fn parse_config_file(path: &Path) -> io::Result<Vec<SysctlEntry>> {
+    read_config_file(path, &mut false)
+}
+
+/// Parse a single sysctl.d config file and return sysctl entries.
+///
+/// Sets `*fatal` if any line is a hard syntax error (see `parse_config_line`),
+/// so the caller can exit non-zero like C while still applying valid settings.
+fn read_config_file(path: &Path, fatal: &mut bool) -> io::Result<Vec<SysctlEntry>> {
     let file = fs::File::open(path)?;
-    parse_config_reader(io::BufReader::new(file), path)
+    parse_config_reader(io::BufReader::new(file), path, fatal)
 }
 
 /// Normalize a prefix from /path/style to dot.style.
@@ -456,6 +484,10 @@ fn run() -> u8 {
     let mut order: Vec<String> = Vec::new();
     let mut settings: HashMap<String, SysctlEntry> = HashMap::new();
 
+    // Set when any source has a hard syntax error; makes the exit non-zero even
+    // if every valid setting applies, matching C systemd-sysctl's RET_GATHER.
+    let mut fatal_parse = false;
+
     if cli.inline {
         // Positional arguments are literal `key=value` settings, parsed with
         // the same rules as config-file lines (including the '-' ignore prefix).
@@ -464,7 +496,9 @@ fn run() -> u8 {
             .files
             .iter()
             .enumerate()
-            .filter_map(|(i, arg)| parse_config_line(&arg.to_string_lossy(), &source, i + 1))
+            .filter_map(|(i, arg)| {
+                parse_config_line(&arg.to_string_lossy(), &source, i + 1, &mut fatal_parse)
+            })
             .collect();
         merge_entries(entries, &mut order, &mut settings);
     } else {
@@ -490,9 +524,13 @@ fn run() -> u8 {
                 path.display().to_string()
             };
             let parsed = if is_stdin {
-                parse_config_reader(io::stdin().lock(), Path::new("(standard input)"))
+                parse_config_reader(
+                    io::stdin().lock(),
+                    Path::new("(standard input)"),
+                    &mut fatal_parse,
+                )
             } else {
-                parse_config_file(path)
+                read_config_file(path, &mut fatal_parse)
             };
             match parsed {
                 Ok(entries) => {
@@ -516,7 +554,13 @@ fn run() -> u8 {
         if verbose {
             eprintln!("systemd-sysctl: No sysctl settings to apply.");
         }
-        return EXIT_SUCCESS;
+        // A config with only a syntax error and no valid settings must still
+        // fail, like C (e.g. a lone "not an assignment" line).
+        return if fatal_parse {
+            EXIT_FAILURE
+        } else {
+            EXIT_SUCCESS
+        };
     }
 
     // Normalize prefixes: convert /path/style to dot.style
@@ -541,7 +585,8 @@ fn run() -> u8 {
         }
     }
 
-    if any_failed {
+    // A syntax error is fatal even when every valid setting applied cleanly.
+    if any_failed || fatal_parse {
         EXIT_FAILURE
     } else {
         EXIT_SUCCESS
@@ -651,6 +696,45 @@ mod tests {
         assert!(!entries[2].ignore_error);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fatal_flag_matches_c_classification() {
+        // C systemd-sysctl treats exactly one config syntax error as fatal: a
+        // line with no '=' that does not start with '-' ("Line is not an
+        // assignment", parse_line returns -EINVAL). It still applies the other
+        // lines but exits non-zero. A leading '-' with no '=' is a valid
+        // negative-match option (not an error), an empty key is not a parse
+        // error (only a later write may fail), and valid/blank/comment lines are
+        // clean. Verify the fatal flag mirrors that.
+        let src = Path::new("test.conf");
+        let fatal = |line: &str| {
+            let mut f = false;
+            let _ = parse_config_line(line, src, 1, &mut f);
+            f
+        };
+
+        // Fatal: no '=' and no leading '-'.
+        assert!(fatal("badnoeq"), "non-assignment line must be fatal");
+        assert!(fatal("kernel core pattern"), "spaced junk must be fatal");
+
+        // Not fatal: negative-match option with no '='.
+        assert!(!fatal("-kernel.nonexistent"), "negative match not fatal");
+        // Not fatal: empty key (C errors only at write time, not at parse).
+        assert!(!fatal("= 5"), "empty key is not a parse error");
+        assert!(!fatal("- = 5"), "empty key after prefix is not a parse error");
+        // Not fatal: valid assignments, blanks, and comments.
+        assert!(!fatal("vm.swappiness = 60"), "valid line not fatal");
+        assert!(!fatal("-net.ipv4.ip_forward = 1"), "valid ignore-prefix line");
+        assert!(!fatal(""), "empty line not fatal");
+        assert!(!fatal("   "), "whitespace line not fatal");
+        assert!(!fatal("# comment"), "hash comment not fatal");
+        // NOTE a divergence, not parity: rust treats a leading ';' as a comment,
+        // but C systemd-sysctl does not and reports "; ..." as "Line is not an
+        // assignment" (exit 1). This is the same rust-accepts-a-superset
+        // leniency class as invalid octal modes / CIDRs (task #31), deliberately
+        // left as-is; the exit-code fix above does not touch comment parsing.
+        assert!(!fatal("; comment"), "rust treats semicolon as a comment (#31)");
     }
 
     #[test]
