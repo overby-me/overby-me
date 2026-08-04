@@ -268,6 +268,54 @@ impl JobRegistry {
         Some(job)
     }
 
+    /// Wake the Waiting jobs whose readiness may have changed because
+    /// `finished` just completed. This is upstream's `job_finish_and_invalidate`
+    /// (job.c) reduced to its one load-bearing rule: finishing a job
+    /// re-evaluates the Waiting jobs of the units ordered against it, and
+    /// enqueues the ones that are now ready. That single rule is what lets a
+    /// Waiting job park at zero cost and be woken only by events — it replaces
+    /// the fixpoint sweep, the goal re-drive and the upholds retry threads
+    /// (docs/EVENT-LOOP.md, "Inc 4").
+    ///
+    /// `ordered_after(u)` yields the units ordered *after* `u` — its `Before=`
+    /// neighbours, i.e. the units that were waiting on `u`. `is_ready(v)`
+    /// re-evaluates whether `v`'s ordering prerequisites are now all met (the
+    /// live caller wraps [`unstarted_deps`](crate::units::unitset_manipulation::activate::unstarted_deps),
+    /// checking it is empty). Both relations are injected so the rule is pure
+    /// over the graph and exercisable without a live unit table: PID 1 passes
+    /// the real `Before=` walk and predicate; a test passes fixtures.
+    ///
+    /// Only a neighbour that still holds an installed `Waiting` job and is now
+    /// ready is enqueued (a Running or already-queued job is left alone by
+    /// [`Self::enqueue`]'s guards). Returns the job IDs newly moved onto the run
+    /// queue, for the dispatcher to log and for tests to assert on.
+    pub fn requeue_after_finish(
+        &mut self,
+        finished: &UnitId,
+        ordered_after: impl Fn(&UnitId) -> Vec<UnitId>,
+        is_ready: impl Fn(&UnitId) -> bool,
+    ) -> Vec<JobId> {
+        let mut woken = Vec::new();
+        for neighbour in ordered_after(finished) {
+            let Some(&id) = self.by_unit.get(&neighbour) else {
+                // No installed job for this neighbour: nothing to wake.
+                continue;
+            };
+            let waiting = self
+                .jobs
+                .get(&id)
+                .is_some_and(|job| job.state == JobState::Waiting);
+            if waiting && is_ready(&neighbour) {
+                let already_queued = self.run_queue.contains(&id);
+                self.enqueue(id);
+                if !already_queued && !woken.contains(&id) {
+                    woken.push(id);
+                }
+            }
+        }
+        woken
+    }
+
     #[must_use]
     pub fn get(&self, id: JobId) -> Option<&Job> {
         self.jobs.get(&id)
@@ -395,6 +443,13 @@ mod tests {
     fn uid(name: &str) -> UnitId {
         UnitId {
             kind: UnitIdKind::Service,
+            name: name.to_owned(),
+        }
+    }
+
+    fn tid(name: &str) -> UnitId {
+        UnitId {
+            kind: UnitIdKind::Target,
             name: name.to_owned(),
         }
     }
@@ -554,6 +609,110 @@ mod tests {
         // defends against one regardless, and still returns the live job.
         reg.run_queue.push_front(a);
         assert_eq!(reg.pop_ready(), Some(b));
+        assert_eq!(reg.pop_ready(), None);
+    }
+
+    // --- increment 4: requeue-on-finish (job_finish_and_invalidate) ---
+
+    #[test]
+    fn requeue_only_wakes_ready_installed_waiting_neighbours() {
+        let mut reg = JobRegistry::new();
+        // a: Waiting + ready -> woken. b: ready but already Running -> skipped
+        // by enqueue's guard. c: a neighbour with no installed job -> skipped.
+        let a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        let b = create(&mut reg, "b.service", JobKind::Start, JobMode::Replace).unwrap();
+        reg.set_running(b);
+        let neighbours = |_: &UnitId| vec![uid("a.service"), uid("b.service"), uid("c.service")];
+        // Report a and b as ready; only a is Waiting, and c has no job at all.
+        let ready = |v: &UnitId| matches!(v.name.as_str(), "a.service" | "b.service");
+        let woken = reg.requeue_after_finish(&uid("x.service"), neighbours, ready);
+        assert_eq!(woken, vec![a]);
+        assert_eq!(reg.pop_ready(), Some(a));
+        assert_eq!(reg.pop_ready(), None); // b (Running) and c (no job) never queued
+    }
+
+    #[test]
+    fn requeue_is_idempotent() {
+        let mut reg = JobRegistry::new();
+        let a = create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
+        let neighbours = |_: &UnitId| vec![uid("a.service")];
+        let first = reg.requeue_after_finish(&uid("x.service"), &neighbours, |_| true);
+        assert_eq!(first, vec![a]);
+        // Already queued: a second finish of the same dep must not re-report it.
+        let second = reg.requeue_after_finish(&uid("x.service"), &neighbours, |_| true);
+        assert!(second.is_empty(), "an already-queued job is not woken again");
+        assert_eq!(reg.pop_ready(), Some(a));
+        assert_eq!(reg.pop_ready(), None);
+    }
+
+    /// The `local-fs-pre.target` wedge in one pure test: a target ordered after
+    /// its members, with a service ordered after the target. Finishing the
+    /// members must thread the target through (it holds no process, so nothing
+    /// else can), and finishing the target must in turn wake the service. The
+    /// reverted inc-4 engine wedged here because a finished member never
+    /// re-evaluated the target, so the dispatcher went silent with the target
+    /// Waiting forever. This asserts the requeue rule threads the whole chain.
+    #[test]
+    fn requeue_threads_a_target_through_its_members() {
+        use std::collections::{HashMap, HashSet};
+
+        let mut reg = JobRegistry::new();
+        let m1 = create(&mut reg, "m1.service", JobKind::Start, JobMode::Replace).unwrap();
+        let m2 = create(&mut reg, "m2.service", JobKind::Start, JobMode::Replace).unwrap();
+        let t = reg
+            .create(
+                tid("local-fs-pre.target"),
+                JobKind::Start,
+                ActivationSource::Regular,
+                JobMode::Replace,
+            )
+            .unwrap();
+        let s = create(&mut reg, "s.service", JobKind::Start, JobMode::Replace).unwrap();
+
+        // Before= adjacency (who is ordered *after* each unit, keyed by name).
+        let mut before: HashMap<&str, Vec<UnitId>> = HashMap::new();
+        before.insert("m1.service", vec![tid("local-fs-pre.target")]);
+        before.insert("m2.service", vec![tid("local-fs-pre.target")]);
+        before.insert("local-fs-pre.target", vec![uid("s.service")]);
+        let ordered_after = |u: &UnitId| before.get(u.name.as_str()).cloned().unwrap_or_default();
+
+        // After= adjacency: a unit is ready once all its After= deps finished.
+        let mut after: HashMap<&str, Vec<&str>> = HashMap::new();
+        after.insert("local-fs-pre.target", vec!["m1.service", "m2.service"]);
+        after.insert("s.service", vec!["local-fs-pre.target"]);
+        let ready_with = |finished: &HashSet<String>, v: &UnitId| {
+            after
+                .get(v.name.as_str())
+                .is_none_or(|deps| deps.iter().all(|d| finished.contains(*d)))
+        };
+
+        let mut finished: HashSet<String> = HashSet::new();
+
+        // m1 finishes first: the target still waits on m2, so nothing wakes.
+        reg.finish(m1, JobResult::Done);
+        finished.insert("m1.service".to_owned());
+        let woken = reg.requeue_after_finish(&uid("m1.service"), &ordered_after, |v| {
+            ready_with(&finished, v)
+        });
+        assert!(woken.is_empty(), "target must not wake on a partial member set");
+
+        // m2 finishes: the target is now ready and must be enqueued.
+        reg.finish(m2, JobResult::Done);
+        finished.insert("m2.service".to_owned());
+        let woken = reg.requeue_after_finish(&uid("m2.service"), &ordered_after, |v| {
+            ready_with(&finished, v)
+        });
+        assert_eq!(woken, vec![t], "both members done -> target ready");
+        assert_eq!(reg.pop_ready(), Some(t));
+
+        // The target finishes (no process of its own): the service must wake.
+        reg.finish(t, JobResult::Done);
+        finished.insert("local-fs-pre.target".to_owned());
+        let woken = reg.requeue_after_finish(&tid("local-fs-pre.target"), &ordered_after, |v| {
+            ready_with(&finished, v)
+        });
+        assert_eq!(woken, vec![s], "target done -> service after it ready");
+        assert_eq!(reg.pop_ready(), Some(s));
         assert_eq!(reg.pop_ready(), None);
     }
 }
