@@ -438,7 +438,7 @@ pub fn UserProfile(id: String) -> Element {
     let tok2 = access_token.clone();
     let memberships = crate::use_data_resource!(|(uid2, tok2)| async move {
         let mut out = Vec::new();
-        for mime in ["wiki/group", "wiki/event"] {
+        for mime in crate::model::CONTEXT_MIMES {
             if let Ok(nodes) = graphql::query_contexts(tok2.as_deref(), &uid2, mime).await {
                 out.extend(nodes);
             }

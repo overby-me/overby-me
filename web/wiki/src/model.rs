@@ -312,13 +312,32 @@ pub struct Crumb {
     pub data: Option<Jsonb>,
 }
 
+/// The mimes that are CONTEXTS: a place with its own members, permissions, apps
+/// and drawer tree, as opposed to a folder that merely sits inside one.
+///
+/// - `wiki/group` is a standing body: it has members.
+/// - `wiki/event` is a meeting: members, an agenda, a projector, a ballot.
+/// - `wiki/site` is a place that PUBLISHES. It need not have members at all,
+///   which is why a blog was a poor fit for a group: it dragged in invitations
+///   and a member list that meant nothing there.
+///
+/// Named once, because the alternative is what this list replaced: nine places
+/// that each spelled out two of them, where missing one meant a new context type
+/// silently failed to act as a context.
+pub const CONTEXT_MIMES: &[&str] = &["wiki/group", "wiki/event", "wiki/site"];
+
+/// Whether this mime is a [context](CONTEXT_MIMES).
+pub fn is_context_mime(mime: Option<&str>) -> bool {
+    mime.is_some_and(|m| CONTEXT_MIMES.contains(&m))
+}
+
 /// How many leading path segments belong to the current node's context: the
-/// depth of the deepest group/event in the crumbs (the node's `contextId` in the
-/// React app). 0 means the path has no context (the groups/events home applies).
+/// depth of the deepest context in the crumbs (the node's `contextId` in the
+/// React app). 0 means the path has no context (the places home applies).
 pub fn deepest_context_depth(crumbs: &[Crumb]) -> usize {
     crumbs
         .iter()
-        .rposition(|c| matches!(c.mime_id.as_deref(), Some("wiki/group" | "wiki/event")))
+        .rposition(|c| is_context_mime(c.mime_id.as_deref()))
         .map(|i| i + 1)
         .unwrap_or(0)
 }
@@ -390,4 +409,58 @@ pub struct MembersSetInput {
     pub hidden: Option<bool>,
     pub node_id: Option<Uuid>,
     pub parent_id: Option<Uuid>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{deepest_context_depth, is_context_mime, Crumb, CONTEXT_MIMES};
+
+    fn crumb(mime: &str) -> Crumb {
+        Crumb {
+            key: mime.to_string(),
+            name: mime.to_string(),
+            mime_id: Some(mime.to_string()),
+            ordinal: None,
+            data: None,
+        }
+    }
+
+    /// A site is a place, the same as a group or an event. This is the check the
+    /// rest of the app routes through, so if it is wrong a site quietly stops
+    /// behaving like a context: the drawer roots its tree at the wrong node and
+    /// the apps belong to whatever is above it.
+    #[test]
+    fn a_site_is_a_context_like_the_others() {
+        for mime in CONTEXT_MIMES {
+            assert!(is_context_mime(Some(mime)), "{mime} should be a context");
+        }
+        assert!(is_context_mime(Some("wiki/site")));
+        for mime in ["wiki/folder", "wiki/document", "wiki/home", "wiki/file"] {
+            assert!(!is_context_mime(Some(mime)), "{mime} is not a place");
+        }
+        assert!(!is_context_mime(None));
+    }
+
+    /// The context is the DEEPEST place in the trail, so a site nested in a group
+    /// wins over the group, exactly as a nested event does.
+    #[test]
+    fn the_deepest_place_wins() {
+        assert_eq!(deepest_context_depth(&[]), 0);
+        assert_eq!(
+            deepest_context_depth(&[crumb("wiki/folder"), crumb("wiki/document")]),
+            0
+        );
+        assert_eq!(
+            deepest_context_depth(&[crumb("wiki/site"), crumb("wiki/document")]),
+            1
+        );
+        assert_eq!(
+            deepest_context_depth(&[
+                crumb("wiki/group"),
+                crumb("wiki/site"),
+                crumb("wiki/folder")
+            ]),
+            2
+        );
+    }
 }

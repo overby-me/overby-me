@@ -1227,7 +1227,13 @@ mod tests {
     fn places_and_files_stay_on_their_page() {
         // A folder is filled by adding children, not by writing; a file is the
         // upload that was already chosen in the dialog.
-        for mime in ["wiki/folder", "wiki/group", "wiki/event", "wiki/file"] {
+        for mime in [
+            "wiki/folder",
+            "wiki/group",
+            "wiki/event",
+            "wiki/site",
+            "wiki/file",
+        ] {
             assert!(!opens_in_editor(mime), "{mime} is not its text");
         }
     }

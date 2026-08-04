@@ -256,7 +256,7 @@ pub fn MimeLoader(
         },
         "wiki/file" => rsx! { FileApp { node: node.clone() } },
         "wiki/home" => rsx! { HomeApp {} },
-        "wiki/group" | "wiki/event" => {
+        m if crate::model::is_context_mime(Some(m)) => {
             rsx! { FolderApp { node: node.clone(), parent_path: path, projector } }
         }
         "vote/policy" | "vote/change" => {
@@ -425,6 +425,9 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "wiki/home" | "app/home" => "home",
         "wiki/group" | "app/member" => "group",
         "wiki/event" => "event",
+        // A site publishes rather than convenes, so neither the people glyph nor
+        // the calendar one fits: this is the page-layout glyph.
+        "wiki/site" => "web",
         "wiki/folder" | "app/folder" => "folder",
         "wiki/document" => "article",
         "canvas/canvas" | "app/canvas" | "app/pixel" => "grid_on",

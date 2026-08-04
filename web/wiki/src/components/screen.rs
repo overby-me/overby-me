@@ -22,10 +22,11 @@ fn content_trail(crumbs: Vec<crate::model::Crumb>) -> Vec<crate::model::Crumb> {
     crumbs
         .into_iter()
         .filter(|c| {
-            !matches!(
-                c.mime_id.as_deref().unwrap_or(""),
-                "wiki/group" | "wiki/event" | "wiki/folder" | "wiki/home"
-            )
+            let mime = c.mime_id.as_deref().unwrap_or("");
+            // Places and the containers inside them say where the room is, not
+            // what it is deciding.
+            !crate::model::is_context_mime(Some(mime))
+                && !matches!(mime, "wiki/folder" | "wiki/home")
         })
         .collect()
 }

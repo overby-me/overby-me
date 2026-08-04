@@ -519,6 +519,7 @@ pub(super) fn place_name(
     match context_mime {
         Some("wiki/group") => ("wiki/group", "mime.group"),
         Some("wiki/event") => ("wiki/event", "mime.event"),
+        Some("wiki/site") => ("wiki/site", "mime.site"),
         // A path with no group or event above it, or crumbs that have not
         // arrived: the context is a plain folder, and so is the name.
         _ => ("wiki/folder", "mime.folder"),

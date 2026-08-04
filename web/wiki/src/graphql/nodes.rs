@@ -1014,11 +1014,7 @@ pub(crate) fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
         ("vote/vote", "member", &["vote/poll"]),
         ("vote/policy", "member", &["wiki/folder"]),
         ("vote/candidate", "member", &["vote/position"]),
-        (
-            "wiki/document",
-            "owner",
-            &["wiki/event", "wiki/folder", "wiki/group"],
-        ),
+        ("wiki/document", "owner", CONTAINER_PARENTS),
         (
             "vote/poll",
             "owner",
@@ -1054,23 +1050,11 @@ pub(crate) fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
             "member",
             &["vote/policy", "vote/change", "wiki/file"],
         ),
-        (
-            "wiki/folder",
-            "owner",
-            &["wiki/folder", "wiki/group", "wiki/event"],
-        ),
+        ("wiki/folder", "owner", CONTAINER_PARENTS),
         ("vote/position", "owner", &["wiki/folder"]),
-        (
-            "wiki/file",
-            "owner",
-            &["wiki/event", "wiki/folder", "wiki/group"],
-        ),
+        ("wiki/file", "owner", CONTAINER_PARENTS),
         // Speaker lists (talerlister): owner-managed, one or more per context.
-        (
-            "speak/list",
-            "owner",
-            &["wiki/event", "wiki/group", "wiki/folder"],
-        ),
+        ("speak/list", "owner", CONTAINER_PARENTS),
     ];
     let objs: Vec<serde_json::Value> = rules
         .iter()
@@ -1092,6 +1076,15 @@ pub(crate) fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
         .collect();
     serde_json::Value::Array(objs)
 }
+
+/// The parent mimes content may be created directly under: every context type
+/// ([`model::CONTEXT_MIMES`]) plus a plain folder inside one.
+///
+/// Named once for the same reason the context list is: four rules above spelled
+/// out the same three mimes in three different orders, so adding a context type
+/// meant finding all of them and getting all of them right.
+pub(crate) const CONTAINER_PARENTS: &[&str] =
+    &["wiki/event", "wiki/folder", "wiki/group", "wiki/site"];
 
 /// The parent mimes a `vote/reaction` may be created under. Reactions attach to
 /// comments today; the wider content set keeps them consistent with `vote/comment`
