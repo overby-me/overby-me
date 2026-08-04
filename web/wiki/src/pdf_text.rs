@@ -906,7 +906,12 @@ struct Drawn {
     pictures: Vec<(f64, Picture)>,
 }
 
-fn page_runs(doc: &Document, page_id: lopdf::ObjectId, budget: &mut usize) -> Drawn {
+fn page_runs(
+    doc: &Document,
+    page_id: lopdf::ObjectId,
+    budget: &mut usize,
+    links: &[LinkArea],
+) -> Drawn {
     let fonts: HashMap<Vec<u8>, Font> = match doc.get_page_fonts(page_id) {
         Ok(map) => map
             .into_iter()
@@ -1011,6 +1016,7 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId, budget: &mut usize) -> Dr
                         &mut tm,
                         ctm,
                         fill.as_deref(),
+                        links,
                         &mut runs,
                     );
                 }
@@ -1029,6 +1035,7 @@ fn page_runs(doc: &Document, page_id: lopdf::ObjectId, budget: &mut usize) -> Dr
                                 &mut tm,
                                 ctm,
                                 fill.as_deref(),
+                                links,
                                 &mut runs,
                             ),
                             other => {
@@ -1114,37 +1121,71 @@ fn show(
     tm: &mut [f64; 6],
     ctm: [f64; 6],
     color: Option<&str>,
+    links: &[LinkArea],
     runs: &mut Vec<Run>,
 ) {
     let Some(font) = font else { return };
     let at = mul(*tm, ctm);
     let scale = (at[0] * at[0] + at[1] * at[1]).sqrt().max(0.01);
+    // A link covers a BOX, and a draw call is under no obligation to stop at its
+    // edge: one call can carry a name, an address and a telephone number, of
+    // which the file linked only the middle. So the glyphs are walked and the
+    // run is cut wherever the link under the pen changes, which is what puts the
+    // link on the address rather than on the line it sits in.
     let mut text = String::new();
     let mut advance = 0.0;
+    let mut piece_at = 0.0;
+    let mut piece_link: Option<Link> = None;
+    let mut started = false;
+    let cut = |from: f64, to: f64, text: &mut String, link: &Option<Link>, runs: &mut Vec<Run>| {
+        let start = mul(mul([1.0, 0.0, 0.0, 1.0, from, 0.0], *tm), ctm);
+        let end = mul(mul([1.0, 0.0, 0.0, 1.0, to, 0.0], *tm), ctm);
+        if !text.trim().is_empty() {
+            runs.push(Run {
+                link: link.clone(),
+                x: start[4],
+                end_x: end[4],
+                y: start[5],
+                size: size * scale,
+                text: std::mem::take(text),
+                color: color.map(str::to_string),
+                bold: font.bold,
+                italic: font.italic,
+            });
+        }
+        text.clear();
+    };
     for (code, s) in font.decode(bytes) {
-        text.push_str(&s);
         let w = font.width(code) / 1000.0 * size;
         let extra = if !font.two_byte && code == 32 {
             word_space
         } else {
             0.0
         };
-        advance += (w + char_space + extra) * h_scale;
+        let step = (w + char_space + extra) * h_scale;
+        // Which link holds this glyph, decided at its middle: a glyph half
+        // inside a box belongs to whichever side has most of it.
+        let mid = mul(
+            mul([1.0, 0.0, 0.0, 1.0, advance + step / 2.0, 0.0], *tm),
+            ctm,
+        );
+        let here = links
+            .iter()
+            .find(|a| a.holds(mid[4], mid[5]))
+            .map(|a| a.link.clone());
+        if started && here != piece_link {
+            cut(piece_at, advance, &mut text, &piece_link, runs);
+            piece_at = advance;
+        }
+        if !started {
+            piece_at = advance;
+            started = true;
+        }
+        piece_link = here;
+        text.push_str(&s);
+        advance += step;
     }
-    let after = mul(mul([1.0, 0.0, 0.0, 1.0, advance, 0.0], *tm), ctm);
-    if !text.trim().is_empty() {
-        runs.push(Run {
-            link: None,
-            x: at[4],
-            end_x: after[4],
-            y: at[5],
-            size: size * scale,
-            text,
-            color: color.map(str::to_string),
-            bold: font.bold,
-            italic: font.italic,
-        });
-    }
+    cut(piece_at, advance, &mut text, &piece_link, runs);
     *tm = mul([1.0, 0.0, 0.0, 1.0, advance, 0.0], *tm);
 }
 
@@ -1289,7 +1330,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         }
         prev_end = run.end_x;
     }
-    let spans = tidy(spans);
+    let spans = mend_email_spans(tidy(spans));
     if spans.is_empty() {
         return None;
     }
@@ -1841,11 +1882,9 @@ impl LinkArea {
     /// its ascenders and descenders may not be. Horizontally, any overlap at
     /// all: a link ends mid-run only if a producer split it there, and half a
     /// word linked is worse than one word too many.
-    fn covers(&self, run: &Run) -> bool {
-        run.y >= self.y0 - 1.0
-            && run.y <= self.y1 + 1.0
-            && run.end_x > self.x0 + 0.5
-            && run.x < self.x1 - 0.5
+    /// Whether one point on the page falls inside this box.
+    fn holds(&self, x: f64, y: f64) -> bool {
+        y >= self.y0 - 1.0 && y <= self.y1 + 1.0 && x > self.x0 && x < self.x1
     }
 }
 
@@ -2033,6 +2072,108 @@ fn page_links(
     areas
 }
 
+/// Put an email link on the address it names, and point it there.
+///
+/// A stale annotation is worse here than anywhere else in a document, because
+/// the reader cannot see where a link goes before following it, and following
+/// it writes to a stranger. The samværspolitik is the case in hand: its
+/// Trustmember list was retyped and the link boxes were not moved, so one box
+/// sits exactly on `msthorup@gmail.com` while naming `magnus@muj.dk`, and
+/// another covers two whole lines belonging to two other people.
+///
+/// The address is written right there in the text, so it decides. Any address
+/// in the line becomes its own link to itself, and a mailto the file put on
+/// words that are not an address is dropped when the line has one, because a
+/// name linked to somebody else's inbox is the harm being undone. Where a line
+/// carries no address at all, a mailto on a name is left alone: that one can
+/// only be what the file says it is.
+fn mend_email_spans(spans: Vec<Span>) -> Vec<Span> {
+    let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+    let found = emails_in(&text);
+    if found.is_empty() {
+        return spans;
+    }
+    // Character by character, so a span may be cut anywhere an address starts or
+    // ends without the offsets having to be tracked through the spans.
+    let mut chars: Vec<(char, Span)> = Vec::new();
+    for span in &spans {
+        for c in span.text.chars() {
+            chars.push((
+                c,
+                Span {
+                    text: String::new(),
+                    ..span.clone()
+                },
+            ));
+        }
+    }
+    for (from, to, address) in &found {
+        for (_, span) in chars.iter_mut().take(*to).skip(*from) {
+            span.link = Some(Link::Url(format!("mailto:{address}")));
+        }
+    }
+    // And off everything else on the line: those are the stale ones.
+    for (at, (_, span)) in chars.iter_mut().enumerate() {
+        let inside = found.iter().any(|(from, to, _)| at >= *from && at < *to);
+        if !inside && matches!(&span.link, Some(Link::Url(u)) if u.starts_with("mailto:")) {
+            span.link = None;
+        }
+    }
+    // Back into spans, merging what still matches.
+    let mut out: Vec<Span> = Vec::new();
+    for (c, attrs) in chars {
+        match out.last_mut() {
+            Some(last) if last.matches(&attrs) => last.text.push(c),
+            _ => out.push(Span {
+                text: c.to_string(),
+                ..attrs
+            }),
+        }
+    }
+    out
+}
+
+/// Every email address in a line, as character ranges.
+///
+/// Found by looking either side of an `@`, which is what makes an address an
+/// address. No pattern language: the shapes worth matching are simple, and the
+/// ones that are not are not addresses.
+fn emails_in(text: &str) -> Vec<(usize, usize, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    let local = |c: char| c.is_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-');
+    let host = |c: char| c.is_alphanumeric() || matches!(c, '.' | '-');
+    let mut out: Vec<(usize, usize, String)> = Vec::new();
+    for (at, c) in chars.iter().enumerate() {
+        if *c != '@' {
+            continue;
+        }
+        let mut from = at;
+        while from > 0 && local(chars[from - 1]) {
+            from -= 1;
+        }
+        let mut to = at + 1;
+        while to < chars.len() && host(chars[to]) {
+            to += 1;
+        }
+        // A trailing stop is the sentence's, not the address's.
+        while to > at + 1 && chars[to - 1] == '.' {
+            to -= 1;
+        }
+        // Something before the @, and a dotted host after it with a real suffix.
+        let domain: String = chars[at + 1..to].iter().collect();
+        let suffix = domain.rsplit('.').next().unwrap_or_default();
+        if from == at || !domain.contains('.') || suffix.len() < 2 {
+            continue;
+        }
+        // Overlapping matches cannot happen, but a run of @s could produce one.
+        if out.last().is_some_and(|(_, prev, _)| *prev > from) {
+            continue;
+        }
+        out.push((from, to, chars[from..to].iter().collect()));
+    }
+    out
+}
+
 /// Only the web schemes, and only as an absolute address.
 ///
 /// A PDF can ask a viewer to open anything it likes, and this one is opening it
@@ -2160,14 +2301,10 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     let mut per_page: Vec<Vec<Line>> = Vec::new();
     let mut budget = PICTURE_BUDGET;
     for (page_no, (_, page_id)) in pages.into_iter().enumerate() {
-        let mut drawn = page_runs(&doc, page_id, &mut budget);
         // The links live beside the content stream rather than in it, so they
-        // are laid over the runs once those are known.
-        for area in page_links(&doc, page_id, &by_id, &mut places) {
-            for run in drawn.runs.iter_mut().filter(|r| area.covers(r)) {
-                run.link = Some(area.link.clone());
-            }
-        }
+        // are read first and handed to the walk, which cuts its runs on them.
+        let areas = page_links(&doc, page_id, &by_id, &mut places);
+        let drawn = page_runs(&doc, page_id, &mut budget, &areas);
         let mut lines = lines_from(drawn.runs);
         for line in &mut lines {
             line.page = page_no + 1;
@@ -2424,7 +2561,7 @@ fn furniture_of(bytes: &[u8]) -> (Vec<String>, HashMap<usize, String>) {
     let mut per_page: Vec<Vec<Line>> = Vec::new();
     let mut budget = PICTURE_BUDGET;
     for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
-        let drawn = page_runs(&doc, page_id, &mut budget);
+        let drawn = page_runs(&doc, page_id, &mut budget, &[]);
         let mut lines = lines_from(drawn.runs);
         for line in &mut lines {
             line.page = page_no + 1;
@@ -2447,6 +2584,32 @@ fn furniture_of(bytes: &[u8]) -> (Vec<String>, HashMap<usize, String>) {
     (gone, printed)
 }
 
+/// The link boxes one page draws over itself, for the harness to show beside the
+/// runs they are supposed to land on.
+#[cfg(test)]
+fn page_areas(bytes: &[u8], want: usize) -> Vec<(f64, f64, f64, f64, Link)> {
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    let pages = doc.get_pages();
+    let by_id: HashMap<lopdf::ObjectId, usize> = pages
+        .iter()
+        .enumerate()
+        .map(|(at, (_, id))| (*id, at))
+        .collect();
+    let mut places = Vec::new();
+    for (page_no, (_, page_id)) in pages.iter().enumerate() {
+        if page_no + 1 != want {
+            continue;
+        }
+        return page_links(&doc, *page_id, &by_id, &mut places)
+            .into_iter()
+            .map(|a| (a.x0, a.y0, a.x1, a.y1, a.link))
+            .collect();
+    }
+    Vec::new()
+}
+
 /// Every run one page drew, before they are joined into lines. The lens for
 /// word-gap questions: what the joiner sees is where a missing space comes from.
 #[cfg(test)]
@@ -2455,9 +2618,17 @@ fn page_runs_raw(bytes: &[u8], want: usize) -> Vec<Run> {
         return Vec::new();
     };
     let mut budget = PICTURE_BUDGET;
-    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+    let pages = doc.get_pages();
+    let by_id: HashMap<lopdf::ObjectId, usize> = pages
+        .iter()
+        .enumerate()
+        .map(|(at, (_, id))| (*id, at))
+        .collect();
+    let mut places = Vec::new();
+    for (page_no, (_, page_id)) in pages.iter().enumerate() {
         if page_no + 1 == want {
-            return page_runs(&doc, page_id, &mut budget).runs;
+            let areas = page_links(&doc, *page_id, &by_id, &mut places);
+            return page_runs(&doc, *page_id, &mut budget, &areas).runs;
         }
     }
     Vec::new()
@@ -2475,7 +2646,7 @@ fn page_lines(bytes: &[u8], want: usize) -> Vec<Line> {
         if page_no + 1 != want {
             continue;
         }
-        let drawn = page_runs(&doc, page_id, &mut budget);
+        let drawn = page_runs(&doc, page_id, &mut budget, &[]);
         let mut lines = lines_from(drawn.runs);
         lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
         return lines;
@@ -2607,6 +2778,16 @@ mod harness {
                 .unwrap_or_default();
             lands.insert(id.clone(), after.chars().take(46).collect());
         }
+        // Every linked stretch of words beside the address it goes to, which is
+        // the only way to see that a link points where it looks like it points.
+        println!("  linked text -> destination:");
+        for block in doc.blocks.iter() {
+            for span in block.spans() {
+                if let Some(super::Link::Url(url)) = &span.link {
+                    println!("    {:?} -> {url}", span.text.trim());
+                }
+            }
+        }
         let mut shown = 0;
         let mut rows = 0;
         for block in doc.blocks.iter() {
@@ -2675,6 +2856,13 @@ mod harness {
         };
         let bytes = std::fs::read(&path).expect("read");
         let want = std::env::var("PDF_NEAR").unwrap_or_default();
+        println!("--- page {page} link boxes ---");
+        for (x0, y0, x1, y1, link) in super::page_areas(&bytes, page) {
+            println!(
+                "  x {x0:>7.1}..{x1:<7.1} y {y0:>7.1}..{y1:<7.1} h={:<5.1} {link:?}",
+                y1 - y0
+            );
+        }
         let mut runs = super::page_runs_raw(&bytes, page);
         runs.sort_by(|a, b| {
             b.y.partial_cmp(&a.y)
@@ -3409,6 +3597,71 @@ mod tests {
             texts(&blocks),
             vec!["Sidste linje på side et", "", "", "Første linje på side to"]
         );
+    }
+
+    /// An address is found by looking either side of the @.
+    #[test]
+    fn an_address_is_found_in_a_line_of_prose() {
+        let line = "Marie Strunge Thorup, msthorup@gmail.com, 23 60 66 61.";
+        let found = emails_in(line);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].2, "msthorup@gmail.com",
+            "and not the comma after it"
+        );
+        // A sentence's full stop is the sentence's.
+        assert_eq!(
+            emails_in("Skriv til anja@example.dk.")[0].2,
+            "anja@example.dk"
+        );
+        // Two on a line, both found.
+        assert_eq!(emails_in("a@b.dk og c@d.org").len(), 2);
+        // And what is not an address.
+        assert!(emails_in("klokken 12@13").is_empty());
+        assert!(emails_in("@handle").is_empty());
+        assert!(emails_in("a@b").is_empty(), "a host needs a dot");
+    }
+
+    /// The harm being undone: a link box left behind when the text under it was
+    /// retyped, so it names one person and sits on another.
+    #[test]
+    fn a_stale_email_link_is_pointed_at_the_address_it_sits_on() {
+        let stale = Some(Link::Url("mailto:magnus@muj.dk".into()));
+        let spans = vec![Span {
+            text: "Marie Strunge Thorup, msthorup@gmail.com, 23 60 66 61".into(),
+            color: None,
+            bold: false,
+            italic: false,
+            link: stale,
+        }];
+        let mended = mend_email_spans(spans);
+        let linked: Vec<(&str, &Link)> = mended
+            .iter()
+            .filter_map(|s| s.link.as_ref().map(|l| (s.text.as_str(), l)))
+            .collect();
+        assert_eq!(
+            linked,
+            vec![(
+                "msthorup@gmail.com",
+                &Link::Url("mailto:msthorup@gmail.com".into())
+            )],
+            "the address links to itself, and the name is not a link at all"
+        );
+    }
+
+    /// But a name the file linked to an address, with no address written beside
+    /// it, can only be what the file says it is.
+    #[test]
+    fn a_name_linked_to_an_address_is_left_alone() {
+        let link = Some(Link::Url("mailto:formand@example.dk".into()));
+        let spans = vec![Span {
+            text: "skriv til formanden".into(),
+            color: None,
+            bold: false,
+            italic: false,
+            link: link.clone(),
+        }];
+        assert_eq!(mend_email_spans(spans.clone()), spans);
     }
 
     /// A statute is written in abbreviations, and they are not bullets.
