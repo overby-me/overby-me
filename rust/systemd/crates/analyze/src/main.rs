@@ -272,6 +272,13 @@ enum Command {
         #[arg(short = 'm', long)]
         mask: bool,
     },
+
+    /// List CPU architectures and their support status
+    Architectures {
+        /// Architecture name(s) or the keywords native/uname/secondary (omit
+        /// for the full table)
+        architectures: Vec<String>,
+    },
 }
 
 // ── Boot timing data structures ───────────────────────────────────────────
@@ -1573,6 +1580,7 @@ fn main() {
             ref capabilities,
             mask,
         }) => cmd_capability(capabilities, mask),
+        Some(Command::Architectures { ref architectures }) => cmd_architectures(architectures),
     }
 }
 
@@ -3635,11 +3643,208 @@ fn cmd_capability(capabilities: &[String], mask: bool) {
     }
 }
 
+// ── Architecture table ─────────────────────────────────────────────────────
+
+/// The `Architecture` enum from C's src/basic/architecture.h, in declaration
+/// order (the index is the enum id, which is `architectures`' sort key), mapped
+/// to the name `architecture_to_string` produces.
+const ARCH_NAMES: &[&str] = &[
+    "alpha",       // 0  ALPHA
+    "arc",         // 1  ARC
+    "arc-be",      // 2  ARC_BE
+    "arm",         // 3  ARM
+    "arm64",       // 4  ARM64
+    "arm64-be",    // 5  ARM64_BE
+    "arm-be",      // 6  ARM_BE
+    "cris",        // 7  CRIS
+    "ia64",        // 8  IA64
+    "loongarch64", // 9  LOONGARCH64
+    "m68k",        // 10 M68K
+    "mips",        // 11 MIPS
+    "mips64",      // 12 MIPS64
+    "mips64-le",   // 13 MIPS64_LE
+    "mips-le",     // 14 MIPS_LE
+    "nios2",       // 15 NIOS2
+    "parisc",      // 16 PARISC
+    "parisc64",    // 17 PARISC64
+    "ppc",         // 18 PPC
+    "ppc64",       // 19 PPC64
+    "ppc64-le",    // 20 PPC64_LE
+    "ppc-le",      // 21 PPC_LE
+    "riscv32",     // 22 RISCV32
+    "riscv64",     // 23 RISCV64
+    "s390",        // 24 S390
+    "s390x",       // 25 S390X
+    "sh",          // 26 SH
+    "sh64",        // 27 SH64
+    "sparc",       // 28 SPARC
+    "sparc64",     // 29 SPARC64
+    "tilegx",      // 30 TILEGX
+    "x86",         // 31 X86
+    "x86-64",      // 32 X86_64
+];
+
+/// The native architecture (C's compile-time `native_architecture()`), and the
+/// secondary personality if any (`ARCHITECTURE_SECONDARY`), as indices into
+/// [`ARCH_NAMES`].
+fn native_and_secondary_arch() -> (usize, Option<usize>) {
+    // Index constants for readability.
+    const ARM: usize = 3;
+    const ARM64: usize = 4;
+    const MIPS: usize = 11;
+    const MIPS64: usize = 12;
+    const PPC: usize = 18;
+    const PPC64: usize = 19;
+    const PPC64_LE: usize = 20;
+    const PPC_LE: usize = 21;
+    const S390: usize = 24;
+    const S390X: usize = 25;
+    const X86: usize = 31;
+    const X86_64: usize = 32;
+
+    if cfg!(target_arch = "x86_64") {
+        (X86_64, Some(X86))
+    } else if cfg!(target_arch = "x86") {
+        (X86, None)
+    } else if cfg!(target_arch = "aarch64") {
+        (ARM64, Some(ARM))
+    } else if cfg!(target_arch = "arm") {
+        (ARM, None)
+    } else if cfg!(target_arch = "powerpc64") {
+        // Both endiannesses map PPC64<->PPC via the secondary personality.
+        if cfg!(target_endian = "little") {
+            (PPC64_LE, Some(PPC_LE))
+        } else {
+            (PPC64, Some(PPC))
+        }
+    } else if cfg!(target_arch = "s390x") {
+        (S390X, Some(S390))
+    } else if cfg!(target_arch = "mips64") {
+        (MIPS64, Some(MIPS))
+    } else if cfg!(target_arch = "riscv64") {
+        (23, None)
+    } else {
+        // Unknown target: no native match, so every row is "foreign".
+        (usize::MAX, None)
+    }
+}
+
+/// The running kernel's architecture (C's `uname_architecture()`), from
+/// `uname().machine`, as an index into [`ARCH_NAMES`] when recognized.
+fn uname_arch() -> Option<usize> {
+    let mut u: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut u) } != 0 {
+        return None;
+    }
+    let machine: Vec<u8> = u
+        .machine
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    let machine = String::from_utf8_lossy(&machine);
+    // The common uname machine strings mapped to canonical architecture names.
+    let name = match machine.as_ref() {
+        "x86_64" => "x86-64",
+        "i386" | "i486" | "i586" | "i686" => "x86",
+        "aarch64" => "arm64",
+        "aarch64_be" => "arm64-be",
+        m if m.starts_with("armv") => "arm",
+        "ppc64" => "ppc64",
+        "ppc64le" => "ppc64-le",
+        "s390x" => "s390x",
+        "riscv64" => "riscv64",
+        "loongarch64" => "loongarch64",
+        "mips64" => "mips64",
+        other => other,
+    };
+    ARCH_NAMES.iter().position(|&n| n == name)
+}
+
+fn cmd_architectures(args: &[String]) {
+    let (native, secondary) = native_and_secondary_arch();
+    let uname = uname_arch();
+
+    // Resolve the architecture indices to show. C errors out (printing no table)
+    // on the first unknown architecture; the full table is emitted in enum order
+    // and an explicit list is sorted by the enum id (column 0).
+    let rows: Vec<usize> = if args.is_empty() {
+        (0..ARCH_NAMES.len()).collect()
+    } else {
+        let mut rows = Vec::with_capacity(args.len());
+        for arg in args {
+            let idx = match arg.as_str() {
+                "native" => native,
+                "uname" => uname.unwrap_or(usize::MAX),
+                "secondary" => match secondary {
+                    Some(s) => s,
+                    None => {
+                        eprintln!("No secondary architecture.");
+                        std::process::exit(1);
+                    }
+                },
+                name => match ARCH_NAMES.iter().position(|&n| n == name) {
+                    Some(i) => i,
+                    None => {
+                        eprintln!("Architecture \"{arg}\" not known.");
+                        std::process::exit(1);
+                    }
+                },
+            };
+            rows.push(idx);
+        }
+        rows.sort_unstable();
+        rows
+    };
+
+    let support = |a: usize| -> &'static str {
+        if a == native {
+            "native"
+        } else if Some(a) == uname {
+            "uname"
+        } else if Some(a) == secondary {
+            "secondary"
+        } else {
+            "foreign"
+        }
+    };
+
+    // C's table formatter sizes NAME to the widest name shown (never narrower
+    // than the "NAME" header); SUPPORT is the trailing column.
+    let name_w = rows
+        .iter()
+        .map(|&a| ARCH_NAMES[a].len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    println!("{:<name_w$} SUPPORT", "NAME");
+    for a in rows {
+        println!("{:<name_w$} {}", ARCH_NAMES[a], support(a));
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_arch_table() {
+        // 33 architectures in enum order (matches C's _ARCHITECTURE_MAX).
+        assert_eq!(ARCH_NAMES.len(), 33);
+        assert_eq!(ARCH_NAMES[0], "alpha");
+        assert_eq!(ARCH_NAMES[32], "x86-64");
+        // The enum order is not alphabetical: the arm64 group precedes arm-be.
+        let pos = |n: &str| ARCH_NAMES.iter().position(|&x| x == n).unwrap();
+        assert!(pos("arm64-be") < pos("arm-be"));
+        // On the x86_64 build/host the native/secondary personalities are known.
+        if cfg!(target_arch = "x86_64") {
+            let (native, secondary) = native_and_secondary_arch();
+            assert_eq!(ARCH_NAMES[native], "x86-64");
+            assert_eq!(secondary.map(|s| ARCH_NAMES[s]), Some("x86"));
+        }
+    }
 
     #[test]
     fn test_format_timespan_full() {

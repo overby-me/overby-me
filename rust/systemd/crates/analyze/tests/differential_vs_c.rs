@@ -620,3 +620,47 @@ fn analyze_timestamp_output_matches_c() {
         div.join("\n")
     );
 }
+
+/// `systemd-analyze architectures` lists the known CPU architectures. The name
+/// set and enum ordering are static; the SUPPORT column (native/secondary/uname)
+/// depends on the running architecture, but rust and C are built for the same
+/// host here, so a verbatim stdout+stderr+exit comparison holds. Covers the full
+/// table, explicit lists (sorted by enum id), the native/uname/secondary
+/// keywords, and the "not known" error before any table.
+#[test]
+fn analyze_architectures_matches_c() {
+    let Ok(c_bin) = std::env::var("SYSTEMD_ANALYZE") else {
+        eprintln!("skip differential: SYSTEMD_ANALYZE unset (run `just differential`)");
+        return;
+    };
+    let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
+
+    let cases: &[&[&str]] = &[
+        &["architectures"],
+        &["architectures", "x86-64", "arm64"],
+        &["architectures", "native"],
+        &["architectures", "uname"],
+        &["architectures", "secondary"],
+        &["architectures", "loongarch64", "riscv64", "s390x"],
+        &["architectures", "x86", "x86-64"],
+        &["architectures", "bogus"],
+        &["architectures", "x86-64", "bogus", "arm64"],
+    ];
+
+    let mut div = Vec::new();
+    for args in cases {
+        let (ro, re, rok) = run_full(rust_bin, args);
+        let (co, ce, cok) = run_full(&c_bin, args);
+        if ro != co || re != ce || rok != cok {
+            div.push(format!(
+                "args={args:?}\n     rust: ok={rok} out={ro:?} err={re:?}\n     c   : ok={cok} out={co:?} err={ce:?}"
+            ));
+        }
+    }
+    assert!(
+        div.is_empty(),
+        "rust vs C systemd-analyze architectures drift ({}):\n{}",
+        div.len(),
+        div.join("\n")
+    );
+}
