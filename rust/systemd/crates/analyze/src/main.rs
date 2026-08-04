@@ -1112,10 +1112,10 @@ fn parse_boolean_c(s: &str) -> Option<bool> {
 /// `$SYSTEMD_FIRST_BOOT` override, else the `/run/systemd/first-boot` flag that
 /// PID 1 writes on a genuine first boot.
 fn in_first_boot() -> bool {
-    if let Ok(e) = std::env::var("SYSTEMD_FIRST_BOOT") {
-        if let Some(b) = parse_boolean_c(&e) {
-            return b;
-        }
+    if let Ok(e) = std::env::var("SYSTEMD_FIRST_BOOT")
+        && let Some(b) = parse_boolean_c(&e)
+    {
+        return b;
     }
     Path::new("/run/systemd/first-boot").exists()
 }

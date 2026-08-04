@@ -3744,10 +3744,11 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     // in a private mount namespace, so they never appear on the host.
     for entry in &config.temporary_file_system {
         let path = entry.split_once(':').map(|(p, _)| p).unwrap_or(entry);
-        if !path.is_empty() && !Path::new(path).exists() {
-            if let Err(e) = std::fs::create_dir_all(path) {
-                log::warn!("Failed to create TemporaryFileSystem mount point {path}: {e}");
-            }
+        if !path.is_empty()
+            && !Path::new(path).exists()
+            && let Err(e) = std::fs::create_dir_all(path)
+        {
+            log::warn!("Failed to create TemporaryFileSystem mount point {path}: {e}");
         }
     }
 
