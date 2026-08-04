@@ -1114,18 +1114,14 @@ fn apply_root_password(
         fs::set_permissions(&shadow_path, fs::Permissions::from_mode(0o640))?;
     }
 
-    if delete {
-        eprintln!("Deleted root password in {}.", shadow_path.display());
-    } else {
-        eprintln!("Set root password in {}.", shadow_path.display());
-    }
-
     // A password in shadow is useless without the matching passwd entry, and
     // the account may not exist yet: TEST-74-AUX-UTILS.firstboot deletes both
     // files and then expects --root-password= alone to recreate them. Upstream
     // does the same, writing passwd and shadow together in
-    // process_root_account() via write_root_passwd().
+    // process_root_account() via write_root_passwd(), and logs both (passwd
+    // first, then shadow, each as "<path> written.") for set and delete alike.
     write_root_passwd_entry(root, settings.root_shell.as_deref())?;
+    eprintln!("{}", written_message(root, &shadow_path, true));
 
     Ok(true)
 }
@@ -1226,6 +1222,7 @@ fn write_root_passwd_entry(root: &Path, shell: Option<&str>) -> io::Result<()> {
     {
         fs::set_permissions(&passwd_path, fs::Permissions::from_mode(0o644))?;
     }
+    eprintln!("{}", written_message(root, &passwd_path, true));
     Ok(())
 }
 
