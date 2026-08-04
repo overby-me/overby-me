@@ -111,6 +111,19 @@ struct IfnameConfig {
     mac: String,
 }
 
+/// Parsed `net.ifname_policy=` parameter: a list of naming policies and an
+/// optional trailing MAC address that scopes them to one interface.
+#[derive(Debug, Clone)]
+struct IfnamePolicyConfig {
+    /// Policies in cmdline order (become `NamePolicy=`).
+    policies: Vec<String>,
+    /// The subset of `policies` that are also valid alternative-names policies
+    /// (become `AlternativeNamesPolicy=`).
+    alt_policies: Vec<String>,
+    /// Optional MAC (colon form, lowercase); when set the link matches on it.
+    mac: Option<String>,
+}
+
 /// All parsed kernel command line network parameters.
 #[derive(Debug, Default)]
 struct CmdlineConfig {
@@ -123,6 +136,7 @@ struct CmdlineConfig {
     bridges: Vec<BridgeConfig>,
     teams: Vec<TeamConfig>,
     ifnames: Vec<IfnameConfig>,
+    ifname_policies: Vec<IfnamePolicyConfig>,
     /// `net.ifnames=0` disables predictable interface names.
     net_ifnames: Option<bool>,
 }
@@ -232,6 +246,10 @@ fn parse_cmdline(cmdline: &str) -> CmdlineConfig {
         } else if let Some(val) = strip_param(token, "ifname=") {
             if let Some(ifn) = parse_ifname_param(val) {
                 config.ifnames.push(ifn);
+            }
+        } else if let Some(val) = strip_param(token, "net.ifname_policy=") {
+            if let Some(pol) = parse_ifname_policy_param(val) {
+                config.ifname_policies.push(pol);
             }
         } else if let Some(val) = strip_param(token, "net.ifnames=") {
             config.net_ifnames = parse_bool_param(val);
@@ -559,6 +577,79 @@ fn parse_ifname_param(val: &str) -> Option<IfnameConfig> {
     })
 }
 
+/// Membership in C's NamePolicy enum (name_policy_from_string).
+fn is_name_policy(word: &str) -> bool {
+    matches!(
+        word,
+        "kernel" | "keep" | "database" | "onboard" | "slot" | "path" | "mac"
+    )
+}
+
+/// Membership in C's AlternativeNamesPolicy enum
+/// (alternative_names_policy_from_string) — a subset of the name policies.
+fn is_alt_names_policy(word: &str) -> bool {
+    matches!(word, "database" | "onboard" | "slot" | "path" | "mac")
+}
+
+/// Normalize a 6-octet colon-separated MAC to lowercase, or None if malformed.
+fn normalize_mac(word: &str) -> Option<String> {
+    let octets: Vec<&str> = word.split(':').collect();
+    if octets.len() != 6 {
+        return None;
+    }
+    if octets
+        .iter()
+        .any(|o| o.len() != 2 || !o.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return None;
+    }
+    Some(word.to_lowercase())
+}
+
+/// Parse `net.ifname_policy=policy1[,policy2,...][,<MAC>]`.
+///
+/// Mirrors C's parse_cmdline_ifname_policy (network-generator.c): comma-separated
+/// words are naming policies; the first word that is not a known policy is taken
+/// as a trailing MAC address and must be last. Returns None (dropping the whole
+/// item, as C errors out) if no policy is present or the MAC is malformed or not
+/// last.
+fn parse_ifname_policy_param(val: &str) -> Option<IfnamePolicyConfig> {
+    let words: Vec<&str> = val.split(',').filter(|w| !w.is_empty()).collect();
+    let mut policies = Vec::new();
+    let mut alt_policies = Vec::new();
+    let mut mac = None;
+    for (i, word) in words.iter().enumerate() {
+        if is_name_policy(word) {
+            if is_alt_names_policy(word) {
+                alt_policies.push((*word).to_string());
+            }
+            policies.push((*word).to_string());
+        } else {
+            // Not a policy: must be the trailing MAC address.
+            if i != words.len() - 1 {
+                log::warn!("Unexpected trailing string in ifname policy: {}", val);
+                return None;
+            }
+            match normalize_mac(word) {
+                Some(m) => mac = Some(m),
+                None => {
+                    log::warn!("Invalid MAC address in ifname policy: {}", word);
+                    return None;
+                }
+            }
+        }
+    }
+    if policies.is_empty() {
+        log::warn!("No ifname policy specified: {}", val);
+        return None;
+    }
+    Some(IfnamePolicyConfig {
+        policies,
+        alt_policies,
+        mac,
+    })
+}
+
 fn parse_bool_param(val: &str) -> Option<bool> {
     match val.to_lowercase().as_str() {
         "1" | "yes" | "true" | "on" => Some(true),
@@ -604,10 +695,13 @@ fn generate(config: &CmdlineConfig) -> GeneratedFiles {
         generate_ifname(&mut files, ifn);
     }
 
-    // Generate net.ifnames=0 .link file if requested.
-    if config.net_ifnames == Some(false) {
-        generate_net_ifnames_off(&mut files);
+    // Generate .link files for net.ifname_policy= parameters.
+    for pol in &config.ifname_policies {
+        generate_ifname_policy(&mut files, pol);
     }
+
+    // net.ifnames= is consumed by udev, not this generator; C's
+    // systemd-network-generator writes no file for it, so neither do we.
 
     // Generate VLAN .netdev and .network files.
     for vlan in &config.vlans {
@@ -679,11 +773,27 @@ fn generate(config: &CmdlineConfig) -> GeneratedFiles {
     files
 }
 
-/// Generate a .link file for `ifname=<name>:<mac>`.
-fn generate_ifname(files: &mut GeneratedFiles, ifn: &IfnameConfig) {
-    // C names the link file 70-<ifname>.link (link_save in network-generator.c)
-    // and emits a single header comment.
-    let filename = format!("70-{}.link", sanitize_name(&ifn.name));
+/// Write a `.link` file matching C's link_dump + link_save (network-generator.c):
+/// filename prefix is `70` when an interface name is given, `71` for a MAC-only
+/// match, `72` otherwise; the base is the ifname, the MAC without colons, or
+/// `default`. The body matches on `Name=`/`MACAddress=`/`OriginalName=*` and
+/// carries the `NamePolicy=`/`AlternativeNamesPolicy=` lists when present.
+fn add_link_file(
+    files: &mut GeneratedFiles,
+    ifname: &str,
+    mac: Option<&str>,
+    policies: &[String],
+    alt_policies: &[String],
+) {
+    let (prefix, base) = if !ifname.is_empty() {
+        ("70", sanitize_name(ifname))
+    } else if let Some(m) = mac {
+        ("71", m.replace(':', ""))
+    } else {
+        ("72", "default".to_string())
+    };
+    let filename = format!("{prefix}-{base}.link");
+
     let mut content = String::new();
     writeln!(
         content,
@@ -692,35 +802,39 @@ fn generate_ifname(files: &mut GeneratedFiles, ifn: &IfnameConfig) {
     .unwrap();
     writeln!(content).unwrap();
     writeln!(content, "[Match]").unwrap();
-    writeln!(content, "MACAddress={}", ifn.mac).unwrap();
+    match mac {
+        Some(m) => writeln!(content, "MACAddress={m}").unwrap(),
+        None => writeln!(content, "OriginalName=*").unwrap(),
+    }
     writeln!(content).unwrap();
     writeln!(content, "[Link]").unwrap();
-    writeln!(content, "Name={}", ifn.name).unwrap();
+    if !ifname.is_empty() {
+        writeln!(content, "Name={ifname}").unwrap();
+    }
+    if !policies.is_empty() {
+        writeln!(content, "NamePolicy={}", policies.join(" ")).unwrap();
+    }
+    if !alt_policies.is_empty() {
+        writeln!(content, "AlternativeNamesPolicy={}", alt_policies.join(" ")).unwrap();
+    }
     files.add(filename, content);
 }
 
-/// Generate a .link file that disables predictable interface names when
-/// `net.ifnames=0` is specified.
-fn generate_net_ifnames_off(files: &mut GeneratedFiles) {
-    let filename = format!("{}-net-ifnames.link", FILE_PREFIX);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: net.ifnames=0"
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "OriginalName=*").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Link]").unwrap();
-    writeln!(content, "NamePolicy=kernel").unwrap();
-    files.add(filename, content);
+/// Generate a .link file for `ifname=<name>:<mac>` (70-<ifname>.link).
+fn generate_ifname(files: &mut GeneratedFiles, ifn: &IfnameConfig) {
+    add_link_file(files, &ifn.name, Some(&ifn.mac), &[], &[]);
+}
+
+/// Generate a .link file for `net.ifname_policy=<policies>[,<mac>]`
+/// (72-default.link, or 71-<mac>.link when scoped to a MAC).
+fn generate_ifname_policy(files: &mut GeneratedFiles, pol: &IfnamePolicyConfig) {
+    add_link_file(
+        files,
+        "",
+        pol.mac.as_deref(),
+        &pol.policies,
+        &pol.alt_policies,
+    );
 }
 
 /// Generate .netdev and parent .network files for a VLAN.
@@ -1331,6 +1445,7 @@ fn run_cmdline_str(cmdline: &str, output_dir: &Path) -> i32 {
         && config.bridges.is_empty()
         && config.teams.is_empty()
         && config.ifnames.is_empty()
+        && config.ifname_policies.is_empty()
         && config.net_ifnames.is_none()
     {
         log::info!("No network parameters on kernel command line.");
@@ -2181,12 +2296,13 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_net_ifnames_off() {
+    fn test_generate_net_ifnames_off_no_file() {
+        // net.ifnames= is consumed by udev, not this generator; C's
+        // systemd-network-generator writes no file for it (parsed but ignored).
         let config = parse_cmdline("net.ifnames=0");
+        assert_eq!(config.net_ifnames, Some(false));
         let files = generate(&config);
-        assert!(files.files.contains_key("71-net-ifnames.link"));
-        let content = &files.files["71-net-ifnames.link"];
-        assert!(content.contains("NamePolicy=kernel"));
+        assert!(files.files.is_empty());
     }
 
     #[test]
@@ -2195,6 +2311,96 @@ mod tests {
         let files = generate(&config);
         // net.ifnames=1 is the default; don't generate a file.
         assert!(!files.files.contains_key("71-net-ifnames.link"));
+    }
+
+    // ── net.ifname_policy= tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_ifname_policy_basic() {
+        let config = parse_cmdline("net.ifname_policy=keep,kernel,path");
+        assert_eq!(config.ifname_policies.len(), 1);
+        let p = &config.ifname_policies[0];
+        assert_eq!(p.policies, vec!["keep", "kernel", "path"]);
+        // Only alternative-names policies (path) go to AlternativeNamesPolicy.
+        assert_eq!(p.alt_policies, vec!["path"]);
+        assert_eq!(p.mac, None);
+    }
+
+    #[test]
+    fn test_parse_ifname_policy_with_mac() {
+        let config = parse_cmdline("net.ifname_policy=path,mac,AA:BB:CC:DD:EE:FF");
+        let p = &config.ifname_policies[0];
+        assert_eq!(p.policies, vec!["path", "mac"]);
+        assert_eq!(p.alt_policies, vec!["path", "mac"]);
+        // MAC is normalized to lowercase.
+        assert_eq!(p.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+    }
+
+    #[test]
+    fn test_parse_ifname_policy_invalid() {
+        // No policy at all (bare MAC) -> dropped.
+        assert!(parse_cmdline("net.ifname_policy=aa:bb:cc:dd:ee:ff")
+            .ifname_policies
+            .is_empty());
+        // MAC not last -> dropped.
+        assert!(parse_cmdline("net.ifname_policy=aa:bb:cc:dd:ee:ff,path")
+            .ifname_policies
+            .is_empty());
+        // Malformed MAC (and not a policy) -> dropped.
+        assert!(parse_cmdline("net.ifname_policy=path,bogus")
+            .ifname_policies
+            .is_empty());
+    }
+
+    #[test]
+    fn test_generate_ifname_policy_default() {
+        let config = parse_cmdline("net.ifname_policy=keep,kernel,path");
+        let files = generate(&config);
+        let content = files
+            .files
+            .get("72-default.link")
+            .expect("72-default.link");
+        assert_eq!(
+            content,
+            "# Automatically generated by systemd-network-generator\n\
+             \n\
+             [Match]\n\
+             OriginalName=*\n\
+             \n\
+             [Link]\n\
+             NamePolicy=keep kernel path\n\
+             AlternativeNamesPolicy=path\n"
+        );
+    }
+
+    #[test]
+    fn test_generate_ifname_policy_no_alt() {
+        // A pure NamePolicy (keep) yields no AlternativeNamesPolicy line.
+        let config = parse_cmdline("net.ifname_policy=keep");
+        let content = &generate(&config).files["72-default.link"];
+        assert!(content.contains("NamePolicy=keep\n"));
+        assert!(!content.contains("AlternativeNamesPolicy"));
+    }
+
+    #[test]
+    fn test_generate_ifname_policy_with_mac() {
+        let config = parse_cmdline("net.ifname_policy=path,mac,aa:bb:cc:dd:ee:ff");
+        let files = generate(&config);
+        let content = files
+            .files
+            .get("71-aabbccddeeff.link")
+            .expect("71-aabbccddeeff.link");
+        assert_eq!(
+            content,
+            "# Automatically generated by systemd-network-generator\n\
+             \n\
+             [Match]\n\
+             MACAddress=aa:bb:cc:dd:ee:ff\n\
+             \n\
+             [Link]\n\
+             NamePolicy=path mac\n\
+             AlternativeNamesPolicy=path mac\n"
+        );
     }
 
     #[test]
@@ -2451,7 +2657,8 @@ mod tests {
                 .exists()
         );
         assert!(output_dir.join("70-lan0.link").exists());
-        assert!(output_dir.join("71-net-ifnames.link").exists());
+        // net.ifnames= is a udev concern; the generator writes no file for it.
+        assert!(!output_dir.join("71-net-ifnames.link").exists());
     }
 
     #[test]

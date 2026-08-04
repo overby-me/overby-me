@@ -54,6 +54,11 @@ fn network_generator_matches_c() {
         &["ip=10.0.0.2::10.0.0.1:24::eth0:none:8.8.8.8:8.8.4.4"],
         &["ifname=eth0:00:11:22:33:44:55"], // -> 70-eth0.link
         &["ifname=lan0:aa:bb:cc:dd:ee:ff", "ip=dhcp"],
+        &["net.ifname_policy=keep,kernel,path"], // -> 72-default.link
+        &["net.ifname_policy=onboard,slot"],
+        &["net.ifname_policy=path,mac,aa:bb:cc:dd:ee:ff"], // -> 71-<mac>.link
+        &["net.ifnames=0"],                               // -> nothing (udev concern)
+        &["net.ifnames=1"],
     ];
 
     let mut div = Vec::new();
