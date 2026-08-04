@@ -678,8 +678,14 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
         // symlink below, not DefaultDependencies here.
     }
 
+    // Canonicalize UUID=/LABEL=/PARTUUID=/PARTLABEL= to the corresponding
+    // /dev/disk/by-*/ device node, matching C's fstab_node_to_udev_node. The
+    // same canonical node is used for the fsck instance name below so the mount
+    // and its check reference the same device.
+    let node = resolve_disk_spec(&entry.what);
+
     unit.push_str("\n[Mount]\n");
-    unit.push_str(&format!("What={}\n", entry.what));
+    unit.push_str(&format!("What={node}\n"));
     unit.push_str(&format!("Where={}\n", entry.where_));
     if entry.fstype != "auto" && !entry.fstype.is_empty() {
         unit.push_str(&format!("Type={}\n", entry.fstype));
@@ -740,19 +746,14 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     }
 
     // fsck: when passno >= 1 and non-root, add Requires=systemd-fsck@<esc>.
+    // The instance is the canonical device node (same as What=), matching C.
     if entry.passno >= 1 && !is_rootfs && entry.where_ != "/usr" {
-        let fsck_unit = format!(
-            "systemd-fsck@{}.service",
-            unit_name_path_escape(&entry.what)
-        );
+        let fsck_unit = format!("systemd-fsck@{}.service", unit_name_path_escape(&node));
         unit.push_str(&format!(
             "\n[Unit]\nRequires={fsck_unit}\nAfter={fsck_unit}\n"
         ));
     } else if entry.passno >= 1 && entry.where_ == "/usr" {
-        let fsck_unit = format!(
-            "systemd-fsck@{}.service",
-            unit_name_path_escape(&entry.what)
-        );
+        let fsck_unit = format!("systemd-fsck@{}.service", unit_name_path_escape(&node));
         unit.push_str(&format!("\n[Unit]\nWants={fsck_unit}\nAfter={fsck_unit}\n"));
     }
 
@@ -919,7 +920,10 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
 }
 
 fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
-    let unit_name = format!("{}.swap", unit_name_path_escape(&entry.what));
+    // Canonicalize UUID=/LABEL=/PARTUUID=/PARTLABEL= to /dev/disk/by-*/ like C;
+    // the swap unit name, What=, and mkswap device all reference this node.
+    let node = resolve_disk_spec(&entry.what);
+    let unit_name = format!("{}.swap", unit_name_path_escape(&node));
     let unit_path = out_dir.join(&unit_name);
 
     let (systemd_opts, _mount_opts) = split_options(&entry.options);
@@ -933,7 +937,7 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
     unit.push_str("Before=swap.target\n");
 
     unit.push_str("\n[Swap]\n");
-    unit.push_str(&format!("What={}\n", entry.what));
+    unit.push_str(&format!("What={node}\n"));
     // Upstream emits the raw fstab options verbatim into `Options=` on
     // swap units (unlike mount units, it does not strip `defaults` or
     // x-systemd.*).  TEST-81-GENERATORS.fstab-generator asserts the
@@ -950,7 +954,7 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
     // `systemd-mkswap@<device>.service` (the swap-specific template —
     // upstream uses a different name than the filesystem `systemd-makefs@`).
     if has_opt(&systemd_opts, "x-systemd.makefs") {
-        let esc_dev = unit_name_path_escape(&entry.what);
+        let esc_dev = unit_name_path_escape(&node);
         let mkswap_unit = format!("systemd-mkswap@{esc_dev}.service");
         let mkswap_path = out_dir.join(&mkswap_unit);
         let mut mkswap = String::new();
@@ -965,8 +969,7 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
         mkswap.push_str("Before=shutdown.target\n");
         mkswap.push_str("\n[Service]\nType=oneshot\nRemainAfterExit=yes\n");
         mkswap.push_str(&format!(
-            "ExecStart=/lib/systemd/systemd-makefs swap {}\n",
-            entry.what
+            "ExecStart=/lib/systemd/systemd-makefs swap {node}\n"
         ));
         mkswap.push_str("TimeoutSec=0\n");
         fs::write(&mkswap_path, mkswap)?;
@@ -1106,6 +1109,70 @@ mod tests {
         // Must have local-fs.target.requires symlink to ../home.mount
         let link = tmp.path().join("local-fs.target.requires/home.mount");
         assert!(link.symlink_metadata().is_ok());
+    }
+
+    #[test]
+    fn test_emit_mount_unit_canonicalizes_device_spec() {
+        // UUID=/LABEL=/PARTUUID=/PARTLABEL= must resolve to /dev/disk/by-*/ in
+        // What= (and in the fsck instance name), matching C's
+        // fstab_node_to_udev_node.
+        let cases = [
+            ("UUID=1234", "/dev/disk/by-uuid/1234"),
+            ("LABEL=my-root", "/dev/disk/by-label/my-root"),
+            ("PARTUUID=DEAD99", "/dev/disk/by-partuuid/DEAD99"),
+            ("PARTLABEL=ESP", "/dev/disk/by-partlabel/ESP"),
+            ("/dev/sda5", "/dev/sda5"),
+        ];
+        for (spec, node) in cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry = FstabEntry {
+                what: spec.into(),
+                where_: "/data".into(),
+                fstype: "ext4".into(),
+                options: "defaults".into(),
+                _dump: 0,
+                passno: 2,
+            };
+            emit_mount_unit(tmp.path(), &entry, false).unwrap();
+            let content = fs::read_to_string(tmp.path().join("data.mount")).unwrap();
+            assert!(
+                content.contains(&format!("What={node}\n")),
+                "spec {spec}: missing What={node} in:\n{content}"
+            );
+            // The fsck instance references the same canonical node, never the
+            // raw spec.
+            assert!(
+                !content.contains("systemd-fsck@UUID"),
+                "spec {spec}: fsck used the raw spec:\n{content}"
+            );
+            let fsck = format!(
+                "systemd-fsck@{}.service",
+                unit_name_path_escape(node)
+            );
+            assert!(
+                content.contains(&fsck),
+                "spec {spec}: missing {fsck} in:\n{content}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_emit_swap_unit_canonicalizes_device_spec() {
+        // Swap unit name and What= are both keyed off the canonical device.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = FstabEntry {
+            what: "UUID=swap-1".into(),
+            where_: "none".into(),
+            fstype: "swap".into(),
+            options: "sw".into(),
+            _dump: 0,
+            passno: 0,
+        };
+        emit_swap_unit(tmp.path(), &entry).unwrap();
+        let unit = tmp.path().join("dev-disk-by\\x2duuid-swap\\x2d1.swap");
+        let content = fs::read_to_string(&unit)
+            .unwrap_or_else(|_| panic!("expected canonical swap unit at {}", unit.display()));
+        assert!(content.contains("What=/dev/disk/by-uuid/swap-1\n"), "{content}");
     }
 
     #[test]

@@ -56,3 +56,6 @@ differential:
     # kernel-command-line → .network generation vs systemd-network-generator
     SYSTEMD_NETWORK_GENERATOR="$sysd/lib/systemd/systemd-network-generator" \
       cargo test -p systemd-network-generator --test differential_vs_c -- --nocapture
+    # fstab → .mount/.swap device-node canonicalization vs systemd-fstab-generator
+    SYSTEMD_FSTAB_GENERATOR="$sysd/lib/systemd/system-generators/systemd-fstab-generator" \
+      cargo test -p systemd-fstab-generator --test differential_vs_c -- --nocapture
