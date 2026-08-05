@@ -89,6 +89,12 @@ pub struct Paragraph {
     /// than Word lays it out.
     #[serde(default)]
     pub contextual_spacing: bool,
+    /// Word keeps this paragraph on the same page as the one after it, which
+    /// every heading style does. A heading is exactly what a page tends to
+    /// break after, and Word moves it down with the text it introduces rather
+    /// than leaving it stranded at the foot of a page.
+    #[serde(default)]
+    pub keep_next: bool,
     /// How big this heading is against the document's own body text, as a
     /// multiplier. Not from the document: computed by [`scale_headings`] after
     /// parsing, because it takes the whole document to know what "body text"
@@ -1162,14 +1168,29 @@ fn DocxBlock(
             // are written out. HTML has six; deeper levels were clamped when the
             // level was worked out.
             match heading_level(p.style_id.as_deref(), p.outline_level) {
-                Some(1) => rsx! { h1 { class: "docx-h", style: "{style}", {inner} } },
-                Some(2) => rsx! { h2 { class: "docx-h", style: "{style}", {inner} } },
-                Some(3) => rsx! { h3 { class: "docx-h", style: "{style}", {inner} } },
-                Some(4) => rsx! { h4 { class: "docx-h", style: "{style}", {inner} } },
-                Some(5) => rsx! { h5 { class: "docx-h", style: "{style}", {inner} } },
-                Some(_) => rsx! { h6 { class: "docx-h", style: "{style}", {inner} } },
+                Some(1) => {
+                    rsx! { h1 { class: "docx-h", style: "{style}", "data-keep-next": "{p.keep_next}", {inner} } }
+                }
+                Some(2) => {
+                    rsx! { h2 { class: "docx-h", style: "{style}", "data-keep-next": "{p.keep_next}", {inner} } }
+                }
+                Some(3) => {
+                    rsx! { h3 { class: "docx-h", style: "{style}", "data-keep-next": "{p.keep_next}", {inner} } }
+                }
+                Some(4) => {
+                    rsx! { h4 { class: "docx-h", style: "{style}", "data-keep-next": "{p.keep_next}", {inner} } }
+                }
+                Some(5) => {
+                    rsx! { h5 { class: "docx-h", style: "{style}", "data-keep-next": "{p.keep_next}", {inner} } }
+                }
+                Some(_) => {
+                    rsx! { h6 { class: "docx-h", style: "{style}", "data-keep-next": "{p.keep_next}", {inner} } }
+                }
                 // An empty paragraph is a deliberate blank line in Word, so it
                 // keeps its element rather than being dropped.
+                None if p.keep_next => rsx! {
+                    p { class: "docx-p", style: "{style}", "data-keep-next": "true", {inner} }
+                },
                 None => rsx! { p { class: "docx-p", style: "{style}", {inner} } },
             }
         }
@@ -2702,6 +2723,9 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
         top: f64,
         bottom: f64,
         empty: bool,
+        /// Word keeps this with whatever follows it -- every heading does -- so
+        /// a page cannot end between the two.
+        keeps_next: bool,
     }
     let mut flow: Vec<Spot> = Vec::new();
     for at in 0..groups.length() {
@@ -2736,6 +2760,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
                         top: rect.top() - top_of,
                         bottom: rect.bottom() - top_of,
                         empty: is_blank(&item),
+                        keeps_next: keeps_next(&item),
                     });
                 }
             }
@@ -2747,6 +2772,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
                     top: rect.top() - top_of,
                     bottom: rect.bottom() - top_of,
                     empty: is_blank(&group),
+                    keeps_next: keeps_next(&group),
                 });
             }
         }
@@ -2769,13 +2795,22 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
     let mut marks: Vec<(usize, usize, usize)> = Vec::new();
     let mut page_top = 0.0f64;
     let mut measured = 0.0f64;
-    for spot in flow.iter().take(last + 1) {
+    for (at, spot) in flow.iter().take(last + 1).enumerate() {
         measured = spot.bottom;
         // `top > page_top` keeps the first element of a page from starting
         // another one: something taller than a whole page has to sit on one.
         if spot.bottom - page_top > height && spot.top > page_top {
-            marks.push((spot.group, spot.item, marks.len() + 2));
-            page_top = spot.top;
+            // A heading goes down with the text it introduces. Word keeps them
+            // together, so the page ends ABOVE the heading, not between it and
+            // its paragraph -- which is why a document whose sections all begin
+            // with one came out a page ahead of Word from its third page on.
+            let mut starts = at;
+            while starts > 0 && flow[starts - 1].keeps_next && flow[starts - 1].top > page_top {
+                starts -= 1;
+            }
+            let begin = &flow[starts];
+            marks.push((begin.group, begin.item, marks.len() + 2));
+            page_top = begin.top;
             if marks.len() > 2000 {
                 return None;
             }
@@ -2801,6 +2836,11 @@ async fn wait_for_the_face(size: f64) {
     };
     let asked = format!("{size}pt Carlito");
     let _ = wasm_bindgen_futures::JsFuture::from(fonts.load(&asked)).await;
+}
+
+/// Whether Word keeps this element on the same page as the one after it.
+fn keeps_next(element: &web_sys::Element) -> bool {
+    element.get_attribute("data-keep-next").as_deref() == Some("true")
 }
 
 /// Whether an element holds no words. `textContent`, NOT `innerText`: the
