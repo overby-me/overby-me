@@ -2457,10 +2457,21 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
 /// Read the off-screen copy: which of its blocks a page boundary falls in, and
 /// how many pages there are.
 ///
-/// A block that is taller than a page swallows more than one boundary. It gets
-/// ONE mark -- there is nowhere inside it to put another without laying out its
-/// lines, which is a different job -- but the pages it covers are still
-/// counted, so the total stays honest even where the marks are coarse.
+/// Two things a naive reading gets wrong, both reported from real documents.
+///
+/// A Word file usually ends with a few empty paragraphs, and they have height:
+/// counted, they spill past a boundary and the reader is told about a last page
+/// with nothing on it. The measuring stops at the last block that has anything
+/// in it.
+///
+/// And a block taller than a page swallows more than one boundary. There is
+/// nowhere inside it to put a second mark without laying out its lines, which is
+/// a different job -- so the page count is the number of places a reader can
+/// actually be TAKEN to, plus the first. Counting the swallowed pages instead
+/// left a control that named a page and then would not go there, which is how
+/// this was reported: "moving forward to the last page does not work". Where a
+/// table spans pages that makes the count one short of Word's, which is the
+/// better of the two errors: the number's job is to navigate.
 fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
     if height <= 0.0 {
         return None;
@@ -2474,9 +2485,9 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
     if children.length() == 0 {
         return None;
     }
-    let mut marks: Vec<(usize, usize)> = Vec::new();
-    let mut page = 1usize;
-    let mut bottom = 0.0f64;
+    // Where the document's content actually stops. Trailing empty paragraphs
+    // are a blank page nobody wrote.
+    let mut last = None;
     for at in 0..children.length() {
         let Some(child) = children
             .item(at)
@@ -2484,13 +2495,32 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
         else {
             continue;
         };
+        if !child.inner_text().trim().is_empty() {
+            last = Some(at);
+        }
+    }
+    let last = last?;
+
+    let mut marks: Vec<(usize, usize)> = Vec::new();
+    let mut page = 1usize;
+    let mut measured = 0.0f64;
+    for at in 0..=last {
+        let Some(child) = children
+            .item(at)
+            .and_then(|c| c.dyn_into::<web_sys::HtmlElement>().ok())
+        else {
+            continue;
+        };
         let top = child.offset_top() as f64;
-        bottom = top + child.offset_height() as f64;
+        measured = top + child.offset_height() as f64;
         let mut began = false;
-        while bottom > page as f64 * height {
+        while measured > page as f64 * height {
             page += 1;
             if !began {
-                marks.push((at as usize, page));
+                // The page that begins here is the one after the marks already
+                // placed, NOT the page the height says: a block that swallowed
+                // a boundary took its number with it.
+                marks.push((at as usize, marks.len() + 2));
                 began = true;
             }
             // A document whose measuring went wrong should not spin.
@@ -2501,7 +2531,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
     }
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
-    (bottom > 0.0).then_some((marks, page))
+    (measured > 0.0).then_some((marks.clone(), marks.len() + 1))
 }
 
 /// The value that turns up most often, to the nearest hundredth. What "the

@@ -8176,12 +8176,25 @@ a.list-item:hover {
    The renderer deliberately makes its measures relative to the reader rather
    than pinned to Word's, which is right for reading and wrong for working out
    where Word's pages end: it laid a three-page document out as four. */
+/* And a table cell is padded for reading here, where Word pads it by a tenth
+   of an inch either side and nothing above or below. A document of nothing but
+   tables measured half again as tall as it is. */
+.docx-measure .docx-table th,
+.docx-measure .docx-table td {
+	padding: 0 0.08in;
+}
 .docx-measure .docx-p,
 .docx-measure .docx-list li {
 	margin-bottom: var(--docx-page-after, 8pt);
 	line-height: var(--docx-page-line, 1.08);
 }
 .docx-measure {
+	/* Word's own defaults, for a document that states neither. The measuring
+	   copy overrides both inline with what the document actually says; these
+	   are what it falls back to, and they are the same two numbers the Rust
+	   side falls back to. */
+	--docx-page-line: 1.08;
+	--docx-page-after: 8pt;
 	position: absolute;
 	left: -10000px;
 	top: 0;
