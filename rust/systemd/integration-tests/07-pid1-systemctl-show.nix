@@ -37,8 +37,10 @@
     [[ "$(systemctl show -P ActiveState show-test.service)" == "inactive" ]]
     retry systemctl start show-test.service
     [[ "$(systemctl show -P ActiveState show-test.service)" == "active" ]]
+    [[ "$(systemctl show -P SubState show-test.service)" == "running" ]]
     systemctl stop show-test.service
     [[ "$(systemctl show -P ActiveState show-test.service)" == "inactive" ]]
+    [[ "$(systemctl show -P SubState show-test.service)" == "dead" ]]
     SSEOF
   '';
 }
