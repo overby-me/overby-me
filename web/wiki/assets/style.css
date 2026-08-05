@@ -8172,6 +8172,11 @@ a.list-item:hover {
    number sitting on it, quiet enough to skim past and precise enough that "see
    page 12" still means something to someone reading this instead of the pages. */
 .pdf-page-break {
+	/* Land a little above the page rather than exactly on it. Scrolled flush to
+	   the top of the window, the mark and the first line under it sit beneath the
+	   bar on a wide screen, and even without one there is nothing to say the page
+	   has turned. This is the room to see that it has. */
+	scroll-margin-top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-4));
 	display: flex;
 	align-items: center;
 	gap: var(--md-sys-spacing-3);

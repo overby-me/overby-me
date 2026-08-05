@@ -508,6 +508,24 @@ fn go_to_page(label: &str) {
     mark.scroll_into_view_with_scroll_into_view_options(&opts);
 }
 
+/// Which page a step lands on: the one `by` places along from where the reader
+/// is, stopping at either end.
+///
+/// `None` means the top of the document: the first page has no mark of its own,
+/// so there is nothing to scroll to, only somewhere to be.
+fn step_to(labels: &[String], here: &str, by: i32) -> Option<String> {
+    match labels.iter().position(|l| l == here) {
+        Some(at) => {
+            let next = (at as i64 + by as i64).clamp(0, labels.len() as i64 - 1) as usize;
+            labels.get(next).cloned()
+        }
+        // Before the first mark, which is where the first page is: forward is
+        // that mark, and back is the top.
+        None if by > 0 => labels.first().cloned(),
+        None => None,
+    }
+}
+
 /// Which page the reader is on: the last one that has begun above them.
 ///
 /// Above every mark is the first page, which has no mark of its own because
@@ -549,6 +567,12 @@ fn PageControl(first: String, last: String) -> Element {
     // the reader moved, and it is already being tracked for the progress bar.
     let scrolled = crate::components::back_to_top::progress();
     let mut height = use_signal(|| 0);
+    // PEEKED, every one of them, because this effect WRITES all three. Reading
+    // them here subscribes the effect to its own output: saying where a jump is
+    // going woke this up, and a smooth scroll has not moved yet when it does, so
+    // it worked out that the reader was still on the page they were leaving and
+    // put that back. The jump then had to be asked for twice. The scroll is the
+    // only thing this should wake for.
     use_effect(use_reactive!(|(scrolled,)| {
         let _ = scrolled;
         let tall = web_sys::window()
@@ -556,12 +580,12 @@ fn PageControl(first: String, last: String) -> Element {
             .and_then(|d| d.document_element())
             .map(|e| e.scroll_height())
             .unwrap_or(0);
-        if tall != height() || pages.read().is_empty() {
+        if tall != *height.peek() || pages.peek().is_empty() {
             height.set(tall);
             pages.set(pages_on_screen());
         }
-        let now = page_here(&pages.read(), &first);
-        if now != *here.read() {
+        let now = page_here(&pages.peek(), &first);
+        if now != *here.peek() {
             here.set(now);
         }
     }));
@@ -574,29 +598,16 @@ fn PageControl(first: String, last: String) -> Element {
     // twice moved one page.
     let mut arrive = move |label: &str| {
         go_to_page(label);
-        if *here.read() != label {
+        if *here.peek() != label {
             here.set(label.to_string());
         }
     };
 
     let mut step = move |by: i32| {
-        let marks = pages.read().clone();
-        let now = here.read().clone();
-        match marks.iter().position(|(_, l)| *l == now) {
-            // On a page with a mark: step from it.
-            Some(at) => {
-                let next = (at as i32 + by).clamp(0, marks.len() as i32 - 1) as usize;
-                if let Some((_, label)) = marks.get(next) {
-                    arrive(label);
-                }
-            }
-            // On the first page, which has no mark: forward is the first mark,
-            // and there is nothing behind it to go back to.
-            None if by > 0 => {
-                if let Some((_, label)) = marks.first() {
-                    arrive(label);
-                }
-            }
+        let marks = pages.peek().clone();
+        let labels: Vec<String> = marks.iter().map(|(_, l)| l.clone()).collect();
+        match step_to(&labels, &here.peek(), by) {
+            Some(label) => arrive(&label),
             None => crate::components::back_to_top::scroll_to_top(),
         }
     };
@@ -666,5 +677,54 @@ pub fn PdfHasNoText() -> Element {
             }
             p { class: "empty-state-body", "{t(\"file.pdfNoText\")}" }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step_to;
+
+    fn songbook() -> Vec<String> {
+        // What the songbook offers: its numbered pages, three to ninety-nine.
+        // Its cover and front matter print no numbers and have no marks, and
+        // neither does the back cover.
+        (3..=99).map(|n| n.to_string()).collect()
+    }
+
+    /// One press, one page. This wanted two for a while, and the arithmetic is
+    /// worth pinning down away from the scrolling that hid the fault.
+    #[test]
+    fn a_step_moves_one_page() {
+        let pages = songbook();
+        assert_eq!(step_to(&pages, "37", 1).as_deref(), Some("38"));
+        assert_eq!(step_to(&pages, "37", -1).as_deref(), Some("36"));
+    }
+
+    /// And stops at the ends rather than falling off them.
+    #[test]
+    fn a_step_stops_at_the_ends() {
+        let pages = songbook();
+        assert_eq!(
+            step_to(&pages, "99", 1).as_deref(),
+            Some("99"),
+            "the last page"
+        );
+        assert_eq!(
+            step_to(&pages, "3", -1).as_deref(),
+            Some("3"),
+            "the first marked page"
+        );
+    }
+
+    /// The first page of a document has no mark, since nothing ended before it.
+    /// Forward from there is the first mark; back is the top of the document,
+    /// which is a scroll rather than a page.
+    #[test]
+    fn the_first_page_has_nowhere_behind_it() {
+        let pages = songbook();
+        assert_eq!(step_to(&pages, "1", 1).as_deref(), Some("3"));
+        assert_eq!(step_to(&pages, "1", -1), None);
+        // And a document with no marks at all goes nowhere in either direction.
+        assert_eq!(step_to(&[], "1", 1), None);
     }
 }
