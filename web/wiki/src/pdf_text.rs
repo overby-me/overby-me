@@ -1967,7 +1967,18 @@ fn column_right(lines: &[Line]) -> f64 {
         return f64::INFINITY;
     }
     rights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    rights[rights.len() * 9 / 10]
+    // Near the top of the range, not a tenth down it. A tenth holds while most
+    // of a document is prose that fills its column, and fails on a book that is
+    // not: the songbook is a hundred pages of verse, none of whose lines come
+    // near the margin, so a tenth down put the column at 392 when the margin is
+    // at 539. Its longer lines then measured as running PAST the column, which
+    // reads as "this line reached the margin and wrapped", and Ode an die Freude
+    // arrived as one long line.
+    //
+    // A fiftieth still keeps a stray out: something drawn in the margin is one
+    // line or two, and this wants a fiftieth of them to agree.
+    let near_the_end = rights.len().saturating_sub(1) * 49 / 50;
+    rights[near_the_end]
 }
 
 /// Where the text column starts: the leftmost place that enough lines begin at.
@@ -3378,6 +3389,29 @@ fn page_runs_raw(bytes: &[u8], want: usize) -> Vec<Run> {
     Vec::new()
 }
 
+/// Where the whole document's column runs to, for the harness.
+#[cfg(test)]
+fn document_column(bytes: &[u8]) -> f64 {
+    match extract(bytes) {
+        Ok(_) => {}
+        Err(_) => return f64::INFINITY,
+    }
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return f64::INFINITY;
+    };
+    let mut budget = PICTURE_BUDGET;
+    let mut all = Vec::new();
+    for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+        let drawn = page_runs(&doc, page_id, &mut budget, &[]);
+        let mut lines = lines_from(drawn.runs);
+        for line in &mut lines {
+            line.page = page_no + 1;
+        }
+        all.extend(lines);
+    }
+    column_right(&all)
+}
+
 /// Every line of one page with the geometry it was drawn at. A lens for the
 /// harness, so the layout rules can be designed against real numbers.
 #[cfg(test)]
@@ -3703,6 +3737,37 @@ mod harness {
                     r.x, r.end_x, r.y, r.size, gap, r.text
                 );
             }
+        }
+    }
+
+    /// What the block builder decides about each line of a page, and why.
+    ///
+    ///   PDF_UNDER_TEST=/path/to.pdf PDF_FLOW=17 cargo test pdf_text::harness -- --nocapture
+    #[test]
+    fn why_each_line_flows_as_it_does() {
+        let (Ok(path), Ok(page)) = (
+            std::env::var("PDF_UNDER_TEST"),
+            std::env::var("PDF_FLOW").map(|v| v.parse::<usize>().unwrap_or(1)),
+        ) else {
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read");
+        let column = super::document_column(&bytes);
+        println!("--- column runs to {column:.1} ---");
+        let mut prev: Option<super::Line> = None;
+        for line in super::page_lines(&bytes, page) {
+            if let Some(p) = &prev {
+                let room = column - p.right;
+                let wanted = super::next_word_width(&line, p.size);
+                println!(
+                    "  room {:>6.1}  next word wants {:>5.1}  ends={:<6} {}",
+                    room,
+                    wanted,
+                    room > p.size * 2.0 && room > wanted,
+                    line.text.chars().take(46).collect::<String>()
+                );
+            }
+            prev = Some(line);
         }
     }
 
@@ -4638,6 +4703,40 @@ mod tests {
         assert_eq!(index_entry("....7"), None, "no title, no row");
     }
 
+    /// The margin is near the end of the range, not a tenth down it: a book of
+    /// verse has no line anywhere near its margin.
+    #[test]
+    fn the_margin_is_where_the_longest_lines_reach() {
+        let ends = |right: f64| Line {
+            y: 700.0,
+            size: 14.0,
+            right,
+            left: 56.7,
+            page: 1,
+            text: "noget".into(),
+            spans: vec![span("noget", None)],
+            bullet: None,
+            picture: None,
+        };
+        // The songbook: a hundred short verse lines, and a contents list whose
+        // rows all run to the margin. A tenth down the range gave 392 and the
+        // margin is at 538, so its longer lines measured as running PAST the
+        // column and Ode an die Freude arrived as one line.
+        let mut lines: Vec<Line> = (0..100).map(|i| ends(150.0 + i as f64)).collect();
+        lines.extend((0..10).map(|_| ends(538.6)));
+        assert!(
+            (column_right(&lines) - 538.6).abs() < 0.01,
+            "the margin the contents rows reach"
+        );
+        // But one line drawn out past it is still a stray.
+        let mut stray = vec![ends(700.0)];
+        stray.extend((0..99).map(|_| ends(400.0)));
+        assert!(
+            (column_right(&stray) - 400.0).abs() < 0.01,
+            "one line is not a margin"
+        );
+    }
+
     /// A verse is lines, not paragraphs. Turning each into a paragraph put a
     /// paragraph's air between every line of Lokalforeningssangen.
     #[test]
@@ -4664,6 +4763,11 @@ mod tests {
                     540.0,
                     "En linje der løber helt ud til margenen og fylder den",
                 ),
+                verse(
+                    681.2,
+                    536.0,
+                    "og endnu en, for margenen er hvor flere linjer siger den er",
+                ),
                 verse(413.1, 168.9, "Vi er unge radikale"),
                 verse(394.3, 187.3, "og vi står i samlet flok"),
                 verse(375.5, 200.0, "vi vil kæmpe for det gode"),
@@ -4676,7 +4780,7 @@ mod tests {
         assert_eq!(
             texts(&blocks),
             vec![
-                "En linje der løber helt ud til margenen og fylder den",
+                "En linje der løber helt ud til margenen og fylder den og endnu en, for margenen er hvor flere linjer siger den er",
                 "Vi er unge radikale\nog vi står i samlet flok\nvi vil kæmpe for det gode",
                 "ÆRU:\nNu’ det ÆRU, der synger,",
             ],
