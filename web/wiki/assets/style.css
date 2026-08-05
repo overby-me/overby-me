@@ -8223,8 +8223,15 @@ a.list-item:hover {
 	   short of what Word makes of it. `1em` is the inherited size, for anything
 	   the parser could not resolve. */
 	font-size: var(--p-size, 1em) !important;
-	margin-top: var(--p-before, 0) !important;
-	margin-bottom: var(--p-after, 8pt) !important;
+	/* Padding, not margin. Word ADDS the space under one paragraph to the space
+	   over the next; CSS collapses the two to the larger of them. A heading with
+	   twelve points over it, under a paragraph with eight under it, is twenty in
+	   Word and twelve here -- and a page that loses eight points at every such
+	   join ends up holding a line more than the page has room for. */
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: var(--p-before, 0) !important;
+	padding-bottom: var(--p-after, 8pt) !important;
 	/* The multiplier the paragraph states, times what SINGLE spacing means in
 	   the face this document is set in -- measured from the face itself, since
 	   Calibri's line box is 1.22 and Times New Roman's 1.15. */
@@ -8246,6 +8253,9 @@ a.list-item:hover {
    way first. */
 .docx-measure .docx-list {
 	padding-left: 0;
+	/* And no space of its own around the list: Word has no list, only the
+	   paragraphs in it, each with the space the document gives it. */
+	margin: 0;
 }
 .docx-measure .docx-list li {
 	margin-inline-start: 0;
@@ -8257,7 +8267,7 @@ a.list-item:hover {
 	/* `!important` for the same reason as the rule above, and it must be: that
 	   rule is important too, and an important declaration is not beaten by
 	   specificity alone. Without this the list closed up in name only. */
-	margin-bottom: 0 !important;
+	padding-bottom: 0 !important;
 }
 .docx-measure {
 	/* No tracking and no word spacing. This app sets letter-spacing on the body
