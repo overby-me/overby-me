@@ -405,6 +405,25 @@ fn finalize_stop_chain(chain: &ServiceStopChain, run_info: &ArcMutRuntimeInfo) {
                 .collect();
             *status = UnitStatus::Stopped(crate::units::StatusStopped::StoppedFinal, errors);
         }
+        // Clean up RuntimeDirectory= dirs unless RuntimeDirectoryPreserve=yes.
+        // The inline deactivate() path (unit.rs) does this, but the dispatcher
+        // stop chain that in-VM `systemctl stop` actually drives did not, so
+        // /run/<name> leaked across every stop (e.g. RemainAfterExit oneshots).
+        if conf.exec_config.runtime_directory_preserve
+            != crate::units::RuntimeDirectoryPreserve::Yes
+        {
+            for dir_name in &conf.exec_config.runtime_directory {
+                let full_path = std::path::Path::new("/run").join(dir_name);
+                if full_path.exists()
+                    && let Err(e) = std::fs::remove_dir_all(&full_path)
+                {
+                    trace!(
+                        "stop chain: failed to remove runtime directory {:?} for {}: {}",
+                        full_path, chain.id.name, e
+                    );
+                }
+            }
+        }
         #[cfg(target_os = "linux")]
         {
             let cgroup_path = &conf.platform_specific.cgroup_path;
