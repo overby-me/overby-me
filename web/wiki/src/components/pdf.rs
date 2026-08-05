@@ -25,6 +25,7 @@ use dioxus::prelude::*;
 
 use crate::i18n::t;
 use crate::pdf_text::{Align, Block, Extracted, Link, Span};
+use wasm_bindgen::JsCast;
 
 /// One block's words, keeping the colours the document set.
 ///
@@ -142,12 +143,6 @@ fn unlinked(spans: &[Span]) -> Vec<Span> {
 /// Render what was read out of a PDF.
 #[component]
 pub fn PdfDocument(doc: Extracted) -> Element {
-    // Tell the progress bar there are pages here, so it becomes a way of getting
-    // to one. Taken back when this leaves, or every page after it would offer to
-    // scrub through pages it does not have.
-    use_effect(|| crate::components::back_to_top::set_paged(true));
-    use_drop(|| crate::components::back_to_top::set_paged(false));
-
     // Consecutive items of one kind become one group, so a bulleted run reads as
     // a single list rather than a column of one-item lists, and a contents list
     // as one aligned table rather than a stack of unrelated rows.
@@ -347,6 +342,11 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     None => rsx! {},
                 }
             }
+            // Where the reader is, and how to go elsewhere. Only for a document
+            // with more than one page: a single page has nowhere to go.
+            if doc.pages > 1 {
+                PageControl { total: doc.pages }
+            }
             // Say what was left behind, in the Word renderer's own gap-notice
             // style rather than a class of this file's invention: a reader
             // deciding whether to open the real thing is owed the reason, and
@@ -395,6 +395,174 @@ fn indent_style(indent: u8) -> String {
 /// "Reflowed from N pages. Layout, figures and tables are not shown."
 fn t_pages(pages: usize) -> String {
     crate::i18n::t_with("file.pdfReflowed", &[("pages", &pages.to_string())])
+}
+
+/// Where the pages of the document on screen begin, and what each calls itself.
+///
+/// Read off the marks the view draws between its pages, which carry the number
+/// the page printed on itself. Measured from the top of the document rather than
+/// the window, so the answer does not depend on where the reader is standing.
+fn pages_on_screen() -> Vec<(f64, String)> {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return Vec::new();
+    };
+    let Ok(marks) = document.query_selector_all(".pdf-page-break") else {
+        return Vec::new();
+    };
+    let scrolled = web_sys::window()
+        .and_then(|w| w.scroll_y().ok())
+        .unwrap_or(0.0);
+    let mut out = Vec::new();
+    for at in 0..marks.length() {
+        let Some(node) = marks.item(at) else { continue };
+        let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        let Some(label) = element.get_attribute("data-page") else {
+            continue;
+        };
+        out.push((element.get_bounding_client_rect().top() + scrolled, label));
+    }
+    out
+}
+
+/// Take the reader to a page by the number the page calls itself.
+fn go_to_page(label: &str) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(mark) = document
+        .query_selector(&format!("[data-page=\"{label}\"]"))
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let opts = web_sys::ScrollIntoViewOptions::new();
+    opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+    opts.set_block(web_sys::ScrollLogicalPosition::Start);
+    mark.scroll_into_view_with_scroll_into_view_options(&opts);
+}
+
+/// Which page the reader is on: the last one that has begun above them.
+fn page_here(pages: &[(f64, String)]) -> String {
+    let scrolled = web_sys::window()
+        .and_then(|w| w.scroll_y().ok())
+        .unwrap_or(0.0);
+    match pages
+        .iter()
+        .take_while(|(top, _)| *top <= scrolled + 8.0)
+        .last()
+    {
+        // Before the first mark is the first page, whatever it calls itself.
+        None => pages.first().map(|(_, l)| l.clone()).unwrap_or_default(),
+        Some((_, label)) => label.clone(),
+    }
+}
+
+/// Where in the document the reader is, and how to go somewhere else.
+///
+/// DESIGN (functional: it says what it is). A hundred-page songbook reflows into
+/// one long page, and the reader wants the song on page 37. The browser's own PDF
+/// viewer — the other choice in this app's own sheet, one tap away — has a page
+/// box, so that is what a reader expects a PDF to have, and an invisible gesture
+/// on a hairline is not it. This says where you are, moves a page at a time, and
+/// takes a number when you tap it.
+///
+/// The numbers are the pages' OWN, so "37" is the page the document's index calls
+/// 37 rather than the thirty-seventh sheet of the file.
+#[component]
+fn PageControl(total: usize) -> Element {
+    let mut pages = use_signal(Vec::<(f64, String)>::new);
+    let mut typing = use_signal(|| false);
+    let mut typed = use_signal(String::new);
+    let mut here = use_signal(String::new);
+
+    // The marks move as pictures land and fonts settle, so their places are taken
+    // again whenever the document's height changes. Scroll progress is what says
+    // the reader moved, and it is already being tracked for the progress bar.
+    let scrolled = crate::components::back_to_top::progress();
+    let mut height = use_signal(|| 0);
+    use_effect(use_reactive!(|(scrolled,)| {
+        let _ = scrolled;
+        let tall = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.document_element())
+            .map(|e| e.scroll_height())
+            .unwrap_or(0);
+        if tall != height() || pages.read().is_empty() {
+            height.set(tall);
+            pages.set(pages_on_screen());
+        }
+        let now = page_here(&pages.read());
+        if now != *here.read() {
+            here.set(now);
+        }
+    }));
+
+    let step = move |by: i32| {
+        let marks = pages.read().clone();
+        let at = marks.iter().position(|(_, l)| *l == *here.read());
+        let next = match at {
+            Some(at) => (at as i32 + by).clamp(0, marks.len() as i32 - 1) as usize,
+            None => 0,
+        };
+        if let Some((_, label)) = marks.get(next) {
+            go_to_page(label);
+        }
+    };
+
+    let mut commit = move || {
+        let wanted = typed.read().trim().to_string();
+        typing.set(false);
+        if !wanted.is_empty() {
+            go_to_page(&wanted);
+        }
+    };
+
+    rsx! {
+        div { class: "pdf-pages", role: "group", aria_label: t("file.goToPage"),
+            button {
+                class: "pdf-pages-step",
+                aria_label: t("file.previousPage"),
+                onclick: move |_| step(-1),
+                span { class: "material-icons", "chevron_left" }
+            }
+            if typing() {
+                input {
+                    class: "pdf-pages-field",
+                    r#type: "text",
+                    inputmode: "numeric",
+                    autofocus: true,
+                    value: "{typed}",
+                    aria_label: t("file.goToPage"),
+                    oninput: move |e| typed.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter {
+                            commit();
+                        }
+                    },
+                    onblur: move |_| commit(),
+                }
+            } else {
+                button {
+                    class: "pdf-pages-here",
+                    aria_label: t("file.goToPage"),
+                    onclick: move |_| {
+                        typed.set(here.read().clone());
+                        typing.set(true);
+                    },
+                    "{here} / {total}"
+                }
+            }
+            button {
+                class: "pdf-pages-step",
+                aria_label: t("file.nextPage"),
+                onclick: move |_| step(1),
+                span { class: "material-icons", "chevron_right" }
+            }
+        }
+    }
 }
 
 /// What to show when a PDF has no text in it at all: a scan, which is an image

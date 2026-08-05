@@ -494,59 +494,6 @@ html {
 	transition: width 80ms linear;
 }
 
-/* DESIGN (M3 Expressive slider): in a paged document the progress bar is also
-   how you get to a page. Resting it is the same hairline; under a finger the
-   track thickens, a handle appears on it and a label says which page is under
-   the finger, which is the Expressive slider's own shape. Nothing is added to
-   the screen for it: the one thing already on screen that means "where you are
-   in this document" is the thing to take hold of.
-
-   The grab area is taller than the ink so there is something to hit. Only a
-   paged document takes pointer events at all, so nowhere else in the app loses
-   a strip along the top of the window. */
-.reading-progress.paged {
-	pointer-events: auto;
-	height: var(--md-sys-spacing-3);
-	cursor: grab;
-	touch-action: none;
-}
-.reading-progress.paged .reading-progress-fill {
-	height: 3px;
-	transition: height 120ms ease, width 80ms linear;
-}
-.reading-progress.dragging {
-	cursor: grabbing;
-}
-/* Thicker while held, the way an Expressive slider's active track is. */
-.reading-progress.dragging .reading-progress-fill {
-	height: var(--md-sys-spacing-2);
-	transition: height 120ms ease;
-}
-.reading-progress-handle {
-	position: absolute;
-	top: 0;
-	width: var(--md-sys-spacing-1);
-	height: var(--md-sys-spacing-4);
-	border-radius: var(--md-sys-shape-corner-full);
-	background: var(--md-primary);
-	/* Centred on the position, and standing a little proud of the track. */
-	transform: translate(-50%, -25%);
-}
-/* The value label. Below the track rather than above it, because the track is
-   at the very top of the window and there is nothing above it. */
-.reading-progress-label {
-	position: absolute;
-	top: var(--md-sys-spacing-5);
-	transform: translateX(-50%);
-	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3);
-	border-radius: var(--md-sys-shape-corner-full);
-	background: var(--md-inverse-surface);
-	color: var(--md-inverse-on-surface);
-	font-size: var(--md-sys-typescale-label-large-size);
-	white-space: nowrap;
-	pointer-events: none;
-}
-
 /* DESIGN (functional: back to top): a scroll-aware button that fades in after
    scrolling down and returns to the top on click. Sits opposite the FAB. */
 .back-to-top {
@@ -8367,6 +8314,79 @@ a.list-item:hover {
 	max-width: 100%;
 	height: auto;
 	color: var(--md-on-surface);
+}
+
+/* DESIGN (M3 Expressive docked toolbar): where the reader is in a paged
+   document, and how to go elsewhere.
+
+   It says what it is. The browser's own PDF viewer is the other choice in this
+   app's own sheet, one tap away, and it has a page box; that is what a reader
+   expects a PDF to have. A gesture on a hairline was not it, however tidy.
+
+   Floating above the bottom dock rather than in it: the dock belongs to the app
+   and this belongs to the document, and it goes when the document does. Centred,
+   so it clears the back-to-top button on one side and the action button on the
+   other. */
+.pdf-pages {
+	position: fixed;
+	/* The same height the action button stands at, which is what already clears
+	   the dock on a phone. NOT measured from `--dock-tier`: that is defined on
+	   the dock element itself, so nothing outside it can read the variable, and
+	   the whole declaration would be thrown away wherever it could not. */
+	bottom: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-6));
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 120;
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-1);
+	padding: var(--md-sys-spacing-1);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	box-shadow: var(--md-sys-elevation-3);
+	/* Never wide enough to reach the action button on one side or the
+	   back-to-top on the other, whatever a page calls itself: front matter is
+	   sometimes numbered in roman. */
+	max-width: calc(100vw - var(--md-sys-spacing-16) * 2 - var(--md-sys-spacing-12));
+}
+.pdf-pages-step,
+.pdf-pages-here {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: var(--md-sys-spacing-10);
+	border: none;
+	background: transparent;
+	color: inherit;
+	border-radius: var(--md-sys-shape-corner-full);
+	cursor: pointer;
+	font: inherit;
+}
+.pdf-pages-step {
+	min-width: var(--md-sys-spacing-10);
+}
+.pdf-pages-here {
+	padding: 0 var(--md-sys-spacing-4);
+	/* Figures of one width, so the number does not jitter as it counts up. */
+	font-variant-numeric: tabular-nums;
+	font-size: var(--md-sys-typescale-label-large-size);
+}
+.pdf-pages-step:hover,
+.pdf-pages-here:hover {
+	background: var(--md-surface-container-highest);
+}
+.pdf-pages-field {
+	width: var(--md-sys-spacing-16);
+	min-height: var(--md-sys-spacing-10);
+	padding: 0 var(--md-sys-spacing-3);
+	border: 1px solid var(--md-primary);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-surface);
+	color: var(--md-on-surface);
+	font: inherit;
+	font-variant-numeric: tabular-nums;
+	text-align: center;
 }
 
 /* Where a link lands. Nothing to see: it exists so the scroll has a target, and
