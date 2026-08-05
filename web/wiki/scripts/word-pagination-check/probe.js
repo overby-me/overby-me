@@ -1,6 +1,9 @@
 // What the app made of a Word document: how many pages its control offers, and
 // what each of those pages begins with.
 JSON.stringify({
+  // Whether the document was rendered at all. A reader who cannot see the file
+  // gets no reader, and "no page control" would otherwise read as "one page".
+  opened: !!document.querySelector(".docx-doc .docx"),
   control: (() => {
     const c = document.querySelector(".pdf-pages");
     return c ? c.innerText.replace(/\s+/g, " ").trim() : null;

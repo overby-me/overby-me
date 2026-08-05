@@ -14,6 +14,10 @@
 #
 #   WIKI_EMAIL=... WIKI_PASSWORD=... scripts/check-word-pagination.nu
 #
+# The account has to be able to open all five documents: three hang under HB5
+# and two under Landsmøde 2026, which are separate contexts. A document it
+# cannot see is reported as skipped rather than failed.
+#
 # Nothing is written to the wiki. Needs `deno` and `chromium`; chromium is not
 # in the devshell, so set CHROMIUM or have one on PATH.
 
@@ -88,6 +92,11 @@ def main [
         (^deno run -A ($here | path join "drive.ts") $session $url $out
             ($here | path join "probe.js") | complete | ignore)
         let seen = (open $"($out).json")
+        let name = ($doc.path | path basename | str substring 0..40)
+        if not ($seen.opened | default false) {
+            print $"  skip  ($name)  this account cannot open it"
+            continue
+        }
         let said = ($seen.control | default "" | parse --regex '(?<at>\d+) / (?<of>\d+)')
         # No control at all is a ONE-page document: the app offers no page
         # control for a document with only one page, which is the right answer.
@@ -103,7 +112,6 @@ def main [
                 $faults = ($faults | append $"page (($i) + 2) begins ($got | str substring 0..32)…, not ($want)…")
             }
         }
-        let name = ($doc.path | path basename | str substring 0..40)
         if ($faults | is-empty) {
             print $"  ok    ($name)  ($pages) pages, every break where Word puts it"
         } else {
