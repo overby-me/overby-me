@@ -174,7 +174,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
     }
 
     rsx! {
-        div { class: "docx-doc",
+        div { class: "docx-doc pdf-doc",
             for (i , group) in groups.iter().enumerate() {
                 match group.first() {
                     Some(Block::ListItem { .. }) => rsx! {

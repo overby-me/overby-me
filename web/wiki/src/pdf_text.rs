@@ -1789,21 +1789,37 @@ fn join_line(runs: &[Run]) -> Option<Line> {
 
 /// Collapse runs of whitespace and drop what is left empty, without losing the
 /// colour boundaries.
+///
+/// A line ending survives the collapse where a space does not. It is the one
+/// piece of whitespace here that carries meaning: it says the page put the next
+/// words on their own line, which is what a verse is made of.
 fn tidy(spans: Vec<Span>) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::new();
     for span in spans {
         let mut text = String::new();
-        let mut last_was_space =
-            out.last().is_some_and(|s: &Span| s.text.ends_with(' ')) || out.is_empty();
         for c in span.text.chars() {
-            if c.is_whitespace() {
-                if !last_was_space {
-                    text.push(' ');
-                }
-                last_was_space = true;
-            } else {
-                text.push(c);
-                last_was_space = false;
+            // What was last written, here or at the end of the span before.
+            let last = text
+                .chars()
+                .last()
+                .or_else(|| out.last().and_then(|s: &Span| s.text.chars().last()));
+            match (c.is_whitespace(), last) {
+                // Leading whitespace, and whitespace after a line ending, go.
+                (true, None) | (true, Some('\n')) => {}
+                // A line ending replaces a space already written: the ending is
+                // meaning and the space beside it is not.
+                (true, Some(' ')) if c == '\n' => match text.pop() {
+                    Some(_) => text.push('\n'),
+                    None => {
+                        if let Some(prev) = out.last_mut() {
+                            prev.text.pop();
+                            prev.text.push('\n');
+                        }
+                    }
+                },
+                (true, Some(' ')) => {}
+                (true, _) => text.push(if c == '\n' { '\n' } else { ' ' }),
+                (false, _) => text.push(c),
             }
         }
         if !text.is_empty() {
@@ -2127,6 +2143,17 @@ fn list_marker(text: &str) -> Option<&str> {
     None
 }
 
+/// What one line is to the line before it.
+enum Flow {
+    /// It ran out of room and carried on: the two are one line of prose.
+    Wrapped,
+    /// It ended where it meant to, and the next starts underneath: a verse, an
+    /// address, an agenda. One block still, but the break is kept.
+    Line,
+    /// A blank line, a change of size, a marker, a new page: a new block.
+    Apart,
+}
+
 /// How much room the first word of this line would have wanted on the line
 /// before it, including the space in front of it.
 ///
@@ -2293,8 +2320,8 @@ fn blocks_from(
             prev = None;
             continue;
         }
-        let starts_new = match prev {
-            None => false,
+        let flow = match prev {
+            None => Flow::Wrapped,
             Some(p) => {
                 let gap = p.y - line.y;
                 // A line that stopped short of the column may have ended on
@@ -2317,19 +2344,30 @@ fn blocks_from(
                     let room = column - p.right;
                     room > p.size * 2.0 && room > next_word_width(line, p.size)
                 };
-                // And the other reasons: spacing, a size change, a list marker,
-                // or the page turning over.
-                ended_early
-                    || starts_new_entry(&line.text)
-                    || is_index_entry(&line.text)
-                    || gap > p.size * 1.6
+                // A line that ended on purpose is a LINE, not a paragraph. A
+                // verse is a stack of them, single-spaced, and turning each into
+                // a paragraph put a paragraph's air between every line of
+                // Lokalforeningssangen. What separates one block from the next is
+                // the blank line between them, which is a wider gap; a size
+                // change; a marker; or the page turning over.
+                let apart = gap > p.size * 1.6
                     || (line.size - p.size).abs() > p.size * 0.15
+                    || is_index_entry(&line.text)
                     || list_marker(&line.text).is_some()
+                    // A bullet the page DREW starts an item as surely as one
+                    // written in the text does, and without this a whole list
+                    // collapsed into a single item.
+                    || line.bullet.is_some()
                     // A page break: y jumps back UP the page.
-                    || gap < -1.0
+                    || gap < -1.0;
+                match (apart, ended_early || starts_new_entry(&line.text)) {
+                    (true, _) => Flow::Apart,
+                    (false, true) => Flow::Line,
+                    (false, false) => Flow::Wrapped,
+                }
             }
         };
-        if starts_new {
+        if matches!(flow, Flow::Apart) {
             flush(
                 &mut para,
                 para_size,
@@ -2341,11 +2379,13 @@ fn blocks_from(
         if para.is_empty() {
             para_size = line.size;
             para_bullet = line.bullet.clone();
-        } else {
-            // A line break inside a paragraph is a space, not a join.
-            if let Some(last) = para.last_mut() {
-                last.text.push(' ');
-            }
+        } else if let Some(last) = para.last_mut() {
+            // A wrapped line joins with a space; a line that ended on purpose
+            // keeps its ending, and the reading surface honours the newline.
+            last.text.push(match flow {
+                Flow::Line => '\n',
+                _ => ' ',
+            });
         }
         para.extend(line.spans.iter().cloned());
         para_lines.push((line.left, line.right));
@@ -4155,11 +4195,14 @@ mod tests {
         );
     }
 
-    /// A line that stopped well short of the column ENDED. Without this every
-    /// entry on a programme ran into the next and a whole day arrived as one
-    /// wall of text, which is what the agenda for LM 2026 looked like.
+    /// A line that stopped well short of the column ENDED, and the next starts
+    /// underneath it rather than running on. Without this every entry on a
+    /// programme ran into the next and a whole day arrived as one wall of text,
+    /// which is what the agenda for LM 2026 looked like. It stays one block: a
+    /// paragraph between every line is what put a verse's lines a paragraph
+    /// apart.
     #[test]
-    fn a_line_that_stops_short_ends_the_block() {
+    fn a_line_that_stops_short_ends_the_line() {
         let short = |y: f64, right: f64, text: &str| Line {
             y,
             size: 11.0,
@@ -4190,11 +4233,8 @@ mod tests {
         );
         assert_eq!(
             texts(&blocks),
-            vec![
-                "16:30 Ankomst",
-                "17:50 Åbning af landsmødet og en fortsættelse af samme punkt",
-            ],
-            "a short line ends its block; a full-width one wraps into the next"
+            vec!["16:30 Ankomst\n17:50 Åbning af landsmødet og en fortsættelse af samme punkt"],
+            "the short line ends; the full-width one wraps into the next; one block"
         );
     }
 
@@ -4596,6 +4636,52 @@ mod tests {
         assert_eq!(index_entry("1. maj 2025"), None);
         assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
         assert_eq!(index_entry("....7"), None, "no title, no row");
+    }
+
+    /// A verse is lines, not paragraphs. Turning each into a paragraph put a
+    /// paragraph's air between every line of Lokalforeningssangen.
+    #[test]
+    fn a_verse_is_one_block_of_lines() {
+        let verse = |y: f64, right: f64, text: &str| Line {
+            y,
+            size: 14.0,
+            right,
+            left: 56.7,
+            page: 1,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            bullet: None,
+            picture: None,
+        };
+        // Single-spaced at 18.8, as the songbook sets them, then a blank line
+        // before the next stanza. The prose line at the top is what sets the
+        // column: without something reaching the margin, nothing can be short of
+        // it.
+        let blocks = blocks_from(
+            vec![
+                verse(
+                    700.0,
+                    540.0,
+                    "En linje der løber helt ud til margenen og fylder den",
+                ),
+                verse(413.1, 168.9, "Vi er unge radikale"),
+                verse(394.3, 187.3, "og vi står i samlet flok"),
+                verse(375.5, 200.0, "vi vil kæmpe for det gode"),
+                verse(337.9, 150.0, "ÆRU:"),
+                verse(319.1, 210.0, "Nu’ det ÆRU, der synger,"),
+            ],
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(
+            texts(&blocks),
+            vec![
+                "En linje der løber helt ud til margenen og fylder den",
+                "Vi er unge radikale\nog vi står i samlet flok\nvi vil kæmpe for det gode",
+                "ÆRU:\nNu’ det ÆRU, der synger,",
+            ],
+            "one block per stanza, its lines kept"
+        );
     }
 
     /// An anchor nobody points at is furniture in the middle of a list, and it

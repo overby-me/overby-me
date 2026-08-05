@@ -8187,6 +8187,20 @@ a.list-item:hover {
 	background: var(--md-outline-variant);
 }
 
+/* A PDF's lines are kept where the page keeps them. A line that ended on
+   purpose, as every line of a verse does, carries its ending into the text, and
+   this is what honours it: `pre-line` breaks on those and collapses everything
+   else, so a stanza reads as a stanza without a paragraph's air between each of
+   its lines. Set on the text-bearing elements rather than the whole document,
+   so nothing else inherits a whitespace rule it did not ask for. */
+.pdf-doc p,
+.pdf-doc li,
+.pdf-doc h3,
+.pdf-doc h4,
+.pdf-doc h5 {
+	white-space: pre-line;
+}
+
 /* A contents list out of a PDF, laid out the way the page laid it out.
 
    On the page the leader dots are what fill the gap, so every page number lands
