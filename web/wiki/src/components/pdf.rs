@@ -515,6 +515,11 @@ fn go_to_page(label: &str) {
 /// so there is nothing to scroll to, only somewhere to be.
 fn step_to(labels: &[String], here: &str, by: i32) -> Option<String> {
     match labels.iter().position(|l| l == here) {
+        // Back from the FIRST mark is the top, not the first mark again. The
+        // page above it has no mark of its own, because nothing ended before
+        // it, so clamping into the list left the control on the second page
+        // with a back button that did nothing at all.
+        Some(0) if by < 0 => None,
         Some(at) => {
             let next = (at as i64 + by as i64).clamp(0, labels.len() as i64 - 1) as usize;
             labels.get(next).cloned()
@@ -526,22 +531,87 @@ fn step_to(labels: &[String], here: &str, by: i32) -> Option<String> {
     }
 }
 
-/// Which page the reader is on: the last one that has begun above them.
+/// Which page the reader is on, given where they are: the last one that has
+/// begun above them.
 ///
-/// Above every mark is the first page, which has no mark of its own because
-/// nothing ended before it, so it has to be told what it is called.
-fn page_here(pages: &[(f64, String)], first: &str) -> String {
-    let scrolled = web_sys::window()
-        .and_then(|w| w.scroll_y().ok())
-        .unwrap_or(0.0);
+/// `allowance` is the room a jump leaves above the mark it lands on. Without it
+/// this reports the page ABOVE the one a jump just landed on -- the mark sits
+/// below the top of the window by exactly that much, so a strict comparison
+/// says it has not been reached, the control snaps back to where it was, and
+/// the next press works out the same answer and goes nowhere. That is the
+/// "press it twice" this was reported as.
+fn page_at(
+    pages: &[(f64, String)],
+    first: &str,
+    scrolled: f64,
+    allowance: f64,
+    at_bottom: bool,
+) -> String {
+    // The end of the document is the last page, whatever the arithmetic says. A
+    // final page shorter than the window can never be scrolled to the top of
+    // it, so it would otherwise be the one page a reader can reach and never be
+    // told they are on.
+    if at_bottom {
+        if let Some((_, label)) = pages.last() {
+            return label.clone();
+        }
+    }
     match pages
         .iter()
-        .take_while(|(top, _)| *top <= scrolled + 8.0)
+        .take_while(|(top, _)| *top <= scrolled + allowance + 8.0)
         .last()
     {
         None => first.to_string(),
         Some((_, label)) => label.clone(),
     }
+}
+
+/// The room a jump leaves above the mark it lands on, read from the mark's own
+/// `scroll-margin-top` rather than repeated here, so the stylesheet and this
+/// cannot drift apart.
+fn landing_allowance() -> f64 {
+    let Some(window) = web_sys::window() else {
+        return 0.0;
+    };
+    let Some(document) = window.document() else {
+        return 0.0;
+    };
+    let Ok(Some(mark)) = document.query_selector(".pdf-page-break") else {
+        return 0.0;
+    };
+    let Ok(Some(style)) = window.get_computed_style(&mark) else {
+        return 0.0;
+    };
+    style
+        .get_property_value("scroll-margin-top")
+        .ok()
+        .and_then(|v| v.trim().trim_end_matches("px").parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
+/// Which page the reader is on: the last one that has begun above them.
+///
+/// Above every mark is the first page, which has no mark of its own because
+/// nothing ended before it, so it has to be told what it is called.
+fn page_here(pages: &[(f64, String)], first: &str) -> String {
+    let Some(window) = web_sys::window() else {
+        return first.to_string();
+    };
+    let scrolled = window.scroll_y().unwrap_or(0.0);
+    let seen = window
+        .inner_height()
+        .ok()
+        .and_then(|h| h.as_f64())
+        .unwrap_or(0.0);
+    let tall = window
+        .document()
+        .and_then(|d| d.document_element())
+        .map(|e| e.scroll_height() as f64)
+        .unwrap_or(0.0);
+    // Within a pixel or two of the end counts as the end: a fractional device
+    // pixel ratio leaves the last scroll a hair short of the arithmetic.
+    let at_bottom = tall > 0.0 && scrolled + seen >= tall - 2.0;
+    page_at(pages, first, scrolled, landing_allowance(), at_bottom)
 }
 
 /// Where in the document the reader is, and how to go somewhere else.
@@ -561,6 +631,10 @@ fn PageControl(first: String, last: String) -> Element {
     let mut typing = use_signal(|| false);
     let mut typed = use_signal(String::new);
     let mut here = use_signal(String::new);
+    // The first page's name, held in a signal so the handlers that need it stay
+    // Copy: a closure that captures the String itself can only be given to one
+    // of the two buttons.
+    let top_page = use_signal(|| first.clone());
 
     // The marks move as pictures land and fonts settle, so their places are taken
     // again whenever the document's height changes. Scroll progress is what says
@@ -621,7 +695,16 @@ fn PageControl(first: String, last: String) -> Element {
         let at = here.peek().clone();
         match step_to(&labels, &at, by) {
             Some(label) => arrive(&label),
-            None => crate::components::back_to_top::scroll_to_top(),
+            None => {
+                crate::components::back_to_top::scroll_to_top();
+                // Said straight away, like a jump to a mark: the top is the
+                // first page, and waiting for the scroll to prove it is what
+                // made a press look ignored.
+                let top = top_page.peek().clone();
+                if *here.peek() != top {
+                    here.set(top);
+                }
+            }
         }
     };
 
@@ -695,7 +778,7 @@ pub fn PdfHasNoText() -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::step_to;
+    use super::{page_at, step_to};
 
     fn songbook() -> Vec<String> {
         // What the songbook offers: its numbered pages, three to ninety-nine.
@@ -713,19 +796,64 @@ mod tests {
         assert_eq!(step_to(&pages, "37", -1).as_deref(), Some("36"));
     }
 
-    /// And stops at the ends rather than falling off them.
+    /// Back from the first mark is the top of the document, where the first
+    /// page is. It used to clamp into the list and hand back the mark it was
+    /// already on, so the back button did nothing on page two.
     #[test]
-    fn a_step_stops_at_the_ends() {
+    fn a_step_back_from_the_first_mark_is_the_top() {
+        let pages = songbook();
+        assert_eq!(step_to(&pages, "3", -1), None);
+    }
+
+    /// The marks of a four-sheet document that prints no numbers, as the DOM
+    /// reports them: the first page has no mark, so the list starts at two.
+    fn fixture() -> Vec<(f64, String)> {
+        vec![
+            (464.0, "2".into()),
+            (748.0, "3".into()),
+            (960.0, "4".into()),
+        ]
+    }
+
+    /// A jump lands the mark BELOW the top of the window, by exactly the room
+    /// the stylesheet leaves above it. Measured in a browser: pressing forward
+    /// scrolled to 384 for a mark at 464, and the control then said page one,
+    /// which is the fault reported as "you have to press twice".
+    #[test]
+    fn a_page_jumped_to_is_the_page_you_are_on() {
+        let pages = fixture();
+        assert_eq!(page_at(&pages, "1", 384.0, 80.0, false), "2");
+        // And with no allowance at all it is the old, wrong answer, which is
+        // what this test exists to keep from coming back.
+        assert_eq!(page_at(&pages, "1", 384.0, 0.0, false), "1");
+    }
+
+    /// The top of the document is the first page, which has no mark.
+    #[test]
+    fn the_top_is_the_first_page() {
+        assert_eq!(page_at(&fixture(), "1", 0.0, 80.0, false), "1");
+    }
+
+    /// The end of the document is its last page even when that page is shorter
+    /// than the window, which is every short document: its last mark sits below
+    /// anywhere the scroll can reach.
+    #[test]
+    fn the_end_of_the_document_is_its_last_page() {
+        assert_eq!(page_at(&fixture(), "1", 819.0, 80.0, true), "4");
+        // 819 is as far as that document scrolls, and the mark is at 960, so
+        // without the end-of-document rule it is unreachable.
+        assert_eq!(page_at(&fixture(), "1", 819.0, 80.0, false), "3");
+    }
+
+    /// And stops at the end rather than falling off it. The other end is not a
+    /// stop but a place: see `a_step_back_from_the_first_mark_is_the_top`.
+    #[test]
+    fn a_step_stops_at_the_end() {
         let pages = songbook();
         assert_eq!(
             step_to(&pages, "99", 1).as_deref(),
             Some("99"),
             "the last page"
-        );
-        assert_eq!(
-            step_to(&pages, "3", -1).as_deref(),
-            Some("3"),
-            "the first marked page"
         );
     }
 
