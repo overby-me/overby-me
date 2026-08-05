@@ -97,6 +97,7 @@
     ../modules/core/uinput.nix
     ../modules/core/users.nix
     ../modules/core/zram.nix
+    ../modules/services/netbird.nix
     ../modules/services/openssh.nix
     ../modules/services/resolved.nix
 
