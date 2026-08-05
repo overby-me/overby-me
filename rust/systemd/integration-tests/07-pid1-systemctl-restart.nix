@@ -37,6 +37,12 @@
     [[ "$NEW_PID" -gt 0 ]]
     [[ "$ORIG_PID" -ne "$NEW_PID" ]]
     systemctl stop restart-cmd-test.service
+
+    : "systemctl restart starts a currently-inactive service"
+    (! systemctl is-active restart-cmd-test.service)
+    systemctl restart restart-cmd-test.service
+    systemctl is-active restart-cmd-test.service
+    systemctl stop restart-cmd-test.service
     SREOF
   '';
 }
