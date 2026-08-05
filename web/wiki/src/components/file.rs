@@ -825,7 +825,12 @@ fn NativeDocx(file_id: String, name: String) -> Element {
         // Needs the whole document: a heading's size means something only
         // against the size of the body text around it.
         super::docx::scale_headings(&mut blocks);
-        Ok::<_, String>((blocks, gaps))
+        // What the document says its pages are, for working out where they
+        // end. `None` where it says nothing usable, and then nothing is marked.
+        let page = doc.get("section").and_then(|section| {
+            super::docx::PageGeometry::read(section, doc.get("minorFont").and_then(|f| f.as_str()))
+        });
+        Ok::<_, String>((blocks, gaps, page))
     });
 
     let state = parsed.read().clone();
@@ -835,12 +840,21 @@ fn NativeDocx(file_id: String, name: String) -> Element {
                 div { class: "spinner spinner-sm" }
             }
         },
-        Some(Ok((blocks, gaps))) => rsx! {
+        Some(Ok((blocks, gaps, page))) => rsx! {
             if !gaps.is_empty() {
                 GapNotice { urgent: gaps.is_major(), report: gaps }
             }
             article { class: "docx-doc", aria_label: "{name}",
-                super::docx::DocxBody { blocks }
+                match page {
+                    // The document states a page size, so where its pages end
+                    // can be worked out and a reader can be told "page 7".
+                    Some(page) => rsx! {
+                        super::docx::PagedDocx { blocks, page }
+                    },
+                    None => rsx! {
+                        super::docx::DocxBody { blocks }
+                    },
+                }
             }
         },
         // A document this cannot read is not a dead end: say so, and the other

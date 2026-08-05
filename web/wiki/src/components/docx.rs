@@ -23,6 +23,7 @@
 
 use dioxus::prelude::*;
 use serde::Deserialize;
+use wasm_bindgen::JsCast;
 
 /// One block in the document body.
 ///
@@ -871,7 +872,14 @@ pub fn is_merged_away(cell: &Cell) -> bool {
 /// walk produces and what makes such a rendering look like a stack of bullets
 /// with gaps between them.
 #[component]
-pub fn DocxBody(blocks: Vec<Block>) -> Element {
+pub fn DocxBody(
+    blocks: Vec<Block>,
+    /// Where the pages end, as `(group index, the page that begins there)`.
+    /// Worked out by [`PagedDocx`], which is the only thing that fills this in;
+    /// a table cell renders through here too and has no pages of its own.
+    #[props(default)]
+    marks: Vec<(usize, usize)>,
+) -> Element {
     // Group first, render second: the grouping is a property of the SEQUENCE,
     // and rsx has no way to look ahead mid-iteration.
     let mut groups: Vec<Group> = Vec::new();
@@ -896,6 +904,20 @@ pub fn DocxBody(blocks: Vec<Block>) -> Element {
     rsx! {
         div { class: "docx",
             for (i , group) in groups.into_iter().enumerate() {
+                // Where a page ends, when someone has worked out where that is
+                // (see `PagedDocx`). Empty for a cell's contents and for a
+                // document nobody paginated, which is most of them.
+                if let Some((_, begins)) = marks.iter().find(|(at, _)| *at == i) {
+                    div {
+                        key: "p{i}",
+                        class: "pdf-page-break",
+                        role: "separator",
+                        "data-page": "{begins}",
+                        // An ending, like the PDF's: a jump aims past it.
+                        "data-page-ends": "true",
+                        span { "{begins - 1}" }
+                    }
+                }
                 match group {
                     Group::Single(block) => rsx! {
                         DocxBlock { key: "b{i}", block }
@@ -2277,4 +2299,155 @@ mod tests {
         // An unknown block kind must not fail the whole document.
         assert_eq!(blocks[2], Block::Unknown);
     }
+}
+
+/// What a Word file says its pages are, in CSS pixels.
+///
+/// A `.docx` has no pagination in it. Word computes it when it lays the
+/// document out, and writes the answer back only as a hint that is absent from
+/// anything another editor saved -- of six real documents from this wiki, not
+/// one had a single authored page break and only two carried Word's hint. So
+/// where the pages fall has to be worked out, and the file does say enough to
+/// work it out: how wide the text column is and how tall.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PageGeometry {
+    /// The text column: page width less both margins.
+    pub column: f64,
+    /// The text height: page height less the top and bottom margins.
+    pub height: f64,
+    /// What the document sets its body text in, so the measuring is done in
+    /// the document's typography rather than the reader's.
+    pub font: String,
+}
+
+impl PageGeometry {
+    /// Points to CSS pixels: 72 points to the inch, 96 pixels to the inch.
+    fn px(points: f64) -> f64 {
+        points * 96.0 / 72.0
+    }
+
+    /// The geometry out of the parser's `section`, when it is usable. A page
+    /// with no size, or margins wider than the paper, says nothing to measure
+    /// against.
+    pub fn read(section: &serde_json::Value, font: Option<&str>) -> Option<Self> {
+        let at = |key: &str| section.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let column = Self::px(at("pageWidth") - at("marginLeft") - at("marginRight"));
+        let height = Self::px(at("pageHeight") - at("marginTop") - at("marginBottom"));
+        // A quarter of an A4 column, and a page that holds more than a line or
+        // two: below either, something is wrong with what was read.
+        (column > 100.0 && height > 100.0).then(|| PageGeometry {
+            column,
+            height,
+            // The document's own body face first, then the metric-compatible
+            // substitutes a reader is likely to actually have. The measuring is
+            // only as good as this: a face that is not installed is replaced by
+            // one with different metrics, the lines wrap elsewhere, and the
+            // pages drift.
+            font: match font.map(str::trim).filter(|f| !f.is_empty()) {
+                Some(named) => format!("{named}, Carlito, Calibri, Liberation Sans, sans-serif"),
+                None => "Carlito, Calibri, Liberation Sans, sans-serif".to_string(),
+            },
+        })
+    }
+}
+
+/// Where each page of a Word document ends, worked out by laying it out at the
+/// size the document says its pages are.
+///
+/// The document is rendered twice: once off-screen at its own text-column width
+/// and typography, which is what gets measured, and once visibly in the
+/// reader's own column with a mark wherever a page ended. The off-screen copy
+/// is dropped as soon as it has been read.
+///
+/// What this is NOT is Word's own pagination. It is this browser's, at Word's
+/// geometry, and the two agree only as far as the fonts do: a document set in a
+/// face the reader does not have is laid out in a substitute, its lines wrap in
+/// different places, and the difference accumulates down the document. Where
+/// the file states no usable page size, nothing is marked at all.
+#[component]
+pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
+    let mut marks = use_signal(Vec::<(usize, usize)>::new);
+    let mut pages = use_signal(|| 0usize);
+    // Whether the off-screen copy is still needed. It is a whole second render
+    // of the document, so it goes as soon as it has been measured.
+    let mut measuring = use_signal(|| true);
+
+    let height = page.height;
+    use_effect(move || {
+        if !*measuring.peek() {
+            return;
+        }
+        let Some((found, count)) = measure_pages(height) else {
+            return;
+        };
+        marks.set(found);
+        pages.set(count);
+        measuring.set(false);
+    });
+
+    rsx! {
+        if measuring() {
+            div {
+                id: "docx-measure",
+                class: "docx-measure",
+                aria_hidden: "true",
+                style: "width:{page.column}px;font-family:{page.font};",
+                DocxBody { blocks: blocks.clone() }
+            }
+        }
+        DocxBody { blocks, marks: marks() }
+        if pages() > 1 {
+            super::pager::PageControl { first: "1".to_string(), last: pages().to_string() }
+        }
+    }
+}
+
+/// Read the off-screen copy: which of its blocks a page boundary falls in, and
+/// how many pages there are.
+///
+/// A block that is taller than a page swallows more than one boundary. It gets
+/// ONE mark -- there is nowhere inside it to put another without laying out its
+/// lines, which is a different job -- but the pages it covers are still
+/// counted, so the total stays honest even where the marks are coarse.
+fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
+    if height <= 0.0 {
+        return None;
+    }
+    let document = web_sys::window()?.document()?;
+    // A NodeList of the top-level blocks rather than `children()`, which needs
+    // a web-sys feature this crate does not carry.
+    let children = document
+        .query_selector_all("#docx-measure > .docx > *")
+        .ok()?;
+    if children.length() == 0 {
+        return None;
+    }
+    let mut marks: Vec<(usize, usize)> = Vec::new();
+    let mut page = 1usize;
+    let mut bottom = 0.0f64;
+    for at in 0..children.length() {
+        let Some(child) = children
+            .item(at)
+            .and_then(|c| c.dyn_into::<web_sys::HtmlElement>().ok())
+        else {
+            continue;
+        };
+        let top = child.offset_top() as f64;
+        bottom = top + child.offset_height() as f64;
+        let mut began = false;
+        while bottom > page as f64 * height {
+            page += 1;
+            if !began {
+                marks.push((at as usize, page));
+                began = true;
+            }
+            // A document whose measuring went wrong should not spin.
+            if page > 2000 {
+                return None;
+            }
+        }
+    }
+    // Nothing measured at all (fonts not settled, or an empty document): let
+    // the effect try again rather than marking a one-page document.
+    (bottom > 0.0).then_some((marks, page))
 }

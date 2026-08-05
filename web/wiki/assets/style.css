@@ -8168,6 +8168,18 @@ a.list-item:hover {
 .docx-doc .docx-h:first-child {
 	margin-top: 0;
 }
+/* The off-screen copy of a Word document, laid out at the size the document
+   says its pages are, so where they end can be measured. Laid out but not
+   shown, and not read out: `visibility: hidden` still has a height, which
+   `display: none` would not. It is dropped as soon as it has been read. */
+.docx-measure {
+	position: absolute;
+	left: -10000px;
+	top: 0;
+	visibility: hidden;
+	pointer-events: none;
+	contain: layout;
+}
 /* Where a page ended in the reflowed PDF view. Furniture: a hairline with the
    number sitting on it, quiet enough to skim past and precise enough that "see
    page 12" still means something to someone reading this instead of the pages. */
