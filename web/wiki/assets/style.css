@@ -8190,8 +8190,14 @@ a.list-item:hover {
 	   hold more paragraphs than its body has a commonest spacing of nothing,
 	   and measured a page short. The multiplier is Word's, which counts from
 	   the font's line box rather than its size. */
-	margin-bottom: var(--p-after, 8pt);
-	line-height: calc(var(--p-line, 1.08) * 1.22);
+	/* `!important` because it has to be: the same paragraph carries an INLINE
+	   margin and line height, in the reader-relative units this renderer
+	   deliberately converts Word's measures into, and an inline style beats a
+	   stylesheet rule. Without this the off-screen copy was laid out in the
+	   reader's spacing however carefully the document's own was worked out --
+	   which is why several rounds of correcting that spacing changed nothing. */
+	margin-bottom: var(--p-after, 8pt) !important;
+	line-height: calc(var(--p-line, 1.08) * 1.22) !important;
 }
 /* A list Word closes up: the space under an item goes only when the NEXT item
    is closed up too, which is what `contextualSpacing` means and why it cannot
