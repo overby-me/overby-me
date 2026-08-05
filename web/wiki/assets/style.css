@@ -8193,6 +8193,17 @@ a.list-item:hover {
 }
 .docx-measure .docx-table {
 	width: 100%;
+	/* So the shares below decide the columns rather than the content does. A
+	   cell that states no share keeps the browser's own fitting. */
+	--c-share: auto;
+	table-layout: fixed;
+}
+.docx-measure .docx-table th,
+.docx-measure .docx-table td {
+	/* Word's share of the table for this column. Not its width in points: the
+	   table is wider than the page it sits on and Word lets it run into the
+	   margin, so the shares are what carries across. */
+	width: var(--c-share, auto);
 }
 .docx-measure .docx-p,
 .docx-measure .docx-h,

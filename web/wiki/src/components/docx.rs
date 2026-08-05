@@ -1090,8 +1090,11 @@ enum Group {
 /// Its own component so the shading can be read off the cell before its content
 /// moves into the body, which rsx has no room to do inline.
 #[component]
-fn TableCell(cell: Cell, header: bool) -> Element {
-    let shade = cell_style(&cell);
+fn TableCell(cell: Cell, header: bool, #[props(default)] share: Option<f64>) -> Element {
+    let shade = match share {
+        Some(pct) => format!("--c-share:{pct:.3}%;{}", cell_style(&cell)),
+        None => cell_style(&cell),
+    };
     let span = cell.col_span;
     match header {
         true => rsx! {
@@ -1218,6 +1221,33 @@ fn DocxBlock(
         Block::Table(t) => {
             // How wide the mark's own row has to be to span the table.
             let across = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
+            // Word's column PROPORTIONS, for the off-screen copy to wrap the
+            // text where Word wraps it. Proportions, not the widths themselves:
+            // this document's three columns come to 670px against a 642px text
+            // column -- Word lets a table run into the margin -- and pinning the
+            // absolute widths inside a narrower box squeezes every row taller,
+            // which was measured at two extra pages. The shares are what
+            // survives the difference.
+            //
+            // Left to itself the browser fits columns to their content, which
+            // is right on screen and nothing like Word: it gave this table
+            // 159/81/402 where Word gives 290/75/305.
+            let shares: Vec<Option<f64>> = {
+                let widths: Vec<f64> = t
+                    .rows
+                    .iter()
+                    .max_by_key(|r| r.cells.len())
+                    .map(|r| r.cells.iter().map(|c| c.width_pt.unwrap_or(0.0)).collect())
+                    .unwrap_or_default();
+                let total: f64 = widths.iter().sum();
+                match total > 0.0 {
+                    true => widths
+                        .iter()
+                        .map(|w| (*w > 0.0).then(|| w / total * 100.0))
+                        .collect(),
+                    false => Vec::new(),
+                }
+            };
             rsx! {
             // Its own scroll container: a wide table must not widen the page and
             // force the whole document sideways on a phone.
@@ -1242,7 +1272,12 @@ fn DocxBlock(
                                 // A cell covered by a merge from above is not
                                 // drawn; drawing it would push the row wider.
                                 if !is_merged_away(&cell) {
-                                    TableCell { key: "c{c}", cell, header: row.is_header }
+                                    TableCell {
+                                        key: "c{c}",
+                                        cell,
+                                        header: row.is_header,
+                                        share: shares.get(c).copied().flatten(),
+                                    }
                                 }
                             }
                         }
