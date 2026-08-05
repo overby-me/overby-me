@@ -862,6 +862,25 @@ pub fn paragraph_style(p: &Paragraph) -> String {
             css.push_str(&format!("line-height:{:.2};", ls.value));
         }
     }
+    // What THIS paragraph leaves under itself and sets its lines at, as Word
+    // resolved it, for the off-screen copy that works out where the pages end.
+    // Read only inside `.docx-measure`, so it changes nothing on screen.
+    //
+    // Per paragraph, not per document: a document-wide figure was tried and the
+    // cells outvoted the body. One file's hundred and thirty cell paragraphs
+    // leave nothing under themselves and its hundred and eight body paragraphs
+    // leave eight points, so "what most paragraphs do" was nothing at all, and
+    // the whole document measured a page short of what Word makes of it.
+    css.push_str(&format!(
+        "--p-after:{:.2}pt;",
+        p.space_after.filter(|v| *v >= 0.0).unwrap_or(0.0)
+    ));
+    let line = match p.line_spacing.as_ref() {
+        Some(ls) if ls.rule == "auto" && ls.value > 0.0 => ls.value,
+        // Stating none is stating single.
+        _ => 1.0,
+    };
+    css.push_str(&format!("--p-line:{line:.3};"));
     css
 }
 
@@ -1309,6 +1328,16 @@ fn RunSpan(run: Run) -> Element {
 
 #[cfg(test)]
 mod tests {
+
+    /// A paragraph's style without the custom properties that exist only for
+    /// the off-screen measuring copy. Those say nothing about how a paragraph
+    /// looks on screen, which is what these tests are about.
+    fn visible(style: &str) -> String {
+        style
+            .split_inclusive(';')
+            .filter(|d| !d.trim_start().starts_with("--p-"))
+            .collect()
+    }
     use super::*;
 
     /// Word writes literal black for ordinary body text, so honouring it put
@@ -1739,7 +1768,7 @@ mod tests {
         assert_eq!(p.runs.len(), 2);
         assert!(picture_of(&p.runs[0]).is_some(), "the bullet");
         assert!(picture_of(&p.runs[1]).is_none(), "the text after it");
-        assert_eq!(paragraph_style(p), "text-align:left;");
+        assert_eq!(visible(&paragraph_style(p)), "text-align:left;");
     }
 
     /// Reported: table cells lost their colour. The parser gives it as a hex on
@@ -2260,7 +2289,7 @@ mod tests {
             start_of(&hanging),
             start_of(&flat)
         );
-        assert_eq!(paragraph_style(&flat), "margin-left:0.92rem;");
+        assert_eq!(visible(&paragraph_style(&flat)), "margin-left:0.92rem;");
     }
 
     #[test]
@@ -2270,7 +2299,7 @@ mod tests {
             indent_first: Some(16.0),
             ..Default::default()
         };
-        assert_eq!(paragraph_style(&prose), "text-indent:1.00rem;");
+        assert_eq!(visible(&paragraph_style(&prose)), "text-indent:1.00rem;");
 
         // A hanging indent deeper than the margin would put the first line
         // outside the document, where it would be clipped.
@@ -2310,17 +2339,17 @@ mod tests {
             alignment: Some("center".into()),
             ..Default::default()
         };
-        assert_eq!(paragraph_style(&centred), "text-align:center;");
+        assert_eq!(visible(&paragraph_style(&centred)), "text-align:center;");
         let right = Paragraph {
             alignment: Some("right".into()),
             ..Default::default()
         };
-        assert_eq!(paragraph_style(&right), "text-align:right;");
+        assert_eq!(visible(&paragraph_style(&right)), "text-align:right;");
         let indented = Paragraph {
             indent_left: Some(32.0),
             ..Default::default()
         };
-        assert_eq!(paragraph_style(&indented), "margin-left:2.00rem;");
+        assert_eq!(visible(&paragraph_style(&indented)), "margin-left:2.00rem;");
     }
 
     /// Reported: a left-aligned document rendered centred. Left used to emit
@@ -2334,12 +2363,14 @@ mod tests {
                 alignment: Some(value.into()),
                 ..Default::default()
             };
-            assert_eq!(paragraph_style(&p), "text-align:left;", "{value}");
+            assert_eq!(visible(&paragraph_style(&p)), "text-align:left;", "{value}");
         }
-        // A paragraph that says nothing still says nothing: the container's
-        // `text-align: start` is what saves it, and inline noise on every
-        // paragraph of every document is not worth the bytes.
-        assert_eq!(paragraph_style(&Paragraph::default()), "");
+        // A paragraph that says nothing still says nothing ON SCREEN: the
+        // container's `text-align: start` is what saves it, and inline noise on
+        // every paragraph of every document is not worth the bytes. It does
+        // carry what it resolves to for the measuring copy, which is inert
+        // anywhere else.
+        assert_eq!(visible(&paragraph_style(&Paragraph::default())), "");
     }
 
     #[test]

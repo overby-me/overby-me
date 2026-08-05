@@ -8183,13 +8183,15 @@ a.list-item:hover {
 .docx-measure .docx-table td {
 	padding: 0 0.08in;
 }
-.docx-measure .docx-p {
-	margin-bottom: var(--docx-page-after, 8pt);
-	line-height: var(--docx-page-line, 1.08);
-}
+.docx-measure .docx-p,
 .docx-measure .docx-list li {
-	margin-bottom: var(--docx-page-list-after, 8pt);
-	line-height: var(--docx-page-line, 1.08);
+	/* Each paragraph's OWN resolved spacing and line height (set by
+	   `paragraph_style`), not one figure for the document: a file whose cells
+	   hold more paragraphs than its body has a commonest spacing of nothing,
+	   and measured a page short. The multiplier is Word's, which counts from
+	   the font's line box rather than its size. */
+	margin-bottom: var(--p-after, 8pt);
+	line-height: calc(var(--p-line, 1.08) * 1.22);
 }
 /* A list Word closes up: the space under an item goes only when the NEXT item
    is closed up too, which is what `contextualSpacing` means and why it cannot
@@ -8202,9 +8204,10 @@ a.list-item:hover {
 	   copy overrides both inline with what the document actually says; these
 	   are what it falls back to, and they are the same two numbers the Rust
 	   side falls back to. */
-	--docx-page-line: 1.08;
-	--docx-page-after: 8pt;
-	--docx-page-list-after: 8pt;
+	/* Word's own defaults, for a paragraph that states neither. Every
+	   paragraph overrides both with what it resolves to. */
+	--p-line: 1.08;
+	--p-after: 8pt;
 	position: absolute;
 	left: -10000px;
 	top: 0;
