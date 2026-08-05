@@ -251,8 +251,19 @@ fn resolve_gid_with_user_fallback(
         return resolve_gid(group);
     }
     if let Some(user_str) = user {
-        // Look up the user's primary group
-        if user_str.parse::<u32>().is_err() {
+        // Look up the user's primary group from the passwd database. systemd
+        // resolves it from the user record whether User= is a name or a bare
+        // numeric UID (e.g. user@%i.service sets User=%i to the UID) — in both
+        // cases an unset Group= means "the User='s primary group", never the
+        // manager's GID.
+        if let Ok(uid) = user_str.parse::<u32>() {
+            // Numeric User=: resolve pw_gid via the UID. If the UID has no
+            // passwd entry, fall through to the current-GID behavior below
+            // rather than failing the exec.
+            if let Ok(pwentry) = crate::platform::pwnam::getpwuid_r(uid) {
+                return Ok(pwentry.gid.as_raw());
+            }
+        } else {
             let pwentry = crate::platform::pwnam::getpwnam_r(user_str)
                 .map_err(|_| format!("Couldn't resolve user for group fallback: {user_str}"))?;
             return Ok(pwentry.gid.as_raw());

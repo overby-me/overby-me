@@ -4,6 +4,16 @@
     TEST_MATCH_SUBTEST = "\\.run\\.sh$";
   };
   testTimeout = 600;
+  # UPDATE 2026-08-05: the "CURRENT STOP" archaeology below is superseded. Two
+  # more user-manager defects were fixed (transient stdout/stderr EPERM ->
+  # $XDG_RUNTIME_DIR, and numeric User= with no Group= dropping to the manager
+  # GID instead of the user's primary group). VM-verified: the `--user
+  # --machine=testuser@` cgroup and `id -nu`/`id -ng` assertions now pass. The
+  # test is now RED one line further on, at
+  # `[[ "$PWD" == /home/testuser && -n "$INVOCATION_ID" ]]` -- a user-manager
+  # service's default working directory should be $HOME. See the 74-AUX-UTILS
+  # run row in docs/TEST-OVERRIDES.md for the current state of record.
+  #
   # The substitute is gone as of 2026-07-27 and the real upstream script runs.
   # It used to be `rm -f`d and replaced by 289 hand-written lines that never
   # exercised --bind --empower --expand-environment= --job-mode= --json=
