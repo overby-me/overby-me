@@ -2495,7 +2495,11 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
         else {
             continue;
         };
-        if !child.inner_text().trim().is_empty() {
+        // `text_content`, NOT `inner_text`: the latter is what the browser
+        // RENDERS, and this copy is hidden, so it answers empty for every block
+        // and the whole measurement gives up. That shipped once and left every
+        // Word document with no page marks at all.
+        if !child.text_content().unwrap_or_default().trim().is_empty() {
             last = Some(at);
         }
     }
