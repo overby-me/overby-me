@@ -2154,6 +2154,31 @@ fn list_marker(text: &str) -> Option<&str> {
     None
 }
 
+/// Whether a line break falls INSIDE a web address, so the two sides join with
+/// nothing between them.
+///
+/// A wrapped line is one piece of text broken for the margin's sake, and the
+/// break is usually between words, where a space belongs. Not always: the
+/// samværspolitik prints its alkoholpolitik link across three lines, breaking it
+/// after "https://" and again after a hyphen, and a space at either place is a
+/// broken address rather than a line ending. Only for a WRAP: a line that ended
+/// on purpose ended, and the next line starts something, even after an address.
+fn continues_a_url(before: &str, after: &str) -> bool {
+    let tail = before.split_whitespace().next_back().unwrap_or_default();
+    let head = after.split_whitespace().next().unwrap_or_default();
+    if tail.is_empty() || head.is_empty() {
+        return false;
+    }
+    let started = tail.to_ascii_lowercase();
+    let started = started.starts_with("http://")
+        || started.starts_with("https://")
+        || started.starts_with("www.")
+        || started.contains("://");
+    // An address in progress breaks where it runs out of room, not at a word,
+    // so what follows carries straight on from it.
+    started && !head.starts_with(|c: char| c.is_ascii_punctuation() && c != '/' && c != '-')
+}
+
 /// What one line is to the line before it.
 enum Flow {
     /// It ran out of room and carried on: the two are one line of prose.
@@ -2222,7 +2247,11 @@ fn blocks_from(
             .fold(f64::INFINITY, f64::min);
         let indent = indent_steps(left, col_left, size);
         geometry.clear();
-        let spans = tidy(std::mem::take(para));
+        // Again at the block, not only at the line: an address broken across
+        // lines is only whole once they are joined, and the file linked the
+        // pieces it drew rather than the address it meant. Here it becomes one
+        // link over the whole of it, "https://" included.
+        let spans = mend_written_links(tidy(std::mem::take(para)));
         if spans.is_empty() {
             return;
         }
@@ -2390,13 +2419,20 @@ fn blocks_from(
         if para.is_empty() {
             para_size = line.size;
             para_bullet = line.bullet.clone();
-        } else if let Some(last) = para.last_mut() {
+        } else {
             // A wrapped line joins with a space; a line that ended on purpose
             // keeps its ending, and the reading surface honours the newline.
-            last.text.push(match flow {
-                Flow::Line => '\n',
-                _ => ' ',
-            });
+            // Unless the wrap fell inside a web address, which joins with
+            // nothing: a space there is a broken address.
+            let so_far: String = para.iter().map(|s| s.text.as_str()).collect();
+            let joiner = match flow {
+                Flow::Line => Some('\n'),
+                _ if continues_a_url(&so_far, &line.text) => None,
+                _ => Some(' '),
+            };
+            if let (Some(c), Some(last)) = (joiner, para.last_mut()) {
+                last.text.push(c);
+            }
         }
         para.extend(line.spans.iter().cloned());
         para_lines.push((line.left, line.right));
@@ -4514,6 +4550,30 @@ mod tests {
             texts(&blocks),
             vec!["Sidste linje på side et", "", "", "Første linje på side to"]
         );
+    }
+
+    /// An address broken for the margin's sake is still one address.
+    #[test]
+    fn a_wrapped_address_joins_without_a_space() {
+        // The samværspolitik breaks its alkoholpolitik link twice.
+        assert!(continues_a_url(
+            "Du kan læse Radikal Ungdoms alkoholpolitik her: https://",
+            "www.radikalungdom.dk/wp-content/uploads/2022/03/Alkoholpolitik-i-Radikal-"
+        ));
+        assert!(continues_a_url(
+            "www.radikalungdom.dk/wp-content/uploads/2022/03/Alkoholpolitik-i-Radikal-",
+            "Ungdom_MARTS2022.pdf"
+        ));
+        // Ordinary prose keeps its space.
+        assert!(!continues_a_url(
+            "Radikal Ungdom har både en samværs- og",
+            "alkoholpolitik. De sætter rammerne"
+        ));
+        // And a sentence that merely follows an address is not more of it.
+        assert!(!continues_a_url(
+            "Se https://example.dk",
+            ", som beskriver det"
+        ));
     }
 
     /// A file often prints its links instead of making them.
