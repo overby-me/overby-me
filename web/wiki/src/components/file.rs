@@ -828,7 +828,11 @@ fn NativeDocx(file_id: String, name: String) -> Element {
         // What the document says its pages are, for working out where they
         // end. `None` where it says nothing usable, and then nothing is marked.
         let page = doc.get("section").and_then(|section| {
-            super::docx::PageGeometry::read(section, doc.get("minorFont").and_then(|f| f.as_str()))
+            super::docx::PageGeometry::read(
+                section,
+                doc.get("minorFont").and_then(|f| f.as_str()),
+                &blocks,
+            )
         });
         Ok::<_, String>((blocks, gaps, page))
     });

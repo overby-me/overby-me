@@ -2318,6 +2318,18 @@ pub struct PageGeometry {
     /// What the document sets its body text in, so the measuring is done in
     /// the document's typography rather than the reader's.
     pub font: String,
+    /// The body text's size in points, its line spacing as a multiplier, and
+    /// the space it leaves under a paragraph in points -- all as the DOCUMENT
+    /// sets them.
+    ///
+    /// Load-bearing. Without these the off-screen copy is laid out in the
+    /// READER's typography, which this renderer deliberately makes relative to
+    /// the reader rather than pinned to Word's, and it comes out taller: a
+    /// three-page document measured as four, with every mark after the first
+    /// shifted a page.
+    pub size: f64,
+    pub line: f64,
+    pub after: f64,
 }
 
 impl PageGeometry {
@@ -2326,18 +2338,58 @@ impl PageGeometry {
         points * 96.0 / 72.0
     }
 
+    /// What size the document sets its body text, how far apart its lines sit
+    /// and how much room it leaves under a paragraph: whatever most of its
+    /// paragraphs say, which is what a document's own defaults look like from
+    /// the outside. Headings are left out of the vote; there are few of them
+    /// and they are not what fills a page.
+    fn typography(blocks: &[Block]) -> (f64, f64, f64) {
+        let mut sizes: Vec<f64> = Vec::new();
+        let mut lines: Vec<f64> = Vec::new();
+        let mut afters: Vec<f64> = Vec::new();
+        for block in blocks {
+            let Block::Paragraph(p) = block else { continue };
+            if p.outline_level.is_some_and(|l| l < 9) {
+                continue;
+            }
+            if let Some(pt) = dominant_size(p) {
+                sizes.push(pt);
+            }
+            if let Some(spacing) = p.line_spacing.as_ref() {
+                // `auto` states a multiplier in 240ths; the other rules state
+                // points, which cannot be a multiplier without knowing the size.
+                if spacing.rule == "auto" && spacing.value > 0.0 {
+                    lines.push(spacing.value);
+                }
+            }
+            if let Some(pt) = p.space_after.filter(|a| *a >= 0.0) {
+                afters.push(pt);
+            }
+        }
+        // Word's own defaults, for a document that states none of this.
+        (
+            commonest(&sizes).unwrap_or(11.0),
+            commonest(&lines).unwrap_or(1.08),
+            commonest(&afters).unwrap_or(8.0),
+        )
+    }
+
     /// The geometry out of the parser's `section`, when it is usable. A page
     /// with no size, or margins wider than the paper, says nothing to measure
     /// against.
-    pub fn read(section: &serde_json::Value, font: Option<&str>) -> Option<Self> {
+    pub fn read(section: &serde_json::Value, font: Option<&str>, blocks: &[Block]) -> Option<Self> {
         let at = |key: &str| section.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0);
         let column = Self::px(at("pageWidth") - at("marginLeft") - at("marginRight"));
         let height = Self::px(at("pageHeight") - at("marginTop") - at("marginBottom"));
         // A quarter of an A4 column, and a page that holds more than a line or
         // two: below either, something is wrong with what was read.
+        let (size, line, after) = Self::typography(blocks);
         (column > 100.0 && height > 100.0).then(|| PageGeometry {
             column,
             height,
+            size,
+            line,
+            after,
             // The document's own body face first, then the metric-compatible
             // substitutes a reader is likely to actually have. The measuring is
             // only as good as this: a face that is not installed is replaced by
@@ -2391,7 +2443,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
                 id: "docx-measure",
                 class: "docx-measure",
                 aria_hidden: "true",
-                style: "width:{page.column}px;font-family:{page.font};",
+                style: "width:{page.column}px;font-family:{page.font};font-size:{page.size}pt;--docx-page-line:{page.line};--docx-page-after:{page.after}pt;",
                 DocxBody { blocks: blocks.clone() }
             }
         }
@@ -2450,4 +2502,20 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
     (bottom > 0.0).then_some((marks, page))
+}
+
+/// The value that turns up most often, to the nearest hundredth. What "the
+/// document's own" means for a measure it states per paragraph rather than once.
+fn commonest(values: &[f64]) -> Option<f64> {
+    let mut tally: Vec<(f64, usize)> = Vec::new();
+    for value in values {
+        match tally.iter_mut().find(|(v, _)| (*v - value).abs() < 0.01) {
+            Some((_, seen)) => *seen += 1,
+            None => tally.push((*value, 1)),
+        }
+    }
+    tally
+        .into_iter()
+        .max_by_key(|(_, seen)| *seen)
+        .map(|(v, _)| v)
 }

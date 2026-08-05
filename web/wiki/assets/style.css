@@ -8172,6 +8172,15 @@ a.list-item:hover {
    says its pages are, so where they end can be measured. Laid out but not
    shown, and not read out: `visibility: hidden` still has a height, which
    `display: none` would not. It is dropped as soon as it has been read. */
+/* Inside the off-screen copy the DOCUMENT's typography wins, not the reader's.
+   The renderer deliberately makes its measures relative to the reader rather
+   than pinned to Word's, which is right for reading and wrong for working out
+   where Word's pages end: it laid a three-page document out as four. */
+.docx-measure .docx-p,
+.docx-measure .docx-list li {
+	margin-bottom: var(--docx-page-after, 8pt);
+	line-height: var(--docx-page-line, 1.08);
+}
 .docx-measure {
 	position: absolute;
 	left: -10000px;
