@@ -39,6 +39,14 @@
     systemctl is-active dep-required.service
     systemctl is-active dep-requirer.service
     systemctl stop dep-requirer.service dep-required.service
+
+    : "Requires= is hard: a failing required unit blocks the requirer"
+    printf '[Service]\nType=oneshot\nExecStart=false\n' > /run/systemd/system/dep-badreq.service
+    printf '[Unit]\nRequires=dep-badreq.service\nAfter=dep-badreq.service\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=true\n' > /run/systemd/system/dep-hardreq.service
+    systemctl daemon-reload
+    systemctl start dep-hardreq.service || true
+    (! systemctl is-active dep-hardreq.service)
+    systemctl stop dep-hardreq.service dep-badreq.service 2>/dev/null || true
     SDEOF
   '';
 }
