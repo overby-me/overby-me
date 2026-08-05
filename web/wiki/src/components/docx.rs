@@ -2829,7 +2829,28 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
             // and Times New Roman's 1.15, and a document states its line
             // spacing as a multiple of whichever its text is set in.
             set_single_spacing();
-            let Some((found, count, ink)) = measure_pages(height) else {
+            // And until the page has been laid out IN those faces. A font's
+            // load resolving is not the same as the text having been laid out
+            // again in it: `fonts.ready` is the promise that says the loads are
+            // done and the layout with them, and without waiting for it the
+            // same document measured 7032px of ink on one visit and 7128 on the
+            // next -- a page more, from one run to the next, on nothing but
+            // timing.
+            wait_for_the_layout().await;
+            // Measured twice, a frame apart, and only believed when the two
+            // agree. Everything above is what SHOULD settle a layout; this is
+            // what proves it did.
+            let mut settled = measure_pages(height);
+            for _ in 0..4 {
+                let Some((_, _, ink)) = settled else { break };
+                next_frame().await;
+                let again = measure_pages(height);
+                match again {
+                    Some((_, _, second)) if (second - ink).abs() < 0.5 => break,
+                    _ => settled = again,
+                }
+            }
+            let Some((found, count, ink)) = settled else {
                 return;
             };
             // What it made of the document, in the console. Pagination that
@@ -3022,6 +3043,38 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
     (measured > 0.0).then_some((marks.clone(), marks.len() + 1, measured))
+}
+
+/// Wait until the document has been laid out in the faces it just loaded.
+///
+/// `document.fonts.ready` resolves when font loading is finished AND the layout
+/// that depends on it has been redone. A face whose `load` has resolved is in
+/// memory but not necessarily on the page yet: measuring between the two reads
+/// the fallback's geometry for some of the document and the real face's for the
+/// rest, which is how one document came out eight pages on one visit and nine
+/// on the next.
+async fn wait_for_the_layout() {
+    let Some(fonts) = web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.fonts())
+    else {
+        return;
+    };
+    if let Ok(ready) = fonts.ready() {
+        let _ = wasm_bindgen_futures::JsFuture::from(ready).await;
+    }
+    next_frame().await;
+}
+
+/// One turn of the browser's rendering loop.
+async fn next_frame() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let _ = window.request_animation_frame(&resolve);
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
 /// Wait until the measuring face is loaded, or give up on it.
