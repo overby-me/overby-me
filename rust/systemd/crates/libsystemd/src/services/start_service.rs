@@ -672,15 +672,28 @@ fn start_service_with_filedescriptors(
                 ));
             }
             // Set HOME, USER, LOGNAME, SHELL from the User= setting.
-            // systemd populates these automatically when User= is set.
-            if let Some(ref user_str) = conf.exec_config.user
-                && let Ok(pwentry) = crate::platform::pwnam::getpwnam_r(user_str)
-            {
-                env.push(("USER".to_owned(), user_str.clone()));
-                env.push(("LOGNAME".to_owned(), user_str.clone()));
-                env.push(("HOME".to_owned(), pwentry.home.clone()));
-                env.push(("SHELL".to_owned(), pwentry.shell.clone()));
-            } else if conf.exec_config.dynamic_user {
+            // systemd populates these automatically when User= is set,
+            // resolving the passwd record whether User= is a name (getpwnam)
+            // or a bare numeric UID (getpwuid) -- user@%i.service's User=%i is
+            // the numeric UID, so a name-only lookup would leave the per-user
+            // manager (and everything it spawns) without $HOME.
+            let mut set_login_env = false;
+            if let Some(ref user_str) = conf.exec_config.user {
+                let pwentry = if let Ok(uid) = user_str.parse::<u32>() {
+                    crate::platform::pwnam::getpwuid_r(uid)
+                } else {
+                    crate::platform::pwnam::getpwnam_r(user_str)
+                };
+                if let Ok(pw) = pwentry {
+                    // $USER/$LOGNAME carry the resolved name, not the raw UID.
+                    env.push(("USER".to_owned(), pw.name.clone()));
+                    env.push(("LOGNAME".to_owned(), pw.name.clone()));
+                    env.push(("HOME".to_owned(), pw.home.clone()));
+                    env.push(("SHELL".to_owned(), pw.shell.clone()));
+                    set_login_env = true;
+                }
+            }
+            if !set_login_env && conf.exec_config.dynamic_user {
                 // Dynamic users have no real passwd entry; upstream's
                 // nss-systemd synthesizes their record with "/" as the home
                 // directory, which is what WorkingDirectory=~ resolves to.
