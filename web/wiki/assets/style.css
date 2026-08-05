@@ -8184,6 +8184,7 @@ a.list-item:hover {
 	padding: 0 0.08in;
 }
 .docx-measure .docx-p,
+.docx-measure .docx-h,
 .docx-measure .docx-list li {
 	/* Each paragraph's OWN resolved spacing and line height (set by
 	   `paragraph_style`), not one figure for the document: a file whose cells
@@ -8196,6 +8197,12 @@ a.list-item:hover {
 	   stylesheet rule. Without this the off-screen copy was laid out in the
 	   reader's spacing however carefully the document's own was worked out --
 	   which is why several rounds of correcting that spacing changed nothing. */
+	/* The size the document resolves for this paragraph, headings included:
+	   they are sized for READING here, by prominence against the body text,
+	   and a document whose table cells are full of headings measured a quarter
+	   short of what Word makes of it. `1em` is the inherited size, for anything
+	   the parser could not resolve. */
+	font-size: var(--p-size, 1em) !important;
 	margin-top: var(--p-before, 0) !important;
 	margin-bottom: var(--p-after, 8pt) !important;
 	line-height: calc(var(--p-line, 1.08) * 1.22) !important;
@@ -8217,6 +8224,7 @@ a.list-item:hover {
 	/* Word's own defaults, for a paragraph that states neither. Every
 	   paragraph overrides both with what it resolves to. */
 	--p-line: 1.08;
+	--p-size: 1em;
 	--p-before: 0;
 	--p-after: 8pt;
 	position: absolute;

@@ -882,6 +882,13 @@ pub fn paragraph_style(p: &Paragraph) -> String {
         p.space_before.filter(|v| *v >= 0.0).unwrap_or(0.0),
         p.space_after.filter(|v| *v >= 0.0).unwrap_or(0.0)
     ));
+    // And the size Word resolved for this paragraph. Headings especially: this
+    // renderer sizes them by how prominent they are against the body, which is
+    // right for reading and wrong for measuring, and a document whose table
+    // cells are full of headings was measured a quarter short because of it.
+    if let Some(pt) = p.default_font_size.filter(|v| *v > 0.0) {
+        css.push_str(&format!("--p-size:{pt:.2}pt;"));
+    }
     let line = match p.line_spacing.as_ref() {
         Some(ls) if ls.rule == "auto" && ls.value > 0.0 => ls.value,
         // Stating none is stating single.
