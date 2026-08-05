@@ -2608,9 +2608,11 @@ pub fn run_exec_helper() {
 
     // ── ProtectHostname= — UTS namespace ──────────────────────────────
     // Both "yes" and "private" modes create a new UTS namespace, isolating
-    // hostname changes from the host. In real systemd, "yes" also uses
-    // seccomp to block sethostname()/setdomainname() within the namespace;
-    // we don't have seccomp yet, so both modes behave like "private" for now.
+    // hostname changes from the host. "yes" additionally installs a minimal
+    // seccomp filter that denies sethostname()/setdomainname() (EPERM), so the
+    // service cannot change the hostname even within its own namespace even if
+    // it holds CAP_SYS_ADMIN, matching systemd. "private" leaves those calls
+    // allowed. The filter is installed AFTER our own initial sethostname().
     if config.protect_hostname && !config.privileged_prefix {
         let ret = unsafe { libc::unshare(libc::CLONE_NEWUTS) };
         if ret != 0 {
@@ -2619,16 +2621,22 @@ pub fn run_exec_helper() {
                 std::io::Error::last_os_error()
             );
             // Non-fatal: continue without UTS isolation
-        } else if let Some(ref hostname) = config.protect_hostname_name {
-            // Set the hostname in the new UTS namespace
-            let cname = std::ffi::CString::new(hostname.as_str()).unwrap_or_default();
-            let ret = unsafe { libc::sethostname(cname.as_ptr(), hostname.len()) };
-            if ret != 0 {
-                log::warn!(
-                    "Failed to set hostname '{}' in UTS namespace: {}",
-                    hostname,
-                    std::io::Error::last_os_error()
-                );
+        } else {
+            if let Some(ref hostname) = config.protect_hostname_name {
+                // Set the hostname in the new UTS namespace
+                let cname = std::ffi::CString::new(hostname.as_str()).unwrap_or_default();
+                let ret = unsafe { libc::sethostname(cname.as_ptr(), hostname.len()) };
+                if ret != 0 {
+                    log::warn!(
+                        "Failed to set hostname '{}' in UTS namespace: {}",
+                        hostname,
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+            // ProtectHostname=yes (the default mode) locks the hostname down.
+            if config.protect_hostname_mode.as_deref() != Some("private") {
+                seccomp_block_hostname();
             }
         }
     }
@@ -5080,6 +5088,74 @@ fn create_private_dev_nodes(_config: &ExecHelperConfig, dev_info: &DevInfo) {
             std::io::Error::last_os_error()
         );
     }
+}
+
+/// Install a minimal seccomp filter denying `sethostname()`/`setdomainname()`
+/// with EPERM (everything else allowed). Used by ProtectHostname=yes so the
+/// service cannot change the hostname even inside its own UTS namespace even
+/// while holding CAP_SYS_ADMIN, matching systemd (=private leaves them allowed).
+/// Best-effort: failures are logged, not fatal.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn seccomp_block_hostname() {
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const SYS_SETHOSTNAME: u32 = 170;
+    const SYS_SETDOMAINNAME: u32 = 171;
+    const ALLOW: u32 = 0x7fff_0000; // SECCOMP_RET_ALLOW
+    let deny: u32 = 0x0005_0000 | (libc::EPERM as u32); // SECCOMP_RET_ERRNO | EPERM
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    // seccomp_data layout: nr @ offset 0, arch @ offset 4.
+    let filter = [
+        f(0x20, 0, 0, 4),                 // BPF_LD|W|ABS   arch
+        f(0x15, 1, 0, AUDIT_ARCH_X86_64), // BPF_JEQ arch==x86_64 -> load nr, else allow
+        f(0x06, 0, 0, ALLOW),             // other arch: allow (filter is x86_64-only)
+        f(0x20, 0, 0, 0),                 // BPF_LD|W|ABS   nr
+        f(0x15, 0, 1, SYS_SETHOSTNAME),   // nr==sethostname -> deny, else skip
+        f(0x06, 0, 0, deny),
+        f(0x15, 0, 1, SYS_SETDOMAINNAME), // nr==setdomainname -> deny, else skip
+        f(0x06, 0, 0, deny),
+        f(0x06, 0, 0, ALLOW),             // allow everything else
+    ];
+    let prog = libc::sock_fprog {
+        len: filter.len() as u16,
+        filter: filter.as_ptr() as *mut libc::sock_filter,
+    };
+    unsafe {
+        // NO_NEW_PRIVS is a precondition for loading a seccomp filter unprivileged
+        // (and harmless as root); systemd sets it for seccomp-using services too.
+        if libc::prctl(
+            libc::PR_SET_NO_NEW_PRIVS,
+            1 as libc::c_ulong,
+            0 as libc::c_ulong,
+            0 as libc::c_ulong,
+            0 as libc::c_ulong,
+        ) != 0
+        {
+            log::warn!(
+                "ProtectHostname=yes: PR_SET_NO_NEW_PRIVS failed: {}",
+                std::io::Error::last_os_error()
+            );
+            return;
+        }
+        // PR_SET_SECCOMP=22, SECCOMP_MODE_FILTER=2.
+        if libc::prctl(
+            libc::PR_SET_SECCOMP,
+            2 as libc::c_ulong,
+            &prog as *const libc::sock_fprog as usize as libc::c_ulong,
+            0 as libc::c_ulong,
+            0 as libc::c_ulong,
+        ) != 0
+        {
+            log::warn!(
+                "ProtectHostname=yes: seccomp filter load failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn seccomp_block_hostname() {
+    log::warn!("ProtectHostname=yes seccomp hostname lock not implemented for this target");
 }
 
 /// Bring up the loopback interface in a new network namespace.
