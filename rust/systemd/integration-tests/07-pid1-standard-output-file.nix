@@ -23,17 +23,19 @@
     # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
     retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
 
-    : "StandardOutput=file: writes stdout to file"
+    : "StandardOutput=file: / StandardError=file: split the streams"
     cat > /run/systemd/system/stdout-test.service << EOF
     [Service]
     Type=oneshot
-    ExecStart=bash -c 'echo hello-stdout'
+    ExecStart=bash -c 'echo hello-stdout; echo hello-stderr >&2'
     StandardOutput=file:/tmp/stdout-test-out
     StandardError=file:/tmp/stdout-test-err
     EOF
     retry systemctl daemon-reload
     retry systemctl start stdout-test.service
     [[ "$(cat /tmp/stdout-test-out)" == "hello-stdout" ]]
+    # StandardError=file: must capture stderr separately from stdout.
+    [[ "$(cat /tmp/stdout-test-err)" == "hello-stderr" ]]
 
     : "StandardOutput=append: appends to file"
     # Stop previous oneshot so re-start actually runs again
