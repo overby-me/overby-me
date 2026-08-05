@@ -8183,6 +8183,17 @@ a.list-item:hover {
 .docx-measure .docx-table td {
 	padding: 0 0.08in;
 }
+/* A table on screen may scroll sideways, which is what keeps a wide one
+   readable on a phone -- and means it can be as wide as its widest cell wants.
+   On a page it cannot: it has the text column and no more, and the text wraps
+   to fit. Measured with the scrolling width, the rows wrapped less than Word
+   wraps them and came out short, which put every page break early. */
+.docx-measure .docx-table-wrap {
+	overflow: visible;
+}
+.docx-measure .docx-table {
+	width: 100%;
+}
 .docx-measure .docx-p,
 .docx-measure .docx-h,
 .docx-measure .docx-list li {
