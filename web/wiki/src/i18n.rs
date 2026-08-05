@@ -149,8 +149,8 @@ const EN_JSON: &str = r#"{
         "lastDay": "Last 24 hours",
         "lastWeek": "Last 7 days",
         "lastMonth": "Last 30 days",
-        "copyStack": "Copy stack trace",
-        "stackCopied": "Stack trace copied",
+        "copyReport": "Copy the whole report",
+        "reportCopied": "Report copied",
         "deleteConfirm": "Delete this feedback? This cannot be undone."
     },
     "editor": {
@@ -752,8 +752,8 @@ const DA_JSON: &str = r#"{
         "lastDay": "Seneste 24 timer",
         "lastWeek": "Seneste 7 dage",
         "lastMonth": "Seneste 30 dage",
-        "copyStack": "Kopiér stakspor",
-        "stackCopied": "Stakspor kopieret",
+        "copyReport": "Kopiér hele rapporten",
+        "reportCopied": "Rapport kopieret",
         "deleteConfirm": "Slet denne feedback? Dette kan ikke fortrydes."
     },
     "editor": {

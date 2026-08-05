@@ -79,3 +79,9 @@ Two things are structural rather than fixable by measuring harder:
    fit. Either Word has a keep rule not written in the file, or that document's
    cached break hints are stale — they are a record of the last time Word drew
    it, not a promise about the text as it stands now.
+
+LibreOffice was tried as a second opinion and is not one: converting the same
+file to PDF gives **ten** pages, against Word's eight and this app's eight. Its
+page 8 begins where this app's page 7 does. A different layout engine agrees
+with neither, so settling those last three breaks needs the document opened in
+Word itself.

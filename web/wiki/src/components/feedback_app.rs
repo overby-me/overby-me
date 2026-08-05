@@ -533,6 +533,48 @@ fn CrashStack(message: String) -> Element {
     }
 }
 
+/// A whole report, as text to paste into an editor, an issue, or an agent.
+///
+/// Deliberately English and deliberately markdown, whatever the reader's
+/// language: this is not read in the app, it is pasted into something that
+/// expects a bug report. The message goes in a fenced block so a stack survives
+/// the paste, and everything else goes above it because "which build" and
+/// "which page" are the questions that get asked first.
+fn report_text(item: &FeedbackItem, reporters: &[(String, String, String)]) -> String {
+    let kind = match item.kind.as_str() {
+        "crash" => "Crash",
+        "error" => "Failure",
+        "bug" => "Bug report",
+        "idea" => "Idea",
+        _ => "Feedback",
+    };
+    let mut out = format!("# {kind} in the wiki\n\n");
+    let mut fact = |label: &str, value: &str| {
+        if !value.trim().is_empty() {
+            out.push_str(&format!("- {label}: {}\n", value.trim()));
+        }
+    };
+    fact("when", &item.created_at);
+    // Only when it says something the line above does not: a report seen once
+    // was last seen when it was made.
+    if item.seen > 1 && item.last_seen != item.created_at {
+        fact("last seen", &item.last_seen);
+        fact("how often", &format!("{} times", item.seen));
+    }
+    fact("where", &item.path);
+    fact("build", &item.commit);
+    fact("browser", &item.user_agent);
+    let names: Vec<&str> = reporters.iter().map(|(_, name, _)| name.as_str()).collect();
+    if !names.is_empty() {
+        fact("reported by", &names.join(", "));
+    }
+    fact("report id", &item.id);
+    out.push_str("\n```\n");
+    out.push_str(item.message.trim_end());
+    out.push_str("\n```\n");
+    out
+}
+
 /// One feedback submission row.
 #[component]
 fn FeedbackRow(
@@ -608,40 +650,42 @@ fn FeedbackRow(
                     // read to work out what someone was doing at the time.
                     span { class: "body-small text-muted", title: "{when_ago}", "{when}" }
                 }
-                // A stack is for pasting somewhere else — an editor, an issue,
-                // a message to whoever owns the code — and selecting forty
-                // wrapped monospace lines by hand on a phone is not that.
-                if item.kind == "crash" {
-                    button {
-                        class: "btn-icon",
-                        title: "{t(\"feedback.copyStack\")}",
-                        onclick: {
-                            let text = item.message.clone();
-                            move |_| {
-                                let text = text.clone();
-                                spawn(async move {
-                                    // Awaited, not fired and forgotten: the
-                                    // clipboard can refuse (permissions, an
-                                    // insecure context) and saying "copied" when
-                                    // nothing was is worse than saying nothing.
-                                    let copied = match web_sys::window() {
-                                        Some(win) => wasm_bindgen_futures::JsFuture::from(
-                                            win.navigator().clipboard().write_text(&text),
-                                        )
-                                        .await
-                                        .is_ok(),
-                                        None => false,
-                                    };
-                                    show_snackbar(&t(if copied {
-                                        "feedback.stackCopied"
-                                    } else {
-                                        "error.somethingWentWrong"
-                                    }));
-                                });
-                            }
-                        },
-                        span { class: "material-icons", "content_copy" }
-                    }
+                // A report is for pasting somewhere else — an editor, an issue,
+                // a message to whoever owns the code, an agent — and selecting
+                // forty wrapped monospace lines by hand on a phone is not that.
+                // The whole report goes, not just the stack: what was on screen,
+                // which build, which browser, how often and to how many. Those
+                // are the first four questions anyone asked about a crash, and
+                // the answers were all on this row and none of them in the copy.
+                button {
+                    class: "btn-icon",
+                    title: "{t(\"feedback.copyReport\")}",
+                    onclick: {
+                        let text = report_text(&item, &reporters);
+                        move |_| {
+                            let text = text.clone();
+                            spawn(async move {
+                                // Awaited, not fired and forgotten: the
+                                // clipboard can refuse (permissions, an
+                                // insecure context) and saying "copied" when
+                                // nothing was is worse than saying nothing.
+                                let copied = match web_sys::window() {
+                                    Some(win) => wasm_bindgen_futures::JsFuture::from(
+                                        win.navigator().clipboard().write_text(&text),
+                                    )
+                                    .await
+                                    .is_ok(),
+                                    None => false,
+                                };
+                                show_snackbar(&t(if copied {
+                                    "feedback.reportCopied"
+                                } else {
+                                    "error.somethingWentWrong"
+                                }));
+                            });
+                        }
+                    },
+                    span { class: "material-icons", "content_copy" }
                 }
                 if can_delete {
                     button {
@@ -738,6 +782,59 @@ fn FeedbackRow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copied_report_carries_what_gets_asked_about_first() {
+        let item = FeedbackItem {
+            id: "abc-123".into(),
+            kind: "crash".into(),
+            message: "panicked at 'already borrowed'\n  at pdf.rs:602".into(),
+            path: "/radikal_ungdom/landsmøde_2026".into(),
+            commit: "46d43887".into(),
+            user_agent: "Mozilla/5.0 (Android 15)".into(),
+            seen: 12,
+            created_at: "2026-08-01T09:12:00Z".into(),
+            last_seen: "2026-08-05T14:32:00Z".into(),
+            ..Default::default()
+        };
+        let who = vec![("u1".to_string(), "Marie".to_string(), String::new())];
+        let text = report_text(&item, &who);
+        for wanted in [
+            "# Crash in the wiki",
+            "- when: 2026-08-01T09:12:00Z",
+            "- last seen: 2026-08-05T14:32:00Z",
+            "- how often: 12 times",
+            "- where: /radikal_ungdom/landsmøde_2026",
+            "- build: 46d43887",
+            "- browser: Mozilla/5.0 (Android 15)",
+            "- reported by: Marie",
+            "- report id: abc-123",
+        ] {
+            assert!(text.contains(wanted), "the report left out {wanted:?}:\n{text}");
+        }
+        // The stack survives the paste, which is what the fence is for.
+        assert!(text.contains("```\npanicked at 'already borrowed'\n  at pdf.rs:602\n```"));
+    }
+
+    #[test]
+    fn a_report_leaves_out_what_it_does_not_know() {
+        // Anything sent before the app recorded builds and browsers, and a
+        // report nobody has hit twice: an empty line reads as a missing fact,
+        // and a missing fact is better left unsaid than said blankly.
+        let item = FeedbackItem {
+            kind: "idea".into(),
+            message: "A page control for Word documents".into(),
+            created_at: "2026-07-01T10:00:00Z".into(),
+            last_seen: "2026-07-01T10:00:00Z".into(),
+            seen: 1,
+            ..Default::default()
+        };
+        let text = report_text(&item, &[]);
+        assert!(text.starts_with("# Idea in the wiki"));
+        for absent in ["- build:", "- browser:", "- where:", "- how often:", "- last seen:", "- reported by:"] {
+            assert!(!text.contains(absent), "the report claimed {absent:?} it does not have:\n{text}");
+        }
+    }
 
     #[test]
     fn a_frame_in_this_repo_is_marked_as_such() {

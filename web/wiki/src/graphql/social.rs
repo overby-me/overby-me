@@ -201,6 +201,9 @@ pub struct FeedbackItem {
     /// The build it was sent from. Empty on anything submitted before builds
     /// started recording it.
     pub commit: String,
+    /// The browser it was sent from, as it described itself. Empty on anything
+    /// submitted before this was recorded.
+    pub user_agent: String,
     /// How many times this crash has been reported. Repeats are folded into one
     /// node by the backend, so this is the only record of how often it happens:
     /// the log sink keeps three days, this keeps everything. 1 (or 0, on a typed
@@ -316,6 +319,7 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
                         image: if image.is_empty() { None } else { Some(image) },
                         path: field("path"),
                         commit: field("commit"),
+                        user_agent: field("userAgent"),
                         seen: d
                             .and_then(|d| d.get("seen"))
                             .and_then(|v| v.as_u64())
