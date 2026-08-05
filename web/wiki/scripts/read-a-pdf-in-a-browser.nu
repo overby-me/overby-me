@@ -128,6 +128,15 @@ def main [
         $bad = ($bad | append $"the end of the long document said page ($seen_long.atTheEnd.page), expected ($long_open.of)")
     }
 
+    # A page turned to must show the page, not the hairline that ended the one
+    # before it. Landing on the mark put "37" across the top for a reader who
+    # had just turned to 38, which reads as having gone nowhere.
+    for run in [[what, seen]; ["short" $seen] ["long" $seen_long]] {
+        if $run.seen.afterForward.markOnScreen {
+            $bad = ($bad | append $"on the ($run.what) document a page mark is on screen after turning a page")
+        }
+    }
+
     let crashes = ([$seen.console $seen_long.console] | flatten
         | where {|l| ($l | str contains "PANIC") or ($l | str contains "panicked") })
     if not ($crashes | is-empty) { $bad = ($bad | append $"the app panicked: ($crashes | first)") }

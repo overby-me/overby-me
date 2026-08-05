@@ -194,6 +194,13 @@ const read = `(() => {
     marks: document.querySelectorAll(".pdf-page-break").length,
     scrollY: Math.round(window.scrollY),
     landing: (() => { const m = document.querySelector(".pdf-page-break"); return m ? getComputedStyle(m).scrollMarginTop : null; })(),
+    // Is a page-ending mark sitting on screen? After turning a page it must
+    // not be: it carries the number of the page that ENDED, so seeing it reads
+    // as not having moved.
+    markOnScreen: [...document.querySelectorAll(".pdf-page-break")].some(m => {
+      const t = m.getBoundingClientRect().top;
+      return t >= -2 && t < window.innerHeight / 2;
+    }),
     sizeClass: (document.querySelector(".app-shell") || {}).dataset?.sizeClass ?? null,
     maxScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
     text: (doc ? doc.innerText : document.body.innerText).slice(0, 600),

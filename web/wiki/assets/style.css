@@ -8176,7 +8176,10 @@ a.list-item:hover {
 	   further: the same measure a contents link or a deep link uses, which is
 	   the bar's height where there is a bar and a small gap on compact, where
 	   the bar is docked at the BOTTOM. A flat 5rem here stopped a phone eighty
-	   pixels short of the page it had turned to, for a bar that was not there. */
+	   pixels short of the page it had turned to, for a bar that was not there.
+	   The mark itself is only the fallback landing; a jump aims at what comes
+	   AFTER it (see `go_to_page`), which is the page being turned to, so that
+	   gets the same measure. */
 	scroll-margin-top: var(--toc-scroll-margin, 5rem);
 	display: flex;
 	align-items: center;
@@ -8184,6 +8187,10 @@ a.list-item:hover {
 	margin: var(--md-sys-spacing-5) 0;
 	color: var(--md-on-surface-variant);
 	font-size: var(--md-sys-typescale-label-small-size);
+}
+/* What a jump actually aims at: the first thing on the page being turned to. */
+.pdf-page-break + * {
+	scroll-margin-top: var(--toc-scroll-margin, 5rem);
 }
 .pdf-page-break::before,
 .pdf-page-break::after {

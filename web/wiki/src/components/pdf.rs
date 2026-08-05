@@ -502,10 +502,16 @@ fn go_to_page(label: &str) {
     else {
         return;
     };
+    // Land on what BEGINS at the mark, not on the mark. The mark is a page's
+    // ending, and it says so -- it carries the number of the page that ended
+    // there -- so arriving on it put "37" across the top of the window for a
+    // reader who had just turned to 38, which reads as not having moved at all.
+    // The page they asked for starts on the next line down.
+    let target = mark.next_element_sibling().unwrap_or(mark);
     let opts = web_sys::ScrollIntoViewOptions::new();
     opts.set_behavior(web_sys::ScrollBehavior::Smooth);
     opts.set_block(web_sys::ScrollLogicalPosition::Start);
-    mark.scroll_into_view_with_scroll_into_view_options(&opts);
+    target.scroll_into_view_with_scroll_into_view_options(&opts);
 }
 
 /// Which page a step lands on: the one `by` places along from where the reader
