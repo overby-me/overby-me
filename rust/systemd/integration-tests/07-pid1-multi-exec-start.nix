@@ -55,6 +55,26 @@
     (! systemctl is-active multi-exec-fail.service)
     # Only first command should have run
     [[ "$(cat /tmp/multi-exec-fail-log)" == "ok" ]]
+
+    : "Multiple ExecStart= with - prefix continues past a failed command"
+    cat > /run/systemd/system/multi-exec-dash.service << EOF
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=bash -c 'echo a >> /tmp/multi-exec-dash-log'
+    ExecStart=-false
+    ExecStart=bash -c 'echo c >> /tmp/multi-exec-dash-log'
+    EOF
+    rm -f /tmp/multi-exec-dash-log
+    systemctl daemon-reload
+    systemctl start multi-exec-dash.service
+    systemctl is-active multi-exec-dash.service
+    # The '-' prefix swallows false's failure, so the third command still runs;
+    # exactly the a and c lines land, and nothing from the ignored false.
+    grep -qx a /tmp/multi-exec-dash-log
+    grep -qx c /tmp/multi-exec-dash-log
+    [[ "$(wc -l < /tmp/multi-exec-dash-log)" -eq 2 ]]
+    systemctl stop multi-exec-dash.service
     MESEOF
   '';
 }
