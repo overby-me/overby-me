@@ -1,8 +1,10 @@
 {
   name = "65-ANALYZE";
-  # Custom rewrite: test subcommands that work locally or via control socket.
-  # Skip dump, security, cat, verify --unit, condition --unit, plot,
-  # syscall-filter, filesystems (need D-Bus, BPF, or other unimplemented features).
+  # Custom rewrite: exercises the systemd-analyze verbs the rust crate implements.
+  # architectures, filesystems, syscall-filter and transient-settings were added
+  # once the crate gained them; security, verify, condition --unit and cat-config
+  # are covered here too. Still omitted: dump, plot (bus state dump / SVG
+  # bootchart output) and `architectures --json`, which are not yet ported.
   patchScript = ''
     cat > TEST-65-ANALYZE.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -146,6 +148,34 @@
     [[ $cap == *cap_net_broadcast* ]]
     [[ $cap == *cap_net_admin* ]]
     [[ $cap == *cap_net_raw* ]]
+
+    : "systemd-analyze architectures"
+    systemd-analyze architectures
+    systemd-analyze architectures x86
+    systemd-analyze architectures x86-64
+    systemd-analyze architectures native
+    systemd-analyze architectures uname
+
+    : "systemd-analyze syscall-filter"
+    systemd-analyze syscall-filter >/dev/null
+    systemd-analyze syscall-filter @chown @sync
+    systemd-analyze syscall-filter @sync @sync @sync
+    (! systemd-analyze syscall-filter @chown @sync @foobar)
+    (! systemd-analyze syscall-filter --global)
+
+    : "systemd-analyze filesystems"
+    systemd-analyze filesystems >/dev/null
+    systemd-analyze filesystems @basic-api
+    systemd-analyze filesystems @basic-api @basic-api @basic-api
+    (! systemd-analyze filesystems @basic-api @basic-api @foobar @basic-api)
+    (! systemd-analyze filesystems --global @basic-api)
+
+    : "systemd-analyze transient-settings"
+    systemd-analyze transient-settings service | grep NoNewPrivileges
+    systemd-analyze transient-settings mount | grep CPUQuotaPeriodSec
+    (! systemd-analyze transient-settings service | grep CPUAccounting)
+    (! systemd-analyze transient-settings service | grep ConditionKernelVersion)
+    (! systemd-analyze transient-settings service | grep AssertKernelVersion)
 
     touch /testok
     TESTEOF

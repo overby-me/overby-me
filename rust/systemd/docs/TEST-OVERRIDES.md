@@ -400,7 +400,7 @@ Remove the override, run, record. Ordered by expected payoff.
 | 55-OOMD | full skip | needs `extraUnits` + oomd binary |
 | 67-INTEGRITY | full skip | needs `extraUnits` (`integritysetup.target`) + binary |
 | 26-SYSTEMCTL | `edit --global` mask ALREADY REMOVED (2026-07-27); only the interactive EDITOR hunks remain, blocked by util-linux `script(1)` hanging under rust PID 1 | done |
-| 65-ANALYZE | substitute, 1167 upstream lines -> 154 | `verify`/`security` were de-weakened since; the substitute's skip list is stale |
+| 65-ANALYZE | substitute, 1167 upstream lines -> ~184 | de-weakened 2026-08-05: `architectures`, `filesystems`, `syscall-filter` and `transient-settings` added with faithful upstream assertions (VM-validated), joining `verify`/`security`/`condition --unit`/`cat-config`. Still unported: `dump`, `plot` (SVG), `architectures --json`, and the `--global` flag on `filesystems`/`syscall-filter` (rust rejects it, which the negative assertions exploit) |
 | 80-NOTIFYACCESS | substitute, 175 -> 86 | Re-scoped 2026-08-03. The status-error triad (`ERRNO=`/`BUSERROR=`/`VARLINKERROR=` to `StatusErrno`/`StatusBusError`/`StatusVarlinkError`) is now complete, the `NOTIFYACCESS=` runtime override works, and the fdstore subsystem is mature, so most of the real script is reachable. The remaining blockers are the `Type=notify-reload` reload substates (`reload-signal` to `reload-notify` to `running`) with `ReloadResult=timeout`, which are unimplemented, plus wiring the `TEST-80-NOTIFYACCESS.units` fixtures (notify.service/test.sh, reload-timeout.service, fdstore-pin) into the VM |
 | 07-PID1 private-pids | substitute, 176 -> 24 | biggest single coverage loss in the 07 family |
 | 07-PID1 protect-hostname | substitute, 121 -> 54 | |
