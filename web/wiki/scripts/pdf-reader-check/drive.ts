@@ -49,7 +49,7 @@ const chrome = new Deno.Command(chromium, {
     "--disable-gpu",
     "--use-gl=swiftshader",
     "--enable-unsafe-swiftshader",
-    "--window-size=1400,1000",
+    `--window-size=${Deno.env.get("WINDOW") ?? "1400,1000"}`,
     `--user-data-dir=${outPrefix}-profile`,
     `--remote-debugging-port=${port}`,
     "about:blank",
@@ -193,6 +193,8 @@ const read = `(() => {
     italics: document.querySelectorAll(".pdf-doc i, .pdf-doc em").length,
     marks: document.querySelectorAll(".pdf-page-break").length,
     scrollY: Math.round(window.scrollY),
+    landing: (() => { const m = document.querySelector(".pdf-page-break"); return m ? getComputedStyle(m).scrollMarginTop : null; })(),
+    sizeClass: (document.querySelector(".app-shell") || {}).dataset?.sizeClass ?? null,
     maxScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
     text: (doc ? doc.innerText : document.body.innerText).slice(0, 600),
   });
