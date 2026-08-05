@@ -142,6 +142,12 @@ fn unlinked(spans: &[Span]) -> Vec<Span> {
 /// Render what was read out of a PDF.
 #[component]
 pub fn PdfDocument(doc: Extracted) -> Element {
+    // Tell the progress bar there are pages here, so it becomes a way of getting
+    // to one. Taken back when this leaves, or every page after it would offer to
+    // scrub through pages it does not have.
+    use_effect(|| crate::components::back_to_top::set_paged(true));
+    use_drop(|| crate::components::back_to_top::set_paged(false));
+
     // Consecutive items of one kind become one group, so a bulleted run reads as
     // a single list rather than a column of one-item lists, and a contents list
     // as one aligned table rather than a stack of unrelated rows.
@@ -296,7 +302,15 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         // rather than the pages. The number the page printed on
                         // itself wins over its position in the file, because
                         // that is the one the document's own index refers to.
-                        div { key: "{i}", class: "pdf-page-break", role: "separator",
+                        div {
+                            key: "{i}",
+                            // Where the page AFTER this mark begins, so anything
+                            // that wants to send a reader to a page has somewhere
+                            // to send them: a contents row, or the scrubber.
+                            id: "pdf-page-{ended + 1}",
+                            class: "pdf-page-break",
+                            role: "separator",
+                            "data-page": "{printed.clone().unwrap_or_else(|| (ended + 1).to_string())}",
                             span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
                         }
                     },

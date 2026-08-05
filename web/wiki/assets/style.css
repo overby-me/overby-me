@@ -494,6 +494,59 @@ html {
 	transition: width 80ms linear;
 }
 
+/* DESIGN (M3 Expressive slider): in a paged document the progress bar is also
+   how you get to a page. Resting it is the same hairline; under a finger the
+   track thickens, a handle appears on it and a label says which page is under
+   the finger, which is the Expressive slider's own shape. Nothing is added to
+   the screen for it: the one thing already on screen that means "where you are
+   in this document" is the thing to take hold of.
+
+   The grab area is taller than the ink so there is something to hit. Only a
+   paged document takes pointer events at all, so nowhere else in the app loses
+   a strip along the top of the window. */
+.reading-progress.paged {
+	pointer-events: auto;
+	height: var(--md-sys-spacing-3);
+	cursor: grab;
+	touch-action: none;
+}
+.reading-progress.paged .reading-progress-fill {
+	height: 3px;
+	transition: height 120ms ease, width 80ms linear;
+}
+.reading-progress.dragging {
+	cursor: grabbing;
+}
+/* Thicker while held, the way an Expressive slider's active track is. */
+.reading-progress.dragging .reading-progress-fill {
+	height: var(--md-sys-spacing-2);
+	transition: height 120ms ease;
+}
+.reading-progress-handle {
+	position: absolute;
+	top: 0;
+	width: var(--md-sys-spacing-1);
+	height: var(--md-sys-spacing-4);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-primary);
+	/* Centred on the position, and standing a little proud of the track. */
+	transform: translate(-50%, -25%);
+}
+/* The value label. Below the track rather than above it, because the track is
+   at the very top of the window and there is nothing above it. */
+.reading-progress-label {
+	position: absolute;
+	top: var(--md-sys-spacing-5);
+	transform: translateX(-50%);
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-inverse-surface);
+	color: var(--md-inverse-on-surface);
+	font-size: var(--md-sys-typescale-label-large-size);
+	white-space: nowrap;
+	pointer-events: none;
+}
+
 /* DESIGN (functional: back to top): a scroll-aware button that fades in after
    scrolling down and returns to the top on click. Sits opposite the FAB. */
 .back-to-top {

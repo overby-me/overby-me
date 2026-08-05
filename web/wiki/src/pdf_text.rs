@@ -2341,10 +2341,6 @@ fn blocks_from(
                 ended: page,
                 printed: printed.get(&(page - 1)).cloned(),
             });
-            // Every page gets somewhere to land, whether or not a link names it
-            // yet: a contents row whose own link is broken is pointed here
-            // instead, by the number printed at the end of the row.
-            blocks.push(Block::Anchor(format!("pdf-page-{}", line.page)));
             page = line.page;
             prev = None;
         }
@@ -4532,7 +4528,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
         );
-        assert_eq!(blocks.len(), 4, "text, break, the new page's anchor, text");
+        assert_eq!(blocks.len(), 3, "text, break, text");
         assert_eq!(
             blocks[1],
             Block::PageBreak {
@@ -4542,13 +4538,9 @@ mod tests {
             "the page that just ended"
         );
         assert_eq!(
-            blocks[2],
-            Block::Anchor("pdf-page-2".into()),
-            "somewhere for a link to page two to land"
-        );
-        assert_eq!(
             texts(&blocks),
-            vec!["Sidste linje på side et", "", "", "Første linje på side to"]
+            vec!["Sidste linje på side et", "", "Første linje på side to"],
+            "the mark itself is where page two begins; it needs no anchor beside it"
         );
     }
 

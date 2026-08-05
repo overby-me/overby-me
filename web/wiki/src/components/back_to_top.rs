@@ -36,6 +36,19 @@ const DOCK_SCROLL_DELTA: f64 = 6.0;
 /// is indistinguishable from the user scrolling down.
 static KEYBOARD_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 
+/// Whether what is on screen has pages to move between. Set by the view that
+/// draws them, because nothing else in the app has any, and read by the reading
+/// progress bar, which becomes a way of getting to one while it is true.
+static PAGED: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Tell the progress bar that this view has pages. Call it with `true` while a
+/// paged document is on screen and `false` as it goes.
+pub fn set_paged(on: bool) {
+    if on != *PAGED.peek() {
+        *PAGED.write() = on;
+    }
+}
+
 /// Whether the viewport has come within [`NEAR_BOTTOM_PX`] of the end of the
 /// page — what an endless list watches to fetch its next page.
 static NEAR_BOTTOM: GlobalSignal<bool> = Signal::global(|| false);
@@ -333,12 +346,170 @@ pub fn BackToTop() -> Element {
     }
 }
 
+/// The pages a paged document laid out: where each begins down the document, and
+/// what the page calls itself.
+///
+/// Read out of the marks the reflowed PDF view draws between its pages, which
+/// carry the number the page printed on itself. Nothing else in the app has
+/// pages, so an empty list is the ordinary case and leaves the bar as a bar.
+fn pages_on_screen() -> Vec<(f64, String)> {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return Vec::new();
+    };
+    let Ok(marks) = document.query_selector_all(".pdf-page-break") else {
+        return Vec::new();
+    };
+    let scroll_y = web_sys::window()
+        .and_then(|w| w.scroll_y().ok())
+        .unwrap_or(0.0);
+    let mut out = Vec::new();
+    for at in 0..marks.length() {
+        let Some(node) = marks.item(at) else { continue };
+        let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        let label = element
+            .get_attribute("data-page")
+            .unwrap_or_else(|| (at + 2).to_string());
+        out.push((element.get_bounding_client_rect().top() + scroll_y, label));
+    }
+    out
+}
+
+/// A reading-progress bar that a paged document turns into a way of getting to a
+/// page.
+///
+/// DESIGN (M3 Expressive slider): resting, it is the same hairline it has always
+/// been. Under a finger the track thickens, a handle appears on it and a label
+/// says which page is under the finger, which is the Expressive slider's own
+/// shape: a value label above the handle, a thicker active track, and a clear
+/// gap at the handle. Nothing new is added to the screen for it, because the one
+/// thing on screen that already means "where you are in this document" is the
+/// thing to grab.
+///
+/// The label says the page's OWN number where it prints one, so "side 3" is the
+/// page the document's index calls 3 rather than the third sheet of the file.
 #[component]
 pub fn ReadingProgress() -> Element {
     let pct = PROGRESS();
+    let mut pages = use_signal(Vec::<(f64, String)>::new);
+    let mut dragging = use_signal(|| false);
+    let mut at_page = use_signal(String::new);
+    let mut handle_pct = use_signal(|| 0.0f64);
+
+    // Where the finger is, as a fraction of the bar, and which page that is. The
+    // bar is pinned edge to edge, so its width is the window's.
+    let mut aim = move |x: f64| {
+        let width = web_sys::window()
+            .and_then(|w| w.inner_width().ok())
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0)
+            .max(1.0);
+        let fraction = (x / width).clamp(0.0, 1.0);
+        handle_pct.set(fraction * 100.0);
+        let marks = pages.read();
+        if marks.is_empty() {
+            return;
+        }
+        let (first, last) = (0.0, marks.last().map(|(y, _)| *y).unwrap_or(0.0));
+        let wanted = first + (last - first) * fraction;
+        let nearest = marks
+            .iter()
+            .min_by(|a, b| {
+                (a.0 - wanted)
+                    .abs()
+                    .partial_cmp(&(b.0 - wanted).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, label)| label.clone())
+            .unwrap_or_default();
+        at_page.set(nearest);
+    };
+
+    let mut land = move || {
+        let wanted = at_page.read().clone();
+        dragging.set(false);
+        if wanted.is_empty() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        // The mark carries the page's own number, so find it by that rather than
+        // by counting: the two disagree wherever front matter is unnumbered.
+        let Ok(marks) = document.query_selector_all(".pdf-page-break") else {
+            return;
+        };
+        for at in 0..marks.length() {
+            let Some(node) = marks.item(at) else { continue };
+            let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            if element.get_attribute("data-page").as_deref() == Some(wanted.as_str()) {
+                let opts = web_sys::ScrollIntoViewOptions::new();
+                opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+                opts.set_block(web_sys::ScrollLogicalPosition::Start);
+                element.scroll_into_view_with_scroll_into_view_options(&opts);
+                return;
+            }
+        }
+    };
+
+    let paged = PAGED();
+    let shown = match dragging() {
+        true => handle_pct(),
+        false => pct as f64,
+    };
     rsx! {
-        div { class: "reading-progress",
-            div { class: "reading-progress-fill", style: "width: {pct}%;" }
+        div {
+            id: "reading-progress",
+            class: if dragging() { "reading-progress paged dragging" } else if paged { "reading-progress paged" } else { "reading-progress" },
+            role: if paged { "slider" } else { "presentation" },
+            aria_label: if paged { t("file.goToPage") } else { String::new() },
+            onpointerdown: move |e: Event<PointerData>| {
+                // Only a paged document is grabbable, and the pages are read
+                // here rather than on every scroll: this is the moment it
+                // matters, and it costs one pass over the marks.
+                pages.set(pages_on_screen());
+                if pages.read().is_empty() {
+                    return;
+                }
+                e.prevent_default();
+                dragging.set(true);
+                // Hold the pointer, or the first drift off a hairline ends the
+                // drag: the track is deliberately thin and a thumb is not.
+                if let Some(bar) = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.get_element_by_id("reading-progress"))
+                {
+                    let _ = bar.set_pointer_capture(e.data().pointer_id());
+                }
+                aim(e.data().element_coordinates().x);
+            },
+            onpointermove: move |e: Event<PointerData>| {
+                if !dragging() {
+                    return;
+                }
+                aim(e.data().element_coordinates().x);
+            },
+            onpointerup: move |_| land(),
+            onpointerleave: move |_| {
+                if dragging() {
+                    land();
+                }
+            },
+            div { class: "reading-progress-fill", style: "width: {shown}%;" }
+            if dragging() {
+                div { class: "reading-progress-handle", style: "left: {shown}%;" }
+                div { class: "reading-progress-label", style: "left: {shown}%;",
+                    {t_with_page(&at_page.read())}
+                }
+            }
         }
     }
+}
+
+/// "Side 37", in the reader's own language.
+fn t_with_page(page: &str) -> String {
+    crate::i18n::t_with("file.pageLabel", &[("page", page)])
 }
