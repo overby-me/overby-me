@@ -8191,6 +8191,11 @@ a.list-item:hover {
 .docx-measure .docx-table th,
 .docx-measure .docx-table td {
 	padding: 0 0.08in;
+	/* The width Word states for the column, not the width its contents want.
+	   Left to itself the browser gave this table 134/60/398 where Word gives
+	   290/75/305, so the column holding the text had a third more room than the
+	   page gives it and every row came out short. */
+	width: var(--c-width, auto);
 }
 /* A table on screen may scroll sideways, which is what keeps a wide one
    readable on a phone -- and means it can be as wide as its widest cell wants.
@@ -8201,7 +8206,12 @@ a.list-item:hover {
 	overflow: visible;
 }
 .docx-measure .docx-table {
-	width: 100%;
+	/* As wide as its own columns make it, and no wider: a table whose columns
+	   come to more than the text column OVERFLOWS the margin in Word rather
+	   than being squeezed into it. Fixed layout, or the widths above are
+	   suggestions the browser overrules from the content. */
+	width: auto;
+	table-layout: fixed;
 }
 .docx-measure .docx-p,
 .docx-measure .docx-h,
@@ -8286,6 +8296,8 @@ a.list-item:hover {
 	--p-single: var(--single-sans, 1.22);
 	--p-indent: 0;
 	--p-first: 0;
+	/* A cell says its own; auto is for one whose document does not. */
+	--c-width: auto;
 	position: absolute;
 	left: -10000px;
 	top: 0;

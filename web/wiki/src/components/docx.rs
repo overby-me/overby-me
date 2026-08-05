@@ -1142,10 +1142,18 @@ enum Group {
 /// moves into the body, which rsx has no room to do inline.
 #[component]
 fn TableCell(cell: Cell, header: bool, #[props(default)] share: Option<f64>) -> Element {
-    let shade = match share {
-        Some(pct) => format!("--c-share:{pct:.3}%;{}", cell_style(&cell)),
-        None => cell_style(&cell),
-    };
+    // The width Word states, for the measuring copy, and the share of the table
+    // it is, for anything that would rather fit the text column. Custom
+    // properties: the visible table sizes its columns to their contents, which
+    // is what keeps a table readable on a phone.
+    let mut shade = String::new();
+    if let Some(pct) = share {
+        shade.push_str(&format!("--c-share:{pct:.3}%;"));
+    }
+    if let Some(pt) = cell.width_pt.filter(|w| *w > 0.0) {
+        shade.push_str(&format!("--c-width:{pt:.2}pt;"));
+    }
+    shade.push_str(&cell_style(&cell));
     let span = cell.col_span;
     match header {
         true => rsx! {
