@@ -872,7 +872,8 @@ pub fn paragraph_style(p: &Paragraph) -> String {
     // leave eight points, so "what most paragraphs do" was nothing at all, and
     // the whole document measured a page short of what Word makes of it.
     css.push_str(&format!(
-        "--p-after:{:.2}pt;",
+        "--p-before:{:.2}pt;--p-after:{:.2}pt;",
+        p.space_before.filter(|v| *v >= 0.0).unwrap_or(0.0),
         p.space_after.filter(|v| *v >= 0.0).unwrap_or(0.0)
     ));
     let line = match p.line_spacing.as_ref() {

@@ -8196,6 +8196,7 @@ a.list-item:hover {
 	   stylesheet rule. Without this the off-screen copy was laid out in the
 	   reader's spacing however carefully the document's own was worked out --
 	   which is why several rounds of correcting that spacing changed nothing. */
+	margin-top: var(--p-before, 0) !important;
 	margin-bottom: var(--p-after, 8pt) !important;
 	line-height: calc(var(--p-line, 1.08) * 1.22) !important;
 }
@@ -8216,6 +8217,7 @@ a.list-item:hover {
 	/* Word's own defaults, for a paragraph that states neither. Every
 	   paragraph overrides both with what it resolves to. */
 	--p-line: 1.08;
+	--p-before: 0;
 	--p-after: 8pt;
 	position: absolute;
 	left: -10000px;
