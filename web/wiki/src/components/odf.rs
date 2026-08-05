@@ -168,6 +168,9 @@ fn table_of(node: roxmltree::Node, styles: &HashMap<String, (bool, bool)>) -> Ta
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(1),
                 v_merge: None,
+                // ODF states its column widths elsewhere; the Word pagination
+                // is the only thing that reads this.
+                width_pt: None,
             });
         }
         rows.push(Row {

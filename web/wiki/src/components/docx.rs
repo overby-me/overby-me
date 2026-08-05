@@ -275,6 +275,13 @@ pub struct Cell {
     /// thing telling a reader it is a header, so this is not decoration.
     #[serde(default)]
     pub background: Option<String>,
+    /// The width Word prefers for this column, in points. Not used on screen --
+    /// there the browser fits the columns to the reader's width, which is what
+    /// makes a wide table readable on a phone -- but the off-screen copy that
+    /// works out where the pages end has to wrap the text where Word wraps it,
+    /// and that depends on the column being the width Word gives it.
+    #[serde(default)]
+    pub width_pt: Option<f64>,
 }
 
 /// A cell's shading, as CSS.
@@ -283,6 +290,23 @@ pub struct Cell {
 /// run's colour, so it must NOT become a colour — a document that says `auto`
 /// on a dark theme wants the dark background, not a white one painted over it.
 pub fn cell_style(cell: &Cell) -> String {
+    // The width Word gives this column, for the off-screen copy to lay the
+    // table out at. Read only inside `.docx-measure`, so on screen the browser
+    // still fits the columns to the reader's width, which is what makes a wide
+    // table readable on a phone. But the text WRAPS to the column, and where a
+    // row's lines wrap decides how tall it is: measured with the browser's own
+    // guess at the widths, one document's rows came out a quarter short of
+    // Word's, and every page break with them.
+    let width = match cell.width_pt.filter(|w| *w > 0.0) {
+        Some(pt) => format!("--c-width:{pt:.2}pt;"),
+        None => String::new(),
+    };
+    let colour = cell_colour(cell);
+    format!("{width}{colour}")
+}
+
+/// What a cell is painted, if the document paints it.
+fn cell_colour(cell: &Cell) -> String {
     match cell.background.as_deref() {
         Some(hex) if is_real_colour(hex) => {
             let hex = hex.trim().trim_start_matches('#');
@@ -1923,6 +1947,7 @@ mod tests {
                         col_span: 1,
                         v_merge: None,
                         background: None,
+                        width_pt: None,
                     }],
                     is_header: false,
                 }],
