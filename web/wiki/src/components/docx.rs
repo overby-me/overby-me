@@ -974,7 +974,17 @@ pub fn DocxBody(
                                 _ => runs.last_mut().expect("seeded above").1.push(item),
                             }
                         }
+                        // A page beginning at the list's FIRST item belongs
+                        // before the whole list, since splitting there would
+                        // leave an empty one. It used to be dropped instead:
+                        // the count knew about the page and nothing on screen
+                        // marked it, so the control offered a page it could not
+                        // scroll to.
+                        let ahead = split_at(i, 0);
                         rsx! {
+                            if let Some(begins) = ahead {
+                                PageMark { key: "lp{i}-first", begins }
+                            }
                             for (r , (begins , run)) in runs.into_iter().enumerate() {
                                 if let Some(begins) = begins {
                                     PageMark { key: "lp{i}-{r}", begins }
