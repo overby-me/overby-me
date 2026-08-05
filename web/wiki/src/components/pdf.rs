@@ -598,7 +598,12 @@ fn PageControl(first: String, last: String) -> Element {
     // twice moved one page.
     let mut arrive = move |label: &str| {
         go_to_page(label);
-        if *here.peek() != label {
+        // Peeked into an OWNED string first. A signal's peek is a live borrow,
+        // and this writes the same signal a line later; leaving the borrow in
+        // the condition works only because an `if` drops it before the block,
+        // which is too subtle to rely on next to a write.
+        let at = here.peek().clone();
+        if at != label {
             here.set(label.to_string());
         }
     };
@@ -606,7 +611,15 @@ fn PageControl(first: String, last: String) -> Element {
     let mut step = move |by: i32| {
         let marks = pages.peek().clone();
         let labels: Vec<String> = marks.iter().map(|(_, l)| l.clone()).collect();
-        match step_to(&labels, &here.peek(), by) {
+        // The page we are on, TAKEN OUT of the signal before the match. A
+        // temporary made in a match's scrutinee lives until the end of the
+        // whole match, so `step_to(.., &here.peek(), ..)` held a read borrow of
+        // `here` across the arm that writes it, and pressing a page button
+        // panicked: it scrolled, then died on the write. That looked from the
+        // outside like a control that moved once and then ignored you, which is
+        // how it was reported three times and misread as a timing fault.
+        let at = here.peek().clone();
+        match step_to(&labels, &at, by) {
             Some(label) => arrive(&label),
             None => crate::components::back_to_top::scroll_to_top(),
         }
