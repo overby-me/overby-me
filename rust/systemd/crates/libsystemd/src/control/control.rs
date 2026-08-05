@@ -9289,6 +9289,9 @@ pub fn execute_command(
             reload_job.finish(crate::units::jobs::JobResult::Done);
         }
         Command::Restart(unit_name) => {
+            if is_unit_masked(&unit_name) {
+                return Err(format!("Unit {unit_name} is masked."));
+            }
             let id = find_or_load_unit(&unit_name, &run_info)?;
             let jobs_registry = run_info.read_poisoned().jobs.clone();
             let restart_job = crate::units::jobs::JobHandle::create(
@@ -9446,6 +9449,9 @@ pub fn execute_command(
         Command::TryRestart(unit_name) => {
             // try-restart: restart the unit only if it is currently active.
             // If the unit is not active, do nothing (success).
+            if is_unit_masked(&unit_name) {
+                return Err(format!("Unit {unit_name} is masked."));
+            }
             let (id, is_active) = {
                 let ri = run_info.read_poisoned();
                 let units = find_units_with_name(&unit_name, &ri.unit_table);
@@ -10986,6 +10992,9 @@ pub fn execute_command(
         }
         Command::RestartNoBlock(unit_name) => {
             // Like Restart but returns immediately — restart runs in background.
+            if is_unit_masked(&unit_name) {
+                return Err(format!("Unit {unit_name} is masked."));
+            }
             let id = find_or_load_unit(&unit_name, &run_info)?;
             let restart_job_id = {
                 let ri = run_info.read_poisoned();
