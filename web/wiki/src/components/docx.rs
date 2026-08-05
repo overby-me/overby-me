@@ -2582,6 +2582,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
 
     let height = page.height;
     let asked_for = page.size;
+    let (size, line, after, list_after) = (page.size, page.line, page.after, page.list_after);
     use_effect(move || {
         if !*measuring.peek() {
             return;
@@ -2602,7 +2603,9 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
             // this there is no way to tell a measurement that ran long from one
             // that never ran at all.
             log::info!(
-                "word pagination: {count} pages, {} marks, pages {height:.0}px",
+                "word pagination: {count} pages, {} marks, pages {height:.0}px, \
+                 set in {size}pt/{line:.3} with {after}pt under a paragraph and \
+                 {list_after}pt under a list item",
                 found.len()
             );
             marks.set(found);
