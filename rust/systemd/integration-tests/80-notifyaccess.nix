@@ -6,10 +6,13 @@
   # and (2026-08-05) the fd-store pinning lifecycle from the upstream fdstore
   # section: FileDescriptorStorePreserve=yes vs restart, NFileDescriptorStore,
   # survival across restart, release on a full stop unless pinned, the
-  # SubState=dead-resources-pinned pinned-dead state, and
-  # `systemctl clean --what=fdstore`. Still omitted vs upstream: the
-  # `systemd-analyze fdstore --json=short` exact-format assertion (the analyze
-  # verb's JSON layout is a separate surface).
+  # SubState=dead-resources-pinned pinned-dead state,
+  # `systemctl clean --what=fdstore`, and (2026-08-05) `systemd-analyze fdstore`
+  # introspection (text line count + the `--json=short` fdname/type/devno/inode/
+  # rdevno/path/flags shape). The analyze section is lightly adapted from
+  # upstream: NotifyAccess=all so the systemd-notify child is accepted without
+  # `--pid=parent` (not implemented), and no `$FDSTORE` env assertion
+  # (rust-systemd does not export it).
   patchScript = ''
         cat > TEST-80-NOTIFYACCESS.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -28,9 +31,11 @@
         systemctl stop testnotify-reload-timeout.service 2>/dev/null
         systemctl stop testnotify-reload-ok.service 2>/dev/null
         systemctl stop fdstore-pin.service fdstore-nopin.service 2>/dev/null
+        systemctl stop fdstore-analyze.service 2>/dev/null
         systemctl clean fdstore-pin.service --what=fdstore 2>/dev/null
         rm -f /run/systemd/system/testnotify-*.service
         rm -f /run/systemd/system/fdstore-pin.service /run/systemd/system/fdstore-nopin.service /run/systemd/system/fdstore-pin.target
+        rm -f /run/systemd/system/fdstore-analyze.service /run/fdstore-analyze.sh /tmp/fdstore-analyze-data
         rm -f /run/fdstore-pin.sh /tmp/fdstore-invoked.* /tmp/fdstore-data.*
         systemctl daemon-reload
     }
@@ -160,6 +165,41 @@
     assert_eq "$(systemctl show testnotify-reload-ok.service -P ReloadResult)" "success"
 
     systemctl stop testnotify-reload-timeout.service testnotify-reload-ok.service
+
+    : "systemd-analyze fdstore introspection"
+    # Store one named, read-only fd in a service, then introspect it with
+    # systemd-analyze fdstore (text line count + --json=short shape). Adapted
+    # from upstream: NotifyAccess=all so the systemd-notify child's message is
+    # accepted without --pid=parent (not implemented), and the $FDSTORE env
+    # check is dropped (rust-systemd does not export $FDSTORE).
+    cat > /run/fdstore-analyze.sh <<'ASCRIPTEOF'
+    #!/usr/bin/env bash
+    set -eux
+    set -o pipefail
+    N="/tmp/fdstore-analyze-data"
+    echo waldi > "$N"
+    systemd-notify --fd=3 --fdname="quux" 3< "$N"
+    rm "$N"
+    systemd-notify --ready
+    exec sleep infinity
+    ASCRIPTEOF
+    chmod +x /run/fdstore-analyze.sh
+    cat > /run/systemd/system/fdstore-analyze.service <<EOF
+    [Service]
+    Type=notify
+    NotifyAccess=all
+    FileDescriptorStoreMax=7
+    ExecStart=/usr/bin/bash /run/fdstore-analyze.sh
+    EOF
+    systemctl daemon-reload
+    systemctl start fdstore-analyze.service
+    timeout 30 bash -c 'while [ "$(systemctl is-active fdstore-analyze.service)" != active ]; do sleep 0.5; done'
+    # One stored fd: analyze prints a header plus one entry line (2 lines).
+    test "$(systemd-analyze fdstore fdstore-analyze.service | wc -l)" -eq 2
+    systemd-analyze fdstore fdstore-analyze.service --json=short
+    systemd-analyze fdstore fdstore-analyze.service --json=short | grep -P '\[{"fdname":"quux","type":.*,"devno":\[.*\],"inode":.*,"rdevno":null,"path":"/tmp/.*","flags":"ro"}\]' >/dev/null
+    systemctl stop fdstore-analyze.service
+    rm -f /run/systemd/system/fdstore-analyze.service /run/fdstore-analyze.sh
 
     : "fd store pinning lifecycle (FileDescriptorStorePreserve=yes vs restart)"
     # Upstream fdstore-pin.sh: called three times per service (start, restart,

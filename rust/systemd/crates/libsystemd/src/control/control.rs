@@ -91,6 +91,11 @@ pub enum Command {
     Show(String, Option<Vec<String>>),
     /// `cat <unit>` — return the unit file source text.
     Cat(String),
+    /// `fdstore-dump <unit>` — return the unit's file-descriptor store entries
+    /// with per-fd metadata (fdname, type, devno, inode, rdevno, path, flags),
+    /// mirroring `systemd-analyze fdstore` / the DumpFileDescriptorStore D-Bus
+    /// method.
+    FdStoreDump(String),
     LoadNew(Vec<String>),
     LoadAllNew,
     LoadAllNewDry,
@@ -705,6 +710,20 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 _ => None,
             };
             Command::ServiceWatchdogs(val)
+        }
+        "fdstore-dump" => {
+            let unit = match &call.params {
+                Some(Value::String(s)) => s.clone(),
+                Some(Value::Array(arr)) if !arr.is_empty() => {
+                    arr[0].as_str().unwrap_or_default().to_owned()
+                }
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "fdstore-dump requires a unit name".to_string(),
+                    ));
+                }
+            };
+            Command::FdStoreDump(unit)
         }
         "start-transient" => {
             // Params: JSON object with transient unit properties.
@@ -6124,6 +6143,48 @@ fn stop_units_via_tree(
     Ok(())
 }
 
+/// Build one `systemd-analyze fdstore` / DumpFileDescriptorStore JSON entry for
+/// a stored file descriptor: its name plus fstat/readlink/F_GETFL metadata. The
+/// fd is one held open by PID 1's fd store, so /proc/self/fd resolves it here.
+fn fd_store_entry_json(fdname: &str, fd: i32) -> Value {
+    use serde_json::json;
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    let (type_val, devno, inode, rdevno) = if unsafe { libc::fstat(fd, &mut stat) } == 0 {
+        let devno = json!([libc::major(stat.st_dev), libc::minor(stat.st_dev)]);
+        let rdevno = if stat.st_rdev != 0 {
+            json!([libc::major(stat.st_rdev), libc::minor(stat.st_rdev)])
+        } else {
+            Value::Null
+        };
+        (
+            json!((stat.st_mode & libc::S_IFMT) as u64),
+            devno,
+            json!(stat.st_ino),
+            rdevno,
+        )
+    } else {
+        (Value::Null, Value::Null, Value::Null, Value::Null)
+    };
+    let path = std::fs::read_link(format!("/proc/self/fd/{fd}"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let flags_raw = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    let flags = if flags_raw >= 0 && (flags_raw & libc::O_ACCMODE) == libc::O_RDONLY {
+        "ro"
+    } else {
+        "rw"
+    };
+    json!({
+        "fdname": fdname,
+        "type": type_val,
+        "devno": devno,
+        "inode": inode,
+        "rdevno": rdevno,
+        "path": path,
+        "flags": flags,
+    })
+}
+
 pub fn execute_command(
     cmd: Command,
     run_info: ArcMutRuntimeInfo,
@@ -8917,6 +8978,22 @@ pub fn execute_command(
 
             let text = unit_properties::format_properties(&props, filter.as_deref());
             return Ok(serde_json::json!({ "show": text }));
+        }
+        Command::FdStoreDump(unit_name) => {
+            let _ = find_or_load_unit(&unit_name, &run_info);
+            let ri = run_info.read_poisoned();
+            let units = find_units_with_name(&unit_name, &ri.unit_table);
+            let unit = units
+                .first()
+                .ok_or_else(|| format!("Unit {unit_name} not found."))?;
+            let mut entries: Vec<Value> = Vec::new();
+            if let Specific::Service(svc) = &unit.specific {
+                let st = svc.state.read_poisoned();
+                for (fdname, raw_fd) in &st.srvc.stored_fds {
+                    entries.push(fd_store_entry_json(fdname, *raw_fd));
+                }
+            }
+            return Ok(Value::Array(entries));
         }
         Command::Cat(unit_name) => {
             // Try to load the unit on demand (handles symlink aliases)

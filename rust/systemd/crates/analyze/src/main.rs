@@ -223,6 +223,9 @@ enum Command {
     Fdstore {
         /// Service unit name
         unit: String,
+        /// Output the entries as JSON (short or pretty).
+        #[arg(long, value_name = "MODE")]
+        json: Option<String>,
     },
 
     /// Analyze image dissection policies
@@ -1587,7 +1590,7 @@ fn main() {
         Some(Command::Security { ref units, .. }) => cmd_security(units),
         Some(Command::Plot) => cmd_plot(),
         Some(Command::InspectElf { ref files }) => cmd_inspect_elf(files),
-        Some(Command::Fdstore { ref unit }) => cmd_fdstore(unit),
+        Some(Command::Fdstore { ref unit, ref json }) => cmd_fdstore(unit, json.as_deref()),
         Some(Command::ImagePolicy { ref policies }) => cmd_image_policy(policies),
         Some(Command::Pcrs) => cmd_pcrs(),
         Some(Command::Srk) => cmd_srk(),
@@ -3030,69 +3033,80 @@ fn cmd_inspect_elf(files: &[String]) {
 
 // ── FD store ──────────────────────────────────────────────────────────────
 
-fn cmd_fdstore(unit: &str) {
-    // Attempt to query fd store via the runtime state directory.
-    // Exit with code 1 when no fdstore entries exist (matching real
-    // systemd's behavior that tests rely on).
-    let fdstore_dir = format!("/run/rust-systemd/fdstore/{unit}");
-    let path = Path::new(&fdstore_dir);
-
-    println!("         Unit: {unit}");
-
-    if !path.exists() {
-        // Try the standard systemd path as well
-        let systemd_path = format!("/run/systemd/units/fdstore/{unit}");
-        if Path::new(&systemd_path).exists()
-            && let Ok(entries) = fs::read_dir(&systemd_path)
-        {
-            let fds: Vec<_> = entries.flatten().collect();
-            if fds.is_empty() {
-                println!("    FD Store: (no entries)");
-                std::process::exit(1);
-            }
-            println!("    FD Store: {} entries", fds.len());
-            for entry in &fds {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let metadata = entry.metadata().ok();
-                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                println!("      {name}: {size} bytes");
-            }
-            return;
-        }
-
-        eprintln!("No file descriptor store data found for {unit}.");
-        std::process::exit(1);
-    }
-
-    match fs::read_dir(path) {
-        Ok(entries) => {
-            let fds: Vec<_> = entries.flatten().collect();
-            if fds.is_empty() {
-                println!("    FD Store: (empty)");
-                std::process::exit(1);
-            } else {
-                println!("    FD Store: {} entries", fds.len());
-                println!();
-                println!("  {:>4}  {:<20}  INFO", "IDX", "NAME");
-                for (idx, entry) in fds.iter().enumerate() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    // Try to read metadata about the fd
-                    let info = fs::read_to_string(entry.path())
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string();
-                    let info_display = if info.is_empty() {
-                        "(no info)".to_string()
-                    } else {
-                        info
-                    };
-                    println!("  {:>4}  {:<20}  {}", idx, name, info_display);
+fn cmd_fdstore(unit: &str, json: Option<&str>) {
+    // Query PID 1's live fd store over the control socket. The manager returns a
+    // JSON array of per-fd metadata (fdname, type, devno, inode, rdevno, path,
+    // flags), mirroring systemd's DumpFileDescriptorStore. Exit 1 when the store
+    // is empty/absent, which the tests (and upstream) rely on.
+    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
+    let request = format!(r#"{{"jsonrpc":"2.0","method":"fdstore-dump","params":"{unit}","id":1}}"#);
+    let entries: Vec<serde_json::Value> = {
+        use std::io::Write;
+        let mut got = None;
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+            let _ = stream.write_all(request.as_bytes());
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+            if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream) {
+                if resp.get("error").is_some() {
+                    eprintln!("No file descriptor store data found for {unit}.");
+                    std::process::exit(1);
+                }
+                if let Some(serde_json::Value::Array(arr)) = resp.get("result") {
+                    got = Some(arr.clone());
                 }
             }
         }
-        Err(e) => {
-            eprintln!("    FD Store: error reading: {e}");
-            std::process::exit(1);
+        match got {
+            Some(v) => v,
+            None => {
+                eprintln!("No file descriptor store data found for {unit}.");
+                std::process::exit(1);
+            }
+        }
+    };
+
+    if entries.is_empty() {
+        eprintln!("No file descriptor store entries for {unit}.");
+        std::process::exit(1);
+    }
+
+    if let Some(mode) = json {
+        // Emit fields in the order upstream's DumpFileDescriptorStore uses
+        // (fdname, type, devno, inode, rdevno, path, flags); serde_json would
+        // otherwise sort keys alphabetically, which the TEST-80 grep rejects.
+        let field = |e: &serde_json::Value, k: &str| e.get(k).cloned().unwrap_or(serde_json::Value::Null);
+        let objs: Vec<String> = entries
+            .iter()
+            .map(|e| {
+                format!(
+                    r#"{{"fdname":{},"type":{},"devno":{},"inode":{},"rdevno":{},"path":{},"flags":{}}}"#,
+                    field(e, "fdname"),
+                    field(e, "type"),
+                    field(e, "devno"),
+                    field(e, "inode"),
+                    field(e, "rdevno"),
+                    field(e, "path"),
+                    field(e, "flags"),
+                )
+            })
+            .collect();
+        if mode == "pretty" {
+            println!("[\n\t{}\n]", objs.join(",\n\t"));
+        } else {
+            println!("[{}]", objs.join(","));
+        }
+    } else {
+        // Text: a header line plus one line per entry, so `wc -l` == 1 + N
+        // (upstream prints 2 lines for a single stored fd).
+        println!("File Descriptor Store of {unit}:");
+        for e in &entries {
+            let s = |k: &str| {
+                e.get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-")
+                    .to_string()
+            };
+            println!("  {}  {}  {}", s("fdname"), s("path"), s("flags"));
         }
     }
 }
