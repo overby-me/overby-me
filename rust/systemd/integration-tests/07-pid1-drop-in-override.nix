@@ -62,6 +62,29 @@
     [[ "$(cat /tmp/dropin-env-result)" == "hello" ]]
     systemctl stop "$UNIT.service"
     rm -f /tmp/dropin-env-result
+
+    : "Drop-in ExecStart= reset replaces the base command list"
+    cat > "/run/systemd/system/$UNIT.service" << EOF
+    [Unit]
+    Description=Base Description
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=bash -c 'echo base >> /tmp/dropin-exec-result'
+    EOF
+    cat > "/run/systemd/system/$UNIT.service.d/exec.conf" << EOF
+    [Service]
+    ExecStart=
+    ExecStart=bash -c 'echo overridden >> /tmp/dropin-exec-result'
+    EOF
+    rm -f /tmp/dropin-exec-result
+    systemctl daemon-reload
+    systemctl start "$UNIT.service"
+    # The empty ExecStart= clears the base list, so only the drop-in command
+    # runs (append would show "base" too if the reset were ignored).
+    [[ "$(cat /tmp/dropin-exec-result)" == "overridden" ]]
+    systemctl stop "$UNIT.service"
+    rm -f /tmp/dropin-exec-result
     DIEOF
   '';
 }
