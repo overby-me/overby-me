@@ -81,6 +81,12 @@ pub enum Block {
         /// seventh page of the file is the page its own index calls 3. The
         /// printed one is what a cross-reference means.
         printed: Option<String>,
+        /// And what the page BEGINNING here calls itself. The mark sits at the
+        /// top of it, so this is the page a reader arriving at the mark is on.
+        /// Keeping only `printed` meant everything that jumped to a mark landed
+        /// one page late, and stepping forward moved by the tail of the page you
+        /// were already on rather than by a page.
+        starts: Option<String>,
     },
 }
 
@@ -2340,6 +2346,7 @@ fn blocks_from(
             blocks.push(Block::PageBreak {
                 ended: page,
                 printed: printed.get(&(page - 1)).cloned(),
+                starts: printed.get(&page).cloned(),
             });
             page = line.page;
             prev = None;
@@ -3932,7 +3939,7 @@ mod harness {
                             format!("toc>{indent} .{page}")
                         }
                         super::Block::Anchor(_) => "anch".into(),
-                        super::Block::PageBreak { ended, printed } => match printed {
+                        super::Block::PageBreak { ended, printed, .. } => match printed {
                             Some(p) => format!("--{ended}({p})--"),
                             None => format!("--{ended}--"),
                         },
@@ -4533,7 +4540,8 @@ mod tests {
             blocks[1],
             Block::PageBreak {
                 ended: 1,
-                printed: None
+                printed: None,
+                starts: None,
             },
             "the page that just ended"
         );

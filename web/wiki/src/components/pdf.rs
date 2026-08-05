@@ -290,7 +290,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         // Nothing to read: somewhere for a link to land.
                         span { key: "{i}", id: "{id}", class: "pdf-anchor" }
                     },
-                    Some(Block::PageBreak { ended, printed }) => rsx! {
+                    Some(Block::PageBreak { ended, printed, starts }) => rsx! {
                         // Furniture, and marked as such: a separator carries no
                         // meaning to read aloud, and the number is what makes
                         // "see page 12" mean something to someone reading this
@@ -305,7 +305,9 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             id: "pdf-page-{ended + 1}",
                             class: "pdf-page-break",
                             role: "separator",
-                            "data-page": "{printed.clone().unwrap_or_else(|| (ended + 1).to_string())}",
+                            // The page that BEGINS here, which is the page a
+                            // reader arriving at this mark is on.
+                            "data-page": "{starts.clone().unwrap_or_else(|| (ended + 1).to_string())}",
                             span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
                         }
                     },
@@ -345,7 +347,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
             // Where the reader is, and how to go elsewhere. Only for a document
             // with more than one page: a single page has nowhere to go.
             if doc.pages > 1 {
-                PageControl { total: doc.pages }
+                PageControl { first: first_page(&doc), last: last_page(&doc) }
             }
             // Say what was left behind, in the Word renderer's own gap-notice
             // style rather than a class of this file's invention: a reader
@@ -397,6 +399,37 @@ fn t_pages(pages: usize) -> String {
     crate::i18n::t_with("file.pdfReflowed", &[("pages", &pages.to_string())])
 }
 
+/// What the document's first page calls itself. It has no mark of its own, since
+/// nothing ended before it, so the first mark carries its number as the page
+/// that ENDED there.
+fn first_page(doc: &Extracted) -> String {
+    doc.blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::PageBreak { printed, .. } => Some(printed.clone()),
+            _ => None,
+        })
+        .flatten()
+        .unwrap_or_else(|| "1".into())
+}
+
+/// The last page number the document PRINTS.
+///
+/// Not the number of sheets in the file: the songbook's hundred and four sheets
+/// end on an unnumbered back cover, and the page its own last folio calls 99.
+/// A reader counting pages is counting the printed ones, so "37 / 99" is the
+/// pair that reads in one language.
+fn last_page(doc: &Extracted) -> String {
+    doc.blocks
+        .iter()
+        .rev()
+        .find_map(|b| match b {
+            Block::PageBreak { printed, .. } => printed.clone(),
+            _ => None,
+        })
+        .unwrap_or_else(|| doc.pages.to_string())
+}
+
 /// Where the pages of the document on screen begin, and what each calls itself.
 ///
 /// Read off the marks the view draws between its pages, which carry the number
@@ -445,7 +478,10 @@ fn go_to_page(label: &str) {
 }
 
 /// Which page the reader is on: the last one that has begun above them.
-fn page_here(pages: &[(f64, String)]) -> String {
+///
+/// Above every mark is the first page, which has no mark of its own because
+/// nothing ended before it, so it has to be told what it is called.
+fn page_here(pages: &[(f64, String)], first: &str) -> String {
     let scrolled = web_sys::window()
         .and_then(|w| w.scroll_y().ok())
         .unwrap_or(0.0);
@@ -454,8 +490,7 @@ fn page_here(pages: &[(f64, String)]) -> String {
         .take_while(|(top, _)| *top <= scrolled + 8.0)
         .last()
     {
-        // Before the first mark is the first page, whatever it calls itself.
-        None => pages.first().map(|(_, l)| l.clone()).unwrap_or_default(),
+        None => first.to_string(),
         Some((_, label)) => label.clone(),
     }
 }
@@ -472,7 +507,7 @@ fn page_here(pages: &[(f64, String)]) -> String {
 /// The numbers are the pages' OWN, so "37" is the page the document's index calls
 /// 37 rather than the thirty-seventh sheet of the file.
 #[component]
-fn PageControl(total: usize) -> Element {
+fn PageControl(first: String, last: String) -> Element {
     let mut pages = use_signal(Vec::<(f64, String)>::new);
     let mut typing = use_signal(|| false);
     let mut typed = use_signal(String::new);
@@ -494,7 +529,7 @@ fn PageControl(total: usize) -> Element {
             height.set(tall);
             pages.set(pages_on_screen());
         }
-        let now = page_here(&pages.read());
+        let now = page_here(&pages.read(), &first);
         if now != *here.read() {
             here.set(now);
         }
@@ -502,13 +537,23 @@ fn PageControl(total: usize) -> Element {
 
     let step = move |by: i32| {
         let marks = pages.read().clone();
-        let at = marks.iter().position(|(_, l)| *l == *here.read());
-        let next = match at {
-            Some(at) => (at as i32 + by).clamp(0, marks.len() as i32 - 1) as usize,
-            None => 0,
-        };
-        if let Some((_, label)) = marks.get(next) {
-            go_to_page(label);
+        let now = here.read().clone();
+        match marks.iter().position(|(_, l)| *l == now) {
+            // On a page with a mark: step from it.
+            Some(at) => {
+                let next = (at as i32 + by).clamp(0, marks.len() as i32 - 1) as usize;
+                if let Some((_, label)) = marks.get(next) {
+                    go_to_page(label);
+                }
+            }
+            // On the first page, which has no mark: forward is the first mark,
+            // and there is nothing behind it to go back to.
+            None if by > 0 => {
+                if let Some((_, label)) = marks.first() {
+                    go_to_page(label);
+                }
+            }
+            None => crate::components::back_to_top::scroll_to_top(),
         }
     };
 
@@ -552,7 +597,7 @@ fn PageControl(total: usize) -> Element {
                         typed.set(here.read().clone());
                         typing.set(true);
                     },
-                    "{here} / {total}"
+                    "{here} / {last}"
                 }
             }
             button {

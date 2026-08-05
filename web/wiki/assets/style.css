@@ -8329,10 +8329,10 @@ a.list-item:hover {
    other. */
 .pdf-pages {
 	position: fixed;
-	/* The same height the action button stands at, which is what already clears
-	   the dock on a phone. NOT measured from `--dock-tier`: that is defined on
-	   the dock element itself, so nothing outside it can read the variable, and
-	   the whole declaration would be thrown away wherever it could not. */
+	/* The height the action button stands at. NOT measured from `--dock-tier`:
+	   that is defined on the dock element itself, so nothing outside it can read
+	   the variable, and the whole declaration would be thrown away wherever it
+	   could not. */
 	bottom: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-6));
 	left: 50%;
 	transform: translateX(-50%);
@@ -8387,6 +8387,15 @@ a.list-item:hover {
 	font: inherit;
 	font-variant-numeric: tabular-nums;
 	text-align: center;
+}
+
+/* On a phone the app's own bar is at the BOTTOM, two tiers of it: search and
+   breadcrumbs over the navigation. The action button's height does not clear
+   that, so the page control sat on top of the search bar. Lifted by exactly what
+   the content pane uses to clear the same dock, so the two agree by
+   construction. */
+.app-shell[data-size-class="compact"] .pdf-pages {
+	bottom: calc(var(--md-sys-spacing-30) + var(--md-sys-margin));
 }
 
 /* Where a link lands. Nothing to see: it exists so the scroll has a target, and
