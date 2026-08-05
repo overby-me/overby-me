@@ -34,6 +34,9 @@
     OUTPUT=$(systemctl cat cat-dropin-test.service)
     echo "$OUTPUT" | grep -q "ExecStart=true"
     echo "$OUTPUT" | grep -q "FOO=bar"
+    # cat attributes each fragment to its source file via a "# <path>" header.
+    echo "$OUTPUT" | grep -q "# /run/systemd/system/cat-dropin-test.service"
+    echo "$OUTPUT" | grep -q "cat-dropin-test.service.d/override.conf"
     CDEOF
     chmod +x TEST-74-AUX-UTILS.cat-dropin.sh
   '';
