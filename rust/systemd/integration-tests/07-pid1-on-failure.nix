@@ -58,6 +58,23 @@
     systemctl start onfail-trigger.service
     sleep 2
     [[ ! -f /tmp/onfail-handler-ran ]]
+
+    : "OnSuccess= triggers handler when service succeeds"
+    # Reset the shared handler to inactive so a trigger actually re-runs it.
+    systemctl stop onfail-handler.service 2>/dev/null || true
+    cat > /run/systemd/system/onfail-trigger.service << EOF
+    [Unit]
+    OnSuccess=onfail-handler.service
+    [Service]
+    Type=oneshot
+    ExecStart=true
+    EOF
+    systemctl daemon-reload
+    rm -f /tmp/onfail-handler-ran
+    systemctl start onfail-trigger.service
+    # OnSuccess fires the handler after a clean exit (mirror of OnFailure).
+    timeout 15 bash -c 'until [[ -f /tmp/onfail-handler-ran ]]; do sleep 0.5; done'
+    [[ -f /tmp/onfail-handler-ran ]]
     OFEOF
   '';
 }
