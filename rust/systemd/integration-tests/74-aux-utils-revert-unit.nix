@@ -24,8 +24,12 @@
     Environment=FOO=bar
     EOF
     systemctl daemon-reload
-    # Revert should remove overrides
-    systemctl revert "$UNIT.service" 2>/dev/null || true
+    # The drop-in override is in effect before revert.
+    systemctl show -P Environment "$UNIT.service" | grep -q "FOO=bar"
+    # revert must succeed and remove the drop-in dir and the runtime unit file.
+    systemctl revert "$UNIT.service"
+    [[ ! -e "/run/systemd/system/$UNIT.service" ]]
+    [[ ! -e "/run/systemd/system/$UNIT.service.d" ]]
     rm -rf "/run/systemd/system/$UNIT.service" "/run/systemd/system/$UNIT.service.d"
     systemctl daemon-reload
     RUEOF
