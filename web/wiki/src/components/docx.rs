@@ -2829,7 +2829,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
             // and Times New Roman's 1.15, and a document states its line
             // spacing as a multiple of whichever its text is set in.
             set_single_spacing();
-            let Some((found, count)) = measure_pages(height) else {
+            let Some((found, count, ink)) = measure_pages(height) else {
                 return;
             };
             // What it made of the document, in the console. Pagination that
@@ -2838,9 +2838,10 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
             // that never ran at all.
             log::info!(
                 "word pagination: {count} pages, {} marks, pages {height:.0}px, \
-                 set in {size}pt/{line:.3} with {after}pt under a paragraph and \
-                 {list_after}pt under a list item",
-                found.len()
+                 {ink:.0}px of ink ({:.2} pages' worth), set in {size}pt/{line:.3} \
+                 with {after}pt under a paragraph and {list_after}pt under a list item",
+                found.len(),
+                ink / height
             );
             marks.set(found);
             pages.set(count);
@@ -2883,7 +2884,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
 /// -- so the page count is the number of places a reader can actually be TAKEN
 /// to, plus the first. Counting the swallowed pages instead left a control that
 /// named a page and then would not go there.
-fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
+fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)> {
     if height <= 0.0 {
         return None;
     }
@@ -3020,7 +3021,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
     }
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
-    (measured > 0.0).then_some((marks.clone(), marks.len() + 1))
+    (measured > 0.0).then_some((marks.clone(), marks.len() + 1, measured))
 }
 
 /// Wait until the measuring face is loaded, or give up on it.
