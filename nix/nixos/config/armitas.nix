@@ -202,11 +202,20 @@
 
       # ── TPM ─────────────────────────────────────────────────────────
       # systemd tags /dev/tpm0 and /dev/tpmrm0 and pulls in tpm2.target, and
-      # on this machine those device units never settle, so boot stalls twice
-      # for DefaultDeviceTimeoutSec (90s each) before carrying on.  Nothing
-      # here uses the TPM: the disk is unencrypted and there is no measured
-      # boot.  Turn it back on if either of those changes.
+      # on this machine those device units never settle, so boot stalls for
+      # DefaultDeviceTimeoutSec before carrying on.  Nothing here uses the
+      # TPM: the disk is unencrypted and there is no measured boot.  Turn
+      # both back on if either of those changes.
+      #
+      # The initrd needs telling separately.  It runs its own systemd with
+      # its own settings, so the stage 2 option alone leaves stage 1 waiting
+      # the full 90s, which was the entire difference between a two-minute
+      # boot and a twenty-second one:
+      #
+      #   initrd 1min 31s + userspace 5.2s
+      #   [91.006053] dev-tpm0.device: Job dev-tpm0.device/start timed out.
       systemd.tpm2.enable = false;
+      boot.initrd.systemd.tpm2.enable = false;
 
       # ── Deployment ──────────────────────────────────────────────────
       # Authorise root so `nixos-rebuild --target-host root@armitas` works.
