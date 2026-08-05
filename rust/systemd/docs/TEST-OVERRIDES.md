@@ -405,7 +405,7 @@ Remove the override, run, record. Ordered by expected payoff.
 | 07-PID1 private-pids | substitute, 176 -> 24 | biggest single coverage loss in the 07 family |
 | 07-PID1 protect-hostname | substitute, 121 -> 54 | |
 | 07-PID1 start-limit | substitute, 46 -> 38 | |
-| 74-AUX-UTILS run | SUBSTITUTE REMOVED; the real upstream script runs now. Three systemd-run defects fixed out of it (--slice-inherit, empty --working-directory= reset, --same-dir). Currently red at `--expand-environment=`, which needs a real env-expansion knob rather than a no-op flag |
+| 74-AUX-UTILS run | SUBSTITUTE REMOVED; the real upstream script runs. Six systemd-run defects fixed out of it: --slice-inherit, empty --working-directory= reset, --same-dir, --expand-environment= / the `:` no-env-expand prefix, transient-unit collection on stop, and (2026-08-05) the user-manager transient stdout/stderr being written to the root-owned system `/run/systemd/transient` (EPERM) instead of the per-user `$XDG_RUNTIME_DIR/systemd/transient` -- now runtime-scoped in `control.rs` gated on `SYSTEMD_USER_MANAGER`, system path byte-for-byte unchanged. VM-verified 2026-08-05: `--expand-environment=no` and the first `systemd-run --user --machine=testuser@` case (cgroup match) now pass. Still RED at the next `--user --machine` assertion: `[[ "$(id -nu)" == testuser && "$(id -ng)" == testuser ]]` -- the transient runs as `User: testuser` but the check fails, a user-manager primary-group (gid) identity gap to chase next |
 | 59-RELOADING-RESTART | substitute, 179 -> 181 | only `ReloadLimitBurst` and `RestartMode=debug` are named as missing |
 
 `07-pid1-exec-context` is a substitute too, but its replacement is 1,185 lines against

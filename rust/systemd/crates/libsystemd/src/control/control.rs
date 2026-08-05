@@ -3401,9 +3401,20 @@ fn create_transient_unit(
         .unwrap_or_default();
     let exec: Vec<Commandline> = Vec::new();
 
-    // Ensure the transient directory exists for --pipe temp files.
+    // Ensure the transient directory exists for --pipe temp files. A user
+    // manager (SYSTEMD_USER_MANAGER=1, set by run_user_manager) runs as the user
+    // and cannot write the root-owned system /run/systemd/transient, so it uses
+    // its XDG runtime dir instead. The system-manager path is unchanged.
+    let transient_base: std::path::PathBuf =
+        if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+            std::env::var_os("XDG_RUNTIME_DIR")
+                .map(|r| std::path::Path::new(&r).join("systemd/transient"))
+                .unwrap_or_else(|| std::path::PathBuf::from("/run/systemd/transient"))
+        } else {
+            std::path::PathBuf::from("/run/systemd/transient")
+        };
     if params.pipe {
-        let _ = std::fs::create_dir_all("/run/systemd/transient");
+        let _ = std::fs::create_dir_all(&transient_base);
     }
 
     // LogExtraFields= assignments from `-p LogExtraFields=...`. Matching the
@@ -3442,14 +3453,14 @@ fn create_transient_unit(
         stdin_option: crate::units::StandardInput::Null,
         stdout_path: if params.pipe {
             Some(crate::units::StdIoOption::File(
-                format!("/run/systemd/transient/{}.stdout", params.unit_name).into(),
+                format!("{}/{}.stdout", transient_base.display(), params.unit_name).into(),
             ))
         } else {
             None
         },
         stderr_path: if params.pipe {
             Some(crate::units::StdIoOption::File(
-                format!("/run/systemd/transient/{}.stderr", params.unit_name).into(),
+                format!("{}/{}.stderr", transient_base.display(), params.unit_name).into(),
             ))
         } else {
             None
