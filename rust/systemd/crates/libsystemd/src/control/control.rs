@@ -2121,6 +2121,23 @@ fn find_units_with_pattern<'a>(
 }
 
 /// Determine the state of a unit file: "enabled", "disabled", "static", or "indirect".
+/// True if the unit is masked: its unit file in /run or /etc is a symlink to
+/// /dev/null. Mirrors the mask detection in `unit_file_state`, but takes only
+/// the unit name so callers (e.g. the start path) can refuse masked units
+/// before loading them.
+fn is_unit_masked(name: &str) -> bool {
+    for base in ["/run/systemd/system", "/etc/systemd/system"] {
+        let p = std::path::Path::new(base).join(name);
+        if std::fs::read_link(&p)
+            .map(|t| t == std::path::Path::new("/dev/null"))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn unit_file_state(
     name: &str,
     unit_table: &UnitTable,
@@ -9753,6 +9770,12 @@ pub fn execute_command(
             let jobs_registry = run_info.read_poisoned().jobs.clone();
 
             for unit_name in &actual_names {
+                // A masked unit must never start: its unit file is a symlink to
+                // /dev/null, so refuse before loading it (upstream errors with
+                // "Unit <name> is masked.").
+                if is_unit_masked(unit_name) {
+                    return Err(format!("Unit {unit_name} is masked."));
+                }
                 let id = find_or_load_unit(unit_name, &run_info)?;
                 // Installed for the whole inline start of this unit; the
                 // failure paths below return early, which drops the handle
