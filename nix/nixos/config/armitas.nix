@@ -94,6 +94,7 @@
     ../modules/core/nix.nix
     ../modules/core/secrets.nix
     ../modules/core/system.nix
+    ../modules/core/uinput.nix
     ../modules/core/users.nix
     ../modules/core/zram.nix
     ../modules/services/openssh.nix

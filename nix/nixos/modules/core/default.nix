@@ -11,6 +11,7 @@
     ./networking.nix
     ./nix.nix
     ./system.nix
+    ./uinput.nix
     ./users.nix
     ./virtualisation.nix
     ./zram.nix
