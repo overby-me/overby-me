@@ -8232,6 +8232,22 @@ a.list-item:hover {
 	   in one and its lists in another. */
 	font-family: var(--p-face, Carlito, Calibri, sans-serif) !important;
 	line-height: calc(var(--p-line, 1.08) * var(--p-single, var(--single-sans, 1.22))) !important;
+	/* Word's own indent, in Word's own points. The visible margin is in rem so
+	   that an indent scales with the reader's text, which is right on screen and
+	   wrong here: it makes every indented line wider than the page gives it, and
+	   a list that wraps less than Word wraps it holds too much on a page. */
+	margin-left: var(--p-indent, 0) !important;
+	text-indent: var(--p-first, 0) !important;
+}
+/* A list is drawn for READING at half Word's depth, and the depth belongs to
+   the reading surface, not to the page. Off screen the item places itself from
+   the document, so the padding and the per-level step have to get out of the
+   way first. */
+.docx-measure .docx-list {
+	padding-left: 0;
+}
+.docx-measure .docx-list li {
+	margin-inline-start: 0;
 }
 /* A list Word closes up: the space under an item goes only when the NEXT item
    is closed up too, which is what `contextualSpacing` means and why it cannot
@@ -8257,6 +8273,8 @@ a.list-item:hover {
 	--p-after: 8pt;
 	--p-face: Carlito, Calibri, sans-serif;
 	--p-single: var(--single-sans, 1.22);
+	--p-indent: 0;
+	--p-first: 0;
 	position: absolute;
 	left: -10000px;
 	top: 0;

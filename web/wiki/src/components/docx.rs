@@ -889,9 +889,22 @@ pub fn paragraph_style(p: &Paragraph) -> String {
             css.push_str(&format!("line-height:{:.2};", ls.value));
         }
     }
+    css.push_str(&measured_style(p));
+    css
+}
+
+/// What Word resolved for this paragraph, for the off-screen copy that works out
+/// where the pages end: the spacing, the size, the face and the indent.
+///
+/// All of it in custom properties, read only inside `.docx-measure`, so it
+/// changes nothing on screen. That is what lets a list item carry its own
+/// measurements without moving on the page: a list is indented for READING here,
+/// half as deep as Word indents it, and the reader's depth is the right one to
+/// read at and the wrong one to paginate by.
+pub fn measured_style(p: &Paragraph) -> String {
+    let mut css = String::new();
     // What THIS paragraph leaves under itself and sets its lines at, as Word
-    // resolved it, for the off-screen copy that works out where the pages end.
-    // Read only inside `.docx-measure`, so it changes nothing on screen.
+    // resolved it.
     //
     // Per paragraph, not per document: a document-wide figure was tried and the
     // cells outvoted the body. One file's hundred and thirty cell paragraphs
@@ -934,6 +947,22 @@ pub fn paragraph_style(p: &Paragraph) -> String {
         _ => 1.0,
     };
     css.push_str(&format!("--p-line:{line:.3};"));
+    // Where Word's own margin puts this paragraph, in points, which is not what
+    // the visible margin above says: that one is in rem so an indent scales with
+    // the reader's text, and at a 16px root Word's 36pt indent reads as 36px
+    // where the page gives it 48. Measured at the reader's depth, a list wrapped
+    // less than Word wraps it and every page held two items too many.
+    let left = p.indent_left.unwrap_or(0.0).max(0.0);
+    if left > 0.0 {
+        css.push_str(&format!("--p-indent:{left:.2}pt;"));
+    }
+    // The first line's own indent, for a paragraph. NOT for a list item: there
+    // the hanging indent is where the bullet goes, and the text of every line,
+    // first included, begins at the indent proper.
+    let first = p.indent_first.unwrap_or(0.0).max(-left);
+    if first.abs() > 0.01 && p.numbering.is_none() {
+        css.push_str(&format!("--p-first:{first:.2}pt;"));
+    }
     css
 }
 
@@ -1191,8 +1220,14 @@ fn ListItem(item: Paragraph) -> Element {
                 true => format!("{class} docx-li-tight"),
                 false => class.to_string(),
             };
+            // Its own resolved typography, for the measuring copy. A list item
+            // used to carry none, so a page was worked out with the document's
+            // defaults where Word uses the item's face, size, line spacing and
+            // indent -- a Cambria list measured in Calibri, at a line box 8%
+            // too tall, half as deep as the page indents it.
+            let measured = measured_style(&item);
             rsx! {
-                li { class: "{class}", {runs_of(&item)} }
+                li { class: "{class}", style: "{measured}", {runs_of(&item)} }
             }
         }
     }
