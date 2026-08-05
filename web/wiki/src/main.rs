@@ -57,6 +57,19 @@ const FONT_ATK_700: Asset = asset!("/assets/fonts/atkinson-700.woff2");
 const FONT_ATK_400I: Asset = asset!("/assets/fonts/atkinson-400i.woff2");
 const FONT_ATK_700I: Asset = asset!("/assets/fonts/atkinson-700i.woff2");
 const FONT_MATERIAL: Asset = asset!("/assets/fonts/material-icons.woff2");
+// Metric-compatible with Calibri, and used for ONE thing: laying a Word
+// document out at the size Word would, to work out where its pages end (see
+// `components::docx::PagedDocx`). Nothing on screen is set in it. A face is
+// fetched only when something actually renders in it, so declaring it here
+// costs nothing until someone opens a Word document -- and then the service
+// worker keeps it, like the others.
+//
+// It has to be shipped rather than hoped for: Calibri is on no Linux or
+// Android device and few Macs, so the measurement fell back to whatever the
+// browser chose, which is 8% wider and lays the text out somewhere else. That
+// made the page numbers depend on the reader's machine.
+const FONT_CARLITO_400: Asset = asset!("/assets/fonts/carlito-400.woff2");
+const FONT_CARLITO_700: Asset = asset!("/assets/fonts/carlito-700.woff2");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -360,8 +373,16 @@ fn App() -> Element {
             "@font-face{{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Material Icons';font-style:normal;font-weight:400;font-display:block;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Carlito';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Carlito';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
         ),
-        FONT_ATK_400, FONT_ATK_700, FONT_ATK_400I, FONT_ATK_700I, FONT_MATERIAL
+        FONT_ATK_400,
+        FONT_ATK_700,
+        FONT_ATK_400I,
+        FONT_ATK_700I,
+        FONT_MATERIAL,
+        FONT_CARLITO_400,
+        FONT_CARLITO_700
     );
 
     rsx! {

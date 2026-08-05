@@ -2441,9 +2441,18 @@ impl PageGeometry {
             // only as good as this: a face that is not installed is replaced by
             // one with different metrics, the lines wrap elsewhere, and the
             // pages drift.
+            // Carlito FIRST, and it is shipped with the app, so this is what
+            // the measuring is actually done in whatever the reader has
+            // installed. The document's own face is named after it for the rare
+            // document set in something else that the reader does happen to
+            // have; Calibri itself comes last, because a machine with real
+            // Calibri and one with Carlito lay text out identically.
             font: match font.map(str::trim).filter(|f| !f.is_empty()) {
-                Some(named) => format!("{named}, Carlito, Calibri, Liberation Sans, sans-serif"),
-                None => "Carlito, Calibri, Liberation Sans, sans-serif".to_string(),
+                Some(named) if named.eq_ignore_ascii_case("calibri") => {
+                    "Carlito, Calibri, sans-serif".to_string()
+                }
+                Some(named) => format!("Carlito, {named}, Calibri, sans-serif"),
+                None => "Carlito, Calibri, sans-serif".to_string(),
             },
         })
     }
@@ -2471,16 +2480,26 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
     let mut measuring = use_signal(|| true);
 
     let height = page.height;
+    let asked_for = page.size;
     use_effect(move || {
         if !*measuring.peek() {
             return;
         }
-        let Some((found, count)) = measure_pages(height) else {
-            return;
-        };
-        marks.set(found);
-        pages.set(count);
-        measuring.set(false);
+        // Not before the face this is measured in has arrived. A font is
+        // fetched when something first renders in it, so on the first Word
+        // document opened it is still on its way while this runs -- and
+        // measuring in whatever the browser fell back to is measuring the wrong
+        // document. `load` resolves immediately once it is there, so this costs
+        // one turn of the event loop afterwards.
+        spawn(async move {
+            wait_for_the_face(asked_for).await;
+            let Some((found, count)) = measure_pages(height) else {
+                return;
+            };
+            marks.set(found);
+            pages.set(count);
+            measuring.set(false);
+        });
     });
 
     rsx! {
@@ -2611,6 +2630,23 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
     (measured > 0.0).then_some((marks.clone(), marks.len() + 1))
+}
+
+/// Wait until the measuring face is loaded, or give up on it.
+///
+/// `document.fonts.load` both fetches and resolves; it answers straight away
+/// once the face is in. Anything that goes wrong here is not worth failing the
+/// document for -- the measurement simply happens in whatever the browser has,
+/// which is what it did before this font was shipped.
+async fn wait_for_the_face(size: f64) {
+    let Some(fonts) = web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.fonts())
+    else {
+        return;
+    };
+    let asked = format!("{size}pt Carlito");
+    let _ = wasm_bindgen_futures::JsFuture::from(fonts.load(&asked)).await;
 }
 
 /// Whether an element holds no words. `textContent`, NOT `innerText`: the
