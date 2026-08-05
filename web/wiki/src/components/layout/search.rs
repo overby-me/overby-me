@@ -58,11 +58,15 @@ pub(super) fn SearchBar(
         _ => Vec::new(),
     };
     let cp = context_path(&segments);
-    let ctx_token = session.read().access_token.clone();
-    let context = use_resource(use_reactive!(|(cp, ctx_token)| async move {
+    // Who is reading, not which token says so: on the token, a rotation
+    // re-resolved the scope and blanked the chip that names it.
+    let who = session.read().identity();
+    let context = use_resource(use_reactive!(|(cp, who)| async move {
+        let _ = &who;
         if cp.is_empty() {
             return None;
         }
+        let ctx_token = crate::session::current_token();
         graphql::resolve_path(ctx_token.as_deref(), &cp)
             .await
             .ok()

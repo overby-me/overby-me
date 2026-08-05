@@ -190,7 +190,6 @@ pub(super) fn ContextSwitchBar(
 #[component]
 pub(super) fn MenuList(segments: Vec<String>) -> Element {
     let session = use_session();
-    let access_token = session.read().access_token.clone();
     // Root the tree at the context (deepest group/event) rather than the first
     // segment, so a nested event shows its own contents.
     let ctx_path = context_path(&segments);
@@ -201,7 +200,13 @@ pub(super) fn MenuList(segments: Vec<String>) -> Element {
     // every refresh would briefly blank and remount the whole drawer tree. The
     // drawer's actual contents refresh via `DrawerLevel` instead.
     let cpath = ctx_path.clone();
-    let context = use_resource(use_reactive!(|(cpath, access_token)| async move {
+    // Keyed on WHO, never on the token: this comment's own warning about
+    // blanking and remounting the whole drawer tree came true once an hour,
+    // because a rotation counted as a change.
+    let who = session.read().identity();
+    let context = use_resource(use_reactive!(|(cpath, who)| async move {
+        let _ = &who;
+        let access_token = crate::session::current_token();
         graphql::resolve_path(access_token.as_deref(), &cpath)
             .await
             .ok()

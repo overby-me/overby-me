@@ -1073,13 +1073,17 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     {
         let id = file_id.to_string();
         let wanted = is_office_mime(file_mime);
-        let token = session.read().access_token.clone();
-        use_effect(use_reactive!(|(id, wanted, token)| {
+        // Who is reading, not which token says so: on the token this re-fetched
+        // the embed link every rotation, and it opens by setting Pending, which
+        // takes the document off the screen and puts it back.
+        let who = session.read().identity();
+        use_effect(use_reactive!(|(id, wanted, who)| {
+            let _ = &who;
             office_embed.set(OfficeLink::Pending);
             if !wanted || id.is_empty() {
                 return;
             }
-            let Some(token) = token.clone() else {
+            let Some(token) = crate::session::current_token() else {
                 office_embed.set(OfficeLink::Refused);
                 return;
             };

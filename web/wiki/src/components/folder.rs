@@ -160,15 +160,15 @@ pub fn FolderApp(
     // Owner toggle state for showing this context's comments on the projector.
     let mut screen_comments = use_signal(|| None::<bool>);
     {
-        let token = access_token.clone();
         let ctx = node_context.clone();
         let can = can_manage;
         // Reactive on the context — NOT a one-shot `use_hook` — since this
         // component is reused across sibling navigations without remounting;
         // keyed on `ctx` so moving to a different context refetches its setting.
-        use_effect(use_reactive!(|(ctx, token, can)| {
+        use_effect(use_reactive!(|(ctx, can)| {
             if can {
                 spawn(async move {
+                    let token = crate::session::current_token();
                     let on = crate::graphql::screen_comments_on(token.as_deref(), &ctx)
                         .await
                         .unwrap_or(false);

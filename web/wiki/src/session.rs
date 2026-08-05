@@ -31,6 +31,55 @@ impl Session {
     pub fn is_authenticated(&self) -> bool {
         self.user.is_some() && self.access_token.is_some()
     }
+
+    /// WHO is asking, for the reads that must not be shared between people.
+    ///
+    /// Not the access token. A token is a credential and it rotates, roughly
+    /// hourly, while the person on the other side of it stays exactly the same.
+    /// Anything that keys off the token instead of this treats a rotation as a
+    /// change of reader: cached answers are filed under a name nothing will look
+    /// up again, so the view empties and fills back in, and whatever was on
+    /// screen flashes white. Empty for a signed-out visitor, who is also a who.
+    pub fn identity(&self) -> String {
+        self.user.as_ref().map(|u| u.id.clone()).unwrap_or_default()
+    }
+}
+
+/// What a cached answer is filed under: who asked, and what they asked, with
+/// the credential taken out of the question.
+///
+/// A read's dependencies are its question, and a cached answer is filed under
+/// them. The access token kept turning up among them, so every answer was filed
+/// under the token that happened to fetch it, and an hourly rotation renamed all
+/// of them at once: every view on screen looked up a name that did not exist
+/// yet, found nothing, and emptied while it fetched the same thing again. That
+/// is the white flash.
+///
+/// The identity stays in front, because separating one reader's answers from
+/// another's is the reason the token was ever in there.
+pub fn cache_scope(deps: &str) -> String {
+    let session = SESSION.peek();
+    scope_of(&session.identity(), session.access_token.as_deref(), deps)
+}
+
+/// The scope, without a session to read: the part worth testing.
+fn scope_of(identity: &str, token: Option<&str>, deps: &str) -> String {
+    let question = match token {
+        // Long enough to be a token rather than a placeholder that would match
+        // half the questions in the app.
+        Some(token) if token.len() > 8 => deps.replace(token, "<token>"),
+        _ => deps.to_string(),
+    };
+    format!("{identity}|{question}")
+}
+
+/// The access token as it stands NOW, without subscribing to it.
+///
+/// For the moment a request is actually sent. Reading it reactively is what
+/// makes a rotation look like new data; reading it here means the request
+/// carries the current one without anything having to re-run to notice.
+pub fn current_token() -> Option<String> {
+    SESSION.peek().access_token.clone()
 }
 
 pub static SESSION: GlobalSignal<Session> = Signal::global(Session::default);
@@ -74,23 +123,32 @@ pub static PENDING_CLAIM: GlobalSignal<Option<String>> = Signal::global(|| None)
 /// is a `Signal<Option<T>>` rather than a `Resource<T>`, which reads the same
 /// way: `.read()` and `.peek()` both give `Option<T>`.
 ///
-/// **Dependencies are part of the cache key**, including the access token, so no
-/// two identities ever share an answer. A dependency that is only a refresh
-/// counter is in there too, which is harmless but worth knowing: after a
-/// mutation bumps one, the next fresh mount opens on the answer from before the
-/// mutation and corrects it a round trip later.
+/// **Dependencies are part of the cache key**, under the reader's identity, so no
+/// two people ever share an answer. The access TOKEN is taken out of them (see
+/// [`cache_scope`]): it is a credential rather than a question, and leaving it in
+/// meant an hourly rotation renamed every answer in the cache and emptied every
+/// view on screen. A dependency that is only a refresh counter is in there too,
+/// which is harmless but worth knowing: after a mutation bumps one, the next
+/// fresh mount opens on the answer from before the mutation and corrects it a
+/// round trip later.
 #[macro_export]
 macro_rules! use_data_resource {
     (|($($dep:ident),* $(,)?)| $body:expr) => {{
         let __data_version = $crate::session::DATA_VERSION();
         let __site = concat!(file!(), ":", line!());
-        let __key = $crate::query_cache::key(__site, &format!("{:?}", ($(&$dep,)*)));
+        let __key = $crate::query_cache::key(
+            __site,
+            &$crate::session::cache_scope(&format!("{:?}", ($(&$dep,)*))),
+        );
         let __res = use_resource(use_reactive!(|($($dep,)* __data_version)| {
             let _ = __data_version;
             // Stamped with the key it was started under. The resource keeps its
             // previous value while re-running, so without this a dependency
             // change would file the outgoing answer under the incoming key.
-            let __stamp = $crate::query_cache::key(__site, &format!("{:?}", ($(&$dep,)*)));
+            let __stamp = $crate::query_cache::key(
+                __site,
+                &$crate::session::cache_scope(&format!("{:?}", ($(&$dep,)*))),
+            );
             // Built HERE, not inside the block below: the call site's own
             // clones have to happen in the closure, or its captures would be
             // moved out of an FnMut.
@@ -494,7 +552,48 @@ pub async fn run_token_refresh() {
 
 #[cfg(test)]
 mod tests {
-    use super::{b64url_decode, is_rotation, jwt_exp_ms, ROTATION_ATTEMPTS, ROTATION_GRACE_MS};
+    use super::{
+        b64url_decode, is_rotation, jwt_exp_ms, scope_of, ROTATION_ATTEMPTS, ROTATION_GRACE_MS,
+    };
+
+    /// A cached answer must survive its reader's token being rotated. Filed
+    /// under the token, an hourly rotation renamed every answer at once and
+    /// every view on screen emptied while it fetched the same thing again.
+    #[test]
+    fn a_rotation_does_not_rename_what_is_cached() {
+        let deps = "(\"node-7\", Some(\"eyJhbGciOi.OLD-TOKEN.signature\"), 3)";
+        let after = "(\"node-7\", Some(\"eyJhbGciOi.NEW-TOKEN.signature\"), 3)";
+        assert_eq!(
+            scope_of("user-1", Some("eyJhbGciOi.OLD-TOKEN.signature"), deps),
+            scope_of("user-1", Some("eyJhbGciOi.NEW-TOKEN.signature"), after),
+            "same person, same question, same answer"
+        );
+    }
+
+    /// And the reason the token was ever in the key: two people must not share
+    /// an answer.
+    #[test]
+    fn two_people_do_not_share_an_answer() {
+        let deps = "(\"node-7\",)";
+        assert_ne!(
+            scope_of("user-1", Some("eyJhbGciOi.A.sig"), deps),
+            scope_of("user-2", Some("eyJhbGciOi.B.sig"), deps)
+        );
+        // A signed-out visitor is a who of their own.
+        assert_ne!(
+            scope_of("", None, deps),
+            scope_of("user-1", Some("eyJhbGciOi.A.sig"), deps)
+        );
+    }
+
+    /// The question itself still tells answers apart.
+    #[test]
+    fn a_different_question_is_a_different_answer() {
+        assert_ne!(
+            scope_of("user-1", None, "(\"node-7\",)"),
+            scope_of("user-1", None, "(\"node-8\",)")
+        );
+    }
 
     #[test]
     fn b64url_decodes_without_padding() {

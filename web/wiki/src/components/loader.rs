@@ -690,15 +690,24 @@ pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
 /// changes, which is the moment the URL is about to be used again.
 pub fn use_presigned_url(file_id: String, freshen: String) -> Option<String> {
     let session = use_session();
-    let token = session.read().access_token.clone();
+    // WHO is reading, not which token says so. Keyed on the token, this re-signed
+    // every time one rotated, and the first thing it does is empty the URL: the
+    // viewer showing it lost its source, went white, and reloaded the file from
+    // the new signature. Nothing about the file had changed. Signed out to signed
+    // in IS a change, and that moves the identity.
+    let who = session.read().identity();
     let mut url = use_signal(|| None::<String>);
-    use_effect(use_reactive!(|(file_id, token, freshen)| {
-        let _ = &freshen;
+    use_effect(use_reactive!(|(file_id, who, freshen)| {
+        let _ = (&freshen, &who);
         url.set(None);
         if file_id.is_empty() {
             return;
         }
-        let Some(token) = token.clone() else { return };
+        // Read at the moment of signing, so the signature carries the current
+        // token without this having to re-run to hear about it.
+        let Some(token) = crate::session::current_token() else {
+            return;
+        };
         spawn(async move {
             if let Some(signed) = crate::backend_api::presigned_file_url(&file_id, &token).await {
                 url.set(Some(signed));
@@ -715,14 +724,17 @@ pub fn use_presigned_url(file_id: String, freshen: String) -> Option<String> {
 /// the object URL is revoked when the component unmounts.
 pub fn use_file_object_url(file_id: String) -> Option<String> {
     let session = use_session();
-    let token = session.read().access_token.clone();
+    // The reader, not the credential: keyed on the token, every picture in the
+    // app threw its blob away and fetched itself again each time one rotated.
+    let who = session.read().identity();
     let mut blob_url = use_signal(|| None::<String>);
-    // Reactive on `file_id` (and the token), NOT a one-shot `use_hook`: this
+    // Reactive on `file_id` (and who is reading), NOT a one-shot `use_hook`: this
     // component is reused across sibling navigations (e.g. switching between two
     // candidates), where only the `file_id` prop changes and the component never
     // remounts — a `use_hook` would keep serving the first node's image. On each
     // change, revoke the previous blob before fetching the new one.
-    use_effect(use_reactive!(|(file_id, token)| {
+    use_effect(use_reactive!(|(file_id, who)| {
+        let _ = &who;
         let previous = blob_url.peek().clone();
         if let Some(old) = previous {
             let _ = web_sys::Url::revoke_object_url(&old);
@@ -731,7 +743,9 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
         if file_id.is_empty() {
             return;
         }
-        let Some(token) = token.clone() else { return };
+        let Some(token) = crate::session::current_token() else {
+            return;
+        };
         spawn(async move {
             // The file URL is built through the one seam (backend_api), so the
             // cutover blob-path swap is a change there. The token goes in the

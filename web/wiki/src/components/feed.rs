@@ -147,15 +147,17 @@ pub fn FeedList(
 
     // First page, and a reset if the scope or the signed-in user changes.
     {
-        let token = token.clone();
         let user_id = user_id.clone();
         let ctx = context_id.clone();
-        use_effect(use_reactive!(|(token, user_id, ctx)| {
+        use_effect(use_reactive!(|(user_id, ctx)| {
+            // NOT the token. It rotates about once an hour, and the first thing
+            // this does is empty the feed: everything on screen vanished and came
+            // back. Who is reading is `user_id`, which is already here.
             items.set(Vec::new());
             pending.set(Vec::new());
             has_more.set(true);
             let Some(uid) = user_id.clone() else { return };
-            let token = token.clone();
+            let token = crate::session::current_token();
             let ctx = ctx.clone();
             loading.set(true);
             spawn(async move {
@@ -183,12 +185,11 @@ pub fn FeedList(
     // paging repeats rows whenever something is inserted between two fetches,
     // and a repeat here is a duplicate key, which Dioxus panics on.
     {
-        let token = token.clone();
         let user_id = user_id.clone();
         let ctx = context_id.clone();
         let rev = live();
         let data_rev = crate::session::DATA_VERSION();
-        use_effect(use_reactive!(|(rev, data_rev, token, user_id, ctx)| {
+        use_effect(use_reactive!(|(rev, data_rev, user_id, ctx)| {
             // The subscription fires once on connect, which is the page the
             // first-page effect has already fetched.
             if rev == 0 && data_rev == 0 {
@@ -200,7 +201,7 @@ pub fn FeedList(
             // A DATA_VERSION bump (an edit elsewhere) still has nothing named, so
             // it falls through to an empty queue and does nothing, which is right:
             // the feed's own arrivals come from the stream.
-            let token = token.clone();
+            let token = crate::session::current_token();
             let _ = ctx.clone();
             let mut arrivals = arrivals;
             spawn(async move {
@@ -290,15 +291,18 @@ pub fn FeedList(
     // Endless scroll on a page: `near_bottom` is driven by the shell's single
     // window scroll listener, which a sheet's own scroll container never moves.
     {
-        let token = token.clone();
         let user_id = user_id.clone();
         let ctx = context_id.clone();
         let near = autoload && crate::components::back_to_top::near_bottom();
-        use_effect(use_reactive!(|(near, token, user_id, ctx)| {
+        use_effect(use_reactive!(|(near, user_id, ctx)| {
             if !near {
                 return;
             }
-            fetch_more(token.clone(), user_id.clone(), ctx.clone());
+            fetch_more(
+                crate::session::current_token(),
+                user_id.clone(),
+                ctx.clone(),
+            );
         }));
     }
 
