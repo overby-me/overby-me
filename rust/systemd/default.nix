@@ -492,6 +492,15 @@ in {
   };
 
   checks = let
+    # The upstream systemd version the port is audited and its oracles build
+    # against. `pkgs.systemd` (the differential oracles and every c-systemd-* check
+    # use it) must match this, or the comparison runs against a version the port was
+    # never checked against. The `rust-systemd-upstream-pin` check below turns a
+    # silent drift here into a failing check (porting rule 8). Bump only after
+    # re-auditing against the new version; docs/ARCHITECTURE, docs/ROADMAP and
+    # docs/TEST-OVERRIDES cite the same number in prose.
+    expectedSystemdVersion = "260.2";
+
     # Upstream systemd integration test names (without TEST- prefix).
     # Each corresponds to test/units/TEST-{name}.sh in the systemd source.
     # Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
@@ -539,5 +548,26 @@ in {
             import ./testsuite.nix (testArgs t pkgs // {useUpstreamSystemd = true;});
         })
         tests)
+      ++ [
+        {
+          # Upstream-pin drift guard (porting rule 8): fail if the nixpkgs systemd
+          # the oracles build against has moved off the version the port was
+          # audited at, so drift surfaces as a failing check instead of silent
+          # parity decay. Cheap (a version-string compare); no VM.
+          name = "rust-systemd-upstream-pin";
+          value = pkgs:
+            pkgs.runCommand "rust-systemd-upstream-pin" {
+              expected = expectedSystemdVersion;
+              actual = pkgs.systemd.version;
+            } ''
+              if [ "$expected" != "$actual" ]; then
+                echo "systemd upstream pin drift: the port targets $expected but nixpkgs provides $actual." >&2
+                echo "Re-audit rust-systemd against $actual, then bump expectedSystemdVersion in default.nix (and the docs that cite it)." >&2
+                exit 1
+              fi
+              echo "systemd upstream pin OK: $expected" > "$out"
+            '';
+        }
+      ]
     );
 }
