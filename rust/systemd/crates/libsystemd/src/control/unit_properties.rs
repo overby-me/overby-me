@@ -379,6 +379,9 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 if let Some(v) = read_counter("memory.current") {
                     insert(&mut props, "MemoryCurrent", &v);
                 }
+                if let Some(v) = read_counter("memory.peak") {
+                    insert(&mut props, "MemoryPeak", &v);
+                }
                 // CPUUsageNSec — cpu.stat's usage_usec (microseconds) as ns.
                 if let Ok(stat) = std::fs::read_to_string(cg.join("cpu.stat"))
                     && let Some(usec) = stat

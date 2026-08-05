@@ -33,6 +33,7 @@
     # non-zero current memory, and a numeric CPU usage counter.
     [[ "$(systemctl show -P TasksCurrent "$UNIT.service")" -ge 1 ]]
     [[ "$(systemctl show -P MemoryCurrent "$UNIT.service")" -gt 0 ]]
+    [[ "$(systemctl show -P MemoryPeak "$UNIT.service")" -gt 0 ]]
     [[ "$(systemctl show -P CPUUsageNSec "$UNIT.service")" =~ ^[0-9]+$ ]]
     systemctl stop "$UNIT.service"
     rm -f "/run/systemd/system/$UNIT.service"
