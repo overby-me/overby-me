@@ -9783,6 +9783,20 @@ pub fn execute_command(
                     return Err(format!("Unit {unit_name} is masked."));
                 }
                 let id = find_or_load_unit(unit_name, &run_info)?;
+                // RefuseManualStart=yes: the unit may only be pulled in as a
+                // dependency, never started directly by the operator.
+                let refuse_manual = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .map(|u| u.common.unit.refuse_manual_start)
+                        .unwrap_or(false)
+                };
+                if refuse_manual {
+                    return Err(format!(
+                        "Operation refused, unit {unit_name} may be requested by dependency only (it is configured to refuse manual start/stop)."
+                    ));
+                }
                 // Installed for the whole inline start of this unit; the
                 // failure paths below return early, which drops the handle
                 // and finishes the job as failed.
@@ -10746,6 +10760,22 @@ pub fn execute_command(
             } else {
                 crate::units::jobs::JobMode::Replace
             };
+
+            // RefuseManualStop=yes: the unit may only be stopped as a
+            // dependency, never directly by the operator.
+            {
+                let ri = run_info.read_poisoned();
+                for name in &actual_names {
+                    if find_units_with_name(name, &ri.unit_table)
+                        .iter()
+                        .any(|u| u.common.unit.refuse_manual_stop)
+                    {
+                        return Err(format!(
+                            "Operation refused, unit {name} may be requested by dependency only (it is configured to refuse manual start/stop)."
+                        ));
+                    }
+                }
+            }
 
             // Sort units so services are stopped before their sockets.
             // This ensures the service process releases the listening fd
