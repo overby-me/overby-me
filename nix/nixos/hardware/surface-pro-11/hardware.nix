@@ -26,6 +26,72 @@ in {
     # substitution rather than an hours-long aarch64 kernel compile.
     boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
 
+    # The one thing that genuinely needs patching.  ath12k only learns that a
+    # machine wants rfkill disabled from an ACPI bitflag, which a
+    # devicetree-booted machine never reads, so Wi-Fi comes up hard-blocked
+    # with nothing in userspace able to clear it:
+    #
+    #   1: phy0: Wireless LAN
+    #     Soft blocked: no
+    #     Hard blocked: yes
+    #
+    # The chip is otherwise fine; the firmware loads and the radio is
+    # detected.  Two commits from dwhinham's tree fix it, five lines between
+    # them: one adds a `disable-rfkill` devicetree property to the driver, the
+    # other sets it on this board.  Neither is upstream as of 7.1, and
+    # mainline still only has ath12k_acpi_get_disable_rfkill.
+    #
+    # This costs a full kernel build, and keeps costing one on every nixpkgs
+    # bump, because linuxPackages_latest is no longer the cached article.
+    # Build it on the machine itself rather than emulated:
+    #
+    #   nixos-rebuild switch --flake .#armitas \
+    #     --target-host root@armitas --build-host root@armitas
+    #
+    # Drop both patches if the series ever lands upstream.
+    boot.kernelPatches = [
+      {
+        name = "ath12k-disable-rfkill-via-devicetree";
+        patch = ./patches/ath12k-disable-rfkill-via-devicetree.patch;
+      }
+      {
+        name = "denali-disable-rfkill";
+        patch = ./patches/denali-disable-rfkill.patch;
+      }
+
+      # Once a kernel build is being paid for anyway, this one is free.  It
+      # flips d3_closes_handle to false in ssam_controller_caps_load_from_of,
+      # the defaults the Surface aggregator picks when it was described by a
+      # devicetree rather than ACPI, so it cannot affect an x86 Surface.
+      #
+      # It is a workaround, not a fix.  dwhinham checked the Surface Pro 11's
+      # SSDT and the upstream default of true matches what the ACPI tables
+      # say, so the real bug is somewhere in the EC blocking path
+      # (dwhinham/linux-surface-pro-11#23).  With the flag off, resume from
+      # the power key, an external keyboard or the lid is reported stable,
+      # with one known quirk: waking by opening the lid can leave the Surface
+      # keyboard and touchpad dead, and unplugging them does not help.
+      # Another suspend/resume cycle using the power key brings them back.
+      {
+        name = "ssam-sp11-suspend-resume";
+        patch = ./patches/ssam-sp11-suspend-resume.patch;
+      }
+    ];
+
+    # Two further patches from that tree are deliberately not taken.
+    #
+    # "HACK: Allow setting Wi-Fi MAC address via devicetree" is redundant:
+    # networking.nix sets the MAC from userspace with a udev rule, and the
+    # patch reads a local-mac-address property that mainline's devicetree does
+    # not set, so on its own it would do nothing.
+    #
+    # "drm/msm/dp: Enable support for eDP v1.4+ link rates table" fixes a
+    # panel probe failure on the Samsung ATNA30DW01-1 this machine has, but
+    # the panel probes fine here and offers two modes, so the failure it
+    # describes is not happening.  It is also the largest of them by far, 120
+    # lines rewriting DP link training.  Worth revisiting only if the display
+    # turns out to be capped below its native 120 Hz.
+
     assertions = [
       {
         assertion = lib.versionAtLeast config.boot.kernelPackages.kernel.version "7.0";
