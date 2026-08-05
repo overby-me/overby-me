@@ -379,6 +379,15 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 if let Some(v) = read_counter("memory.current") {
                     insert(&mut props, "MemoryCurrent", &v);
                 }
+                // CPUUsageNSec — cpu.stat's usage_usec (microseconds) as ns.
+                if let Ok(stat) = std::fs::read_to_string(cg.join("cpu.stat"))
+                    && let Some(usec) = stat
+                        .lines()
+                        .find_map(|l| l.strip_prefix("usage_usec "))
+                        .and_then(|v| v.trim().parse::<u64>().ok())
+                {
+                    insert(&mut props, "CPUUsageNSec", &(usec.saturating_mul(1000)).to_string());
+                }
             }
             insert_service_config(&mut props, &svc.conf);
             insert_exec_config(&mut props, &svc.conf.exec_config);
