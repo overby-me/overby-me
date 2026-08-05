@@ -70,6 +70,12 @@ const FONT_MATERIAL: Asset = asset!("/assets/fonts/material-icons.woff2");
 // made the page numbers depend on the reader's machine.
 const FONT_CARLITO_400: Asset = asset!("/assets/fonts/carlito-400.woff2");
 const FONT_CARLITO_700: Asset = asset!("/assets/fonts/carlito-700.woff2");
+// And the same for a document set in Times New Roman, which several of these
+// are: Liberation Serif has Times' metrics, as Carlito has Calibri's. One face
+// cannot serve both -- a Times document measured in Carlito came out a tenth
+// too tall, which is a page.
+const FONT_SERIF_400: Asset = asset!("/assets/fonts/serif-400.woff2");
+const FONT_SERIF_700: Asset = asset!("/assets/fonts/serif-700.woff2");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -375,6 +381,8 @@ fn App() -> Element {
             "@font-face{{font-family:'Material Icons';font-style:normal;font-weight:400;font-display:block;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Carlito';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Carlito';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
         ),
         FONT_ATK_400,
         FONT_ATK_700,
@@ -382,7 +390,9 @@ fn App() -> Element {
         FONT_ATK_700I,
         FONT_MATERIAL,
         FONT_CARLITO_400,
-        FONT_CARLITO_700
+        FONT_CARLITO_700,
+        FONT_SERIF_400,
+        FONT_SERIF_700
     );
 
     rsx! {

@@ -8216,7 +8216,10 @@ a.list-item:hover {
 	font-size: var(--p-size, 1em) !important;
 	margin-top: var(--p-before, 0) !important;
 	margin-bottom: var(--p-after, 8pt) !important;
-	line-height: calc(var(--p-line, 1.08) * 1.22) !important;
+	/* The multiplier the paragraph states, times what SINGLE spacing means in
+	   the face this document is set in -- measured from the face itself, since
+	   Calibri's line box is 1.22 and Times New Roman's 1.15. */
+	line-height: calc(var(--p-line, 1.08) * var(--docx-single-spacing, 1.22)) !important;
 }
 /* A list Word closes up: the space under an item goes only when the NEXT item
    is closed up too, which is what `contextualSpacing` means and why it cannot
@@ -8235,6 +8238,7 @@ a.list-item:hover {
 	/* Word's own defaults, for a paragraph that states neither. Every
 	   paragraph overrides both with what it resolves to. */
 	--p-line: 1.08;
+	--docx-single-spacing: 1.22;
 	--p-size: 1em;
 	--p-before: 0;
 	--p-after: 8pt;

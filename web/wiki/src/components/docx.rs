@@ -83,6 +83,13 @@ pub struct Paragraph {
     /// heading size.
     #[serde(default)]
     pub default_font_size: Option<f64>,
+    /// The typeface Word resolves for this paragraph, through the style chain
+    /// and the theme. Read for the measuring, which has to lay the text out in
+    /// the face the document sets: one face for every document was tried, and a
+    /// Times New Roman document measured in Calibri's metrics came out a tenth
+    /// too tall, which is a whole page.
+    #[serde(default)]
+    pub default_font_family: Option<String>,
     /// Word suppresses the space between adjacent paragraphs of the same style
     /// when this is set, which is how a bulleted list closes up. Resolved
     /// through the style chain. Without it a list measures 8pt per item taller
@@ -2564,6 +2571,29 @@ impl PageGeometry {
     /// paragraphs say, which is what a document's own defaults look like from
     /// the outside. Headings are left out of the vote; there are few of them
     /// and they are not what fills a page.
+    /// What most of a document's paragraphs are set in, which is what to
+    /// measure it in. A document that mixes faces is measured in its commonest;
+    /// the alternative is a face per paragraph, and no document in this wiki
+    /// needs that yet.
+    fn face(blocks: &[Block]) -> Option<String> {
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        for_each_paragraph(blocks, &mut |p| {
+            let Some(name) = p
+                .default_font_family
+                .as_deref()
+                .map(str::trim)
+                .filter(|f| !f.is_empty())
+            else {
+                return;
+            };
+            match seen.iter_mut().find(|(f, _)| f == name) {
+                Some((_, n)) => *n += 1,
+                None => seen.push((name.to_string(), 1)),
+            }
+        });
+        seen.into_iter().max_by_key(|(_, n)| *n).map(|(f, _)| f)
+    }
+
     fn typography(blocks: &[Block]) -> (f64, f64, f64, f64) {
         let mut sizes: Vec<f64> = Vec::new();
         let mut lines: Vec<f64> = Vec::new();
@@ -2624,7 +2654,7 @@ impl PageGeometry {
         // font SIZE, which is a fifth short of what Word lays out.
         (
             commonest(&sizes).unwrap_or(11.0),
-            commonest(&lines).unwrap_or(1.0) * SINGLE_SPACING,
+            commonest(&lines).unwrap_or(1.0),
             commonest(&afters).unwrap_or(8.0),
             list_after,
         )
@@ -2652,19 +2682,12 @@ impl PageGeometry {
             // only as good as this: a face that is not installed is replaced by
             // one with different metrics, the lines wrap elsewhere, and the
             // pages drift.
-            // Carlito FIRST, and it is shipped with the app, so this is what
-            // the measuring is actually done in whatever the reader has
-            // installed. The document's own face is named after it for the rare
-            // document set in something else that the reader does happen to
-            // have; Calibri itself comes last, because a machine with real
-            // Calibri and one with Carlito lay text out identically.
-            font: match font.map(str::trim).filter(|f| !f.is_empty()) {
-                Some(named) if named.eq_ignore_ascii_case("calibri") => {
-                    "Carlito, Calibri, sans-serif".to_string()
-                }
-                Some(named) => format!("Carlito, {named}, Calibri, sans-serif"),
-                None => "Carlito, Calibri, sans-serif".to_string(),
-            },
+            // The document's own face, through a substitute with the same
+            // metrics that this app SHIPS -- so the measuring does not depend
+            // on what the reader happens to have installed. Calibri and Times
+            // New Roman are what these documents are set in, and Carlito and
+            // Liberation Serif have their widths and line boxes exactly.
+            font: measuring_face(Self::face(blocks).as_deref().or(font)),
         })
     }
 }
@@ -2692,6 +2715,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
 
     let height = page.height;
     let asked_for = page.size;
+    let face = page.font.clone();
     let (size, line, after, list_after) = (page.size, page.line, page.after, page.list_after);
     use_effect(move || {
         if !*measuring.peek() {
@@ -2703,8 +2727,14 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
         // measuring in whatever the browser fell back to is measuring the wrong
         // document. `load` resolves immediately once it is there, so this costs
         // one turn of the event loop afterwards.
+        let face = face.clone();
         spawn(async move {
-            wait_for_the_face(asked_for).await;
+            wait_for_the_face(asked_for, &face).await;
+            // What SINGLE spacing means in the face this document is set in.
+            // Measured, not assumed: Calibri's line box is about 1.22 times its
+            // size and Times New Roman's about 1.15, and a Times document
+            // measured with Calibri's came out a tenth too tall -- a page.
+            set_single_spacing(single_spacing(&face));
             let Some((found, count)) = measure_pages(height) else {
                 return;
             };
@@ -2884,15 +2914,62 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
 /// once the face is in. Anything that goes wrong here is not worth failing the
 /// document for -- the measurement simply happens in whatever the browser has,
 /// which is what it did before this font was shipped.
-async fn wait_for_the_face(size: f64) {
+async fn wait_for_the_face(size: f64, face: &str) {
     let Some(fonts) = web_sys::window()
         .and_then(|w| w.document())
         .map(|d| d.fonts())
     else {
         return;
     };
-    let asked = format!("{size}pt Carlito");
-    let _ = wasm_bindgen_futures::JsFuture::from(fonts.load(&asked)).await;
+    let _ = wasm_bindgen_futures::JsFuture::from(fonts.load(&format!("{size}pt {face}"))).await;
+}
+
+/// The line box of a face, as a multiple of its size: what Word calls SINGLE
+/// spacing. Measured by laying one line out in it and asking how tall the line
+/// came out, which is the only way to know it for a face rather than assume it.
+fn single_spacing(face: &str) -> f64 {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return SINGLE_SPACING;
+    };
+    let Ok(probe) = document.create_element("div") else {
+        return SINGLE_SPACING;
+    };
+    let _ = probe.set_attribute(
+        "style",
+        &format!(
+            "position:absolute;left:-9999px;top:0;visibility:hidden;\
+             font-family:{face};font-size:100px;line-height:normal;white-space:nowrap;"
+        ),
+    );
+    probe.set_text_content(Some("Hxg"));
+    let Some(body) = document.body() else {
+        return SINGLE_SPACING;
+    };
+    if body.append_child(&probe).is_err() {
+        return SINGLE_SPACING;
+    }
+    let tall = probe.get_bounding_client_rect().height() / 100.0;
+    let _ = body.remove_child(&probe);
+    // A face that answered something absurd is not worth believing.
+    match (1.0..=2.0).contains(&tall) {
+        true => tall,
+        false => SINGLE_SPACING,
+    }
+}
+
+/// Tell the stylesheet what single spacing is for this document, so the line
+/// height every paragraph states can be scaled by it.
+fn set_single_spacing(single: f64) {
+    let Some(root) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return;
+    };
+    let _ = root
+        .style()
+        .set_property("--docx-single-spacing", &format!("{single:.4}"));
 }
 
 /// Whether Word keeps this element on the same page as the one after it.
@@ -2908,10 +2985,34 @@ fn is_blank(element: &web_sys::Element) -> bool {
     element.text_content().unwrap_or_default().trim().is_empty()
 }
 
-/// What Word means by SINGLE line spacing: the font's own line box, which for
-/// Calibri and the faces that stand in for it is about 1.22 times the size.
-/// CSS counts line height from the size instead, so every multiplier the
-/// document states has to be scaled by this to mean the same thing.
+/// The stack to measure a document set in `named` with.
+///
+/// A metric-compatible substitute FIRST, and one this app ships, so the answer
+/// does not depend on what the reader has installed -- then the document's own
+/// name, for a reader who does have it, then the generic. Two faces cover what
+/// this wiki holds; anything else falls back to Calibri's, which is what Word
+/// itself defaults to.
+fn measuring_face(named: Option<&str>) -> String {
+    let name = named.map(str::trim).unwrap_or("");
+    let serif = name.eq_ignore_ascii_case("times new roman")
+        || name.eq_ignore_ascii_case("times")
+        || name.eq_ignore_ascii_case("georgia")
+        || name.eq_ignore_ascii_case("cambria");
+    match (serif, name.is_empty()) {
+        (true, _) => format!("'Liberation Serif', '{name}', serif"),
+        (false, true) => "Carlito, Calibri, sans-serif".to_string(),
+        (false, false) => format!("Carlito, '{name}', Calibri, sans-serif"),
+    }
+}
+
+/// What Word means by SINGLE line spacing: the FONT's own line box, not a
+/// number. Calibri's is about 1.22 times its size and Times New Roman's about
+/// 1.15, and CSS counts line height from the size instead -- so every
+/// multiplier a document states has to be scaled by the line box of the face
+/// it is actually set in. Measured from the face rather than assumed: assuming
+/// Calibri's for a Times document made it a tenth too tall.
+///
+/// This is the fallback for when the measuring cannot be done at all.
 const SINGLE_SPACING: f64 = 1.22;
 
 /// The value that turns up most often, to the nearest hundredth. What "the
