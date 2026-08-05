@@ -940,9 +940,16 @@ pub fn DocxBody(
                     PageMark { key: "p{i}", begins }
                 }
                 match group {
-                    Group::Single(block) => rsx! {
-                        DocxBlock { key: "b{i}", block }
-                    },
+                    Group::Single(block) => {
+                        let rows_marked: Vec<(usize, usize)> = marks
+                            .iter()
+                            .filter(|(g, item, _)| *g == i && *item != BEFORE_GROUP)
+                            .map(|(_, item, begins)| (*item, *begins))
+                            .collect();
+                        rsx! {
+                            DocxBlock { key: "b{i}", block, rows_marked }
+                        }
+                    }
                     Group::List { ordered, items } => {
                         // A list drawn with picture bullets places itself from
                         // the document's own indents, so the list must not add
@@ -1097,7 +1104,15 @@ fn ListItem(item: Paragraph) -> Element {
 
 /// One block: a heading, a paragraph, or a table.
 #[component]
-fn DocxBlock(block: Block) -> Element {
+fn DocxBlock(
+    block: Block,
+    /// Page ends that fall INSIDE this block, as `(row index, the page that
+    /// begins there)`. Only a table has anywhere inside it to put one: Word
+    /// carries a table's rows onto the next page, and a document that is mostly
+    /// table has almost nowhere else a page can end.
+    #[props(default)]
+    rows_marked: Vec<(usize, usize)>,
+) -> Element {
     match block {
         Block::Paragraph(p) => {
             let style = paragraph_style(&p);
@@ -1117,12 +1132,28 @@ fn DocxBlock(block: Block) -> Element {
                 None => rsx! { p { class: "docx-p", style: "{style}", {inner} } },
             }
         }
-        Block::Table(t) => rsx! {
+        Block::Table(t) => {
+            // How wide the mark's own row has to be to span the table.
+            let across = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
+            rsx! {
             // Its own scroll container: a wide table must not widen the page and
             // force the whole document sideways on a phone.
             div { class: "docx-table-wrap",
                 table { class: "docx-table",
                     for (r , row) in t.rows.into_iter().enumerate() {
+                        if let Some((_, begins)) = rows_marked.iter().find(|(at, _)| *at == r) {
+                            tr { key: "pr{r}", class: "docx-page-row",
+                                td { colspan: "{across}",
+                                    div {
+                                        class: "pdf-page-break",
+                                        role: "separator",
+                                        "data-page": "{begins}",
+                                        "data-page-ends": "true",
+                                        span { "{begins - 1}" }
+                                    }
+                                }
+                            }
+                        }
                         tr { key: "r{r}",
                             for (c , cell) in row.cells.into_iter().enumerate() {
                                 // A cell covered by a merge from above is not
@@ -1135,7 +1166,8 @@ fn DocxBlock(block: Block) -> Element {
                     }
                 }
             }
-        },
+            }
+        }
         Block::Unknown => rsx! {},
     }
 }
@@ -2612,9 +2644,16 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
         else {
             continue;
         };
-        let listish = matches!(group.tag_name().as_str(), "UL" | "OL");
-        let items = group.query_selector_all(":scope > li").ok();
-        match (listish, items) {
+        // A list is walked by item and a table by row: Word ends a page
+        // wherever the text runs out, and in these documents that is nearly
+        // always inside one or the other. Anything else is measured whole.
+        let inside = match group.tag_name().as_str() {
+            "UL" | "OL" => group.query_selector_all(":scope > li").ok(),
+            _ => group
+                .query_selector_all(":scope table > tbody > tr, :scope table > tr")
+                .ok(),
+        };
+        match (true, inside) {
             (true, Some(items)) if items.length() > 0 => {
                 for j in 0..items.length() {
                     let Some(item) = items

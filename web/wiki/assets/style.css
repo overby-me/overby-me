@@ -8226,6 +8226,16 @@ a.list-item:hover {
 	color: var(--md-on-surface-variant);
 	font-size: var(--md-sys-typescale-label-small-size);
 }
+/* A page ending inside a table: its own full-width row, carrying the same
+   hairline. No cell padding or rule of its own -- it is furniture between the
+   rows, not a row of data. */
+.docx-page-row td {
+	padding: 0;
+	border: none;
+}
+.docx-page-row .pdf-page-break {
+	margin: var(--md-sys-spacing-2) 0;
+}
 /* What a jump actually aims at: the first thing on the page being turned to. */
 .pdf-page-break + * {
 	scroll-margin-top: var(--toc-scroll-margin, 5rem);
