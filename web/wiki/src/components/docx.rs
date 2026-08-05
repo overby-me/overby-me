@@ -275,11 +275,13 @@ pub struct Cell {
     /// thing telling a reader it is a header, so this is not decoration.
     #[serde(default)]
     pub background: Option<String>,
-    /// The width Word prefers for this column, in points. Not used on screen --
-    /// there the browser fits the columns to the reader's width, which is what
-    /// makes a wide table readable on a phone -- but the off-screen copy that
-    /// works out where the pages end has to wrap the text where Word wraps it,
-    /// and that depends on the column being the width Word gives it.
+    /// The width Word prefers for this column, in points. NOT used to lay the
+    /// measuring copy out: forcing the columns to these widths was tried and
+    /// measured, and it made every document worse -- one table's columns come
+    /// to 670px against a 642px text column, so pinning them squeezes every row
+    /// taller and an eight-page document measured ten. Kept because the field
+    /// is what the document says; whatever uses it will have to reconcile that
+    /// overflow the way Word does.
     #[serde(default)]
     pub width_pt: Option<f64>,
 }
@@ -290,19 +292,7 @@ pub struct Cell {
 /// run's colour, so it must NOT become a colour — a document that says `auto`
 /// on a dark theme wants the dark background, not a white one painted over it.
 pub fn cell_style(cell: &Cell) -> String {
-    // The width Word gives this column, for the off-screen copy to lay the
-    // table out at. Read only inside `.docx-measure`, so on screen the browser
-    // still fits the columns to the reader's width, which is what makes a wide
-    // table readable on a phone. But the text WRAPS to the column, and where a
-    // row's lines wrap decides how tall it is: measured with the browser's own
-    // guess at the widths, one document's rows came out a quarter short of
-    // Word's, and every page break with them.
-    let width = match cell.width_pt.filter(|w| *w > 0.0) {
-        Some(pt) => format!("--c-width:{pt:.2}pt;"),
-        None => String::new(),
-    };
-    let colour = cell_colour(cell);
-    format!("{width}{colour}")
+    cell_colour(cell)
 }
 
 /// What a cell is painted, if the document paints it.

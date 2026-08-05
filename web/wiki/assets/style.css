@@ -8182,15 +8182,6 @@ a.list-item:hover {
 .docx-measure .docx-table th,
 .docx-measure .docx-table td {
 	padding: 0 0.08in;
-	/* The column width the document states, so the text wraps where Word wraps
-	   it. `fixed` below is what makes the browser honour it rather than fitting
-	   the columns to their content. */
-	width: var(--c-width, auto);
-}
-.docx-measure .docx-table {
-	/* The document's own column widths, for a cell that states none. */
-	--c-width: auto;
-	table-layout: fixed;
 }
 .docx-measure .docx-p,
 .docx-measure .docx-h,
