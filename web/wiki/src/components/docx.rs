@@ -2573,6 +2573,14 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
             let Some((found, count)) = measure_pages(height) else {
                 return;
             };
+            // What it made of the document, in the console. Pagination that
+            // disagrees with Word is reported as "it says N pages", and without
+            // this there is no way to tell a measurement that ran long from one
+            // that never ran at all.
+            log::info!(
+                "word pagination: {count} pages, {} marks, pages {height:.0}px",
+                found.len()
+            );
             marks.set(found);
             pages.set(count);
             measuring.set(false);
