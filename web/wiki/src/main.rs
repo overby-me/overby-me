@@ -76,6 +76,12 @@ const FONT_CARLITO_700: Asset = asset!("/assets/fonts/carlito-700.woff2");
 // too tall, which is a page.
 const FONT_SERIF_400: Asset = asset!("/assets/fonts/serif-400.woff2");
 const FONT_SERIF_700: Asset = asset!("/assets/fonts/serif-700.woff2");
+// And for Cambria, which is what Word's older Danish templates set their body
+// in: Caladea has Cambria's metrics. Times' are not close enough to borrow --
+// Cambria is the wider face, and measuring a Cambria document in Liberation
+// Serif fitted five list items too many onto every page.
+const FONT_CALADEA_400: Asset = asset!("/assets/fonts/caladea-400.woff2");
+const FONT_CALADEA_700: Asset = asset!("/assets/fonts/caladea-700.woff2");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -383,6 +389,8 @@ fn App() -> Element {
             "@font-face{{font-family:'Carlito';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Caladea';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Caladea';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
         ),
         FONT_ATK_400,
         FONT_ATK_700,
@@ -392,7 +400,9 @@ fn App() -> Element {
         FONT_CARLITO_400,
         FONT_CARLITO_700,
         FONT_SERIF_400,
-        FONT_SERIF_700
+        FONT_SERIF_700,
+        FONT_CALADEA_400,
+        FONT_CALADEA_700
     );
 
     rsx! {

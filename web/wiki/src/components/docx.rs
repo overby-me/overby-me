@@ -936,10 +936,7 @@ pub fn measured_style(p: &Paragraph) -> String {
         .filter(|f| !f.is_empty())
     {
         css.push_str(&format!("--p-face:{};", measuring_face(Some(named))));
-        css.push_str(match is_serif(named) {
-            true => "--p-single:var(--single-serif);",
-            false => "--p-single:var(--single-sans);",
-        });
+        css.push_str(&format!("--p-single:{};", Measured::of(Some(named)).single()));
     }
     let line = match p.line_spacing.as_ref() {
         Some(ls) if ls.rule == "auto" && ls.value > 0.0 => ls.value,
@@ -2405,6 +2402,31 @@ mod tests {
     }
 
     #[test]
+    fn each_face_is_measured_in_the_one_cut_to_its_widths() {
+        // Metric-compatible substitutes, one per family of widths. Cambria is
+        // NOT Times: it is the wider face, and measuring one in the other put
+        // five list items too many on a page.
+        assert_eq!(Measured::of(Some("Cambria")).family(), "Caladea");
+        assert_eq!(Measured::of(Some("cambria")).family(), "Caladea");
+        assert_eq!(Measured::of(Some("Times New Roman")).family(), "Liberation Serif");
+        assert_eq!(Measured::of(Some("Georgia")).family(), "Liberation Serif");
+        assert_eq!(Measured::of(Some("Calibri")).family(), "Carlito");
+        // Word's own default for a face it does not know.
+        assert_eq!(Measured::of(Some("Papyrus")).family(), "Carlito");
+        assert_eq!(Measured::of(None).family(), "Carlito");
+        // Each reads its line box from its own property, since what SINGLE
+        // spacing means belongs to the face.
+        assert_eq!(Measured::of(Some("Cambria")).single(), "var(--single-cambria)");
+        assert_ne!(
+            Measured::of(Some("Cambria")).single(),
+            Measured::of(Some("Times")).single()
+        );
+        // The substitute comes FIRST in the stack, so the measurement does not
+        // depend on what the reader happens to have installed.
+        assert!(measuring_face(Some("Cambria")).starts_with("'Caladea', 'Cambria'"));
+    }
+
+    #[test]
     fn a_hanging_indent_leaves_the_first_line_where_its_neighbours_are() {
         let hanging = Paragraph {
             indent_left: Some(32.75),
@@ -2782,16 +2804,17 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
         // one turn of the event loop afterwards.
         let face = face.clone();
         spawn(async move {
-            // Both faces this app measures in, because a document may use
-            // both: its body in one and its lists in the other.
-            wait_for_the_face(asked_for, "Carlito").await;
-            wait_for_the_face(asked_for, "Liberation Serif").await;
+            // Every face this app measures in, because a document may use more
+            // than one: its body in one and its lists in another.
+            for measured in [Measured::Sans, Measured::Serif, Measured::Cambria] {
+                wait_for_the_face(asked_for, measured.family()).await;
+            }
             wait_for_the_face(asked_for, &face).await;
             // What SINGLE spacing means in each. Measured, not assumed:
-            // Calibri's line box is about 1.22 times its size and Times New
-            // Roman's about 1.15, and a document states its line spacing as a
-            // multiple of whichever its text is set in.
-            set_single_spacing(single_spacing("Carlito"), single_spacing("Liberation Serif"));
+            // Calibri's line box is about 1.22 times its size, Cambria's 1.17
+            // and Times New Roman's 1.15, and a document states its line
+            // spacing as a multiple of whichever its text is set in.
+            set_single_spacing();
             let Some((found, count)) = measure_pages(height) else {
                 return;
             };
@@ -3039,17 +3062,23 @@ fn single_spacing(face: &str) -> f64 {
 
 /// Tell the stylesheet what single spacing is for this document, so the line
 /// height every paragraph states can be scaled by it.
-fn set_single_spacing(sans: f64, serif: f64) {
+fn set_single_spacing() {
     let Some(root) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.document_element())
-        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
     else {
         return;
     };
+    let Ok(root) = root.dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
     let style = root.style();
-    let _ = style.set_property("--single-sans", &format!("{sans:.4}"));
-    let _ = style.set_property("--single-serif", &format!("{serif:.4}"));
+    for measured in [Measured::Sans, Measured::Serif, Measured::Cambria] {
+        // `var(--single-sans)` back to `--single-sans`: the property is named
+        // once, where it is read.
+        let name = measured.single().trim_start_matches("var(").trim_end_matches(')');
+        let _ = style.set_property(name, &format!("{:.4}", single_spacing(measured.family())));
+    }
 }
 
 /// Whether Word keeps this element on the same page as the one after it.
@@ -3065,28 +3094,75 @@ fn is_blank(element: &web_sys::Element) -> bool {
     element.text_content().unwrap_or_default().trim().is_empty()
 }
 
+/// One of the three faces this app measures documents in.
+///
+/// Each is metric-compatible with a face Word is set in -- the same widths for
+/// the same text -- so a line wraps where Word wraps it whatever the reader has
+/// installed. Which one matters: a Cambria document measured in Times metrics
+/// held five list items too many on a page, because Times is the narrower face.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Measured {
+    /// Carlito, for Calibri and for anything unrecognised -- Word's own default.
+    Sans,
+    /// Liberation Serif, for Times New Roman and the faces cut to its widths.
+    Serif,
+    /// Caladea, for Cambria.
+    Cambria,
+}
+
+impl Measured {
+    /// Which face a document's named one is measured in.
+    pub fn of(named: Option<&str>) -> Self {
+        let name = named.map(str::trim).unwrap_or("");
+        match name {
+            n if n.eq_ignore_ascii_case("cambria") => Self::Cambria,
+            n if ["times new roman", "times", "georgia", "garamond"]
+                .iter()
+                .any(|serif| n.eq_ignore_ascii_case(serif)) =>
+            {
+                Self::Serif
+            }
+            _ => Self::Sans,
+        }
+    }
+
+    /// The family to load and to measure. The substitute itself, never a stack:
+    /// `fonts.load` is satisfied by any family in a list that already resolves,
+    /// and the generic at the end always does.
+    pub fn family(self) -> &'static str {
+        match self {
+            Self::Sans => "Carlito",
+            Self::Serif => "Liberation Serif",
+            Self::Cambria => "Caladea",
+        }
+    }
+
+    /// The custom property holding what SINGLE spacing means in it, measured at
+    /// runtime from the face itself.
+    pub fn single(self) -> &'static str {
+        match self {
+            Self::Sans => "var(--single-sans)",
+            Self::Serif => "var(--single-serif)",
+            Self::Cambria => "var(--single-cambria)",
+        }
+    }
+}
+
 /// The stack to measure a document set in `named` with.
 ///
 /// A metric-compatible substitute FIRST, and one this app ships, so the answer
 /// does not depend on what the reader has installed -- then the document's own
-/// name, for a reader who does have it, then the generic. Two faces cover what
-/// this wiki holds; anything else falls back to Calibri's, which is what Word
-/// itself defaults to.
-/// Whether a face is one of the serifs these documents use. Their line boxes
-/// and their widths differ from Calibri's enough to move a page break.
-fn is_serif(name: &str) -> bool {
-    ["times new roman", "times", "georgia", "cambria", "garamond"]
-        .iter()
-        .any(|serif| name.eq_ignore_ascii_case(serif))
-}
-
+/// name, for a reader who does have it, then the generic.
 fn measuring_face(named: Option<&str>) -> String {
     let name = named.map(str::trim).unwrap_or("");
-    let serif = is_serif(name);
-    match (serif, name.is_empty()) {
-        (true, _) => format!("'Liberation Serif', '{name}', serif"),
-        (false, true) => "Carlito, Calibri, sans-serif".to_string(),
-        (false, false) => format!("Carlito, '{name}', Calibri, sans-serif"),
+    let face = Measured::of(named);
+    let generic = match face {
+        Measured::Sans => "Calibri, sans-serif",
+        Measured::Serif | Measured::Cambria => "serif",
+    };
+    match name.is_empty() {
+        true => format!("{}, {generic}", face.family()),
+        false => format!("'{}', '{name}', {generic}", face.family()),
     }
 }
 

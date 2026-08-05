@@ -4,6 +4,11 @@ fn main() {
     let path = std::env::args().nth(1).expect("usage: dump <file.docx>");
     let data = std::fs::read(&path).expect("read the document");
     let json = docx_parser::parse_docx_native(&data).expect("parse the document");
+    // The whole parse, for a tool that wants to lay the document out itself.
+    if std::env::args().any(|a| a == "--json") {
+        println!("{json}");
+        return;
+    }
     let doc: serde_json::Value = serde_json::from_str(&json).expect("valid json");
     fn walk(v: &serde_json::Value, n: &mut usize) {
         match v {
