@@ -65,6 +65,13 @@
     [[ -d /var/cache/cache-dir-test ]]
     [[ -f /var/cache/cache-dir-test/marker ]]
     systemctl stop state-dir-test.service
+
+    : "StateDirectory=/LogsDirectory=/CacheDirectory= persist across stop"
+    # Unlike RuntimeDirectory= (removed on stop), these directories and their
+    # contents must survive the service stopping -- that is their whole point.
+    [[ -d /var/lib/state-dir-test && -f /var/lib/state-dir-test/marker ]]
+    [[ -d /var/log/log-dir-test && -f /var/log/log-dir-test/marker ]]
+    [[ -d /var/cache/cache-dir-test && -f /var/cache/cache-dir-test/marker ]]
     SLDEOF
   '';
 }
