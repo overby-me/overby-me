@@ -2450,10 +2450,13 @@ impl PageGeometry {
         let mut afters: Vec<f64> = Vec::new();
         let mut closed_up = 0usize;
         let mut items = 0usize;
-        for block in blocks {
-            let Block::Paragraph(p) = block else { continue };
+        // Every paragraph, INCLUDING the ones in table cells. Walking only the
+        // top-level blocks took a six-table document's typography from the four
+        // paragraphs that were not in a table, and measured all hundred and
+        // thirty cell paragraphs in type the document does not use there.
+        for_each_paragraph(blocks, &mut |p| {
             if p.outline_level.is_some_and(|l| l < 9) {
-                continue;
+                return;
             }
             // The RESOLVED size, not the commonest one the runs happen to
             // state: see the field's own note.
@@ -2481,7 +2484,7 @@ impl PageGeometry {
                     closed_up += 1;
                 }
             }
-        }
+        });
         // Word's contextualSpacing closes a list up, and it is tempting to
         // read it off the paragraphs and drop the space under every item. That
         // was measured and it is wrong: the rule is PAIRWISE -- the space goes
