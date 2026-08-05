@@ -8203,7 +8203,10 @@ a.list-item:hover {
    is closed up too, which is what `contextualSpacing` means and why it cannot
    be read off the document one paragraph at a time. */
 .docx-measure .docx-list li.docx-li-tight:has(+ li.docx-li-tight) {
-	margin-bottom: 0;
+	/* `!important` for the same reason as the rule above, and it must be: that
+	   rule is important too, and an important declaration is not beaten by
+	   specificity alone. Without this the list closed up in name only. */
+	margin-bottom: 0 !important;
 }
 .docx-measure {
 	/* Word's own defaults, for a document that states neither. The measuring
