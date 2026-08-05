@@ -8191,6 +8191,12 @@ a.list-item:hover {
 	margin-bottom: var(--docx-page-list-after, 8pt);
 	line-height: var(--docx-page-line, 1.08);
 }
+/* A list Word closes up: the space under an item goes only when the NEXT item
+   is closed up too, which is what `contextualSpacing` means and why it cannot
+   be read off the document one paragraph at a time. */
+.docx-measure .docx-list li.docx-li-tight:has(+ li.docx-li-tight) {
+	margin-bottom: 0;
+}
 .docx-measure {
 	/* Word's own defaults, for a document that states neither. The measuring
 	   copy overrides both inline with what the document actually says; these

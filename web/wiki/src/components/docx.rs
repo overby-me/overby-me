@@ -1095,8 +1095,19 @@ fn ListItem(item: Paragraph) -> Element {
                 2 => "docx-li docx-li-3",
                 _ => "docx-li docx-li-4",
             };
+            // Word closes a list up: where a paragraph sets contextualSpacing,
+            // the space under it goes IF the next paragraph shares its style
+            // and sets it too. That "if" is why reading the flag off the
+            // document and dropping every item's spacing was wrong -- it took
+            // six hundred points out of a sixty-item list. The pair is what
+            // matters, so each item says whether it is closed up and the
+            // stylesheet asks about its neighbour.
+            let class = match item.contextual_spacing {
+                true => format!("{class} docx-li-tight"),
+                false => class.to_string(),
+            };
             rsx! {
-                li { class, {runs_of(&item)} }
+                li { class: "{class}", {runs_of(&item)} }
             }
         }
     }
