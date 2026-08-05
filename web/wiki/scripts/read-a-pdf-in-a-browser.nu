@@ -131,9 +131,18 @@ def main [
     # A page turned to must show the page, not the hairline that ended the one
     # before it. Landing on the mark put "37" across the top for a reader who
     # had just turned to 38, which reads as having gone nowhere.
+    # Measured against the landing clearance rather than the top of the window,
+    # because that clearance IS what covers the top: the bar's height where
+    # there is a bar, a small gap where there is not. Above that line the mark
+    # is behind the bar or off the screen; below it the reader is looking at the
+    # previous page's ending and reasonably concludes nothing happened.
     for run in [[what, seen]; ["short" $seen] ["long" $seen_long]] {
-        if $run.seen.afterForward.markOnScreen {
-            $bad = ($bad | append $"on the ($run.what) document a page mark is on screen after turning a page")
+        let after = $run.seen.afterForward
+        let passed = $after.markJustPassed
+        let covered = ($after.landing | default "0px" | str replace "px" "" | into float)
+        if $passed != null and $passed >= $covered {
+            $bad = ($bad | append
+                $"on the ($run.what) document the mark ending the previous page is in view after turning: ($passed)px down, past the ($covered)px the bar covers")
         }
     }
 

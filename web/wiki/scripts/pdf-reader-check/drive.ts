@@ -194,13 +194,17 @@ const read = `(() => {
     marks: document.querySelectorAll(".pdf-page-break").length,
     scrollY: Math.round(window.scrollY),
     landing: (() => { const m = document.querySelector(".pdf-page-break"); return m ? getComputedStyle(m).scrollMarginTop : null; })(),
-    // Is a page-ending mark sitting on screen? After turning a page it must
-    // not be: it carries the number of the page that ENDED, so seeing it reads
-    // as not having moved.
-    markOnScreen: [...document.querySelectorAll(".pdf-page-break")].some(m => {
-      const t = m.getBoundingClientRect().top;
-      return t >= -2 && t < window.innerHeight / 2;
-    }),
+    // Where the mark the reader has just come PAST is, relative to the top of
+    // the window. It carries the number of the page that ENDED there, so after
+    // turning a page it must be above the top: seeing it reads as not having
+    // moved. Null when there is no such mark, which is the first page.
+    markJustPassed: (() => {
+      const control = document.querySelector(".pdf-pages");
+      const at = control ? (control.innerText.match(/([0-9ivxlcIVXLC]+)\\s*\\//) || [])[1] : null;
+      if (!at) return null;
+      const m = document.querySelector('.pdf-page-break[data-page="' + at + '"]');
+      return m ? Math.round(m.getBoundingClientRect().top) : null;
+    })(),
     sizeClass: (document.querySelector(".app-shell") || {}).dataset?.sizeClass ?? null,
     maxScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
     text: (doc ? doc.innerText : document.body.innerText).slice(0, 600),
