@@ -355,7 +355,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
             // it should look like the other one when they do.
             div { class: "file-gap-notice", role: "note",
                 span { class: "material-icons", "info" }
-                p { class: "body-small", {t_pages(doc.pages)} }
+                p { class: "body-small", {t_pages(&last_page(&doc))} }
             }
         }
     }
@@ -395,8 +395,13 @@ fn indent_style(indent: u8) -> String {
 }
 
 /// "Reflowed from N pages. Layout, figures and tables are not shown."
-fn t_pages(pages: usize) -> String {
-    crate::i18n::t_with("file.pdfReflowed", &[("pages", &pages.to_string())])
+///
+/// Counted the same way the page control counts, because saying "104 pages"
+/// under a control that reads "37 / 99" makes a reader wonder which of the two
+/// is lying. The document's own numbering wins in both: it is the one a reader
+/// is counting, and the one its contents list refers to.
+fn t_pages(pages: &str) -> String {
+    crate::i18n::t_with("file.pdfReflowed", &[("pages", pages)])
 }
 
 /// What the document's first page calls itself. It has no mark of its own, since
