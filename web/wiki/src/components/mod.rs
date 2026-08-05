@@ -22,6 +22,7 @@ pub mod member;
 pub mod node;
 pub mod odf;
 pub mod optimistic;
+pub mod pager;
 pub mod parent;
 pub mod pdf;
 pub mod perm;

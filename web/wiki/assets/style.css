@@ -8640,6 +8640,10 @@ a.list-item:hover {
    sized in cqw, hundredths of THIS box, so a deck reads the same on a phone and
    on a projector. */
 .pptx-slide {
+	/* A slide is a page, so the page control jumps to one. Clear of whatever
+	   covers the top, the same measure everything else that gets jumped to
+	   uses. */
+	scroll-margin-top: var(--toc-scroll-margin, 5rem);
 	position: relative;
 	container-type: size;
 	width: 100%;

@@ -412,6 +412,7 @@ pub fn DeckView(deck: Deck) -> Element {
             (slide.clone(), paper)
         })
         .collect();
+    let slide_count = slides.len();
     rsx! {
         div { class: "pptx-deck",
             for (i , (slide , paper)) in slides.into_iter().enumerate() {
@@ -420,6 +421,11 @@ pub fn DeckView(deck: Deck) -> Element {
                     class: "pptx-slide",
                     style: "aspect-ratio:{w} / {h};{paper}",
                     aria_label: "{i + 1}",
+                    // A slide IS a page, so the deck's pages need no working
+                    // out: slide one is page one. No `data-page-ends` -- this
+                    // is the page itself, not a hairline between two, so a jump
+                    // lands ON it rather than after it.
+                    "data-page": "{i + 1}",
                     for (j , shape) in slide.elements.into_iter().enumerate() {
                         if let Some(src) = shape.src.clone() {
                             // A picture sits in its own box, at the place and
@@ -465,6 +471,12 @@ pub fn DeckView(deck: Deck) -> Element {
                         }
                     }
                 }
+            }
+            // Which slide the reader is on, and a way to a numbered one.
+            // A deck is where this control is least of a reconstruction: the
+            // numbers are the slides' own.
+            if slide_count > 1 {
+                super::pager::PageControl { first: "1".to_string(), last: slide_count.to_string() }
             }
         }
     }
