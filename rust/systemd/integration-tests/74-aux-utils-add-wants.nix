@@ -21,6 +21,8 @@
     # The .wants symlink must now exist under the target's drop-in dir.
     test -L "/etc/systemd/system/multi-user.target.wants/$UNIT.service"
     systemctl daemon-reload
+    # The manager must load that symlink as an effective Wants dependency.
+    systemctl show -P WantedBy "$UNIT.service" | grep -q "multi-user.target"
     rm -f "/run/systemd/system/$UNIT.service"
     rm -f "/etc/systemd/system/multi-user.target.wants/$UNIT.service" 2>/dev/null || true
     systemctl daemon-reload
