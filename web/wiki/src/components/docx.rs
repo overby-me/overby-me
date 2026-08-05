@@ -2439,12 +2439,16 @@ impl PageGeometry {
                 }
             }
         }
-        // A list that closes itself up gets no space between its items, which
-        // on a document that is mostly list is most of its height.
-        let list_after = match closed_up * 2 > items {
-            true => 0.0,
-            false => commonest(&afters).unwrap_or(8.0),
-        };
+        // Word's contextualSpacing closes a list up, and it is tempting to
+        // read it off the paragraphs and drop the space under every item. That
+        // was measured and it is wrong: the rule is PAIRWISE -- the space goes
+        // only between adjacent paragraphs that share a style and both set it
+        // -- and applying it wholesale took 8pt from each of one document's
+        // sixty items, some six hundred points, and put its first page break
+        // thirty paragraphs past where Word puts it. Until it is applied pair
+        // by pair, a list leaves what every other paragraph leaves.
+        let _ = (closed_up, items);
+        let list_after = commonest(&afters).unwrap_or(8.0);
         // Word's own defaults, for a document that states none of this.
         //
         // The line multiplier is scaled on the way out. Word's `auto` rule
