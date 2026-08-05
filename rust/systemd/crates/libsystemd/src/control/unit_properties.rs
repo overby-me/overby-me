@@ -358,6 +358,28 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 let relative = if relative.is_empty() { "/" } else { relative };
                 insert(&mut props, "ControlGroup", relative);
             }
+            // TasksCurrent / MemoryCurrent — live counters read from the
+            // service's cgroup when its controllers are enabled (e.g. under a
+            // TasksMax=/MemoryMax=/*Accounting= setting). Absent otherwise.
+            #[cfg(target_os = "linux")]
+            {
+                let cg = &svc.conf.platform_specific.cgroup_path;
+                let read_counter = |file: &str| -> Option<String> {
+                    let s = std::fs::read_to_string(cg.join(file)).ok()?;
+                    let s = s.trim();
+                    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+                        Some(s.to_string())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(v) = read_counter("pids.current") {
+                    insert(&mut props, "TasksCurrent", &v);
+                }
+                if let Some(v) = read_counter("memory.current") {
+                    insert(&mut props, "MemoryCurrent", &v);
+                }
+            }
             insert_service_config(&mut props, &svc.conf);
             insert_exec_config(&mut props, &svc.conf.exec_config);
 

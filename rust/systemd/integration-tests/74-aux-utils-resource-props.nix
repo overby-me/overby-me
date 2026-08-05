@@ -17,6 +17,24 @@
 
     : "CPUUsageNSec property exists for service"
     systemctl show -P CPUUsageNSec systemd-journald.service > /dev/null
+
+    : "TasksCurrent and MemoryCurrent report live cgroup counters"
+    UNIT="rescur-$RANDOM"
+    cat > "/run/systemd/system/$UNIT.service" << EOF2
+    [Service]
+    ExecStart=sleep infinity
+    MemoryMax=64M
+    TasksMax=50
+    EOF2
+    systemctl daemon-reload
+    systemctl start "$UNIT.service"
+    # With the pids/memory controllers enabled, a running sleep has >=1 task
+    # and non-zero current memory.
+    [[ "$(systemctl show -P TasksCurrent "$UNIT.service")" -ge 1 ]]
+    [[ "$(systemctl show -P MemoryCurrent "$UNIT.service")" -gt 0 ]]
+    systemctl stop "$UNIT.service"
+    rm -f "/run/systemd/system/$UNIT.service"
+    systemctl daemon-reload
     RPEOF
     chmod +x TEST-74-AUX-UTILS.resource-props.sh
   '';
