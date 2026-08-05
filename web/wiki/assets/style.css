@@ -8172,11 +8172,12 @@ a.list-item:hover {
    number sitting on it, quiet enough to skim past and precise enough that "see
    page 12" still means something to someone reading this instead of the pages. */
 .pdf-page-break {
-	/* Land a little above the page rather than exactly on it. Scrolled flush to
-	   the top of the window, the mark and the first line under it sit beneath the
-	   bar on a wide screen, and even without one there is nothing to say the page
-	   has turned. This is the room to see that it has. */
-	scroll-margin-top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-4));
+	/* Land clear of whatever covers the top of the reading surface, and no
+	   further: the same measure a contents link or a deep link uses, which is
+	   the bar's height where there is a bar and a small gap on compact, where
+	   the bar is docked at the BOTTOM. A flat 5rem here stopped a phone eighty
+	   pixels short of the page it had turned to, for a bar that was not there. */
+	scroll-margin-top: var(--toc-scroll-margin, 5rem);
 	display: flex;
 	align-items: center;
 	gap: var(--md-sys-spacing-3);

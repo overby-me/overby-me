@@ -41,15 +41,23 @@ def main [
     let browser = (chromium-at)
     let work = (mktemp -d)
     let fixture = ($work | path join "fixture.pdf")
+    let long = ($work | path join "fixture-long.pdf")
 
-    # A four-page document with a contents list that points into itself, an
-    # external link, an address, a picture, italic and bold, and a bullet list.
-    print "printing the fixture..."
-    (^$browser --headless=new --no-sandbox --disable-gpu
-        $"--print-to-pdf=($fixture)" --no-pdf-header-footer
-        --virtual-time-budget=5000 $"file://($here | path join 'fixture.html')"
-        | complete | ignore)
-    if not ($fixture | path exists) { error make { msg: "chromium printed no fixture" } }
+    # Two documents, because they catch different things. The short one has the
+    # contents list, the links, the picture and the italic. The long one has
+    # sixty pages, which is the only way to see the page control's real fault:
+    # it is told where the reader is a whole percent at a time, so on a long
+    # document it is told about once per page, in the middle of the scroll.
+    print "printing the fixtures..."
+    for pair in [[src, out]; ["fixture.html", $fixture] ["fixture-long.html", $long]] {
+        (^$browser --headless=new --no-sandbox --disable-gpu
+            $"--print-to-pdf=($pair.out)" --no-pdf-header-footer
+            --virtual-time-budget=8000 $"file://($here | path join $pair.src)"
+            | complete | ignore)
+        if not ($pair.out | path exists) {
+            error make { msg: $"chromium printed no ($pair.src)" }
+        }
+    }
 
     let email = ($env.WIKI_EMAIL? | default "")
     let password = ($env.WIKI_PASSWORD? | default "")
@@ -63,11 +71,18 @@ def main [
     (http post --content-type application/json $"($NHOST)/signin/email-password"
         { email: $email, password: $password } | to json | save -f $session)
 
-    print $"opening ($url) ..."
-    let out = ($work | path join "seen")
     $env.CHROMIUM = $browser
-    (^deno run -A ($here | path join "drive.ts") $session $fixture $url $out | complete | ignore)
+    let drive = ($here | path join "drive.ts")
+
+    print $"opening ($url) with the short document..."
+    let out = ($work | path join "seen")
+    (^deno run -A $drive $session $fixture $url $out | complete | ignore)
     let seen = (open $"($out).json")
+
+    print "and again with the long one..."
+    let out_long = ($work | path join "seen-long")
+    (^deno run -A $drive $session $long $url $out_long | complete | ignore)
+    let seen_long = (open $"($out_long).json")
 
     mut bad = []
     let opened = $seen.opened
@@ -96,7 +111,25 @@ def main [
     if $seen.atTheEnd.page != $opened.of {
         $bad = ($bad | append $"the end of the document said page ($seen.atTheEnd.page), expected ($opened.of)")
     }
-    let crashes = ($seen.console | where {|l| ($l | str contains "PANIC") or ($l | str contains "panicked") })
+    # The long document, where the control is told where the reader is about
+    # once per page. This is the one that catches "press it twice": the short
+    # document above passed all through the weeks it took to find that.
+    let long_open = $seen_long.opened
+    if $long_open.marks < 50 {
+        $bad = ($bad | append $"the long document showed ($long_open.marks) page marks, expected sixty-ish")
+    }
+    if $seen_long.afterForward.page != "2" {
+        $bad = ($bad | append $"on sixty pages, one press forward said page ($seen_long.afterForward.page), expected 2")
+    }
+    if $seen_long.afterBack.page != "1" {
+        $bad = ($bad | append $"on sixty pages, one press back said page ($seen_long.afterBack.page), expected 1")
+    }
+    if $seen_long.atTheEnd.page != $long_open.of {
+        $bad = ($bad | append $"the end of the long document said page ($seen_long.atTheEnd.page), expected ($long_open.of)")
+    }
+
+    let crashes = ([$seen.console $seen_long.console] | flatten
+        | where {|l| ($l | str contains "PANIC") or ($l | str contains "panicked") })
     if not ($crashes | is-empty) { $bad = ($bad | append $"the app panicked: ($crashes | first)") }
 
     if $keep { print $"working files in ($work)" } else { rm -rf $work }

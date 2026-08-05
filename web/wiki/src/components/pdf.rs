@@ -566,6 +566,21 @@ fn page_at(
     }
 }
 
+/// How long a jump's own answer outranks the scroll's, in milliseconds.
+///
+/// Long enough to cover a smooth scroll, which the browser runs for a few
+/// hundred milliseconds; short enough that a reader who scrolls by hand
+/// straight after a jump is followed again almost at once.
+const JUMP_HOLD_MS: f64 = 1200.0;
+
+/// Milliseconds on the page's own clock. Only differences matter.
+fn now_ms() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0)
+}
+
 /// The room a jump leaves above the mark it lands on, read from the mark's own
 /// `scroll-margin-top` rather than repeated here, so the stylesheet and this
 /// cannot drift apart.
@@ -635,6 +650,8 @@ fn PageControl(first: String, last: String) -> Element {
     // Copy: a closure that captures the String itself can only be given to one
     // of the two buttons.
     let top_page = use_signal(|| first.clone());
+    // Until when a jump's own answer outranks the scroll's. See `arrive`.
+    let mut jumping_until = use_signal(|| 0.0f64);
 
     // The marks move as pictures land and fonts settle, so their places are taken
     // again whenever the document's height changes. Scroll progress is what says
@@ -658,6 +675,17 @@ fn PageControl(first: String, last: String) -> Element {
             height.set(tall);
             pages.set(pages_on_screen());
         }
+        // Not while a jump is in flight. The scroll is watched a PERCENT at a
+        // time, so on a hundred-page document one page moves it by about one and
+        // this runs about once per page -- and the once it runs is in the middle
+        // of the smooth scroll, over the page being left. It wrote that back,
+        // and no later tick came to correct it, so the reader saw the page they
+        // had just left and pressed again. That is the "press it twice" a short
+        // document cannot show: there, one page is a quarter of the scroll and
+        // the ticks after the landing put it right.
+        if now_ms() < *jumping_until.peek() {
+            return;
+        }
         let now = page_here(&pages.peek(), &first);
         if now != *here.peek() {
             here.set(now);
@@ -665,13 +693,15 @@ fn PageControl(first: String, last: String) -> Element {
     }));
 
     // Where a jump is taking the reader, said straight away rather than waited
-    // for. The scroll is what this otherwise learns from, and it is watched a
-    // percent at a time: one page of a hundred moves it by about one, so a step
-    // often left the control still holding the page it had just left, and the
-    // next press worked out the same answer and went nowhere. Pressing forward
-    // twice moved one page.
+    // for, and HELD while the scroll catches up. A smooth scroll reports its
+    // position all the way there, and the reckoning above would otherwise read
+    // one of those positions -- still over the page being left -- and put it
+    // back. The hold is a moment, not a state: nothing has to clear it, and if
+    // a jump somehow never lands the control is following the scroll again a
+    // second later.
     let mut arrive = move |label: &str| {
         go_to_page(label);
+        jumping_until.set(now_ms() + JUMP_HOLD_MS);
         // Peeked into an OWNED string first. A signal's peek is a live borrow,
         // and this writes the same signal a line later; leaving the borrow in
         // the condition works only because an `if` drops it before the block,
@@ -700,6 +730,7 @@ fn PageControl(first: String, last: String) -> Element {
                 // Said straight away, like a jump to a mark: the top is the
                 // first page, and waiting for the scroll to prove it is what
                 // made a press look ignored.
+                jumping_until.set(now_ms() + JUMP_HOLD_MS);
                 let top = top_page.peek().clone();
                 if *here.peek() != top {
                     here.set(top);
