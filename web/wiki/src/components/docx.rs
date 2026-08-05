@@ -74,6 +74,21 @@ pub struct Paragraph {
     pub space_after: Option<f64>,
     #[serde(default)]
     pub line_spacing: Option<LineSpacing>,
+    /// The size this paragraph's text ends up at, in points, resolved by the
+    /// parser through the style chain AND the document defaults. Read for the
+    /// pagination, which needs the size Word would actually set: a document can
+    /// state a size on almost no run at all -- one here states one on five runs
+    /// of a hundred and eighty, and those five are its headings -- so taking
+    /// the commonest size the RUNS state measures the whole document at its
+    /// heading size.
+    #[serde(default)]
+    pub default_font_size: Option<f64>,
+    /// Word suppresses the space between adjacent paragraphs of the same style
+    /// when this is set, which is how a bulleted list closes up. Resolved
+    /// through the style chain. Without it a list measures 8pt per item taller
+    /// than Word lays it out.
+    #[serde(default)]
+    pub contextual_spacing: bool,
     /// How big this heading is against the document's own body text, as a
     /// multiplier. Not from the document: computed by [`scale_headings`] after
     /// parsing, because it takes the whole document to know what "body text"
@@ -2370,6 +2385,9 @@ pub struct PageGeometry {
     pub size: f64,
     pub line: f64,
     pub after: f64,
+    /// What a LIST item leaves under itself, which is nothing at all where the
+    /// document closes its lists up.
+    pub list_after: f64,
 }
 
 impl PageGeometry {
@@ -2383,29 +2401,50 @@ impl PageGeometry {
     /// paragraphs say, which is what a document's own defaults look like from
     /// the outside. Headings are left out of the vote; there are few of them
     /// and they are not what fills a page.
-    fn typography(blocks: &[Block]) -> (f64, f64, f64) {
+    fn typography(blocks: &[Block]) -> (f64, f64, f64, f64) {
         let mut sizes: Vec<f64> = Vec::new();
         let mut lines: Vec<f64> = Vec::new();
         let mut afters: Vec<f64> = Vec::new();
+        let mut closed_up = 0usize;
+        let mut items = 0usize;
         for block in blocks {
             let Block::Paragraph(p) = block else { continue };
             if p.outline_level.is_some_and(|l| l < 9) {
                 continue;
             }
-            if let Some(pt) = dominant_size(p) {
+            // The RESOLVED size, not the commonest one the runs happen to
+            // state: see the field's own note.
+            if let Some(pt) = p.default_font_size.or_else(|| dominant_size(p)) {
                 sizes.push(pt);
             }
-            if let Some(spacing) = p.line_spacing.as_ref() {
+            // No line spacing stated IS a statement: it means single. Counting
+            // only the paragraphs that state one takes the document's spacing
+            // from whichever few paragraphs disagreed with it.
+            match p.line_spacing.as_ref() {
                 // `auto` states a multiplier in 240ths; the other rules state
                 // points, which cannot be a multiplier without knowing the size.
-                if spacing.rule == "auto" && spacing.value > 0.0 {
-                    lines.push(spacing.value);
+                Some(spacing) if spacing.rule == "auto" && spacing.value > 0.0 => {
+                    lines.push(spacing.value)
                 }
+                Some(_) => {}
+                None => lines.push(1.0),
             }
             if let Some(pt) = p.space_after.filter(|a| *a >= 0.0) {
                 afters.push(pt);
             }
+            if p.numbering.is_some() {
+                items += 1;
+                if p.contextual_spacing {
+                    closed_up += 1;
+                }
+            }
         }
+        // A list that closes itself up gets no space between its items, which
+        // on a document that is mostly list is most of its height.
+        let list_after = match closed_up * 2 > items {
+            true => 0.0,
+            false => commonest(&afters).unwrap_or(8.0),
+        };
         // Word's own defaults, for a document that states none of this.
         //
         // The line multiplier is scaled on the way out. Word's `auto` rule
@@ -2415,8 +2454,9 @@ impl PageGeometry {
         // font SIZE, which is a fifth short of what Word lays out.
         (
             commonest(&sizes).unwrap_or(11.0),
-            commonest(&lines).unwrap_or(1.08) * SINGLE_SPACING,
+            commonest(&lines).unwrap_or(1.0) * SINGLE_SPACING,
             commonest(&afters).unwrap_or(8.0),
+            list_after,
         )
     }
 
@@ -2429,13 +2469,14 @@ impl PageGeometry {
         let height = Self::px(at("pageHeight") - at("marginTop") - at("marginBottom"));
         // A quarter of an A4 column, and a page that holds more than a line or
         // two: below either, something is wrong with what was read.
-        let (size, line, after) = Self::typography(blocks);
+        let (size, line, after, list_after) = Self::typography(blocks);
         (column > 100.0 && height > 100.0).then(|| PageGeometry {
             column,
             height,
             size,
             line,
             after,
+            list_after,
             // The document's own body face first, then the metric-compatible
             // substitutes a reader is likely to actually have. The measuring is
             // only as good as this: a face that is not installed is replaced by
@@ -2508,7 +2549,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
                 id: "docx-measure",
                 class: "docx-measure",
                 aria_hidden: "true",
-                style: "width:{page.column}px;font-family:{page.font};font-size:{page.size}pt;--docx-page-line:{page.line};--docx-page-after:{page.after}pt;",
+                style: "width:{page.column}px;font-family:{page.font};font-size:{page.size}pt;--docx-page-line:{page.line};--docx-page-after:{page.after}pt;--docx-page-list-after:{page.list_after}pt;",
                 DocxBody { blocks: blocks.clone() }
             }
         }

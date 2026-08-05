@@ -8183,9 +8183,12 @@ a.list-item:hover {
 .docx-measure .docx-table td {
 	padding: 0 0.08in;
 }
-.docx-measure .docx-p,
-.docx-measure .docx-list li {
+.docx-measure .docx-p {
 	margin-bottom: var(--docx-page-after, 8pt);
+	line-height: var(--docx-page-line, 1.08);
+}
+.docx-measure .docx-list li {
+	margin-bottom: var(--docx-page-list-after, 8pt);
 	line-height: var(--docx-page-line, 1.08);
 }
 .docx-measure {
@@ -8195,6 +8198,7 @@ a.list-item:hover {
 	   side falls back to. */
 	--docx-page-line: 1.08;
 	--docx-page-after: 8pt;
+	--docx-page-list-after: 8pt;
 	position: absolute;
 	left: -10000px;
 	top: 0;
