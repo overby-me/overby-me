@@ -8231,12 +8231,14 @@ a.list-item:hover {
 	margin-bottom: 0 !important;
 }
 .docx-measure {
-	/* Word's own defaults, for a document that states neither. The measuring
-	   copy overrides both inline with what the document actually says; these
-	   are what it falls back to, and they are the same two numbers the Rust
-	   side falls back to. */
-	/* Word's own defaults, for a paragraph that states neither. Every
-	   paragraph overrides both with what it resolves to. */
+	/* No tracking and no word spacing. This app sets letter-spacing on the body
+	   for readability, which is a good reading decision and not what a page
+	   does: the text ran wider here than in Word and lost a line every few
+	   paragraphs to it. */
+	letter-spacing: normal;
+	word-spacing: normal;
+	/* Word's own defaults, for a paragraph that states neither. Every paragraph
+	   overrides them with what it resolves to. */
 	--p-line: 1.08;
 	--docx-single-spacing: 1.22;
 	--p-size: 1em;
