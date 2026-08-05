@@ -874,11 +874,13 @@ pub fn is_merged_away(cell: &Cell) -> bool {
 #[component]
 pub fn DocxBody(
     blocks: Vec<Block>,
-    /// Where the pages end, as `(group index, the page that begins there)`.
+    /// Where the pages end, as `(group index, item index, the page that begins
+    /// there)`. The item index is [`BEFORE_GROUP`] for a break between groups
+    /// and the item's own index for one inside a list.
     /// Worked out by [`PagedDocx`], which is the only thing that fills this in;
     /// a table cell renders through here too and has no pages of its own.
     #[props(default)]
-    marks: Vec<(usize, usize)>,
+    marks: Vec<(usize, usize, usize)>,
 ) -> Element {
     // Group first, render second: the grouping is a property of the SEQUENCE,
     // and rsx has no way to look ahead mid-iteration.
@@ -901,22 +903,26 @@ pub fn DocxBody(
         }
     }
 
+    // A mark can sit before a group, or BETWEEN two items of a list. Word breaks
+    // a page wherever the text runs out, which in these documents is usually
+    // in the middle of a bulleted list -- sixty of one document's sixty-eight
+    // paragraphs are list items -- so marking only between groups snapped every
+    // break back to where the list started, eight paragraphs early.
+    let split_at = |group: usize, item: usize| {
+        marks
+            .iter()
+            .find(|(g, i, _)| *g == group && *i == item)
+            .map(|(_, _, begins)| *begins)
+    };
+
     rsx! {
         div { class: "docx",
             for (i , group) in groups.into_iter().enumerate() {
                 // Where a page ends, when someone has worked out where that is
                 // (see `PagedDocx`). Empty for a cell's contents and for a
                 // document nobody paginated, which is most of them.
-                if let Some((_, begins)) = marks.iter().find(|(at, _)| *at == i) {
-                    div {
-                        key: "p{i}",
-                        class: "pdf-page-break",
-                        role: "separator",
-                        "data-page": "{begins}",
-                        // An ending, like the PDF's: a jump aims past it.
-                        "data-page-ends": "true",
-                        span { "{begins - 1}" }
-                    }
+                if let Some(begins) = split_at(i, BEFORE_GROUP) {
+                    PageMark { key: "p{i}", begins }
                 }
                 match group {
                     Group::Single(block) => rsx! {
@@ -935,17 +941,33 @@ pub fn DocxBody(
                             true => "docx-list docx-list-pic",
                             false => "docx-list",
                         };
+                        // The list, cut into runs wherever a page ends inside
+                        // it. Each run is its own list with the mark between,
+                        // which is what HTML has room for: a page break is not
+                        // a list item.
+                        let mut runs: Vec<(Option<usize>, Vec<Paragraph>)> = vec![(None, Vec::new())];
+                        for (j, item) in items.into_iter().enumerate() {
+                            match split_at(i, j) {
+                                Some(begins) if j > 0 => runs.push((Some(begins), vec![item])),
+                                _ => runs.last_mut().expect("seeded above").1.push(item),
+                            }
+                        }
                         rsx! {
-                            if ordered {
-                                ol { key: "l{i}", class,
-                                    for (j , item) in items.into_iter().enumerate() {
-                                        ListItem { key: "i{j}", item }
-                                    }
+                            for (r , (begins , run)) in runs.into_iter().enumerate() {
+                                if let Some(begins) = begins {
+                                    PageMark { key: "lp{i}-{r}", begins }
                                 }
-                            } else {
-                                ul { key: "l{i}", class,
-                                    for (j , item) in items.into_iter().enumerate() {
-                                        ListItem { key: "i{j}", item }
+                                if ordered {
+                                    ol { key: "l{i}-{r}", class,
+                                        for (j , item) in run.into_iter().enumerate() {
+                                            ListItem { key: "i{j}", item }
+                                        }
+                                    }
+                                } else {
+                                    ul { key: "l{i}-{r}", class,
+                                        for (j , item) in run.into_iter().enumerate() {
+                                            ListItem { key: "i{j}", item }
+                                        }
                                     }
                                 }
                             }
@@ -953,6 +975,24 @@ pub fn DocxBody(
                     }
                 }
             }
+        }
+    }
+}
+
+/// The item index that means "before the whole group" rather than inside it.
+pub const BEFORE_GROUP: usize = usize::MAX;
+
+/// The hairline that says a page ended here, the same one the PDF reader draws.
+#[component]
+fn PageMark(begins: usize) -> Element {
+    rsx! {
+        div {
+            class: "pdf-page-break",
+            role: "separator",
+            "data-page": "{begins}",
+            // An ending, like the PDF's: a jump aims past it.
+            "data-page-ends": "true",
+            span { "{begins - 1}" }
         }
     }
 }
@@ -2367,9 +2407,15 @@ impl PageGeometry {
             }
         }
         // Word's own defaults, for a document that states none of this.
+        //
+        // The line multiplier is scaled on the way out. Word's `auto` rule
+        // means "this many times SINGLE spacing", and single spacing is the
+        // font's own line box -- around 1.22 times its size for the faces these
+        // documents are set in. CSS `line-height: 1.08` means 1.08 times the
+        // font SIZE, which is a fifth short of what Word lays out.
         (
             commonest(&sizes).unwrap_or(11.0),
-            commonest(&lines).unwrap_or(1.08),
+            commonest(&lines).unwrap_or(1.08) * SINGLE_SPACING,
             commonest(&afters).unwrap_or(8.0),
         )
     }
@@ -2418,7 +2464,7 @@ impl PageGeometry {
 /// the file states no usable page size, nothing is marked at all.
 #[component]
 pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
-    let mut marks = use_signal(Vec::<(usize, usize)>::new);
+    let mut marks = use_signal(Vec::<(usize, usize, usize)>::new);
     let mut pages = use_signal(|| 0usize);
     // Whether the off-screen copy is still needed. It is a whole second render
     // of the document, so it goes as soon as it has been measured.
@@ -2454,77 +2500,105 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
     }
 }
 
-/// Read the off-screen copy: which of its blocks a page boundary falls in, and
-/// how many pages there are.
+/// Read the off-screen copy: where each page ends, and how many pages there are.
 ///
-/// Two things a naive reading gets wrong, both reported from real documents.
+/// The flow is walked at the finest granularity a mark can be placed at: the
+/// blocks, and the ITEMS of a list. Word breaks a page wherever the text runs
+/// out, which in these documents is usually inside a bulleted list -- sixty of
+/// one document's sixty-eight paragraphs are list items -- and marking only
+/// between blocks snapped every break back to where the list began, eight
+/// paragraphs early against Word's own answer.
 ///
-/// A Word file usually ends with a few empty paragraphs, and they have height:
-/// counted, they spill past a boundary and the reader is told about a last page
-/// with nothing on it. The measuring stops at the last block that has anything
-/// in it.
-///
-/// And a block taller than a page swallows more than one boundary. There is
-/// nowhere inside it to put a second mark without laying out its lines, which is
-/// a different job -- so the page count is the number of places a reader can
-/// actually be TAKEN to, plus the first. Counting the swallowed pages instead
-/// left a control that named a page and then would not go there, which is how
-/// this was reported: "moving forward to the last page does not work". Where a
-/// table spans pages that makes the count one short of Word's, which is the
-/// better of the two errors: the number's job is to navigate.
-fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
+/// Two things a naive reading still gets wrong, both reported from real
+/// documents. A Word file usually ends with a few empty paragraphs, and they
+/// have height: counted, they spill past a boundary and the reader is told
+/// about a last page with nothing on it, so the measuring stops at the last
+/// thing with anything in it. And a single element taller than a page swallows
+/// more than one boundary -- a table, whose rows cannot be marked between yet
+/// -- so the page count is the number of places a reader can actually be TAKEN
+/// to, plus the first. Counting the swallowed pages instead left a control that
+/// named a page and then would not go there.
+fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
     if height <= 0.0 {
         return None;
     }
     let document = web_sys::window()?.document()?;
-    // A NodeList of the top-level blocks rather than `children()`, which needs
-    // a web-sys feature this crate does not carry.
-    let children = document
+    let root = document.query_selector("#docx-measure > .docx").ok()??;
+    let top_of = root.get_bounding_client_rect().top();
+    let groups = document
         .query_selector_all("#docx-measure > .docx > *")
         .ok()?;
-    if children.length() == 0 {
+    if groups.length() == 0 {
         return None;
     }
-    // Where the document's content actually stops. Trailing empty paragraphs
-    // are a blank page nobody wrote.
-    let mut last = None;
-    for at in 0..children.length() {
-        let Some(child) = children
+
+    // Every place a mark could go, in order, with where it sits.
+    struct Spot {
+        group: usize,
+        item: usize,
+        top: f64,
+        bottom: f64,
+        empty: bool,
+    }
+    let mut flow: Vec<Spot> = Vec::new();
+    for at in 0..groups.length() {
+        let Some(group) = groups
             .item(at)
-            .and_then(|c| c.dyn_into::<web_sys::HtmlElement>().ok())
+            .and_then(|c| c.dyn_into::<web_sys::Element>().ok())
         else {
             continue;
         };
-        // `text_content`, NOT `inner_text`: the latter is what the browser
-        // RENDERS, and this copy is hidden, so it answers empty for every block
-        // and the whole measurement gives up. That shipped once and left every
-        // Word document with no page marks at all.
-        if !child.text_content().unwrap_or_default().trim().is_empty() {
-            last = Some(at);
+        let listish = matches!(group.tag_name().as_str(), "UL" | "OL");
+        let items = group.query_selector_all(":scope > li").ok();
+        match (listish, items) {
+            (true, Some(items)) if items.length() > 0 => {
+                for j in 0..items.length() {
+                    let Some(item) = items
+                        .item(j)
+                        .and_then(|c| c.dyn_into::<web_sys::Element>().ok())
+                    else {
+                        continue;
+                    };
+                    let rect = item.get_bounding_client_rect();
+                    flow.push(Spot {
+                        group: at as usize,
+                        item: j as usize,
+                        top: rect.top() - top_of,
+                        bottom: rect.bottom() - top_of,
+                        empty: is_blank(&item),
+                    });
+                }
+            }
+            _ => {
+                let rect = group.get_bounding_client_rect();
+                flow.push(Spot {
+                    group: at as usize,
+                    item: BEFORE_GROUP,
+                    top: rect.top() - top_of,
+                    bottom: rect.bottom() - top_of,
+                    empty: is_blank(&group),
+                });
+            }
         }
     }
-    let last = last?;
 
-    let mut marks: Vec<(usize, usize)> = Vec::new();
+    // Where the content actually stops. Trailing empty paragraphs are a blank
+    // page nobody wrote.
+    let last = flow.iter().rposition(|spot| !spot.empty)?;
+
+    let mut marks: Vec<(usize, usize, usize)> = Vec::new();
     let mut page = 1usize;
     let mut measured = 0.0f64;
-    for at in 0..=last {
-        let Some(child) = children
-            .item(at)
-            .and_then(|c| c.dyn_into::<web_sys::HtmlElement>().ok())
-        else {
-            continue;
-        };
-        let top = child.offset_top() as f64;
-        measured = top + child.offset_height() as f64;
+    for spot in flow.iter().take(last + 1) {
+        measured = spot.bottom;
         let mut began = false;
         while measured > page as f64 * height {
             page += 1;
             if !began {
                 // The page that begins here is the one after the marks already
-                // placed, NOT the page the height says: a block that swallowed
+                // placed, NOT the page the height says: anything that swallowed
                 // a boundary took its number with it.
-                marks.push((at as usize, marks.len() + 2));
+                marks.push((spot.group, spot.item, marks.len() + 2));
                 began = true;
             }
             // A document whose measuring went wrong should not spin.
@@ -2532,11 +2606,26 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize)>, usize)> {
                 return None;
             }
         }
+        let _ = spot.top;
     }
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
     (measured > 0.0).then_some((marks.clone(), marks.len() + 1))
 }
+
+/// Whether an element holds no words. `textContent`, NOT `innerText`: the
+/// latter is what the browser RENDERS, and this copy is hidden, so it answers
+/// empty for everything and the whole measurement gives up. That shipped once
+/// and left every Word document with no page marks at all.
+fn is_blank(element: &web_sys::Element) -> bool {
+    element.text_content().unwrap_or_default().trim().is_empty()
+}
+
+/// What Word means by SINGLE line spacing: the font's own line box, which for
+/// Calibri and the faces that stand in for it is about 1.22 times the size.
+/// CSS counts line height from the size instead, so every multiplier the
+/// document states has to be scaled by this to mean the same thing.
+const SINGLE_SPACING: f64 = 1.22;
 
 /// The value that turns up most often, to the nearest hundredth. What "the
 /// document's own" means for a measure it states per paragraph rather than once.

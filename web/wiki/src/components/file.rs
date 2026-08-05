@@ -1298,8 +1298,34 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                 }
             }
             div { class: "file-viewer",
-                if file_url.is_empty() {
-                    p { class: "body-medium", "{t(\"common.noContent\")}" }
+                // The readers that fetch their OWN bytes come first, because
+                // they do not use the url below and must not wait on it. It is
+                // presigned, and a signature that has not arrived -- or has
+                // failed -- left a document that could be read perfectly well
+                // showing "no content". Found by suppressing the signing call
+                // and watching the native PDF reader never mount.
+                if file_mime == "application/pdf" && PDF_VIEWER() == PdfViewer::Native {
+                    NativePdf { file_id: file_id.to_string(), name: name.to_string() }
+                } else if is_office_mime(file_mime) && OFFICE_VIEWER() == OfficeViewer::Native {
+                    // Same for Word, Excel, PowerPoint and ODF: each reads the
+                    // package itself with the session token. The HOSTED viewers
+                    // below do need the link, and they still wait for it.
+                    if file_mime == ODT {
+                        NativeOdt { file_id: file_id.to_string(), name: name.to_string() }
+                    } else if is_presentation(file_mime) {
+                        NativePptx { file_id: file_id.to_string(), name: name.to_string() }
+                    } else if is_spreadsheet(file_mime) {
+                        NativeXlsx { file_id: file_id.to_string(), name: name.to_string() }
+                    } else {
+                        NativeDocx { file_id: file_id.to_string(), name: name.to_string() }
+                    }
+                } else if file_url.is_empty() {
+                    // Still on its way, or it failed. A spinner is the truth
+                    // while it is on its way; "no content" said the file was
+                    // empty, which it is not.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "spinner spinner-sm" }
+                    }
                 } else if file_mime.starts_with("image/") {
                     super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
                 } else if file_mime.starts_with("video/") {
@@ -1329,22 +1355,6 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             div { class: "empty-state empty-state-sm",
                                 div { class: "spinner spinner-sm" }
                             }
-                        },
-                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                            && file_mime == ODT => rsx! {
-                            NativeOdt { file_id: file_id.to_string(), name: name.to_string() }
-                        },
-                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                            && is_presentation(file_mime) => rsx! {
-                            NativePptx { file_id: file_id.to_string(), name: name.to_string() }
-                        },
-                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                            && is_spreadsheet(file_mime) => rsx! {
-                            NativeXlsx { file_id: file_id.to_string(), name: name.to_string() }
-                        },
-                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                            && renders_natively(file_mime) => rsx! {
-                            NativeDocx { file_id: file_id.to_string(), name: name.to_string() }
                         },
                         OfficeLink::Ready(url) => {
                             let encoded = String::from(&js_sys::encode_uri_component(&url));
