@@ -2708,27 +2708,30 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
     // page nobody wrote.
     let last = flow.iter().rposition(|spot| !spot.empty)?;
 
+    // Filled a page at a time, not cut out of one long ribbon.
+    //
+    // The difference is what Word does at the bottom of a page: it moves a
+    // paragraph WHOLE rather than leaving a line of it stranded, and a table
+    // row the same. So a page ends early and the space under it is simply
+    // unused -- which a continuous measurement never accounts for, and which is
+    // why it read six tables as seven pages where Word makes eight, and put
+    // every break in a prose document one paragraph late.
+    //
+    // Each page therefore starts where the element that would not fit starts.
     let mut marks: Vec<(usize, usize, usize)> = Vec::new();
-    let mut page = 1usize;
+    let mut page_top = 0.0f64;
     let mut measured = 0.0f64;
     for spot in flow.iter().take(last + 1) {
         measured = spot.bottom;
-        let mut began = false;
-        while measured > page as f64 * height {
-            page += 1;
-            if !began {
-                // The page that begins here is the one after the marks already
-                // placed, NOT the page the height says: anything that swallowed
-                // a boundary took its number with it.
-                marks.push((spot.group, spot.item, marks.len() + 2));
-                began = true;
-            }
-            // A document whose measuring went wrong should not spin.
-            if page > 2000 {
+        // `top > page_top` keeps the first element of a page from starting
+        // another one: something taller than a whole page has to sit on one.
+        if spot.bottom - page_top > height && spot.top > page_top {
+            marks.push((spot.group, spot.item, marks.len() + 2));
+            page_top = spot.top;
+            if marks.len() > 2000 {
                 return None;
             }
         }
-        let _ = spot.top;
     }
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
