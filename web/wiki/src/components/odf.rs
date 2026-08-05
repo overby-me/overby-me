@@ -176,6 +176,9 @@ fn table_of(node: roxmltree::Node, styles: &HashMap<String, (bool, bool)>) -> Ta
         rows.push(Row {
             cells,
             is_header: false,
+            // An OpenDocument table says so per row too; nothing pages one of
+            // these yet, and Word's default is that a row may split.
+            cant_split: false,
         });
     }
     Table { rows }

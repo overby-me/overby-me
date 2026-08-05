@@ -263,6 +263,11 @@ pub struct Row {
     pub cells: Vec<Cell>,
     #[serde(default)]
     pub is_header: bool,
+    /// `w:cantSplit`: the document forbids Word to break this row across two
+    /// pages. Word splits a row by default, and where it splits one the page
+    /// below it is full rather than ending early.
+    #[serde(default)]
+    pub cant_split: bool,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
@@ -1332,7 +1337,7 @@ fn DocxBlock(
                                 }
                             }
                         }
-                        tr { key: "r{r}",
+                        tr { key: "r{r}", "data-cant-split": "{row.cant_split}",
                             for (c , cell) in row.cells.into_iter().enumerate() {
                                 // A cell covered by a merge from above is not
                                 // drawn; drawing it would push the row wider.
@@ -2040,6 +2045,7 @@ mod tests {
                         width_pt: None,
                     }],
                     is_header: false,
+                    cant_split: false,
                 }],
             }),
         ];
@@ -2901,6 +2907,10 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
         /// Word keeps this with whatever follows it -- every heading does -- so
         /// a page cannot end between the two.
         keeps_next: bool,
+        /// Whether Word carries the REST of this over the page rather than
+        /// moving it whole. A table row does, unless the document says it may
+        /// not; a paragraph does not, in this model.
+        splits: bool,
     }
     let mut flow: Vec<Spot> = Vec::new();
     for at in 0..groups.length() {
@@ -2936,6 +2946,8 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
                         bottom: rect.bottom() - top_of,
                         empty: is_blank(&item),
                         keeps_next: keeps_next(&item),
+                        splits: item.tag_name() == "TR"
+                            && item.get_attribute("data-cant-split").as_deref() != Some("true"),
                     });
                 }
             }
@@ -2948,6 +2960,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
                     bottom: rect.bottom() - top_of,
                     empty: is_blank(&group),
                     keeps_next: keeps_next(&group),
+                    splits: false,
                 });
             }
         }
@@ -2984,8 +2997,22 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
                 starts -= 1;
             }
             let begin = &flow[starts];
-            marks.push((begin.group, begin.item, marks.len() + 2));
-            page_top = begin.top;
+            // A table ROW is the exception: Word carries the rest of it over
+            // rather than moving the whole row, so the page ends where the page
+            // ends and the row continues on the next one. Moving it whole left
+            // the bottom of a page empty every time, which is a page in nine on
+            // a document that is six tables. The mark still goes on the row,
+            // because that is where the next page begins to be read -- and only
+            // once, for a row tall enough to cross two boundaries.
+            let carried = begin.splits && starts == at;
+            let already = marks.last().is_some_and(|m| (m.0, m.1) == (begin.group, begin.item));
+            if !already {
+                marks.push((begin.group, begin.item, marks.len() + 2));
+            }
+            page_top = match carried {
+                true => page_top + height,
+                false => begin.top,
+            };
             if marks.len() > 2000 {
                 return None;
             }
