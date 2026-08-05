@@ -7552,6 +7552,22 @@ pub fn execute_command(
             let remove_state = matches!(what, Some("state") | Some("all"));
             let remove_cache = matches!(what, None | Some("cache") | Some("all"));
             let remove_logs = matches!(what, Some("logs") | Some("all"));
+            let remove_fdstore = matches!(what, Some("fdstore") | Some("all"));
+
+            // clean --what=fdstore: release the service's stored file descriptors.
+            // A pinned store (FileDescriptorStorePreserve=yes) survives stop and
+            // leaves the unit in SubState=dead-resources-pinned; this is how that
+            // store is dropped, after which the unit reports plain "dead".
+            if remove_fdstore
+                && let Specific::Service(svc) = &unit.specific
+            {
+                let mut st = svc.state.write_poisoned();
+                if !st.srvc.stored_fds.is_empty() {
+                    for (_, fd) in st.srvc.stored_fds.drain(..) {
+                        let _ = nix::unistd::close(fd);
+                    }
+                }
+            }
 
             let mut removed = Vec::new();
 
@@ -10642,6 +10658,30 @@ pub fn execute_command(
             // recursive path below runs unchanged.
             if crate::entrypoints::dispatcher::global().is_some() {
                 stop_units_via_tree(&actual_names, irreversible, stop_jmode, &run_info)?;
+                // Release the fd store on a full stop unless pinned (=yes),
+                // mirroring the inline path below. `systemctl restart` goes
+                // through reactivate_unit, not this stop path, so restarts keep
+                // their fds; =restart and =no drop them here, leaving a pinned
+                // store in SubState=dead-resources-pinned until
+                // `systemctl clean --what=fdstore`.
+                {
+                    let ri = run_info.read_poisoned();
+                    for unit_name in &actual_names {
+                        for unit in find_units_with_name(unit_name, &ri.unit_table) {
+                            if let Specific::Service(svc) = &unit.specific
+                                && svc.conf.file_descriptor_store_preserve
+                                    != crate::units::FileDescriptorStorePreserve::Yes
+                            {
+                                let mut st = svc.state.write_poisoned();
+                                if !st.srvc.stored_fds.is_empty() {
+                                    for (_, fd) in st.srvc.stored_fds.drain(..) {
+                                        let _ = nix::unistd::close(fd);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 return Ok(result_vec);
             }
 
@@ -10752,6 +10792,27 @@ pub fn execute_command(
                         && path.starts_with("/run/systemd/transient")
                     {
                         let _ = std::fs::remove_file(path);
+                    }
+                    // Release the file-descriptor store on a full stop unless it
+                    // is pinned (FileDescriptorStorePreserve=yes). systemd keeps a
+                    // stopped unit's stored fds only when pinned; =restart and =no
+                    // discard them here. A restart goes through reactivate_unit,
+                    // not this Command::Stop path, so restarts keep their fds. A
+                    // pinned, non-empty store leaves the unit in SubState=
+                    // dead-resources-pinned until `systemctl clean --what=fdstore`.
+                    if let Some(unit) = run_info.unit_table.get(id)
+                        && let Specific::Service(svc) = &unit.specific
+                        && svc.conf.file_descriptor_store_preserve
+                            != crate::units::FileDescriptorStorePreserve::Yes
+                    {
+                        let mut st = svc.state.write_poisoned();
+                        if !st.srvc.stored_fds.is_empty() {
+                            let n = st.srvc.stored_fds.len();
+                            for (_, fd) in st.srvc.stored_fds.drain(..) {
+                                let _ = nix::unistd::close(fd);
+                            }
+                            trace!("Released {n} stored fd(s) for {} on stop", id.name);
+                        }
                     }
                     stop_job.finish(crate::units::jobs::JobResult::Done);
                 } // end for id in &ids_to_stop

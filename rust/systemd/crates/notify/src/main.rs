@@ -65,6 +65,17 @@ struct Cli {
     #[arg(long, value_name = "UID")]
     uid: Option<u32>,
 
+    /// Store the given file descriptor in the service manager's file
+    /// descriptor store. Sends FDSTORE=1 with the fd(s) attached via
+    /// SCM_RIGHTS. May be given more than once.
+    #[arg(long, value_name = "FD")]
+    fd: Vec<i32>,
+
+    /// Name to associate with the file descriptor(s) passed via --fd
+    /// (sent as FDNAME=...).
+    #[arg(long, value_name = "NAME")]
+    fdname: Option<String>,
+
     /// Do not synchronously wait for the notification to be processed.
     /// Currently a no-op for compatibility with the real systemd-notify.
     #[arg(long)]
@@ -165,6 +176,89 @@ fn send_notification(socket_path: &str, message: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Send a notification message with file descriptors attached via SCM_RIGHTS,
+/// matching `sd_pid_notify_with_fds()`. Used for FDSTORE=1, where the manager
+/// stores the passed descriptors in the service's file-descriptor store.
+fn send_notification_with_fds(socket_path: &str, message: &str, fds: &[i32]) -> Result<(), String> {
+    use std::os::unix::io::AsRawFd;
+
+    let sock = UnixDatagram::unbound()
+        .map_err(|e| format!("Failed to create Unix datagram socket: {e}"))?;
+    let sock_fd = sock.as_raw_fd();
+
+    // Build the destination sockaddr_un (regular path or abstract "@name").
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    let addr_len: libc::socklen_t = if let Some(stripped) = socket_path.strip_prefix('@') {
+        let name_bytes = stripped.as_bytes();
+        let max_len = addr.sun_path.len() - 1;
+        if name_bytes.len() > max_len {
+            return Err(format!(
+                "Abstract socket name too long: {} bytes (max {max_len})",
+                name_bytes.len()
+            ));
+        }
+        // sun_path[0] stays NUL for the abstract namespace.
+        for (i, &b) in name_bytes.iter().enumerate() {
+            addr.sun_path[i + 1] = b as libc::c_char;
+        }
+        (std::mem::size_of::<libc::sa_family_t>() + 1 + name_bytes.len()) as libc::socklen_t
+    } else {
+        let path_bytes = socket_path.as_bytes();
+        let max_len = addr.sun_path.len() - 1;
+        if path_bytes.len() > max_len {
+            return Err(format!(
+                "Socket path too long: {} bytes (max {max_len})",
+                path_bytes.len()
+            ));
+        }
+        for (i, &b) in path_bytes.iter().enumerate() {
+            addr.sun_path[i] = b as libc::c_char;
+        }
+        std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t
+    };
+
+    let msg_bytes = message.as_bytes();
+    let mut iov = libc::iovec {
+        iov_base: msg_bytes.as_ptr() as *mut libc::c_void,
+        iov_len: msg_bytes.len(),
+    };
+
+    let fds_bytes = std::mem::size_of_val(fds);
+    let cmsg_space = unsafe { libc::CMSG_SPACE(fds_bytes as libc::c_uint) } as usize;
+    let mut cmsg_buf = vec![0u8; cmsg_space];
+
+    let mut mhdr: libc::msghdr = unsafe { std::mem::zeroed() };
+    mhdr.msg_name = (&mut addr as *mut libc::sockaddr_un).cast();
+    mhdr.msg_namelen = addr_len;
+    mhdr.msg_iov = &mut iov;
+    mhdr.msg_iovlen = 1;
+    mhdr.msg_control = cmsg_buf.as_mut_ptr().cast();
+    mhdr.msg_controllen = cmsg_space as _;
+
+    unsafe {
+        let cmsg = libc::CMSG_FIRSTHDR(&mhdr);
+        if cmsg.is_null() {
+            return Err("Failed to build SCM_RIGHTS control message".to_string());
+        }
+        (*cmsg).cmsg_level = libc::SOL_SOCKET;
+        (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(fds_bytes as libc::c_uint) as _;
+        let data = libc::CMSG_DATA(cmsg).cast::<i32>();
+        for (i, &fd) in fds.iter().enumerate() {
+            std::ptr::write_unaligned(data.add(i), fd);
+        }
+        if libc::sendmsg(sock_fd, &mhdr, libc::MSG_NOSIGNAL) < 0 {
+            return Err(format!(
+                "Failed to send fds to {socket_path}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Check whether the system was booted with systemd.
 ///
 /// This checks for the existence of `/run/systemd/system/` which is
@@ -229,6 +323,15 @@ fn main() {
         parts.push(format!("MAINPID={pid}"));
     }
 
+    // --fd: request the manager store the given file descriptor(s). FDNAME=
+    // labels them; the fds themselves ride along as SCM_RIGHTS below.
+    if !cli.fd.is_empty() {
+        parts.push("FDSTORE=1".to_string());
+        if let Some(ref name) = cli.fdname {
+            parts.push(format!("FDNAME={name}"));
+        }
+    }
+
     // Separate variables from exec command (when --exec or --fork is used).
     // Arguments after ";" or "--" are the command; bare tokens without '='
     // under --exec/--fork are also treated as command words.
@@ -291,7 +394,12 @@ fn main() {
         // Real systemd-notify uses SCM_CREDENTIALS for this.
     }
 
-    if let Err(e) = send_notification(&socket_path, &message) {
+    let send_result = if cli.fd.is_empty() {
+        send_notification(&socket_path, &message)
+    } else {
+        send_notification_with_fds(&socket_path, &message, &cli.fd)
+    };
+    if let Err(e) = send_result {
         eprintln!("Error: {e}");
         process::exit(1);
     }

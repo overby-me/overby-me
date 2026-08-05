@@ -588,6 +588,26 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     "NFileDescriptorStore",
                     &state.srvc.stored_fds.len().to_string(),
                 );
+                // SubState=dead-resources-pinned: a stopped service keeps its fd
+                // store only when pinned (FileDescriptorStorePreserve=yes). While
+                // that pinned store is non-empty and the unit is inactive, systemd
+                // reports this distinct substate instead of plain "dead", until the
+                // store is released (e.g. `systemctl clean --what=fdstore`). This
+                // overrides the "dead" set by insert_status() earlier. Reading the
+                // unit status while holding the service-state guard follows the
+                // service-state -> unit-status lock order the writers use (see the
+                // Status block above), so it does not deadlock.
+                let unit_is_inactive = matches!(
+                    &*unit.common.status.read_poisoned(),
+                    UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                );
+                if svc.conf.file_descriptor_store_preserve
+                    == crate::units::FileDescriptorStorePreserve::Yes
+                    && !state.srvc.stored_fds.is_empty()
+                    && unit_is_inactive
+                {
+                    insert(&mut props, "SubState", "dead-resources-pinned");
+                }
                 // ExtraFileDescriptorNames is the space-separated list of
                 // FD names registered via StartTransientUnit's
                 // ExtraFileDescriptors property. We reuse stored_fds for
