@@ -16,12 +16,14 @@
  * font-family falls back to the system stack below if a face fails to load. */
 
 :root {
-	/* What SINGLE line spacing means, as a multiple of the font size. Declared
-	   here and MEASURED at runtime from the face a Word document is set in
-	   (see components::docx): Calibri's line box is about 1.22 and Times New
-	   Roman's about 1.15. Declaring it on `.docx-measure` instead shadowed the
-	   measured value, which is a quiet way to ignore an answer. */
-	--docx-single-spacing: 1.22;
+	/* What SINGLE line spacing means in each of the two faces a Word document
+	   is measured in, as a multiple of the font size. Declared here and
+	   MEASURED at runtime (see components::docx): Calibri's line box is about
+	   1.22 and Times New Roman's about 1.15. Declaring them next to what reads
+	   them shadowed the measured values, which is a quiet way to ignore an
+	   answer. */
+	--single-sans: 1.22;
+	--single-serif: 1.15;
 	/* Per-level indentation step for the drawer node tree (see drawer.rs), kept
 	   here so the nesting rhythm is tuned in one place. */
 	--nav-indent-step: 14px;
@@ -8225,7 +8227,11 @@ a.list-item:hover {
 	/* The multiplier the paragraph states, times what SINGLE spacing means in
 	   the face this document is set in -- measured from the face itself, since
 	   Calibri's line box is 1.22 and Times New Roman's 1.15. */
-	line-height: calc(var(--p-line, 1.08) * var(--docx-single-spacing, 1.22)) !important;
+	/* The paragraph's own face, and the line box of THAT face: what Word calls
+	   single spacing belongs to the typeface, and a document may set its body
+	   in one and its lists in another. */
+	font-family: var(--p-face, Carlito, Calibri, sans-serif) !important;
+	line-height: calc(var(--p-line, 1.08) * var(--p-single, var(--single-sans, 1.22))) !important;
 }
 /* A list Word closes up: the space under an item goes only when the NEXT item
    is closed up too, which is what `contextualSpacing` means and why it cannot
@@ -8249,6 +8255,8 @@ a.list-item:hover {
 	--p-size: 1em;
 	--p-before: 0;
 	--p-after: 8pt;
+	--p-face: Carlito, Calibri, sans-serif;
+	--p-single: var(--single-sans, 1.22);
 	position: absolute;
 	left: -10000px;
 	top: 0;

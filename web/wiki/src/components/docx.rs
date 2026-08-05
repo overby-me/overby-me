@@ -910,6 +910,24 @@ pub fn paragraph_style(p: &Paragraph) -> String {
     if let Some(pt) = p.default_font_size.filter(|v| *v > 0.0) {
         css.push_str(&format!("--p-size:{pt:.2}pt;"));
     }
+    // And the face, per paragraph. Not one face for the document: a document
+    // whose list style is Cambria and whose body is Calibri is most of the
+    // corpus, and measuring all of it in whichever face is commonest gets the
+    // other one wrong. The line box comes with it -- what Word calls single
+    // spacing is a property of the face, and the two shipped faces have theirs
+    // measured at runtime.
+    if let Some(named) = p
+        .default_font_family
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+    {
+        css.push_str(&format!("--p-face:{};", measuring_face(Some(named))));
+        css.push_str(match is_serif(named) {
+            true => "--p-single:var(--single-serif);",
+            false => "--p-single:var(--single-sans);",
+        });
+    }
     let line = match p.line_spacing.as_ref() {
         Some(ls) if ls.rule == "auto" && ls.value > 0.0 => ls.value,
         // Stating none is stating single.
@@ -2729,12 +2747,16 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
         // one turn of the event loop afterwards.
         let face = face.clone();
         spawn(async move {
+            // Both faces this app measures in, because a document may use
+            // both: its body in one and its lists in the other.
+            wait_for_the_face(asked_for, "Carlito").await;
+            wait_for_the_face(asked_for, "Liberation Serif").await;
             wait_for_the_face(asked_for, &face).await;
-            // What SINGLE spacing means in the face this document is set in.
-            // Measured, not assumed: Calibri's line box is about 1.22 times its
-            // size and Times New Roman's about 1.15, and a Times document
-            // measured with Calibri's came out a tenth too tall -- a page.
-            set_single_spacing(single_spacing(&face));
+            // What SINGLE spacing means in each. Measured, not assumed:
+            // Calibri's line box is about 1.22 times its size and Times New
+            // Roman's about 1.15, and a document states its line spacing as a
+            // multiple of whichever its text is set in.
+            set_single_spacing(single_spacing("Carlito"), single_spacing("Liberation Serif"));
             let Some((found, count)) = measure_pages(height) else {
                 return;
             };
@@ -2982,7 +3004,7 @@ fn single_spacing(face: &str) -> f64 {
 
 /// Tell the stylesheet what single spacing is for this document, so the line
 /// height every paragraph states can be scaled by it.
-fn set_single_spacing(single: f64) {
+fn set_single_spacing(sans: f64, serif: f64) {
     let Some(root) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.document_element())
@@ -2990,9 +3012,9 @@ fn set_single_spacing(single: f64) {
     else {
         return;
     };
-    let _ = root
-        .style()
-        .set_property("--docx-single-spacing", &format!("{single:.4}"));
+    let style = root.style();
+    let _ = style.set_property("--single-sans", &format!("{sans:.4}"));
+    let _ = style.set_property("--single-serif", &format!("{serif:.4}"));
 }
 
 /// Whether Word keeps this element on the same page as the one after it.
@@ -3015,12 +3037,17 @@ fn is_blank(element: &web_sys::Element) -> bool {
 /// name, for a reader who does have it, then the generic. Two faces cover what
 /// this wiki holds; anything else falls back to Calibri's, which is what Word
 /// itself defaults to.
+/// Whether a face is one of the serifs these documents use. Their line boxes
+/// and their widths differ from Calibri's enough to move a page break.
+fn is_serif(name: &str) -> bool {
+    ["times new roman", "times", "georgia", "cambria", "garamond"]
+        .iter()
+        .any(|serif| name.eq_ignore_ascii_case(serif))
+}
+
 fn measuring_face(named: Option<&str>) -> String {
     let name = named.map(str::trim).unwrap_or("");
-    let serif = name.eq_ignore_ascii_case("times new roman")
-        || name.eq_ignore_ascii_case("times")
-        || name.eq_ignore_ascii_case("georgia")
-        || name.eq_ignore_ascii_case("cambria");
+    let serif = is_serif(name);
     match (serif, name.is_empty()) {
         (true, _) => format!("'Liberation Serif', '{name}', serif"),
         (false, true) => "Carlito, Calibri, sans-serif".to_string(),
