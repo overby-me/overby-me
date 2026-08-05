@@ -2915,6 +2915,12 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize)> {
 /// document for -- the measurement simply happens in whatever the browser has,
 /// which is what it did before this font was shipped.
 async fn wait_for_the_face(size: f64, face: &str) {
+    // The FIRST family, not the stack. `fonts.load` is satisfied by any family
+    // in a list that already resolves -- the generic at the end always does --
+    // so asking for the stack returns at once and the face this is measured in
+    // is still on its way. A Calibri document then measured with the fallback's
+    // line box and lost a page.
+    let face = first_family(face);
     let Some(fonts) = web_sys::window()
         .and_then(|w| w.document())
         .map(|d| d.fonts())
@@ -2924,6 +2930,19 @@ async fn wait_for_the_face(size: f64, face: &str) {
     let _ = wasm_bindgen_futures::JsFuture::from(fonts.load(&format!("{size}pt {face}"))).await;
 }
 
+/// The first family named in a font stack, which is the one that decides how
+/// the text is laid out when it is there.
+fn first_family(stack: &str) -> String {
+    stack
+        .split(',')
+        .next()
+        .unwrap_or(stack)
+        .trim()
+        .trim_matches('\'')
+        .trim_matches('"')
+        .to_string()
+}
+
 /// The line box of a face, as a multiple of its size: what Word calls SINGLE
 /// spacing. Measured by laying one line out in it and asking how tall the line
 /// came out, which is the only way to know it for a face rather than assume it.
@@ -2931,6 +2950,10 @@ fn single_spacing(face: &str) -> f64 {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return SINGLE_SPACING;
     };
+    // The face itself, quoted, rather than the stack: measuring the stack
+    // measures whichever member happens to be resolvable, and the generic at
+    // the end always is.
+    let face = format!("'{}'", first_family(face));
     let Ok(probe) = document.create_element("div") else {
         return SINGLE_SPACING;
     };
