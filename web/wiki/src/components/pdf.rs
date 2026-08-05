@@ -160,6 +160,20 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                 | (Block::Anchor(_), Block::ListItem { .. } | Block::IndexEntry { .. })
         )
     }
+    // Whether the document numbers its own pages at all. Where it does, a page
+    // that prints no number is not given the file's sheet number instead: the
+    // songbook ends on an unnumbered back cover, and counting it made the
+    // control read 104 on a document whose last page is 99. Where it does not,
+    // the sheet numbers are all there is, and they are better than nothing.
+    let numbered = doc.blocks.iter().any(|b| {
+        matches!(
+            b,
+            Block::PageBreak {
+                printed: Some(_),
+                ..
+            }
+        )
+    });
     let mut groups: Vec<Vec<Block>> = Vec::new();
     for block in doc.blocks.iter() {
         // Against the run's KIND rather than its last block, so a run of items
@@ -306,8 +320,15 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             class: "pdf-page-break",
                             role: "separator",
                             // The page that BEGINS here, which is the page a
-                            // reader arriving at this mark is on.
-                            "data-page": "{starts.clone().unwrap_or_else(|| (ended + 1).to_string())}",
+                            // reader arriving at this mark is on. Absent when
+                            // that page prints no number in a document that
+                            // numbers its pages: an unnumbered back cover is not
+                            // page 104 of a book whose last page is 99.
+                            "data-page": match (starts.clone(), numbered) {
+                                (Some(page), _) => page,
+                                (None, false) => (ended + 1).to_string(),
+                                (None, true) => String::new(),
+                            },
                             span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
                         }
                     },
@@ -456,7 +477,9 @@ fn pages_on_screen() -> Vec<(f64, String)> {
         let Ok(element) = node.dyn_into::<web_sys::Element>() else {
             continue;
         };
-        let Some(label) = element.get_attribute("data-page") else {
+        // A mark with no number on it is a page the document does not number,
+        // and there is nothing for the control to say about it.
+        let Some(label) = element.get_attribute("data-page").filter(|l| !l.is_empty()) else {
             continue;
         };
         out.push((element.get_bounding_client_rect().top() + scrolled, label));
@@ -466,6 +489,9 @@ fn pages_on_screen() -> Vec<(f64, String)> {
 
 /// Take the reader to a page by the number the page calls itself.
 fn go_to_page(label: &str) {
+    if label.is_empty() {
+        return;
+    }
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -540,7 +566,20 @@ fn PageControl(first: String, last: String) -> Element {
         }
     }));
 
-    let step = move |by: i32| {
+    // Where a jump is taking the reader, said straight away rather than waited
+    // for. The scroll is what this otherwise learns from, and it is watched a
+    // percent at a time: one page of a hundred moves it by about one, so a step
+    // often left the control still holding the page it had just left, and the
+    // next press worked out the same answer and went nowhere. Pressing forward
+    // twice moved one page.
+    let mut arrive = move |label: &str| {
+        go_to_page(label);
+        if *here.read() != label {
+            here.set(label.to_string());
+        }
+    };
+
+    let mut step = move |by: i32| {
         let marks = pages.read().clone();
         let now = here.read().clone();
         match marks.iter().position(|(_, l)| *l == now) {
@@ -548,14 +587,14 @@ fn PageControl(first: String, last: String) -> Element {
             Some(at) => {
                 let next = (at as i32 + by).clamp(0, marks.len() as i32 - 1) as usize;
                 if let Some((_, label)) = marks.get(next) {
-                    go_to_page(label);
+                    arrive(label);
                 }
             }
             // On the first page, which has no mark: forward is the first mark,
             // and there is nothing behind it to go back to.
             None if by > 0 => {
                 if let Some((_, label)) = marks.first() {
-                    go_to_page(label);
+                    arrive(label);
                 }
             }
             None => crate::components::back_to_top::scroll_to_top(),
@@ -566,7 +605,7 @@ fn PageControl(first: String, last: String) -> Element {
         let wanted = typed.read().trim().to_string();
         typing.set(false);
         if !wanted.is_empty() {
-            go_to_page(&wanted);
+            arrive(&wanted);
         }
     };
 
