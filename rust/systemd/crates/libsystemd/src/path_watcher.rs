@@ -20,6 +20,7 @@
 use log::{debug, info, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::os::fd::{AsFd, AsRawFd};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -137,6 +138,26 @@ impl PathInotify {
             let key = (unit_name.to_owned(), ci);
             if self.active_conditions.contains_key(&key) {
                 continue;
+            }
+            // MakeDirectory=yes: create the watched directory with DirectoryMode=
+            // before arming the watch, so a direct watch is established rather than
+            // only a parent watch. PathExists=/PathExistsGlob= watch a path that is
+            // not necessarily a directory, so they are skipped (matches upstream
+            // path_spec_mkdir, which returns early for PATH_EXISTS/PATH_EXISTS_GLOB).
+            if conf.make_directory
+                && !matches!(
+                    condition,
+                    PathCondition::PathExists(_) | PathCondition::PathExistsGlob(_)
+                )
+            {
+                let dir = condition.path();
+                if let Err(e) = std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(conf.directory_mode)
+                    .create(dir)
+                {
+                    warn!("path unit {unit_name}: MakeDirectory mkdir({dir}) failed: {e}");
+                }
             }
             self.add_watch_for_condition(unit_name, ci, condition);
         }
