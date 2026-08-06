@@ -450,7 +450,17 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                         "start-limit-hit"
                     } else {
                         match &*status {
-                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                // A signal death reports "signal" (upstream also
+                                // distinguishes "core-dump", which we cannot yet
+                                // since ChildTermination drops the dumped bit).
+                                match state.srvc.main_exit_termination {
+                                    Some(crate::signal_handler::ChildTermination::Signal(_)) => {
+                                        "signal"
+                                    }
+                                    _ => "exit-code",
+                                }
+                            }
                             _ => "success",
                         }
                     };

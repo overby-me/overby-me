@@ -23,11 +23,24 @@
                    [[ "$(findmnt --mountpoint /proc --noheadings -o VFS-OPTIONS)" =~ nodev ]]
                    [[ "$(findmnt --mountpoint /proc --noheadings -o VFS-OPTIONS)" =~ noexec ]]'
 
-    # NOTE (2026-08-05): upstream testcase_basic also SIGKILLs the namespace PID 1
-    # and asserts Result=signal / ExecMainStatus=9. That is NOT included here: a
-    # SIGKILL of a PrivatePIDs=yes (CLONE_NEWPID) main is currently recorded as
-    # Result=exit-code, not signal -- a real exit-status-handling gap for the
-    # PID-namespace child (see docs/TEST-OVERRIDES.md). Left out until fixed.
+    : "upstream testcase_basic: SIGKILL of the namespace PID 1 records Result=signal"
+    KUNIT="private-pids-kill-$RANDOM"
+    systemd-run --unit="$KUNIT" -p PrivatePIDs=yes sleep infinity
+    for _ in $(seq 1 50); do
+        [[ "$(systemctl is-active "$KUNIT.service" 2>/dev/null)" == active ]] && break
+        sleep 0.2
+    done
+    systemctl is-active "$KUNIT.service"
+    systemctl kill -s KILL "$KUNIT.service"
+    for _ in $(seq 1 50); do
+        [[ "$(systemctl is-active "$KUNIT.service" 2>/dev/null)" == failed ]] && break
+        sleep 0.2
+    done
+    # A SIGKILL of a PrivatePIDs=yes (CLONE_NEWPID) main is now recorded as a
+    # signal death, not exit-code (ExecMainStatus is the signal number 9).
+    assert_eq "$(systemctl show -P Result "$KUNIT.service")" "signal"
+    assert_eq "$(systemctl show -P ExecMainStatus "$KUNIT.service")" "9"
+    systemctl reset-failed "$KUNIT.service" 2>/dev/null || true
     PPEOF
   '';
 }
