@@ -760,6 +760,17 @@ fn start_service_with_filedescriptors(
             }
             env.push(("NOTIFY_SOCKET".to_owned(), notifications_path));
 
+            // FDSTORE — the file descriptor store capacity, exported when
+            // FileDescriptorStoreMax > 0 so a service can discover how many fds
+            // it may push via FDSTORE=1 sd_notify (upstream exec_context sets
+            // FDSTORE=n_fd_store_max).
+            if conf.file_descriptor_store_max > 0 {
+                env.push((
+                    "FDSTORE".to_owned(),
+                    conf.file_descriptor_store_max.to_string(),
+                ));
+            }
+
             // INVOCATION_ID — a unique 128-bit identifier for each service
             // invocation, formatted as lowercase hex without dashes.
             {
