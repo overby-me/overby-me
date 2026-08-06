@@ -192,6 +192,24 @@ pub fn LastPageMark(page: String) -> Element {
     }
 }
 
+/// Whether the reader has reached the end of the document.
+///
+/// The tolerance is a PERCENT of the scroll, not a pixel or two, because a
+/// percent is the resolution of the thing that wakes this: the reckoning runs
+/// when the scroll's integer percent changes, and the scroll itself is smooth,
+/// so the last run before the end can be a whole percent short of it. On a
+/// document of seventeen hundred pixels that is nine, and the reader sitting at
+/// the very bottom was told they were on the page above -- the one page this
+/// branch exists to get right, since a last page shorter than the window can
+/// never be scrolled to the top of itself.
+fn reached_the_end(scrolled: f64, seen: f64, tall: f64) -> bool {
+    if tall <= 0.0 {
+        return false;
+    }
+    let scrollable = (tall - seen).max(1.0);
+    scrolled + seen >= tall - (scrollable / 100.0).max(2.0)
+}
+
 fn page_here(pages: &[(f64, String)], first: &str) -> String {
     let Some(window) = web_sys::window() else {
         return first.to_string();
@@ -207,10 +225,13 @@ fn page_here(pages: &[(f64, String)], first: &str) -> String {
         .and_then(|d| d.document_element())
         .map(|e| e.scroll_height() as f64)
         .unwrap_or(0.0);
-    // Within a pixel or two of the end counts as the end: a fractional device
-    // pixel ratio leaves the last scroll a hair short of the arithmetic.
-    let at_bottom = tall > 0.0 && scrolled + seen >= tall - 2.0;
-    page_at(pages, first, scrolled, landing_allowance(), at_bottom)
+    page_at(
+        pages,
+        first,
+        scrolled,
+        landing_allowance(),
+        reached_the_end(scrolled, seen, tall),
+    )
 }
 
 /// Where in the document the reader is, and how to go somewhere else.
@@ -378,7 +399,29 @@ pub fn PageControl(first: String, last: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::{page_at, step_to};
+    use super::{page_at, reached_the_end, step_to};
+
+    #[test]
+    fn the_end_is_reached_a_percent_before_the_last_pixel() {
+        // The reckoning wakes on the scroll's integer PERCENT, and the scroll
+        // is smooth: its last run before the end sat four pixels short of a
+        // seventeen-hundred-pixel document, and a two-pixel tolerance called
+        // that "not the end". The reader was at the bottom looking at the last
+        // page and the control said the page above.
+        assert!(reached_the_end(855.0, 857.0, 1716.0));
+        assert!(reached_the_end(859.0, 857.0, 1716.0));
+        // A percent of a LONG document is a lot of pixels, and that is still
+        // the right tolerance: the branch this feeds only matters when the last
+        // page is shorter than the window.
+        assert!(reached_the_end(19_000.0, 900.0, 19_950.0));
+        // The middle of a document is not its end, however long it is.
+        assert!(!reached_the_end(500.0, 857.0, 1716.0));
+        assert!(!reached_the_end(9_000.0, 900.0, 19_950.0));
+        // A document shorter than the window is entirely on screen.
+        assert!(reached_the_end(0.0, 857.0, 400.0));
+        // Nothing measured yet is not the end either.
+        assert!(!reached_the_end(0.0, 857.0, 0.0));
+    }
 
     fn songbook() -> Vec<String> {
         // What the songbook offers: its numbered pages, three to ninety-nine.
