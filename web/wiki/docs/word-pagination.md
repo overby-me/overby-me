@@ -44,6 +44,13 @@ Each of these was wrong at some point, and each was worth a page or more:
   this wrong in both directions.
 - **A table row is the exception**: Word carries the rest of a row onto the next
   page unless `cantSplit` forbids it, so a page that ends inside a row is full.
+- **An empty paragraph is a line.** Word gives it the line of its paragraph
+  mark, and half these documents space their sections with runs of them; an
+  empty block in CSS is half a line or none. Four blanks before a heading came
+  to a paragraph less than the page holds.
+- **The space under a page's last paragraph falls off the page.** Word puts a
+  paragraph on the page when its LINES fit and cuts the space after it at the
+  page edge, so the fit test asks where the text ends, not where the box does.
 - **The layout has to have settled.** A font's `load` resolving is not the same
   as the document having been laid out again in it. The measurement waits for
   `fonts.ready` and then measures twice a frame apart, accepting the answer only
@@ -57,28 +64,31 @@ build and compares both halves of the answer — how many pages, and what each
 page begins with — against what Word recorded in the files themselves
 (`lastRenderedPageBreak`, the note Word leaves where it last drew a break).
 
-Four of the five match Word exactly, including both of the assembly's own.
+Four of the five match Word exactly, including both of the assembly's own. So
+does `indstillinger` under Ekstraordinært landsmøde, which is checked by hand
+(the test account is not a member of that context).
 
 ## The one that does not, and why
 
-`evaluering_af_fu_og_posk´s_arbejdsprogram` is six tables and little else. Its
-page count is Word's (8) and its first four pages begin where Word begins them;
-the last three begin one or two table rows later.
+`evaluering_af_fu_og_posk´s_arbejdsprogram` is six tables and eighty-five blank
+paragraphs. It measures 9 pages where Word makes 8, and four of its breaks are
+Word's. Every page it produces is packed to the full 896px, and the document
+measures 8.26 pages of ink — so no better filling can make it 8: about 230px of
+its content is taller here than in Word.
 
-Two things are structural rather than fixable by measuring harder:
+It read 8 before the blank-paragraph fix below, and that was luck: blank
+paragraphs measured half a line, which cancelled the excess. Two known
+structural limits remain in this document, both of them about tables:
 
-1. **Word breaks inside a row.** Four of that document's eight pages begin
-   partway down a row, in the third cell. HTML has nowhere to put a page mark
-   inside a table row, so the mark goes on the row — the reader lands at the top
-   of the row whose text the page begins in, which is as close as this rendering
-   can be.
-2. **Word leaves the bottom of a page empty** before the section heading that
-   introduces the fifth table, with room to spare for the heading and two rows.
-   No property in the file accounts for it: there is no `pageBreakBefore`, no
-   `cantSplit`, and the keep-with-next chain from the heading is short enough to
-   fit. Either Word has a keep rule not written in the file, or that document's
-   cached break hints are stale — they are a record of the last time Word drew
-   it, not a promise about the text as it stands now.
+1. **Word breaks inside a row.** Four of that document's pages begin partway
+   down a row, in the third cell. HTML has nowhere to put a page mark inside a
+   table row, so the mark goes on the row — the reader lands at the top of the
+   row whose text the page begins in, which is as close as this rendering can
+   be.
+2. **Something in its tables measures too tall**, by about a quarter of a page
+   over six tables. Its fifty-three in-cell blank paragraphs are the obvious
+   suspect (Word gives an empty paragraph a line, and so does this now), but
+   that is a guess until it is measured cell by cell.
 
 LibreOffice was tried as a second opinion and is not one: converting the same
 file to PDF gives **ten** pages, against Word's eight and this app's eight. Its
