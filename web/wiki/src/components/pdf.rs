@@ -371,6 +371,12 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     None => rsx! {},
                 }
             }
+            // The last page's number, which the file itself never marks: its
+            // breaks sit BETWEEN pages, so the number of the page after the
+            // last break is nowhere on the document.
+            if doc.pages > 1 {
+                super::pager::LastPageMark { page: last_page(&doc) }
+            }
             // Where the reader is, and how to go elsewhere. Only for a document
             // with more than one page: a single page has nowhere to go.
             if doc.pages > 1 {

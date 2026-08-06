@@ -173,6 +173,25 @@ fn landing_allowance() -> f64 {
         .unwrap_or(0.0)
 }
 
+/// The rule at the foot of the LAST page, carrying its number.
+///
+/// Every other page's number is drawn where that page ENDS, on the hairline
+/// between it and the next one. The last page has no next one, so its number
+/// was the single number a reader could never see on the document itself --
+/// they could reach the last page and still not know what it is called, which
+/// is the number wanted when someone says "it is on the last page".
+///
+/// It carries no `data-page`, because nothing begins here: a mark that claimed
+/// to would add a page to the control with nothing on it.
+#[component]
+pub fn LastPageMark(page: String) -> Element {
+    rsx! {
+        div { class: "pdf-page-break pdf-page-last", role: "separator",
+            span { "{page}" }
+        }
+    }
+}
+
 fn page_here(pages: &[(f64, String)], first: &str) -> String {
     let Some(window) = web_sys::window() else {
         return first.to_string();

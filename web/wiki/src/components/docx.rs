@@ -2882,6 +2882,10 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
         }
         DocxBody { blocks, marks: marks() }
         if pages() > 1 {
+            // The last page's own number, which no mark inside the document can
+            // carry: every other one is drawn where a page ends and the next
+            // begins.
+            super::pager::LastPageMark { page: pages().to_string() }
             super::pager::PageControl { first: "1".to_string(), last: pages().to_string() }
         }
     }

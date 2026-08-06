@@ -8347,6 +8347,14 @@ a.list-item:hover {
 .docx-page-row .pdf-page-break {
 	margin: var(--md-sys-spacing-2) 0;
 }
+/* The rule at the foot of the LAST page. It marks an ending and nothing after
+   it, so it keeps the hairline and the number and gives up the landing place:
+   there is no page below it to turn to. */
+.pdf-page-last {
+	scroll-margin-top: 0;
+	margin-bottom: var(--md-sys-spacing-2);
+}
+
 /* What a jump actually aims at: the first thing on the page being turned to. */
 .pdf-page-break + * {
 	scroll-margin-top: var(--toc-scroll-margin, 5rem);
