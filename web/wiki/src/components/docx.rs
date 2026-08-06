@@ -2925,6 +2925,12 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
         item: usize,
         top: f64,
         bottom: f64,
+        /// Where its TEXT ends -- the bottom without the space under it. Word
+        /// cuts that space at the foot of a page: what has to fit is the last
+        /// line, not the gap after it. A page of thirty-two uniform paragraphs
+        /// held one too few without this, every one of the eight points under
+        /// the last of them counting against the page.
+        ends: f64,
         empty: bool,
         /// Word keeps this with whatever follows it -- every heading does -- so
         /// a page cannot end between the two.
@@ -2966,6 +2972,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
                         item: j as usize,
                         top: rect.top() - top_of,
                         bottom: rect.bottom() - top_of,
+                        ends: rect.bottom() - top_of - space_under(&item),
                         empty: is_blank(&item),
                         keeps_next: keeps_next(&item),
                         splits: item.tag_name() == "TR"
@@ -2980,6 +2987,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
                     item: BEFORE_GROUP,
                     top: rect.top() - top_of,
                     bottom: rect.bottom() - top_of,
+                    ends: rect.bottom() - top_of - space_under(&group),
                     empty: is_blank(&group),
                     keeps_next: keeps_next(&group),
                     splits: false,
@@ -3009,7 +3017,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
         measured = spot.bottom;
         // `top > page_top` keeps the first element of a page from starting
         // another one: something taller than a whole page has to sit on one.
-        if spot.bottom - page_top > height && spot.top > page_top {
+        if spot.ends - page_top > height && spot.top > page_top {
             // A heading goes down with the text it introduces. Word keeps them
             // together, so the page ends ABOVE the heading, not between it and
             // its paragraph -- which is why a document whose sections all begin
@@ -3168,6 +3176,21 @@ fn set_single_spacing() {
         let name = measured.single().trim_start_matches("var(").trim_end_matches(')');
         let _ = style.set_property(name, &format!("{:.4}", single_spacing(measured.family())));
     }
+}
+
+/// The space UNDER an element, which the measuring copy carries as padding so
+/// that it adds to the space over the next one the way Word's does rather than
+/// collapsing into it.
+///
+/// Read back off here because a page's last paragraph does not have to make
+/// room for it: Word puts the paragraph on the page if its lines fit and cuts
+/// the space at the page edge.
+fn space_under(element: &web_sys::Element) -> f64 {
+    web_sys::window()
+        .and_then(|w| w.get_computed_style(element).ok().flatten())
+        .and_then(|style| style.get_property_value("padding-bottom").ok())
+        .and_then(|value| value.trim_end_matches("px").parse::<f64>().ok())
+        .unwrap_or(0.0)
 }
 
 /// Whether Word keeps this element on the same page as the one after it.
