@@ -723,13 +723,6 @@ pub fn parse_unit_section(
 
     // Merge explicit deps with implicit mount deps from RequiresMountsFor=
     let mut requires_list = map_tuples_to_second(split_list_values(requires.unwrap_or_default()));
-    // Add Requisite= deps to requires (they also need After= semantics at runtime,
-    // but for ordering purposes they go into the requires list here)
-    for name in &requisite_list {
-        if !requires_list.contains(name) {
-            requires_list.push(name.clone());
-        }
-    }
     for name in mount_unit_requires {
         if !requires_list.contains(&name) {
             requires_list.push(name);
@@ -740,6 +733,13 @@ pub fn parse_unit_section(
     for name in mount_unit_after {
         if !after_list.contains(&name) {
             after_list.push(name);
+        }
+    }
+    // Requisite= implies After= ordering, but (unlike Requires=) does NOT pull
+    // the dep in. Whether it is already active is enforced at activation time.
+    for name in &requisite_list {
+        if !after_list.contains(name) {
+            after_list.push(name.clone());
         }
     }
 

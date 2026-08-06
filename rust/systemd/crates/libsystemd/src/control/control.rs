@@ -5059,6 +5059,7 @@ fn create_transient_unit(
                 wants: dep_wants.iter().map(|n| unit_id_from_name(n)).collect(),
                 wanted_by: vec![],
                 requires: dep_requires.iter().map(|n| unit_id_from_name(n)).collect(),
+                requisite: vec![],
                 required_by: vec![],
                 conflicts: vec![],
                 conflicted_by: vec![],
@@ -5401,6 +5402,7 @@ fn create_transient_unit(
                     wanted_by: vec![],
                     requires: vec![],
                     required_by: vec![],
+                    requisite: vec![],
                     conflicts: vec![],
                     conflicted_by: vec![],
                     before: vec![],
@@ -5562,6 +5564,7 @@ fn create_transient_unit(
                     wanted_by: vec![],
                     requires: vec![],
                     required_by: vec![],
+                    requisite: vec![],
                     conflicts: vec![],
                     conflicted_by: vec![],
                     before: vec![],
@@ -9797,6 +9800,33 @@ pub fn execute_command(
                         "Operation refused, unit {unit_name} may be requested by dependency only (it is configured to refuse manual start/stop)."
                     ));
                 }
+                // Requisite=: listed units must ALREADY be active (they are not
+                // pulled in like Requires=), so refuse the start if any is not.
+                let unmet_requisite: Vec<String> = {
+                    let ri = run_info.read_poisoned();
+                    match ri.unit_table.get(&id) {
+                        Some(u) => u
+                            .common
+                            .dependencies
+                            .requisite
+                            .iter()
+                            .filter(|req| {
+                                !ri.unit_table
+                                    .get(req)
+                                    .map(|ru| ru.common.status.read_poisoned().is_started())
+                                    .unwrap_or(false)
+                            })
+                            .map(|req| req.name.clone())
+                            .collect(),
+                        None => Vec::new(),
+                    }
+                };
+                if !unmet_requisite.is_empty() {
+                    return Err(format!(
+                        "Unit {unit_name} may only be started if {} is already active (Requisite=).",
+                        unmet_requisite.join(", ")
+                    ));
+                }
                 // Installed for the whole inline start of this unit; the
                 // failure paths below return early, which drops the handle
                 // and finishes the job as failed.
@@ -12225,6 +12255,7 @@ mod tests {
                     wanted_by: vec![],
                     requires: vec![],
                     required_by: vec![],
+                    requisite: vec![],
                     conflicts: vec![],
                     conflicted_by: vec![],
                     before: vec![],

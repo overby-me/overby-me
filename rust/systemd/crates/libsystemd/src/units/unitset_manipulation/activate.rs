@@ -419,6 +419,36 @@ pub fn activate_unit(
         }
     }
 
+    // Requisite=: every listed unit must ALREADY be active. Unlike Requires=,
+    // they are not pulled in — if any is inactive, this start fails.
+    {
+        let unmet: Vec<UnitId> = unit
+            .common
+            .dependencies
+            .requisite
+            .iter()
+            .filter(|req_id| {
+                !run_info
+                    .unit_table
+                    .get(req_id)
+                    .map(|u| u.common.status.read_poisoned().is_started())
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        if !unmet.is_empty() {
+            trace!(
+                "Requisite= not met for {}: {unmet:?} not active",
+                id_to_start.name
+            );
+            return Err(UnitOperationError {
+                reason: UnitOperationErrorReason::DependencyError(unmet),
+                unit_name: id_to_start.name.clone(),
+                unit_id: id_to_start.clone(),
+            });
+        }
+    }
+
     // Check unit assertions (AssertPathExists=, etc.) before activation.
     // Unlike conditions, if any assertion fails the unit enters a **failed**
     // state. This matches systemd's behavior where Assert* causes an error.

@@ -2689,6 +2689,10 @@ pub struct Dependencies {
     pub wanted_by: Vec<UnitId>,
     pub requires: Vec<UnitId>,
     pub required_by: Vec<UnitId>,
+    /// Units that must be ALREADY active when this unit starts (Requisite=).
+    /// Unlike requires, these are NOT pulled in: if a listed unit is not
+    /// active at start time, this unit's start fails.
+    pub requisite: Vec<UnitId>,
     pub conflicts: Vec<UnitId>,
     pub conflicted_by: Vec<UnitId>,
     pub before: Vec<UnitId>,

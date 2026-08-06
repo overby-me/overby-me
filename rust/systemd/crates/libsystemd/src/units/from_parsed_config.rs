@@ -880,6 +880,7 @@ fn make_common_from_parsed(
     // Also= in [Install] is treated as a soft (wants) dependency
     wants.extend(collect_supported_unit_ids(install.also));
     let requires = collect_supported_unit_ids(unit.requires);
+    let requisite = collect_supported_unit_ids(unit.requisite);
     let binds_to = collect_supported_unit_ids(unit.binds_to);
     let upholds = collect_supported_unit_ids(unit.upholds);
     let propagates_stop_to = collect_supported_unit_ids(unit.propagates_stop_to);
@@ -943,6 +944,7 @@ fn make_common_from_parsed(
             wanted_by,
             requires,
             required_by,
+            requisite,
             conflicts,
             conflicted_by: Vec::new(),
             before,
