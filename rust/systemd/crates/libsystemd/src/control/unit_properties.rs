@@ -451,13 +451,18 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     } else {
                         match &*status {
                             UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                // A signal death reports "signal" (upstream also
-                                // distinguishes "core-dump", which we cannot yet
-                                // since ChildTermination drops the dumped bit).
+                                // A signal death reports "core-dump" when the
+                                // kernel dumped core, else "signal"; anything
+                                // else is a non-zero exit code.
                                 match state.srvc.main_exit_termination {
-                                    Some(crate::signal_handler::ChildTermination::Signal(_)) => {
-                                        "signal"
-                                    }
+                                    Some(crate::signal_handler::ChildTermination::Signal(
+                                        _,
+                                        true,
+                                    )) => "core-dump",
+                                    Some(crate::signal_handler::ChildTermination::Signal(
+                                        _,
+                                        false,
+                                    )) => "signal",
                                     _ => "exit-code",
                                 }
                             }

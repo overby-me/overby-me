@@ -916,14 +916,18 @@ fn set_log_level(level: log::LevelFilter) {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum ChildTermination {
-    Signal(nix::sys::signal::Signal),
+    /// Killed by a signal. The bool is whether the kernel dumped core
+    /// (`WCOREDUMP`), which upstream distinguishes as Result=core-dump vs
+    /// Result=signal.
+    Signal(nix::sys::signal::Signal, bool),
     Exit(i32),
 }
 
 impl std::fmt::Display for ChildTermination {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Signal(sig) => write!(f, "signal {sig}"),
+            Self::Signal(sig, true) => write!(f, "signal {sig} (core dumped)"),
+            Self::Signal(sig, false) => write!(f, "signal {sig}"),
             Self::Exit(code) => write!(f, "exit code {code}"),
         }
     }
@@ -933,9 +937,15 @@ impl ChildTermination {
     #[must_use]
     pub const fn success(&self) -> bool {
         match self {
-            Self::Signal(_) => false,
+            Self::Signal(..) => false,
             Self::Exit(code) => *code == 0,
         }
+    }
+
+    /// Whether death was by a signal that dumped core (`WCOREDUMP`).
+    #[must_use]
+    pub const fn core_dumped(&self) -> bool {
+        matches!(self, Self::Signal(_, true))
     }
 }
 
@@ -949,11 +959,11 @@ fn get_next_exited_child() -> Option<ChildIterElem> {
             nix::sys::wait::WaitStatus::Exited(pid, code) => {
                 Some(Ok((pid, ChildTermination::Exit(code))))
             }
-            nix::sys::wait::WaitStatus::Signaled(pid, signal, _dumped_core) => {
+            nix::sys::wait::WaitStatus::Signaled(pid, signal, dumped_core) => {
                 // signals get handed to the parent if the child got killed by it but didnt handle the
-                // signal itself
-                // we dont care if the service dumped it's core
-                Some(Ok((pid, ChildTermination::Signal(signal))))
+                // signal itself. The core-dump bit distinguishes Result=core-dump
+                // from Result=signal.
+                Some(Ok((pid, ChildTermination::Signal(signal, dumped_core))))
             }
             nix::sys::wait::WaitStatus::StillAlive => {
                 trace!("No more state changes to poll");
@@ -1061,7 +1071,7 @@ mod tests {
 
     #[test]
     fn test_child_termination_signal() {
-        let term = ChildTermination::Signal(nix::sys::signal::Signal::SIGTERM);
+        let term = ChildTermination::Signal(nix::sys::signal::Signal::SIGTERM, false);
         assert!(!term.success());
         let display = format!("{term}");
         assert!(
@@ -1076,7 +1086,7 @@ mod tests {
         let term2 = term1;
         assert_eq!(term1, term2);
 
-        let term3 = ChildTermination::Signal(nix::sys::signal::Signal::SIGKILL);
+        let term3 = ChildTermination::Signal(nix::sys::signal::Signal::SIGKILL, false);
         let term4 = term3;
         assert_eq!(term3, term4);
         assert_ne!(term1, term3);

@@ -763,7 +763,7 @@ pub fn resolve_action_exit_status(
     }
     match code {
         crate::signal_handler::ChildTermination::Exit(c) => u8::try_from(*c).ok(),
-        crate::signal_handler::ChildTermination::Signal(_) => Some(255),
+        crate::signal_handler::ChildTermination::Signal(_, _) => Some(255),
     }
 }
 
@@ -3227,7 +3227,7 @@ mod action_exit_status_tests {
     #[test]
     fn a_signalled_process_propagates_255() {
         // Upstream's -EBADE case: exited, but not cleanly (unit.c:6293).
-        let code = ChildTermination::Signal(Signal::SIGKILL);
+        let code = ChildTermination::Signal(Signal::SIGKILL, false);
         assert_eq!(resolve_action_exit_status(None, &code), Some(255));
     }
 

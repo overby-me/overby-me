@@ -3559,7 +3559,7 @@ impl SuccessExitStatus {
             crate::signal_handler::ChildTermination::Exit(code) => {
                 *code == 0 || self.exit_codes.contains(code)
             }
-            crate::signal_handler::ChildTermination::Signal(sig) => self.signals.contains(sig),
+            crate::signal_handler::ChildTermination::Signal(sig, _) => self.signals.contains(sig),
         }
     }
 
@@ -3568,7 +3568,7 @@ impl SuccessExitStatus {
     pub fn is_clean_signal(&self, termination: &crate::signal_handler::ChildTermination) -> bool {
         use nix::sys::signal::Signal;
         match termination {
-            crate::signal_handler::ChildTermination::Signal(sig) => {
+            crate::signal_handler::ChildTermination::Signal(sig, _) => {
                 matches!(
                     sig,
                     Signal::SIGHUP | Signal::SIGINT | Signal::SIGTERM | Signal::SIGPIPE

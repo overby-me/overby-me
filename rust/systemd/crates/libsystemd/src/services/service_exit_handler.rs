@@ -185,7 +185,7 @@ fn build_monitor_env(
                 "exit-code".to_string()
             },
         ),
-        ChildTermination::Signal(s) => (
+        ChildTermination::Signal(s, _) => (
             "killed".to_string(),
             (*s as i32).to_string(),
             if is_success {
@@ -253,7 +253,7 @@ fn should_restart(
                 ChildTermination::Exit(code) => {
                     *code != 0 && !success_exit_status.exit_codes.contains(code)
                 }
-                ChildTermination::Signal(sig) => {
+                ChildTermination::Signal(sig, _) => {
                     !is_clean_signal_value(*sig) && !success_exit_status.signals.contains(sig)
                 }
             }
@@ -266,7 +266,7 @@ fn should_restart(
             // Unclean signal or timeout – not on any exit code.
             match termination {
                 ChildTermination::Exit(_) => false,
-                ChildTermination::Signal(sig) => {
+                ChildTermination::Signal(sig, _) => {
                     !is_clean_signal_value(*sig) && !success_exit_status.signals.contains(sig)
                 }
             }
@@ -275,7 +275,7 @@ fn should_restart(
             // Unclean signal only (watchdog does NOT trigger on-abort).
             match termination {
                 ChildTermination::Exit(_) => false,
-                ChildTermination::Signal(sig) => {
+                ChildTermination::Signal(sig, _) => {
                     !is_clean_signal_value(*sig) && !success_exit_status.signals.contains(sig)
                 }
             }
@@ -742,7 +742,7 @@ pub(crate) fn service_exit_head(
         let mut state = srvc.state.write_poisoned();
         let exit_code = match code {
             ChildTermination::Exit(c) => *c,
-            ChildTermination::Signal(s) => *s as i32,
+            ChildTermination::Signal(s, _) => *s as i32,
         };
         state.srvc.main_exit_status = Some(exit_code);
         state.srvc.main_exit_termination = Some(*code);
@@ -871,7 +871,7 @@ pub(crate) fn service_exit_head(
                         ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
                             format!("process exited with status {c}"),
                         ),
-                        ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                        ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
                             format!("process killed by signal {s}"),
                         ),
                     };
@@ -882,7 +882,7 @@ pub(crate) fn service_exit_head(
                     );
                     let fail_reason = match &main_code {
                         ChildTermination::Exit(c) => format!("exit-code (status {c})"),
-                        ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                        ChildTermination::Signal(s, _) => format!("signal (signal {s})"),
                     };
                     let desc = &unit.common.unit.description;
                     let msg = if desc.is_empty() {
@@ -1143,14 +1143,14 @@ pub(crate) fn service_exit_handler(
                     let rps = &srvc.conf.restart_prevent_exit_status;
                     match &code {
                         ChildTermination::Exit(c) => rps.exit_codes.contains(c),
-                        ChildTermination::Signal(s) => rps.signals.contains(s),
+                        ChildTermination::Signal(s, _) => rps.signals.contains(s),
                     }
                 };
                 let force_restart = {
                     let rfs = &srvc.conf.restart_force_exit_status;
                     match &code {
                         ChildTermination::Exit(c) => rfs.exit_codes.contains(c),
-                        ChildTermination::Signal(s) => rfs.signals.contains(s),
+                        ChildTermination::Signal(s, _) => rfs.signals.contains(s),
                     }
                 };
                 !prevent_restart
@@ -1273,7 +1273,7 @@ pub(crate) fn service_exit_handler(
                     ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
                         format!("process exited with status {c}"),
                     ),
-                    ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                    ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
                         format!("process killed by signal {s}"),
                     ),
                 };
@@ -1287,7 +1287,7 @@ pub(crate) fn service_exit_handler(
                 );
                 let fail_reason = match &code {
                     ChildTermination::Exit(c) => format!("exit-code (status {c})"),
-                    ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                    ChildTermination::Signal(s, _) => format!("signal (signal {s})"),
                 };
                 let desc = &unit.common.unit.description;
                 let msg = if desc.is_empty() {
@@ -1421,7 +1421,7 @@ pub(crate) fn service_exit_handler(
                 let rps = &srvc.conf.restart_prevent_exit_status;
                 match &code {
                     ChildTermination::Exit(c) => rps.exit_codes.contains(c),
-                    ChildTermination::Signal(s) => rps.signals.contains(s),
+                    ChildTermination::Signal(s, _) => rps.signals.contains(s),
                 }
             };
 
@@ -1438,7 +1438,7 @@ pub(crate) fn service_exit_handler(
                     let rfs = &srvc.conf.restart_force_exit_status;
                     match &code {
                         ChildTermination::Exit(c) => rfs.exit_codes.contains(c),
-                        ChildTermination::Signal(s) => rfs.signals.contains(s),
+                        ChildTermination::Signal(s, _) => rfs.signals.contains(s),
                     }
                 };
 
@@ -1691,7 +1691,7 @@ pub(crate) fn service_exit_handler(
                 ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(format!(
                     "process exited with status {c}"
                 )),
-                ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
                     format!("process killed by signal {s}",),
                 ),
             };
@@ -1700,7 +1700,7 @@ pub(crate) fn service_exit_handler(
             info!("Service {name} failed with {:?}, marked as failed", code);
             let fail_reason = match &code {
                 ChildTermination::Exit(c) => format!("exit-code (status {c})"),
-                ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                ChildTermination::Signal(s, _) => format!("signal (signal {s})"),
             };
             let desc = &unit.common.unit.description;
             let msg = if desc.is_empty() {
@@ -2012,7 +2012,7 @@ mod tests {
         ));
         assert!(!should_restart(
             &ServiceRestart::No,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
@@ -2035,13 +2035,13 @@ mod tests {
         ));
         assert!(should_restart(
             &ServiceRestart::Always,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         assert!(should_restart(
             &ServiceRestart::Always,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -2072,14 +2072,14 @@ mod tests {
         // SIGTERM is a clean signal
         assert!(should_restart(
             &ServiceRestart::OnSuccess,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
         // SIGKILL is not a clean signal
         assert!(!should_restart(
             &ServiceRestart::OnSuccess,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
@@ -2125,14 +2125,14 @@ mod tests {
         // SIGKILL is unclean — should restart
         assert!(should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         // SIGTERM is clean — should not restart
         assert!(!should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -2159,14 +2159,14 @@ mod tests {
         // on-abnormal: unclean signal → restart
         assert!(should_restart(
             &ServiceRestart::OnAbnormal,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         // on-abnormal: clean signal → no restart
         assert!(!should_restart(
             &ServiceRestart::OnAbnormal,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -2191,14 +2191,14 @@ mod tests {
         // on-abort: unclean signal → restart
         assert!(should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         // on-abort: clean signal → no restart
         assert!(!should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -2223,7 +2223,7 @@ mod tests {
         ));
         assert!(!should_restart(
             &ServiceRestart::OnWatchdog,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
@@ -2235,7 +2235,7 @@ mod tests {
         // on-watchdog should restart when watchdog_fired is true
         assert!(should_restart(
             &ServiceRestart::OnWatchdog,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -2261,7 +2261,7 @@ mod tests {
         // Even a clean exit with watchdog_fired is a failure
         assert!(should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             true,
         ));
@@ -2279,7 +2279,7 @@ mod tests {
         ));
         assert!(should_restart(
             &ServiceRestart::OnAbnormal,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -2299,14 +2299,14 @@ mod tests {
         // Clean signal + watchdog → no restart for on-abort
         assert!(!should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             true,
         ));
         // Unclean signal + watchdog → restart (because of the signal, not watchdog)
         assert!(should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -2337,7 +2337,7 @@ mod tests {
         // Restart=no never restarts, even with watchdog
         assert!(!should_restart(
             &ServiceRestart::No,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -2349,7 +2349,7 @@ mod tests {
         // Restart=always restarts with or without watchdog
         assert!(should_restart(
             &ServiceRestart::Always,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -2376,14 +2376,14 @@ mod tests {
         // SIGUSR1 is in SuccessExitStatus — on-failure should NOT restart
         assert!(!should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGUSR1),
+            &ChildTermination::Signal(Signal::SIGUSR1, false),
             &ses,
             false,
         ));
         // SIGUSR2 is not — on-failure should restart
         assert!(should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGUSR2),
+            &ChildTermination::Signal(Signal::SIGUSR2, false),
             &ses,
             false,
         ));
