@@ -96,6 +96,47 @@ pub(crate) fn check_start_rate_limit(unit: &Unit) -> bool {
     }
 }
 
+/// Check-only variant of the start rate limit: returns true if starting the unit
+/// right now would exceed StartLimitBurst= within StartLimitIntervalSec=, WITHOUT
+/// recording the attempt (activation records it via record_start_timestamp).
+///
+/// Used to enforce the limit on a manual `systemctl start`: the exit handler
+/// already rate-limits auto-restarts, but a manual start reached activation
+/// unchecked, so a repeatedly-failing unit could be hand-started without ever
+/// tripping start-limit-hit the way upstream does.
+pub(crate) fn start_rate_limit_would_block(unit: &Unit) -> bool {
+    let burst = unit.common.unit.start_limit_burst.unwrap_or(5);
+    let interval = match &unit.common.unit.start_limit_interval_sec {
+        Some(Timeout::Duration(d)) => *d,
+        Some(Timeout::Infinity) | None => std::time::Duration::from_secs(10),
+    };
+
+    // If burst is 0 or interval is zero, rate limiting is disabled.
+    if burst == 0 || interval.is_zero() {
+        return false;
+    }
+
+    fn would_block(common: &mut CommonState, burst: u32, interval: std::time::Duration) -> bool {
+        let now = std::time::Instant::now();
+        common
+            .start_timestamps
+            .retain(|t| now.duration_since(*t) < interval);
+        common.start_timestamps.len() >= burst as usize
+    }
+
+    match &unit.specific {
+        Specific::Service(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Socket(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Target(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Slice(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Mount(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Swap(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Timer(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Path(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Device(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct UnitOperationError {
     pub reason: UnitOperationErrorReason,

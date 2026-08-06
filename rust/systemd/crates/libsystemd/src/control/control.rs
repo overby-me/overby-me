@@ -1465,6 +1465,11 @@ fn reset_failed_unit(unit: &Unit) {
         let mut state = srvc.state.write_poisoned();
         state.srvc.manual_stop = false;
         state.srvc.start_limit_hit = false;
+        // Drop the start rate-limit history so a manual start is permitted
+        // again immediately (mirrors upstream ratelimit_reset in
+        // unit_reset_failed); otherwise our StartLimitBurst= enforcement would
+        // leave the unit un-startable until the interval elapsed.
+        state.common.start_timestamps.clear();
     }
     // Reset path-specific result.
     if let Specific::Path(path_specific) = &unit.specific {
@@ -9825,6 +9830,33 @@ pub fn execute_command(
                     return Err(format!(
                         "Unit {unit_name} may only be started if {} is already active (Requisite=).",
                         unmet_requisite.join(", ")
+                    ));
+                }
+                // StartLimitBurst=/StartLimitIntervalSec=: a manual start reaches
+                // activation unchecked (the exit handler only rate-limits automatic
+                // restarts), so enforce the same limit here -- otherwise a
+                // repeatedly-failing unit can be hand-started without ever tripping
+                // start-limit-hit the way upstream does.
+                let start_rate_limited = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .map(crate::units::start_rate_limit_would_block)
+                        .unwrap_or(false)
+                };
+                if start_rate_limited {
+                    {
+                        let ri = run_info.read_poisoned();
+                        if let Some(u) = ri.unit_table.get(&id)
+                            && let Specific::Service(srvc) = &u.specific
+                        {
+                            // So `Result` reports "start-limit-hit" (mirrors
+                            // upstream SERVICE_FAILURE_START_LIMIT_HIT).
+                            srvc.state.write_poisoned().srvc.start_limit_hit = true;
+                        }
+                    }
+                    return Err(format!(
+                        "Start request repeated too quickly for unit {unit_name}."
                     ));
                 }
                 // Installed for the whole inline start of this unit; the
