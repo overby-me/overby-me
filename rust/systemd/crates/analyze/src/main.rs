@@ -281,6 +281,9 @@ enum Command {
         /// Architecture name(s) or the keywords native/uname/secondary (omit
         /// for the full table)
         architectures: Vec<String>,
+        /// Output the entries as JSON (short or pretty).
+        #[arg(long, value_name = "MODE")]
+        json: Option<String>,
     },
 
     /// List known filesystems and their predefined sets
@@ -1601,7 +1604,10 @@ fn main() {
             ref capabilities,
             mask,
         }) => cmd_capability(capabilities, mask),
-        Some(Command::Architectures { ref architectures }) => cmd_architectures(architectures),
+        Some(Command::Architectures {
+            ref architectures,
+            ref json,
+        }) => cmd_architectures(architectures, json.as_deref()),
         Some(Command::Filesystems { ref filesystems }) => cmd_filesystems(filesystems),
         Some(Command::SyscallFilter { ref syscall_filters }) => cmd_syscall_filter(syscall_filters),
         Some(Command::TransientSettings { ref properties }) => cmd_transient_settings(properties),
@@ -3796,7 +3802,7 @@ fn uname_arch() -> Option<usize> {
     ARCH_NAMES.iter().position(|&n| n == name)
 }
 
-fn cmd_architectures(args: &[String]) {
+fn cmd_architectures(args: &[String], json: Option<&str>) {
     let (native, secondary) = native_and_secondary_arch();
     let uname = uname_arch();
 
@@ -3843,6 +3849,30 @@ fn cmd_architectures(args: &[String]) {
             "foreign"
         }
     };
+
+    // --json: emit the underlying table as JSON. The C table has a hidden "id"
+    // column (the architecture enum index, also the sort key) plus "name" and
+    // "support"; all three appear in the JSON output.
+    if let Some(mode) = json {
+        let arr: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|&a| {
+                serde_json::json!({
+                    "id": a,
+                    "name": ARCH_NAMES[a],
+                    "support": support(a),
+                })
+            })
+            .collect();
+        let val = serde_json::Value::Array(arr);
+        let out = if mode == "pretty" {
+            serde_json::to_string_pretty(&val).unwrap()
+        } else {
+            serde_json::to_string(&val).unwrap()
+        };
+        println!("{out}");
+        return;
+    }
 
     // C's table formatter sizes NAME to the widest name shown (never narrower
     // than the "NAME" header); SUPPORT is the trailing column.

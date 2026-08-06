@@ -3,8 +3,8 @@
   # Custom rewrite: exercises the systemd-analyze verbs the rust crate implements.
   # architectures, filesystems, syscall-filter and transient-settings were added
   # once the crate gained them; security, verify, condition --unit and cat-config
-  # are covered here too. Still omitted: dump, plot (bus state dump / SVG
-  # bootchart output) and `architectures --json`, which are not yet ported.
+  # are covered here too, as is `architectures --json`. Still omitted: dump and
+  # plot (bus state dump / SVG bootchart output), which are not yet ported.
   patchScript = ''
     cat > TEST-65-ANALYZE.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -155,6 +155,18 @@
     systemd-analyze architectures x86-64
     systemd-analyze architectures native
     systemd-analyze architectures uname
+
+    : "systemd-analyze architectures --json emits a JSON table (id/name/support)"
+    AJSON="$(systemd-analyze architectures --json=short)"
+    [[ "$AJSON" == \[*\] ]]
+    [[ "$AJSON" == *'"id":'* ]]
+    [[ "$AJSON" == *'"name":'* ]]
+    [[ "$AJSON" == *'"support":'* ]]
+    [[ "$AJSON" == *'x86-64'* ]]
+
+    : "systemd-analyze architectures native --json reports support=native"
+    NJSON="$(systemd-analyze architectures native --json=short)"
+    [[ "$NJSON" == *'"support":"native"'* ]]
 
     : "systemd-analyze syscall-filter"
     systemd-analyze syscall-filter >/dev/null
