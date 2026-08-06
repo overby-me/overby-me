@@ -8270,6 +8270,18 @@ a.list-item:hover {
 .docx-measure .docx-list li {
 	margin-inline-start: 0;
 }
+/* An EMPTY paragraph is a line. Word gives it the line of its paragraph mark --
+   which is how half these documents space their sections, with a run of blank
+   paragraphs -- and an empty block in CSS is half that or nothing at all. A
+   zero-width space makes the line without making a word: four blank paragraphs
+   measured half a line each is a paragraph's worth of page, and it moved a
+   break onto the wrong name. */
+.docx-measure .docx-p::before,
+.docx-measure .docx-h::before,
+.docx-measure .docx-list li::before {
+	content: "\200b";
+}
+
 /* A list Word closes up: the space under an item goes only when the NEXT item
    is closed up too, which is what `contextualSpacing` means and why it cannot
    be read off the document one paragraph at a time. */
