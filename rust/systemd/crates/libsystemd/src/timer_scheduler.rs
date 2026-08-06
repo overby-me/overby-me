@@ -405,6 +405,28 @@ fn check_and_fire_timers(
                         );
                     }
                 }
+
+                // RemainAfterElapse=no: a one-shot timer (only OnActiveSec=/
+                // OnBootSec=/OnStartupSec=, which fire exactly once) deactivates
+                // once it has elapsed. Timers with a recurring source
+                // (OnCalendar=/OnUnitActiveSec=/OnUnitInactiveSec=) keep waiting
+                // and stay active regardless.
+                let recurring = !tmr.conf.on_calendar.is_empty()
+                    || !tmr.conf.on_unit_active_sec.is_empty()
+                    || !tmr.conf.on_unit_inactive_sec.is_empty();
+                if !recurring && !tmr.conf.remain_after_elapse {
+                    let mut status = unit.common.status.write_poisoned();
+                    if status.is_started() {
+                        trace!(
+                            "Timer {}: RemainAfterElapse=no and elapsed, deactivating",
+                            timer_id.name
+                        );
+                        *status = UnitStatus::Stopped(
+                            crate::units::StatusStopped::StoppedFinal,
+                            vec![],
+                        );
+                    }
+                }
             }
         }
 
