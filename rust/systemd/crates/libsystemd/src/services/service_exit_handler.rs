@@ -745,6 +745,7 @@ pub(crate) fn service_exit_head(
             ChildTermination::Signal(s) => *s as i32,
         };
         state.srvc.main_exit_status = Some(exit_code);
+        state.srvc.main_exit_termination = Some(*code);
         state.srvc.main_exit_pid = Some(pid);
         state.srvc.exec_main_exit_timestamp = Some(crate::units::UnitTimestamps::now_usec());
         // Update lock-free atomics so property queries work without the state lock.

@@ -1948,6 +1948,8 @@ pub(crate) fn oneshot_chain_step(
                         // performs the Started transition + dispatch.
                         st.srvc.current_exec_argv = None;
                         st.srvc.main_exit_status = Some(0);
+                        st.srvc.main_exit_termination =
+                            Some(crate::signal_handler::ChildTermination::Exit(0));
                         Step::Completed
                     } else if idx + 1 >= exec_list.len() {
                         // Only the last command remains: fork it as the main
@@ -2653,9 +2655,19 @@ pub(crate) fn evaluate_start_wait(
     // finished" signal.
     let exit_success = if matches!(svc_type, ServiceType::OneShot | ServiceType::Forking) {
         let state = svc.state.read_poisoned();
+        // main_exit_status is the race-free "has the main process finished?"
+        // signal; judge SUCCESS via the recorded termination so a signal listed
+        // in SuccessExitStatus= counts (the bare status number cannot tell
+        // `exit N` from death by signal N). This matches the exit handler's own
+        // is_success verdict, so the start wait and the exit handler agree
+        // instead of leaving a signal-success oneshot wedged in Starting. Fall
+        // back to the exit-code test when no termination was recorded.
         state.srvc.main_exit_status.map(|code| {
-            code == 0
-                || svc.conf.success_exit_status.exit_codes.contains(&code)
+            let succeeded = match state.srvc.main_exit_termination {
+                Some(term) => svc.conf.success_exit_status.is_success(&term),
+                None => code == 0 || svc.conf.success_exit_status.exit_codes.contains(&code),
+            };
+            succeeded
                 || svc
                     .conf
                     .exec
@@ -2683,6 +2695,7 @@ pub(crate) fn evaluate_start_wait(
                 // Consume the signal so the daemon's own later exit is not
                 // mistaken for another parent exit.
                 state.srvc.main_exit_status = None;
+                state.srvc.main_exit_termination = None;
                 let daemon_pid = if let Some(ref pid_file_path) = svc.conf.pid_file {
                     let p = crate::services::fork_parent::read_pid_file(pid_file_path);
                     if p.is_none() {

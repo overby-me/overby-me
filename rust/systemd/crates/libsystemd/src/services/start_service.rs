@@ -1302,6 +1302,7 @@ fn start_service_with_filedescriptors(
             // so a stale value from an earlier run would make a restarted
             // oneshot/forking service appear instantly completed.
             srvc.main_exit_status = None;
+            srvc.main_exit_termination = None;
             let now = crate::units::UnitTimestamps::now_usec();
             srvc.exec_main_start_timestamp = Some(now);
             srvc.exec_main_handoff_timestamp = Some(now);

@@ -257,6 +257,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     start_limit_hit: false,
                     runtime_started_at: None,
                     main_exit_status: None,
+                    main_exit_termination: None,
                     main_exit_pid: None,
                     trigger_path: None,
                     trigger_unit: None,

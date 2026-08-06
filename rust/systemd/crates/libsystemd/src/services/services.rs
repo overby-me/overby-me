@@ -540,6 +540,12 @@ pub struct Service {
     /// The exit status of the main service process (exit code or signal number).
     /// Set by the exit handler when the main process exits.
     pub main_exit_status: Option<i32>,
+    /// The raw termination (exit code vs signal) of the last main process, kept
+    /// in lockstep with `main_exit_status` so oneshot/forking start completion
+    /// can judge success with signal awareness (SuccessExitStatus= signals),
+    /// which the bare status number cannot express (it cannot tell `exit 6`
+    /// from death by SIGABRT).
+    pub main_exit_termination: Option<crate::signal_handler::ChildTermination>,
     /// The PID of the main service process at the time it was started.
     /// Unlike `pid` (which is cleared on stop), this persists for `ExecMainPID`.
     pub main_exit_pid: Option<nix::unistd::Pid>,
@@ -808,6 +814,7 @@ impl Service {
         self.watchdog_last_ping = None;
         self.watchdog_usec_override = None;
         self.main_exit_status = None;
+        self.main_exit_termination = None;
         self.extend_timeout_usec = None;
         self.extend_timeout_timestamp = None;
         // Reset lock-free atomics for the new invocation.
@@ -1062,6 +1069,8 @@ impl Service {
                         // Record the error exit status for ExecMainStatus property.
                         trace!("Ignore spawn error for ExecStart with '-' prefix for {name}: {e}");
                         self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
+                        self.main_exit_termination =
+                            Some(crate::signal_handler::ChildTermination::Exit(203));
                     }
                     Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                 }
