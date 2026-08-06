@@ -83,6 +83,13 @@ pub enum Event {
     /// free wake so the dispatcher takes a run-queue drive pass. The drive reads
     /// the registry directly; the event only exists to break the block.
     JobQueued,
+    /// StopWhenUnneeded= garbage collection (deferred): after a unit stopped,
+    /// the units it kept alive are candidates to become unneeded. Enqueued by
+    /// `on_stop_chain_finished` and processed on a settled stop graph, so the
+    /// stop of an unneeded candidate never re-enters the stop machinery that is
+    /// mid-update. Each candidate is re-checked with `is_unit_unneeded` when the
+    /// event is drained, since state may have changed since it was queued.
+    GcUnneeded { candidates: Vec<UnitId> },
 }
 
 /// A helper-command continuation parked between steps, keyed by the
@@ -348,6 +355,25 @@ fn dispatch_one(
         // Increment 4: only a wake. The run-queue drive runs after every
         // event in the loop (step 4), so there is nothing to do on intake.
         Event::JobQueued => {}
+        Event::GcUnneeded { candidates } => {
+            // Re-check each candidate now (state may have changed since queued),
+            // then stop the still-unneeded ones through the normal stop tree.
+            // Runs on a settled stop graph, so this is not re-entrant.
+            let to_stop: Vec<UnitId> = {
+                let ri = crate::units::dispatcher_read(run_info);
+                candidates
+                    .into_iter()
+                    .filter(|c| crate::units::is_unit_unneeded(c, &ri))
+                    .collect()
+            };
+            for cand in to_stop {
+                log::trace!(
+                    "GcUnneeded: stopping {} (StopWhenUnneeded=yes, no active needers)",
+                    cand.name
+                );
+                begin_stop_tree(cand, None, run_info, chains, stop_graph);
+            }
+        }
         Event::Notify {
             unit,
             datagram,
@@ -1063,6 +1089,35 @@ fn on_stop_chain_finished(
         for target in targets {
             begin_stop_tree(target, None, run_info, chains, stop_graph);
         }
+    }
+
+    // StopWhenUnneeded= GC: `id` has stopped, so any unit it kept alive
+    // (Wants=/Requires=/BindsTo=/Upholds=) may now be unneeded. Collect those
+    // forward deps and DEFER the check to a fresh GcUnneeded event rather than
+    // stopping them here: begin_stop_tree mutates the very stop graph this
+    // function is mid-update on, and doing it re-entrantly corrupts the
+    // pending-count/parent bookkeeping (it wedged 01-basic). The deferred event
+    // runs once this stop has fully settled, and re-checks each candidate.
+    let candidates: Vec<UnitId> = {
+        let ri = crate::units::dispatcher_read(run_info);
+        match ri.unit_table.get(&id) {
+            Some(u) => {
+                let d = &u.common.dependencies;
+                d.wants
+                    .iter()
+                    .chain(&d.requires)
+                    .chain(&d.binds_to)
+                    .chain(&d.upholds)
+                    .cloned()
+                    .collect()
+            }
+            None => Vec::new(),
+        }
+    };
+    if !candidates.is_empty()
+        && let Some(handle) = global()
+    {
+        handle.send_normal(Event::GcUnneeded { candidates });
     }
 }
 

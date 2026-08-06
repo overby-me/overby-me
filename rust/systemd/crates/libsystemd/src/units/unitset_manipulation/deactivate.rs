@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use log::trace;
 
+use crate::lock_ext::RwLockExt;
 use crate::runtime_info::RuntimeInfo;
 use crate::units::{UnitId, UnitOperationError, UnitOperationErrorReason};
 
@@ -93,6 +94,39 @@ pub fn deactivate_unit(
     unit.deactivate(run_info)?;
 
     Ok(())
+}
+
+/// True if `target_id` opts into automatic GC (`StopWhenUnneeded=yes`), is
+/// currently active, and no longer has any *active* unit needing it (via
+/// Wants=/Requires=/BindsTo=/Upholds=).  The stop itself is left to the caller
+/// (the dispatcher's deferred GcUnneeded handler) so it runs on a settled stop
+/// graph rather than re-entrantly.  Distinct from the udev path's narrower
+/// `stop_if_unneeded`, which keys on the reverse-dep lists being entirely empty.
+pub(crate) fn is_unit_unneeded(target_id: &UnitId, run_info: &RuntimeInfo) -> bool {
+    let Some(target) = run_info.unit_table.get(target_id) else {
+        return false;
+    };
+    if !target.common.unit.stop_when_unneeded {
+        return false;
+    }
+    if !target.common.status.read_poisoned().is_started() {
+        return false;
+    }
+    let deps = &target.common.dependencies;
+    let has_active_needer = deps
+        .wanted_by
+        .iter()
+        .chain(&deps.required_by)
+        .chain(&deps.bound_by)
+        .chain(&deps.upheld_by)
+        .any(|n| {
+            run_info
+                .unit_table
+                .get(n)
+                .map(|nu| nu.common.status.read_poisoned().is_started())
+                .unwrap_or(false)
+        });
+    !has_active_needer
 }
 
 pub fn deactivate_units_recursive(
