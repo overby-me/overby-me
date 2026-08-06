@@ -555,7 +555,22 @@ fn progress_start_wait(
         crate::units::StartWaitVerdict::Pending => {
             start_waits.insert(wait.id.clone(), wait);
         }
-        crate::units::StartWaitVerdict::Abandoned => {}
+        crate::units::StartWaitVerdict::Abandoned => {
+            // The unit did not become Ready (it failed, vanished, or already
+            // left Starting). Still re-drive its before-chain so After=-ordered
+            // soft (Wants=) dependents proceed instead of being stranded; the
+            // transaction filter bounds the walk and each dependent's own
+            // unstarted_deps gates it (a failed hard Requires= dep stays
+            // blocking). This mirrors the success path's before-chain dispatch.
+            crate::units::spawn_redrive_after_abandoned(
+                wait.id,
+                wait.next_services_ids,
+                wait.filter_ids,
+                wait.errors,
+                wait.source,
+                run_info.clone(),
+            );
+        }
         crate::units::StartWaitVerdict::Fail(reason) => {
             fail_start_with_poststop(&wait.id, reason, run_info, chains, start_waits);
         }

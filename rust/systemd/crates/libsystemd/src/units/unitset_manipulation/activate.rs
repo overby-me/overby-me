@@ -2943,6 +2943,65 @@ pub(crate) fn finish_deferred_start(
     }
 }
 
+/// Re-drive the before-chain of a deferred start whose wait was ABANDONED (the
+/// unit failed, vanished, or already left `Starting`) so its After=-ordered
+/// dependents are re-evaluated.  A soft dependent (`Wants=`/`Upholds=`) must
+/// still start when its dependency failed; a hard dependent (`Requires=`/
+/// `BindsTo=`) stays held back by its own `unstarted_deps` check (the failed dep
+/// is `Stopped`, not `Started`).
+///
+/// The success completion (`finish_deferred_start`) dispatches this same
+/// `next_services_ids` scoped by the transaction's `filter_ids`; the Abandoned
+/// arm previously dropped it, so a soft dependent of a failed deferred oneshot
+/// was left inactive.  The transaction `filter_ids` (NOT the raw before-chain)
+/// is what bounds the walk, so pure-ordering `After=` units outside the
+/// transaction are never spuriously started.
+///
+/// Runs on its own thread: activation must not run on the dispatcher, and it
+/// first waits (bounded) for the unit to leave `Starting`, because the terminal
+/// transition is performed by the asynchronous exit handler — without the wait,
+/// `unstarted_deps` could still observe the dep as `Starting` and wrongly block
+/// the soft dependent.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_redrive_after_abandoned(
+    id: UnitId,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<UnitId>>,
+    errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
+    run_info: ArcMutRuntimeInfo,
+) {
+    if next_services_ids.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        loop {
+            let terminal = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table
+                    .get(&id)
+                    .map(|u| !matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
+                    .unwrap_or(true)
+            };
+            if terminal || started.elapsed() > std::time::Duration::from_secs(5) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let tpool = ThreadPool::new(8);
+        activate_units_recursive(
+            next_services_ids,
+            filter_ids,
+            run_info,
+            tpool.clone(),
+            errors,
+            source,
+        );
+        tpool.join();
+    });
+}
+
 /// Park the deferred completion of a service whose start wait was deferred
 /// (`start_service` returned `StartResult::DeferredNotifyWait`, so the unit
 /// is left in `Starting`).  Used by activation paths that call
