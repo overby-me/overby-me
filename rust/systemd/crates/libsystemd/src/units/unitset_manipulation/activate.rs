@@ -1521,7 +1521,7 @@ static JOB_GRAPH_POOL: std::sync::OnceLock<ThreadPool> = std::sync::OnceLock::ne
 /// block the dispatcher; that holds for services (fork-and-return) and is why
 /// the first slice is service-only (mounts move off-thread in inc 5).
 pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
-    use crate::units::jobs::{JobId, JobResult, JobState};
+    use crate::units::jobs::{JobId, JobKind, JobResult, JobState};
 
     // Every RuntimeInfo read here is on the dispatcher (or a pool worker it
     // spawns), so it must yield to a queued writer via `dispatcher_read` and
@@ -1547,9 +1547,14 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
                 && unstarted_deps(u, ri, Some(&activation_set)).is_empty()
         };
 
+        // Inc-4 scope: the drive only activates Start jobs. Runtime
+        // Reload/Restart/Stop/etc. jobs are installed and completed by the
+        // control path itself (as with the flag off); the drive must not
+        // retire them here (it would finish a live Reload the moment the unit
+        // reads Started) nor dispatch them below.
         let running: Vec<(JobId, UnitId)> = reg
             .iter()
-            .filter(|job| job.state == JobState::Running)
+            .filter(|job| job.state == JobState::Running && job.kind == JobKind::Start)
             .map(|job| (job.id, job.unit.clone()))
             .collect();
         for (jid, unit_id) in running {
@@ -1580,6 +1585,30 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
             }
         }
 
+        // Externally-completed jobs never go Running through the drive: a
+        // `.device` unit is plugged by udev (is_ready excludes Device, so it is
+        // never dispatched) and a Start job whose unit is already active needs
+        // no work. Finish any such Waiting Start job the moment its unit reads
+        // Started, so it stops blocking the units ordered after it and the
+        // closure can drain. (enqueue_ready below then re-primes the newly
+        // unblocked frontier.)
+        let waiting_done: Vec<JobId> = reg
+            .iter()
+            .filter(|job| job.state == JobState::Waiting && job.kind == JobKind::Start)
+            .filter(|job| {
+                matches!(
+                    ri.unit_table
+                        .get(&job.unit)
+                        .map(|u| u.common.status.read_poisoned().clone()),
+                    Some(UnitStatus::Started(_))
+                )
+            })
+            .map(|job| job.id)
+            .collect();
+        for jid in waiting_done {
+            reg.finish(jid, JobResult::Done);
+        }
+
         let now = std::time::Instant::now();
         for jid in reg.pop_expired(now) {
             warn!("job-graph: job {jid} exceeded its deadline, finishing as Timeout");
@@ -1606,7 +1635,11 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
         let jid = { jobs.lock().unwrap().pop_ready() };
         let Some(jid) = jid else { break };
         let unit_id = match jobs.lock().unwrap().get(jid) {
-            Some(job) => job.unit.clone(),
+            // Only Start jobs are driven here; leave a ready non-Start job for
+            // the control path (it is popped from the run queue but not
+            // touched, and its owner finishes it).
+            Some(job) if job.kind == JobKind::Start => job.unit.clone(),
+            Some(_) => continue,
             None => continue,
         };
         {
