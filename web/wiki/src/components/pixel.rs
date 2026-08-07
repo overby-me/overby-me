@@ -1084,10 +1084,27 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
             .flatten()
     });
 
+    // Whether the app is still working out what to show, as opposed to having
+    // worked out that there is nothing. Two questions are outstanding at mount
+    // and both are answered over the network: which canvas this room is on, and
+    // then that canvas itself. A resource reads `None` until it answers, and
+    // `None` was being taken for "no canvas" -- so opening the app said "No
+    // canvases here yet" for as long as the round trip took, to a room that has
+    // one.
+    let deciding = focused.read().is_none();
+    let fetching_board = showing.is_some() && board.read().is_none();
+    let still_looking = deciding || fetching_board;
+
     rsx! {
         div { class: "stack stack-v",
             if let Some(canvas) = board.read().clone().flatten() {
                 PixelApp { key: "{canvas.id.0}", node: canvas }
+            } else if still_looking {
+                div { class: "card",
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "spinner spinner-sm" }
+                    }
+                }
             } else if !is_owner {
                 div { class: "card",
                     div { class: "empty-state empty-state-sm",
@@ -1114,7 +1131,9 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
                         AddCanvasButton { context_id: context_id.clone() }
                     }
                     div { class: "card-content",
-                        if canvases.is_empty() {
+                        if canvases.is_empty() && still_looking {
+                            div { class: "spinner spinner-sm" }
+                        } else if canvases.is_empty() {
                             p { class: "body-medium text-muted", "{t(\"pixel.noCanvases\")}" }
                         } else {
                             div { class: "list",
