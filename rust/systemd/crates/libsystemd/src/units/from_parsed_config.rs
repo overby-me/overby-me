@@ -637,10 +637,11 @@ pub fn parse_timespan(input: &str) -> Option<std::time::Duration> {
             chars.next();
         }
 
-        // Parse unit suffix
+        // Parse unit suffix (`µ` is not ASCII-alphabetic but is part of the
+        // `µs` microsecond unit).
         let mut unit = String::new();
         while let Some(&c) = chars.peek() {
-            if c.is_ascii_alphabetic() {
+            if c.is_ascii_alphabetic() || c == 'µ' {
                 unit.push(c);
                 chars.next();
             } else {
@@ -648,16 +649,19 @@ pub fn parse_timespan(input: &str) -> Option<std::time::Duration> {
             }
         }
 
+        // Case-SENSITIVE, matching systemd's time_units table: `m` = minute,
+        // `M` = month; a month is 30.44 days and a year 365.25 days (C's
+        // USEC_PER_MONTH / USEC_PER_YEAR), not the round 30/365.
         let multiplier_us: u64 = match unit.as_str() {
-            "us" | "usec" => 1,
+            "us" | "usec" | "µs" => 1,
             "ms" | "msec" => 1_000,
             "" | "s" | "sec" | "second" | "seconds" | "secs" => 1_000_000,
             "min" | "minute" | "minutes" | "m" => 60 * 1_000_000,
             "h" | "hr" | "hrs" | "hour" | "hours" => 3600 * 1_000_000,
             "d" | "day" | "days" => 86400 * 1_000_000,
             "w" | "week" | "weeks" => 7 * 86400 * 1_000_000,
-            "month" | "months" => 30 * 86400 * 1_000_000, // approximate
-            "y" | "year" | "years" => 365 * 86400 * 1_000_000, // approximate
+            "M" | "month" | "months" => 2_629_800 * 1_000_000,
+            "y" | "year" | "years" => 31_557_600 * 1_000_000,
             _ => return None,
         };
 
