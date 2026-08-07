@@ -198,6 +198,77 @@ pub struct ServiceSpecific {
     pub state: RwLock<ServiceState>,
 }
 
+/// Run a socket unit's `Exec*=` helper commands (`ExecStartPre=`/`Post=`,
+/// `ExecStopPre=`/`Post=`) in order. Socket units bypass exec_helper, so these run
+/// in the manager's context (as root, inheriting the manager environment) — enough
+/// for the common `ExecStartPost=` chmod/setfacl of the freshly created socket. A
+/// leading `-` ignores failure; any other failure returns `Err` so a start phase
+/// can fail the unit.
+///
+/// The child is registered in the pid_table as a `Helper` and awaited via
+/// [`wait_for_helper_child`]: the PID 1 SIGCHLD reaper `waitpid(-1)`s every child
+/// into the table, so a bare `Command::status()` would race it and get `ECHILD`.
+/// `User=`/`WorkingDirectory=`/sandboxing for socket exec commands are not applied
+/// yet (a socket rarely needs them; noted for follow-up).
+fn run_socket_exec_commands(
+    cmds: &[Commandline],
+    phase: &str,
+    id: &UnitId,
+    run_info: &RuntimeInfo,
+) -> Result<(), String> {
+    for cmd in cmds {
+        let ignore = cmd
+            .prefixes
+            .contains(&crate::units::CommandlinePrefix::Minus);
+        let resolved = match which::which(&cmd.cmd) {
+            Ok(p) => p,
+            Err(e) if ignore => {
+                trace!("{phase} for {}: cannot resolve {:?}: {e} (ignored)", id.name, cmd.cmd);
+                continue;
+            }
+            Err(e) => {
+                return Err(format!("{phase} for {}: cannot resolve {:?}: {e}", id.name, cmd.cmd));
+            }
+        };
+        let child = match std::process::Command::new(&resolved).args(&cmd.args).spawn() {
+            Ok(c) => c,
+            Err(e) if ignore => {
+                trace!("{phase} for {}: {cmd} failed to spawn: {e} (ignored)", id.name);
+                continue;
+            }
+            Err(e) => return Err(format!("{phase} for {}: {cmd} failed to spawn: {e}", id.name)),
+        };
+        run_info.pid_table.lock_poisoned().insert(
+            nix::unistd::Pid::from_raw(child.id() as i32),
+            crate::runtime_info::PidEntry::Helper(id.clone(), id.name.clone()),
+        );
+        let failure: Option<String> = match crate::services::wait_for_helper_child(
+            &child,
+            &run_info.pid_table,
+            Some(std::time::Duration::from_secs(90)),
+        ) {
+            crate::services::WaitResult::InTime(Ok(term)) if term.success() => None,
+            crate::services::WaitResult::InTime(Ok(term)) => {
+                Some(format!("{phase} for {}: {cmd} failed: {term:?}", id.name))
+            }
+            crate::services::WaitResult::InTime(Err(e)) => {
+                Some(format!("{phase} for {}: {cmd} wait error: {e}", id.name))
+            }
+            crate::services::WaitResult::TimedOut => {
+                Some(format!("{phase} for {}: {cmd} timed out", id.name))
+            }
+        };
+        if let Some(msg) = failure {
+            if ignore {
+                log::warn!("{msg} (ignored, '-' prefix)");
+            } else {
+                return Err(msg);
+            }
+        }
+    }
+    Ok(())
+}
+
 impl SocketState {
     fn activate(
         &mut self,
@@ -206,6 +277,20 @@ impl SocketState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<UnitStatus, UnitOperationError> {
+        // ExecStartPre= runs before the socket is opened; a non-'-' failure aborts
+        // the start (systemd.socket(5)). Socket Exec*= commands were parsed and
+        // reported but never executed until this path.
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_start_pre, "ExecStartPre", id, run_info)
+        {
+            let reason = UnitOperationErrorReason::GenericStartError(msg);
+            *status.write_poisoned() =
+                UnitStatus::Stopped(StatusStopped::StoppedUnexpected, vec![reason.clone()]);
+            return Err(UnitOperationError {
+                unit_name: id.name.clone(),
+                unit_id: id.clone(),
+                reason,
+            });
+        }
         let open_res = self
             .sock
             .open_all(
@@ -230,6 +315,21 @@ impl SocketState {
                     &conf.exec_config.cache_directory,
                     &conf.exec_config.logs_directory,
                 ]);
+                // ExecStartPost= runs after the socket is listening.
+                if let Err(msg) =
+                    run_socket_exec_commands(&conf.exec_start_post, "ExecStartPost", id, run_info)
+                {
+                    let reason = UnitOperationErrorReason::GenericStartError(msg);
+                    *status.write_poisoned() = UnitStatus::Stopped(
+                        StatusStopped::StoppedUnexpected,
+                        vec![reason.clone()],
+                    );
+                    return Err(UnitOperationError {
+                        unit_name: id.name.clone(),
+                        unit_id: id.clone(),
+                        reason,
+                    });
+                }
                 let mut status = status.write_poisoned();
                 *status = UnitStatus::Started(StatusStarted::Running);
                 run_info.notify_eventfds();
@@ -251,6 +351,10 @@ impl SocketState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<(), UnitOperationError> {
+        // ExecStopPre= runs before the socket is closed (best-effort on stop).
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_pre, "ExecStopPre", id, run_info) {
+            log::warn!("{msg}");
+        }
         // RuntimeDirectory= is dropped on stop, like services/mounts — unless
         // RuntimeDirectoryPreserve=yes, which the service path already honors
         // (this socket path removed it unconditionally, so a socket with
@@ -270,6 +374,11 @@ impl SocketState {
                 unit_id: id.clone(),
                 reason: UnitOperationErrorReason::SocketCloseError(e),
             });
+        // ExecStopPost= runs after the socket is closed (best-effort).
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_post, "ExecStopPost", id, run_info)
+        {
+            log::warn!("{msg}");
+        }
         match &close_result {
             Ok(()) => {
                 let mut status = status.write_poisoned();
