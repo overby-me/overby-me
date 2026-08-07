@@ -8189,6 +8189,14 @@ a.list-item:hover {
 /* And a table cell is padded for reading here, where Word pads it by a tenth
    of an inch either side and nothing above or below. A document of nothing but
    tables measured half again as tall as it is. */
+/* A row the document gives a height: Word keeps it that tall even when its
+   text does not fill it, which is what someone dragging a row boundary asks
+   for. `height` on a row is a minimum in CSS, which is the right reading of it
+   -- a row is never shorter than its text. Ignoring it left one document's
+   first page holding a heading that Word puts on its second. */
+.docx-measure .docx-table tr {
+	height: var(--r-height, auto);
+}
 .docx-measure .docx-table th,
 .docx-measure .docx-table td {
 	padding: 0 0.08in;
@@ -8311,6 +8319,7 @@ a.list-item:hover {
 	--p-first: 0;
 	/* A cell says its own; auto is for one whose document does not. */
 	--c-width: auto;
+	--r-height: auto;
 	position: absolute;
 	left: -10000px;
 	top: 0;

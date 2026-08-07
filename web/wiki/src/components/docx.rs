@@ -268,6 +268,13 @@ pub struct Row {
     /// below it is full rather than ending early.
     #[serde(default)]
     pub cant_split: bool,
+    /// `w:trHeight`, in points: a height the document asks this row to have,
+    /// which is usually the trace of someone dragging its boundary in Word. It
+    /// is a MINIMUM here whatever the rule says -- a row is never made shorter
+    /// than its text, and clipping the text is not something a reader that
+    /// reflows should do.
+    #[serde(default)]
+    pub row_height: Option<f64>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
@@ -1337,7 +1344,16 @@ fn DocxBlock(
                                 }
                             }
                         }
-                        tr { key: "r{r}", "data-cant-split": "{row.cant_split}",
+                        tr {
+                            key: "r{r}",
+                            "data-cant-split": "{row.cant_split}",
+                            // The height the document asks for, for the copy
+                            // that measures. Not the visible table: on a phone
+                            // a row dragged tall in Word is empty space.
+                            style: match row.row_height.filter(|h| *h > 0.0) {
+                                Some(pt) => format!("--r-height:{pt:.2}pt;"),
+                                None => String::new(),
+                            },
                             for (c , cell) in row.cells.into_iter().enumerate() {
                                 // A cell covered by a merge from above is not
                                 // drawn; drawing it would push the row wider.
@@ -2046,6 +2062,7 @@ mod tests {
                     }],
                     is_header: false,
                     cant_split: false,
+                    row_height: None,
                 }],
             }),
         ];
