@@ -1613,12 +1613,19 @@ pub fn parse_exec_section(
         None => super::StandardInput::Null,
         Some(mut vec) => {
             if vec.len() == 1 {
-                match vec.remove(0).1.to_lowercase().as_str() {
+                // Keep the original-case value: `file:PATH` must preserve the
+                // path's case, so match on a lowercased copy but slice the path
+                // out of the untouched string (mirrors make_stdio_option).
+                let val = vec.remove(0).1;
+                match val.to_lowercase().as_str() {
                     "null" | "" => super::StandardInput::Null,
                     "tty" => super::StandardInput::Tty,
                     "tty-force" => super::StandardInput::TtyForce,
                     "tty-fail" => super::StandardInput::TtyFail,
                     "socket" => super::StandardInput::Socket,
+                    lower if lower.starts_with("file:") => {
+                        super::StandardInput::File(val["file:".len()..].to_string())
+                    }
                     other => {
                         trace!("Unsupported StandardInput={}, falling back to null", other);
                         super::StandardInput::Null

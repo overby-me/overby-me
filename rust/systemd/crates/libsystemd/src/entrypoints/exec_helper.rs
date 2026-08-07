@@ -1293,7 +1293,7 @@ fn setup_tty_output(config: &ExecHelperConfig) {
     // already dup2'd the TTY fd onto stdout/stderr via stdout_is_inherit).
     match config.stdin_option {
         StandardInput::Tty | StandardInput::TtyForce | StandardInput::TtyFail => return,
-        StandardInput::Null | StandardInput::Socket => {}
+        StandardInput::Null | StandardInput::Socket | StandardInput::File(_) => {}
     }
 
     let tty_path = config
@@ -1567,6 +1567,37 @@ fn setup_stdin(config: &ExecHelperConfig) {
             let listen_fd = libc::STDERR_FILENO + 1; // fd 3
             unsafe {
                 libc::dup2(listen_fd, libc::STDIN_FILENO);
+            }
+        }
+        StandardInput::File(ref path) => {
+            // StandardInput=file:PATH — open the file read-only and make it the
+            // process's stdin, mirroring StandardOutput=file:. Opened here in the
+            // child (like the Tty arm) so the fd needs no parent hand-off.
+            let path_cstr = match std::ffi::CString::new(path.as_bytes()) {
+                Ok(c) => c,
+                Err(_) => {
+                    log::error!("Invalid StandardInput=file: path {:?}", path);
+                    std::process::exit(1);
+                }
+            };
+            // No O_CLOEXEC: STDIN_FILENO was just closed (above), so open() may
+            // return fd 0 itself, in which case the dup2 is skipped and the fd
+            // must survive execve to actually be the service's stdin. When it
+            // lands on a higher fd, dup2 moves it to 0 (clearing cloexec anyway).
+            let file_fd = unsafe { libc::open(path_cstr.as_ptr(), libc::O_RDONLY) };
+            if file_fd < 0 {
+                log::error!(
+                    "Failed to open StandardInput=file:{} : {}",
+                    path,
+                    std::io::Error::last_os_error()
+                );
+                std::process::exit(1);
+            }
+            if file_fd != libc::STDIN_FILENO {
+                unsafe {
+                    libc::dup2(file_fd, libc::STDIN_FILENO);
+                    libc::close(file_fd);
+                }
             }
         }
         StandardInput::Tty | StandardInput::TtyForce | StandardInput::TtyFail => {

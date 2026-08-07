@@ -4374,6 +4374,10 @@ pub enum StandardInput {
     /// services). The accepted connection fd (fd 3, the first LISTEN_FD) is
     /// dup'd to stdin.
     Socket,
+    /// `StandardInput=file:PATH` — stdin is connected to the given file, opened
+    /// read-only. The path is opened in the child just before exec (like the
+    /// Tty arm), mirroring `StandardOutput=file:`.
+    File(String),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
