@@ -405,6 +405,16 @@ fn finalize_stop_chain(chain: &ServiceStopChain, run_info: &ArcMutRuntimeInfo) {
                 .collect();
             *status = UnitStatus::Stopped(crate::units::StatusStopped::StoppedFinal, errors);
         }
+        // RemoveIPC=yes: remove SysV/POSIX IPC owned by the service's (static)
+        // User= now that its processes are gone. Skipped for root and for
+        // DynamicUser= (whose allocated UID is not stored yet). Mirrors systemd's
+        // clean_ipc_by_uid on the stop path.
+        if conf.exec_config.remove_ipc
+            && let Ok(uid) = crate::services::start_service::resolve_uid(&conf.exec_config.user)
+            && uid != 0
+        {
+            crate::services::clean_ipc::clean_ipc_by_uid(uid);
+        }
         // Clean up RuntimeDirectory= dirs unless RuntimeDirectoryPreserve=yes.
         // The inline deactivate() path (unit.rs) does this, but the dispatcher
         // stop chain that in-VM `systemctl stop` actually drives did not, so

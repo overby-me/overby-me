@@ -2079,6 +2079,14 @@ impl Service {
         }
         self.pid = None;
         self.process_group = None;
+        // RemoveIPC=yes: remove the (static) User='s IPC now that the processes
+        // are gone (mirrors the dispatcher stop path in finalize_stop_chain).
+        if conf.exec_config.remove_ipc
+            && let Ok(uid) = crate::services::start_service::resolve_uid(&conf.exec_config.user)
+            && uid != 0
+        {
+            crate::services::clean_ipc::clean_ipc_by_uid(uid);
+        }
         res
     }
 
