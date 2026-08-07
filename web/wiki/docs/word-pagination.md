@@ -47,10 +47,16 @@ Each of these was wrong at some point, and each was worth a page or more:
   the document default's 8pt stood. Reading past the attributes left every such
   paragraph 6pt tight; adding 14pt to the 8pt already there would have been 6pt
   too loose.
-- **Table columns.** The widths the document states, and a table wider than the
-  text column overflows the margin as it does in Word rather than being squeezed
-  into it. Left to the browser, one table was laid out 134/60/398 where Word has
-  290/75/305, and every row came out short.
+- **Table columns.** The widths the document states. Left to the browser, one
+  table was laid out 134/60/398 where Word has 290/75/305, and every row came
+  out short.
+- **And the table's own width with them.** A table wider than the text column
+  overflows the margin in Word; told only what its columns are, it is still
+  capped at the box around it and the browser scales them down to fit. That same
+  table came out 275/76/290 — five per cent narrow, which wraps a seven-line
+  cell into eight. One line per row, and over one document's tables most of a
+  page. Given the sum as its width, it measures 290.5/75.1/305.1 and its rows
+  land within a pixel of Word's.
 - **A page ends between two LINES of a paragraph**, not above it. Word leaves as
   many lines as fit and carries the rest over, keeping two on each side of the
   break — widow and orphan control, which every document here asks for. This

@@ -28,6 +28,12 @@ const WIKI = "https://radikal.wiki/radikal_ungdom"
 # hints -- the record Word leaves of where it last drew a page break -- plus the
 # first words of each page after the first.
 #
+# Every row below is now corroborated by a second, independent reading:
+# `scripts/word-pages.nu` renders the same file with LibreOffice in
+# metric-compatible faces and reports where its pages fall. It agrees with all
+# five, including the two whose expectations did NOT come from the hints, and
+# it is how a sixth would be added without asking anyone to export anything.
+#
 # Where Word breaks INSIDE a table row, the words are the ROW's rather than the
 # paragraph's: a rendering that cannot split a row across a page can only mark
 # the row, and a reader jumping to that page lands at the top of the row whose
@@ -52,11 +58,11 @@ const TRUTH = [
     ["hb5/bilag/evaluering_af_fu_og_posk´s_arbejdsprogram", 9,
         ["Fokus på trivslen lokalt", "At vi har et bedre skolevalg"]]
 
-    # This one records no hints at all, so its count came from reading it and
-    # its first break from someone opening it in Word. It is three tables and a
-    # page of prose, and we currently break it one paragraph late: the first
-    # page measures about six pixels short of what Word fits there, which is a
-    # tenth of the heading that ought to move.
+    # This one records no hints at all: its count came from reading it, its
+    # break from someone opening it in Word, and both are confirmed by the
+    # converter. It broke a heading late until the renderer learned about
+    # AUTOMATIC paragraph spacing, which every one of its paragraphs asks for
+    # (see `docs/word-pagination.md`).
     ["hb5/bilag/posk_arbejdsprogram_21-22", 3,
         ["Radikal Ungdom skal være et engagerende politisk fællesskab"]]
 

@@ -8186,9 +8186,16 @@ a.list-item:hover {
    The renderer deliberately makes its measures relative to the reader rather
    than pinned to Word's, which is right for reading and wrong for working out
    where Word's pages end: it laid a three-page document out as four. */
-/* And a table cell is padded for reading here, where Word pads it by a tenth
-   of an inch either side and nothing above or below. A document of nothing but
-   tables measured half again as tall as it is. */
+/* And a table cell is padded for reading here, where Word pads it by its
+   default cell margin of 108 twips either side and nothing above or below. A
+   document of nothing but tables measured half again as tall as it is.
+   108 twips is 0.075in, and the difference from a rounder 0.08in is half a
+   pixel a side -- which is not nothing: it is what decided whether the word
+   "Vurdering" fitted the 75px column of a heading row, and a heading row an
+   extra line tall in every table put one document's third page a row late.
+   A document that states its own `tblCellMar` is still measured at the
+   default; the parser resolves those margins per cell and they are the next
+   thing to carry through. */
 /* A row the document gives a height: Word keeps it that tall even when its
    text does not fill it, which is what someone dragging a row boundary asks
    for. `height` on a row is a minimum in CSS, which is the right reading of it
@@ -8199,7 +8206,7 @@ a.list-item:hover {
 }
 .docx-measure .docx-table th,
 .docx-measure .docx-table td {
-	padding: 0 0.08in;
+	padding: 0 0.075in;
 	/* The width Word states for the column, not the width its contents want.
 	   Left to itself the browser gave this table 134/60/398 where Word gives
 	   290/75/305, so the column holding the text had a third more room than the
