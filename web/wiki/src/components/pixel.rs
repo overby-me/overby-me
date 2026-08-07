@@ -34,11 +34,17 @@ use crate::session::use_session;
 /// squares can still ask for them.
 pub const DEFAULT_SIDE: u32 = 64;
 
-/// How long a painter waits between placements, when a canvas is the first in
-/// its context and seeds the rate limit. Twenty seconds is quick enough that a
-/// hall feels the board move and slow enough that a board is a crowd's picture
-/// rather than one person's.
-pub const DEFAULT_COOLDOWN: u32 = 20;
+/// How long a painter waits between placements.
+///
+/// Ten seconds. Short enough that a board is worth standing in front of, and
+/// still long enough that it takes a room rather than a person: a whole session
+/// of one determined painter is a few hundred cells of four thousand, and
+/// anybody else can paint over them at the same rate.
+///
+/// Written onto the context's `canvas/pixel` permission when a canvas is made,
+/// which is where the trigger reads it (`migrations/0007`), and onto the canvas
+/// itself, which is where the countdown reads it.
+pub const DEFAULT_COOLDOWN: u32 = 10;
 
 /// The palette, as CSS colours. The stored value is the INDEX, so a cell costs a
 /// single digit in the database and the palette can be restyled later without
