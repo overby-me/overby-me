@@ -3039,6 +3039,31 @@ pub enum StdinInput {
     Data(String),
 }
 
+/// Reconstruct the raw stdin byte stream from ordered `StandardInputText=`/
+/// `StandardInputData=` entries: each `Text` value contributes its bytes plus a
+/// trailing newline; each `Data` value contributes its base64-decoded bytes.
+/// Mirrors systemd's accumulation of `c->stdin_data`. Used for both the
+/// `StandardInputData` D-Bus property and for actually feeding the service stdin.
+pub fn reconstruct_stdin_data(inputs: &[StdinInput]) -> Vec<u8> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+    let mut bytes: Vec<u8> = Vec::new();
+    for item in inputs {
+        match item {
+            StdinInput::Text(s) => {
+                bytes.extend_from_slice(s.as_bytes());
+                bytes.push(b'\n');
+            }
+            StdinInput::Data(s) => {
+                if let Ok(decoded) = engine.decode(s) {
+                    bytes.extend(decoded);
+                }
+            }
+        }
+    }
+    bytes
+}
+
 pub struct ParsedExecSection {
     pub user: Option<String>,
     pub group: Option<String>,

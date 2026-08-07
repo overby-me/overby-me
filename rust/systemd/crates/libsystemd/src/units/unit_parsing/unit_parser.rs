@@ -1300,12 +1300,16 @@ fn build_stdin_inputs(
             out.clear();
             continue;
         }
-        for token in value.split_whitespace() {
-            if is_data {
+        if is_data {
+            // StandardInputData=: whitespace-separated base64 blobs.
+            for token in value.split_whitespace() {
                 out.push(super::StdinInput::Data(token.to_owned()));
-            } else {
-                out.push(super::StdinInput::Text(token.to_owned()));
             }
+        } else {
+            // StandardInputText=: the whole line is one entry — embedded spaces are
+            // part of the text and must NOT be whitespace-split (only a trailing
+            // newline is added when materialized). C-escape decoding not applied yet.
+            out.push(super::StdinInput::Text(value.to_owned()));
         }
     }
     out

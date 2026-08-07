@@ -464,6 +464,11 @@ pub struct ExecHelperConfig {
     /// How stdin should be set up for the service process.
     #[serde(default)]
     pub stdin_option: StandardInput,
+    /// StandardInputText=/StandardInputData= payload: the accumulated bytes to feed
+    /// the service on stdin (via an in-memory file) when StandardInput= is left at
+    /// its default. None when neither directive is set.
+    #[serde(default)]
+    pub stdin_data: Option<Vec<u8>>,
     /// Path to the TTY device to use when StandardInput=tty/tty-force/tty-fail.
     /// Defaults to /dev/console if not set.
     pub tty_path: Option<PathBuf>,
@@ -1543,23 +1548,62 @@ fn open_journal_stream_nonblock(
 fn setup_stdin(config: &ExecHelperConfig) {
     match config.stdin_option {
         StandardInput::Null => {
-            // Open /dev/null as stdin. No O_CLOEXEC: STDIN_FILENO was closed just
-            // before setup_stdin, so open() returns fd 0 and the dup2 below is
-            // skipped — with O_CLOEXEC set, execve would then close fd 0, leaving
-            // the service with NO stdin (a reader gets EBADF) instead of an
-            // EOF-yielding /dev/null.
-            let null_fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
-            if null_fd < 0 {
-                log::error!(
-                    "Failed to open /dev/null for stdin: {}",
-                    std::io::Error::last_os_error()
-                );
-                std::process::exit(1);
+            // StandardInputText=/StandardInputData= (implicit StandardInput=data):
+            // feed the accumulated bytes from an in-memory file. No O_CLOEXEC on any
+            // fd here — STDIN_FILENO was closed just above, so an fd may land on 0
+            // and must survive execve (else the service gets no stdin / EBADF).
+            let mut handled = false;
+            if let Some(ref data) = config.stdin_data {
+                let mfd = unsafe { libc::memfd_create(c"stdin-data".as_ptr(), 0) };
+                if mfd < 0 {
+                    log::error!(
+                        "StandardInputText/Data: memfd_create failed: {}",
+                        std::io::Error::last_os_error()
+                    );
+                } else {
+                    let mut off = 0usize;
+                    while off < data.len() {
+                        let n = unsafe {
+                            libc::write(
+                                mfd,
+                                data[off..].as_ptr() as *const libc::c_void,
+                                data.len() - off,
+                            )
+                        };
+                        if n <= 0 {
+                            break;
+                        }
+                        off += n as usize;
+                    }
+                    unsafe { libc::lseek(mfd, 0, libc::SEEK_SET) };
+                    if mfd != libc::STDIN_FILENO {
+                        unsafe {
+                            libc::dup2(mfd, libc::STDIN_FILENO);
+                            libc::close(mfd);
+                        }
+                    }
+                    handled = true;
+                }
             }
-            if null_fd != libc::STDIN_FILENO {
-                unsafe {
-                    libc::dup2(null_fd, libc::STDIN_FILENO);
-                    libc::close(null_fd);
+            if !handled {
+                // Open /dev/null as stdin. No O_CLOEXEC: STDIN_FILENO was closed just
+                // before setup_stdin, so open() returns fd 0 and the dup2 below is
+                // skipped — with O_CLOEXEC set, execve would then close fd 0, leaving
+                // the service with NO stdin (a reader gets EBADF) instead of an
+                // EOF-yielding /dev/null.
+                let null_fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
+                if null_fd < 0 {
+                    log::error!(
+                        "Failed to open /dev/null for stdin: {}",
+                        std::io::Error::last_os_error()
+                    );
+                    std::process::exit(1);
+                }
+                if null_fd != libc::STDIN_FILENO {
+                    unsafe {
+                        libc::dup2(null_fd, libc::STDIN_FILENO);
+                        libc::close(null_fd);
+                    }
                 }
             }
         }

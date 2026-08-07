@@ -974,6 +974,12 @@ fn start_service_with_filedescriptors(
         limit_nofile: conf.limit_nofile,
 
         stdin_option: conf.exec_config.stdin_option.clone(),
+        stdin_data: {
+            // StandardInputText=/StandardInputData= -> the bytes to feed on stdin.
+            let bytes =
+                crate::units::unit_parsing::reconstruct_stdin_data(&conf.exec_config.stdin_inputs);
+            if bytes.is_empty() { None } else { Some(bytes) }
+        },
         tty_path: conf.exec_config.tty_path.clone(),
         tty_reset: conf.exec_config.tty_reset,
         tty_vhangup: conf.exec_config.tty_vhangup,

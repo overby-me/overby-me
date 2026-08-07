@@ -1863,25 +1863,14 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
     // an interleaving where a data directive precedes a text one.  Matches
     // upstream behaviour exercised by 15-DROPIN testcase_transient_service_dropins.
     {
-        use crate::units::unit_parsing::StdinInput;
         use base64::Engine;
-        let engine = base64::engine::general_purpose::STANDARD;
-        let mut bytes: Vec<u8> = Vec::new();
-        for item in &conf.stdin_inputs {
-            match item {
-                StdinInput::Text(s) => {
-                    bytes.extend_from_slice(s.as_bytes());
-                    bytes.push(b'\n');
-                }
-                StdinInput::Data(s) => {
-                    if let Ok(decoded) = engine.decode(s) {
-                        bytes.extend(decoded);
-                    }
-                }
-            }
-        }
+        let bytes = crate::units::unit_parsing::reconstruct_stdin_data(&conf.stdin_inputs);
         if !bytes.is_empty() {
-            insert(props, "StandardInputData", &engine.encode(&bytes));
+            insert(
+                props,
+                "StandardInputData",
+                &base64::engine::general_purpose::STANDARD.encode(&bytes),
+            );
         }
     }
 }
