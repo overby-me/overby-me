@@ -1369,7 +1369,16 @@ fn main() {
                         .or_else(|_| std::env::var("VISUAL"))
                         .unwrap_or_else(|_| "vi".to_owned());
 
-                    let status = std::process::Command::new(&editor).arg(&tmp_path).status();
+                    // Invoke the editor as `$EDITOR +<line> <path>`, matching
+                    // upstream `run_editor` (edit-util.c: e->line == 4 for a
+                    // fresh drop-in, the first line of the content area between
+                    // the markers). A real editor opens at that line; the
+                    // `EDITOR=mv` test hack relies on the `+4` positional (it
+                    // runs `mv +4 <path>` to swap in a prepared "+4" file).
+                    let status = std::process::Command::new(&editor)
+                        .arg("+4")
+                        .arg(&tmp_path)
+                        .status();
 
                     match status {
                         Ok(s) if s.success() => {
