@@ -28,7 +28,7 @@ use crate::session::use_session;
 /// width of a phone and a 64-cell board gives a cell about five pixels on a
 /// 360px screen, which is not much to aim at. That argument is still true and
 /// is answered rather than ignored: the board can be pinched and zoomed, and a
-/// tap that lands on the wrong cell costs one turn of a twenty-second cooldown.
+/// tap that lands on the wrong cell costs one turn of a ten-second cooldown.
 /// Four times the cells is a picture a hall can actually make something of, and
 /// the size is a field on the dialog now, so a room that would rather have big
 /// squares can still ask for them.
@@ -279,7 +279,12 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let mut owners = use_signal(HashMap::<(u32, u32), String>::new);
     let mut painted_at = use_signal(HashMap::<(u32, u32), String>::new);
     let mut colour = use_signal(|| 3u8);
+    // What the reader is TOLD, and the moment it is actually over. Two signals
+    // because they answer different questions: the first is a number on a
+    // button, the second is when the database will take a placement. Counting
+    // down by decrementing a number was what let the two disagree.
     let mut cooling = use_signal(|| 0u32);
+    let mut ready_at = use_signal(|| 0.0f64);
     let mut busy = use_signal(|| false);
     // The cell being asked about: hovered with a mouse, held under a finger.
     let mut asking = use_signal(|| None::<(u32, u32)>);
@@ -345,10 +350,9 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             return;
         };
         let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&iso)).get_time();
-        let elapsed = (js_sys::Date::now() - then) / 1000.0;
-        let left = (cooldown as f64 - elapsed).max(0.0) as u32;
-        if left > 0 {
-            cooling.set(left);
+        let deadline = then + cooldown as f64 * 1000.0;
+        if deadline > js_sys::Date::now() {
+            ready_at.set(deadline);
         }
     });
 
@@ -413,14 +417,22 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         }
     });
 
-    // The cooldown ticks down locally. The database is the authority; this is so
-    // the button can say how long rather than only that it is too soon.
+    // The number on the button, read off the CLOCK rather than counted down.
+    //
+    // Decrementing once a second was wrong twice over. The first tick fired at
+    // whatever point in the second the wait had begun, so it was worth anything
+    // from nothing to a full second; and the number was truncated, so a wait of
+    // 3.9 seconds displayed as 3. Between them the button offered the board up
+    // to two seconds before the database would take a placement, and a painter
+    // who tapped the moment it read zero was refused.
+    //
+    // Four times a second, so zero arrives promptly once the deadline passes.
     use_future(move || async move {
         loop {
-            gloo_timers::future::TimeoutFuture::new(1000).await;
-            let left = cooling();
-            if left > 0 {
-                cooling.set(left - 1);
+            gloo_timers::future::TimeoutFuture::new(250).await;
+            let left = seconds_left(ready_at(), js_sys::Date::now());
+            if cooling() != left {
+                cooling.set(left);
             }
         }
     });
@@ -582,7 +594,10 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             match result {
                 Ok(()) => {
                     log::info!("painted {x},{y}");
-                    cooling.set(cooldown)
+                    // From NOW, which is after the database stamped the row, so
+                    // this device waits a little longer than the trigger does
+                    // rather than a little less.
+                    ready_at.set(js_sys::Date::now() + cooldown as f64 * 1000.0);
                 }
                 Err(e) => {
                     // The overwhelmingly common refusal is the cooldown, and the
@@ -598,14 +613,28 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     // A refusal that knows when is not a failure to report; it is
                     // an instruction. Anything else is a real error and is already
                     // logged and filed by `execute_raw_vars`.
-                    match retry_after_seconds(&e) {
-                        Some(secs) => cooling.set(secs),
-                        // Unreadable, and the overwhelmingly likely cause is the
-                        // cooldown: the client only offers the board when its own
-                        // countdown is done, so the disagreement is the server
-                        // knowing about a placement this tab does not.
-                        None => cooling.set(cooldown),
-                    }
+                    let now = js_sys::Date::now();
+                    let deadline = match retry_after_seconds(&e) {
+                        Some(secs) => now + secs as f64 * 1000.0,
+                        // Unreadable, so ask the server what it knows instead of
+                        // charging a whole cooldown again. A placement refused by
+                        // a fraction of a second used to cost the full wait a
+                        // second time, which is the same near-miss punished
+                        // twice. `max` keeps it moving if this device's clock
+                        // disagrees with the database's, so a refusal can never
+                        // loop.
+                        None => match graphql::my_last_paint(token.as_deref(), &cv, &me).await {
+                            Some(iso) => {
+                                let then = js_sys::Date::new(
+                                    &wasm_bindgen::JsValue::from_str(&iso),
+                                )
+                                .get_time();
+                                (then + cooldown as f64 * 1000.0).max(now + 1000.0)
+                            }
+                            None => now + cooldown as f64 * 1000.0,
+                        },
+                    };
+                    ready_at.set(deadline);
                 }
             }
         });
@@ -758,6 +787,20 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     }
 }
 
+/// How many whole seconds are still to wait, from a deadline.
+///
+/// Rounded UP. Truncating is what made the board offer itself early: three and
+/// nine tenths of a second left displayed as three, ran out three seconds later,
+/// and the placement the painter made on zero was refused by a database that
+/// still had nine tenths of a second to go.
+pub fn seconds_left(ready_at_ms: f64, now_ms: f64) -> u32 {
+    let left = (ready_at_ms - now_ms) / 1000.0;
+    match left > 0.0 {
+        true => left.ceil() as u32,
+        false => 0,
+    }
+}
+
 /// Put a refused placement back the way it was.
 ///
 /// REMOVING the cell is not undoing it. The board is redrawn by filling with
@@ -827,6 +870,25 @@ mod tests {
         // Any other failure is not a cooldown and must not be shown as one.
         assert_eq!(retry_after_seconds("permission denied"), None);
         assert_eq!(retry_after_seconds("retry_after_ms=abc"), None);
+    }
+
+    /// The wait is rounded UP, so the button never reads zero while the database
+    /// would still refuse.
+    ///
+    /// This is the fix for "if I click right after time ends, the pixel will not
+    /// apply": the old countdown truncated, so a wait with nine tenths of a
+    /// second left showed as a whole second fewer and ran out early.
+    #[test]
+    fn the_wait_is_never_shorter_than_it_is() {
+        // 3.9 seconds left is four seconds to wait, not three.
+        assert_eq!(seconds_left(13_900.0, 10_000.0), 4);
+        // A hair before the deadline still says one, never zero.
+        assert_eq!(seconds_left(10_001.0, 10_000.0), 1);
+        // Zero only once it has actually passed.
+        assert_eq!(seconds_left(10_000.0, 10_000.0), 0);
+        assert_eq!(seconds_left(9_000.0, 10_000.0), 0, "and stays there");
+        // A whole cooldown reads as the whole cooldown.
+        assert_eq!(seconds_left(20_000.0, 10_000.0), 10);
     }
 
     /// A refused placement puts back what was under it, rather than clearing it.
