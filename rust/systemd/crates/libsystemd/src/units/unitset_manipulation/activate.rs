@@ -1497,6 +1497,17 @@ fn activate_units_recursive(
 /// pool. Shared across drive passes and initialised on first use.
 static JOB_GRAPH_POOL: std::sync::OnceLock<ThreadPool> = std::sync::OnceLock::new();
 
+/// True only while the boot producer ([`activate_needed_units_via_job_graph`])
+/// is draining its closure. The pool worker's completion-wake (send a
+/// `JobQueued` when an activation settles, so process-less target chains advance
+/// at event speed instead of one level per 200ms nudge) is gated on this: during
+/// boot it removes the nudge from the critical path, but POST-boot it must stay
+/// silent so runtime `--no-block` jobs keep the exact completion timing the
+/// control path expects (an unconditional wake perturbs runtime job-mode
+/// sequencing, e.g. 03-jobs' list-jobs / ignore-dependencies checks).
+static JOB_GRAPH_BOOT_DRAINING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Increment-4 job-graph drive, run as step 4 of the single dispatcher loop
 /// behind `SYSTEMD_RS_JOB_GRAPH=1` (docs/EVENT-LOOP.md, "The flag-on dispatch
 /// belongs in the existing dispatcher loop"). One pass:
@@ -1685,6 +1696,20 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
                     jobs_c.lock().unwrap().finish(jid, JobResult::Failed);
                 }
             }
+            // Event-driven completion (boot only): this activation just settled
+            // (Started, or Failed), so wake the dispatcher to re-scan the run
+            // queue now rather than waiting for the producer's periodic nudge.
+            // Phase 1 retires the finished job and enqueue_ready primes the
+            // newly-unblocked frontier on the very next dispatcher pass, so a
+            // process-less target chain advances at event speed instead of one
+            // level per 200ms tick. Gated on the boot drain: post-boot the nudge
+            // is gone (only the producer loops it), so runtime `--no-block` jobs
+            // must not get this extra wake or their completion timing shifts.
+            if JOB_GRAPH_BOOT_DRAINING.load(std::sync::atomic::Ordering::Relaxed) {
+                dispatcher_read(&run_info_c)
+                    .dispatcher
+                    .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+            }
         });
     }
 }
@@ -1738,10 +1763,12 @@ pub fn activate_needed_units_via_job_graph(
             .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
     }
 
-    // The dispatcher drive owns the closure now; block until it drains. The wake
-    // every 200ms advances process-less frontiers (which fire no completion
-    // event); real starts advance the drive through their Notify/ChildExit
-    // events. The overall deadline is a boot-wide safety net.
+    // The dispatcher drive owns the closure now; block until it drains. The
+    // pool worker's completion-wake (enabled for this drain) advances the drive
+    // at event speed; the 200ms nudge below is now only a backstop for a
+    // completion path that fires neither an event nor the wake. The overall
+    // deadline is a boot-wide safety net.
+    JOB_GRAPH_BOOT_DRAINING.store(true, std::sync::atomic::Ordering::Relaxed);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
     let mut tick: u32 = 0;
     loop {
@@ -1778,6 +1805,9 @@ pub fn activate_needed_units_via_job_graph(
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
+    // Boot drain done: silence the completion-wake so post-boot runtime jobs
+    // keep the control path's completion timing.
+    JOB_GRAPH_BOOT_DRAINING.store(false, std::sync::atomic::Ordering::Relaxed);
     info!(
         "activate_needed_units_via_job_graph: {} closure settled",
         target_id.name
