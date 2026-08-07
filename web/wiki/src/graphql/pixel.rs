@@ -333,6 +333,28 @@ pub async fn set_focused_canvas(
     .map(|_| ())
 }
 
+/// Open a canvas to the room, or lock it so it takes no more paint.
+///
+/// The state lives on the canvas node's `mutable`, which is what the board
+/// already reads to decide whether to offer itself and what draws the "Closed"
+/// chip. Setting it here is only half the lock: the other half is a trigger
+/// (`migrations/0014`) that refuses a placement on a locked canvas, so a board
+/// closed to the room is closed to anything that is not the board too.
+pub async fn set_canvas_open(
+    access_token: Option<&str>,
+    canvas_id: &str,
+    open: bool,
+) -> Result<(), String> {
+    execute_raw_vars(
+        access_token,
+        "mutation($id: uuid!, $m: Boolean!) { \
+           updateNode(pk_columns: {id: $id}, _set: {mutable: $m}) { id mutable } }",
+        serde_json::json!({ "id": canvas_id, "m": open }),
+    )
+    .await
+    .map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

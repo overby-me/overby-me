@@ -484,6 +484,30 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             .collect()
     });
 
+    // Locking is the owner's, and it takes effect for everyone: the board reads
+    // `mutable`, and so does the trigger that refuses a placement, so a closed
+    // canvas is closed to anything that is not this board as well.
+    let mut locking = use_signal(|| false);
+    let lock_id = canvas_id.clone();
+    let toggle_lock = move |_| {
+        if locking() {
+            return;
+        }
+        locking.set(true);
+        let (id, want) = (lock_id.clone(), !open);
+        let token = session.read().access_token.clone();
+        spawn(async move {
+            match graphql::set_canvas_open(token.as_deref(), &id, want).await {
+                Ok(()) => crate::session::bump_data_version(),
+                Err(e) => {
+                    crate::errors::log_handled("lock canvas failed", e);
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+            locking.set(false);
+        });
+    };
+
     let can_paint = session.read().is_authenticated() && open && !projector;
     let paint_canvas = canvas_id.clone();
     let click_id = dom_id.clone();
@@ -703,6 +727,21 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                 span { class: "body-small text-muted", "{painted} / {cols * rows_n}" }
                 if !open {
                     span { class: "chip", "{t(\"pixel.closed\")}" }
+                }
+                // The lock, where the board is: this is the canvas a room is
+                // looking at, so it is the one an owner means by "close it now".
+                if node.is_context_owner.unwrap_or(false) {
+                    button {
+                        class: "btn-icon",
+                        r#type: "button",
+                        disabled: locking(),
+                        aria_label: if open { t("pixel.lock") } else { t("pixel.unlock") },
+                        title: if open { t("pixel.lock") } else { t("pixel.unlock") },
+                        onclick: toggle_lock,
+                        span { class: "material-icons",
+                            if open { "lock_open" } else { "lock" }
+                        }
+                    }
                 }
             }
             div { class: "card-content",
@@ -1186,6 +1225,7 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
                                         name: canvas.name.clone(),
                                         context_id: context_id.clone(),
                                         is_showing: showing.as_deref() == Some(canvas.id.0.as_str()),
+                                        is_open: canvas.mutable,
                                     }
                                 }
                             }
@@ -1199,10 +1239,37 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
 
 /// One canvas in the owner's list: show it to the room, or clear it away.
 #[component]
-fn CanvasRow(canvas_id: String, name: String, context_id: String, is_showing: bool) -> Element {
+fn CanvasRow(
+    canvas_id: String,
+    name: String,
+    context_id: String,
+    is_showing: bool,
+    is_open: bool,
+) -> Element {
     let session = use_session();
     let mut confirm = use_signal(|| false);
     let mut busy = use_signal(|| false);
+    let mut locking = use_signal(|| false);
+
+    let lock_id = canvas_id.clone();
+    let on_lock = move |_| {
+        if locking() {
+            return;
+        }
+        locking.set(true);
+        let (id, want) = (lock_id.clone(), !is_open);
+        let token = session.read().access_token.clone();
+        spawn(async move {
+            match graphql::set_canvas_open(token.as_deref(), &id, want).await {
+                Ok(()) => crate::session::bump_data_version(),
+                Err(e) => {
+                    crate::errors::log_handled("lock canvas failed", e);
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+            locking.set(false);
+        });
+    };
 
     let show_id = canvas_id.clone();
     let show_ctx = context_id.clone();
@@ -1257,6 +1324,17 @@ fn CanvasRow(canvas_id: String, name: String, context_id: String, is_showing: bo
                     r#type: "button",
                     onclick: on_show,
                     "{t(\"pixel.show\")}"
+                }
+            }
+            button {
+                class: "btn-icon",
+                r#type: "button",
+                disabled: locking(),
+                aria_label: if is_open { t("pixel.lock") } else { t("pixel.unlock") },
+                title: if is_open { t("pixel.lock") } else { t("pixel.unlock") },
+                onclick: on_lock,
+                span { class: "material-icons",
+                    if is_open { "lock_open" } else { "lock" }
                 }
             }
             button {
