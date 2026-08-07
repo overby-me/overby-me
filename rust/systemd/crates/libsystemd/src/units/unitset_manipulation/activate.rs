@@ -1661,6 +1661,32 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
             Some(_) => continue,
             None => continue,
         };
+        // Do not re-activate a unit another path is already handling. The drive
+        // owns boot-closure units, which are NeverStarted when it dispatches
+        // them; if the unit has already LEFT NeverStarted, an inline runtime
+        // `systemctl start` (or an in-flight activation) is driving it, and
+        // calling activate_unit again double-starts it. Observed after the
+        // default flip: a runtime blocking start of a oneshot with a required
+        // oneshot dep ran ExecStart twice and its parked wait went Abandoned.
+        // Retire an already-Started job here; leave a Starting one Running for
+        // Phase 1 to retire on its terminal transition.
+        {
+            let status = dispatcher_read(run_info)
+                .unit_table
+                .get(&unit_id)
+                .map(|u| u.common.status.read_poisoned().clone());
+            match status {
+                Some(UnitStatus::NeverStarted) => {}
+                Some(UnitStatus::Started(_)) => {
+                    jobs.lock().unwrap().finish(jid, JobResult::Done);
+                    continue;
+                }
+                _ => {
+                    jobs.lock().unwrap().set_running(jid);
+                    continue;
+                }
+            }
+        }
         {
             let mut reg = jobs.lock().unwrap();
             reg.set_running(jid);
