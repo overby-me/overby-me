@@ -564,6 +564,10 @@ pub struct Service {
     /// MONITOR_* environment variables — set when this service is activated
     /// as an OnSuccess= or OnFailure= handler for another unit.
     pub monitor_env: Option<MonitorEnv>,
+    /// SERVICE_RESULT/EXIT_CODE/EXIT_STATUS for this service's OWN ExecStop=/
+    /// ExecStopPost= commands. Set just before those run so a cleanup command can
+    /// see how the service ended; cleared afterwards (reuses the MonitorEnv shape).
+    pub stop_result_env: Option<MonitorEnv>,
     /// Timestamp (usec since epoch) when the main process was started.
     pub exec_main_start_timestamp: Option<u64>,
     /// Timestamp (usec since epoch) when the main process was handed off (exec).
@@ -803,6 +807,12 @@ impl Service {
         // Clear manual_stop flag so that a subsequent exit will respect
         // the Restart= policy again.
         self.manual_stop = false;
+
+        // Clear any SERVICE_RESULT/EXIT_CODE/EXIT_STATUS recorded from a previous
+        // run's exit, so this start's ExecStartPre=/ExecStartPost= do not inherit
+        // a stale stop result. It is repopulated by the exit head when the main
+        // process next exits, just before the stop-phase commands run.
+        self.stop_result_env = None;
 
         // Clear watchdog state from any previous run so that the watchdog
         // enforcement thread doesn't immediately kill the freshly started
@@ -1312,6 +1322,15 @@ impl Service {
         name: &str,
         run_info: &RuntimeInfo,
     ) -> Result<(), RunCmdError> {
+        // ExecStop= sees SERVICE_RESULT/EXIT_CODE/EXIT_STATUS as well, computed
+        // from how the main process terminated (parity with ExecStopPost= in
+        // run_poststop). Only set when a main actually ran and exited.
+        if let Some(term) = self.main_exit_termination {
+            let is_success = conf.success_exit_status.is_success(&term);
+            self.stop_result_env = Some(
+                crate::services::service_exit_handler::build_monitor_env(name, &term, is_success),
+            );
+        }
         self.run_stop_cmd(conf, id, name, run_info)
     }
 
@@ -1644,6 +1663,15 @@ impl Service {
             // MONITOR_INVOCATION_ID is required but we don't track invocation IDs yet;
             // use a placeholder so handler scripts that check -z don't fail.
             cmd.env("MONITOR_INVOCATION_ID", "0");
+        }
+
+        // Pass SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to the service's own
+        // ExecStop=/ExecStopPost= commands (set only while those run), so a
+        // cleanup command can see how the service ended.
+        if let Some(ref r) = self.stop_result_env {
+            cmd.env("SERVICE_RESULT", &r.service_result);
+            cmd.env("EXIT_CODE", &r.exit_code);
+            cmd.env("EXIT_STATUS", &r.exit_status);
         }
 
         // Apply the unit's Environment= to helper commands (ExecStartPre=/Post=,
@@ -2020,6 +2048,18 @@ impl Service {
         run_info: &RuntimeInfo,
     ) -> Result<(), RunCmdError> {
         trace!("Run poststop for {name}");
+        // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=, computed
+        // from how the main process terminated. This is the deactivate()/kill()
+        // stop path; setting it here (from the persistent main_exit_termination
+        // recorded by the exit head) makes the env correct even though an inline
+        // exit-handler run may have cleared the field just before. Only set when a
+        // main actually ran and exited — a start-phase failure leaves it unset.
+        if let Some(term) = self.main_exit_termination {
+            let is_success = conf.success_exit_status.is_success(&term);
+            self.stop_result_env = Some(
+                crate::services::service_exit_handler::build_monitor_env(name, &term, is_success),
+            );
+        }
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stoppost.clone();
         self.helper_mount_ns = helper_mount_ns_from_conf(conf);

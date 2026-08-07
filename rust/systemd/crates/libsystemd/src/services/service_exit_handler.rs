@@ -169,7 +169,7 @@ fn trigger_on_success_failure_units(
 }
 
 /// Build a `MonitorEnv` from the source unit's termination status.
-fn build_monitor_env(
+pub(crate) fn build_monitor_env(
     source_name: &str,
     code: &crate::signal_handler::ChildTermination,
     is_success: bool,
@@ -746,6 +746,17 @@ pub(crate) fn service_exit_head(
         };
         state.srvc.main_exit_status = Some(exit_code);
         state.srvc.main_exit_termination = Some(*code);
+        // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to this service's own
+        // stop-phase commands (ExecStop=/ExecStopPost=). The exit head runs first
+        // for every main-process exit, so recording it here makes every downstream
+        // stoppost path see it: the inline exit handler, the dispatcher stop
+        // chain's ForkHelper, and run_poststop. Cleared on the next start() so a
+        // Restart='s ExecStartPre does not inherit a stale result.
+        state.srvc.stop_result_env = Some(build_monitor_env(
+            &srvc_id.name,
+            code,
+            srvc.conf.success_exit_status.is_success(code),
+        ));
         state.srvc.main_exit_pid = Some(pid);
         state.srvc.exec_main_exit_timestamp = Some(crate::units::UnitTimestamps::now_usec());
         // Update lock-free atomics so property queries work without the state lock.
@@ -1045,6 +1056,9 @@ pub(crate) fn service_exit_handler(
                 let name = &unit.id.name;
                 trace!("Running ExecStopPost for oneshot service {name}");
                 let mut state = srvc.state.write_poisoned();
+                // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=.
+                state.srvc.stop_result_env =
+                    Some(build_monitor_env(name, &code, success_exit_status.is_success(&code)));
                 let timeout = state.srvc.get_stop_timeout(&srvc.conf);
                 let cmds = srvc.conf.stoppost.clone();
                 if let Err(e) = state.srvc.run_all_cmds(
@@ -1057,6 +1071,7 @@ pub(crate) fn service_exit_handler(
                 ) {
                     warn!("ExecStopPost for oneshot service {name} failed: {e:?}");
                 }
+                state.srvc.stop_result_env = None;
             }
 
             // RemainAfterExit=no (default): deactivate the oneshot service
@@ -1508,6 +1523,9 @@ pub(crate) fn service_exit_handler(
     {
         trace!("Running ExecStopPost for service {name}");
         let mut state = srvc.state.write_poisoned();
+        // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=.
+        state.srvc.stop_result_env =
+            Some(build_monitor_env(name, &code, success_exit_status.is_success(&code)));
         let timeout = state.srvc.get_stop_timeout(&srvc.conf);
         let cmds = srvc.conf.stoppost.clone();
         if let Err(e) = state.srvc.run_all_cmds(
@@ -1520,6 +1538,7 @@ pub(crate) fn service_exit_handler(
         ) {
             warn!("ExecStopPost for service {name} failed: {e:?}");
         }
+        state.srvc.stop_result_env = None;
     }
 
     if restart_unit {

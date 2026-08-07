@@ -264,6 +264,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     trigger_timer_realtime_usec: None,
                     trigger_timer_monotonic_usec: None,
                     monitor_env: None,
+                    stop_result_env: None,
                     exec_main_start_timestamp: None,
                     exec_main_handoff_timestamp: None,
                     exec_main_exit_timestamp: None,
