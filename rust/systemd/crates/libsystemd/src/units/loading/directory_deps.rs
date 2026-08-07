@@ -3043,6 +3043,7 @@ mod tests {
                     wanted_by: vec![],
                     requires: vec![],
                     required_by: vec![],
+                    requisite: vec![],
                     conflicts: vec![],
                     conflicted_by: vec![],
                     before: vec![],

@@ -8498,12 +8498,12 @@ fn test_success_exit_status_is_success_extra_signal() {
     };
     assert!(
         ses.is_success(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1
+            nix::sys::signal::Signal::SIGUSR1, false
         ))
     );
     assert!(
         !ses.is_success(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR2
+            nix::sys::signal::Signal::SIGUSR2, false
         ))
     );
 }
@@ -8514,33 +8514,33 @@ fn test_success_exit_status_is_clean_signal_defaults() {
     // Built-in clean signals
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGHUP
+            nix::sys::signal::Signal::SIGHUP, false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGINT
+            nix::sys::signal::Signal::SIGINT, false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGTERM
+            nix::sys::signal::Signal::SIGTERM, false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGPIPE
+            nix::sys::signal::Signal::SIGPIPE, false
         ))
     );
     // Not clean by default
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1
+            nix::sys::signal::Signal::SIGUSR1, false
         ))
     );
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGKILL
+            nix::sys::signal::Signal::SIGKILL, false
         ))
     );
 }
@@ -8554,19 +8554,19 @@ fn test_success_exit_status_is_clean_signal_extra() {
     // Extra signal is now clean
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1
+            nix::sys::signal::Signal::SIGUSR1, false
         ))
     );
     // Built-in clean signals still work
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGTERM
+            nix::sys::signal::Signal::SIGTERM, false
         ))
     );
     // Other signals still not clean
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR2
+            nix::sys::signal::Signal::SIGUSR2, false
         ))
     );
 }
@@ -49563,7 +49563,7 @@ fn test_requisite_multiple_units() {
 }
 
 #[test]
-fn test_requisite_also_added_to_requires() {
+fn test_requisite_not_added_to_requires() {
     let test_service_str = r#"
     [Unit]
     Requisite = network.target
@@ -49574,11 +49574,22 @@ fn test_requisite_also_added_to_requires() {
     let service =
         crate::units::parse_service(parsed_file, &std::path::PathBuf::from("test.service"))
             .unwrap();
+    // Requisite= is a DISTINCT dependency: it must NOT be merged into Requires=
+    // (that merge was a bug, fixed in 74692e88 — Requisite= refuses a start
+    // whose target is inactive but, unlike Requires=, does not pull it in).
+    assert!(
+        !service
+            .common
+            .unit
+            .requires
+            .contains(&"network.target".to_string()),
+        "Requisite= must not be merged into Requires="
+    );
     assert!(
         service
             .common
             .unit
-            .requires
+            .requisite
             .contains(&"network.target".to_string())
     );
 }
