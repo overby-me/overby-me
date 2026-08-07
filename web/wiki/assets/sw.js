@@ -10,6 +10,27 @@
 //     network, then to the cached app shell (/) when offline.
 const CACHE = "radikalwiki-v5";
 
+// Which build this worker IS. Substituted when the bundle is assembled (see the
+// justfile), like version.json; unsubstituted in `dx serve`, where it says so.
+//
+// A worker outlives the page that installed it: a visitor can be running one
+// build in the tab while a worker from an older deploy serves the files. That
+// gap is invisible from the page -- it explains "I still see the old version"
+// and a stack that does not match the code -- so the worker answers when asked.
+const BUILD = "__WIKI_BUILD__";
+
+self.addEventListener("message", (event) => {
+	if (event.data !== "which build?") return;
+	const reply = { build: BUILD, cache: CACHE };
+	// Back down the port the asker sent, when they sent one; otherwise to
+	// everybody, which is what a page without a MessageChannel would hear.
+	if (event.ports && event.ports[0]) {
+		event.ports[0].postMessage(reply);
+		return;
+	}
+	event.source && event.source.postMessage(reply);
+});
+
 self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) =>

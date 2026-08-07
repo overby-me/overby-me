@@ -46,7 +46,11 @@ build:
     #                /assets/ path, whose scope would only be /assets/)
     cp assets/_redirects target/dx/wiki-dioxus/release/web/public/_redirects
     cp assets/_headers target/dx/wiki-dioxus/release/web/public/_headers
-    cp assets/sw.js target/dx/wiki-dioxus/release/web/public/sw.js
+    # sw.js carries the build it is, so a page can ask the worker serving it
+    # which deploy it came from (src/logging.rs). Substituted here rather than
+    # baked by `dx`, which does not process this file.
+    sed 's/__WIKI_BUILD__/'"$GIT_COMMIT"'/' assets/sw.js \
+        > target/dx/wiki-dioxus/release/web/public/sw.js
     # What this deploy is, for a running tab to compare itself against
     # (src/update.rs). At the root, so `_headers` keeps it revalidated rather
     # than cached like the hashed assets.

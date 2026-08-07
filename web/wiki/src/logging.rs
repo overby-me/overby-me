@@ -36,6 +36,9 @@ thread_local! {
     static BREADCRUMBS: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
     /// A random id identifying this browser tab/session.
     static SESSION_ID: RefCell<String> = const { RefCell::new(String::new()) };
+    /// Which build the service worker serving this page came from, once it has
+    /// been asked. See [`ask_the_worker_which_build`].
+    static SW_BUILD: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// The backend log-ingest proxy (it forwards to Better Stack server-side). Going
@@ -205,6 +208,12 @@ fn make_entry_with_stack(level: &str, message: String, stack: Option<String>) ->
         "dpr": web_sys::window().map(|w| w.device_pixel_ratio()),
         "installed": display_mode_standalone(),
         "sw_controlled": service_worker_controlling(),
+        // And WHICH build that worker is. A worker outlives the page that
+        // installed it, so a visitor can be running one deploy in the tab while
+        // an older one serves the files -- which is what "I still see the old
+        // version" is, and why a stack can disagree with the code. `null` with
+        // `sw_controlled` true is a worker from before this was asked of them.
+        "sw_build": SW_BUILD.with(|b| b.borrow().clone()),
         "online": web_sys::window().map(|w| w.navigator().on_line()),
         "connection": connection_kind(),
         "language": web_sys::window().and_then(|w| w.navigator().language()),
@@ -274,6 +283,60 @@ fn connection_kind() -> Option<String> {
 fn storage_works() -> Option<bool> {
     let w = web_sys::window()?;
     Some(matches!(w.local_storage(), Ok(Some(_))))
+}
+
+/// Ask the service worker serving this page which build it is, and remember the
+/// answer for every entry after it.
+///
+/// A worker outlives the page that installed it, so a visitor can be running one
+/// deploy in the tab while an older one serves the files. There is no other way
+/// to ask: the worker's build is in the worker's own code, and `version.json` is
+/// deliberately never cached (see sw.js).
+///
+/// Nothing waits for the reply. The listener goes on first and the question
+/// after it, so an answer lands when it lands -- and a worker from a deploy
+/// before this question existed simply never sends one, which is why the field
+/// can be absent while `sw_controlled` is true.
+fn ask_the_worker_which_build() {
+    use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    if !crate::pwa::service_worker_available() {
+        return;
+    }
+    let Ok(container) = js_sys::Reflect::get(window.navigator().as_ref(), &"serviceWorker".into())
+    else {
+        return;
+    };
+    let Ok(controller) = js_sys::Reflect::get(&container, &"controller".into()) else {
+        return;
+    };
+    if controller.is_null() || controller.is_undefined() {
+        return;
+    }
+    if let Ok(target) = container.clone().dyn_into::<web_sys::EventTarget>() {
+        let heard =
+            Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+                let build = js_sys::Reflect::get(&ev.data(), &"build".into())
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .filter(|b| !b.is_empty() && b != "__WIKI_BUILD__");
+                if build.is_some() {
+                    SW_BUILD.with(|b| *b.borrow_mut() = build);
+                }
+            });
+        let _ = target.add_event_listener_with_callback("message", heard.as_ref().unchecked_ref());
+        heard.forget();
+    }
+    let Ok(post) = js_sys::Reflect::get(&controller, &"postMessage".into()) else {
+        return;
+    };
+    let Ok(post) = post.dyn_into::<js_sys::Function>() else {
+        return;
+    };
+    let _ = post.call1(&controller, &JsValue::from_str("which build?"));
 }
 
 fn level_str(l: Level) -> &'static str {
@@ -621,6 +684,7 @@ pub fn init() {
     setup_panic_hook();
     setup_global_error_handlers();
     start_flush_loop();
+    ask_the_worker_which_build();
 
     if SOURCE_TOKEN.is_none() {
         log::info!("remote logging built in, but BETTERSTACK_SOURCE_TOKEN is unset: console only");
