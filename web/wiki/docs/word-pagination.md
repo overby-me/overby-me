@@ -38,10 +38,16 @@ Each of these was wrong at some point, and each was worth a page or more:
   text column overflows the margin as it does in Word rather than being squeezed
   into it. Left to the browser, one table was laid out 134/60/398 where Word has
   290/75/305, and every row came out short.
-- **Pages are filled, not sliced.** Word moves a paragraph whole rather than
-  stranding a line of it, so a page can end early and the space below it goes
-  unused. Measuring the ribbon continuously and dividing by the page height gets
-  this wrong in both directions.
+- **A page ends between two LINES of a paragraph**, not above it. Word leaves as
+  many lines as fit and carries the rest over, keeping two on each side of the
+  break — widow and orphan control, which every document here asks for. This
+  file used to claim the opposite, and measuring it that way left up to a
+  paragraph of empty page at every break.
+- **But an element that cannot be sliced moves whole**, and then the page ends
+  early with the space below it unused: a table row (unless it splits, below), a
+  heading kept with what follows it, a paragraph of three lines or fewer.
+  Measuring the ribbon continuously and dividing by the page height gets this
+  wrong in both directions.
 - **A table row is the exception**: Word carries the rest of a row onto the next
   page unless `cantSplit` forbids it, so a page that ends inside a row is full.
 - **An empty paragraph is a line.** Word gives it the line of its paragraph
