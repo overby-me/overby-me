@@ -183,6 +183,36 @@ pub fn stashed_scroll(url: &str) -> Option<f64> {
         .ok()
 }
 
+/// Where the reader was before the sign-in screens.
+///
+/// Signing in is a detour, not a destination: someone who taps "log in" while
+/// reading an agenda wants the agenda back, not the front page. Recorded on
+/// every page that is not one of the auth screens, so it covers all the ways
+/// into them at once -- the menu, a link, and the app sending a signed-out
+/// reader there itself.
+///
+/// In `sessionStorage`, like the scroll: the detour can include a password
+/// reset, a mail and a reload, and it should die with the tab.
+const WAY_BACK: &str = "wiki_way_back";
+
+/// Note that this is where the reader is, in case they sign in from here.
+pub fn note_way_back(url: &str) {
+    let Some(store) = session_storage() else {
+        return;
+    };
+    let _ = store.set_item(WAY_BACK, url);
+}
+
+/// Where to put the reader after signing in, TAKEN: it is worth one journey.
+/// Left behind, it would send them back there again the next time they signed
+/// in from somewhere else in the same tab.
+pub fn way_back() -> Option<String> {
+    let store = session_storage()?;
+    let url = store.get_item(WAY_BACK).ok().flatten()?;
+    let _ = store.remove_item(WAY_BACK);
+    (!url.is_empty()).then_some(url)
+}
+
 /// The current URL as the router writes it: path plus query, which is the key
 /// the scroll is filed under.
 pub fn current_url() -> Option<String> {
@@ -191,7 +221,8 @@ pub fn current_url() -> Option<String> {
 }
 
 /// Forget everything. Called on sign-out, so the next reader does not inherit
-/// the last one's places, which may be in a context they cannot even see.
+/// the last one's places, which may be in a context they cannot even see --
+/// the way back after signing in included, for exactly that reason.
 pub fn clear() {
     SPOTS.write().clear();
     let Some(store) = session_storage() else {
@@ -199,6 +230,7 @@ pub fn clear() {
     };
     // Collect first: removing while walking the store would shift the indices
     // under the walk and skip half the keys.
+    let _ = store.remove_item(WAY_BACK);
     let mut ours = Vec::new();
     for i in 0..store.length().unwrap_or(0) {
         if let Ok(Some(k)) = store.key(i) {

@@ -419,6 +419,14 @@ pub fn Layout() -> Element {
         };
     }
 
+    // Where the reader is, in case they sign in from here. Recorded for every
+    // page that is not an auth screen, which is the one place that covers all
+    // the ways into them: the user menu, the buttons on an empty state, and the
+    // app sending a signed-out reader there itself.
+    if let Some(url) = crate::nav_memory::current_url() {
+        crate::nav_memory::note_way_back(&url);
+    }
+
     // The projector view (`?app=screen`) is full-screen: no drawer / rail / bar,
     // just the active content + speaker list (React renders it chrome-less).
     let is_screen = matches!(&route, Route::PathPage { app: Some(a), .. } if a == "screen");

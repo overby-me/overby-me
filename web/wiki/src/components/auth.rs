@@ -166,7 +166,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                             // Refetch everything for the new session so no data
                             // from a previous one lingers (React clears its cache).
                             crate::session::bump_data_version();
-                            nav.push(Route::Home { app: None });
+                            back_to_where_they_were();
                         }
                         Err(err) => match err.error.as_deref() {
                             Some("unverified-user") => {
@@ -288,7 +288,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                     let token = SESSION.read().access_token.clone().unwrap_or_default();
                     match nhost::change_password(&token, &pw).await {
                         Ok(()) => {
-                            nav.push(Route::Home { app: None });
+                            back_to_where_they_were();
                         }
                         Err(err) => {
                             error_password.set(auth_error_message(&err));
@@ -484,6 +484,21 @@ fn AuthForm(mode: AuthMode) -> Element {
             }
         }
     }
+}
+
+/// Put the reader back where they were before they signed in.
+///
+/// The front page is where a reader who arrived at the door belongs; anyone
+/// else was reading something, and sending them to the front page loses it --
+/// they came to sign in so they could see THAT page. Where the app has no
+/// record (a fresh tab opened on the login screen, or a link straight to it),
+/// the front page is still the answer.
+fn back_to_where_they_were() {
+    let nav = navigator();
+    match crate::nav_memory::way_back().and_then(|url| url.parse::<Route>().ok()) {
+        Some(back) => nav.push(back),
+        None => nav.push(Route::Home { app: None }),
+    };
 }
 
 #[component]
