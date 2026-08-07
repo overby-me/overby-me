@@ -685,11 +685,19 @@ fn start_service_with_filedescriptors(
                     crate::platform::pwnam::getpwnam_r(user_str)
                 };
                 if let Ok(pw) = pwentry {
-                    // $USER/$LOGNAME carry the resolved name, not the raw UID.
+                    // Upstream always exports $USER when the user record resolves
+                    // (carrying the resolved name, not the raw UID); $LOGNAME,
+                    // $HOME and $SHELL are gated on SetLoginEnvironment=
+                    // (exec-invoke.c exec_context_get_set_login_environment). The
+                    // tristate defaults to true when User=/DynamicUser= is set,
+                    // which it is here, so an unset directive keeps the old
+                    // behaviour; only SetLoginEnvironment=no suppresses them.
                     env.push(("USER".to_owned(), pw.name.clone()));
-                    env.push(("LOGNAME".to_owned(), pw.name.clone()));
-                    env.push(("HOME".to_owned(), pw.home.clone()));
-                    env.push(("SHELL".to_owned(), pw.shell.clone()));
+                    if conf.exec_config.set_login_environment.unwrap_or(true) {
+                        env.push(("LOGNAME".to_owned(), pw.name.clone()));
+                        env.push(("HOME".to_owned(), pw.home.clone()));
+                        env.push(("SHELL".to_owned(), pw.shell.clone()));
+                    }
                     set_login_env = true;
                 }
             }
