@@ -790,6 +790,18 @@ fn start_service_with_filedescriptors(
             }
             env.push(("NOTIFY_SOCKET".to_owned(), notifications_path));
 
+            // WATCHDOG_USEC — the runtime watchdog interval in microseconds,
+            // exported when WatchdogSec= is set so a service can discover its
+            // keep-alive deadline via sd_watchdog_enabled(). The companion
+            // WATCHDOG_PID is stamped with the exec'd PID in exec_helper
+            // (post-fork), mirroring LISTEN_PID.
+            if let Some(crate::units::Timeout::Duration(d)) = &conf.watchdog_sec {
+                let usec = d.as_micros();
+                if usec > 0 {
+                    env.push(("WATCHDOG_USEC".to_owned(), usec.to_string()));
+                }
+            }
+
             // FDSTORE — the file descriptor store capacity, exported when
             // FileDescriptorStoreMax > 0 so a service can discover how many fds
             // it may push via FDSTORE=1 sd_notify (upstream exec_context sets

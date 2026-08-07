@@ -3514,6 +3514,14 @@ pub fn run_exec_helper() {
         unsafe { std::env::set_var("LISTEN_PID", format!("{}", nix::unistd::getpid())) };
     }
 
+    // Stamp WATCHDOG_PID with the exec'd PID whenever WATCHDOG_USEC was
+    // exported (WatchdogSec= is set), so sd_watchdog_enabled() — which returns
+    // 0 unless $WATCHDOG_PID is unset or equals getpid() — recognises this
+    // process as the watchdog owner. Mirrors the LISTEN_PID handling above.
+    if std::env::var("WATCHDOG_USEC").is_ok() {
+        unsafe { std::env::set_var("WATCHDOG_PID", format!("{}", nix::unistd::getpid())) };
+    }
+
     // Reset the signal mask so the child starts with all signals unblocked.
     // The service manager (PID 1) may block signals via sigprocmask (e.g.
     // signal-hook blocks SIGCHLD, SIGTERM, etc. for its iterator thread),
