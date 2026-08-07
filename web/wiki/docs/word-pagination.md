@@ -68,6 +68,23 @@ Four of the five match Word exactly, including both of the assembly's own. So
 does `indstillinger` under Ekstraordinært landsmøde, which is checked by hand
 (the test account is not a member of that context).
 
+## What Word's own record is worth, and how to read it
+
+Eighty-four of the wiki's Word files carry `lastRenderedPageBreak` hints, which
+makes them a truth set worth measuring against — but the hints have a trap in
+them. **Word writes the hint into every CELL a page boundary crosses**, so one
+break across a four-column row appears four times. Counting hints as pages made
+one document look like 22 pages when Word makes 11 — and made this renderer look
+half as long as Word when it was exactly right. Group the hints by their
+enclosing `w:tr` and count each row once.
+
+Measured against twelve of them (a spread of prose and tables), the model gets
+the page count right on five, and on the one long prose document with no tables
+at all it gets every one of its fourteen breaks exactly. The failures are
+documents with tables, in both directions, and one long prose document that
+comes out a quarter too long. That is the shape of the remaining work: the
+prose model is close, the table model is not.
+
 ## The one that does not, and why
 
 `evaluering_af_fu_og_posk´s_arbejdsprogram` is six tables and eighty-five blank
