@@ -45,9 +45,13 @@ const TRUTH = [
         ["Fokus på trivslen lokalt", "At vi har et bedre skolevalg", "Genstart af lokalforeningerne",
          "Konklusion", "Evaluering af PoSK´s arbejdsprogram", "Påvirke RV", "Konklusion"]]
 
-    # No hints in this one; its pages were counted by reading it, so only the
-    # count is known.
-    ["hb5/bilag/posk_arbejdsprogram_21-22", 3, []]
+    # This one records no hints at all, so its count came from reading it and
+    # its first break from someone opening it in Word. It is three tables and a
+    # page of prose, and we currently break it one paragraph late: the first
+    # page measures about six pixels short of what Word fits there, which is a
+    # tenth of the heading that ought to move.
+    ["hb5/bilag/posk_arbejdsprogram_21-22", 3,
+        ["Radikal Ungdom skal være et engagerende politisk fællesskab"]]
 
     # The assembly's own two, which is what this was for.
     ["landsmøde_2026/bilag/beretninger/sekretariatets_beretning_2026", 1, []]
