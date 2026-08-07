@@ -251,8 +251,13 @@ impl SocketState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<(), UnitOperationError> {
-        // RuntimeDirectory= is dropped on stop, like services/mounts.
-        remove_runtime_directories(&conf.exec_config.runtime_directory);
+        // RuntimeDirectory= is dropped on stop, like services/mounts — unless
+        // RuntimeDirectoryPreserve=yes, which the service path already honors
+        // (this socket path removed it unconditionally, so a socket with
+        // RuntimeDirectoryPreserve=yes lost /run/<dir> on every stop).
+        if conf.exec_config.runtime_directory_preserve != RuntimeDirectoryPreserve::Yes {
+            remove_runtime_directories(&conf.exec_config.runtime_directory);
+        }
         let close_result = self
             .sock
             .close_all(
