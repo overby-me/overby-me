@@ -298,7 +298,7 @@ fn storage_works() -> Option<bool> {
 /// before this question existed simply never sends one, which is why the field
 /// can be absent while `sw_controlled` is true.
 fn ask_the_worker_which_build() {
-    use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+    use wasm_bindgen::{closure::Closure, JsCast};
 
     let Some(window) = web_sys::window() else {
         return;
@@ -310,40 +310,58 @@ fn ask_the_worker_which_build() {
     else {
         return;
     };
-    let Ok(controller) = js_sys::Reflect::get(&container, &"controller".into()) else {
+    let Ok(target) = container.clone().dyn_into::<web_sys::EventTarget>() else {
+        return;
+    };
+
+    let heard = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+        let build = js_sys::Reflect::get(&ev.data(), &"build".into())
+            .ok()
+            .and_then(|v| v.as_string())
+            .filter(|b| !b.is_empty() && b != "__WIKI_BUILD__");
+        if build.is_some() {
+            SW_BUILD.with(|b| *b.borrow_mut() = build);
+        }
+    });
+    let _ = target.add_event_listener_with_callback("message", heard.as_ref().unchecked_ref());
+    heard.forget();
+    // And START the delivery. A container queues its messages until either an
+    // `onmessage` property is assigned or this is called; a listener added with
+    // `addEventListener` does NOT start it, and the answer would sit in the
+    // queue unread.
+    if let Ok(start) = js_sys::Reflect::get(&container, &"startMessages".into()) {
+        if let Ok(start) = start.dyn_into::<js_sys::Function>() {
+            let _ = start.call0(&container);
+        }
+    }
+
+    // Now, if a worker is already serving this page -- and again when one takes
+    // over, which is what happens on the visit that installs it: the page is
+    // loaded uncontrolled and claimed a moment later, so asking only at boot
+    // would leave that visit unable to say what is serving it.
+    ask_the_controller(&container);
+    let container_again = container.clone();
+    let taken_over = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+        ask_the_controller(&container_again);
+    });
+    let _ = target
+        .add_event_listener_with_callback("controllerchange", taken_over.as_ref().unchecked_ref());
+    taken_over.forget();
+}
+
+/// Put the question to whichever worker is serving the page right now.
+fn ask_the_controller(container: &wasm_bindgen::JsValue) {
+    use wasm_bindgen::{JsCast, JsValue};
+
+    let Ok(controller) = js_sys::Reflect::get(container, &"controller".into()) else {
         return;
     };
     if controller.is_null() || controller.is_undefined() {
-        // The first visit installs a worker but is not served by one, so there
-        // is nobody to ask yet. Said out loud because a report with no
-        // `sw_build` is otherwise ambiguous between this and a worker too old
-        // to answer.
+        // The visit that INSTALLS a worker is not served by one, so there is
+        // nobody to ask yet. Said out loud because a report with no `sw_build`
+        // is otherwise ambiguous between this and a worker too old to answer.
         log::info!("no service worker controls this page yet, so none was asked which build it is");
         return;
-    }
-    if let Ok(target) = container.clone().dyn_into::<web_sys::EventTarget>() {
-        let heard =
-            Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
-                let build = js_sys::Reflect::get(&ev.data(), &"build".into())
-                    .ok()
-                    .and_then(|v| v.as_string())
-                    .filter(|b| !b.is_empty() && b != "__WIKI_BUILD__");
-                if build.is_some() {
-                    SW_BUILD.with(|b| *b.borrow_mut() = build);
-                }
-            });
-        let _ = target.add_event_listener_with_callback("message", heard.as_ref().unchecked_ref());
-        heard.forget();
-        // And START the delivery. A container queues its messages until either
-        // an `onmessage` property is assigned or this is called; a listener
-        // added with `addEventListener` does NOT start it, so the worker's
-        // answer sat in the queue and every report said it did not know which
-        // build was serving it.
-        if let Ok(start) = js_sys::Reflect::get(&container, &"startMessages".into()) {
-            if let Ok(start) = start.dyn_into::<js_sys::Function>() {
-                let _ = start.call0(&container);
-            }
-        }
     }
     let Ok(post) = js_sys::Reflect::get(&controller, &"postMessage".into()) else {
         return;
