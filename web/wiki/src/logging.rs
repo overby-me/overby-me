@@ -314,6 +314,11 @@ fn ask_the_worker_which_build() {
         return;
     };
     if controller.is_null() || controller.is_undefined() {
+        // The first visit installs a worker but is not served by one, so there
+        // is nobody to ask yet. Said out loud because a report with no
+        // `sw_build` is otherwise ambiguous between this and a worker too old
+        // to answer.
+        log::info!("no service worker controls this page yet, so none was asked which build it is");
         return;
     }
     if let Ok(target) = container.clone().dyn_into::<web_sys::EventTarget>() {
@@ -346,7 +351,10 @@ fn ask_the_worker_which_build() {
     let Ok(post) = post.dyn_into::<js_sys::Function>() else {
         return;
     };
-    let _ = post.call1(&controller, &JsValue::from_str("which build?"));
+    match post.call1(&controller, &JsValue::from_str("which build?")) {
+        Ok(_) => log::info!("asked the service worker which build it is"),
+        Err(e) => log::info!("could not ask the service worker which build it is: {e:?}"),
+    }
 }
 
 fn level_str(l: Level) -> &'static str {
