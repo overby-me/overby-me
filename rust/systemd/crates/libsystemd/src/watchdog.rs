@@ -94,6 +94,10 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
     // act, to avoid holding the RuntimeInfo read lock during signal delivery.
     let mut timed_out: Vec<WatchdogTimeout> = Vec::new();
     let mut runtime_max_timed_out: Vec<RuntimeMaxTimeout> = Vec::new();
+    // Services whose WatchdogSignal= was already sent and whose TimeoutAbortSec=
+    // has since expired: escalate to SIGKILL. (unit_name, pid, process_group)
+    let mut abort_kills: Vec<(String, Option<nix::unistd::Pid>, Option<nix::unistd::Pid>)> =
+        Vec::new();
 
     {
         let ri = match run_info.try_read() {
@@ -220,22 +224,54 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
 
             let elapsed = now.duration_since(reference);
             if elapsed >= timeout {
-                // The watchdog has expired.
                 let effective_pid = srvc.main_pid.or(srvc.pid);
-                let signal = srvc_specific
-                    .conf
-                    .watchdog_signal
-                    .and_then(|s| nix::sys::signal::Signal::try_from(s).ok())
-                    .unwrap_or(nix::sys::signal::Signal::SIGABRT);
+                if srvc.watchdog_timeout_fired {
+                    // The WatchdogSignal= was already sent on an earlier cycle; do
+                    // not re-send it every tick. Instead escalate to SIGKILL once
+                    // TimeoutAbortSec= has elapsed since that signal (upstream's
+                    // abort timeout, which gives the service time to write a core
+                    // dump). TimeoutAbortSec= defaults to TimeoutStopSec= (then 90s);
+                    // Infinity disables the SIGKILL escalation entirely.
+                    let abort_timeout = match srvc_specific.conf.timeout_abort_sec.as_ref() {
+                        Some(Timeout::Duration(d)) => Some(*d),
+                        Some(Timeout::Infinity) => None,
+                        None => match srvc_specific
+                            .conf
+                            .stoptimeout
+                            .as_ref()
+                            .or(srvc_specific.conf.generaltimeout.as_ref())
+                        {
+                            Some(Timeout::Duration(d)) => Some(*d),
+                            Some(Timeout::Infinity) => None,
+                            None => Some(std::time::Duration::from_secs(90)),
+                        },
+                    };
+                    if let Some(abort_timeout) = abort_timeout
+                        && elapsed >= timeout + abort_timeout
+                    {
+                        abort_kills.push((
+                            unit.id.name.clone(),
+                            effective_pid,
+                            srvc.process_group,
+                        ));
+                    }
+                } else {
+                    // First expiry: send the configured WatchdogSignal= (SIGABRT).
+                    let signal = srvc_specific
+                        .conf
+                        .watchdog_signal
+                        .and_then(|s| nix::sys::signal::Signal::try_from(s).ok())
+                        .unwrap_or(nix::sys::signal::Signal::SIGABRT);
 
-                timed_out.push(WatchdogTimeout {
-                    unit_name: unit.id.name.clone(),
-                    pid: effective_pid,
-                    process_group: srvc.process_group,
-                    signal,
-                    elapsed,
-                    timeout,
-                });
+                    timed_out.push(WatchdogTimeout {
+                        unit_name: unit.id.name.clone(),
+                        pid: effective_pid,
+                        process_group: srvc.process_group,
+                        signal,
+                        elapsed,
+                        timeout,
+                    });
+                }
             }
         }
     }
@@ -304,6 +340,18 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         }
 
         send_signal_to_service(&wt.unit_name, wt.pid, wt.process_group, wt.signal);
+    }
+
+    // Escalate to SIGKILL for watchdog-signaled services that outlived
+    // TimeoutAbortSec= (upstream sends SIGKILL after the abort timeout).
+    for (unit_name, pid, process_group) in &abort_kills {
+        warn!("Abort timeout (TimeoutAbortSec=) for service {unit_name} — sending SIGKILL");
+        send_signal_to_service(
+            unit_name,
+            *pid,
+            *process_group,
+            nix::sys::signal::Signal::SIGKILL,
+        );
     }
 }
 
