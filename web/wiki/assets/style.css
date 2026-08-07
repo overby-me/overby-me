@@ -8391,7 +8391,17 @@ a.list-item:hover {
    there is no page below it to turn to. */
 .pdf-page-last {
 	scroll-margin-top: 0;
-	margin-bottom: var(--md-sys-spacing-2);
+	/* The same space under it as under any other page ending. It used to give
+	   this up on the grounds that nothing follows -- but a document then ended
+	   tighter than any of its own pages, its last rule all but touching the edge
+	   of the reading surface with the comments beneath it.
+
+	   The same space, and no more: the white Word leaves under the last line of
+	   a short final page is most of a page, and putting that here would be a
+	   screenful of nothing between the document and its comments. No other page
+	   that ends early shows its unused space either -- this surface reflows, and
+	   the rules say where the pages END, not how tall they were. */
+	margin-bottom: var(--pdf-page-gap, var(--md-sys-spacing-10));
 }
 
 /* What a jump actually aims at: the first thing on the page being turned to. */
