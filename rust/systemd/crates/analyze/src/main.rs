@@ -574,6 +574,7 @@ fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
         ("year", USEC_PER_YEAR),
         ("msec", USEC_PER_MSEC),
         ("usec", 1),
+        ("µs", 1),
         ("min", USEC_PER_MINUTE),
         ("ms", USEC_PER_MSEC),
         ("us", 1),
@@ -585,6 +586,19 @@ fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
         ("w", USEC_PER_WEEK),
         ("y", USEC_PER_YEAR),
     ];
+
+    // systemd's time-unit table is case-SENSITIVE for the single-letter `M`
+    // (month) vs `m` (minute); the table below is matched case-insensitively
+    // for convenience, so a bare capital `M` must be resolved to month here,
+    // before it is lowercased into `m`. Longer capitalised units (`Month`)
+    // still fall through to the case-insensitive match.
+    if let Some(after) = s.strip_prefix('M')
+        && (after.is_empty()
+            || after.starts_with(' ')
+            || after.starts_with(|c: char| c.is_ascii_digit()))
+    {
+        return Ok((USEC_PER_MONTH, 1));
+    }
 
     let lower = s.to_lowercase();
     for &(suffix, mult) in units {

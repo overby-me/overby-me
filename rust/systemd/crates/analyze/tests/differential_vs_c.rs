@@ -157,6 +157,13 @@ fn analyze_timespan_matches_c() {
         "3d",
         "1month",
         "2w",
+        // Case-sensitive `M` = month (not minute), the µ micro-sign unit, and a
+        // combined `M`+`m` to prove they resolve differently.
+        "1M",
+        "5M",
+        "1µs",
+        "2M 3d",
+        "1M 1m",
     ];
     let mut div = Vec::new();
     for s in specs {
