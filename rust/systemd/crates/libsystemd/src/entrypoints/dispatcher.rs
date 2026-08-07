@@ -321,6 +321,20 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
                 // any other dispatcher fault.
                 if crate::units::jobs::job_graph_enabled() {
                     crate::units::drive_run_queue(&run_info);
+                    // Re-check parked Type=oneshot/forking start waits each wake,
+                    // but ONLY during the boot drain. Their completion is the
+                    // ExecStart process EXITING; the primary path re-progresses
+                    // them from the ChildExit handler, but under load a
+                    // registration-vs-exit ordering race can strand one parked
+                    // until its 90s start-timeout (observed: lastlog2-import
+                    // Running 24s->90s). The producer nudges the dispatcher
+                    // ~every 200ms during boot, so re-evaluating here finalizes a
+                    // completed oneshot within a tick. Boot-scoped so it never
+                    // re-drives a POST-boot runtime start-wait (that perturbs
+                    // dependency ordering, e.g. 07-pid1-service-dependencies).
+                    if crate::units::job_graph_boot_draining() {
+                        recheck_parked_oneshot_waits(&run_info, &mut chains, &mut start_waits);
+                    }
                 }
             }));
             if let Err(panic) = result {
@@ -602,6 +616,36 @@ fn progress_start_wait(
         }
         crate::units::StartWaitVerdict::Ready => {
             spawn_start_finisher(wait, run_info.clone());
+        }
+    }
+}
+
+/// Re-evaluate every parked Type=oneshot/forking start wait. Their readiness is
+/// the ExecStart process exiting (a `main_exit_status` recording), unlike
+/// Type=notify (READY=1) or Type=dbus (bus name) which are strictly
+/// event-driven. The event path (ChildExit -> line-474 re-progress) is primary,
+/// but a registration-vs-exit ordering race under load can leave a completed
+/// oneshot parked until its 90s start-timeout. Called each dispatcher wake
+/// behind the job-graph flag so such a wait finalizes within a nudge tick. Only
+/// oneshot/forking waits are touched; notify/dbus/exec keep their own readiness.
+fn recheck_parked_oneshot_waits(
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    start_waits: &mut StartWaits,
+) {
+    let ids: Vec<UnitId> = start_waits
+        .iter()
+        .filter(|(_, w)| {
+            matches!(
+                w.svc_type,
+                crate::units::ServiceType::OneShot | crate::units::ServiceType::Forking
+            )
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in ids {
+        if let Some(wait) = start_waits.remove(&id) {
+            progress_start_wait(wait, false, run_info, chains, start_waits);
         }
     }
 }

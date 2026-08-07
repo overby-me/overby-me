@@ -1508,6 +1508,14 @@ static JOB_GRAPH_POOL: std::sync::OnceLock<ThreadPool> = std::sync::OnceLock::ne
 static JOB_GRAPH_BOOT_DRAINING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// True only while the job-graph boot producer is draining its closure. Used to
+/// scope boot-only dispatcher work (the parked-oneshot re-check) so it never
+/// perturbs post-boot runtime job handling.
+#[must_use]
+pub fn job_graph_boot_draining() -> bool {
+    JOB_GRAPH_BOOT_DRAINING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Increment-4 job-graph drive, run as step 4 of the single dispatcher loop
 /// behind `SYSTEMD_RS_JOB_GRAPH=1` (docs/EVENT-LOOP.md, "The flag-on dispatch
 /// belongs in the existing dispatcher loop"). One pass:
@@ -1797,6 +1805,46 @@ pub fn activate_needed_units_via_job_graph(
                 pending.len(),
                 pending
             ));
+        }
+        // Recovery net (the flag-on analogue of the flag-off
+        // `spawn_active_goal_redrive` thread, which flag-on skips): every ~2s,
+        // re-collect the closure and top up any unit that is still
+        // NeverStarted yet holds no job — one that loaded after the initial
+        // collection, or whose start the event-driven path dropped in a race.
+        // Then re-prime readiness. Without this net an intermittent drive
+        // re-scan miss becomes a PERMANENT stall (flag-off silently recovers
+        // via its redrive; flag-on had no equivalent). Only NeverStarted units
+        // are recreated, so Started/Failed/Starting units are never re-run.
+        if tick.is_multiple_of(10) {
+            let ri = dispatcher_read(&run_info);
+            let mut fresh = vec![target_id.clone()];
+            collect_unit_start_subgraph(&mut fresh, &ri.unit_table);
+            let mut reg = jobs.lock().unwrap();
+            let have: std::collections::HashSet<UnitId> =
+                reg.iter().map(|j| j.unit.clone()).collect();
+            for uid in &fresh {
+                if have.contains(uid) {
+                    continue;
+                }
+                let never_started = matches!(
+                    ri.unit_table
+                        .get(uid)
+                        .map(|u| u.common.status.read_poisoned().clone()),
+                    Some(UnitStatus::NeverStarted)
+                );
+                if never_started {
+                    let _ = reg.create(
+                        uid.clone(),
+                        JobKind::Start,
+                        ActivationSource::Regular,
+                        JobMode::Replace,
+                    );
+                }
+            }
+            reg.enqueue_ready(|u| {
+                !matches!(u.kind, crate::units::UnitIdKind::Device)
+                    && unstarted_deps(u, &ri, Some(&fresh)).is_empty()
+            });
         }
         {
             let ri = dispatcher_read(&run_info);
