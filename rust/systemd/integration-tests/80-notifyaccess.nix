@@ -11,8 +11,8 @@
   # introspection (text line count + the `--json=short` fdname/type/devno/inode/
   # rdevno/path/flags shape). The analyze section is lightly adapted from
   # upstream: NotifyAccess=all so the systemd-notify child is accepted without
-  # `--pid=parent` (not implemented), and no `$FDSTORE` env assertion
-  # (rust-systemd does not export it).
+  # `--pid=parent` (not implemented); the `$FDSTORE` env assertion is kept
+  # (rust-systemd exports `$FDSTORE`=FileDescriptorStoreMax as of 579d2950).
   patchScript = ''
         cat > TEST-80-NOTIFYACCESS.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -170,12 +170,15 @@
     # Store one named, read-only fd in a service, then introspect it with
     # systemd-analyze fdstore (text line count + --json=short shape). Adapted
     # from upstream: NotifyAccess=all so the systemd-notify child's message is
-    # accepted without --pid=parent (not implemented), and the $FDSTORE env
-    # check is dropped (rust-systemd does not export $FDSTORE).
+    # accepted without --pid=parent (not implemented). The $FDSTORE env check is
+    # kept (rust-systemd exports $FDSTORE=FileDescriptorStoreMax as of 579d2950).
     cat > /run/fdstore-analyze.sh <<'ASCRIPTEOF'
     #!/usr/bin/env bash
     set -eux
     set -o pipefail
+    # FileDescriptorStoreMax=7 is exported to the service as $FDSTORE=7 (upstream
+    # asserts this; rust-systemd now exports it, so the check is restored).
+    test "$FDSTORE" = "7"
     N="/tmp/fdstore-analyze-data"
     echo waldi > "$N"
     systemd-notify --fd=3 --fdname="quux" 3< "$N"
