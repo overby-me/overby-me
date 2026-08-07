@@ -8348,11 +8348,19 @@ a.list-item:hover {
 	font-size: var(--md-sys-typescale-label-small-size);
 }
 /* A page ending inside a table: its own full-width row, carrying the same
-   hairline. No cell padding or rule of its own -- it is furniture between the
-   rows, not a row of data. */
-.docx-page-row td {
+   hairline. No cell padding, rule or shading of its own -- it is furniture
+   between the rows, not a row of data, and a table that carries on over a page
+   break carries on in Word without a line drawn across it.
+
+   Written to out-specify `.docx-table td`, which is where the border and the
+   padding come from: the shorter selector lost, and the mark came out as an
+   empty BOXED row of the table -- which is exactly what it must not look
+   like. */
+.docx-table tr.docx-page-row td,
+.docx-table tr.docx-page-row th {
 	padding: 0;
 	border: none;
+	background: none;
 }
 .docx-page-row .pdf-page-break {
 	margin: var(--md-sys-spacing-2) 0;
