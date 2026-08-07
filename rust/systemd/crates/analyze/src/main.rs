@@ -728,6 +728,13 @@ fn is_weekday_abbrev(s: &str) -> bool {
         .any(|w| s.eq_ignore_ascii_case(w))
 }
 
+/// Today's date (UTC) as (year, month, day), used when a timestamp carries a
+/// time but no date.
+fn today_ymd() -> Option<(i64, u32, u32)> {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
+    Some(civil_from_days(secs.div_euclid(86400)))
+}
+
 fn try_parse_datetime(input: &str) -> Option<SystemTime> {
     // Strip a trailing "UTC" zone token. We evaluate in UTC (there is no zone
     // database here), and without this the zone is glued onto the last time
@@ -752,17 +759,28 @@ fn try_parse_datetime(input: &str) -> Option<SystemTime> {
 
     let parts: Vec<&str> = input.splitn(2, [' ', 'T']).collect();
 
-    let date_str = parts.first()?;
-    let time_str = parts.get(1).copied().unwrap_or("00:00:00");
+    let date_str: &str = parts.first().copied()?;
 
-    let date_parts: Vec<&str> = date_str.split('-').collect();
-    if date_parts.len() != 3 {
-        return None;
-    }
-
-    let year: i64 = date_parts[0].parse().ok()?;
-    let month: u32 = date_parts[1].parse().ok()?;
-    let day: u32 = date_parts[2].parse().ok()?;
+    // A date-less input that is just a time ("12:00:00", "01:02") means "today
+    // at that time" in C. Detect a first token that is a time (has ':') rather
+    // than a date and substitute today's date (UTC, as all of this is
+    // UTC-evaluated).
+    let (year, month, day, time_str): (i64, u32, u32, &str) =
+        if parts.len() == 1 && date_str.contains(':') {
+            let (y, mo, d) = today_ymd()?;
+            (y, mo, d, date_str)
+        } else {
+            let date_parts: Vec<&str> = date_str.split('-').collect();
+            if date_parts.len() != 3 {
+                return None;
+            }
+            (
+                date_parts[0].parse().ok()?,
+                date_parts[1].parse().ok()?,
+                date_parts[2].parse().ok()?,
+                parts.get(1).copied().unwrap_or("00:00:00"),
+            )
+        };
 
     // Reject years outside C's accepted range. Below 1970 is before the epoch
     // (unrepresentable as a non-negative UNIX time) and above 9999 is C's
@@ -5568,6 +5586,23 @@ mod tests {
         let ts = parse_timestamp("@1700000000").unwrap();
         let dur = ts.duration_since(UNIX_EPOCH).unwrap();
         assert_eq!(dur.as_secs(), 1_700_000_000);
+    }
+
+    #[test]
+    fn test_timestamp_bare_time_is_today() {
+        // A date-less time is "today at that time" (C parses these). Assert the
+        // time-of-day only, so the test does not depend on today's date.
+        let tod = |s: &str| {
+            parse_timestamp(s)
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                % 86400
+        };
+        assert_eq!(tod("12:00:00"), 12 * 3600);
+        assert_eq!(tod("01:02"), 3600 + 2 * 60);
+        assert_eq!(tod("23:59:59"), 23 * 3600 + 59 * 60 + 59);
     }
 
     #[test]
