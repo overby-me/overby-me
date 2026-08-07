@@ -3051,7 +3051,11 @@ pub fn reconstruct_stdin_data(inputs: &[StdinInput]) -> Vec<u8> {
     for item in inputs {
         match item {
             StdinInput::Text(s) => {
-                bytes.extend_from_slice(s.as_bytes());
+                // Decode C-style escapes (\n, \t, \xNN, ...) exactly as systemd's
+                // cunescape does at parse time, then terminate the entry with a
+                // newline. Shared with the StandardInputData D-Bus property so both
+                // report/feed identical bytes.
+                bytes.extend(crate::entrypoints::exec_helper::cunescape(s));
                 bytes.push(b'\n');
             }
             StdinInput::Data(s) => {

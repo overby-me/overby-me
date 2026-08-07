@@ -15,7 +15,7 @@ use crate::units::{
 /// `\v`, `\xHH` (hex byte), `\NNN` (octal byte).  Unknown escapes are
 /// passed through literally.  Returns raw bytes because the unescaped
 /// data may contain arbitrary byte values (e.g. `\x00`).
-fn cunescape(s: &str) -> Vec<u8> {
+pub(crate) fn cunescape(s: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
