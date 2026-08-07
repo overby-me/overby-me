@@ -329,6 +329,16 @@ fn ask_the_worker_which_build() {
             });
         let _ = target.add_event_listener_with_callback("message", heard.as_ref().unchecked_ref());
         heard.forget();
+        // And START the delivery. A container queues its messages until either
+        // an `onmessage` property is assigned or this is called; a listener
+        // added with `addEventListener` does NOT start it, so the worker's
+        // answer sat in the queue and every report said it did not know which
+        // build was serving it.
+        if let Ok(start) = js_sys::Reflect::get(&container, &"startMessages".into()) {
+            if let Ok(start) = start.dyn_into::<js_sys::Function>() {
+                let _ = start.call0(&container);
+            }
+        }
     }
     let Ok(post) = js_sys::Reflect::get(&controller, &"postMessage".into()) else {
         return;
