@@ -8353,7 +8353,14 @@ a.list-item:hover {
 	display: flex;
 	align-items: center;
 	gap: var(--md-sys-spacing-3);
-	margin: var(--md-sys-spacing-5) 0;
+	/* Empty space either side, because that is what a page break IS: the foot
+	   of one page and the head of the next, and in the document itself that is
+	   two inches of nothing. Not two inches here -- a reading surface that gave
+	   up a third of a phone screen at every break would be worse to read, not
+	   truer -- but enough that a break reads as a gap between pages rather than
+	   a rule drawn through the text. One measure, so a break inside a table and
+	   a break between paragraphs separate by the same amount. */
+	margin: var(--pdf-page-gap, var(--md-sys-spacing-10)) 0;
 	color: var(--md-on-surface-variant);
 	font-size: var(--md-sys-typescale-label-small-size);
 }
@@ -8372,8 +8379,12 @@ a.list-item:hover {
 	border: none;
 	background: none;
 }
+/* The same gap inside a table. A row of its own with no padding, rule or
+   shading was the first half of making a table carry over the way Word carries
+   it; the space is the other half, and without it the two halves of the table
+   still read as one table with a line through it. */
 .docx-page-row .pdf-page-break {
-	margin: var(--md-sys-spacing-2) 0;
+	margin: var(--pdf-page-gap, var(--md-sys-spacing-10)) 0;
 }
 /* The rule at the foot of the LAST page. It marks an ending and nothing after
    it, so it keeps the hairline and the number and gives up the landing place:
