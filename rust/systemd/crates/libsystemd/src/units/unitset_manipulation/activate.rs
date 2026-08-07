@@ -2705,8 +2705,18 @@ pub(crate) fn evaluate_start_wait(
                         );
                     }
                     p
+                } else if let Some(mp) = state.srvc.main_pid {
+                    // MAINPID reported via sd_notify.
+                    Some(mp)
+                } else if svc.conf.guess_main_pid {
+                    // No PIDFile= and no sd_notify MAINPID: guess the main PID as
+                    // the sole process left in the service's cgroup after the
+                    // ExecStart= parent exited (GuessMainPID=, default yes).
+                    crate::services::fork_parent::guess_main_pid_from_cgroup(
+                        &svc.conf.platform_specific.cgroup_path,
+                    )
                 } else {
-                    state.srvc.main_pid
+                    None
                 };
                 if let Some(daemon_pid) = daemon_pid {
                     state.srvc.pid = Some(daemon_pid);
