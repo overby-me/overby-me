@@ -2425,6 +2425,14 @@ mod tests {
         assert_eq!(Measured::of(Some("Times New Roman")).family(), "Liberation Serif");
         assert_eq!(Measured::of(Some("Georgia")).family(), "Liberation Serif");
         assert_eq!(Measured::of(Some("Calibri")).family(), "Carlito");
+        // Arial is not Calibri: it is about a tenth wider, which is a line
+        // every few paragraphs and a table row every few rows.
+        assert_eq!(Measured::of(Some("Arial")).family(), "Liberation Sans");
+        assert_eq!(Measured::of(Some("helvetica")).family(), "Liberation Sans");
+        assert_ne!(
+            Measured::of(Some("Arial")).single(),
+            Measured::of(Some("Calibri")).single()
+        );
         // Word's own default for a face it does not know.
         assert_eq!(Measured::of(Some("Papyrus")).family(), "Carlito");
         assert_eq!(Measured::of(None).family(), "Carlito");
@@ -2839,7 +2847,12 @@ pub fn PagedDocx(
             next_frame().await;
             // Every face this app measures in, because a document may use more
             // than one: its body in one and its lists in another.
-            for measured in [Measured::Sans, Measured::Serif, Measured::Cambria] {
+            for measured in [
+                Measured::Sans,
+                Measured::Serif,
+                Measured::Cambria,
+                Measured::Arial,
+            ] {
                 wait_for_the_face(asked_for, measured.family()).await;
             }
             wait_for_the_face(asked_for, &face).await;
@@ -3193,7 +3206,12 @@ fn set_single_spacing() {
         return;
     };
     let style = root.style();
-    for measured in [Measured::Sans, Measured::Serif, Measured::Cambria] {
+    for measured in [
+        Measured::Sans,
+        Measured::Serif,
+        Measured::Cambria,
+        Measured::Arial,
+    ] {
         // `var(--single-sans)` back to `--single-sans`: the property is named
         // once, where it is read.
         let name = measured.single().trim_start_matches("var(").trim_end_matches(')');
@@ -3243,6 +3261,10 @@ pub enum Measured {
     Serif,
     /// Caladea, for Cambria.
     Cambria,
+    /// Liberation Sans, for Arial and Helvetica. NOT Calibri's: Arial is the
+    /// wider face by about a tenth, so an Arial document measured in Carlito
+    /// wraps later than Word wraps it and every table row comes out short.
+    Arial,
 }
 
 impl Measured {
@@ -3251,6 +3273,12 @@ impl Measured {
         let name = named.map(str::trim).unwrap_or("");
         match name {
             n if n.eq_ignore_ascii_case("cambria") => Self::Cambria,
+            n if ["arial", "helvetica", "liberation sans"]
+                .iter()
+                .any(|sans| n.eq_ignore_ascii_case(sans)) =>
+            {
+                Self::Arial
+            }
             n if ["times new roman", "times", "georgia", "garamond"]
                 .iter()
                 .any(|serif| n.eq_ignore_ascii_case(serif)) =>
@@ -3269,6 +3297,7 @@ impl Measured {
             Self::Sans => "Carlito",
             Self::Serif => "Liberation Serif",
             Self::Cambria => "Caladea",
+            Self::Arial => "Liberation Sans",
         }
     }
 
@@ -3279,6 +3308,7 @@ impl Measured {
             Self::Sans => "var(--single-sans)",
             Self::Serif => "var(--single-serif)",
             Self::Cambria => "var(--single-cambria)",
+            Self::Arial => "var(--single-arial)",
         }
     }
 }
@@ -3293,6 +3323,7 @@ fn measuring_face(named: Option<&str>) -> String {
     let face = Measured::of(named);
     let generic = match face {
         Measured::Sans => "Calibri, sans-serif",
+        Measured::Arial => "Arial, sans-serif",
         Measured::Serif | Measured::Cambria => "serif",
     };
     match name.is_empty() {

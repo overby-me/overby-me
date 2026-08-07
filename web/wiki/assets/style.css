@@ -25,6 +25,7 @@
 	--single-sans: 1.22;
 	--single-serif: 1.15;
 	--single-cambria: 1.17;
+	--single-arial: 1.15;
 	/* Per-level indentation step for the drawer node tree (see drawer.rs), kept
 	   here so the nesting rhythm is tuned in one place. */
 	--nav-indent-step: 14px;

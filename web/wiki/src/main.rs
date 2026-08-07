@@ -82,6 +82,12 @@ const FONT_SERIF_700: Asset = asset!("/assets/fonts/serif-700.woff2");
 // Serif fitted five list items too many onto every page.
 const FONT_CALADEA_400: Asset = asset!("/assets/fonts/caladea-400.woff2");
 const FONT_CALADEA_700: Asset = asset!("/assets/fonts/caladea-700.woff2");
+// And for Arial, which the older attachments are set in outright: Liberation
+// Sans has Arial's metrics. Calibri's are not a stand-in for them -- Arial is
+// the wider face by about a tenth, so an Arial table measured in Carlito wraps
+// later than Word wraps it and comes out rows short.
+const FONT_SANS_400: Asset = asset!("/assets/fonts/sans-400.woff2");
+const FONT_SANS_700: Asset = asset!("/assets/fonts/sans-700.woff2");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -391,6 +397,8 @@ fn App() -> Element {
             "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Caladea';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
             "@font-face{{font-family:'Caladea';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Sans';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Sans';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
         ),
         FONT_ATK_400,
         FONT_ATK_700,
@@ -402,7 +410,9 @@ fn App() -> Element {
         FONT_SERIF_400,
         FONT_SERIF_700,
         FONT_CALADEA_400,
-        FONT_CALADEA_700
+        FONT_CALADEA_700,
+        FONT_SANS_400,
+        FONT_SANS_700
     );
 
     rsx! {
