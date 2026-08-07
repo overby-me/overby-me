@@ -269,6 +269,87 @@ fn run_socket_exec_commands(
     Ok(())
 }
 
+/// Find the single filesystem path a socket unit's `Symlinks=` should point at.
+/// Mirrors upstream `socket_find_symlink_target`: a target exists only when the
+/// unit has exactly one path-based listen address (an AF_UNIX *path* socket or a
+/// FIFO). Abstract-namespace sockets (no filesystem path) and units with more than
+/// one path listener yield no target (so no symlinks are created).
+fn socket_symlink_target(conf: &SocketConfig) -> Option<String> {
+    let mut found: Option<&str> = None;
+    for s in &conf.sockets {
+        let path = match &s.kind {
+            crate::sockets::SocketKind::Stream(p)
+            | crate::sockets::SocketKind::Sequential(p)
+            | crate::sockets::SocketKind::Datagram(p)
+            | crate::sockets::SocketKind::Fifo(p)
+            | crate::sockets::SocketKind::Special(p) => p.as_str(),
+            crate::sockets::SocketKind::Netlink(_) | crate::sockets::SocketKind::MessageQueue(_) => {
+                continue;
+            }
+        };
+        // Abstract-namespace AF_UNIX sockets (leading '@', or empty) have no path.
+        if path.is_empty() || path.starts_with('@') {
+            continue;
+        }
+        if found.is_some() {
+            return None; // more than one path listener -> no symlink target
+        }
+        found = Some(path);
+    }
+    found.map(str::to_owned)
+}
+
+/// Create the `Symlinks=` symlinks pointing at the socket's path on start. Matches
+/// systemd `socket_symlink`: parent dirs are created, failures are logged and
+/// ignored (best-effort), and an existing file is replaced only when
+/// `RemoveOnStop=` is set.
+fn create_socket_symlinks(conf: &SocketConfig, unit_name: &str) {
+    if conf.symlinks.is_empty() {
+        return;
+    }
+    let Some(target) = socket_symlink_target(conf) else {
+        return;
+    };
+    let dir_mode = conf.directory_mode.unwrap_or(0o755);
+    for link in &conf.symlinks {
+        let link_path = std::path::Path::new(link);
+        if let Some(parent) = link_path.parent() {
+            use std::os::unix::fs::DirBuilderExt;
+            let _ = std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(dir_mode)
+                .create(parent);
+        }
+        match std::os::unix::fs::symlink(&target, link_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if conf.remove_on_stop
+                    && std::fs::remove_file(link_path).is_ok()
+                    && let Err(e2) = std::os::unix::fs::symlink(&target, link_path)
+                {
+                    log::warn!("socket {unit_name}: failed to create symlink {link} -> {target}: {e2}");
+                } else if !conf.remove_on_stop {
+                    log::warn!("socket {unit_name}: symlink {link} already exists, not replacing");
+                }
+            }
+            Err(e) => {
+                log::warn!("socket {unit_name}: failed to create symlink {link} -> {target}: {e}");
+            }
+        }
+    }
+}
+
+/// Remove the `Symlinks=` symlinks on stop — only when `RemoveOnStop=` is set,
+/// matching upstream (otherwise the symlinks persist like any other created file).
+fn remove_socket_symlinks(conf: &SocketConfig) {
+    if !conf.remove_on_stop {
+        return;
+    }
+    for link in &conf.symlinks {
+        let _ = std::fs::remove_file(link);
+    }
+}
+
 impl SocketState {
     fn activate(
         &mut self,
@@ -315,6 +396,8 @@ impl SocketState {
                     &conf.exec_config.cache_directory,
                     &conf.exec_config.logs_directory,
                 ]);
+                // Symlinks= point at the socket path; created now that it is bound.
+                create_socket_symlinks(conf, &id.name);
                 // ExecStartPost= runs after the socket is listening.
                 if let Err(msg) =
                     run_socket_exec_commands(&conf.exec_start_post, "ExecStartPost", id, run_info)
@@ -379,6 +462,8 @@ impl SocketState {
         {
             log::warn!("{msg}");
         }
+        // Symlinks= are torn down on stop only when RemoveOnStop= is set.
+        remove_socket_symlinks(conf);
         match &close_result {
             Ok(()) => {
                 let mut status = status.write_poisoned();
