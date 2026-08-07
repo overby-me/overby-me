@@ -2795,7 +2795,18 @@ impl PageGeometry {
 /// different places, and the difference accumulates down the document. Where
 /// the file states no usable page size, nothing is marked at all.
 #[component]
-pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
+pub fn PagedDocx(
+    /// Which document this is. Not drawn: it is what tells the reader that the
+    /// document has CHANGED. Opening another file puts new props into the same
+    /// component, and a signal outlives that, so without this the control kept
+    /// the last document's page count and its marks stayed at those indices in
+    /// the new text -- a three-page attachment followed by a nine-page one
+    /// still read "3", with page breaks at paragraphs that had nothing to do
+    /// with them.
+    document: String,
+    blocks: Vec<Block>,
+    page: PageGeometry,
+) -> Element {
     let mut marks = use_signal(Vec::<(usize, usize, usize)>::new);
     let mut pages = use_signal(|| 0usize);
     // Whether the off-screen copy is still needed. It is a whole second render
@@ -2806,10 +2817,14 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
     let asked_for = page.size;
     let face = page.font.clone();
     let (size, line, after, list_after) = (page.size, page.line, page.after, page.list_after);
-    use_effect(move || {
-        if !*measuring.peek() {
-            return;
-        }
+    use_effect(use_reactive!(|(document,)| {
+        let _ = &document;
+        // A different document, so nothing worked out about the last one holds.
+        // Cleared before the measuring starts rather than when it finishes: a
+        // count from another file is worse on screen than no count at all.
+        marks.set(Vec::new());
+        pages.set(0);
+        measuring.set(true);
         // Not before the face this is measured in has arrived. A font is
         // fetched when something first renders in it, so on the first Word
         // document opened it is still on its way while this runs -- and
@@ -2818,6 +2833,10 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
         // one turn of the event loop afterwards.
         let face = face.clone();
         spawn(async move {
+            // After the render that puts the off-screen copy back: `measuring`
+            // was just set, and what is in the DOM at this instant is still the
+            // document that was open before.
+            next_frame().await;
             // Every face this app measures in, because a document may use more
             // than one: its body in one and its lists in another.
             for measured in [Measured::Sans, Measured::Serif, Measured::Cambria] {
@@ -2868,7 +2887,7 @@ pub fn PagedDocx(blocks: Vec<Block>, page: PageGeometry) -> Element {
             pages.set(count);
             measuring.set(false);
         });
-    });
+    }));
 
     rsx! {
         if measuring() {

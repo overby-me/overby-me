@@ -792,6 +792,9 @@ fn NativePdf(file_id: String, name: String) -> Element {
 #[component]
 fn NativeDocx(file_id: String, name: String) -> Element {
     let token = crate::session::use_session().read().access_token.clone();
+    // Kept: the reader below needs to know WHICH document it is holding, and
+    // the fetch takes the id itself.
+    let which = file_id.clone();
     let parsed = crate::use_data_resource!(|(file_id, token)| async move {
         let token = token.unwrap_or_default();
         let bytes = crate::backend_api::file_bytes(&file_id, &token).await?;
@@ -853,7 +856,7 @@ fn NativeDocx(file_id: String, name: String) -> Element {
                     // The document states a page size, so where its pages end
                     // can be worked out and a reader can be told "page 7".
                     Some(page) => rsx! {
-                        super::docx::PagedDocx { blocks, page }
+                        super::docx::PagedDocx { document: which.clone(), blocks, page }
                     },
                     None => rsx! {
                         super::docx::DocxBody { blocks }
