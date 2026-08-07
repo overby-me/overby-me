@@ -104,6 +104,15 @@ fn analyze_calendar_matches_c() {
         "*-*-* 00:00:00 UTC",
         "Mon *-*-* 00:00:00 UTC",
         "12:00 UTC",
+        // @TIMESTAMP one-shot events (accepted past/future + rejected forms:
+        // out-of-range year 2200, fractional, and non-numeric).
+        "@2000000000",
+        "@0",
+        "@1234567890",
+        "@4102444800",
+        "@7258118400",
+        "@1234567890.5",
+        "@abc",
     ];
     let mut div = Vec::new();
     for s in specs {

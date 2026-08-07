@@ -39,6 +39,10 @@ pub struct CalendarSpec {
     /// port has no local-timezone database), so this only affects rendering
     /// and input acceptance; named timezones remain unsupported.
     pub utc: bool,
+    /// `@TIMESTAMP` — a one-shot event at an exact UNIX time (seconds). When
+    /// set, the component fields are unused: elapse is the instant itself (once,
+    /// if still in the future) and the normalized form is its UTC datetime.
+    pub fixed_instant: Option<i64>,
 }
 
 /// A range of weekdays (inclusive), e.g. Mon..Fri or just Wed.
@@ -94,6 +98,35 @@ impl CalendarSpec {
         let input = input.trim();
         if input.is_empty() {
             return Err("Empty calendar expression".to_string());
+        }
+
+        // @TIMESTAMP — a one-shot event at an exact UNIX time in seconds
+        // (systemd.time(7)). Matches C: integer seconds only, rendered in UTC,
+        // and the resulting year must be in [1970, 2199] (calendarspec.c
+        // MAX_YEAR); a fractional `@N.5` is a timestamp, not a calendar spec.
+        if let Some(rest) = input.strip_prefix('@') {
+            if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(format!("Invalid calendar expression: {input}"));
+            }
+            let secs: i64 = rest
+                .parse()
+                .map_err(|_| format!("Timestamp out of range: {input}"))?;
+            if !(1970..=2199).contains(&unix_to_datetime(secs).year) {
+                return Err(format!("Timestamp out of range: {input}"));
+            }
+            return Ok(CalendarSpec {
+                original: input.to_string(),
+                weekdays: None,
+                year: None,
+                month: CalendarComponent::Wildcard,
+                day: CalendarComponent::Wildcard,
+                day_from_end: false,
+                hour: CalendarComponent::Wildcard,
+                minute: CalendarComponent::Wildcard,
+                second: CalendarComponent::Wildcard,
+                utc: true,
+                fixed_instant: Some(secs),
+            });
         }
 
         // Handle well-known shorthands — parse the expanded form but keep
@@ -207,6 +240,7 @@ impl CalendarSpec {
             minute,
             second,
             utc,
+            fixed_instant: None,
         })
     }
 
@@ -215,6 +249,12 @@ impl CalendarSpec {
     ///
     /// The caller converts between `Instant`/system-clock and `DateTime` as needed.
     pub fn next_elapse(&self, after: DateTime) -> Option<DateTime> {
+        // `@TIMESTAMP` is a one-shot: fire once, only if the instant is still
+        // strictly ahead of the reference (so it does not re-arm after firing).
+        if let Some(t) = self.fixed_instant {
+            return (t > Self::datetime_to_unix(&after)).then(|| unix_to_datetime(t));
+        }
+
         // Brute-force forward search with early pruning.
         // We iterate year→month→day→hour→minute→second, skipping non-matching values.
         // Safety limit: don't search more than 5 years ahead.
@@ -322,6 +362,14 @@ impl CalendarSpec {
 
     /// Produce a normalized representation of the calendar expression.
     pub fn normalized(&self) -> String {
+        if let Some(t) = self.fixed_instant {
+            let dt = unix_to_datetime(t);
+            return format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+                dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+            );
+        }
+
         let mut s = String::new();
 
         if let Some(ref wds) = self.weekdays {
