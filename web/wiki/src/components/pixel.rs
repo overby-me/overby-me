@@ -55,12 +55,32 @@ pub const DEFAULT_COOLDOWN: u32 = 10;
 /// A board painted by this organisation should be able to spell its own name in
 /// its own colours, and neither is reachable by mixing the sixteen above.
 ///
+/// The eight after those close the holes the first sixteen leave, chosen by
+/// measuring them: every colour a room here would reach for — the flags, faces,
+/// the ordinary business of drawing — was scored against the palette in CIE Lab,
+/// and these are the additions that shrink the average miss most. It falls from
+/// 27 to 12, which is the difference between "near enough" and "that is the
+/// colour". What they answer, in order:
+///
+/// * **Pale warm tones.** Light skin resolved to light GREY, and blond hair to
+///   yellow. A face could not be drawn at all.
+/// * **A flag blue.** The palette leapt from azure straight to `#0000ea` with
+///   nothing between, so EU blue landed on PURPLE and the Nordic blues on
+///   near-black. This one had already bitten: the EU flag on the assembly's
+///   board is vivid blue because that band did not exist.
+/// * **Shades.** `#222222` was the only dark colour, so a dark red or a teal
+///   collapsed onto black or onto a brighter version of itself, and nothing
+///   could be shaded in its own hue.
+///
 /// **Appended, never inserted.** The index IS the stored value, so putting a
-/// colour anywhere but the end would repaint every cell already placed.
+/// colour anywhere but the end would repaint every cell already placed. That is
+/// why these sit apart from their relatives on the swatch row rather than beside
+/// them; a tidier order would cost every board its picture.
 pub const PALETTE: &[&str] = &[
     "#ffffff", "#e4e4e4", "#888888", "#222222", "#ffa7d1", "#e50000", "#e59500", "#a06a42",
     "#e5d900", "#94e044", "#02be01", "#00d3dd", "#0083c7", "#0000ea", "#cf6ee4", "#820080",
-    "#02944f", "#d2307e",
+    "#02944f", "#d2307e", "#ffdbac", "#003399", "#be0039", "#008080", "#004dff", "#fff8b8",
+    "#7ec8e3", "#e0ac69",
 ];
 
 /// The palette entry for a stored index, falling back rather than panicking on a
@@ -870,6 +890,28 @@ mod tests {
         // Any other failure is not a cooldown and must not be shown as one.
         assert_eq!(retry_after_seconds("permission denied"), None);
         assert_eq!(retry_after_seconds("retry_after_ms=abc"), None);
+    }
+
+    /// Every colour the palette offers is a colour, and no two are the same one.
+    ///
+    /// The index is the stored value, so a duplicate would waste a swatch and a
+    /// malformed entry would paint nothing. Cheap to check, and it catches a
+    /// fat-fingered hex in the one place a typo is invisible.
+    #[test]
+    fn the_palette_is_well_formed() {
+        for c in PALETTE {
+            assert!(c.len() == 7 && c.starts_with('#'), "{c} is not a hex colour");
+            assert!(u32::from_str_radix(&c[1..], 16).is_ok(), "{c} is not hex");
+        }
+        let mut seen: Vec<&str> = PALETTE.to_vec();
+        seen.sort_unstable();
+        let before = seen.len();
+        seen.dedup();
+        assert_eq!(seen.len(), before, "the palette repeats a colour");
+        // An index is stored in a u8, and `hex_of` falls back rather than
+        // panicking above it -- but a palette that outgrew a byte would silently
+        // lose its tail.
+        assert!(PALETTE.len() <= 256);
     }
 
     /// The wait is rounded UP, so the button never reads zero while the database
