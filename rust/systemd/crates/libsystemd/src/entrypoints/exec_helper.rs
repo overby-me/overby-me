@@ -1543,9 +1543,12 @@ fn open_journal_stream_nonblock(
 fn setup_stdin(config: &ExecHelperConfig) {
     match config.stdin_option {
         StandardInput::Null => {
-            // Open /dev/null as stdin
-            let null_fd =
-                unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+            // Open /dev/null as stdin. No O_CLOEXEC: STDIN_FILENO was closed just
+            // before setup_stdin, so open() returns fd 0 and the dup2 below is
+            // skipped — with O_CLOEXEC set, execve would then close fd 0, leaving
+            // the service with NO stdin (a reader gets EBADF) instead of an
+            // EOF-yielding /dev/null.
+            let null_fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
             if null_fd < 0 {
                 log::error!(
                     "Failed to open /dev/null for stdin: {}",
