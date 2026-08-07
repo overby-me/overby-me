@@ -80,6 +80,18 @@ pub fn FolderApp(
     // Owner-only admin (reorder), and the folder "lock": adding children is only
     // offered when the node is `attachable`. Mirrors React FolderDial/AddContentFab.
     let is_context_owner = node.is_context_owner.unwrap_or(false);
+    // Standing in the context's own root rather than in a folder inside it: a
+    // context node is its own context. Only there does "the whole place" name
+    // something the person is looking at.
+    let is_context_root = node
+        .context_id
+        .as_ref()
+        .is_some_and(|c| c.0 == node.id.0);
+    let place_id = node
+        .context_id
+        .clone()
+        .map(|c| c.0)
+        .unwrap_or_else(|| node.id.0.clone());
     // Optimistic lock/unlock: flip the attachable state at once, reconcile against
     // the refetched node, revert on error.
     let mut attachable_opt = use_signal(|| None::<bool>);
@@ -148,6 +160,12 @@ pub fn FolderApp(
     // Submitting is irreversible (it makes the node immutable), so the sheet row
     // opens a warning first — the same one ContentApp uses.
     let mut confirm_submit = use_signal(|| false);
+    // Locking the whole place, which is a context owner's and nobody else's.
+    // Asked for rather than done on a press: it reaches every folder, position
+    // and resolution in the context at once, however deep, and that is not
+    // something to discover by accident.
+    let mut confirm_place = use_signal(|| None::<bool>);
+    let mut place_busy = use_signal(|| false);
     // Bluesky link status gates the share action (like ContentApp).
     let link_token = access_token.clone();
     let bsky_link = crate::use_data_resource!(|(link_token)| async move {
@@ -486,6 +504,24 @@ pub fn FolderApp(
                                     "{t(\"folder.unlockContent\")}"
                                 }
                             }
+                            // And the whole place at once, offered only where
+                            // "the whole place" is a thing you are standing in:
+                            // the context's own root. A folder deep inside one
+                            // gets the single lock above and nothing more.
+                            if is_context_root {
+                                button {
+                                    class: "sheet-action",
+                                    onclick: move |_| confirm_place.set(Some(false)),
+                                    span { class: "material-icons", "lock" }
+                                    "{t(\"folder.lockPlace\")}"
+                                }
+                                button {
+                                    class: "sheet-action",
+                                    onclick: move |_| confirm_place.set(Some(true)),
+                                    span { class: "material-icons", "lock_open" }
+                                    "{t(\"folder.unlockPlace\")}"
+                                }
+                            }
                             // Paste the clipboard selection here (deep-copy), when
                             // something is actually selected.
                             if !SELECTED.read().is_empty() {
@@ -565,6 +601,77 @@ pub fn FolderApp(
             }
             // Submit confirm, carrying the same warning ContentApp's does: after
             // this the folder can no longer be edited.
+            // Locking or unlocking the whole place. Its own dialog because it
+            // is not the same act as locking this one folder: it reaches every
+            // folder, position and resolution in the context.
+            if is_context_root {
+                super::widgets::Dialog {
+                    open: confirm_place().is_some(),
+                    on_dismiss: move |_| confirm_place.set(None),
+                    headline: if confirm_place() == Some(true) { t("folder.unlockPlace") } else { t("folder.lockPlace") },
+                    icon: if confirm_place() == Some(true) { "lock_open".to_string() } else { "lock".to_string() },
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm_place.set(None),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            disabled: place_busy(),
+                            onclick: {
+                                let ctx = place_id.clone();
+                                move |_| {
+                                    let Some(want) = confirm_place() else {
+                                        return;
+                                    };
+                                    if place_busy() {
+                                        return;
+                                    }
+                                    place_busy.set(true);
+                                    let ctx = ctx.clone();
+                                    let token = session.read().access_token.clone();
+                                    spawn(async move {
+                                        match graphql::set_context_attachable(token.as_deref(), &ctx, want).await {
+                                            // The count, because the update rule is
+                                            // applied per row: a node this owner may
+                                            // not touch is skipped without a word,
+                                            // and the number is the only sign.
+                                            Ok(changed) => {
+                                                crate::snackbar::show_snackbar(
+                                                    &t("folder.placeChanged").replace("{n}", &changed.to_string()),
+                                                );
+                                                crate::session::bump_data_version();
+                                            }
+                                            Err(e) => {
+                                                crate::errors::log_handled("lock place failed", e);
+                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                            }
+                                        }
+                                        place_busy.set(false);
+                                        confirm_place.set(None);
+                                    });
+                                }
+                            },
+                            if place_busy() {
+                                div { class: "spinner spinner-xs" }
+                            }
+                            if confirm_place() == Some(true) {
+                                "{t(\"folder.unlockPlace\")}"
+                            } else {
+                                "{t(\"folder.lockPlace\")}"
+                            }
+                        }
+                    },
+                    p {
+                        if confirm_place() == Some(true) {
+                            "{t(\"folder.unlockPlaceExplain\")}"
+                        } else {
+                            "{t(\"folder.lockPlaceExplain\")}"
+                        }
+                    }
+                }
+            }
             if can_edit && !parent_path.is_empty() {
                 super::widgets::Dialog {
                     open: confirm_submit(),

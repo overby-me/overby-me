@@ -1804,3 +1804,58 @@ mod tests {
         assert!(!super::is_key_taken("rate limited: retry_after_ms=54977"));
     }
 }
+
+/// The mimes a context-wide lock is worth setting on.
+///
+/// Not every node: `attachable` only bites where a node can take a child that is
+/// not discussion, and the rule that enforces it exempts comments and reactions
+/// (`migrations/0015`). Locking a document would therefore do nothing at all,
+/// since the only thing a document takes is talk about it.
+///
+/// Derived from the permission rules rather than guessed: these are the parents
+/// whose children include something other than a comment, a reaction or a
+/// question, MINUS the three live-session tools. A speaker list, a poll and a
+/// canvas each have their own open state that a chair works during a meeting,
+/// and a lock on the whole place should not reach into the middle of a session
+/// and close them.
+pub const LOCKABLE_MIMES: &[&str] = &[
+    "wiki/event",
+    "wiki/group",
+    "wiki/site",
+    "wiki/folder",
+    "wiki/file",
+    "vote/position",
+    "vote/policy",
+    "vote/change",
+];
+
+/// Lock, or unlock, everything in a context that can be locked.
+///
+/// One statement rather than a walk: a context is a flat `context_id` on every
+/// node in it, however deep, so this reaches a resolution nested four folders
+/// down as readily as one at the top.
+///
+/// Returns how many nodes changed. Worth reporting rather than swallowing: the
+/// update rule is applied per row, so a node this owner may not update is
+/// silently skipped, and a count that is lower than expected is the only way
+/// that shows.
+pub async fn set_context_attachable(
+    access_token: Option<&str>,
+    context_id: &str,
+    attachable: bool,
+) -> Result<u64, String> {
+    let data = execute_raw_vars(
+        access_token,
+        "mutation($c: uuid!, $m: [String!]!, $a: Boolean!) { \
+           updateNodes(where: {contextId: {_eq: $c}, mimeId: {_in: $m}, \
+                               attachable: {_neq: $a}}, \
+                       _set: {attachable: $a}) { affected_rows } }",
+        serde_json::json!({ "c": context_id, "m": LOCKABLE_MIMES, "a": attachable }),
+    )
+    .await?;
+    Ok(data
+        .get("updateNodes")
+        .and_then(|u| u.get("affected_rows"))
+        .and_then(|a| a.as_u64())
+        .unwrap_or(0))
+}
