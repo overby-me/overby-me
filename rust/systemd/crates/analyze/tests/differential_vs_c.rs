@@ -85,6 +85,20 @@ fn analyze_calendar_matches_c() {
         "Mon,Tue *-1..7 12:00",
         "*-*-* 04:00:00",
         "Fri *-*-1..7 03:00:00",
+        // Day-of-month counted from the end of the month (`~`).
+        "*-*~01",
+        "*-*~2",
+        "*-02~01",
+        "*-*~1..3",
+        "*-*~1,15",
+        "Mon *-*~07/1",
+        "*-*~28",
+        // Rejected forms: a second `~`, a reversed from-end range, and a
+        // reversed ordinary range (upstream errors on all three).
+        "*-*~5..~1",
+        "*-*~7..1",
+        "*-*-7..5",
+        "*:30..10",
     ];
     let mut div = Vec::new();
     for s in specs {

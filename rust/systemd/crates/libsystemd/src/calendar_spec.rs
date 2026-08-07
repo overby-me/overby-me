@@ -25,6 +25,9 @@ pub struct CalendarSpec {
     pub month: CalendarComponent,
     /// Day-of-month component.
     pub day: CalendarComponent,
+    /// When true, day values count from the END of the month (the `~` syntax,
+    /// e.g. `*-*~01` = last day). Resolved per-month in [`Self::next_elapse`].
+    pub day_from_end: bool,
     /// Hour component.
     pub hour: CalendarComponent,
     /// Minute component.
@@ -142,13 +145,16 @@ impl CalendarSpec {
         };
 
         // Parse date: YYYY-MM-DD or *-MM-DD or MM-DD etc.
-        let (year, month, day) = if let Some(d) = date_part {
+        // The `~` day separator (e.g. `*-*~01`) marks day values as counted
+        // from the end of the month.
+        let (year, month, day, day_from_end) = if let Some(d) = date_part {
             parse_date_part(d)?
         } else {
             (
                 None,
                 CalendarComponent::Wildcard,
                 CalendarComponent::Wildcard,
+                false,
             )
         };
 
@@ -167,7 +173,9 @@ impl CalendarSpec {
         // components fall outside wall-clock bounds (e.g. `*-* 99:*:*`).
         // Upstream: TEST-65-ANALYZE asserts these error out.
         validate_component_range(&month, 1, 12, "month")?;
-        validate_component_range(&day, 1, 31, "day")?;
+        // From-end day values (`~N`) are capped at 28: upstream forbids dates
+        // more than 28 days from the end of the month (calendarspec.c chain_valid).
+        validate_component_range(&day, 1, if day_from_end { 28 } else { 31 }, "day")?;
         validate_component_range(&hour, 0, 23, "hour")?;
         validate_component_range(&minute, 0, 59, "minute")?;
         validate_component_range(&second, 0, 60, "second")?;
@@ -178,6 +186,7 @@ impl CalendarSpec {
             year,
             month,
             day,
+            day_from_end,
             hour,
             minute,
             second,
@@ -214,7 +223,11 @@ impl CalendarSpec {
                     1
                 };
 
-                let days = matching_values_from(&self.day, d_start, max_day);
+                let days = if self.day_from_end {
+                    resolve_from_end_days(&self.day, d_start, max_day)
+                } else {
+                    matching_values_from(&self.day, d_start, max_day)
+                };
 
                 for d in days {
                     if d > max_day {
@@ -317,7 +330,7 @@ impl CalendarSpec {
             s.push_str("*-");
         }
         s.push_str(&format_component_padded(&self.month, 2));
-        s.push('-');
+        s.push(if self.day_from_end { '~' } else { '-' });
         s.push_str(&format_component_padded(&self.day, 2));
 
         s.push(' ');
@@ -428,9 +441,44 @@ fn parse_date_part(
         Option<CalendarComponent>,
         CalendarComponent,
         CalendarComponent,
+        bool, // day counts from the end of the month (`~`)
     ),
     String,
 > {
+    // A `~` separates the day when it is counted from the end of the month
+    // (e.g. `*-*~01`, `2024-02~1..3`); it takes the place of the final `-`.
+    // The from-end flag is a single property of the whole day component
+    // (mirrors upstream calendarspec.c's `end_of_month`), so only one `~` is
+    // allowed — a second (`~5..~1`) is rejected below.
+    if let Some(pos) = s.find('~') {
+        let head = &s[..pos];
+        let day_str = &s[pos + 1..];
+        // Upstream allows a single `~` (before the day); a second one
+        // (e.g. `~5..~1`) is rejected.
+        if day_str.contains('~') {
+            return Err(format!("Invalid calendar expression: {s}"));
+        }
+        let day = parse_component(day_str)?;
+        let head_parts: Vec<&str> = head.split('-').collect();
+        let (year, month) = if head_parts.len() == 2 {
+            let year = if head_parts[0] == "*" {
+                None
+            } else {
+                Some(parse_component(head_parts[0])?)
+            };
+            (year, parse_component(head_parts[1])?)
+        } else if head_parts.len() == 1 {
+            if head_parts[0].is_empty() {
+                (None, CalendarComponent::Wildcard)
+            } else {
+                (None, parse_component(head_parts[0])?)
+            }
+        } else {
+            return Err(format!("Invalid date format: {s}"));
+        };
+        return Ok((year, month, day, true));
+    }
+
     let parts: Vec<&str> = s.split('-').collect();
     match parts.len() {
         3 => {
@@ -442,18 +490,18 @@ fn parse_date_part(
             };
             let month = parse_component(parts[1])?;
             let day = parse_component(parts[2])?;
-            Ok((year, month, day))
+            Ok((year, month, day, false))
         }
         2 => {
             // MM-DD (year wildcard implied)
             let month = parse_component(parts[0])?;
             let day = parse_component(parts[1])?;
-            Ok((None, month, day))
+            Ok((None, month, day, false))
         }
         1 => {
             // Just a day? Treat as *-*-DD
             let day = parse_component(parts[0])?;
-            Ok((None, CalendarComponent::Wildcard, day))
+            Ok((None, CalendarComponent::Wildcard, day, false))
         }
         _ => Err(format!("Invalid date format: {s}")),
     }
@@ -598,6 +646,10 @@ fn parse_single_value(s: &str) -> Result<CalendarValue, String> {
             let b: u32 = b_str
                 .parse()
                 .map_err(|_| format!("Invalid value: {b_str}"))?;
+            // Upstream rejects a reversed range (start > stop).
+            if a > b {
+                return Err(format!("Range start after end: {s}"));
+            }
             Ok(CalendarValue::RangeRepeat(a, b, step))
         } else {
             let v: u32 = base.parse().map_err(|_| format!("Invalid value: {base}"))?;
@@ -610,6 +662,10 @@ fn parse_single_value(s: &str) -> Result<CalendarValue, String> {
         let b: u32 = b_str
             .parse()
             .map_err(|_| format!("Invalid value: {b_str}"))?;
+        // Upstream rejects a reversed range (start > stop).
+        if a > b {
+            return Err(format!("Range start after end: {s}"));
+        }
         Ok(CalendarValue::Range(a, b))
     } else {
         let v: u32 = s.parse().map_err(|_| format!("Invalid value: {s}"))?;
@@ -652,6 +708,79 @@ fn value_matches(val: &CalendarValue, v: u32) -> bool {
 }
 
 /// Generate matching values in `[from..=max]` for a component, in order.
+/// Resolve a from-end (`~`) day component against a concrete month length,
+/// returning matching absolute days of month in `1..=max_day` that are `>=
+/// from`, sorted. `~N` maps to `max_day - N + 1`; ranges and repeats are
+/// resolved in absolute space after conversion, mirroring upstream
+/// calendarspec.c (find_end_of_month + the start/stop SWAP for reversed order).
+fn resolve_from_end_days(comp: &CalendarComponent, from: u32, max_day: u32) -> Vec<u32> {
+    // N days-from-the-end -> absolute day of month, if it lands inside the month.
+    let abs = |n: u32| -> Option<u32> {
+        if (1..=max_day).contains(&n) {
+            Some(max_day - n + 1)
+        } else {
+            None
+        }
+    };
+    let mut result: Vec<u32> = Vec::new();
+    match comp {
+        // `~*` / `~*/N` are degenerate — from-end on a wildcard is meaningless,
+        // so fall back to plain forward matching over the month.
+        CalendarComponent::Wildcard | CalendarComponent::WildcardRepeat(_) => {
+            return matching_values_from(comp, from, max_day);
+        }
+        CalendarComponent::List(values) => {
+            for cv in values {
+                match cv {
+                    CalendarValue::Exact(n) => {
+                        if let Some(d) = abs(*n) {
+                            result.push(d);
+                        }
+                    }
+                    CalendarValue::Range(a, b) => {
+                        if let (Some(da), Some(db)) = (abs(*a), abs(*b)) {
+                            let (lo, hi) = (da.min(db), da.max(db));
+                            result.extend(lo..=hi);
+                        }
+                    }
+                    CalendarValue::Repeat(start, step) => {
+                        // Absolute start, then step forward toward month end.
+                        if let Some(mut d) = abs(*start) {
+                            loop {
+                                result.push(d);
+                                if *step == 0 {
+                                    break;
+                                }
+                                d += *step;
+                                if d > max_day {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    CalendarValue::RangeRepeat(a, b, step) => {
+                        if let (Some(da), Some(db)) = (abs(*a), abs(*b)) {
+                            let (lo, hi) = (da.min(db), da.max(db));
+                            let mut d = lo;
+                            while d <= hi {
+                                result.push(d);
+                                if *step == 0 {
+                                    break;
+                                }
+                                d += *step;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    result.retain(|&d| d >= from);
+    result.sort_unstable();
+    result.dedup();
+    result
+}
+
 fn matching_values_from(comp: &CalendarComponent, from: u32, max: u32) -> Vec<u32> {
     let mut result = Vec::new();
     match comp {
