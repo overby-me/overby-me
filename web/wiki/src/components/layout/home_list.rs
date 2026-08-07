@@ -574,19 +574,31 @@ pub(super) fn InvitedContextItem(invite: model::InvitationFields) -> Element {
             spawn(async move {
                 let mut ok = false;
                 if let Some(uid) = uid {
-                    let accepted = graphql::accept_invitation(token.as_deref(), &member_id, &uid)
-                        .await
-                        .unwrap_or(false);
-                    if accepted {
-                        ok = true;
-                    } else if let Some(pid) = parent_id {
-                        if graphql::accept_existing_member(token.as_deref(), &pid, &uid)
+                    // Already in this room? Then the invitation is a SECOND row
+                    // for the same person -- someone was invited by mail who was
+                    // already a member -- and the row to keep is the membership
+                    // they have: accept that, and the invitation goes.
+                    //
+                    // Asked FIRST, and this is the whole point of the order: a
+                    // membership is unique per (context, person), so claiming
+                    // the invitation onto their node is a write the database is
+                    // bound to refuse, and that refusal was reaching the error
+                    // log as a fault. It is not a fault. Where they are NOT a
+                    // member this touches nothing and says so, at the cost of
+                    // one round trip on an action taken once.
+                    let already = match &parent_id {
+                        Some(pid) => graphql::accept_existing_member(token.as_deref(), pid, &uid)
                             .await
-                            .unwrap_or(false)
-                        {
-                            let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
-                            ok = true;
-                        }
+                            .unwrap_or(false),
+                        None => false,
+                    };
+                    if already {
+                        let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
+                        ok = true;
+                    } else {
+                        ok = graphql::accept_invitation(token.as_deref(), &member_id, &uid)
+                            .await
+                            .unwrap_or(false);
                     }
                     crate::session::bump_data_version();
                 }
