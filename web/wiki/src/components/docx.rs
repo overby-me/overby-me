@@ -1005,7 +1005,7 @@ pub fn DocxBody(
     /// Worked out by [`PagedDocx`], which is the only thing that fills this in;
     /// a table cell renders through here too and has no pages of its own.
     #[props(default)]
-    marks: Vec<(usize, usize, usize)>,
+    marks: Vec<(usize, usize, usize, f64)>,
 ) -> Element {
     // Group first, render second: the grouping is a property of the SEQUENCE,
     // and rsx has no way to look ahead mid-iteration.
@@ -1036,8 +1036,8 @@ pub fn DocxBody(
     let split_at = |group: usize, item: usize| {
         marks
             .iter()
-            .find(|(g, i, _)| *g == group && *i == item)
-            .map(|(_, _, begins)| *begins)
+            .find(|(g, i, _, _)| *g == group && *i == item)
+            .map(|(_, _, begins, spare)| (*begins, *spare))
     };
 
     rsx! {
@@ -1046,15 +1046,15 @@ pub fn DocxBody(
                 // Where a page ends, when someone has worked out where that is
                 // (see `PagedDocx`). Empty for a cell's contents and for a
                 // document nobody paginated, which is most of them.
-                if let Some(begins) = split_at(i, BEFORE_GROUP) {
-                    PageMark { key: "p{i}", begins }
+                if let Some((begins, spare)) = split_at(i, BEFORE_GROUP) {
+                    PageMark { key: "p{i}", begins, spare }
                 }
                 match group {
                     Group::Single(block) => {
-                        let rows_marked: Vec<(usize, usize)> = marks
+                        let rows_marked: Vec<(usize, usize, f64)> = marks
                             .iter()
-                            .filter(|(g, item, _)| *g == i && *item != BEFORE_GROUP)
-                            .map(|(_, item, begins)| (*item, *begins))
+                            .filter(|(g, item, _, _)| *g == i && *item != BEFORE_GROUP)
+                            .map(|(_, item, begins, spare)| (*item, *begins, *spare))
                             .collect();
                         rsx! {
                             DocxBlock { key: "b{i}", block, rows_marked }
@@ -1077,10 +1077,11 @@ pub fn DocxBody(
                         // it. Each run is its own list with the mark between,
                         // which is what HTML has room for: a page break is not
                         // a list item.
-                        let mut runs: Vec<(Option<usize>, Vec<Paragraph>)> = vec![(None, Vec::new())];
+                        let mut runs: Vec<(Option<(usize, f64)>, Vec<Paragraph>)> =
+                            vec![(None, Vec::new())];
                         for (j, item) in items.into_iter().enumerate() {
                             match split_at(i, j) {
-                                Some(begins) if j > 0 => runs.push((Some(begins), vec![item])),
+                                Some(mark) if j > 0 => runs.push((Some(mark), vec![item])),
                                 _ => runs.last_mut().expect("seeded above").1.push(item),
                             }
                         }
@@ -1092,12 +1093,12 @@ pub fn DocxBody(
                         // scroll to.
                         let ahead = split_at(i, 0);
                         rsx! {
-                            if let Some(begins) = ahead {
-                                PageMark { key: "lp{i}-first", begins }
+                            if let Some((begins, spare)) = ahead {
+                                PageMark { key: "lp{i}-first", begins, spare }
                             }
-                            for (r , (begins , run)) in runs.into_iter().enumerate() {
-                                if let Some(begins) = begins {
-                                    PageMark { key: "lp{i}-{r}", begins }
+                            for (r , (mark , run)) in runs.into_iter().enumerate() {
+                                if let Some((begins, spare)) = mark {
+                                    PageMark { key: "lp{i}-{r}", begins, spare }
                                 }
                                 if ordered {
                                     ol { key: "l{i}-{r}", class,
@@ -1126,11 +1127,14 @@ pub const BEFORE_GROUP: usize = usize::MAX;
 
 /// The hairline that says a page ended here, the same one the PDF reader draws.
 #[component]
-fn PageMark(begins: usize) -> Element {
+fn PageMark(begins: usize, #[props(default)] spare: f64) -> Element {
     rsx! {
         div {
             class: "pdf-page-break",
             role: "separator",
+            // The paper left under the text of the page that ends here, drawn as
+            // the empty space it is on the page itself.
+            style: "--page-spare:{spare:.0}px;",
             "data-page": "{begins}",
             // An ending, like the PDF's: a jump aims past it.
             "data-page-ends": "true",
@@ -1259,7 +1263,7 @@ fn DocxBlock(
     /// carries a table's rows onto the next page, and a document that is mostly
     /// table has almost nowhere else a page can end.
     #[props(default)]
-    rows_marked: Vec<(usize, usize)>,
+    rows_marked: Vec<(usize, usize, f64)>,
 ) -> Element {
     match block {
         Block::Paragraph(p) => {
@@ -1349,12 +1353,13 @@ fn DocxBlock(
             div { class: "docx-table-wrap",
                 table { class: "docx-table", style: "{table_width}",
                     for (r , row) in t.rows.into_iter().enumerate() {
-                        if let Some((_, begins)) = rows_marked.iter().find(|(at, _)| *at == r) {
+                        if let Some((_, begins, spare)) = rows_marked.iter().find(|(at, _, _)| *at == r) {
                             tr { key: "pr{r}", class: "docx-page-row",
                                 td { colspan: "{across}",
                                     div {
                                         class: "pdf-page-break",
                                         role: "separator",
+                                        style: "--page-spare:{spare:.0}px;",
                                         "data-page": "{begins}",
                                         "data-page-ends": "true",
                                         span { "{begins - 1}" }
@@ -2887,8 +2892,11 @@ pub fn PagedDocx(
     blocks: Vec<Block>,
     page: PageGeometry,
 ) -> Element {
-    let mut marks = use_signal(Vec::<(usize, usize, usize)>::new);
+    let mut marks = use_signal(Vec::<(usize, usize, usize, f64)>::new);
     let mut pages = use_signal(|| 0usize);
+    // How much of the last page its text leaves empty, so the reading surface
+    // can show that page as the mostly-blank sheet it is.
+    let mut last_slack = use_signal(|| 0.0f64);
     // Whether the off-screen copy is still needed. It is a whole second render
     // of the document, so it goes as soon as it has been measured.
     let mut measuring = use_signal(|| true);
@@ -2904,6 +2912,7 @@ pub fn PagedDocx(
         // count from another file is worse on screen than no count at all.
         marks.set(Vec::new());
         pages.set(0);
+        last_slack.set(0.0);
         measuring.set(true);
         // Not before the face this is measured in has arrived. A font is
         // fetched when something first renders in it, so on the first Word
@@ -2946,15 +2955,15 @@ pub fn PagedDocx(
             // what proves it did.
             let mut settled = measure_pages(height);
             for _ in 0..4 {
-                let Some((_, _, ink)) = settled else { break };
+                let Some((_, _, ink, _)) = settled else { break };
                 next_frame().await;
                 let again = measure_pages(height);
                 match again {
-                    Some((_, _, second)) if (second - ink).abs() < 0.5 => break,
+                    Some((_, _, second, _)) if (second - ink).abs() < 0.5 => break,
                     _ => settled = again,
                 }
             }
-            let Some((found, count, ink)) = settled else {
+            let Some((found, count, ink, spare)) = settled else {
                 return;
             };
             // What it made of the document, in the console. Pagination that
@@ -2970,6 +2979,7 @@ pub fn PagedDocx(
             );
             marks.set(found);
             pages.set(count);
+            last_slack.set(spare);
             measuring.set(false);
         });
     }));
@@ -2989,7 +2999,7 @@ pub fn PagedDocx(
             // The last page's own number, which no mark inside the document can
             // carry: every other one is drawn where a page ends and the next
             // begins.
-            super::pager::LastPageMark { page: pages().to_string() }
+            super::pager::LastPageMark { page: pages().to_string(), spare: last_slack() }
             super::pager::PageControl { first: "1".to_string(), last: pages().to_string() }
         }
     }
@@ -3013,7 +3023,7 @@ pub fn PagedDocx(
 /// -- so the page count is the number of places a reader can actually be TAKEN
 /// to, plus the first. Counting the swallowed pages instead left a control that
 /// named a page and then would not go there.
-fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)> {
+fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize, f64)>, usize, f64, f64)> {
     if height <= 0.0 {
         return None;
     }
@@ -3125,11 +3135,17 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
     // every break in a prose document one paragraph late.
     //
     // Each page therefore starts where the element that would not fit starts.
-    let mut marks: Vec<(usize, usize, usize)> = Vec::new();
+    let mut marks: Vec<(usize, usize, usize, f64)> = Vec::new();
     let mut page_top = 0.0f64;
     let mut measured = 0.0f64;
+    // Where the text on the page just ended, so the paper left under it can be
+    // drawn. A page whose last element moved down whole ends early, and on the
+    // page that is white space -- one document's last page holds a single
+    // bulleted line and the rest of the sheet is empty.
+    let mut ends_the_page = 0.0f64;
     for (at, spot) in flow.iter().take(last + 1).enumerate() {
         measured = spot.bottom;
+        ends_the_page = spot.ends;
         // `top > page_top` keeps the first element of a page from starting
         // another one: something taller than a whole page has to sit on one.
         if spot.ends - page_top > height && spot.top > page_top {
@@ -3160,9 +3176,30 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
                 true => splits_between_lines(&begin.lines, page_top, height),
                 false => None,
             };
+            // The paper left at the foot of the page that just ended: the page's
+            // own bottom edge, less where its text actually stopped. Nothing,
+            // where a row or a paragraph runs over the edge and carries the rest
+            // to the next page -- that page is full. Everything from the last
+            // line to the edge, where what would not fit moved down whole.
+            let floor = page_top + height;
+            let text_ended = match (carried, split_at) {
+                (true, _) => floor,
+                (false, Some(line)) => line,
+                (false, None) => match starts.checked_sub(1).and_then(|i| flow.get(i)) {
+                    Some(above) => above.ends,
+                    // Nothing above it on this page: the element itself is taller
+                    // than a page, and there is no paper to spare.
+                    None => floor,
+                },
+            };
             let already = marks.last().is_some_and(|m| (m.0, m.1) == (begin.group, begin.item));
             if !already {
-                marks.push((begin.group, begin.item, marks.len() + 2));
+                marks.push((
+                    begin.group,
+                    begin.item,
+                    marks.len() + 2,
+                    (floor - text_ended).max(0.0),
+                ));
             }
             page_top = match (carried, split_at) {
                 (true, _) => page_top + height,
@@ -3174,9 +3211,12 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
             }
         }
     }
+    // And the paper under the LAST page's text, which no mark inside the
+    // document can carry: there is no page after it to be pushed down.
+    let last_slack = (page_top + height - ends_the_page).max(0.0);
     // Nothing measured at all (fonts not settled, or an empty document): let
     // the effect try again rather than marking a one-page document.
-    (measured > 0.0).then_some((marks.clone(), marks.len() + 1, measured))
+    (measured > 0.0).then_some((marks.clone(), marks.len() + 1, measured, last_slack))
 }
 
 /// Wait until the document has been laid out in the faces it just loaded.

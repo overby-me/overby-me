@@ -184,9 +184,16 @@ fn landing_allowance() -> f64 {
 /// It carries no `data-page`, because nothing begins here: a mark that claimed
 /// to would add a page to the control with nothing on it.
 #[component]
-pub fn LastPageMark(page: String) -> Element {
+pub fn LastPageMark(page: String, #[props(default)] spare: f64) -> Element {
     rsx! {
-        div { class: "pdf-page-break pdf-page-last", role: "separator",
+        div {
+            class: "pdf-page-break pdf-page-last",
+            role: "separator",
+            // The paper the last page's text leaves empty. It is the page most
+            // often nearly blank -- one document ends with a single bulleted
+            // line -- and drawing that emptiness is what makes the rule read as
+            // the foot of a page rather than the end of the text.
+            style: "--page-spare:{spare:.0}px;",
             span { "{page}" }
         }
     }
