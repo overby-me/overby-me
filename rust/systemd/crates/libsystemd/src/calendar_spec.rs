@@ -2100,6 +2100,67 @@ mod tests {
         assert!(as_fixed_interval(&CalendarSpec::parse("*-*-* 06:00:00").unwrap()).is_none());
     }
 
+    #[test]
+    fn test_end_of_month_last_day_elapse() {
+        let spec = CalendarSpec::parse("*-*~01").unwrap();
+        assert!(spec.day_from_end);
+        assert_eq!(spec.normalized(), "*-*~01 00:00:00");
+        let at = |y, mo, d| DateTime {
+            year: y,
+            month: mo,
+            day: d,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        };
+        // Last day of a 31-day month, and of leap February.
+        let jan = spec.next_elapse(at(2024, 1, 15)).unwrap();
+        assert_eq!((jan.year, jan.month, jan.day), (2024, 1, 31));
+        let feb = spec.next_elapse(at(2024, 2, 1)).unwrap();
+        assert_eq!((feb.year, feb.month, feb.day), (2024, 2, 29));
+    }
+
+    #[test]
+    fn test_end_of_month_rejects_reversed_and_double_tilde() {
+        assert!(CalendarSpec::parse("*-*~7..1").is_err()); // reversed from-end range
+        assert!(CalendarSpec::parse("*-*~5..~1").is_err()); // a second `~`
+        assert!(CalendarSpec::parse("*-*-7..5").is_err()); // reversed ordinary range
+        assert!(CalendarSpec::parse("*-*~30").is_err()); // > 28 from the end
+    }
+
+    #[test]
+    fn test_utc_suffix() {
+        let spec = CalendarSpec::parse("Mon *-*-* 00:00:00 UTC").unwrap();
+        assert!(spec.utc);
+        assert_eq!(spec.normalized(), "Mon *-*-* 00:00:00 UTC");
+        let plain = CalendarSpec::parse("Mon *-*-* 00:00:00").unwrap();
+        assert!(!plain.utc);
+        assert_eq!(plain.normalized(), "Mon *-*-* 00:00:00");
+    }
+
+    #[test]
+    fn test_fixed_instant_at_timestamp() {
+        // @1704067200 == 2024-01-01 00:00:00 UTC.
+        let spec = CalendarSpec::parse("@1704067200").unwrap();
+        assert_eq!(spec.fixed_instant, Some(1704067200));
+        assert_eq!(spec.normalized(), "2024-01-01 00:00:00 UTC");
+        let at = |y, mo, d| DateTime {
+            year: y,
+            month: mo,
+            day: d,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        };
+        // One-shot: fires once while ahead of the reference, never once past.
+        let hit = spec.next_elapse(at(2023, 12, 31)).unwrap();
+        assert_eq!((hit.year, hit.month, hit.day), (2024, 1, 1));
+        assert!(spec.next_elapse(at(2024, 6, 1)).is_none());
+        // Out-of-range year (> 2199) and a fractional timestamp are rejected.
+        assert!(CalendarSpec::parse("@7258118400").is_err());
+        assert!(CalendarSpec::parse("@123.5").is_err());
+    }
+
     // -- Edge case tests --
 
     #[test]
