@@ -550,6 +550,8 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             return;
         };
         let c = colour();
+        // What is under the finger already, kept so a refusal can put it back.
+        let was = cells.read().get(&(x, y)).copied();
         // Optimistic: the cell is painted now and corrected by the stream if the
         // server disagrees, so a hall on slow wifi still feels immediate.
         cells.write().insert((x, y), c);
@@ -584,8 +586,8 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     // as a fault, and the countdown starts. It is logged, not
                     // filed, because "you were too quick" is not a bug.
                     log::info!("paint {x},{y} refused: {e}");
-                    // Take the optimistic cell back: it is not on the board.
-                    cells.write().remove(&(x, y));
+                    // Take the optimistic cell back, to whatever was under it.
+                    undo_placement(&mut cells.write(), (x, y), was);
                     draw_all_of(&undo, cols, rows_n, &cells.read());
                     // A refusal that knows when is not a failure to report; it is
                     // an instruction. Anything else is a real error and is already
@@ -750,6 +752,26 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     }
 }
 
+/// Put a refused placement back the way it was.
+///
+/// REMOVING the cell is not undoing it. The board is redrawn by filling with
+/// `PALETTE[0]` and painting the cells the map holds, so a cell taken out of the
+/// map comes back WHITE rather than the colour it was before the tap — which is
+/// what a painter saw when the cooldown refused them: the cell they aimed at
+/// turned white and stayed white until the next load put the real board back.
+///
+/// A cell that was never painted still goes, since white IS its state.
+pub fn undo_placement(cells: &mut HashMap<(u32, u32), u8>, at: (u32, u32), was: Option<u8>) {
+    match was {
+        Some(before) => {
+            cells.insert(at, before);
+        }
+        None => {
+            cells.remove(&at);
+        }
+    }
+}
+
 /// The widest the board is allowed to draw, for a given number of cells.
 ///
 /// A ceiling, not a size: the board is `width: 100%` and shrinks to whatever it
@@ -799,6 +821,27 @@ mod tests {
         // Any other failure is not a cooldown and must not be shown as one.
         assert_eq!(retry_after_seconds("permission denied"), None);
         assert_eq!(retry_after_seconds("retry_after_ms=abc"), None);
+    }
+
+    /// A refused placement puts back what was under it, rather than clearing it.
+    ///
+    /// The board is redrawn by filling white and painting what the map holds, so
+    /// dropping the cell paints it WHITE — which is what a painter reported:
+    /// "the pixel was set to white, not blue as I had selected", and the real
+    /// colour only came back on the next load.
+    #[test]
+    fn a_refused_placement_restores_the_cell_under_it() {
+        let mut cells = HashMap::new();
+        cells.insert((3, 4), 13u8); // the blue of the flag under the finger
+        cells.insert((3, 4), 8u8); // the optimistic placement
+        undo_placement(&mut cells, (3, 4), Some(13));
+        assert_eq!(cells.get(&(3, 4)), Some(&13), "the cell is blue again, not gone");
+
+        // A cell nobody had painted goes, because white IS its state.
+        let mut empty = HashMap::new();
+        empty.insert((9, 9), 5u8);
+        undo_placement(&mut empty, (9, 9), None);
+        assert!(!empty.contains_key(&(9, 9)));
     }
 
     /// The board never asks the browser for a size it cannot draw.
