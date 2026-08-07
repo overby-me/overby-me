@@ -195,7 +195,85 @@ fn make_entry_with_stack(level: &str, message: String, stack: Option<String>) ->
         "user_agent": web_sys::window()
             .and_then(|w| w.navigator().user_agent().ok()),
         "breadcrumbs": breadcrumbs(),
+        // The state of the thing it happened IN. Every one of these has been
+        // the answer to a real report: the window's size decides where a page
+        // control thinks the reader is, whether a service worker is serving the
+        // page decides whether the build running is the build deployed, and the
+        // connection is the first question anyone asks about a failure in a hall
+        // of six hundred people on one access point.
+        "viewport": viewport(),
+        "dpr": web_sys::window().map(|w| w.device_pixel_ratio()),
+        "installed": display_mode_standalone(),
+        "sw_controlled": service_worker_controlling(),
+        "online": web_sys::window().map(|w| w.navigator().on_line()),
+        "connection": connection_kind(),
+        "language": web_sys::window().and_then(|w| w.navigator().language()),
+        "storage": storage_works(),
+        // How long the tab had been open. A fault at boot and a fault after an
+        // hour of use are different faults, and the timestamp alone cannot tell
+        // them apart.
+        "up_ms": web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now().round()),
     })
+}
+
+/// The window, as `1400x1000`. Not the screen: the window is what the layout is
+/// laid out in.
+fn viewport() -> Option<String> {
+    let w = web_sys::window()?;
+    let width = w.inner_width().ok()?.as_f64()?;
+    let height = w.inner_height().ok()?.as_f64()?;
+    Some(format!("{}x{}", width.round(), height.round()))
+}
+
+/// Whether the app is running as an installed app rather than in a browser tab.
+fn display_mode_standalone() -> Option<bool> {
+    use wasm_bindgen::JsCast;
+    let w = web_sys::window()?;
+    // Through Reflect: `matchMedia` is not in the web-sys Window binding this
+    // build uses, and asking JavaScript directly is cheaper than a feature.
+    let ask = js_sys::Reflect::get(&w, &"matchMedia".into())
+        .ok()?
+        .dyn_into::<js_sys::Function>()
+        .ok()?;
+    let list = ask
+        .call1(&w, &"(display-mode: standalone)".into())
+        .ok()?;
+    Some(
+        js_sys::Reflect::get(&list, &"matches".into())
+            .ok()
+            .and_then(|m| m.as_bool())
+            .unwrap_or(false),
+    )
+}
+
+/// Whether a service worker is serving this page -- which decides whether the
+/// code running is the code deployed, and whether there is one at all.
+fn service_worker_controlling() -> Option<bool> {
+    if !crate::pwa::service_worker_available() {
+        return Some(false);
+    }
+    let w = web_sys::window()?;
+    let container = js_sys::Reflect::get(w.navigator().as_ref(), &"serviceWorker".into()).ok()?;
+    let controller = js_sys::Reflect::get(&container, &"controller".into()).ok()?;
+    Some(!controller.is_null() && !controller.is_undefined())
+}
+
+/// What the browser calls this connection (`4g`, `slow-2g`), where it says.
+fn connection_kind() -> Option<String> {
+    let w = web_sys::window()?;
+    let connection = js_sys::Reflect::get(w.navigator().as_ref(), &"connection".into()).ok()?;
+    js_sys::Reflect::get(&connection, &"effectiveType".into())
+        .ok()?
+        .as_string()
+}
+
+/// Whether this browser will let the app store anything. Private-mode Safari
+/// THROWS on `localStorage`, which is how a session silently fails to persist.
+fn storage_works() -> Option<bool> {
+    let w = web_sys::window()?;
+    Some(matches!(w.local_storage(), Ok(Some(_))))
 }
 
 fn level_str(l: Level) -> &'static str {

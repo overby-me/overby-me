@@ -63,12 +63,40 @@ pub fn setup() {
     // reject outright, and private-mode and insecure-context browsers refuse too.
     // None of that is a fault worth an error entry, but a silent no-op is not
     // worth having either — offline support is simply off for that visitor.
+    //
+    // And only where there IS one to register with. `navigator.serviceWorker`
+    // is missing altogether in an in-app browser -- the Google app's on iOS is
+    // where this was reported from -- and web-sys types it as always present,
+    // so `.register` on the missing property throws a TypeError instead of
+    // returning a promise that rejects. Thrown out of `setup`, through the wasm
+    // boundary, that took the whole boot with it: the app rendered NOTHING for
+    // those visitors, and the report they sent said only that something was
+    // undefined.
+    if !service_worker_available() {
+        log::info!("no service worker in this browser, continuing without offline support");
+        return;
+    }
     let promise = window.navigator().service_worker().register(SW_URL);
     wasm_bindgen_futures::spawn_local(async move {
         if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
             log::info!("service worker not registered, continuing without offline support: {e:?}");
         }
     });
+}
+
+/// Whether this browser has a service worker container at all.
+///
+/// Asked in JavaScript's own terms rather than Rust's, because that is the only
+/// way to ask: web-sys binds `navigator.serviceWorker` as a value that is always
+/// there, and reading a missing property is fine in JS while CALLING a method on
+/// the result is a TypeError.
+pub fn service_worker_available() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    js_sys::Reflect::get(window.navigator().as_ref(), &"serviceWorker".into())
+        .map(|found| !found.is_undefined() && !found.is_null())
+        .unwrap_or(false)
 }
 
 fn append_link(
@@ -150,6 +178,9 @@ fn subscription_json(sub: &web_sys::PushSubscription) -> Result<wasm_bindgen::Js
 /// The active service worker registration (resolves once the worker is ready).
 async fn registration() -> Result<web_sys::ServiceWorkerRegistration, String> {
     use wasm_bindgen::JsCast;
+    if !service_worker_available() {
+        return Err("no service worker in this browser".to_string());
+    }
     let win = web_sys::window().ok_or("no window")?;
     let ready = win.navigator().service_worker().ready().map_err(js_err)?;
     wasm_bindgen_futures::JsFuture::from(ready)
