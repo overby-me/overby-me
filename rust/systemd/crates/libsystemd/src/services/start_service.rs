@@ -682,12 +682,16 @@ fn start_service_with_filedescriptors(
                     std::env::var("PATH").unwrap_or_else(|_| default_path.to_owned()),
                 ));
             }
-            // NOTE: ExecSearchPath= is honored for resolving the ExecStart=
-            // executable (see the which_in() call above) but is not yet folded
-            // into the child's $PATH the way upstream does (exec-invoke.c sets
-            // PATH to the joined search path unless Environment=PATH= overrides).
-            // Consequently a bare command a service *script* itself invokes is
-            // still resolved against the default PATH only.
+            // ExecSearchPath= overrides the default $PATH with the joined search
+            // path (systemd.exec(5): "overrides $PATH if $PATH is not supplied by
+            // the user through Environment=/EnvironmentFile="). Applied here, before
+            // the EnvironmentFile=/Environment= steps below, so a user-supplied
+            // PATH from those still wins.
+            if !conf.exec_config.exec_search_path.is_empty() {
+                let joined = conf.exec_config.exec_search_path.join(":");
+                env.retain(|(k, _)| k != "PATH");
+                env.push(("PATH".to_owned(), joined));
+            }
             // Set HOME, USER, LOGNAME, SHELL from the User= setting.
             // systemd populates these automatically when User= is set,
             // resolving the passwd record whether User= is a name (getpwnam)
