@@ -339,6 +339,42 @@ const UNIT_TYPES_IN_ENUM_ORDER: [&str; 11] = [
     "scope",
 ];
 
+/// Build the interactive drop-in scaffold handed to `$EDITOR` for a fresh
+/// override. Mirrors upstream `edit-util.c` (`create_edit_temp_file`): the two
+/// `###` markers wrap an EMPTY content area, with no `[Service]` (or any other)
+/// section header pre-seeded. That emptiness is load-bearing: an unmodified
+/// edit (e.g. `EDITOR=true`) must trim back to nothing and be discarded, so the
+/// scaffold itself must contribute no real content. (A prior version seeded a
+/// literal `[Service]` line here, which survived the marker strip and caused a
+/// no-op edit to write a bogus `override.conf` — TEST-26 line 49-50.)
+fn dropin_edit_scaffold(unit_name: &str) -> String {
+    format!(
+        "### Editing drop-in override for {unit_name}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n\n### Lines below this comment will be discarded\n"
+    )
+}
+
+/// Extract the real drop-in body from an edited scaffold: drop the `### ` marker
+/// lines and trim surrounding whitespace. Returns `None` when only markers and
+/// whitespace remain, i.e. the edit introduced no real change and the override
+/// must be discarded (upstream `trim_edit_markers` returns 0 == "file is
+/// empty"). Otherwise returns the body with a single trailing newline.
+fn dropin_edit_extract(edited: &str) -> Option<String> {
+    let clean: String = edited
+        .lines()
+        .filter(|l| !l.starts_with("### "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed = clean.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut final_content = trimmed.to_owned();
+    if !final_content.ends_with('\n') {
+        final_content.push('\n');
+    }
+    Some(final_content)
+}
+
 fn main() {
     // Ignore SIGPIPE so piping systemctl output to grep/head/etc. doesn't
     // cause a panic when the reader closes the pipe early.
@@ -1317,9 +1353,7 @@ fn main() {
 
                     let tmp_path = format!("{override_path}.tmp");
                     let initial_content = if existing.is_empty() {
-                        format!(
-                            "### Editing drop-in override for {unit_name}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\n\n### Lines below this comment will be discarded\n"
-                        )
+                        dropin_edit_scaffold(unit_name)
                     } else {
                         existing
                     };
@@ -1340,23 +1374,14 @@ fn main() {
                     match status {
                         Ok(s) if s.success() => {
                             match std::fs::read_to_string(&tmp_path) {
-                                Ok(edited) => {
-                                    let clean: String = edited
-                                        .lines()
-                                        .filter(|l| !l.starts_with("### "))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    let trimmed = clean.trim();
-                                    if trimmed.is_empty() {
+                                Ok(edited) => match dropin_edit_extract(&edited) {
+                                    None => {
                                         let _ = std::fs::remove_file(&override_path);
                                         if !quiet {
                                             eprintln!("Removed empty override for {unit_name}.");
                                         }
-                                    } else {
-                                        let mut final_content = trimmed.to_owned();
-                                        if !final_content.ends_with('\n') {
-                                            final_content.push('\n');
-                                        }
+                                    }
+                                    Some(final_content) => {
                                         if let Err(e) =
                                             std::fs::write(&override_path, &final_content)
                                         {
@@ -1366,7 +1391,7 @@ fn main() {
                                             std::process::exit(1);
                                         }
                                     }
-                                }
+                                },
                                 Err(e) => {
                                     if !quiet {
                                         eprintln!("Failed to read {tmp_path}: {e}");
@@ -2751,6 +2776,32 @@ fn send_tcp(addr: &str, payload: &str) -> Result<Value, Box<dyn std::error::Erro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dropin_edit_scaffold_noop_is_discarded() {
+        // A no-op interactive edit (e.g. `EDITOR=true`) leaves the scaffold
+        // byte-for-byte. Feeding it back through the marker strip must yield
+        // None (== upstream "file is empty, no real changes"), so `systemctl
+        // edit` writes no override.conf. Regression for TEST-26 line 49-50: the
+        // scaffold used to seed a `[Service]` header that survived the strip.
+        let scaffold = dropin_edit_scaffold("systemctl-test.service");
+        assert!(
+            !scaffold.contains("[Service]"),
+            "scaffold must not pre-seed a section header: {scaffold:?}"
+        );
+        assert_eq!(dropin_edit_extract(&scaffold), None);
+    }
+
+    #[test]
+    fn test_dropin_edit_extract_keeps_real_content() {
+        // A real edit (content typed into the marked area) is kept verbatim,
+        // marker lines dropped, and normalized to a single trailing newline.
+        let edited = "### Editing drop-in override for foo.service\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\nExecStart=\nExecStart=sleep 10d\n\n### Lines below this comment will be discarded\n";
+        assert_eq!(
+            dropin_edit_extract(edited).as_deref(),
+            Some("[Service]\nExecStart=\nExecStart=sleep 10d\n")
+        );
+    }
 
     #[test]
     fn test_unit_types_help_matches_c_enum_order() {
