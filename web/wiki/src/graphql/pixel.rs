@@ -249,6 +249,26 @@ pub async fn create_canvas(
         .await?;
     }
 
+    // And bring the limit the DATABASE enforces in step with the one this canvas
+    // states. They are stored apart -- the trigger reads the context's
+    // permission, the countdown reads the canvas -- and a context seeded when
+    // the default was a minute went on enforcing a minute while every canvas
+    // made in it since said twenty seconds. The stated cooldown has to be the
+    // real one, or the board tells a painter to try again at a moment it will
+    // refuse them.
+    //
+    // Per CONTEXT, so this moves the limit for canvases already in it. That is
+    // the seam the permission is on, and one limit a room can rely on beats two
+    // that disagree.
+    execute_raw_vars(
+        access_token,
+        "mutation($c: uuid!, $r: interval!) { \
+           updatePermissions(where: {contextId: {_eq: $c}, mimeId: {_eq: \"canvas/pixel\"}}, \
+                             _set: {rate_limit: $r}) { affected_rows } }",
+        serde_json::json!({ "c": context_id, "r": format!("{cooldown_seconds} seconds") }),
+    )
+    .await?;
+
     insert_node_named(
         access_token,
         model::NodesInsertInput {

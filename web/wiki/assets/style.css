@@ -7973,6 +7973,19 @@ a.list-item:hover {
 	gap: var(--md-sys-spacing-1-5);
 }
 
+/* Width and height, side by side, because they are one decision: how big is the
+   board. Each keeps its own label, so the pair still reads as two fields to a
+   screen reader rather than one field with a mystery second box. */
+.pixel-size-fields {
+	display: flex;
+	gap: var(--md-sys-spacing-3);
+}
+
+.pixel-size-fields .text-field {
+	flex: 1;
+	min-width: 0;
+}
+
 .pixel-swatch {
 	width: var(--md-sys-spacing-8);
 	height: var(--md-sys-spacing-8);

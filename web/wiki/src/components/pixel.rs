@@ -21,21 +21,40 @@ use crate::model::NodeWithChildren;
 use crate::route::Route;
 use crate::session::use_session;
 
-/// How many cells a new canvas is across and down.
+/// How many cells a new canvas is across and down, unless the person making it
+/// says otherwise.
 ///
-/// Thirty-two, not sixty-four, because a board scales to the width of a phone: at
-/// 64 a cell is about five pixels on a 360px screen, which is not something a
-/// finger can aim at. A canvas can still be made larger — the size lives in the
-/// node's `data` — but the default should be paintable on the device most people
-/// will have in the hall.
-pub const DEFAULT_SIDE: u32 = 32;
+/// Sixty-four. It was thirty-two, on the argument that a board scales to the
+/// width of a phone and a 64-cell board gives a cell about five pixels on a
+/// 360px screen, which is not much to aim at. That argument is still true and
+/// is answered rather than ignored: the board can be pinched and zoomed, and a
+/// tap that lands on the wrong cell costs one turn of a twenty-second cooldown.
+/// Four times the cells is a picture a hall can actually make something of, and
+/// the size is a field on the dialog now, so a room that would rather have big
+/// squares can still ask for them.
+pub const DEFAULT_SIDE: u32 = 64;
+
+/// How long a painter waits between placements, when a canvas is the first in
+/// its context and seeds the rate limit. Twenty seconds is quick enough that a
+/// hall feels the board move and slow enough that a board is a crowd's picture
+/// rather than one person's.
+pub const DEFAULT_COOLDOWN: u32 = 20;
 
 /// The palette, as CSS colours. The stored value is the INDEX, so a cell costs a
 /// single digit in the database and the palette can be restyled later without
 /// rewriting every row.
+///
+/// The last two are the party's own, the seeds this app's whole colour scheme is
+/// generated from (`scripts/gen-theme.ts`): Radikale grøn and Radikale magenta.
+/// A board painted by this organisation should be able to spell its own name in
+/// its own colours, and neither is reachable by mixing the sixteen above.
+///
+/// **Appended, never inserted.** The index IS the stored value, so putting a
+/// colour anywhere but the end would repaint every cell already placed.
 pub const PALETTE: &[&str] = &[
     "#ffffff", "#e4e4e4", "#888888", "#222222", "#ffa7d1", "#e50000", "#e59500", "#a06a42",
     "#e5d900", "#94e044", "#02be01", "#00d3dd", "#0083c7", "#0000ea", "#cf6ee4", "#820080",
+    "#02944f", "#d2307e",
 ];
 
 /// The palette entry for a stored index, falling back rather than panicking on a
@@ -786,8 +805,8 @@ mod tests {
     #[test]
     fn the_board_stays_a_sane_size() {
         assert_eq!(board_px(1), 240, "a tiny canvas is still worth looking at");
-        assert_eq!(board_px(DEFAULT_SIDE), 512);
-        assert_eq!(board_px(64), 1024);
+        assert_eq!(board_px(32), 512);
+        assert_eq!(board_px(DEFAULT_SIDE), 1024, "the default fills its ceiling");
         assert_eq!(board_px(1000), 1024, "and never wider than a screen");
     }
 
@@ -1105,13 +1124,30 @@ fn AddCanvasButton(context_id: String) -> Element {
     let session = use_session();
     let mut open = use_signal(|| false);
     let mut name = use_signal(String::new);
+    // Held as text, not numbers: a field being typed into passes through empty
+    // and through half-written values, and a number signal would fight the
+    // person editing it. Read once, on submit.
+    let mut width = use_signal(|| DEFAULT_SIDE.to_string());
+    let mut height = use_signal(|| DEFAULT_SIDE.to_string());
     let mut busy = use_signal(|| false);
+
+    // What was typed, or the default if it was not a number. The clamp is the
+    // same one `create_canvas` applies, so the field cannot ask for a board the
+    // backend would quietly cut down.
+    let side = |typed: &str| {
+        typed
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(DEFAULT_SIDE)
+            .clamp(1, graphql::MAX_CANVAS_SIDE)
+    };
 
     let submit = move |_| {
         let title = name.read().trim().to_string();
         if title.is_empty() || *busy.read() {
             return;
         }
+        let (w, h) = (side(&width.read()), side(&height.read()));
         let ctx = context_id.clone();
         let token = session.read().access_token.clone();
         busy.set(true);
@@ -1120,9 +1156,9 @@ fn AddCanvasButton(context_id: String) -> Element {
                 token.as_deref(),
                 &ctx,
                 &title,
-                DEFAULT_SIDE,
-                DEFAULT_SIDE,
-                60,
+                w,
+                h,
+                DEFAULT_COOLDOWN,
             )
             .await
             {
@@ -1177,6 +1213,32 @@ fn AddCanvasButton(context_id: String) -> Element {
                     maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
                     value: "{name}",
                     oninput: move |e| name.set(e.value()),
+                }
+            }
+            // How big the board is. Asked here because it cannot be changed
+            // afterwards without throwing away what has been painted: the cells
+            // are addressed by their coordinates, so a narrower board would
+            // strand every cell beyond its new edge.
+            div { class: "pixel-size-fields",
+                div { class: "text-field",
+                    label { "{t(\"pixel.canvasWidth\")}" }
+                    input {
+                        r#type: "number",
+                        min: "1",
+                        max: "{graphql::MAX_CANVAS_SIDE}",
+                        value: "{width}",
+                        oninput: move |e| width.set(e.value()),
+                    }
+                }
+                div { class: "text-field",
+                    label { "{t(\"pixel.canvasHeight\")}" }
+                    input {
+                        r#type: "number",
+                        min: "1",
+                        max: "{graphql::MAX_CANVAS_SIDE}",
+                        value: "{height}",
+                        oninput: move |e| height.set(e.value()),
+                    }
                 }
             }
         }
