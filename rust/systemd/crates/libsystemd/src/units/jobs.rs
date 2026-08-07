@@ -507,7 +507,7 @@ impl Drop for JobHandle {
 /// idiom read in service_manager.rs / signal_handler.rs.
 #[must_use]
 pub fn job_graph_enabled() -> bool {
-    std::env::var("SYSTEMD_RS_JOB_GRAPH").is_ok_and(|v| v == "1")
+    std::env::var("SYSTEMD_RS_JOB_GRAPH").map_or(true, |v| v != "0")
 }
 
 #[cfg(test)]
