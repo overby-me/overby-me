@@ -73,6 +73,12 @@ Each of these was wrong at some point, and each was worth a page or more:
   mark, and half these documents space their sections with runs of them; an
   empty block in CSS is half a line or none. Four blanks before a heading came
   to a paragraph less than the page holds.
+- **And so is the line break a paragraph ENDS with.** Word moves to a new line
+  and puts the paragraph mark on it; a trailing `<br>` in HTML closes nothing
+  and takes no room. Ten paragraphs of one document end that way, and the ten
+  lost lines came to a fifth of a page — enough to hold a closing section that
+  Word puts on the page after. Held open with a zero-width space, like the
+  empty paragraph above.
 - **The space under a page's last paragraph falls off the page.** Word puts a
   paragraph on the page when its LINES fit and cuts the space after it at the
   page edge, so the fit test asks where the text ends, not where the box does.
