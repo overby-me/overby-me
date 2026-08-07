@@ -3522,6 +3522,14 @@ pub fn run_exec_helper() {
         unsafe { std::env::set_var("WATCHDOG_PID", format!("{}", nix::unistd::getpid())) };
     }
 
+    // Stamp SYSTEMD_EXEC_PID with the exec'd PID for every service (upstream
+    // exec-invoke.c sets it unconditionally to exec_pid). sd_notify() uses it
+    // to reject notifications forwarded from a process other than the one the
+    // manager expects. getpid() here is the process about to execve, which is
+    // also the pid the manager tracks — and returns the namespace-local pid
+    // (1) automatically inside a PID namespace, matching upstream.
+    unsafe { std::env::set_var("SYSTEMD_EXEC_PID", format!("{}", nix::unistd::getpid())) };
+
     // Reset the signal mask so the child starts with all signals unblocked.
     // The service manager (PID 1) may block signals via sigprocmask (e.g.
     // signal-hook blocks SIGCHLD, SIGTERM, etc. for its iterator thread),
