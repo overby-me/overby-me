@@ -3150,6 +3150,10 @@ pub struct ExecConfig {
     /// the list. Parsed and stored; no runtime mount-namespace enforcement
     /// yet. See systemd.exec(5).
     pub read_write_paths: Vec<String>,
+    /// `ExecSearchPath=` — colon-separated absolute directories searched (in
+    /// order) to resolve a bare `ExecStart=`/`ExecStop=` command name, ahead of
+    /// the default `$PATH`. Empty when unset.
+    pub exec_search_path: Vec<String>,
     /// MemoryDenyWriteExecute= — if true, attempts to create memory mappings
     /// that are both writable and executable, or to change existing writable
     /// mappings to executable, are prohibited. Defaults to false. Parsed and

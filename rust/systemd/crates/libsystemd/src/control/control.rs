@@ -3559,6 +3559,7 @@ fn create_transient_unit(
         protect_hostname_name: None,
         system_call_architectures: vec![],
         read_write_paths: vec![],
+        exec_search_path: vec![],
         memory_deny_write_execute: false,
         lock_personality: false,
         protect_proc: crate::units::ProtectProc::Default,

@@ -3279,6 +3279,7 @@ pub struct ParsedExecSection {
     /// the list. Parsed and stored; no runtime mount-namespace enforcement
     /// yet. See systemd.exec(5).
     pub read_write_paths: Vec<String>,
+    pub exec_search_path: Vec<String>,
     /// MemoryDenyWriteExecute= — if true, attempts to create memory mappings
     /// that are both writable and executable, or to change existing writable
     /// mappings to executable, are prohibited. Defaults to false. Parsed and

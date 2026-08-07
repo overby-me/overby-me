@@ -1316,6 +1316,32 @@ fn build_stdin_inputs(
 /// `EXTRACT_UNQUOTE`).  Backslash-space (`\ `) keeps the space in the token,
 /// backslash-colon (`\:`) keeps the colon literal, and `\\` produces a single
 /// backslash.  Used for BindPaths, ReadOnlyPaths, etc.
+/// Parse an `ExecSearchPath=`-style colon-separated absolute-path list.
+///
+/// Mirrors systemd's `config_parse_colon_separated_paths`: each assignment's
+/// value is split on ':' and the pieces accumulated across repeats; an empty
+/// assignment resets the accumulated list. Only absolute paths are kept.
+fn parse_colon_separated_paths(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
+    let mut entries = Vec::new();
+    let Some(vec) = vec else {
+        return entries;
+    };
+    for (_idx, line) in &vec {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            entries.clear();
+            continue;
+        }
+        for part in trimmed.split(':') {
+            let p = part.trim();
+            if p.starts_with('/') {
+                entries.push(p.to_string());
+            }
+        }
+    }
+    entries
+}
+
 fn parse_escaped_space_separated_list(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
     match vec {
         Some(vec) => {
@@ -1446,6 +1472,7 @@ pub fn parse_exec_section(
     let protect_hostname = section.remove("PROTECTHOSTNAME");
     let system_call_architectures = section.remove("SYSTEMCALLARCHITECTURES");
     let read_write_paths = section.remove("READWRITEPATHS");
+    let exec_search_path = section.remove("EXECSEARCHPATH");
     let memory_deny_write_execute = section.remove("MEMORYDENYWRITEEXECUTE");
     let lock_personality = section.remove("LOCKPERSONALITY");
     let protect_proc = section.remove("PROTECTPROC");
@@ -2872,6 +2899,7 @@ pub fn parse_exec_section(
             None => Vec::new(),
         },
         read_write_paths: parse_escaped_space_separated_list(read_write_paths),
+        exec_search_path: parse_colon_separated_paths(exec_search_path),
         memory_deny_write_execute,
         lock_personality,
         protect_proc: match protect_proc {

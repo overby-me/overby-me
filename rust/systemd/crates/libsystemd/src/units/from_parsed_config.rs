@@ -739,6 +739,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             protect_hostname_name: None, // Extended syntax only via transient units
             system_call_architectures: parsed.system_call_architectures,
             read_write_paths: parsed.read_write_paths,
+            exec_search_path: parsed.exec_search_path,
             memory_deny_write_execute: parsed.memory_deny_write_execute,
             lock_personality: parsed.lock_personality,
             protect_proc: parsed.protect_proc,

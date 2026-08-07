@@ -442,8 +442,19 @@ fn start_service_with_filedescriptors(
         )
     })?;
 
-    // check if executable even exists
-    let cmd = which(&exec.cmd).map_err(|err| {
+    // check if executable even exists. ExecSearchPath= (when set) supplies the
+    // colon-joined directories that a bare command name is resolved against,
+    // instead of the inherited $PATH — mirroring systemd's find_executable_full
+    // with the unit's exec_search_path. An absolute ExecStart= path is returned
+    // unchanged either way.
+    let resolved = if conf.exec_config.exec_search_path.is_empty() {
+        which(&exec.cmd)
+    } else {
+        let joined = conf.exec_config.exec_search_path.join(":");
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        which::which_in(&exec.cmd, Some(joined), cwd)
+    };
+    let cmd = resolved.map_err(|err| {
         RunCmdError::SpawnError(
             name.to_owned(),
             format!("Could not resolve command to an executable file: {err:?}"),
@@ -671,6 +682,12 @@ fn start_service_with_filedescriptors(
                     std::env::var("PATH").unwrap_or_else(|_| default_path.to_owned()),
                 ));
             }
+            // NOTE: ExecSearchPath= is honored for resolving the ExecStart=
+            // executable (see the which_in() call above) but is not yet folded
+            // into the child's $PATH the way upstream does (exec-invoke.c sets
+            // PATH to the joined search path unless Environment=PATH= overrides).
+            // Consequently a bare command a service *script* itself invokes is
+            // still resolved against the default PATH only.
             // Set HOME, USER, LOGNAME, SHELL from the User= setting.
             // systemd populates these automatically when User= is set,
             // resolving the passwd record whether User= is a name (getpwnam)
