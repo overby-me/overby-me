@@ -8215,11 +8215,14 @@ a.list-item:hover {
 	overflow: visible;
 }
 .docx-measure .docx-table {
-	/* As wide as its own columns make it, and no wider: a table whose columns
+	/* As wide as its own columns make it, and no narrower: a table whose columns
 	   come to more than the text column OVERFLOWS the margin in Word rather
-	   than being squeezed into it. Fixed layout, or the widths above are
-	   suggestions the browser overrules from the content. */
-	width: auto;
+	   than being squeezed into it. `auto` is not that -- it caps the table at
+	   the box around it and scales the columns down to fit, which turned
+	   290/75/305 into 275/76/290 and wrapped a seven-line cell into eight. One
+	   line per row, and a page break a row early. Fixed layout, or the widths
+	   above are suggestions the browser overrules from the content. */
+	width: var(--t-width, auto);
 	table-layout: fixed;
 }
 .docx-measure .docx-p,

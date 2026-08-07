@@ -22,7 +22,11 @@ JSON.stringify({
         (m.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) &&
         el.innerText.trim().length > 0
       );
-      return next ? next.innerText.replace(/\s+/g, " ").trim().slice(0, 56) : null;
+      // Long enough to outrun what is compared against it. Cut to 56, a page
+      // whose break was exactly right read as wrong: the expectation it is
+      // tested against was 59 characters, and no prefix of a shorter string can
+      // start with a longer one.
+      return next ? next.innerText.replace(/\s+/g, " ").trim().slice(0, 160) : null;
     });
   })(),
 });

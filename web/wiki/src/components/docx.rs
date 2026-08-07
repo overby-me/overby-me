@@ -1298,38 +1298,56 @@ fn DocxBlock(
         Block::Table(t) => {
             // How wide the mark's own row has to be to span the table.
             let across = t.rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
-            // Word's column PROPORTIONS, for the off-screen copy to wrap the
-            // text where Word wraps it. Proportions, not the widths themselves:
-            // this document's three columns come to 670px against a 642px text
-            // column -- Word lets a table run into the margin -- and pinning the
-            // absolute widths inside a narrower box squeezes every row taller,
-            // which was measured at two extra pages. The shares are what
-            // survives the difference.
+            // Word's column widths, and the SUM of them, for the off-screen copy
+            // to wrap the text where Word wraps it.
             //
             // Left to itself the browser fits columns to their content, which
             // is right on screen and nothing like Word: it gave this table
             // 159/81/402 where Word gives 290/75/305.
-            let shares: Vec<Option<f64>> = {
-                let widths: Vec<f64> = t
-                    .rows
+            //
+            // The sum is the part that took two goes to get right. This
+            // document's three columns come to 670px against a 642px text
+            // column, because **Word lets a table run into the margin**; a table
+            // told only what its columns are is still capped at the box around
+            // it, and the browser scales them down to fit — 290/75/305 became
+            // 275/76/290, five per cent narrower, and five per cent narrower
+            // wraps a seven-line cell into eight. That is one line per row, and
+            // over one document's tables it came to the better part of a page,
+            // which moved a break a row late. So the table is told its own width
+            // as well, and allowed to overflow exactly as it does in Word.
+            //
+            // Shares alongside, for the reading copy, which would rather fit
+            // the text column than reproduce the page.
+            let widths: Vec<f64> = t
+                .rows
+                .iter()
+                .max_by_key(|r| r.cells.len())
+                .map(|r| r.cells.iter().map(|c| c.width_pt.unwrap_or(0.0)).collect())
+                .unwrap_or_default();
+            let stated: f64 = widths.iter().sum();
+            let shares: Vec<Option<f64>> = match stated > 0.0 {
+                true => widths
                     .iter()
-                    .max_by_key(|r| r.cells.len())
-                    .map(|r| r.cells.iter().map(|c| c.width_pt.unwrap_or(0.0)).collect())
-                    .unwrap_or_default();
-                let total: f64 = widths.iter().sum();
-                match total > 0.0 {
-                    true => widths
-                        .iter()
-                        .map(|w| (*w > 0.0).then(|| w / total * 100.0))
-                        .collect(),
-                    false => Vec::new(),
-                }
+                    .map(|w| (*w > 0.0).then(|| w / stated * 100.0))
+                    .collect(),
+                false => Vec::new(),
+            };
+            // Only when EVERY column states one: a table with some widths and
+            // some not has no total, and a partial sum would be a narrower table
+            // rather than a wider one.
+            //
+            // Always set, `auto` included, because a custom property INHERITS: a
+            // nested table that states no widths of its own would otherwise be
+            // laid out at the width of the table it sits inside.
+            let table_width = match !widths.is_empty() && widths.iter().all(|w| *w > 0.0) {
+                true => format!("--t-width:{stated:.2}pt;"),
+                false => "--t-width:auto;".to_string(),
             };
             rsx! {
             // Its own scroll container: a wide table must not widen the page and
             // force the whole document sideways on a phone.
             div { class: "docx-table-wrap",
-                table { class: "docx-table",
+                table { class: "docx-table", style: "{table_width}",
                     for (r , row) in t.rows.into_iter().enumerate() {
                         if let Some((_, begins)) = rows_marked.iter().find(|(at, _)| *at == r) {
                             tr { key: "pr{r}", class: "docx-page-row",

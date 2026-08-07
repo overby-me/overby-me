@@ -120,7 +120,7 @@ def main [
             let want = ($doc.starts | get $i)
             let got = ($starts | get -o $i | default "")
             if not ($got | str starts-with $want) {
-                $faults = ($faults | append $"page (($i) + 2) begins ($got | str substring 0..32)…, not ($want)…")
+                $faults = ($faults | append $"page (($i) + 2) begins ($got | str substring 0..72)…\n            not ($want)…")
             }
         }
         if ($faults | is-empty) {

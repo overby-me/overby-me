@@ -34,6 +34,19 @@ Each of these was wrong at some point, and each was worth a page or more:
 - **Spacing does not collapse.** Word ADDS the space under one paragraph to the
   space over the next; CSS keeps the larger. The measuring copy spaces with
   padding for that reason.
+- **Except where the space is AUTOMATIC**, which is a margin and does collapse.
+  A paragraph can decline to state its spacing and leave it to whoever draws the
+  document (`beforeAutospacing`/`afterAutospacing`, ECMA-376 §17.3.1.33). Word
+  writes that whenever text arrives from a browser or a Google Docs export, and
+  a fifth of this wiki's documents carry it. The figure is **14pt**, it
+  overrides whatever the paragraph states, and it collapses against its
+  neighbour rather than adding to it — these attributes exist to reproduce a
+  browser's paragraph margins, collapsing included. Both halves are measured
+  (`scripts/word-pages.nu`, one rendering with the attributes and one with them
+  stripped): every boundary moved by exactly 8.0px, which is 14pt standing where
+  the document default's 8pt stood. Reading past the attributes left every such
+  paragraph 6pt tight; adding 14pt to the 8pt already there would have been 6pt
+  too loose.
 - **Table columns.** The widths the document states, and a table wider than the
   text column overflows the margin as it does in Word rather than being squeezed
   into it. Left to the browser, one table was laid out 134/60/398 where Word has
@@ -63,12 +76,37 @@ Each of these was wrong at some point, and each was worth a page or more:
   when the two agree — without that, the same file came out eight pages on one
   visit and nine on the next.
 
+## Where the truth comes from
+
+Two places, and the second one took a while to find.
+
+**The files themselves.** Word leaves a `lastRenderedPageBreak` where it last
+drew a break, and eighty-four of the wiki's documents carry them. Read with
+care — see the two traps below.
+
+**A converter, run here.** `scripts/word-pages.nu` renders a document to PDF
+with LibreOffice and reports how many pages came out and what each begins with.
+That needs no export from anyone and no Word licence, so a change to the model
+can be checked against a real document in about a minute.
+
+LibreOffice was written off as a second opinion once, on the grounds that it
+made a document ten pages where Word makes eight. That was its **font
+substitution**, not its layout: pointed at the same metric-compatible faces this
+app measures in (Carlito, Caladea, Liberation Sans/Serif), the document that
+read ten came out nine — which is what the reader's own export of it says — and
+the break this app was getting wrong landed exactly where the reader reported
+Word puts it. The substitutions are the whole trick, and the script sets them up
+in a fontconfig of its own so nothing installed on the machine gets a vote.
+
+It is a second renderer, not Word, so it is worth what it agrees with: it
+matches Word on both documents here that can be checked against Word directly.
+Where it and the file's own record disagree, say which one is being quoted.
+
 ## What is checked
 
 `scripts/check-word-pagination.nu` opens five real documents in the deployed
 build and compares both halves of the answer — how many pages, and what each
-page begins with — against what Word recorded in the files themselves
-(`lastRenderedPageBreak`, the note Word leaves where it last drew a break).
+page begins with — against what Word recorded in the files themselves.
 
 Four of the five match Word exactly, including both of the assembly's own. So
 does `indstillinger` under Ekstraordinært landsmøde, which is checked by hand
@@ -102,9 +140,18 @@ a Word page. The prose-only documents come out at 100.0%.
 That is the accuracy the model has, and it is worth saying plainly what it
 means: five per cent of a page is about a paragraph. A document can be measured
 correctly by this standard and still break one paragraph away from where Word
-breaks it, which is what `posk_arbejdsprogram_21-22` does — its first page ends
-22px from Word's. Nothing found so far accounts for that 22px, and a correction
-fitted to it would be a correction fitted to one file.
+breaks it, which is what `posk_arbejdsprogram_21-22` did — its first page ended
+about 20px past Word's, and it broke its second page a heading late.
+
+That one turned out to be a rule the renderer did not know rather than an
+accumulation of small errors: the file's paragraphs ask for **automatic**
+spacing, and the renderer was giving them the document default instead. See the
+entry above. It is worth recording how it was found, because the same method
+finds the next one: render the file twice with the converter, once as it is and
+once with one attribute stripped, and diff the two line by line. The gap between
+the two renderings is what that attribute is worth, with every other variable
+held still — no arithmetic on inferred quantities, and no correction fitted to a
+single file.
 
 ### The one real gap: Aptos
 
@@ -118,30 +165,20 @@ and a twenty-two per cent taller line box, they still come up short. There is no
 open font cut to Aptos's widths to ship, so this stays a known gap until there
 is one.
 
-## The one that does not, and why
+## The hardest one, and what remains of it
 
 `evaluering_af_fu_og_posk´s_arbejdsprogram` is six tables and eighty-five blank
-paragraphs. It measures 9 pages where Word makes 8, and four of its breaks are
-Word's. Every page it produces is packed to the full 896px, and the document
-measures 8.26 pages of ink — so no better filling can make it 8: about 230px of
-its content is taller here than in Word.
+paragraphs, and it was the document that looked wrong longest. It reads **9
+pages** here. That was called an error against the 8 its own hints imply, and
+the hints were the thing that was wrong: the file was edited after Word last
+drew it. The reader's own export of it is 9 pages, and so is the converter's.
 
-It read 8 before the blank-paragraph fix below, and that was luck: blank
-paragraphs measured half a line, which cancelled the excess. Two known
-structural limits remain in this document, both of them about tables:
+What remains is the one thing this rendering cannot express:
 
-1. **Word breaks inside a row.** Four of that document's pages begin partway
-   down a row, in the third cell. HTML has nowhere to put a page mark inside a
-   table row, so the mark goes on the row — the reader lands at the top of the
-   row whose text the page begins in, which is as close as this rendering can
-   be.
-2. **Something in its tables measures too tall**, by about a quarter of a page
-   over six tables. Its fifty-three in-cell blank paragraphs are the obvious
-   suspect (Word gives an empty paragraph a line, and so does this now), but
-   that is a guess until it is measured cell by cell.
+- **Word breaks inside a row.** Four of that document's pages begin partway down
+  a row, in the third cell. HTML has nowhere to put a page mark inside a table
+  row, so the mark goes on the row — the reader lands at the top of the row
+  whose text the page begins in, which is as close as this rendering can be.
 
-LibreOffice was tried as a second opinion and is not one: converting the same
-file to PDF gives **ten** pages, against Word's eight and this app's eight. Its
-page 8 begins where this app's page 7 does. A different layout engine agrees
-with neither, so settling those last three breaks needs the document opened in
-Word itself.
+Measured against the export page by page, its pages come out between 97 and 102
+per cent of theirs.
