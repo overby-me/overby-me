@@ -78,12 +78,39 @@ one document look like 22 pages when Word makes 11 — and made this renderer lo
 half as long as Word when it was exactly right. Group the hints by their
 enclosing `w:tr` and count each row once.
 
-Measured against twelve of them (a spread of prose and tables), the model gets
-the page count right on five, and on the one long prose document with no tables
-at all it gets every one of its fourteen breaks exactly. The failures are
-documents with tables, in both directions, and one long prose document that
-comes out a quarter too long. That is the shape of the remaining work: the
-prose model is close, the table model is not.
+The hints have a second trap: **they are where the document broke the last time
+WORD drew it**, not where the text breaks now. A file edited in Word Online, or
+saved by another tool, keeps its old hints. Two of the corpus documents — both
+of them named "(opdateret)" — imply pages holding a single small table row,
+which the text they now contain cannot fill. Their hints are stale and they are
+useless as truth. The test that catches it: measure each of Word's pages in this
+renderer's own layout, and if two or more of them hold less than half what the
+median page holds, the record no longer matches the text.
+
+Measured against the seven whose hints survive that test, placing Word's breaks
+by POSITION in the flow rather than by their text (a document of twenty
+identical tables cannot be placed by its text), this renderer lands within **±5%
+of Word on every one**: medians of 97, 98, 98, 100, 101, 105 and 105 per cent of
+a Word page. The prose-only documents come out at 100.0%.
+
+That is the accuracy the model has, and it is worth saying plainly what it
+means: five per cent of a page is about a paragraph. A document can be measured
+correctly by this standard and still break one paragraph away from where Word
+breaks it, which is what `posk_arbejdsprogram_21-22` does — its first page ends
+22px from Word's. Nothing found so far accounts for that 22px, and a correction
+fitted to it would be a correction fitted to one file.
+
+### The one real gap: Aptos
+
+Word 2024 changed its default font from Calibri to **Aptos**, and this app has no
+metric-compatible substitute for it — Carlito stands in, and Carlito is
+Calibri's metrics, not Aptos's. Every document the organisation writes from now
+on is Aptos by default. The two Aptos documents in the corpus measure 20-40%
+shorter here than Word and LibreOffice make them, and no correction to the line
+box or the letter spacing closes it: swept to a twelve per cent wider tracking
+and a twenty-two per cent taller line box, they still come up short. There is no
+open font cut to Aptos's widths to ship, so this stays a known gap until there
+is one.
 
 ## The one that does not, and why
 
