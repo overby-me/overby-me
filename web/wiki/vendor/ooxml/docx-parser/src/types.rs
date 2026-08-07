@@ -744,6 +744,15 @@ pub struct DocParagraph {
     pub space_before: f64,
     /// pt
     pub space_after: f64,
+    /// Whether those two came from ECMA-376 §17.3.1.33's AUTOMATIC spacing
+    /// rather than a stated figure. Parser-private (`skip`): consumers want the
+    /// resolved measurement, and by the time they see it the difference has
+    /// already been applied — an automatic space collapses against its
+    /// neighbour, a stated one is added to it (`collapse_automatic_spacing`).
+    #[serde(skip)]
+    pub space_before_auto: bool,
+    #[serde(skip)]
+    pub space_after_auto: bool,
     /// None = single (1.0), Some(LineSpacing)
     pub line_spacing: Option<LineSpacing>,
     /// Boxed: `NumberingInfo` carries several resolved strings (text + marker

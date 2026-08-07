@@ -2060,6 +2060,30 @@ fn logical_table_sequence_contexts(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Word's AUTOMATIC paragraph spacing is an HTML margin, and margins collapse.
+///
+/// A stated space is added to the one under the paragraph above it — that is
+/// Word, and it is why the measuring copy spaces with padding rather than
+/// margin. An automatic one (§17.3.1.33) does not: it reproduces a browser's
+/// paragraph margin, collapsing behaviour included, so what lands between two
+/// paragraphs is the LARGER of the two rather than their sum.
+///
+/// Measured, on the document that revealed it: with the attributes stripped, one
+/// file's second page began a heading too late, because our 8pt gaps stood where
+/// Word had 14pt. Adding 14pt to the 8pt already there overshot by as much
+/// again; taking the larger of the two matched Word's rendering at every
+/// boundary of that document, and moved its page break to where Word puts it.
+///
+/// Only a boundary where one of the two spaces is automatic is touched. Between
+/// two stated spaces nothing changes.
+fn collapse_automatic_spacing(prev: &mut DocParagraph, next: &mut DocParagraph) {
+    if !(prev.space_after_auto || next.space_before_auto) {
+        return;
+    }
+    prev.space_after = prev.space_after.max(next.space_before);
+    next.space_before = 0.0;
+}
+
 fn parse_body_elements_in_story(
     body_node: roxmltree::Node,
     style_map: &StyleMap,
@@ -2238,6 +2262,18 @@ fn parse_body_elements_in_story(
                 parity: None,
                 same_paragraph_as_previous: None,
             });
+        }
+    }
+
+    // Every §17.3.1.33 automatic space, collapsed against the paragraph it meets.
+    // Here rather than in `parse_paragraph`, which sees one paragraph at a time
+    // and so cannot know what it is next to.
+    for i in 1..body.len() {
+        let (above, below) = body.split_at_mut(i);
+        if let (Some(BodyElement::Paragraph(prev)), Some(BodyElement::Paragraph(next))) =
+            (above.last_mut(), below.first_mut())
+        {
+            collapse_automatic_spacing(prev, next);
         }
     }
 
@@ -3887,6 +3923,8 @@ fn parse_paragraph_cond_at_depth_with_diagnostics(
         indent_first,
         space_before,
         space_after,
+        space_before_auto: base_para.space_before_auto.unwrap_or(false),
+        space_after_auto: base_para.space_after_auto.unwrap_or(false),
         line_spacing,
         numbering,
         tab_stops,
@@ -11385,6 +11423,18 @@ fn parse_table_cell(
                 }
             }
             _ => {}
+        }
+    }
+
+    // A cell is a story of its own, and §17.3.1.33's automatic spacing collapses
+    // inside one exactly as it does in the body.
+    let mut content = content;
+    for i in 1..content.len() {
+        let (above, below) = content.split_at_mut(i);
+        if let (Some(CellElement::Paragraph(prev)), Some(CellElement::Paragraph(next))) =
+            (above.last_mut(), below.first_mut())
+        {
+            collapse_automatic_spacing(prev, next);
         }
     }
 
@@ -22187,6 +22237,85 @@ mod numbering_marker_font_tests {
             </w:styles>"#,
             ns = W_NS
         ))
+    }
+
+    fn parse_body_paragraphs(body: &str, styles: &StyleMap) -> Vec<DocParagraph> {
+        let xml = format!(r#"<w:body xmlns:w="{ns}">{body}</w:body>"#, ns = W_NS);
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let mut num_map = NumberingMap::default();
+        parse_body_elements(
+            doc.root_element(),
+            styles,
+            &mut num_map,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &ThemeColors::default(),
+            &HashMap::new(),
+        )
+        .into_iter()
+        .filter_map(|element| match element {
+            BodyElement::Paragraph(p) => Some(*p),
+            _ => None,
+        })
+        .collect()
+    }
+
+    /// ECMA-376 §17.3.1.33 — an AUTOMATIC space is 14 pt, it overrides whatever
+    /// figure the paragraph states, and it COLLAPSES against its neighbour
+    /// instead of adding to it.
+    ///
+    /// The last part is the one worth a test. Rendering a real document with
+    /// these attributes and again with them stripped, every boundary lost
+    /// exactly 6 pt: 14 pt standing where 8 pt stood, not 14 pt added to the
+    /// 8 pt. Adding them would have been 6 pt too much at every gap, which on
+    /// the document this came from is most of a line.
+    #[test]
+    fn automatic_paragraph_spacing_is_fourteen_points_and_collapses() {
+        let paragraphs = parse_body_paragraphs(
+            r#"<w:p><w:pPr><w:spacing w:after="160"/></w:pPr><w:r><w:t>above</w:t></w:r></w:p>
+               <w:p><w:pPr><w:spacing w:before="240" w:after="240"
+                    w:beforeAutospacing="on" w:afterAutospacing="on"/></w:pPr>
+                    <w:r><w:t>auto</w:t></w:r></w:p>
+               <w:p><w:pPr><w:spacing w:after="160"/></w:pPr><w:r><w:t>below</w:t></w:r></w:p>"#,
+            &StyleMap::default(),
+        );
+        // The 8 pt under the first paragraph and the automatic 14 pt over the
+        // second are ONE space of 14 pt, carried by the paragraph above.
+        assert!((paragraphs[0].space_after - 14.0).abs() < 1e-6);
+        assert!(paragraphs[1].space_before.abs() < 1e-6);
+        // The stated 12 pt on the automatic paragraph is ignored, both sides.
+        assert!((paragraphs[1].space_after - 14.0).abs() < 1e-6);
+        // And the paragraph after it keeps its own, untouched.
+        assert!((paragraphs[2].space_after - 8.0).abs() < 1e-6);
+    }
+
+    /// Where neither side is automatic, nothing collapses: Word adds the space
+    /// under one paragraph to the space over the next, and the renderer measures
+    /// it that way. Only §17.3.1.33's automatic spacing behaves like a margin.
+    #[test]
+    fn stated_paragraph_spacing_is_left_alone() {
+        let paragraphs = parse_body_paragraphs(
+            r#"<w:p><w:pPr><w:spacing w:after="160"/></w:pPr><w:r><w:t>above</w:t></w:r></w:p>
+               <w:p><w:pPr><w:spacing w:before="240"/></w:pPr><w:r><w:t>below</w:t></w:r></w:p>"#,
+            &StyleMap::default(),
+        );
+        assert!((paragraphs[0].space_after - 8.0).abs() < 1e-6);
+        assert!((paragraphs[1].space_before - 12.0).abs() < 1e-6);
+    }
+
+    /// An automatic space explicitly turned OFF is not one: the stated figure
+    /// stands, and the boundary does not collapse.
+    #[test]
+    fn automatic_spacing_turned_off_leaves_the_stated_figure() {
+        let paragraphs = parse_body_paragraphs(
+            r#"<w:p><w:pPr><w:spacing w:after="160"/></w:pPr><w:r><w:t>above</w:t></w:r></w:p>
+               <w:p><w:pPr><w:spacing w:before="240" w:beforeAutospacing="0"/></w:pPr>
+                    <w:r><w:t>below</w:t></w:r></w:p>"#,
+            &StyleMap::default(),
+        );
+        assert!((paragraphs[0].space_after - 8.0).abs() < 1e-6);
+        assert!((paragraphs[1].space_before - 12.0).abs() < 1e-6);
     }
 
     fn parse_body_tables(body: &str, styles: &StyleMap) -> Vec<DocTable> {

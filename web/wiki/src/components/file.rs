@@ -1088,6 +1088,48 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     )
     .unwrap_or_default();
 
+    // Downloading fetches the bytes when the reader asks for them, rather than
+    // following a link minted when the page opened.
+    //
+    // A presigned URL lives about thirty seconds. A reader who opens a file,
+    // reads it, and only then reaches for the download button is well past that,
+    // and the storage service answers "signature already expired" — reported
+    // from the wiki as "the download fails after some time". Nothing can be
+    // signed early enough to be safe here, because the press can come at any
+    // time; the token, on the other hand, is current at the moment of the press.
+    //
+    // It buys a real save as well: a cross-origin `download` attribute is
+    // ignored, so the old link handed the file to a new tab and let the browser
+    // decide. These bytes arrive as a blob of this origin, under the file's own
+    // name.
+    let mut downloading = use_signal(|| false);
+    let download_the_file = {
+        let file_id = file_id.to_string();
+        let name = name.to_string();
+        let mime = file_mime.to_string();
+        move |_| {
+            if downloading() {
+                return;
+            }
+            let (file_id, name, mime) = (file_id.clone(), name.clone(), mime.clone());
+            downloading.set(true);
+            spawn(async move {
+                let bytes = match crate::session::current_token() {
+                    Some(token) => crate::backend_api::file_bytes(&file_id, &token).await,
+                    None => Err("not signed in".to_string()),
+                };
+                match bytes {
+                    Ok(bytes) => crate::export::download_bytes(&name, &mime, &bytes),
+                    Err(why) => {
+                        log::error!("download of {file_id} failed: {why}");
+                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                    }
+                }
+                downloading.set(false);
+            });
+        }
+    };
+
     // The Office viewer needs its own link (see the branch that uses it), fetched
     // only for the mimes that go through it.
     let mut office_embed = use_signal(|| OfficeLink::Pending);
@@ -1160,15 +1202,15 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         // Pinned quick group: copy link (the sheet's own
                         // first segment) and downloading the file itself.
                         quick: rsx! {
-                            if !file_url.is_empty() {
-                                a {
-                                    href: "{file_url}",
-                                    target: "_blank",
-                                    download: "{name}",
-                                    "referrerpolicy": "no-referrer",
-                                    class: "sheet-quick-action",
-                                    title: "{t(\"common.download\")}",
-                                    aria_label: "{t(\"common.download\")}",
+                            button {
+                                class: "sheet-quick-action",
+                                onclick: download_the_file.clone(),
+                                disabled: downloading(),
+                                title: "{t(\"common.download\")}",
+                                aria_label: "{t(\"common.download\")}",
+                                if downloading() {
+                                    div { class: "spinner spinner-xs" }
+                                } else {
                                     span { class: "material-icons", "download" }
                                 }
                             }
@@ -1394,12 +1436,15 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             {node_icon_el("wiki/file", data.as_ref())}
                         }
                         p { class: "empty-state-body", "{t(\"common.noPreview\")}" }
-                        a {
-                            href: "{file_url}",
-                            target: "_blank",
-                            "referrerpolicy": "no-referrer",
+                        button {
                             class: "btn btn-primary",
-                            span { class: "material-icons", "download" }
+                            onclick: download_the_file.clone(),
+                            disabled: downloading(),
+                            if downloading() {
+                                div { class: "spinner spinner-xs" }
+                            } else {
+                                span { class: "material-icons", "download" }
+                            }
                             " {t(\"common.download\")}"
                         }
                     }
