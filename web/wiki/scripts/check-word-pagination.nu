@@ -113,7 +113,16 @@ def main [
             }
         }
         if ($faults | is-empty) {
-            print $"  ok    ($name)  ($pages) pages, every break where Word puts it"
+            # Said apart, because they are not the same claim. A file that
+            # records no breaks of its own can only have its COUNT checked, and
+            # calling that "every break where Word puts it" is how a document
+            # whose break had moved went on being reported as fine.
+            let how = (if ($doc.starts | is-empty) {
+                "pages; the file records no breaks of its own, so only the count is checked"
+            } else {
+                "pages, every break where Word puts it"
+            })
+            print $"  ok    ($name)  ($pages) ($how)"
         } else {
             $wrong = $wrong + 1
             print $"  WRONG ($name)"
