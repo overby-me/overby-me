@@ -5145,6 +5145,7 @@ fn create_transient_unit(
                     trigger_timer_monotonic_usec: None,
                     monitor_env: None,
                     stop_result_env: None,
+                    dynamic_uid: None,
                     exec_main_start_timestamp: None,
                     exec_main_handoff_timestamp: None,
                     exec_main_exit_timestamp: None,

@@ -568,6 +568,10 @@ pub struct Service {
     /// ExecStopPost= commands. Set just before those run so a cleanup command can
     /// see how the service ended; cleared afterwards (reuses the MonitorEnv shape).
     pub stop_result_env: Option<MonitorEnv>,
+    /// The UID this service ran as when `DynamicUser=yes` allocated one (which is
+    /// not re-derivable from the config at stop time). Used by `RemoveIPC=` to
+    /// clean the dynamic user's IPC on stop. `None` for static `User=`.
+    pub dynamic_uid: Option<u32>,
     /// Timestamp (usec since epoch) when the main process was started.
     pub exec_main_start_timestamp: Option<u64>,
     /// Timestamp (usec since epoch) when the main process was handed off (exec).
@@ -2081,11 +2085,15 @@ impl Service {
         self.process_group = None;
         // RemoveIPC=yes: remove the (static) User='s IPC now that the processes
         // are gone (mirrors the dispatcher stop path in finalize_stop_chain).
-        if conf.exec_config.remove_ipc
-            && let Ok(uid) = crate::services::start_service::resolve_uid(&conf.exec_config.user)
-            && uid != 0
-        {
-            crate::services::clean_ipc::clean_ipc_by_uid(uid);
+        if conf.exec_config.remove_ipc {
+            let uid = self.dynamic_uid.or_else(|| {
+                crate::services::start_service::resolve_uid(&conf.exec_config.user).ok()
+            });
+            if let Some(uid) = uid
+                && uid != 0
+            {
+                crate::services::clean_ipc::clean_ipc_by_uid(uid);
+            }
         }
         res
     }

@@ -508,6 +508,7 @@ fn start_service_with_filedescriptors(
         } else {
             None
         };
+    srvc.dynamic_uid = dynamic_uid;
 
     super::fork_os_specific::pre_fork_os_specific(conf, dynamic_uid)
         .map_err(RunCmdError::Generic)?;
