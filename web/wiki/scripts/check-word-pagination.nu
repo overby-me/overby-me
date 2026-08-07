@@ -38,11 +38,16 @@ const WIKI = "https://radikal.wiki/radikal_ungdom"
 # paragraph's: a rendering that cannot split a row across a page can only mark
 # the row, and a reader jumping to that page lands at the top of the row whose
 # text the page begins in.
+#
+# `starts` is read from page 2 onwards, in order. `last` is the LAST page's, for
+# a document whose middle breaks cannot all be stated but whose ending can: it
+# is checked against the final mark whatever its number, so it guards the end of
+# a document without claiming to know everything in between.
 const TRUTH = [
-    [path, pages, starts];
+    [path, pages, starts, last];
 
     ["hb5/bilag/forretningsudvalgets_arbejdsprogram_202122", 3,
-        ["Et godt kommunal- og regionsrådsvalg", "Der ifbm. lokalforeningsgtræf"]]
+        ["Et godt kommunal- og regionsrådsvalg", "Der ifbm. lokalforeningsgtræf"], ""]
 
     # Six tables and little else. NINE pages, from the document exported to PDF
     # by the office suite the reader uses -- not from the file, whose own record
@@ -51,12 +56,16 @@ const TRUTH = [
     # its neighbours hold, which the text it now contains cannot do. The file
     # was edited after it was last drawn.
     #
-    # Two breaks are checked, and only two: FOUR of this document's nine pages
-    # begin in the middle of a table cell or a sentence, which a rendering that
-    # marks whole rows cannot express. Measured against the export page by page,
-    # its pages come out between 97 and 102 per cent of theirs.
+    # Two of the middle breaks are checked, and only two: FOUR of this
+    # document's nine pages begin in the middle of a table cell or a sentence,
+    # which a rendering that marks whole rows cannot express. The LAST page is
+    # checked as well, reported by the reader who opened it in Word: it begins
+    # at the closing "Konklusion" and its paragraph. That one was wrong until
+    # the renderer kept the empty line a paragraph ENDING in a line break makes
+    # -- ten of this document's paragraphs end that way, and the ten lines came
+    # to a fifth of a page.
     ["hb5/bilag/evaluering_af_fu_og_posk´s_arbejdsprogram", 9,
-        ["Fokus på trivslen lokalt", "At vi har et bedre skolevalg"]]
+        ["Fokus på trivslen lokalt", "At vi har et bedre skolevalg"], "Konklusion"]
 
     # This one records no hints at all: its count came from reading it, its
     # break from someone opening it in Word, and both are confirmed by the
@@ -64,12 +73,12 @@ const TRUTH = [
     # AUTOMATIC paragraph spacing, which every one of its paragraphs asks for
     # (see `docs/word-pagination.md`).
     ["hb5/bilag/posk_arbejdsprogram_21-22", 3,
-        ["Radikal Ungdom skal være et engagerende politisk fællesskab"]]
+        ["Radikal Ungdom skal være et engagerende politisk fællesskab"], ""]
 
     # The assembly's own two, which is what this was for.
-    ["landsmøde_2026/bilag/beretninger/sekretariatets_beretning_2026", 1, []]
+    ["landsmøde_2026/bilag/beretninger/sekretariatets_beretning_2026", 1, [], ""]
     ["landsmøde_2026/bilag/strategi_bilag/strategi_2030", 2,
-        ["Radikal Ungdom skal skabe politisk forandring."]]
+        ["Radikal Ungdom skal skabe politisk forandring."], ""]
 ]
 
 def chromium-at [] {
@@ -127,6 +136,15 @@ def main [
             let got = ($starts | get -o $i | default "")
             if not ($got | str starts-with $want) {
                 $faults = ($faults | append $"page (($i) + 2) begins ($got | str substring 0..72)…\n            not ($want)…")
+            }
+        }
+        # And the last page, where the document states one. Checked against the
+        # final mark rather than a numbered position, so it holds whatever the
+        # count turns out to be.
+        if not ($doc.last | is-empty) {
+            let got = ($starts | last | default "")
+            if not ($got | str starts-with $doc.last) {
+                $faults = ($faults | append $"the last page begins ($got | str substring 0..72)…\n            not ($doc.last)…")
             }
         }
         if ($faults | is-empty) {

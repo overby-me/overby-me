@@ -1435,6 +1435,18 @@ fn runs_of(p: &Paragraph) -> Element {
     let runs = p.runs.clone();
     let split = picture_bulleted(p);
     let mut seen_picture = false;
+    // A paragraph that ENDS with a line break ends with an empty line, and Word
+    // draws it: the break moves to a new line and the paragraph mark sits on it.
+    // HTML does not -- a trailing `<br>` closes nothing and takes no room -- so
+    // the line has to be held open by something. A zero-width space is the same
+    // trick an empty paragraph uses, for the same reason.
+    //
+    // Ten paragraphs of one document end this way, and the ten missing lines
+    // came to a fifth of a page: enough to hold a heading Word puts on the page
+    // after.
+    let ends_with_a_break = runs
+        .last()
+        .is_some_and(|r| r.kind.as_deref() == Some("break"));
     rsx! {
         for (i , run) in runs.into_iter().enumerate() {
             if split && run.src.is_some() && std::mem::replace(&mut seen_picture, true) {
@@ -1447,6 +1459,9 @@ fn runs_of(p: &Paragraph) -> Element {
             } else {
                 RunSpan { key: "r{i}", run }
             }
+        }
+        if ends_with_a_break {
+            "\u{200b}"
         }
     }
 }
