@@ -1394,6 +1394,7 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
                 libc::close(fd);
             }
         }
+        set_journal_stream_env(libc::STDOUT_FILENO);
         return;
     }
 
@@ -1412,6 +1413,22 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
             if fd != libc::STDERR_FILENO {
                 libc::close(fd);
             }
+        }
+        set_journal_stream_env(libc::STDERR_FILENO);
+    }
+}
+
+/// Export `JOURNAL_STREAM=<dev>:<ino>` for the given stdio fd once it is
+/// connected to journald's stream socket, mirroring systemd (exec-invoke.c):
+/// a service reads it (via sd_journal_stream_fd) to detect that its stdout or
+/// stderr already goes to the journal, so it can use the native protocol and
+/// skip re-adding timestamps/levels. Runs post-fork in the child, so the
+/// non-thread-safe `set_var` is safe here (same as LISTEN_PID/WATCHDOG_PID).
+fn set_journal_stream_env(fd: libc::c_int) {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } == 0 {
+        unsafe {
+            std::env::set_var("JOURNAL_STREAM", format!("{}:{}", st.st_dev, st.st_ino));
         }
     }
 }
