@@ -437,3 +437,61 @@ were reverted pending fixes (do not re-add them until green):
 Net: boot through the job graph is demonstrated but not yet robust. The next
 slices are the deferred-start completion race and the `JobKind::Start` scoping,
 each re-validated against a re-added variant.
+
+## Inc 4 validation status, 2026-08-07 (both 2026-08-04 gaps CLOSED)
+
+Both gaps above are fixed, and the drive now boots robustly and fast:
+
+- **Deferred-start / boot stall (03-jobs): FIXED.** The stall was device Start
+  jobs never completing. `is_ready` excludes `.device` units (a device is plugged
+  by udev, never fork-activated), so their Start jobs were never dispatched, never
+  went Running, and `drive_run_queue` Phase 1 (which only retired *Running* jobs)
+  left them Waiting forever, blocking every unit ordered after them until its start
+  timeout. Fix: Phase 1 also finishes any *Waiting* `Start` job whose unit already
+  reads `Started` (udev-plugged devices and already-active units), then
+  `enqueue_ready` re-primes the unblocked frontier. 03-jobs now passes 4/4 across
+  forced reruns.
+- **Runtime non-Start jobs (26/concurrency): FIXED via scoping.** `drive_run_queue`
+  now retires and dispatches only `JobKind::Start`; runtime Reload/Restart/Stop are
+  left to the control path (as with the flag off). Marked-job / runtime-job checks
+  clear normally.
+
+Beyond the fixes, the drive is now **event-driven and fast**: each bounded-pool
+worker sends `Event::JobQueued` the instant its activation settles, so a
+process-less target chain advances at event speed instead of one level per 200ms
+nudge. The wake is gated on a `JOB_GRAPH_BOOT_DRAINING` flag the producer holds only
+for its boot drain, so post-boot runtime `--no-block` jobs keep the control path's
+completion timing (an unconditional wake shifted it and regressed 03-jobs). Result:
+flag-on `01-basic` reaches `multi-user.target` in ~13s, versus ~53s before, near the
+flag-off fixpoint's speed. The 200ms nudge stays as a backstop.
+
+### Default-readiness assessment
+
+The flag-on boot path is validated across a broad, diverse gate set (14 committed
+`*-jobgraph` variants as of 2026-08-07): `01-basic`, `15-dropin`, `03-jobs`, and the
+`07-pid1` subtests socket-defer, DeferReactivation, alias-rename (which also crosses
+a daemon-reload + reexec), attach-processes and subgroup-kill, plus one subtest each
+from `04-journal`, `17-udev`, `05-rlimits`, `53-timer`, `81-generators` and
+`23-unit-file`. Across four validation sweeps there were **zero flag-specific
+failures**: every closure that boots flag-off also boots flag-on, at comparable
+speed. The one sweep failure, `07-pid1-concurrency`, is flag-independent (it fails
+flag-off identically): the port implements neither `ConcurrencyHardMax=` nor
+`ConcurrencySoftMax=`, a separate feature gap.
+
+So inc 4 (dependency waiting via Waiting jobs, driven by the single dispatcher) is
+functionally complete and proven for the boot path. What remains before the flag can
+become the default is **not** more of the same validation:
+
+1. **Flip the default (`SYSTEMD_RS_JOB_GRAPH` on) — a high-blast-radius decision.**
+   It routes all ~480 integration tests' boots through the drive. It should be a
+   deliberate call backed by a full-suite flag-on run, not flipped autonomously; the
+   14 variants become redundant once the default is on and would be deleted.
+2. **Unify runtime on the job graph (inc 4 tail / inc 6).** Blocking runtime
+   `Command::Start` still uses the inline path, not the drive. Routing it through the
+   drive is intricate and high-risk to the flag-off path (restart-retry,
+   cycle-detection, per-type post-checks), so it needs its own careful, gated slice.
+3. **Inc 5 (mounts/swaps/devices as first-class jobs)** and **inc 6 (single-writer
+   collapse)** remain as written above.
+
+Until one of those is chosen, widening the variant set further is low-value: the
+drive is already demonstrably robust.
