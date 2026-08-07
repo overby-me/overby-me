@@ -2433,6 +2433,28 @@ mod tests {
     }
 
     #[test]
+    fn a_page_ends_between_a_paragraphs_lines_but_leaves_two_on_each_side() {
+        // Six lines of twenty pixels, on a page that ends at 95: four fit.
+        let lines: Vec<f64> = (0..6).map(|i| i as f64 * 20.0).collect();
+        assert_eq!(splits_between_lines(&lines, 0.0, 95.0), Some(80.0));
+        // One line left over is a widow, and Word does not leave one: the
+        // whole paragraph goes rather than its last line travelling alone.
+        assert_eq!(splits_between_lines(&lines, 0.0, 115.0), None);
+        // One line fitting is an orphan, and the same answer.
+        assert_eq!(splits_between_lines(&lines, 0.0, 35.0), None);
+        // A short paragraph can never satisfy two on each side.
+        let three: Vec<f64> = (0..3).map(|i| i as f64 * 20.0).collect();
+        assert_eq!(splits_between_lines(&three, 0.0, 45.0), None);
+        // Nothing to split where the lines could not be read (a table row).
+        assert_eq!(splits_between_lines(&[], 0.0, 500.0), None);
+        // And it splits the same way part-way down a document.
+        assert_eq!(
+            splits_between_lines(&(0..6).map(|i| 500.0 + i as f64 * 20.0).collect::<Vec<_>>(), 500.0, 95.0),
+            Some(580.0)
+        );
+    }
+
+    #[test]
     fn each_face_is_measured_in_the_one_cut_to_its_widths() {
         // Metric-compatible substitutes, one per family of widths. Cambria is
         // NOT Times: it is the wider face, and measuring one in the other put
@@ -2990,8 +3012,13 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
         keeps_next: bool,
         /// Whether Word carries the REST of this over the page rather than
         /// moving it whole. A table row does, unless the document says it may
-        /// not; a paragraph does not, in this model.
+        /// not.
         splits: bool,
+        /// Where this element's own LINES sit, when it is text. Word breaks a
+        /// paragraph between its lines rather than moving all of it down, and
+        /// measuring it whole leaves the foot of every page empty by up to a
+        /// paragraph -- which is a page in eight on a document of prose.
+        lines: Vec<f64>,
     }
     let mut flow: Vec<Spot> = Vec::new();
     for at in 0..groups.length() {
@@ -3030,6 +3057,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
                         keeps_next: keeps_next(&item),
                         splits: item.tag_name() == "TR"
                             && item.get_attribute("data-cant-split").as_deref() != Some("true"),
+                        lines: line_tops(&item, top_of),
                     });
                 }
             }
@@ -3044,6 +3072,7 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
                     empty: is_blank(&group),
                     keeps_next: keeps_next(&group),
                     splits: false,
+                    lines: line_tops(&group, top_of),
                 });
             }
         }
@@ -3088,13 +3117,24 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize)>, usize, f64)
             // because that is where the next page begins to be read -- and only
             // once, for a row tall enough to cross two boundaries.
             let carried = begin.splits && starts == at;
+            // Or SPLIT between its own lines, which is what Word does with a
+            // paragraph: it leaves as many lines as fit and carries the rest
+            // over, keeping two on each side of the break (widow and orphan
+            // control, which every one of these documents asks for). Moving the
+            // whole paragraph instead left up to a paragraph of empty page at
+            // every break -- a page in eight, on a document of prose.
+            let split_at = match starts == at {
+                true => splits_between_lines(&begin.lines, page_top, height),
+                false => None,
+            };
             let already = marks.last().is_some_and(|m| (m.0, m.1) == (begin.group, begin.item));
             if !already {
                 marks.push((begin.group, begin.item, marks.len() + 2));
             }
-            page_top = match carried {
-                true => page_top + height,
-                false => begin.top,
+            page_top = match (carried, split_at) {
+                (true, _) => page_top + height,
+                (false, Some(line)) => line,
+                (false, None) => begin.top,
             };
             if marks.len() > 2000 {
                 return None;
@@ -3234,6 +3274,74 @@ fn set_single_spacing() {
         let name = measured.single().trim_start_matches("var(").trim_end_matches(')');
         let _ = style.set_property(name, &format!("{:.4}", single_spacing(measured.family())));
     }
+}
+
+/// Where each of an element's LINES begins, in the measuring copy's own
+/// coordinates.
+///
+/// From the element's own line height rather than by asking for its line boxes:
+/// the browser will hand those over one rectangle at a time through a range,
+/// but the binding is not in this build, and a paragraph whose lines are all
+/// the same height needs no such help. Word breaks a page between two lines, so
+/// without knowing where they are the whole paragraph has to move and the foot
+/// of the page is left empty.
+///
+/// Empty where the arithmetic cannot be trusted: a table row, whose cells sit
+/// side by side and have no shared lines, and a paragraph carrying a run bigger
+/// than its own text, whose lines are not all one height.
+fn line_tops(element: &web_sys::Element, top_of: f64) -> Vec<f64> {
+    if element.tag_name() == "TR" || element.query_selector("table").ok().flatten().is_some() {
+        return Vec::new();
+    }
+    let Some(window) = web_sys::window() else {
+        return Vec::new();
+    };
+    let Ok(Some(style)) = window.get_computed_style(element) else {
+        return Vec::new();
+    };
+    let px = |name: &str| {
+        style
+            .get_property_value(name)
+            .ok()
+            .and_then(|v| v.trim().trim_end_matches("px").parse::<f64>().ok())
+            .unwrap_or(0.0)
+    };
+    let line = px("line-height");
+    if line <= 1.0 {
+        return Vec::new();
+    }
+    let (over, under) = (px("padding-top"), px("padding-bottom"));
+    let rect = element.get_bounding_client_rect();
+    let text_top = rect.top() - top_of + over;
+    let text_height = rect.height() - over - under;
+    let count = (text_height / line).round();
+    if count < 1.0 || (count * line - text_height).abs() > 1.5 {
+        return Vec::new();
+    }
+    (0..count as usize)
+        .map(|i| text_top + i as f64 * line)
+        .collect()
+}
+
+/// Where a page ends INSIDE a paragraph: the top of the first line that does
+/// not fit, or nothing when the paragraph should move whole.
+///
+/// Word keeps two lines on each side of the break -- one line stranded at the
+/// foot of a page, or arriving alone at the head of the next, is what widow and
+/// orphan control exists to prevent, and every document in this wiki asks for
+/// it. A paragraph of three lines or fewer can never satisfy that, so it moves.
+fn splits_between_lines(lines: &[f64], page_top: f64, height: f64) -> Option<f64> {
+    if lines.len() < 4 {
+        return None;
+    }
+    let bottom = page_top + height;
+    // A line fits when the WHOLE of it does. Counting the ones that merely
+    // begin above the boundary puts a line half on each page, which is not
+    // something a page can do.
+    let tall = lines[1] - lines[0];
+    let fits = lines.iter().filter(|top| **top + tall <= bottom).count();
+    let left = lines.len() - fits;
+    (fits >= 2 && left >= 2).then(|| lines[fits])
 }
 
 /// The space UNDER an element, which the measuring copy carries as padding so
