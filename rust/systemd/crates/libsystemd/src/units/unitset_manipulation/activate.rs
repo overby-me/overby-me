@@ -1805,6 +1805,7 @@ pub fn activate_needed_units_via_job_graph(
     JOB_GRAPH_BOOT_DRAINING.store(true, std::sync::atomic::Ordering::Relaxed);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
     let mut tick: u32 = 0;
+    let mut fallback_done = false;
     loop {
         if jobs.lock().unwrap().is_empty() {
             break;
@@ -1814,6 +1815,24 @@ pub fn activate_needed_units_via_job_graph(
             break;
         }
         tick += 1;
+        // Reliability fallback for the elusive intermittent inc-4 drive stall
+        // (whole closure Waiting, nothing dispatched). If the drive has not
+        // drained the closure within ~20s (a normal boot settles well under
+        // that, even under parallel load), force completion once through the
+        // proven flag-off fixpoint sweep. activate_unit is idempotent for
+        // already-Started/Starting units, so this cannot double-start; the
+        // fixpoint activates the stuck frontier and the drive's scan then
+        // retires the finished jobs. Guarantees the boot always completes, so
+        // making the job graph the default cannot hang a boot.
+        if !fallback_done && tick >= 100 {
+            fallback_done = true;
+            warn!(
+                "activate_needed_units_via_job_graph: {} not drained after ~20s; \
+                 forcing completion via the fixpoint sweep",
+                target_id.name
+            );
+            let _ = activate_needed_units(target_id.clone(), run_info.clone());
+        }
         // Diagnostic for the intermittent inc-4 boot stall: every ~5s name the
         // still-pending jobs (unit=state) via kmsg so a stalled boot identifies
         // the stuck units and whether they are Waiting (a dep never cleared) or

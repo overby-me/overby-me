@@ -10665,22 +10665,15 @@ pub fn execute_command(
                         })
                         .collect()
                 };
-                // Increment 4: under SYSTEMD_RS_JOB_GRAPH, hand the closure to
-                // the single dispatcher instead of spawning a per-start
-                // activate-and-poll thread. Enqueue the initially startable jobs
-                // and wake the dispatcher; its run-queue drive (drive_run_queue)
-                // owns activation, completion, requeue and timeouts.
-                if crate::units::jobs::job_graph_enabled() {
-                    let ri = run_info.read_poisoned();
-                    let mut registry = ri.jobs.lock().unwrap();
-                    registry.enqueue_ready(|u| {
-                        !matches!(u.kind, crate::units::UnitIdKind::Device)
-                            && crate::units::unstarted_deps(u, &ri, Some(&subgraph)).is_empty()
-                    });
-                    ri.dispatcher
-                        .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
-                    continue;
-                }
+                // Runtime `--no-block` always activates on the background
+                // monitor thread below (activate_needed_units + a poll that
+                // finishes each job as its unit reaches a terminal state), never
+                // the job-graph drive. The drive is scoped to boot
+                // (job_graph_boot_draining) so that flipping SYSTEMD_RS_JOB_GRAPH
+                // on by default does not make it run post-boot and perturb
+                // runtime jobs (double-activation of a blocking start, socket
+                // activation stalls). The monitor owns this closure's completion
+                // identically with the flag on or off.
                 let run_info_clone = run_info.clone();
                 std::thread::spawn(move || {
                     let errs =

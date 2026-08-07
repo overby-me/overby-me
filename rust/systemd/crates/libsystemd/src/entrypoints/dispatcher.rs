@@ -315,26 +315,27 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
                     }
                 }
                 // Increment 4: drive the job run queue after event intake (step 4
-                // of the loop contract). Behind the flag and a no-op when nothing
-                // is enqueued, so the flag-off loop is unchanged. Inside the
-                // catch_unwind, so a panic here routes to the emergency shell like
-                // any other dispatcher fault.
-                if crate::units::jobs::job_graph_enabled() {
+                // of the loop contract), but ONLY while the boot producer is
+                // draining its closure (job_graph_boot_draining()). The
+                // job-graph drive is the BOOT activation path; POST-boot, runtime
+                // jobs (blocking `systemctl start`, socket activation, dependency
+                // pulls, `--no-block` which uses the control path, not the drive)
+                // stay on the inline/dispatcher paths exactly as with the flag
+                // off, so the drive never perturbs runtime job handling. Flipping
+                // the default on without this scoping regressed runtime under
+                // load: double-activation of a blocking start, and socket
+                // activation stalls (04-journal-cat). A no-op when nothing is
+                // enqueued, and never runs with the flag off. Inside the
+                // catch_unwind, so a panic here routes to the emergency shell.
+                if crate::units::jobs::job_graph_enabled()
+                    && crate::units::job_graph_boot_draining()
+                {
                     crate::units::drive_run_queue(&run_info);
-                    // Re-check parked Type=oneshot/forking start waits each wake,
-                    // but ONLY during the boot drain. Their completion is the
-                    // ExecStart process EXITING; the primary path re-progresses
-                    // them from the ChildExit handler, but under load a
-                    // registration-vs-exit ordering race can strand one parked
-                    // until its 90s start-timeout (observed: lastlog2-import
-                    // Running 24s->90s). The producer nudges the dispatcher
-                    // ~every 200ms during boot, so re-evaluating here finalizes a
-                    // completed oneshot within a tick. Boot-scoped so it never
-                    // re-drives a POST-boot runtime start-wait (that perturbs
-                    // dependency ordering, e.g. 07-pid1-service-dependencies).
-                    if crate::units::job_graph_boot_draining() {
-                        recheck_parked_oneshot_waits(&run_info, &mut chains, &mut start_waits);
-                    }
+                    // Re-check parked Type=oneshot/forking start waits each wake
+                    // (their completion is the ExecStart process exiting; under
+                    // load a registration-vs-exit race can strand one until its
+                    // 90s start-timeout). Only reached during the boot drain.
+                    recheck_parked_oneshot_waits(&run_info, &mut chains, &mut start_waits);
                 }
             }));
             if let Err(panic) = result {
