@@ -1,20 +1,30 @@
-{pkgs, ...}: {
+{
+  pkgs,
+  lib,
+  ...
+}: let
+  # cosmic-ext-quake-terminal is built from source out of nix/pkgs, so no
+  # binary cache has it and every aarch64 host compiles it under emulation,
+  # where it is one of the slowest things in the closure.  x86_64 only.
+  quakeTerminal = pkgs.stdenv.hostPlatform.isx86_64;
+in {
   environment = {
-    systemPackages = with pkgs; [
-      #cosmic-ext-applet-emoji-selector
-      #cosmic-ext-applet-external-monitor-brightness
-      cosmic-ext-applet-caffeine
-      cosmic-ext-calculator
-      cosmic-ext-quake-terminal
-      wezterm
-      examine
-      forecast
-      tasks
-      cosmic-ext-tweaks
-      cosmic-player
-      #cosmic-reader
-      #stellarshot
-    ];
+    systemPackages = with pkgs;
+      [
+        #cosmic-ext-applet-emoji-selector
+        #cosmic-ext-applet-external-monitor-brightness
+        cosmic-ext-applet-caffeine
+        cosmic-ext-calculator
+        wezterm
+        examine
+        forecast
+        tasks
+        cosmic-ext-tweaks
+        cosmic-player
+        #cosmic-reader
+        #stellarshot
+      ]
+      ++ lib.optional quakeTerminal cosmic-ext-quake-terminal;
     sessionVariables = {
       COSMIC_DATA_CONTROL_ENABLED = 1;
     };
@@ -24,7 +34,7 @@
     displayManager.cosmic-greeter.enable = true;
     system76-scheduler.enable = true;
   };
-  systemd.user.services.cosmic-ext-quake-terminal = {
+  systemd.user.services.cosmic-ext-quake-terminal = lib.mkIf quakeTerminal {
     description = "COSMIC Quake Terminal Daemon";
     wantedBy = ["graphical-session.target"];
     partOf = ["graphical-session.target"];

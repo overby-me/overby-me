@@ -36,6 +36,12 @@
       url = "github:NixOS/nixos-hardware/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    disko = {
+      # Declarative disk layout for armitas, so nixos-anywhere can partition
+      # and format the Surface Pro 11 without anything being typed on it.
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixos-raspberrypi = {
       # Following nixpkgs means eva-00 is built against this flake's nixpkgs
       # rather than the revision nixos-raspberrypi pins. Its binary cache

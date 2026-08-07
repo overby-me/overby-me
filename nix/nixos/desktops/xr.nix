@@ -2,11 +2,14 @@
   environment.systemPackages = with pkgs; [
     monado
     stardust-xr-server
-    stardust-xr-kiara
     non-spatial-input
     #flatland
     #weston
   ];
+  # stardust-xr-kiara was dropped from nixpkgs on 2026-07-04, "no longer
+  # compatible with the latest versions of the Stardust XR server", and the
+  # alias now throws.  Surviving clients if a replacement is wanted:
+  # stardust-xr-protostar, -phobetor, -atmosphere, -gravity, -sphereland.
   services.udev.extraRules = ''
     # XReal
 
