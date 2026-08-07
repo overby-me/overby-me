@@ -3,14 +3,14 @@
 #
 # The app has to model Word's page breaking (see `docs/word-pagination.md`), and
 # a model needs something to be measured against. Word itself is the truth, and
-# nobody here runs Word — so this converts the document with LibreOffice and
+# nobody here runs Word, so this converts the document with LibreOffice and
 # reports what came out: how many pages, and what each one begins with.
 #
 #   scripts/word-pages.nu some.docx
 #   scripts/word-pages.nu some.docx --pdf out.pdf     # keep the rendering
 #
 # **The fonts are the whole trick.** LibreOffice was written off as a second
-# opinion once because it made a document ten pages where Word makes eight — but
+# opinion once because it made a document ten pages where Word makes eight, but
 # that was its font substitution, not its layout. Given the same
 # metric-compatible faces the app measures in (Carlito for Calibri, Caladea for
 # Cambria, Liberation Sans/Serif for Arial and Times), it agrees with Word: the
