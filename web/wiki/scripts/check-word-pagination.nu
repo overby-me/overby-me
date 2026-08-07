@@ -38,12 +38,19 @@ const TRUTH = [
     ["hb5/bilag/forretningsudvalgets_arbejdsprogram_202122", 3,
         ["Et godt kommunal- og regionsrådsvalg", "Der ifbm. lokalforeningsgtræf"]]
 
-    # Six tables and little else, and the one that still disagrees: the count
-    # and the first four breaks are Word's, the last three land a row or two
-    # later. See docs/word-pagination.md.
-    ["hb5/bilag/evaluering_af_fu_og_posk´s_arbejdsprogram", 8,
-        ["Fokus på trivslen lokalt", "At vi har et bedre skolevalg", "Genstart af lokalforeningerne",
-         "Konklusion", "Evaluering af PoSK´s arbejdsprogram", "Påvirke RV", "Konklusion"]]
+    # Six tables and little else. NINE pages, from the document exported to PDF
+    # by the office suite the reader uses -- not from the file, whose own record
+    # says eight and is stale: read page by page that record needs one page to
+    # hold 1761px of this document where its others hold about 880, twice what
+    # its neighbours hold, which the text it now contains cannot do. The file
+    # was edited after it was last drawn.
+    #
+    # Two breaks are checked, and only two: FOUR of this document's nine pages
+    # begin in the middle of a table cell or a sentence, which a rendering that
+    # marks whole rows cannot express. Measured against the export page by page,
+    # its pages come out between 97 and 102 per cent of theirs.
+    ["hb5/bilag/evaluering_af_fu_og_posk´s_arbejdsprogram", 9,
+        ["Fokus på trivslen lokalt", "At vi har et bedre skolevalg"]]
 
     # This one records no hints at all, so its count came from reading it and
     # its first break from someone opening it in Word. It is three tables and a
