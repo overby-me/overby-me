@@ -34,6 +34,11 @@ pub struct CalendarSpec {
     pub minute: CalendarComponent,
     /// Second component.
     pub second: CalendarComponent,
+    /// When true, the expression carried an explicit ` UTC` suffix and the
+    /// normalized form re-emits it. Elapse is computed in UTC either way (the
+    /// port has no local-timezone database), so this only affects rendering
+    /// and input acceptance; named timezones remain unsupported.
+    pub utc: bool,
 }
 
 /// A range of weekdays (inclusive), e.g. Mon..Fri or just Wed.
@@ -112,7 +117,18 @@ impl CalendarSpec {
         }
 
         let original = input.to_string();
-        let parts: Vec<&str> = input.split_whitespace().collect();
+        let mut parts: Vec<&str> = input.split_whitespace().collect();
+
+        // A trailing ` UTC` timezone suffix (systemd.time(7)). Only UTC is
+        // accepted — the elapse is already computed in UTC, so this just
+        // records the suffix for the normalized form. Named timezones
+        // (e.g. `Europe/Berlin`) need a timezone database and stay rejected.
+        let utc = if parts.len() >= 2 && parts.last() == Some(&"UTC") {
+            parts.pop();
+            true
+        } else {
+            false
+        };
 
         let (weekdays, date_time_parts) = if !parts.is_empty() && looks_like_weekday(parts[0]) {
             let wd = parse_weekdays(parts[0])?;
@@ -190,6 +206,7 @@ impl CalendarSpec {
             hour,
             minute,
             second,
+            utc,
         })
     }
 
@@ -341,6 +358,10 @@ impl CalendarSpec {
         s.push_str(&format_component_padded(&self.minute, 2));
         s.push(':');
         s.push_str(&format_component_padded(&self.second, 2));
+
+        if self.utc {
+            s.push_str(" UTC");
+        }
 
         s
     }

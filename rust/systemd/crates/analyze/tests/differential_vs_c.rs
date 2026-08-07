@@ -99,6 +99,11 @@ fn analyze_calendar_matches_c() {
         "*-*~7..1",
         "*-*-7..5",
         "*:30..10",
+        // Trailing UTC timezone suffix (named zones need a tz database and are
+        // an intentional, documented divergence — not tested here).
+        "*-*-* 00:00:00 UTC",
+        "Mon *-*-* 00:00:00 UTC",
+        "12:00 UTC",
     ];
     let mut div = Vec::new();
     for s in specs {
