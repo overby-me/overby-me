@@ -218,7 +218,9 @@ pub async fn establish_from_refresh_token(refresh_token: &str) -> bool {
             true
         }
         Err(err) => {
-            log::warn!("password-reset token exchange failed: {err}");
+            // Same rule: a dropped request here is the network, and the caller
+            // shows the person what happened either way.
+            crate::errors::log_handled("password-reset token exchange failed", &err);
             false
         }
     }
@@ -488,13 +490,22 @@ async fn refresh_access_token() -> RefreshOutcome {
             // Nobody rotated it in all that time, so the refresh token itself is
             // dead: clear the session and let the UI fall back to the login
             // screen instead of looping on a bad token.
+            // This one stays a warning whatever its wording: the refresh token is
+            // dead and the person has just been signed out mid-session, which is
+            // rare, consequential, and worth having in the record.
             log::warn!("session refresh rejected, signing out: {err}");
             *SESSION.write() = Session::default();
             save_session(&Session::default());
             RefreshOutcome::Expired
         }
         Err(err) => {
-            log::warn!("session refresh failed (will retry): {err}");
+            // Classified, not shouted. A refresh that could not reach the server
+            // is the venue's wifi, and this path already answers it by retrying;
+            // `logging.rs` ships warn to the sink, so at a congress the hall
+            // would file one stored fault per person per dip. A refresh that
+            // fails for any other reason is still a fault and still reaches the
+            // sink, because that is what `log_handled` decides.
+            crate::errors::log_handled("session refresh failed (will retry)", &err);
             RefreshOutcome::Transient
         }
     }
