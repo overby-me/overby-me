@@ -816,7 +816,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     if !is_auth {
         // DESIGN: an expressive locked-barrier state instead of a plain card.
         return rsx! {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "lock" }
@@ -831,7 +831,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     let cmd_seed = initial_html.clone();
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-content",
                 // Title field. maxlength caps the node name length (#111).
                 div { class: "text-field mb-2",

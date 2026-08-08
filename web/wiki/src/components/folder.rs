@@ -807,7 +807,7 @@ pub fn FolderApp(
         // The folder's contents in a separate card, so the content card's header
         // stays simple (identity + tools). The item count and the list/grid toggle
         // live here, with the children they control.
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar small",
                     span { class: "material-icons", "folder_open" }
@@ -898,7 +898,7 @@ pub fn FolderApp(
 
         // What this group is credited on, below its own contents.
         if is_group {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "history_edu" } }
                     // The neutral heading, not the first-person one: these are the

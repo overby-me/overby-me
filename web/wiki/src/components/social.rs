@@ -61,7 +61,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                 }
             },
             Some(Ok(_)) => rsx! {
-                div { class: "card",
+                div { class: "card app-card",
                     super::widgets::EmptyState {
                         icon: "search_off".to_string(),
                         message: t("social.empty"),
@@ -73,7 +73,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                 // Log the detail; the UI shows a friendly state, never raw error text.
                 crate::errors::log_handled("bluesky wall fetch", e);
                 rsx! {
-                    div { class: "card accent-error",
+                    div { class: "card app-card accent-error",
                         super::widgets::ErrorState {
                             title: t("error.somethingWentWrong"),
                             small: true,

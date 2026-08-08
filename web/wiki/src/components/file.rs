@@ -258,18 +258,21 @@ fn is_presentation(mime: &str) -> bool {
 ///
 /// A different question from [`OfficeViewer`], which is about which THIRD PARTY
 /// sees the document. A PDF already goes to nobody: every browser has a viewer
-/// built in and it renders locally. So this is fidelity against readability, and
-/// the browser keeps the default, because it is exact, it prints, and it is what
-/// a reader already expects a PDF to look like.
+/// built in and it renders locally. So this is fidelity against readability.
 ///
-/// The native one is for the case the browser's viewer is bad at: a long
-/// appendix on a phone, where a fixed page in a scrolling box means pinching at
-/// six-point type. It reflows, and the browser's own find works on it.
+/// Readability leads. Most of what this wiki carries a PDF for is read on a
+/// phone at a meeting, and there the browser's viewer is a fixed page in a
+/// scrolling box: pinching at six-point type, no reflow, and the page's own find
+/// blind to it. The native one reflows, works with find, keeps the page marks,
+/// and is the one this app can go on improving.
+///
+/// The browser's stays one tap away and unchanged, for when a reader wants the
+/// page exactly as it was laid out, or wants to print it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum PdfViewer {
-    /// The browser's built-in viewer, in an iframe. The default.
+    /// The browser's built-in viewer, in an iframe.
     Browser,
-    /// Rendered here, from the file's own bytes, as flowing text.
+    /// Rendered here, from the file's own bytes, as flowing text. The default.
     Native,
 }
 
@@ -288,12 +291,11 @@ impl PdfViewer {
         }
     }
 
-    /// Anything unrecognised is the browser: a preference that cannot be read
-    /// must not silently move a reader to the renderer that reflows.
+    /// Anything unrecognised is the default, which is this app's own renderer.
     fn from_key(key: &str) -> Self {
         match key {
-            "native" => PdfViewer::Native,
-            _ => PdfViewer::Browser,
+            "browser" => PdfViewer::Browser,
+            _ => PdfViewer::Native,
         }
     }
 }
@@ -304,7 +306,7 @@ pub static PDF_VIEWER: GlobalSignal<PdfViewer> = Signal::global(|| {
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|s| s.get_item("wiki_pdf_viewer").ok().flatten())
         .map(|v| PdfViewer::from_key(&v))
-        .unwrap_or(PdfViewer::Browser)
+        .unwrap_or(PdfViewer::Native)
 });
 
 /// Choose a PDF viewer, and remember it.
@@ -1224,7 +1226,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         if file_mime == "application/pdf" {
                             super::widgets::SheetGroup {
                                 div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
-                                for viewer in [PdfViewer::Browser, PdfViewer::Native] {
+                                for viewer in [PdfViewer::Native, PdfViewer::Browser] {
                                     button {
                                         key: "{viewer.label_key()}",
                                         class: if PDF_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },

@@ -194,7 +194,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                     // the chair asked for this one, and the active node is often
                     // just whatever was last discussed.
                     _ if show_feed => rsx! {
-                        div { class: "card projector-feed",
+                        div { class: "card app-card projector-feed",
                             div { class: "card-header",
                                 div { class: "avatar", span { class: "material-icons", "view_agenda" } }
                                 h3 { class: "title-medium", "{crate::i18n::t(\"layout.feed\")}" }
@@ -208,7 +208,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                         // The LARGE orb on purpose: this is the projector, read
                         // from across a room, and is the one place a full-size
                         // empty state belongs outside a page-level state.
-                        div { class: "card",
+                        div { class: "card app-card",
                             div { class: "empty-state",
                                 div { class: "empty-state-orb",
                                     span { class: "material-icons", "cast" }

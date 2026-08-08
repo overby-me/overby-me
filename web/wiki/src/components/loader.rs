@@ -234,7 +234,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
 #[component]
 fn ContentSkeleton() -> Element {
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "skeleton-card",
                 div { class: "skeleton-row",
                     div { class: "skeleton skeleton-avatar" }

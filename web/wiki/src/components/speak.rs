@@ -632,7 +632,7 @@ fn SpeakList(
 
         // Owner admin panel (#6): open/close the list, clear it, run the timer.
         if is_owner && !screen {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "card-header",
                     h3 { class: "title-medium", "{t(\"speak.manageSpeakerList\")}" }
                 }

@@ -864,7 +864,7 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
     let range_label = t("poll.voteRange");
 
     rsx! {
-        div { class: "card mt-1",
+        div { class: "card app-card mt-1",
             div { class: "card-header",
                 // `small`, like every other section card on the pages this sits
                 // among (candidates, questions, amendments, polls): a full-size

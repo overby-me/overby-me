@@ -190,7 +190,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
         // Polls opened on this position.
         if !polls.is_empty() {
-            div { class: "card mt-1",
+            div { class: "card app-card mt-1",
                 div { class: "card-header",
                     div { class: "avatar small", {icon_el("vote/poll")} }
                     h3 { class: "title-medium", "{t(\"mime.vote\")}" }

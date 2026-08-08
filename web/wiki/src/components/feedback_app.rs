@@ -210,7 +210,7 @@ pub fn FeedbackApp() -> Element {
 
     if !is_auth {
         return rsx! {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "lock" }
@@ -235,7 +235,7 @@ pub fn FeedbackApp() -> Element {
     };
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar small", {super::loader::feedback_icon_el()} }
                 h3 { class: "title-medium",

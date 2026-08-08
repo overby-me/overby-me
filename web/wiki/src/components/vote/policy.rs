@@ -66,7 +66,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
         // Amendments — always shown so its create action (in the header) has a
         // home; the body shows an empty state until the first amendment lands.
-        div { class: "card mt-1",
+        div { class: "card app-card mt-1",
             div { class: "card-header",
                 div { class: "avatar small", {icon_el("vote/change")} }
                 h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
@@ -174,7 +174,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
         // Polls
         if !polls.is_empty() {
-            div { class: "card mt-1",
+            div { class: "card app-card mt-1",
                 div { class: "card-header",
                     div { class: "avatar small", {icon_el("vote/poll")} }
                     h3 { class: "title-medium", "{t(\"mime.vote\")}" }
@@ -213,7 +213,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
         // Other children (comments, questions)
         if !comments.is_empty() {
-            div { class: "card mt-1",
+            div { class: "card app-card mt-1",
                 div { class: "list",
                     for child in comments.iter() {
                         {

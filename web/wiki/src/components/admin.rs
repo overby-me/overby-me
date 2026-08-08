@@ -169,7 +169,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     let sel = console_tab(tab(), wide);
 
     let agenda_pane = rsx! {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "card-header",
                     div { class: "avatar", {icon_el("app/program")} }
                     h3 { class: "title-medium", "{t(\"console.agenda\")}" }
@@ -231,7 +231,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
             // something is projected; when the item has no sections, the card stays
             // (with a note) rather than silently vanishing.
             if can_manage && active_id.is_some() {
-                div { class: "card",
+                div { class: "card app-card",
                     div { class: "card-header",
                         div { class: "avatar", span { class: "material-icons", "center_focus_strong" } }
                         h3 { class: "title-medium", "{t(\"console.focusSection\")}" }
@@ -333,7 +333,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
             }
             // ── Polls ───────────────────────────────────────────────────────
             if sel == 2 {
-                div { class: "card",
+                div { class: "card app-card",
                     div { class: "card-header",
                         div { class: "avatar", {icon_el("vote/poll")} }
                         h3 { class: "title-medium", "{t(\"admin.results\")}" }
@@ -360,7 +360,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
             // What has landed in this context while the meeting ran: an amendment
             // posted from the floor shows up here without the chair going looking.
             if sel == 3 {
-                div { class: "card",
+                div { class: "card app-card",
                     div { class: "card-header",
                         div { class: "avatar small", span { class: "material-icons", "view_agenda" } }
                         h3 { class: "title-medium", "{t(\"layout.feed\")}" }

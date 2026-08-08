@@ -75,7 +75,7 @@ pub fn ProfileApp() -> Element {
 
     let Some(user) = user else {
         return rsx! {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "card-content",
                     p { class: "body-large", "{t(\"node.maybeLoginForAccess\")}" }
                     Link { to: Route::Login {}, class: "btn btn-primary", "{t(\"common.logIn\")}" }
@@ -89,7 +89,7 @@ pub fn ProfileApp() -> Element {
     let show_linked = link.linked && !*just_unlinked.read();
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {user_avatar(&user.avatar_url, icon_el("app/profile"))} }
                 div {
@@ -114,7 +114,7 @@ pub fn ProfileApp() -> Element {
         // action; otherwise hand off to the backend OAuth flow with the handle +
         // current NHost access token (it redirects back to APP_ORIGIN with
         // ?linked=bluesky|error, surfaced in a snackbar by App on load).
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar small", {crate::components::loader::bsky_logo()} }
                 h3 { class: "title-medium",
@@ -228,7 +228,7 @@ pub fn ProfileApp() -> Element {
         // Background Web Push: opt this device in/out of notifications that arrive
         // even when the app is closed (e.g. a vote opening in a group you're in).
         if crate::pwa::push_supported() {
-            div { class: "card",
+            div { class: "card app-card",
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "notifications" } }
                     h3 { class: "title-medium", "{t(\"profile.notifications\")}" }
@@ -279,7 +279,7 @@ pub fn ProfileApp() -> Element {
         }
 
         // Latest contributions the user authored, each linking to the item.
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar small", span { class: "material-icons", "history_edu" } }
                 h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
@@ -478,7 +478,7 @@ pub fn UserProfile(id: String) -> Element {
     let contrib_state = contributions.read().clone();
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "profile-hero",
                 div { class: "profile-hero-avatar",
                     {user_avatar(&avatar_url, icon_el("wiki/user"))}
@@ -503,7 +503,7 @@ pub fn UserProfile(id: String) -> Element {
         // What they have written, first: it is why you opened someone's profile.
         // The same card your own profile carries, but titled without the "Your",
         // since this is someone else's page.
-        div { class: "card mt-1",
+        div { class: "card app-card mt-1",
             div { class: "card-header",
                 div { class: "avatar small", span { class: "material-icons", "history_edu" } }
                 h3 { class: "title-medium", "{t(\"profile.contributionsOther\")}" }
@@ -518,7 +518,7 @@ pub fn UserProfile(id: String) -> Element {
             }}
         }
         // Where you overlap, below it: context for the reader, not the point.
-        div { class: "card mt-1",
+        div { class: "card app-card mt-1",
             div { class: "card-header",
                 // join_inner, the set-intersection mark: this card is precisely
                 // the overlap between their memberships and yours, and it does not

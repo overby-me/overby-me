@@ -114,7 +114,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
         super::widgets::SupportingPaneLayout {
             primary: rsx! {
                 if show_link_nudge && !nudge_dismissed() {
-                    div { class: "card mb-1",
+                    div { class: "card app-card mb-1",
                         div {
                             class: "card-content stack stack-h",
                             span { class: "material-icons", "cloud_off" }
@@ -144,7 +144,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         }
                     }
                 }
-                div { class: "card",
+                div { class: "card app-card",
                     div { class: "card-header",
                         div { class: "avatar", span { class: "material-icons", "group" } }
                         div {
