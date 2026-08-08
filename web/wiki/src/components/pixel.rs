@@ -771,16 +771,17 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             // board, so it lands on the right cell at any width — a phone's
             // scaled-down board, a desktop's full one, or a pinch zoom — with
             // nothing measured in JavaScript.
-            div { class: "pixel-board-scroll",
+            div {
+                class: "pixel-board-scroll",
+                // The zoom for the stylesheet to multiply by, and the board's
+                // own shape so the window is cut to it rather than to a square.
+                style: "--zoom: {zoom()}; --board-aspect: {cols} / {rows_n};",
             div {
                 class: "pixel-board-wrap",
                 // The wrapper, not the canvas, carries the zoom: the tooltip is
                 // placed as a percentage of THIS box, so growing the box keeps
                 // the tip on its cell.
-                // The zoom as a number the stylesheet can multiply by. The
-                // sizing itself is CSS: it has to weigh the width available
-                // against the height allowed, which only the layout knows.
-                style: "--zoom: {zoom()};",
+
                 // Leaving is the WRAPPER's business, not the canvas's. The tip
                 // hangs a small gap away from its cell, and that gap belongs to
                 // neither element: crossing it to reach the profile link fired
