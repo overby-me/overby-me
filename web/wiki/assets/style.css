@@ -1280,6 +1280,11 @@ html {
 	background: var(--md-surface-container-low);
 	/* Accent colour for the header wash; retinted per card via the accent classes. */
 	--card-accent: var(--md-primary);
+	--card-brow: linear-gradient(
+		to bottom,
+		color-mix(in srgb, var(--card-accent) 10%, transparent),
+		transparent
+	);
 	/* M3 Expressive: extra-large corner radius for a softer, bolder surface. */
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-1);
@@ -1335,7 +1340,21 @@ html {
    compact dropped it. The accent still reads, from the avatar it sits beside. */
 .app-shell:not([data-size-class="compact"]) .app-card > .card-header {
 	padding-inline: 0;
+}
+.app-shell:not([data-size-class="compact"]) .app-card .card-header {
 	background: none;
+}
+/* Except a genuine card sitting inside one -- a place on the home screen, a
+   canvas in the picker. It is still a card, so it still has a top to tint. */
+.app-shell:not([data-size-class="compact"]) .app-card .card:not(.app-card) .card-header {
+	background: var(--card-brow);
+}
+
+/* The cover photo kept its rounded corners by being clipped to the card's; with
+   the card flat it has to hold its own shape, which is what an image on a plain
+   surface wants anyway. */
+.app-shell:not([data-size-class="compact"]) .app-card .content-hero {
+	border-radius: var(--md-sys-shape-corner-large);
 }
 
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
@@ -1366,12 +1385,11 @@ html {
 		var(--md-sys-spacing-3-5);
 	gap: var(--md-sys-spacing-3-5);
 	/* Faint accent wash: tints the identity zone from the accent, fading into the
-	   body — a soft brow instead of a hard divider. */
-	background: linear-gradient(
-		to bottom,
-		color-mix(in srgb, var(--card-accent) 10%, transparent),
-		transparent
-	);
+	   body — a soft brow instead of a hard divider. Assembled on the card, not
+	   here, because `--card-accent` lives there: a var() inside a custom property
+	   resolves where it is DEFINED, so a brow built on :root would freeze every
+	   card's accent at the root's. */
+	background: var(--card-brow);
 }
 /* Per-card accent retints (apply from RSX, e.g. vote → tertiary). */
 .card.accent-tertiary {
@@ -1680,14 +1698,18 @@ html {
 	   the title and date disappeared behind the image. */
 	z-index: 2;
 	display: flex;
-	align-items: flex-end;
+	/* At the TOP of the photo: what a page is and when it was added is the first
+	   thing to read, and at the foot it sat under the picture, below the fold on
+	   a tall cover, and collided with whatever the photo has at its base -- which
+	   for a candidate portrait is usually the face. */
+	align-items: flex-start;
 	gap: var(--md-sys-spacing-3-5);
 	padding: var(--md-sys-spacing-5);
 	/* Click-through so the image underneath still opens the zoom lightbox. */
 	pointer-events: none;
-	/* Legibility scrim: deep at the base where the identity sits, clear up top. */
+	/* Legibility scrim: deep where the identity sits, clear away from it. */
 	background: linear-gradient(
-		to top,
+		to bottom,
 		color-mix(in srgb, black 74%, transparent) 0%,
 		color-mix(in srgb, black 32%, transparent) 34%,
 		transparent 62%
