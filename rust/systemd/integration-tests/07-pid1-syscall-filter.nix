@@ -13,18 +13,21 @@
     UNIT="scf-$RANDOM"
     UNIT_OK="scfok-$RANDOM"
     UNIT_MNT="scfmnt-$RANDOM"
+    UNIT_ALLOW="scfallow-$RANDOM"
     OUT="/run/scf-out.$RANDOM"
     OUT_OK="/run/scfok-out.$RANDOM"
     OUT_MNT="/run/scfmnt-out.$RANDOM"
+    OUT_ALLOW="/run/scfallow-out.$RANDOM"
 
     at_exit() {
         set +e
-        systemctl stop "$UNIT.service" "$UNIT_OK.service" "$UNIT_MNT.service" 2>/dev/null
-        systemctl reset-failed "$UNIT.service" "$UNIT_OK.service" "$UNIT_MNT.service" 2>/dev/null
+        systemctl stop "$UNIT.service" "$UNIT_OK.service" "$UNIT_MNT.service" "$UNIT_ALLOW.service" 2>/dev/null
+        systemctl reset-failed "$UNIT.service" "$UNIT_OK.service" "$UNIT_MNT.service" "$UNIT_ALLOW.service" 2>/dev/null
         rm -f "/run/systemd/system/$UNIT.service" "/run/systemd/system/$UNIT_OK.service" \
-              "/run/systemd/system/$UNIT_MNT.service" "$OUT" "$OUT_OK" "$OUT_MNT"
-        umount /run/scf-mnt-dir 2>/dev/null
-        rm -rf /run/scf-dir /run/scf-mnt-dir
+              "/run/systemd/system/$UNIT_MNT.service" "/run/systemd/system/$UNIT_ALLOW.service" \
+              "$OUT" "$OUT_OK" "$OUT_MNT" "$OUT_ALLOW"
+        umount /run/scf-mnt-dir /run/scf-allow-mnt 2>/dev/null
+        rm -rf /run/scf-dir /run/scf-mnt-dir /run/scf-allow-mnt
         systemctl daemon-reload
     }
     trap at_exit EXIT
@@ -69,6 +72,21 @@
     cat "$OUT_MNT"
     grep -qx BLOCKED "$OUT_MNT"
     ! mountpoint -q /run/scf-mnt-dir
+
+    : "allow-list SystemCallFilter=@system-service runs normally but blocks mount() (not in the set)"
+    mkdir -p /run/scf-allow-mnt
+    cat > "/run/systemd/system/$UNIT_ALLOW.service" << EOF
+    [Service]
+    Type=oneshot
+    SystemCallFilter=@system-service
+    SystemCallErrorNumber=EPERM
+    ExecStart=/bin/sh -c 'echo alive; if mount -t tmpfs tmpfs /run/scf-allow-mnt 2>/dev/null; then echo MOUNT-OK; else echo MOUNT-BLOCKED; fi > $OUT_ALLOW'
+    EOF
+    systemctl daemon-reload
+    systemctl start "$UNIT_ALLOW.service"
+    cat "$OUT_ALLOW"
+    grep -qx MOUNT-BLOCKED "$OUT_ALLOW"
+    ! mountpoint -q /run/scf-allow-mnt
     RIDEOF
   '';
 }

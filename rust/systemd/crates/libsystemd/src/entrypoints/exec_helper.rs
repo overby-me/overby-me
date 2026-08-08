@@ -3723,11 +3723,6 @@ pub fn run_exec_helper() {
         }
     }
 
-    // ── SystemCallFilter= seccomp syscall filter ─────────────────────
-    // Installed last (after NoNewPrivileges, before exec) so nothing later needs
-    // a filtered syscall. Using any filter implies NoNewPrivileges.
-    install_system_call_filter(&config);
-
     log::trace!(
         "about to execv {} (uid={}, gid={}, env_count={})",
         effective_cmd.display(),
@@ -3833,6 +3828,12 @@ pub fn run_exec_helper() {
         &effective_args,
         config.login_shell || config.use_first_arg_as_argv0,
     );
+
+    // SystemCallFilter= seccomp filter: installed as the very last step before
+    // execve, so nothing here needs a syscall an allow-list would block (the
+    // exec-dir reachability check above runs unconfined, and @default includes
+    // execve). Using any filter implies NoNewPrivileges.
+    install_system_call_filter(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -5414,11 +5415,34 @@ fn build_seccomp_deny_filter(blocked: &[i64], action: u32) -> Vec<libc::sock_fil
 /// Sets `PR_SET_NO_NEW_PRIVS` first (a precondition for an unprivileged filter,
 /// and implied by using `SystemCallFilter=`).
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn install_seccomp_deny_filter(blocked: &[i64], action: u32) -> bool {
-    if blocked.is_empty() {
-        return true;
+/// Build a seccomp cBPF program that allows only the syscalls in `allowed` and
+/// applies `action` to every other syscall. Mirrors the deny-list builder but
+/// with the per-syscall action being ALLOW and the fall-through default being
+/// `action`. x86_64-only; other arches are allowed wholesale.
+fn build_seccomp_allow_filter(allowed: &[i64], action: u32) -> Vec<libc::sock_filter> {
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const ALLOW: u32 = 0x7fff_0000; // SECCOMP_RET_ALLOW
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    let mut prog = vec![
+        f(0x20, 0, 0, 4), // BPF_LD|W|ABS arch
+        f(0x15, 1, 0, AUDIT_ARCH_X86_64), // JEQ arch==x86_64 -> load nr, else allow
+        f(0x06, 0, 0, ALLOW), // other arch: allow
+        f(0x20, 0, 0, 0), // BPF_LD|W|ABS nr
+    ];
+    for &nr in allowed {
+        // JEQ nr: on match fall through to RET ALLOW; else skip it. Using jf=1
+        // (not a jump to a single shared target) keeps every offset within the
+        // BPF u8 limit even for large allow sets like @system-service.
+        prog.push(f(0x15, 0, 1, nr as u32));
+        prog.push(f(0x06, 0, 0, ALLOW));
     }
-    let filter = build_seccomp_deny_filter(blocked, action);
+    prog.push(f(0x06, 0, 0, action)); // default: block everything not listed
+    prog
+}
+
+/// Load a prebuilt seccomp filter via PR_SET_SECCOMP, setting the mandatory
+/// PR_SET_NO_NEW_PRIVS first. Returns false on failure.
+fn install_seccomp_program(filter: &[libc::sock_filter]) -> bool {
     let prog = libc::sock_fprog {
         len: filter.len() as u16,
         filter: filter.as_ptr() as *mut libc::sock_filter,
@@ -5449,6 +5473,14 @@ fn install_seccomp_deny_filter(blocked: &[i64], action: u32) -> bool {
     true
 }
 
+/// Install a seccomp deny-list filter for `blocked`.
+fn install_seccomp_deny_filter(blocked: &[i64], action: u32) -> bool {
+    if blocked.is_empty() {
+        return true;
+    }
+    install_seccomp_program(&build_seccomp_deny_filter(blocked, action))
+}
+
 /// Apply `SystemCallFilter=` for the child.
 ///
 /// Increment 1 supports the deny-list form (`SystemCallFilter=~a b c`), which
@@ -5465,17 +5497,9 @@ fn install_system_call_filter(config: &ExecHelperConfig) {
         return;
     }
     let deny_list = config.system_call_filter[0].starts_with('~');
-    if !deny_list {
-        log::warn!(
-            "SystemCallFilter= allow-list not yet enforced; running {} without a \
-             seccomp filter",
-            config.name
-        );
-        return;
-    }
 
-    // Strip the leading '~' (deny-list marker) from the first token, then resolve
-    // every name and @group set to concrete x86_64 syscall numbers.
+    // Recover the token list. A leading '~' marks the whole list as a deny-list;
+    // strip it from the first token (a no-op for an allow-list).
     let tokens: Vec<&str> = config
         .system_call_filter
         .iter()
@@ -5488,15 +5512,9 @@ fn install_system_call_filter(config: &ExecHelperConfig) {
             }
         })
         .collect();
-    let mut blocked: Vec<i64> = Vec::new();
-    let mut visited: Vec<String> = Vec::new();
-    resolve_syscall_set(&tokens, &mut blocked, &mut visited);
-    if blocked.is_empty() {
-        return;
-    }
 
-    // Default action is to kill the process (systemd's SECCOMP_ERROR_NUMBER_KILL
-    // default); SystemCallErrorNumber= overrides it to return an errno.
+    // Default action for a filtered syscall is to kill the process (systemd's
+    // SECCOMP_ERROR_NUMBER_KILL default); SystemCallErrorNumber= overrides it.
     const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
     const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
     let action = match config
@@ -5508,12 +5526,42 @@ fn install_system_call_filter(config: &ExecHelperConfig) {
         None => SECCOMP_RET_KILL_PROCESS,
     };
 
-    if install_seccomp_deny_filter(&blocked, action) {
-        log::debug!(
-            "SystemCallFilter: installed deny filter ({} syscalls) for {}",
-            blocked.len(),
-            config.name
-        );
+    let mut set: Vec<i64> = Vec::new();
+    let mut visited: Vec<String> = Vec::new();
+
+    if deny_list {
+        resolve_syscall_set(&tokens, &mut set, &mut visited);
+        if set.is_empty() {
+            return;
+        }
+        if install_seccomp_deny_filter(&set, action) {
+            log::debug!(
+                "SystemCallFilter: installed deny filter ({} syscalls) for {}",
+                set.len(),
+                config.name
+            );
+        }
+    } else {
+        // Allow-list: permit the listed syscalls plus the mandatory implicit
+        // base. systemd always adds @default to an allow-list (load-fragment.c)
+        // and `write` for the exec handoff (exec-invoke.c); everything else gets
+        // the negative action. Safe because the filter is installed immediately
+        // before execve with nothing in between needing a blocked syscall, and
+        // @default includes execve/mmap/brk/rt_sigreturn.
+        let mut allow_tokens = tokens;
+        allow_tokens.push("@default");
+        allow_tokens.push("write");
+        resolve_syscall_set(&allow_tokens, &mut set, &mut visited);
+        if set.is_empty() {
+            return;
+        }
+        if install_seccomp_program(&build_seccomp_allow_filter(&set, action)) {
+            log::debug!(
+                "SystemCallFilter: installed allow filter ({} syscalls) for {}",
+                set.len(),
+                config.name
+            );
+        }
     }
 }
 
@@ -6526,6 +6574,44 @@ mod tests {
             &mut visited3,
         );
         assert_eq!(out3, vec![libc::SYS_mkdir]);
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_seccomp_allow_filter() {
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+        let action = SECCOMP_RET_ERRNO | (libc::EPERM as u32);
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // Allow only getpid + exit(_group); everything else gets EPERM.
+            let allowed = [libc::SYS_getpid, libc::SYS_exit_group, libc::SYS_exit];
+            if !install_seccomp_program(&build_seccomp_allow_filter(&allowed, action)) {
+                unsafe { libc::_exit(10) };
+            }
+            // An allowed syscall still works.
+            if unsafe { libc::syscall(libc::SYS_getpid) } <= 0 {
+                unsafe { libc::_exit(11) };
+            }
+            // A syscall outside the allow-list is blocked (EPERM).
+            let r = unsafe {
+                libc::syscall(libc::SYS_mkdir, c"/tmp/rs-scf-allow".as_ptr(), 0o755)
+            };
+            let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if r != -1 || e != libc::EPERM {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "allow-list child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
     }
     use aes_gcm::aead::OsRng;
 
