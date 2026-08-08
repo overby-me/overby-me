@@ -454,6 +454,9 @@ impl From<SearchNodeFields> for model::NodeFields {
 #[derive(cynic::QueryVariables, Debug)]
 pub struct NodeWithChildrenVariables {
     pub id: Uuid,
+    /// Which children to bring back with the node. Always [`not_a_canvas_cell`]:
+    /// see the note on the `children` field below.
+    pub children_where: NodesBoolExp,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
@@ -468,7 +471,11 @@ pub struct NodeWithChildrenQuery {
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
-#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes",
+    variables = "NodeWithChildrenVariables"
+)]
 pub struct NodeWithChildren {
     pub id: Uuid,
     pub name: String,
@@ -489,6 +496,20 @@ pub struct NodeWithChildren {
     pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
     pub parent: Option<Box<ParentNodeFields>>,
+    /// The node's children, MINUS the cells of a canvas.
+    ///
+    /// A cell is a node like anything else, so a canvas page was fetching every
+    /// painted square here as a full row -- name, key, mime, owner, parent, and
+    /// four per-row computed fields -- before the board's own query fetched the
+    /// same squares as the four fields it actually draws from. On a filled
+    /// 64 by 64 board that was 3.3 MB and a second of database time to deliver
+    /// what the canvas then re-fetched in 0.5 MB.
+    ///
+    /// Nothing reads a cell from here: this list is for what a page LISTS, and
+    /// the only thing the canvas takes from it is which canvases a place has.
+    /// Filtered at the source rather than dropped on arrival, so the rows are
+    /// never built, never serialised and never sent.
+    #[arguments(where: $children_where)]
     pub children: Vec<ChildNodeFields>,
     pub members: Vec<MemberFields>,
     // Backend-computed permission flags: `is_owner` = the session user owns this
@@ -746,6 +767,7 @@ pub async fn query_node_by_id(
 ) -> Result<Option<model::NodeWithChildren>, String> {
     let operation = NodeWithChildrenQuery::build(NodeWithChildrenVariables {
         id: Uuid(id.to_string()),
+        children_where: not_a_canvas_cell(),
     });
     let result = execute(access_token, operation).await?;
     Ok(result.node.map(Into::into))
@@ -1603,6 +1625,23 @@ pub(crate) fn visible_to_user(user_id: &str) -> NodesBoolExp {
     }
 }
 
+/// Filter excluding the cells of a canvas.
+///
+/// Not `mime_not_hidden`, which would look like the general form of this: hidden
+/// marks what the drawer and the create menu leave out, and a canvas itself is
+/// hidden by that rule while still being something a page lists. This one is
+/// about size. A cell is the only node that exists in the thousands, and it is
+/// drawn from its own query rather than from any list.
+pub(crate) fn not_a_canvas_cell() -> NodesBoolExp {
+    NodesBoolExp {
+        mime_id: Some(StringComparisonExp {
+            neq: Some("canvas/pixel".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 /// Filter excluding nodes whose mime type is marked hidden.
 pub(crate) fn mime_not_hidden() -> NodesBoolExp {
     NodesBoolExp {
@@ -1755,6 +1794,36 @@ mod tests {
             contexts.query.contains(r#"data(path: "type")"#),
             "the context list must not fetch whole documents: {}",
             contexts.query
+        );
+    }
+
+    /// A page must not drag a canvas's cells along with the node.
+    ///
+    /// Same class as the test above, one order of magnitude worse: a cell is a
+    /// node, so opening a canvas fetched every painted square as a full row
+    /// before the board fetched the same squares as the four fields it draws
+    /// from. Measured on the filled 64 by 64 board in production: 3.3 MB and
+    /// 1087 ms for the page query, against 0.5 MB and 144 ms for the board's
+    /// own. The filter is one argument and easy to lose in a refactor, so it is
+    /// asserted on the operation as actually built, and on the variable that
+    /// gives the argument its meaning.
+    #[test]
+    fn a_page_does_not_fetch_the_cells_of_a_canvas() {
+        use cynic::QueryBuilder;
+
+        let page = NodeWithChildrenQuery::build(NodeWithChildrenVariables {
+            id: Uuid("00000000-0000-0000-0000-000000000000".to_string()),
+            children_where: not_a_canvas_cell(),
+        });
+        assert!(
+            page.query.contains("children(where: $childrenWhere)"),
+            "the page query must filter its children: {}",
+            page.query
+        );
+        let vars = serde_json::to_string(&page.variables).expect("variables serialise");
+        assert!(
+            vars.contains(r#""_neq":"canvas/pixel""#),
+            "and the filter must be the one that leaves cells out: {vars}"
         );
     }
 

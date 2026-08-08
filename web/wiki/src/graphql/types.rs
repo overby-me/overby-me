@@ -332,6 +332,8 @@ pub struct StringComparisonExp {
     pub ilike: Option<String>,
     #[cynic(rename = "_in", skip_serializing_if = "Option::is_none")]
     pub in_: Option<Vec<String>>,
+    #[cynic(rename = "_neq", skip_serializing_if = "Option::is_none")]
+    pub neq: Option<String>,
     #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
 }
