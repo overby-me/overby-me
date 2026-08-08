@@ -369,7 +369,10 @@ pub fn relative_time(iso: &str) -> String {
     if then.is_nan() {
         return String::new();
     }
-    let secs = ((js_sys::Date::now() - then) / 1000.0).max(0.0);
+    // On the SERVER's clock at both ends: the timestamp is the database's, and a
+    // device whose own clock is minutes out would otherwise greet a comment posted
+    // this second with "11 minutes ago".
+    let secs = ((crate::session::server_now_ms() - then) / 1000.0).max(0.0);
     // Largest sensible unit; the value is negative because it is in the past
     // (the sign `Intl.RelativeTimeFormat` expects).
     let (value, unit) = if secs < 60.0 {

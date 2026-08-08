@@ -212,12 +212,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // anything being fetched to find out. It used to be a change token that
     // triggered a whole node-with-children query to read one boolean.
     let mut live_open = use_signal(|| node.mutable);
-    let poll_since = use_hook(|| {
-        js_sys::Date::new_0()
-            .to_iso_string()
-            .as_string()
-            .unwrap_or_default()
-    });
+    let poll_since = use_hook(crate::session::server_now_iso);
     let poll_stream = crate::subscription::use_graphql_subscription(graphql::state_stream(
         graphql::node_is(&sub_poll),
         &poll_since,

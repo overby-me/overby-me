@@ -333,6 +333,28 @@ pub fn server_clock_offset_ms() -> f64 {
     }
 }
 
+/// "Now", on the SERVER's clock, in ms since the epoch.
+///
+/// Use this, not `Date::now()`, whenever the other end of the comparison came from
+/// the server: a row's `created_at`, a stored `updatedAt`, a cooldown anchor. The
+/// device clock is not trustworthy - a phone eleven minutes behind made the canvas
+/// cooldown read "you can paint again in 700 seconds" - and the two clocks only
+/// agree by accident.
+pub fn server_now_ms() -> f64 {
+    now_ms() + server_clock_offset_ms()
+}
+
+/// "Now" on the server's clock, as an ISO 8601 string.
+///
+/// For a value the SERVER will compare against its own rows - a subscription cursor
+/// ("only rows after this"), a timer anchor it stores. Stamped with a device clock
+/// eleven minutes behind, such a cursor replays eleven minutes of rows; ahead, it
+/// silently misses everything until the clock catches up.
+pub fn server_now_iso() -> String {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(server_now_ms()));
+    String::from(d.to_iso_string())
+}
+
 /// The `exp` claim (ms epoch) from a JWT's payload segment, or None if it cannot be
 /// decoded. Only reads the standard `exp` number; the signature is not verified (the
 /// server does that), this is purely to read the server's notion of time.

@@ -673,7 +673,7 @@ fn SpeakList(
                                         });
                                         // Re-anchor the per-turn timer for the next speaker.
                                         if limit > 0 {
-                                            move_timer(token.clone(), list_id.clone(), limit, refresh, busy, clock_offset);
+                                            move_timer(token.clone(), list_id.clone(), limit, refresh, busy);
                                         }
                                     }
                                 },
@@ -767,7 +767,7 @@ fn SpeakList(
                                     let id = id.clone();
                                     // Start sets the limit + a fresh timestamp; stop zeroes it.
                                     let secs = if running { 0 } else { *time_box.read() };
-                                    move_timer(token, id, secs, refresh, busy, clock_offset);
+                                    move_timer(token, id, secs, refresh, busy);
                                 }
                             },
                             if running {
@@ -933,11 +933,11 @@ fn move_timer(
     secs: i32,
     refresh: Signal<u32>,
     busy: Signal<bool>,
-    offset_ms: f64,
 ) {
     spawn(async move {
         // Anchor on the server clock so every device counts down consistently.
-        let data = serde_json::json!({ "time": secs, "updatedAt": server_iso(offset_ms) });
+        let data =
+            serde_json::json!({ "time": secs, "updatedAt": crate::session::server_now_iso() });
         let set = NodesSetInput {
             data: Some(Jsonb(data)),
             ..Default::default()
@@ -1008,18 +1008,6 @@ fn now_ms() -> String {
     let window = web_sys::window().unwrap();
     let performance = window.performance().unwrap();
     format!("{:.0}", performance.now())
-}
-
-/// The current wall-clock time as an ISO 8601 string (for the timer start).
-/// Server-aligned ISO timestamp: this device's clock plus its offset to the server
-/// clock, so the timer anchor is written on the server clock and every device reads
-/// the same remaining time regardless of local clock skew (the old React wiki had
-/// scaffolding for this via `session.timeDiff`, but it was disabled).
-fn server_iso(offset_ms: f64) -> String {
-    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
-        js_sys::Date::now() + offset_ms,
-    ));
-    String::from(d.to_iso_string())
 }
 
 /// Seconds left on the current speaker's turn: the `time` limit minus the elapsed

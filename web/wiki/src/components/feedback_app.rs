@@ -61,7 +61,8 @@ fn since_options() -> Vec<(String, String)> {
 /// The oldest timestamp a range admits, in epoch milliseconds; `None` for "any".
 fn cutoff_ms(since: &str) -> Option<f64> {
     let days: f64 = since.parse().ok()?;
-    Some(js_sys::Date::now() - days * 24.0 * 60.0 * 60.0 * 1000.0)
+    // Server clock: the timestamps it is compared against are the database's.
+    Some(crate::session::server_now_ms() - days * 24.0 * 60.0 * 60.0 * 1000.0)
 }
 
 fn matches_kind(item: &FeedbackItem, kind: &str) -> bool {

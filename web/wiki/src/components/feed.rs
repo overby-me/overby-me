@@ -98,12 +98,7 @@ pub fn FeedList(
             // STREAMED ids. A change token could only say "something appeared
             // somewhere in scope", which cost a page fetch to find out what; the
             // stream names the rows, and they are fetched by id below.
-            let since = use_hook(|| {
-                js_sys::Date::new_0()
-                    .to_iso_string()
-                    .as_string()
-                    .unwrap_or_default()
-            });
+            let since = use_hook(crate::session::server_now_iso);
             let stream = crate::subscription::use_graphql_subscription(crate::graphql::id_stream(
                 scope(),
                 &since,

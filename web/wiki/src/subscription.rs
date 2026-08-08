@@ -151,12 +151,7 @@ pub fn use_live_children(
     mine: String,
     mut refresh: Signal<u32>,
 ) {
-    let since = use_hook(|| {
-        js_sys::Date::new_0()
-            .to_iso_string()
-            .as_string()
-            .unwrap_or_default()
-    });
+    let since = use_hook(crate::session::server_now_iso);
     let stream = use_graphql_subscription(crate::graphql::parent_stream(where_clause, &since, 100));
     use_effect(move || {
         let Some(payload) = stream.read().clone() else {
