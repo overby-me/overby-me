@@ -8028,6 +8028,11 @@ a.list-item:hover {
    the app stays where it is and the board is panned within its own box. */
 .pixel-board-scroll {
 	overflow: auto;
+	/* Both, and the width is not optional: a scroll container is sized by its
+	   content, and its content is a board asking for a PERCENTAGE of it. Without
+	   a width of its own the two asked each other and the board came out 34px
+	   wide on a 500px screen. */
+	width: 100%;
 	max-width: 100%;
 	/* A drag pans the board; a tap still paints, because a browser does not
 	   raise a click after a scrolling gesture. */
