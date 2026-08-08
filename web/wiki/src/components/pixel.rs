@@ -378,8 +378,9 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             return;
         };
         let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&iso)).get_time();
-        let deadline = then + cooldown as f64 * 1000.0;
-        if deadline > js_sys::Date::now() {
+        let now = js_sys::Date::now();
+        let deadline = deadline_from_server(then, now, cooldown);
+        if deadline > now {
             ready_at.set(deadline);
         }
     });
@@ -707,7 +708,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                                     &wasm_bindgen::JsValue::from_str(&iso),
                                 )
                                 .get_time();
-                                (then + cooldown as f64 * 1000.0).max(now + 1000.0)
+                                deadline_from_server(then, now, cooldown).max(now + 1000.0)
                             }
                             None => now + cooldown as f64 * 1000.0,
                         },
@@ -932,6 +933,24 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     }
 }
 
+/// A deadline worked out from a timestamp the SERVER wrote, kept honest against
+/// the clock this device happens to have.
+///
+/// The row says when this person last painted, in the database's time; the
+/// countdown runs on the phone's. Those disagree, sometimes by a lot -- a phone
+/// eleven minutes behind the database was told it could paint again in 700
+/// seconds, on a canvas with a ten-second cooldown.
+///
+/// The rule the client can be sure of is the cooldown itself: however the two
+/// clocks differ, a wait longer than one cooldown from NOW is not a wait, it is
+/// a clock. So the derived deadline is capped at that. The database stays the
+/// authority on whether a placement is taken; this only decides what the button
+/// says and when it offers itself.
+pub fn deadline_from_server(then_ms: f64, now_ms: f64, cooldown_secs: u32) -> f64 {
+    let full = cooldown_secs as f64 * 1000.0;
+    (then_ms + full).min(now_ms + full)
+}
+
 /// How many whole seconds are still to wait, from a deadline.
 ///
 /// Rounded UP. Truncating is what made the board offer itself early: three and
@@ -1037,6 +1056,24 @@ mod tests {
         // panicking above it -- but a palette that outgrew a byte would silently
         // lose its tail.
         assert!(PALETTE.len() <= 256);
+    }
+
+    /// A wait longer than the cooldown is a clock, not a wait.
+    ///
+    /// Reported from a phone: "you can paint again in 700 seconds" on a canvas
+    /// whose cooldown is ten. The row's timestamp is the database's and the
+    /// countdown runs on the phone's clock, and those were about eleven minutes
+    /// apart.
+    #[test]
+    fn a_wrong_clock_cannot_make_the_wait_longer_than_the_cooldown() {
+        let now = 1_000_000.0;
+        // The device is eleven minutes behind the database.
+        let then = now + 660_000.0;
+        assert_eq!(seconds_left(deadline_from_server(then, now, 10), now), 10);
+        // A device that agrees with the database is unaffected.
+        assert_eq!(seconds_left(deadline_from_server(now - 4_000.0, now, 10), now), 6);
+        // And one that has already waited it out is free.
+        assert_eq!(seconds_left(deadline_from_server(now - 60_000.0, now, 10), now), 0);
     }
 
     /// The wait is rounded UP, so the button never reads zero while the database
