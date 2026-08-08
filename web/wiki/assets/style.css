@@ -7974,6 +7974,12 @@ a.list-item:hover {
    there is room for, keeps every row the same, and centres what is left over. */
 .pixel-palette {
 	display: grid;
+	/* A definite width, which auto-fit needs to know how many tracks fit. Its
+	   parent centres what it holds, so the palette was sized shrink-to-fit --
+	   and against an indefinite width `repeat(auto-fit, ...)` degenerates to a
+	   single track. That is how twenty-six swatches ended up in a column 32px
+	   wide, with the stylesheet, the grid and the tracks all correct. */
+	width: 100%;
 	/* Literal sizes, not tokens: a custom property inside minmax() that fails to
 	   resolve takes the whole declaration down with it at computed-value time,
 	   and the grid falls back to a single column -- which is what happened here,
