@@ -8,7 +8,11 @@
 //   everything else same-origin (/, /wasm/*) → stale-while-revalidate: serve the
 //     cached copy instantly, refresh it in the background; fall back to the
 //     network, then to the cached app shell (/) when offline.
-const CACHE = "radikalwiki-v5";
+// Renamed to drop what the previous one is holding. The activate step deletes
+// every cache that is not this one, so a bumped name is how a bad entry -- a
+// half-arrived bundle, a response that was not what it claimed -- stops being
+// served to the tab that has it. Bump it whenever the worker's own rules change.
+const CACHE = "radikalwiki-v6";
 
 // Which build this worker IS. Substituted when the bundle is assembled (see the
 // justfile), like version.json; unsubstituted in `dx serve`, where it says so.
@@ -47,6 +51,14 @@ self.addEventListener("activate", (event) =>
 );
 
 function cachePut(req, res) {
+	// Only what actually arrived, and only what the server meant to send. A 404
+	// (or the SPA fallback's index.html, which is a 200 carrying HTML) stored
+	// under a .wasm URL is served back for as long as the cache lives, and the
+	// tab stays broken through every reload -- which is what "a ServiceWorker
+	// intercepted the request and encountered an unexpected error" looked like
+	// from the hall. An opaque cross-origin response cannot be inspected at all,
+	// so it is not kept either.
+	if (!res || !res.ok || res.type === "opaque") return res;
 	const copy = res.clone();
 	caches
 		.open(CACHE)

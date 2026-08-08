@@ -211,6 +211,29 @@
                     })();
                 }
 
+                // Start again on ground the worker is not holding. Marked
+                // first: if this reload lands on the same failure, the mark is
+                // already set and the shell lets it fail visibly rather than
+                // reloading forever.
+                function recover(why) {
+                    try {
+                        if (sessionStorage.getItem("wiki_recovered")) return;
+                        sessionStorage.setItem("wiki_recovered", why);
+                    } catch (e) { return; }
+                    var done = function () { location.reload(); };
+                    var caches_gone = (window.caches && caches.keys)
+                        ? caches.keys().then(function (keys) {
+                            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+                        }).catch(function () {})
+                        : Promise.resolve();
+                    var worker_gone = (navigator.serviceWorker && navigator.serviceWorker.getRegistrations)
+                        ? navigator.serviceWorker.getRegistrations().then(function (rs) {
+                            return Promise.all(rs.map(function (r) { return r.unregister(); }));
+                        }).catch(function () {})
+                        : Promise.resolve();
+                    Promise.all([caches_gone, worker_gone]).then(done, done);
+                }
+
                 var original = window.fetch;
                 window.fetch = function (input) {
                     // The loader passes whichever of the three the bundler felt
@@ -225,10 +248,29 @@
                     // afterwards goes straight through.
                     window.fetch = original;
                     return result.then(function (response) {
+                        // A bundle that did not arrive, or arrived as something
+                        // else. Reported from the hall as "Failed to load ...
+                        // A ServiceWorker intercepted the request and
+                        // encountered an unexpected error", after which the tab
+                        // stayed broken through reload after reload -- because
+                        // whatever the worker is holding under that URL is what
+                        // it keeps handing back.
+                        //
+                        // The app cannot start from here and nothing it could
+                        // say would help, so the shell clears the ground: drop
+                        // every cache, let go of the worker, and load again.
+                        // Once per tab, marked before the reload, so a site that
+                        // is genuinely down cannot turn this into a loop.
+                        var wasm = (response.headers.get("content-type") || "")
+                            .indexOf("wasm") !== -1;
+                        if (!response.ok || !wasm) recover("bad wasm response");
                         try {
                             if (response.ok && response.body) count(response.clone().body);
                         } catch (e) {}
                         return response;
+                    }, function (err) {
+                        recover("wasm fetch failed");
+                        throw err;
                     });
                 };
             })();
