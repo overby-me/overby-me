@@ -379,7 +379,8 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         };
         let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&iso)).get_time();
         let now = js_sys::Date::now();
-        let deadline = deadline_from_server(then, now, cooldown);
+        let deadline =
+            deadline_from_server(then, now, crate::session::server_clock_offset_ms(), cooldown);
         if deadline > now {
             ready_at.set(deadline);
         }
@@ -387,12 +388,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
 
     // Only what changed, as it changes. A stream carries nothing until something
     // happens, so the cursor starts at mount: the load above covers the past.
-    let since = use_hook(|| {
-        js_sys::Date::new_0()
-            .to_iso_string()
-            .as_string()
-            .unwrap_or_default()
-    });
+    let since = use_hook(crate::session::server_now_iso);
     let stream_id = dom_id.clone();
     let stream = crate::subscription::use_graphql_subscription(graphql::cell_stream(
         graphql::children_of_mime(&canvas_id, "canvas/pixel"),
@@ -708,7 +704,13 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                                     &wasm_bindgen::JsValue::from_str(&iso),
                                 )
                                 .get_time();
-                                deadline_from_server(then, now, cooldown).max(now + 1000.0)
+                                deadline_from_server(
+                                    then,
+                                    now,
+                                    crate::session::server_clock_offset_ms(),
+                                    cooldown,
+                                )
+                                .max(now + 1000.0)
                             }
                             None => now + cooldown as f64 * 1000.0,
                         },
@@ -815,91 +817,90 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                 // The zoom for the stylesheet to multiply by, and the board's
                 // own shape so the window is cut to it rather than to a square.
                 style: "--zoom: {zoom()}; --board-aspect: {cols} / {rows_n};",
-            div {
-                class: "pixel-board-scroll",
-                // Scrollable only when there is something to scroll to. At 1x
-                // the board is sized to the window, and a fraction of a pixel
-                // of rounding was enough to raise a scrollbar on a board that
-                // fits.
-                style: "overflow: {pans};",
-            div {
-                class: "pixel-board-wrap",
-                // The wrapper, not the canvas, carries the zoom: the tooltip is
-                // placed as a percentage of THIS box, so growing the box keeps
-                // the tip on its cell.
-
-                // Leaving is the WRAPPER's business, not the canvas's. The tip
-                // hangs a small gap away from its cell, and that gap belongs to
-                // neither element: crossing it to reach the profile link fired
-                // the canvas's leave and took the tooltip away mid-reach. The
-                // gap is inside the wrapper, so travelling across it never
-                // leaves anything.
-                onpointerleave: on_leave,
-                onpointercancel: on_leave,
-                // Sized by CSS, not by a fixed pixel count: the canvas element's
-                // own width/height attributes are the CELL grid, so the browser
-                // keeps the aspect ratio and a phone gets the whole board scaled
-                // to fit rather than a corner of it.
-                canvas {
-                    id: "{dom_id}",
-                    class: "pixel-board",
-                    width: "{cols}",
-                    height: "{rows_n}",
-                    onclick: on_click,
-                    onpointermove: on_move,
-                    onpointerdown: on_down,
-                    // A finger lifting ends the press wherever it happens; the
-                    // wrapper above handles leaving.
-                    onpointerup: on_up,
-                }
-                        }
-                    }
-                }
-                if let Some(cell) = at {
+                div {
+                    class: "pixel-board-scroll",
+                    // Scrollable only when there is something to scroll to. At 1x
+                    // the board is sized to the window, and a fraction of a pixel
+                    // of rounding was enough to raise a scrollbar on a board that
+                    // fits.
+                    style: "overflow: {pans};",
                     div {
-                        class: "pixel-tip",
-                        style: "{tip_style(cell, cols, rows_n)}",
-                        role: "tooltip",
-                        aria_live: "polite",
-                        // The pointer may travel INTO the tip to reach the
-                        // profile link. The tip only records that it is under
-                        // the pointer — closing stays the wrapper's decision, so
-                        // stepping off the tip back towards the board does not
-                        // shut the thing you are still using.
-                        onpointerenter: move |_| over_tip.set(true),
-                        onpointerleave: move |_| over_tip.set(false),
-                        if let Some(author) = author.clone() {
-                            // A person to go and look at, so the whole line is a
-                            // link: avatar, name, and the cell it is about.
-                            Link {
-                                class: "pixel-tip-who",
-                                to: Route::UserProfile {
-                                    id: author.user_id.clone().unwrap_or_default(),
-                                },
-                                span { class: "avatar small",
-                                    {crate::components::loader::user_avatar(
-                                        &author.avatar_url,
-                                        rsx! { span { class: "material-icons", "person" } },
-                                    )}
+                        class: "pixel-board-wrap",
+                        // The wrapper, not the canvas, carries the zoom: the tooltip is
+                        // placed as a percentage of THIS box, so growing the box keeps
+                        // the tip on its cell.
+
+                        // Leaving is the WRAPPER's business, not the canvas's. The tip
+                        // hangs a small gap away from its cell, and that gap belongs to
+                        // neither element: crossing it to reach the profile link fired
+                        // the canvas's leave and took the tooltip away mid-reach. The
+                        // gap is inside the wrapper, so travelling across it never
+                        // leaves anything.
+                        onpointerleave: on_leave,
+                        onpointercancel: on_leave,
+                        // Sized by CSS, not by a fixed pixel count: the canvas element's
+                        // own width/height attributes are the CELL grid, so the browser
+                        // keeps the aspect ratio and a phone gets the whole board scaled
+                        // to fit rather than a corner of it.
+                        canvas {
+                            id: "{dom_id}",
+                            class: "pixel-board",
+                            width: "{cols}",
+                            height: "{rows_n}",
+                            onclick: on_click,
+                            onpointermove: on_move,
+                            onpointerdown: on_down,
+                            // A finger lifting ends the press wherever it happens; the
+                            // wrapper above handles leaving.
+                            onpointerup: on_up,
+                        }
+                        if let Some(cell) = at {
+                            div {
+                                class: "pixel-tip",
+                                style: "{tip_style(cell, cols, rows_n)}",
+                                role: "tooltip",
+                                aria_live: "polite",
+                                // The pointer may travel INTO the tip to reach the
+                                // profile link. The tip only records that it is under
+                                // the pointer -- closing stays the wrapper's decision, so
+                                // stepping off the tip back towards the board does not
+                                // shut the thing you are still using.
+                                onpointerenter: move |_| over_tip.set(true),
+                                onpointerleave: move |_| over_tip.set(false),
+                                if let Some(author) = author.clone() {
+                                    // A person to go and look at, so the whole line is a
+                                    // link: avatar, name, and the cell it is about.
+                                    Link {
+                                        class: "pixel-tip-who",
+                                        to: Route::UserProfile {
+                                            id: author.user_id.clone().unwrap_or_default(),
+                                        },
+                                        span { class: "avatar small",
+                                            {crate::components::loader::user_avatar(
+                                                &author.avatar_url,
+                                                rsx! { span { class: "material-icons", "person" } },
+                                            )}
+                                        }
+                                        span { class: "pixel-tip-name", "{author.name}" }
+                                    }
+                                    if let Some(when) = when.clone() {
+                                        span { class: "pixel-tip-when",
+                                            {crate::components::loader::relative_time(&when)}
+                                        }
+                                    }
+                                } else if let Some(text) = plain.clone() {
+                                    span { class: "pixel-tip-plain", "{text}" }
                                 }
-                                span { class: "pixel-tip-name", "{author.name}" }
                             }
-                            if let Some(when) = when.clone() {
-                                span { class: "pixel-tip-when",
-                                    {crate::components::loader::relative_time(&when)}
-                                }
-                            }
-                        } else if let Some(text) = plain.clone() {
-                            span { class: "pixel-tip-plain", "{text}" }
                         }
                     }
                 }
-            }
-            }
                 // One place for both things the board has to say: what to do,
                 // and how long until it will listen. On the board rather than
                 // under it, because a line under it is a line the board does
-                // not get -- and only one of them is ever true at a time.
+                // not get -- and only one of them is ever true at a time. In
+                // the FRAME rather than in the zoomed wrapper, so magnifying
+                // the picture does not magnify the words on top of it.
                 if can_paint && (cooling() > 0 || hint()) {
                     div {
                         class: "pixel-hint",
@@ -911,6 +912,9 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                             } else {
                                 "{t(\"pixel.yourTurn\")}"
                             }
+                        }
+                    }
+                }
             }
 
             if can_paint {
@@ -926,7 +930,6 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                         }
                     }
                 }
-
             }
             }
         }
@@ -941,14 +944,19 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
 /// eleven minutes behind the database was told it could paint again in 700
 /// seconds, on a canvas with a ten-second cooldown.
 ///
-/// The rule the client can be sure of is the cooldown itself: however the two
-/// clocks differ, a wait longer than one cooldown from NOW is not a wait, it is
-/// a clock. So the derived deadline is capped at that. The database stays the
+/// So the timestamp is moved onto THIS device's clock first, with the offset the
+/// session already knows (see [`crate::session::server_clock_offset_ms`], the same
+/// one the speaker-list countdown runs on). Everything downstream -- the tick, the
+/// deadline set after a successful placement -- is then honestly in device time.
+///
+/// The cap stays as a second line of defence, because the offset is derived from a
+/// token and can be missing or stale: however the two clocks differ, a wait longer
+/// than one cooldown from NOW is not a wait, it is a clock. The database stays the
 /// authority on whether a placement is taken; this only decides what the button
 /// says and when it offers itself.
-pub fn deadline_from_server(then_ms: f64, now_ms: f64, cooldown_secs: u32) -> f64 {
+pub fn deadline_from_server(then_ms: f64, now_ms: f64, offset_ms: f64, cooldown_secs: u32) -> f64 {
     let full = cooldown_secs as f64 * 1000.0;
-    (then_ms + full).min(now_ms + full)
+    ((then_ms - offset_ms) + full).min(now_ms + full)
 }
 
 /// How many whole seconds are still to wait, from a deadline.
@@ -1069,11 +1077,45 @@ mod tests {
         let now = 1_000_000.0;
         // The device is eleven minutes behind the database.
         let then = now + 660_000.0;
-        assert_eq!(seconds_left(deadline_from_server(then, now, 10), now), 10);
+        assert_eq!(seconds_left(deadline_from_server(then, now, 0.0, 10), now), 10);
         // A device that agrees with the database is unaffected.
-        assert_eq!(seconds_left(deadline_from_server(now - 4_000.0, now, 10), now), 6);
+        assert_eq!(
+            seconds_left(deadline_from_server(now - 4_000.0, now, 0.0, 10), now),
+            6
+        );
         // And one that has already waited it out is free.
-        assert_eq!(seconds_left(deadline_from_server(now - 60_000.0, now, 10), now), 0);
+        assert_eq!(
+            seconds_left(deadline_from_server(now - 60_000.0, now, 0.0, 10), now),
+            0
+        );
+    }
+
+    /// With the offset known, the same skewed phone gets the RIGHT answer, not
+    /// merely a capped one.
+    ///
+    /// The cap above is the fallback for when the session has no token to derive
+    /// an offset from; this is the ordinary path, and it is the whole point of
+    /// sharing the speaker list's mechanism: four seconds into a ten-second
+    /// cooldown is six seconds left, whichever clock the phone happens to keep.
+    #[test]
+    fn a_known_offset_puts_a_skewed_phone_on_the_right_second() {
+        let now = 1_000_000.0;
+        // Eleven minutes behind: the database's "four seconds ago" is stamped
+        // eleven minutes AHEAD of anything this device would call now.
+        let offset = 660_000.0;
+        let then = (now + offset) - 4_000.0;
+        assert_eq!(
+            seconds_left(deadline_from_server(then, now, offset, 10), now),
+            6
+        );
+        // A phone running fast is just as wrong, in the other direction: without
+        // the offset it would be told it may paint immediately.
+        let offset = -660_000.0;
+        let then = (now + offset) - 4_000.0;
+        assert_eq!(
+            seconds_left(deadline_from_server(then, now, offset, 10), now),
+            6
+        );
     }
 
     /// The wait is rounded UP, so the button never reads zero while the database
