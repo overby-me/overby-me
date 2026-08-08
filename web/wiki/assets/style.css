@@ -5283,11 +5283,6 @@ h6,
 	overflow: hidden;
 	white-space: nowrap;
 	opacity: 0;
-	/* A CONSTANT line box. Revealing a name switches it to title-medium at weight
-	   600, and a taller line box in a centre-aligned row re-centres the row: the
-	   whole trail hopped two pixels the moment the pointer touched it. Fixed
-	   here, so the type may change size without the bar moving. */
-	line-height: var(--md-sys-spacing-7);
 	/* On the tonal top app bar (was white on the old green bar). */
 	color: var(--md-on-surface);
 	transition:
