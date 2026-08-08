@@ -1323,8 +1323,8 @@ html {
 
    Compact is untouched: it already flattens every card to an edge-to-edge
    section for exactly this reason. */
-.app-shell:not([data-size-class="compact"]) .card.app-card,
-.app-shell:not([data-size-class="compact"]) .card.app-card:hover {
+.app-shell .card.app-card,
+.app-shell .card.app-card:hover {
 	background: none;
 	box-shadow: none;
 	border-radius: 0;
@@ -1332,6 +1332,9 @@ html {
 	   sticky headers inside an app need to be able to reach the well's edge. */
 	overflow: visible;
 	margin-bottom: 0;
+	/* Compact drew a hairline after each card to keep flat, edge-to-edge cards
+	   apart. An app surface has nothing to be kept apart from: it is the screen. */
+	border-bottom: none;
 }
 /* The pane already pays the side margin, so the app's own padding would be a
    second one. The vertical padding stays: it is the gap under the bar. */
@@ -1347,7 +1350,7 @@ html {
 .app-shell:not([data-size-class="compact"]) .card.app-card > .card-header {
 	padding-inline: 0;
 }
-.app-shell:not([data-size-class="compact"]) .card.app-card .card-header {
+.app-shell .card.app-card .card-header {
 	background: none;
 }
 /* Except a genuine card sitting inside one -- a place on the home screen, a
@@ -1361,8 +1364,10 @@ html {
    against, which is the same thing the header brow was. The avatar and the name
    carry the identity on their own, and they line up with the content below now
    that the inset is gone. */
-.app-shell:not([data-size-class="compact"]) .card.app-card .context-header:not(.has-cover) {
+.app-shell .card.app-card .context-header:not(.has-cover) {
 	background: none;
+}
+.app-shell:not([data-size-class="compact"]) .card.app-card .context-header:not(.has-cover) {
 	padding-inline: 0;
 }
 
