@@ -249,6 +249,14 @@ fn check_trigger_rate_limit(run_info: &ArcMutRuntimeInfo, info: &SocketActivatio
                     "Socket unit {} hit trigger rate limit ({} triggers in {:?}), transitioning to failed",
                     info.socket_id.name, burst, interval
                 );
+                // Console-visible: a socket failing its trigger limit
+                // permanently blocks any Requires= dependent, so surface it to
+                // kmsg (not just the journal) — this is how the udev kernel
+                // socket's coldplug-flood stall manifested.
+                crate::entrypoints::kmsg(&format!(
+                    "socket {} hit trigger rate limit ({}/{:?}), failing",
+                    info.socket_id.name, burst, interval
+                ));
                 guard.result = SocketResult::TriggerLimitHit;
                 guard.sock.activated = true; // prevent further select() triggering
                 true
@@ -486,18 +494,30 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
             }
         }
 
-        // Re-arm the socket if the service did not end up running (e.g.
-        // ConditionPathExistsGlob= failed, or activation error). Without
-        // this, the socket stays activated=true and the select() loop
-        // skips it, preventing future trigger events — which means the
-        // trigger rate limit can never be reached (issue #2467).
-        let should_rearm = if activation_result.is_err() {
-            true
-        } else if let Some(srvc) = unit_table.get(service_id) {
-            let status = srvc.common.status.read_poisoned();
-            !status.is_started() && !matches!(&*status, UnitStatus::Starting)
-        } else {
-            false
+        // Re-arm the socket only if the service's start was rejected
+        // (activation error) or the service has actually run and STOPPED (a
+        // crash-loop the trigger limit should eventually catch). Do NOT re-arm
+        // while the start is still in progress — `NeverStarted` (queued in the
+        // drive but not yet forked) or `Starting`. Re-arming during the
+        // in-flight window sets activated=false and re-polls the socket, so a
+        // high-frequency listener re-triggers on every readable event before
+        // its service finishes starting: the coldplug uevent flood on
+        // systemd-udevd-kernel.socket did exactly this, hitting
+        // TriggerLimitBurst (200/2s) and permanently failing the socket, which
+        // blocked systemd-udevd.service (Requires= it) and hung the whole boot.
+        // Real systemd keeps the socket in its RUNNING state (unpolled) while
+        // the service is activating and only re-listens once it exits.
+        // A transient DependencyError (the service's OTHER deps are not ready
+        // yet — e.g. systemd-udevd.service also Requires= its control socket)
+        // is NOT a reason to re-arm: it resolves on its own once the deps come
+        // up. Re-arming on it re-polls the socket, so the coldplug uevent flood
+        // re-triggers udevd before it can start and trips TriggerLimitBurst.
+        let should_rearm = match &activation_result {
+            Err(e) => !matches!(e.reason, UnitOperationErrorReason::DependencyError(_)),
+            Ok(_) => unit_table
+                .get(service_id)
+                .map(|s| s.common.status.read_poisoned().is_stopped())
+                .unwrap_or(false),
         };
 
         if should_rearm {

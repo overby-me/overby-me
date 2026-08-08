@@ -1812,6 +1812,7 @@ pub fn activate_needed_units_via_job_graph(
         }
         if std::time::Instant::now() > deadline {
             warn!("activate_needed_units_via_job_graph: closure did not drain within 300s");
+            crate::entrypoints::kmsg("JGSTALL DEADLINE: closure did not drain within 300s");
             break;
         }
         tick += 1;
@@ -1833,23 +1834,99 @@ pub fn activate_needed_units_via_job_graph(
             );
             let _ = activate_needed_units(target_id.clone(), run_info.clone());
         }
-        // Diagnostic for the intermittent inc-4 boot stall: every ~5s name the
-        // still-pending jobs (unit=state) via kmsg so a stalled boot identifies
-        // the stuck units and whether they are Waiting (a dep never cleared) or
-        // Running (a start never completed).
-        if tick.is_multiple_of(25) {
-            let pending: Vec<String> = {
-                let reg = jobs.lock().unwrap();
-                reg.iter()
-                    .map(|j| format!("{}={:?}", j.unit.name, j.state))
-                    .collect()
+        // Observability for a slow/stalling boot drain: once the closure has not
+        // drained within ~10s (a normal boot settles well under that; only a
+        // stall reaches here), name the still-pending jobs every ~5s via kmsg so
+        // a stalled boot identifies its stuck units and, for each Waiting job,
+        // the deps it is blocked on and their status. Chunked to stay under the
+        // ~1KB kmsg LOG_LINE_MAX (a full one-line dump overflows and is dropped).
+        // Quiet on a healthy boot (drains before tick 50).
+        if tick >= 50 && tick.is_multiple_of(25) {
+            let status_tag = |ri: &RuntimeInfo, u: &UnitId| -> &'static str {
+                match ri.unit_table.get(u).map(|x| x.common.status.read_poisoned().clone()) {
+                    None => "gone",
+                    Some(UnitStatus::NeverStarted) => "NS",
+                    Some(UnitStatus::Starting) => "ing",
+                    Some(UnitStatus::Stopping) => "stopping",
+                    Some(UnitStatus::Restarting) => "restarting",
+                    Some(UnitStatus::Started(_)) => "OK",
+                    Some(UnitStatus::Stopped(_, ref e)) if e.is_empty() => "stop",
+                    Some(UnitStatus::Stopped(_, _)) => "FAIL",
+                }
             };
+            let (pending, ready_stuck, failed): (Vec<String>, Vec<String>, Vec<String>) = {
+                let ri = dispatcher_read(&run_info);
+                let reg = jobs.lock().unwrap();
+                let set: Vec<UnitId> = reg.iter().map(|j| j.unit.clone()).collect();
+                let mut pending = Vec::new();
+                let mut ready_stuck = Vec::new();
+                // A blocker whose status is Stopped-with-errors is the true sink
+                // of the stall (e.g. a required socket that failed to activate
+                // permanently blocks its dependent). Record its error reason so
+                // the trace names WHY it failed, not just that it did.
+                let mut failed: std::collections::BTreeMap<String, String> =
+                    std::collections::BTreeMap::new();
+                for j in reg.iter() {
+                    if j.state == crate::units::jobs::JobState::Waiting {
+                        let blockers = unstarted_deps(&j.unit, &ri, Some(&set));
+                        // Smoking gun: a Waiting job that is actually ready
+                        // (empty blockers, not a Device) but never dispatched
+                        // => an enqueue_ready / pop_ready / Phase-2 bug, not a
+                        // genuine dep chain.
+                        if blockers.is_empty()
+                            && !matches!(j.unit.kind, crate::units::UnitIdKind::Device)
+                        {
+                            ready_stuck.push(j.unit.name.clone());
+                        }
+                        let names: Vec<String> = blockers
+                            .iter()
+                            .map(|b| format!("{}:{}", b.name, status_tag(&ri, b)))
+                            .collect();
+                        for b in &blockers {
+                            if let Some(UnitStatus::Stopped(_, errs)) = ri
+                                .unit_table
+                                .get(b)
+                                .map(|x| x.common.status.read_poisoned().clone())
+                                && !errs.is_empty()
+                                && !failed.contains_key(&b.name)
+                            {
+                                let mut reason = format!("{errs:?}");
+                                reason.truncate(400);
+                                failed.insert(b.name.clone(), reason);
+                            }
+                        }
+                        pending.push(format!("{}=W<-[{}]", j.unit.name, names.join(",")));
+                    } else {
+                        pending.push(format!("{}={:?}", j.unit.name, j.state));
+                    }
+                }
+                let failed: Vec<String> =
+                    failed.into_iter().map(|(n, r)| format!("{n}: {r}")).collect();
+                (pending, ready_stuck, failed)
+            };
+            for f in &failed {
+                crate::entrypoints::kmsg(&format!("JGSTALL FAIL {f}"));
+            }
+            // kmsg has a ~1KB per-line limit (LOG_LINE_MAX); the full pending
+            // dump for a ~29-unit closure overflows it and the kernel drops the
+            // payload, so the message renders empty and the stall is both
+            // unreadable AND undetectable. Emit a short header (always
+            // greppable via the "JGSTALL" tag) plus the blocker graph in small
+            // chunks (<=5 units/line) so every line fits.
             crate::entrypoints::kmsg(&format!(
-                "JOB-GRAPH pending after {}s ({}): {:?}",
-                tick / 5,
+                "JGSTALL t={} jobs={} readystuck={:?}",
+                tick,
                 pending.len(),
-                pending
+                ready_stuck
             ));
+            for (ci, chunk) in pending.chunks(5).enumerate() {
+                crate::entrypoints::kmsg(&format!(
+                    "JGSTALL t={} c{}: {}",
+                    tick,
+                    ci,
+                    chunk.join(" | ")
+                ));
+            }
         }
         // Recovery net (the flag-on analogue of the flag-off
         // `spawn_active_goal_redrive` thread, which flag-on skips): every ~2s,

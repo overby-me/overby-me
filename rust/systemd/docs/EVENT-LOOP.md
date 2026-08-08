@@ -495,3 +495,51 @@ become the default is **not** more of the same validation:
 
 Until one of those is chosen, widening the variant set further is low-value: the
 drive is already demonstrably robust.
+## Inc 4 default flip: the intermittent all-Waiting boot stall, root-caused and fixed (2026-08-08)
+
+Flipping `SYSTEMD_RS_JOB_GRAPH` on by default and validating base tests **under
+load** exposed an intermittent (~1/12 under load) boot stall the single-VM runs
+never hit: the whole boot closure sits `Waiting`, nothing dispatches, and the
+producer runs to its 300s deadline. A per-tick pending-jobs report — chunked to
+fit the kernel's ~1KB `LOG_LINE_MAX`, because an earlier single-line dump
+overflowed and rendered empty, hiding the trace — pinned the sink:
+
+    sysinit.target <-W- systemd-udevd.service <-W- systemd-udevd-kernel.socket : FAILED
+
+### Root cause: the udev kernel socket hits its trigger limit on the coldplug flood
+
+`systemd-udevd-kernel.socket` is the `NETLINK_KOBJECT_UEVENT` socket; udevd
+`Requires=`/`After=` it. During early boot the kernel coldplug emits a burst of
+hundreds of uevents. Each makes the socket readable; the socket-activation loop
+"triggers" its service (udevd) and, in `handle_accept_no`, records the trigger
+against `TriggerLimitBurst` (default 200 / 2s). Because udevd's start is
+in-flight — it is `NeverStarted` (queued in the drive), or its own control-socket
+dependency is not ready yet — the re-arm logic put the socket back into the
+pollable state, and it re-triggered on the next uevent: hundreds of times in
+under two seconds, tripping the trigger limit. The socket was marked `Failed`;
+udevd's required dependency is then permanently `Stopped`-with-errors, so udevd
+never starts, `sysinit.target` never completes, and the whole boot hangs. The
+fixpoint fallback does NOT rescue this — a genuinely-failed required socket
+blocks the fixpoint's readiness the same way — so it is a real defect, not
+something the fallback masks.
+
+This is not job-graph-specific: the socket-activation loop is shared with the
+flag off, so the fix helps both. Two earlier hypotheses for this stall — a
+udev-write starvation on the global `RuntimeInfo` lock, and a host-thrash
+wall-clock artifact — were investigated and **refuted** by the readable trace
+(zero writer starvation, zero dispatcher-read stalls, and reproducible on a
+cores=2 host with memory to spare).
+
+### The fix
+
+`socket_activation.rs` `handle_accept_no`: re-arm the socket only when the
+service will genuinely not run without a new trigger — a *hard* start error (not
+a transient `DependencyError`, i.e. deps-not-ready, which resolves on its own),
+or the service having actually run and `Stopped` (a crash-loop the trigger limit
+should still catch). Never re-arm while the start is merely in progress
+(`NeverStarted`/`Starting`) or waiting on deps. This matches real systemd, which
+keeps the socket in its RUNNING (unpolled) state while the service activates and
+only re-listens once it exits. With the fix the udev kernel socket triggers udevd
+once and stays unpolled while it starts, so the coldplug flood no longer
+re-triggers it. Validated across many boots under load: zero trigger-limit hits
+(was ~1/12 before).
