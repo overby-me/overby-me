@@ -1701,23 +1701,40 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
         let filter_c = filter.clone();
         let errors_c = errors.clone();
         pool.execute(move || {
-            // inc-5: run a mount's blocking mount(2) syscall OFF the global
-            // RuntimeInfo read guard. Holding the read across a slow mount pins
-            // it for the whole syscall, which under load starves the global
-            // writer (udev device-plug writes) and fragilizes activation. Clone
-            // the mount config under a brief read, DROP the guard, run the mount
-            // guard-free, then re-acquire briefly to publish the unit's status
-            // and wake the dispatcher (whose Phase-1 scan retires the job).
-            let mount_conf = {
+            // inc-5: run a mount's mount(2) / a swap's swapon(2) blocking
+            // syscall OFF the global RuntimeInfo read guard. Holding the read
+            // across a slow mount/swap pins it for the whole syscall, which
+            // under load starves the global writer (udev device-plug writes) and
+            // fragilizes activation. Clone the config under a brief read, DROP
+            // the guard, run the syscall guard-free, then re-acquire briefly to
+            // publish the unit's status and wake the dispatcher (whose Phase-1
+            // scan retires the job).
+            enum BlockingKind {
+                Mount(crate::units::unit::MountConfig),
+                Swap(crate::units::unit::SwapConfig),
+            }
+            let blocking = {
                 let ri = dispatcher_read(&run_info_c);
                 match ri.unit_table.get(&unit_id).map(|u| &u.specific) {
-                    Some(crate::units::Specific::Mount(m)) => Some(m.conf.clone()),
+                    Some(crate::units::Specific::Mount(m)) => {
+                        Some(BlockingKind::Mount(m.conf.clone()))
+                    }
+                    Some(crate::units::Specific::Swap(s)) => {
+                        Some(BlockingKind::Swap(s.conf.clone()))
+                    }
                     _ => None,
                 }
             };
-            if let Some(conf) = mount_conf {
+            if let Some(kind) = blocking {
                 let scratch = std::sync::RwLock::new(UnitStatus::Starting);
-                let result = crate::units::unit::activate_mount(&unit_id, &conf, &scratch);
+                let result = match &kind {
+                    BlockingKind::Mount(c) => {
+                        crate::units::unit::activate_mount(&unit_id, c, &scratch)
+                    }
+                    BlockingKind::Swap(c) => {
+                        crate::units::unit::activate_swap(&unit_id, c, &scratch)
+                    }
+                };
                 let final_status = scratch.into_inner().unwrap_or(UnitStatus::Starting);
                 {
                     let ri = dispatcher_read(&run_info_c);

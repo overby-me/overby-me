@@ -2538,7 +2538,7 @@ fn is_already_swapped(_what: &str) -> bool {
 /// The `Priority=` setting is passed via the `SWAP_FLAG_PREFER` flag and the
 /// priority value encoded in the flags argument to swapon(2).
 #[cfg(target_os = "linux")]
-fn activate_swap(
+pub(crate) fn activate_swap(
     id: &UnitId,
     conf: &SwapConfig,
     status: &RwLock<UnitStatus>,
@@ -2639,7 +2639,7 @@ fn activate_swap(
 /// Non-Linux stub for swap activation — always succeeds and marks the unit
 /// as started.
 #[cfg(not(target_os = "linux"))]
-fn activate_swap(
+pub(crate) fn activate_swap(
     id: &UnitId,
     _conf: &SwapConfig,
     status: &RwLock<UnitStatus>,
