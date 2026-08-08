@@ -1301,6 +1301,13 @@ html {
 
 /* DESIGN (an app is not a card): the outermost surface of an app view.
 
+   Written `.card.app-card` for its WEIGHT, not for the sake of it. The density
+   preference tightens every card's margin from a rule further down the sheet,
+   and at equal weight the later rule wins -- so at compact density the surface
+   kept a 10px margin at rest and lost it to the heavier `:hover` variant of this
+   one, which dropped everything below it by ten pixels the moment the pointer
+   crossed the app. The same tie was quietly restoring the side padding.
+
    A card contains ONE subject among siblings you can compare or tap; its fill,
    its radius and its shadow all say "this is one of several". Every app view
    opened with a card all the same, and on a desktop page that card was the only
@@ -1317,8 +1324,8 @@ html {
 
    Compact is untouched: it already flattens every card to an edge-to-edge
    section for exactly this reason. */
-.app-shell:not([data-size-class="compact"]) .app-card,
-.app-shell:not([data-size-class="compact"]) .app-card:hover {
+.app-shell:not([data-size-class="compact"]) .card.app-card,
+.app-shell:not([data-size-class="compact"]) .card.app-card:hover {
 	background: none;
 	box-shadow: none;
 	border-radius: 0;
@@ -1329,7 +1336,7 @@ html {
 }
 /* The pane already pays the side margin, so the app's own padding would be a
    second one. The vertical padding stays: it is the gap under the bar. */
-.app-shell:not([data-size-class="compact"]) .app-card > .card-content {
+.app-shell:not([data-size-class="compact"]) .card.app-card > .card-content {
 	padding-inline: 0;
 }
 /* The header loses the inset that only made sense inside a card, so an app's
@@ -1338,15 +1345,15 @@ html {
    into the body, which needs a card top to tint. On a flat surface it is a green
    rectangle with square corners floating in the well, which is the same reason
    compact dropped it. The accent still reads, from the avatar it sits beside. */
-.app-shell:not([data-size-class="compact"]) .app-card > .card-header {
+.app-shell:not([data-size-class="compact"]) .card.app-card > .card-header {
 	padding-inline: 0;
 }
-.app-shell:not([data-size-class="compact"]) .app-card .card-header {
+.app-shell:not([data-size-class="compact"]) .card.app-card .card-header {
 	background: none;
 }
 /* Except a genuine card sitting inside one -- a place on the home screen, a
    canvas in the picker. It is still a card, so it still has a top to tint. */
-.app-shell:not([data-size-class="compact"]) .app-card .card:not(.app-card) .card-header {
+.app-shell:not([data-size-class="compact"]) .card.app-card .card:not(.app-card) .card-header {
 	background: var(--card-brow);
 }
 
@@ -1355,7 +1362,7 @@ html {
    against, which is the same thing the header brow was. The avatar and the name
    carry the identity on their own, and they line up with the content below now
    that the inset is gone. */
-.app-shell:not([data-size-class="compact"]) .app-card .context-header:not(.has-cover) {
+.app-shell:not([data-size-class="compact"]) .card.app-card .context-header:not(.has-cover) {
 	background: none;
 	padding-inline: 0;
 }
@@ -1363,7 +1370,7 @@ html {
 /* The cover photo kept its rounded corners by being clipped to the card's; with
    the card flat it has to hold its own shape, which is what an image on a plain
    surface wants anyway. */
-.app-shell:not([data-size-class="compact"]) .app-card .content-hero {
+.app-shell:not([data-size-class="compact"]) .card.app-card .content-hero {
 	border-radius: var(--md-sys-shape-corner-large);
 }
 
