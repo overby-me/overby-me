@@ -7967,29 +7967,15 @@ a.list-item:hover {
 	background: var(--md-surface-container-low);
 }
 
-/* A grid, not a wrapping flex row, and centred.
-   Flex wrapped on the base size and then grew what was left, so the last row's
-   swatches came out fatter than the rest -- and a row that grows to fill cannot
-   be centred, because it is always full. A grid fits as many equal tracks as
-   there is room for, keeps every row the same, and centres what is left over. */
+/* Centred, and every swatch the same size.
+   A grid was tried first and gets the row count right, but CSS grid cannot
+   centre a partial last row: the items sit in tracks, and the tracks start at
+   the left. Flex can centre every line it makes. So the swatches take a fixed
+   size instead of sharing the row -- small enough that a palette of twenty-six
+   still comes to one or two rows rather than three, and large enough to press. */
 .pixel-palette {
-	display: grid;
-	/* A definite width, which auto-fit needs to know how many tracks fit. Its
-	   parent centres what it holds, so the palette was sized shrink-to-fit --
-	   and against an indefinite width `repeat(auto-fit, ...)` degenerates to a
-	   single track. That is how twenty-six swatches ended up in a column 32px
-	   wide, with the stylesheet, the grid and the tracks all correct. */
-	width: 100%;
-	/* Literal sizes, not tokens: a custom property inside minmax() that fails to
-	   resolve takes the whole declaration down with it at computed-value time,
-	   and the grid falls back to a single column -- which is what happened here,
-	   twenty-six swatches in a column a thousand pixels tall. */
-	/* The max must be FLEXIBLE. auto-fit counts how many repetitions fit using
-	   the track's max when that max is a fixed length, so minmax(22px, 32px)
-	   asked "how many 32s fit" -- 23 in a 902px palette, and 26 swatches then
-	   need two rows. With 1fr it counts by the minimum instead, fits all 26,
-	   and shares the leftover between them. */
-	grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
+	display: flex;
+	flex-wrap: wrap;
 	justify-content: center;
 	gap: var(--md-sys-spacing-1-5);
 }
@@ -8008,18 +7994,12 @@ a.list-item:hover {
 }
 
 .pixel-swatch {
-	/* The track decides how wide, up to a point: a swatch on a very wide palette
-	   should not become a tile. Centred in its track, so a capped swatch sits
-	   under the one above it. */
-	/* Fill the track, then cap. `width: auto` with `justify-self: center` sizes
-	   a grid item to its CONTENT, and a button with no content in it is four
-	   pixels of border -- which is what the swatches became. */
-	width: 100%;
-	height: auto;
-	min-width: 0;
-	max-width: var(--md-sys-spacing-8);
-	justify-self: center;
-	aspect-ratio: 1;
+	/* 24px, not 32: twenty-six of them at 32 wanted 982px and wrapped to three
+	   rows, which the board wanted back. Fixed rather than flexible, so every
+	   row is the same and a short last row can be centred with the rest. */
+	width: 24px;
+	height: 24px;
+	flex: 0 0 auto;
 	border: 2px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
 	padding: 0;
