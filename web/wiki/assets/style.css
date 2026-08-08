@@ -7967,9 +7967,15 @@ a.list-item:hover {
 	background: var(--md-surface-container-low);
 }
 
+/* A grid, not a wrapping flex row, and centred.
+   Flex wrapped on the base size and then grew what was left, so the last row's
+   swatches came out fatter than the rest -- and a row that grows to fill cannot
+   be centred, because it is always full. A grid fits as many equal tracks as
+   there is room for, keeps every row the same, and centres what is left over. */
 .pixel-palette {
-	display: flex;
-	flex-wrap: wrap;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(22px, var(--md-sys-spacing-8)));
+	justify-content: center;
 	gap: var(--md-sys-spacing-1-5);
 }
 
@@ -7987,20 +7993,11 @@ a.list-item:hover {
 }
 
 .pixel-swatch {
-	/* Share the row and shrink to fit it. Twenty-six swatches at a fixed 32px
-	   need 982px and the palette has 630-782px, so they wrapped to three rows
-	   and took 114px of the screen the board wanted. Sharing the row costs them
-	   a few pixels each and gives the board back most of that.
-	   The floor is what a finger still hits; below it they wrap as before. */
-	/* The basis is the FLOOR, not the preferred size: a wrapping flex line is
-	   broken using the base size and only then are the items shrunk, so a 32px
-	   basis wrapped to two rows and then politely shrank them to 22px on a row
-	   that had space for all of them. Starting at 22 they fit, then grow. */
-	flex: 1 1 22px;
-	min-width: 22px;
-	max-width: var(--md-sys-spacing-8);
-	aspect-ratio: 1;
+	/* The track decides how wide; the swatch stays square inside it. */
+	width: auto;
 	height: auto;
+	min-width: 0;
+	aspect-ratio: 1;
 	border: 2px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
 	padding: 0;
