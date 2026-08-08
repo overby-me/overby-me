@@ -1896,6 +1896,12 @@ struct Line {
     /// Set when it is a flat line the page drew, carrying how much of the page's
     /// width it spanned. Same idea: it belongs where it was drawn.
     rule: Option<f64>,
+    /// The gap before the line's last word, in multiples of its type size.
+    ///
+    /// What tells a contents row from a sentence when there are no leader dots
+    /// to go by: "Ledelsespåtegning" and its "4" are a third of the page apart,
+    /// and nothing in the text says so.
+    tail_gap: f64,
 }
 
 /// Group runs into lines by baseline, then join each line left to right,
@@ -1970,6 +1976,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
     let first = runs.first()?;
     let mut spans: Vec<Span> = Vec::new();
     let mut prev_end = f64::NEG_INFINITY;
+    let mut tail_gap = 0.0_f64;
     let mut size: f64 = 0.0;
     let mut sorted: Vec<&Run> = runs.iter().collect();
     sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
@@ -1978,6 +1985,9 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         // Compared against the pen's TRUE end, not a guess from the character
         // count, which is what put spaces inside words. See [`WORD_GAP`].
         let gap = run.x - prev_end;
+        if prev_end.is_finite() && run.size > 0.0 {
+            tail_gap = gap / run.size;
+        }
         let wants_space = prev_end.is_finite()
             && gap > run.size * word_gap()
             && !spans.last().is_some_and(|s| s.text.ends_with(' '));
@@ -2032,6 +2042,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         text,
         spans,
         rule: None,
+        tail_gap,
         left,
         // Filled in by the caller, which is the only place that knows.
         page: 0,
@@ -2148,38 +2159,64 @@ fn is_index_entry(text: &str) -> bool {
         .any(|w| w.iter().all(|b| *b == b'.'))
 }
 
+/// How wide a gap says "contents row" rather than "sentence", in type sizes.
+///
+/// A word space is about a quarter of the size and the widest justified space
+/// rarely reaches one. Two and a half is a gap nothing sets by accident: on the
+/// annual report's contents page the entries and their numbers are a third of
+/// the page apart.
+const CONTENTS_GAP: f64 = 2.5;
+
 /// Split a table-of-contents row into what it names and the page it names.
 ///
-/// Read from the end, because that is where the certainty is: a number, then the
-/// leader that carried the eye to it. Anything else is a sentence that happens to
+/// Read from the end, because that is where the certainty is: a number, then
+/// whatever carried the eye to it. Anything else is a sentence that happens to
 /// end in a digit, and left alone.
-fn index_entry(text: &str) -> Option<(&str, &str)> {
+///
+/// Two kinds of carrier. Leader dots, which say so in the text. And plain
+/// space, which says it only in the geometry -- the annual report's contents
+/// page sets "Ledelsespåtegning" and its "4" a third of the page apart with
+/// nothing between them, and read as text that is a sentence ending in a digit.
+/// `gap` is how far apart the last two words were, in type sizes, which is the
+/// only place that distinction survives.
+fn index_entry(text: &str, gap: f64) -> Option<(&str, &str)> {
     let trimmed = text.trim_end();
-    let digits_start = trimmed
+    // A page, or a range of them: "13", "5 - 10", "17 - 25".
+    let tail_start = trimmed
         .char_indices()
         .rev()
-        .take_while(|(_, c)| c.is_ascii_digit())
+        .take_while(|(_, c)| c.is_ascii_digit() || matches!(c, ' ' | '-' | '\u{2013}'))
         .last()
         .map(|(i, _)| i)?;
-    let page = &trimmed[digits_start..];
-    // A page number, not a year in a title and not a whole line of digits.
-    if page.len() > 4 {
+    let page = trimmed[tail_start..].trim();
+    if page.is_empty() || !page.ends_with(|c: char| c.is_ascii_digit()) {
         return None;
     }
-    let lead = trimmed[..digits_start].trim_end();
-    // The leader itself: dots, with whatever spacing the file set them in.
+    // A page number, not a year in a title and not a whole line of digits.
+    if page.chars().filter(char::is_ascii_digit).count() > 5 || page.len() > 9 {
+        return None;
+    }
+    let lead = trimmed[..tail_start].trim_end();
     let dots = lead
         .chars()
         .rev()
         .take_while(|c| matches!(c, '.' | '\u{00B7}' | '\u{2024}' | '\u{2026}' | ' '))
         .filter(|c| *c != ' ')
         .count();
-    if dots < 3 {
+    let by_dots = dots >= 3;
+    if !by_dots && gap < CONTENTS_GAP {
         return None;
     }
-    let title = lead
-        .trim_end_matches([' ', '.', '\u{00B7}', '\u{2024}', '\u{2026}'])
-        .trim();
+    // Only strip a leader that is actually there. "Foreningsoplysninger m.v."
+    // ends in a full stop that belongs to the abbreviation, and a row carried by
+    // a gap has no leader to remove -- taking the dots off both alike turned it
+    // into "Foreningsoplysninger m.v".
+    let title = match by_dots {
+        true => lead
+            .trim_end_matches([' ', '.', '\u{00B7}', '\u{2024}', '\u{2026}'])
+            .trim(),
+        false => lead.trim(),
+    };
     match title.is_empty() {
         true => None,
         false => Some((title, page)),
@@ -2483,10 +2520,15 @@ fn blocks_from(
     // centred too, and a left paragraph's last line is short without meaning
     // anything by it.
     let mut para_lines: Vec<(f64, f64)> = Vec::new();
+    // The gap before the last word of the line being built, carried the way the
+    // drawn bullet is: it is a property of the LINE and the decision it feeds is
+    // made about the block.
+    let mut para_gap = 0.0_f64;
     let flush = |para: &mut Vec<Span>,
                  size: f64,
                  geometry: &mut Vec<(f64, f64)>,
                  bullet: &mut Option<String>,
+                 gap: &mut f64,
                  blocks: &mut Vec<Block>| {
         let drawn_bullet = bullet.take();
         let align = alignment_of(geometry, col_left, column, size);
@@ -2509,7 +2551,8 @@ fn blocks_from(
             return;
         }
         let text: String = spans.iter().map(|s| s.text.as_str()).collect();
-        if let Some((title, page)) = index_entry(&text) {
+        let tail = std::mem::take(gap);
+        if let Some((title, page)) = index_entry(&text, tail) {
             let keep = title.chars().count();
             let page = page.to_string();
             blocks.push(Block::IndexEntry {
@@ -2574,6 +2617,7 @@ fn blocks_from(
                 para_size,
                 &mut para_lines,
                 &mut para_bullet,
+                &mut para_gap,
                 &mut blocks,
             );
             prev = None;
@@ -2588,6 +2632,7 @@ fn blocks_from(
                 para_size,
                 &mut para_lines,
                 &mut para_bullet,
+                &mut para_gap,
                 &mut blocks,
             );
             blocks.push(Block::PageBreak {
@@ -2604,6 +2649,7 @@ fn blocks_from(
                 para_size,
                 &mut para_lines,
                 &mut para_bullet,
+                &mut para_gap,
                 &mut blocks,
             );
             blocks.push(Block::Image(picture.clone()));
@@ -2618,6 +2664,7 @@ fn blocks_from(
                 para_size,
                 &mut para_lines,
                 &mut para_bullet,
+                &mut para_gap,
                 &mut blocks,
             );
             blocks.push(Block::Rule { width });
@@ -2657,6 +2704,10 @@ fn blocks_from(
                 let apart = gap > p.size * 1.6
                     || (line.size - p.size).abs() > p.size * 0.15
                     || is_index_entry(&line.text)
+                    // The same row without leader dots: the page number is a
+                    // third of the page away and only the geometry says so.
+                    || (line.tail_gap >= CONTENTS_GAP
+                        && index_entry(&line.text, line.tail_gap).is_some())
                     || list_marker(&line.text).is_some()
                     // A bullet the page DREW starts an item as surely as one
                     // written in the text does, and without this a whole list
@@ -2677,6 +2728,7 @@ fn blocks_from(
                 para_size,
                 &mut para_lines,
                 &mut para_bullet,
+                &mut para_gap,
                 &mut blocks,
             );
         }
@@ -2700,6 +2752,11 @@ fn blocks_from(
         }
         para.extend(line.spans.iter().cloned());
         para_lines.push((line.left, line.right));
+        // The last line's gap is the block's: a contents row is one line, and a
+        // paragraph that happens to end in a number did not leave a hole before
+        // it. Taking the last rather than the widest keeps a table row from
+        // being read as a contents entry for having columns.
+        para_gap = line.tail_gap;
         prev = Some(line);
     }
     flush(
@@ -2707,6 +2764,7 @@ fn blocks_from(
         para_size,
         &mut para_lines,
         &mut para_bullet,
+        &mut para_gap,
         &mut blocks,
     );
     blocks
@@ -3278,6 +3336,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 bullet: None,
                 picture: Some(picture),
                 rule: None,
+                tail_gap: 0.0,
             });
         }
         // And so does a line the page drew. A rule that turned out to be an
@@ -3301,6 +3360,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 bullet: None,
                 picture: None,
                 rule: Some(width),
+                tail_gap: 0.0,
             });
         }
         lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
@@ -4264,6 +4324,38 @@ mod harness {
 
 #[cfg(test)]
 mod tests {
+    /// A contents row whose leader is empty space, not dots.
+    ///
+    /// The annual report's contents page sets each entry against a page number
+    /// at the right margin with nothing in between, so as text it is a sentence
+    /// that ends in a digit -- which is exactly what the dot rule refuses to
+    /// touch. The gap is the only place the distinction survives.
+    #[test]
+    fn a_contents_row_can_be_carried_by_the_gap_alone() {
+        let wide = super::CONTENTS_GAP + 1.0;
+        assert_eq!(
+            super::index_entry("Ledelsespåtegning 4", wide),
+            Some(("Ledelsespåtegning", "4"))
+        );
+        // A range of pages is a page too.
+        assert_eq!(
+            super::index_entry("Den uafhængige revisors erklæring 5 - 10", wide),
+            Some(("Den uafhængige revisors erklæring", "5 - 10"))
+        );
+        // The abbreviation keeps its full stop: there is no leader to strip.
+        assert_eq!(
+            super::index_entry("Foreningsoplysninger m.v. 3", wide),
+            Some(("Foreningsoplysninger m.v.", "3"))
+        );
+        // Without the gap it is a sentence that happens to end in a number.
+        assert_eq!(super::index_entry("Vi var 12", 0.5), None);
+        // And a leader still works with no gap to speak of.
+        assert_eq!(
+            super::index_entry("Kampsange...........3", 0.0),
+            Some(("Kampsange", "3"))
+        );
+    }
+
     /// A rule that separated something is content; one under a word is not.
     ///
     /// The 2024 annual report draws a half-width rule over every subtotal --
@@ -4283,6 +4375,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         let lines = vec![line(100.0, 50.0, 300.0)];
         let rule = |x0: f64, x1: f64, y: f64| super::Rule { x0, x1, y, thickness: 0.5 };
@@ -4516,6 +4609,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         }
     }
 
@@ -4758,6 +4852,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         // Column runs to 400. The first line stops at 180, far short of it.
         let blocks = blocks_from(
@@ -4961,6 +5056,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         let blocks = blocks_from(
             vec![
@@ -5169,17 +5265,17 @@ mod tests {
     #[test]
     fn a_contents_row_splits_into_what_it_names_and_where() {
         assert_eq!(
-            index_entry("Kampsange....................3"),
+            index_entry("Kampsange....................3", 0.0),
             Some(("Kampsange", "3"))
         );
         // The file may leave a space before the leader, or none before the
         // number, and both are the same row.
         assert_eq!(
-            index_entry("Radikal Ungdoms holdning til rigsfællesskabet .........19"),
+            index_entry("Radikal Ungdoms holdning til rigsfællesskabet .........19", 0.0),
             Some(("Radikal Ungdoms holdning til rigsfællesskabet", "19"))
         );
         assert_eq!(
-            index_entry("Internationale................................9"),
+            index_entry("Internationale................................9", 0.0),
             Some(("Internationale", "9"))
         );
     }
@@ -5187,15 +5283,15 @@ mod tests {
     /// And a sentence that merely ends in a digit is left alone.
     #[test]
     fn prose_is_not_a_contents_row() {
-        assert_eq!(index_entry("Vi mødes i 2025"), None);
+        assert_eq!(index_entry("Vi mødes i 2025", 0.0), None);
         assert_eq!(
-            index_entry("Der var engang… 7"),
+            index_entry("Der var engang… 7", 0.0),
             None,
             "one ellipsis is not a leader"
         );
-        assert_eq!(index_entry("1. maj 2025"), None);
-        assert_eq!(index_entry("Kampsange...."), None, "no page, no row");
-        assert_eq!(index_entry("....7"), None, "no title, no row");
+        assert_eq!(index_entry("1. maj 2025", 0.0), None);
+        assert_eq!(index_entry("Kampsange....", 0.0), None, "no page, no row");
+        assert_eq!(index_entry("....7", 0.0), None, "no title, no row");
     }
 
     /// The margin is near the end of the range, not a tenth down it: a book of
@@ -5213,6 +5309,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         // The songbook: a hundred short verse lines, and a contents list whose
         // rows all run to the margin. A tenth down the range gave 392 and the
@@ -5248,6 +5345,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         // Single-spaced at 18.8, as the songbook sets them, then a blank line
         // before the next stanza. The prose line at the top is what sets the
@@ -5343,6 +5441,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         // The alkoholpolitik: the line stops sixty points short because
         // "internationale" is what comes next, and it does not fit.
@@ -5405,6 +5504,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         // The alkoholpolitik: a title and three lines at the margin, and forty
         // in a list one step in. A tenth percentile lands on the LIST, which
@@ -5455,6 +5555,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         let folio = |page: usize, text: &str| Line {
             y: 37.7,
@@ -5467,6 +5568,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
             .map(|p| {
@@ -5504,6 +5606,7 @@ mod tests {
             bullet: None,
             picture: None,
             rule: None,
+            tail_gap: 0.0,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
             .map(|p| {
