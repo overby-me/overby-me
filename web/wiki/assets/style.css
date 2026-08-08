@@ -8011,7 +8011,10 @@ a.list-item:hover {
 	/* The track decides how wide, up to a point: a swatch on a very wide palette
 	   should not become a tile. Centred in its track, so a capped swatch sits
 	   under the one above it. */
-	width: auto;
+	/* Fill the track, then cap. `width: auto` with `justify-self: center` sizes
+	   a grid item to its CONTENT, and a button with no content in it is four
+	   pixels of border -- which is what the swatches became. */
+	width: 100%;
 	height: auto;
 	min-width: 0;
 	max-width: var(--md-sys-spacing-8);
