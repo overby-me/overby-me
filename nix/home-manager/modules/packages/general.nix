@@ -33,8 +33,18 @@
       kooha
       rustdesk-flutter
     ]
-    # Linux x86_64-only (not available on Darwin or aarch64).
+    # Linux x86_64-only.  euro-office would evaluate on aarch64 as well, but
+    # it builds CEF and the editor core from source, which is not something to
+    # hand an emulated builder or the tablet itself.  The
+    # onlyoffice-desktopeditors it replaces was x86_64-only too, so the office
+    # suite stays where it already was.
+    #
+    # `.app` rather than the bare attribute: nix/pkgs/euro-office/default.nix
+    # resolves the top level to the data bundle (fonts, dictionaries,
+    # templates) so the flake's package set stays green everywhere, and hangs
+    # the real application off passthru.  Installing the bare attribute gets
+    # you no editors at all.
     ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) [
-      onlyoffice-desktopeditors
+      euro-office.app
     ];
 }
