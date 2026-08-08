@@ -269,17 +269,19 @@ pub fn MimeLoader(
     match mime_id {
         "wiki/folder" => rsx! { FolderApp { node: node.clone(), parent_path: path, projector } },
         "wiki/document" if projector => rsx! { ContentApp { node: node.clone() } },
+        // Comments UNDER the text, not beside it. The supporting pane stands a
+        // thread next to the primary content once the column is wide enough,
+        // which is right for a console or a profile, where the thread is part of
+        // the work. Reading is not that: the split takes the width off the
+        // reading column at exactly the sizes that could have given it more, and
+        // it arrives without warning -- one window drag and the article is
+        // narrower and a conversation has appeared at its shoulder. The file
+        // viewer made this call already, for the same reason.
         "wiki/document" => rsx! {
-            super::widgets::SupportingPaneLayout {
-                primary: rsx! {
-                    ContentApp { node: node.clone() }
-                },
-                supporting: rsx! {
-                    super::comments::CommentSection {
-                        node_id: node.id.0.clone(),
-                        context_id: node.context_id.as_ref().map(|u| u.0.clone()),
-                    }
-                },
+            ContentApp { node: node.clone() }
+            super::comments::CommentSection {
+                node_id: node.id.0.clone(),
+                context_id: node.context_id.as_ref().map(|u| u.0.clone()),
             }
         },
         "wiki/file" => rsx! { FileApp { node: node.clone() } },
@@ -297,17 +299,12 @@ pub fn MimeLoader(
         // the content); React hides members, which the port already omits here.
         "vote/candidate" if projector => rsx! { ContentApp { node: node.clone() } },
         "vote/candidate" => {
+            // Under the portrait, for the reason a document's are under its text.
             rsx! {
-                super::widgets::SupportingPaneLayout {
-                    primary: rsx! {
-                        ContentApp { node: node.clone() }
-                    },
-                    supporting: rsx! {
-                        super::comments::CommentSection {
-                            node_id: node.id.0.clone(),
-                            context_id: node.context_id.as_ref().map(|u| u.0.clone()),
-                        }
-                    },
+                ContentApp { node: node.clone() }
+                super::comments::CommentSection {
+                    node_id: node.id.0.clone(),
+                    context_id: node.context_id.as_ref().map(|u| u.0.clone()),
                 }
             }
         }
