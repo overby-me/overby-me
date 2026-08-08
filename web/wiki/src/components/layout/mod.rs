@@ -442,8 +442,6 @@ pub fn Layout() -> Element {
             // Set when a view mounts a permanent (docked) tools side sheet, so the
             // content pane reserves room for it on the right.
             "data-tools-docked": if super::widgets::TOOLS_DOCKED() { "true" } else { "false" },
-            // DESIGN (functional): reflect the UI density preference.
-            "data-density": if crate::density::COMPACT_DENSITY() { "compact" } else { "comfortable" },
             // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
             // bubble up from any focused element in the app.
             onkeydown: move |evt| {

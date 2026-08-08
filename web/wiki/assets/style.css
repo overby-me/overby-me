@@ -1301,12 +1301,11 @@ html {
 
 /* DESIGN (an app is not a card): the outermost surface of an app view.
 
-   Written `.card.app-card` for its WEIGHT, not for the sake of it. The density
-   preference tightens every card's margin from a rule further down the sheet,
-   and at equal weight the later rule wins -- so at compact density the surface
-   kept a 10px margin at rest and lost it to the heavier `:hover` variant of this
-   one, which dropped everything below it by ten pixels the moment the pointer
-   crossed the app. The same tie was quietly restoring the side padding.
+   Written `.card.app-card` for its WEIGHT: these elements are both, and saying
+   so keeps the rule above anything that styles a plain card later in the sheet.
+   A tie there is decided by file order, which is not a decision anyone makes on
+   purpose -- the density preference used to win one at rest and lose it on
+   hover, dropping the whole app ten pixels under the pointer.
 
    A card contains ONE subject among siblings you can compare or tap; its fill,
    its radius and its shadow all say "this is one of several". Every app view
@@ -1427,24 +1426,6 @@ html {
 	background: none;
 }
 
-/* DESIGN (functional: compact density): tighten card/list spacing so more
-   fits on screen. Toggled from the account menu (data-density on the shell). */
-.app-shell[data-density="compact"] .card {
-	margin-bottom: var(--md-sys-spacing-2-5);
-}
-.app-shell[data-density="compact"] .card-header {
-	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4)
-		var(--md-sys-spacing-2);
-}
-.app-shell[data-density="compact"] .card-content {
-	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
-}
-.app-shell[data-density="compact"] .folder-item {
-	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3-5);
-}
-.app-shell[data-density="compact"] .list-item {
-	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
-}
 
 /* DESIGN (format-aware file card): tonal metadata chips under the file title. */
 .file-meta-chips {

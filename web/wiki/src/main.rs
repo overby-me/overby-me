@@ -2,7 +2,6 @@ mod backend_api;
 mod build_info;
 mod components;
 mod crash;
-mod density;
 mod errors;
 mod export;
 // cynic query-result structs must select fields the code doesn't read (e.g. an
@@ -322,8 +321,6 @@ fn App() -> Element {
         theme::apply_theme(&theme::THEME.read());
         // Load any user-picked M3 seed colours and inject the override scheme.
         theme::load_seeds();
-        // DESIGN: load the persisted UI density preference.
-        density::load_density();
 
         // Nudge the token-refresh loop whenever the tab becomes visible again:
         // a backgrounded tab throttles timers, so the access token can lapse

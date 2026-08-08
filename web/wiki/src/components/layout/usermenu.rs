@@ -130,18 +130,6 @@ pub(super) fn UserMenu() -> Element {
                             },
                         }
                     }
-                    // DESIGN (functional): compact / comfortable UI density.
-                    div { class: "list-item switch-row",
-                        span { class: "material-icons", "density_medium" }
-                        span { class: "switch-row-label", "{t(\"layout.compactDensity\")}" }
-                        Switch {
-                            checked: Some(crate::density::COMPACT_DENSITY()),
-                            aria_label: t("layout.compactDensity"),
-                            on_checked_change: move |on: bool| {
-                                crate::density::set_compact(on);
-                            },
-                        }
-                    }
                     // Theme colours: pick the M3 primary + accent seeds. Changing
                     // either regenerates the tonal scheme and re-skins the whole
                     // app at runtime (see crate::theme::apply_seeds).

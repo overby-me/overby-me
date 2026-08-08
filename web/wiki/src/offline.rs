@@ -27,7 +27,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 /// Key prefix, so eviction can tell this cache from everything else the app
-/// keeps in `localStorage` (the session, the density and folder-view prefs).
+/// keeps in `localStorage` (the session, the folder-view and viewer prefs).
 const PREFIX: &str = "wiki.read.";
 /// The insertion order of the cached keys, oldest first.
 const INDEX_KEY: &str = "wiki.read.index";
