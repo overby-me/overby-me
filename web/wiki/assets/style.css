@@ -7977,6 +7977,11 @@ a.list-item:hover {
 	display: flex;
 	flex-wrap: wrap;
 	justify-content: center;
+	/* Full width, or there is nothing to centre WITHIN: the card content is a
+	   flex column that packs its children to the start, so the palette was
+	   sized to its own content and sat against the left edge, centring its rows
+	   inside a box that was already only as wide as they were. */
+	width: 100%;
 	gap: var(--md-sys-spacing-1-5);
 }
 
@@ -8037,25 +8042,33 @@ a.list-item:hover {
    nothing stops a pinch -- but it takes the palette off the screen with it, and
    the palette is what you came to press. This keeps the zoom local to the board:
    the app stays where it is and the board is panned within its own box. */
-.pixel-board-scroll {
-	/* Assembled HERE, not on :root, so the dock clearance is the one this box
+/* The frame: a fixed box the size of the window onto the board, and the thing
+   anything said ABOUT the board is positioned against. The window scrolls and
+   the board inside it is zoomed, so neither of those can hold a message that is
+   supposed to stay put. */
+.pixel-board-frame {
+	/* Assembled here, not on :root, so the dock clearance is the one this box
 	   inherits. */
 	--pixel-board-cap: min(
 		var(--pixel-board-share),
 		calc(100svh - var(--pixel-board-furniture) - var(--pixel-dock-clear))
 	);
-	/* A window onto the board, and a window of a FIXED size: as wide as there is
-	   room for or as wide as the height allows, whichever is smaller, and shaped
-	   like the board so nothing is letterboxed. Fixed is the point -- zoom
-	   changes what is inside the window, never the window, so going from 1x to
-	   2x does not shove the palette down the page. */
+	position: relative;
+	/* As wide as there is room for, or as wide as the height allows while
+	   keeping the board's shape, whichever is smaller. Centred, because the
+	   window is often narrower than the card. */
 	width: min(100%, var(--pixel-board-cap));
-	/* Centred: the window is often narrower than the card, and a board pinned
-	   to the left of a wide card reads as a mistake. */
 	margin-inline: auto;
 	aspect-ratio: var(--board-aspect, 1);
 	max-height: var(--pixel-board-cap);
-	overflow: auto;
+}
+
+.pixel-board-scroll {
+	width: 100%;
+	height: 100%;
+	/* `overflow` is set on the element: there is nothing to scroll to at 1x, and
+	   a fraction of a pixel of rounding was raising a scrollbar on a board that
+	   fits its window exactly. */
 	/* A drag pans the board; a tap still paints, because a browser does not
 	   raise a click after a scrolling gesture. */
 	touch-action: pan-x pan-y;
@@ -8081,9 +8094,11 @@ a.list-item:hover {
 	/* A share of the screen, so the board is not a postage stamp on a tall
 	   monitor. */
 	--pixel-board-share: 60svh;
-	/* And what has to be seen with it: the card header, the zoom control, three
-	   rows of swatches and the line saying whose turn it is. */
-	--pixel-board-furniture: 17rem;
+	/* And what has to be seen with it. Less than it was: the zoom moved into the
+	   header, the hint and the countdown moved onto the board, and the swatches
+	   came down to two rows -- so what is left under the board is the palette
+	   and the card's own padding. */
+	--pixel-board-furniture: 12rem;
 	--pixel-dock-clear: 0px;
 }
 

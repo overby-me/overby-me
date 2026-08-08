@@ -533,6 +533,14 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         });
     };
 
+    // Scrollable only when there is something to scroll to: at 1x the board is
+    // sized to its window, and a fraction of a pixel of rounding was enough to
+    // raise a scrollbar on a board that fits.
+    let pans = match zoom() > 1 {
+        true => "auto",
+        false => "hidden",
+    };
+
     let can_paint = session.read().is_authenticated() && open && !projector;
     let paint_canvas = canvas_id.clone();
     let click_id = dom_id.clone();
@@ -802,10 +810,17 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             // scaled-down board, a desktop's full one, or a pinch zoom — with
             // nothing measured in JavaScript.
             div {
-                class: "pixel-board-scroll",
+                class: "pixel-board-frame",
                 // The zoom for the stylesheet to multiply by, and the board's
                 // own shape so the window is cut to it rather than to a square.
                 style: "--zoom: {zoom()}; --board-aspect: {cols} / {rows_n};",
+            div {
+                class: "pixel-board-scroll",
+                // Scrollable only when there is something to scroll to. At 1x
+                // the board is sized to the window, and a fraction of a pixel
+                // of rounding was enough to raise a scrollbar on a board that
+                // fits.
+                style: "overflow: {pans};",
             div {
                 class: "pixel-board-wrap",
                 // The wrapper, not the canvas, carries the zoom: the tooltip is
@@ -836,21 +851,6 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     // wrapper above handles leaving.
                     onpointerup: on_up,
                 }
-                // One place for both things the board has to say: what to do,
-                // and how long until it will listen. On the board rather than
-                // under it, because a line under it is a line the board does
-                // not get -- and only one of them is ever true at a time.
-                if can_paint && (cooling() > 0 || hint()) {
-                    div {
-                        class: "pixel-hint",
-                        // The countdown is worth announcing; the hint is not.
-                        aria_live: if cooling() > 0 { "polite" } else { "off" },
-                        span {
-                            if cooling() > 0 {
-                                "{t(\"pixel.waitSeconds\")} {cooling()}"
-                            } else {
-                                "{t(\"pixel.yourTurn\")}"
-                            }
                         }
                     }
                 }
@@ -894,6 +894,22 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     }
                 }
             }
+            }
+                // One place for both things the board has to say: what to do,
+                // and how long until it will listen. On the board rather than
+                // under it, because a line under it is a line the board does
+                // not get -- and only one of them is ever true at a time.
+                if can_paint && (cooling() > 0 || hint()) {
+                    div {
+                        class: "pixel-hint",
+                        // The countdown is worth announcing; the hint is not.
+                        aria_live: if cooling() > 0 { "polite" } else { "off" },
+                        span {
+                            if cooling() > 0 {
+                                "{t(\"pixel.waitSeconds\")} {cooling()}"
+                            } else {
+                                "{t(\"pixel.yourTurn\")}"
+                            }
             }
 
             if can_paint {
