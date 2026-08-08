@@ -65,6 +65,15 @@ pub enum Block {
         page: String,
         indent: u8,
     },
+    /// Rows whose words stood in the same columns down the page.
+    ///
+    /// A page draws a table exactly as it draws a sentence -- glyphs at
+    /// positions -- so what makes these a table is that line after line the
+    /// groups start at the same x. Read as sentences they are nonsense of a
+    /// particular kind: the board page reads as three names, then three roles,
+    /// and a statement reads as a label followed by every year's figure in a
+    /// row, with nothing to say which is which.
+    Table { rows: Vec<Vec<Vec<Span>>> },
     /// A flat line the page drew across itself: the rule over a total, the one
     /// under a table's headings, the one that separates two sections.
     ///
@@ -106,9 +115,11 @@ impl Block {
             | Block::Paragraph { spans, .. }
             | Block::IndexEntry { spans, .. }
             | Block::ListItem { spans, .. } => spans,
-            Block::Image(_) | Block::Anchor(_) | Block::PageBreak { .. } | Block::Rule { .. } => {
-                &[]
-            }
+            Block::Image(_)
+            | Block::Anchor(_)
+            | Block::PageBreak { .. }
+            | Block::Rule { .. }
+            | Block::Table { .. } => &[],
         }
     }
 
@@ -122,6 +133,20 @@ impl Block {
 
     /// The block's words, without their colours.
     pub fn text(&self) -> String {
+        if let Block::Table { rows } = self {
+            // Cells apart, rows apart: the words of a table are still words, and
+            // a reader searching the page for one of them must find it.
+            return rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| cell.iter().map(|s| s.text.as_str()).collect::<String>())
+                        .collect::<Vec<_>>()
+                        .join("\t")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
         self.spans().iter().map(|s| s.text.as_str()).collect()
     }
 }
@@ -1438,6 +1463,222 @@ fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64)
     out
 }
 
+/// Teach every line where the page's columns are, and re-split it there.
+///
+/// A gap alone is not enough on its own line. "Anton Munkholm Petersen" nearly
+/// fills its column, so only fourteen points separate it from the name in the
+/// next one -- less than the width of two of its own spaces -- and the row came
+/// out as one cell while the row of ROLES under it, set smaller, came out as
+/// three. One row of a table splitting differently from the next is the same as
+/// no table at all.
+///
+/// What is steady is not the gaps but the column starts: on that page every
+/// second column begins at x=259 and every third at x=408, line after line. So
+/// the starts that RECUR are taken as the page's columns, and every line is cut
+/// at them -- including the lines whose own gaps were too small to see.
+fn align_to_column_stops(lines: &mut [Line]) {
+    // Where cells began, from the lines whose gaps were wide enough to be sure.
+    let mut seen: Vec<(f64, usize)> = Vec::new();
+    for line in lines.iter().filter(|l| l.cells.len() > 1) {
+        for cell in line.cells.iter().skip(1) {
+            match seen.iter_mut().find(|(x, _)| (*x - cell.left).abs() < 4.0) {
+                Some((_, n)) => *n += 1,
+                None => seen.push((cell.left, 1)),
+            }
+        }
+    }
+    // Twice is a column; once is a sentence with a gap in it.
+    let mut stops: Vec<f64> = seen
+        .into_iter()
+        .filter(|(_, n)| *n >= 2)
+        .map(|(x, _)| x)
+        .collect();
+    if stops.is_empty() {
+        return;
+    }
+    stops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    for line in lines.iter_mut() {
+        if line.cells.is_empty() {
+            continue;
+        }
+        let mut split: Vec<Cell> = Vec::new();
+        for cell in std::mem::take(&mut line.cells) {
+            split.extend(cut_at_stops(cell, &stops));
+        }
+        line.cells = split;
+    }
+}
+
+/// Cut one cell wherever a column starts inside it.
+///
+/// The words are all there is to cut by: a cell knows where it began and ended
+/// but not where each word sat, so the split is made on the text in proportion
+/// to the width, which is exact enough for a column stop that is a third of the
+/// page away from the last word before it.
+fn cut_at_stops(cell: Cell, stops: &[f64]) -> Vec<Cell> {
+    let inside: Vec<f64> = stops
+        .iter()
+        .copied()
+        .filter(|x| *x > cell.left + 1.0 && *x < cell.right - 1.0)
+        .collect();
+    if inside.is_empty() {
+        return vec![cell];
+    }
+    let text: String = cell.spans.iter().map(|s| s.text.as_str()).collect();
+    let width = (cell.right - cell.left).max(1.0);
+    let mut out: Vec<Cell> = Vec::new();
+    let mut rest = cell.spans;
+    let mut left = cell.left;
+    let mut consumed = 0usize;
+    for stop in inside {
+        // Which character the stop falls at, then back to the word boundary
+        // before it: a column starts at a word, never inside one.
+        let at = ((stop - cell.left) / width * text.chars().count() as f64).round() as usize;
+        let at = at.min(text.chars().count());
+        let boundary = text
+            .char_indices()
+            .take(at)
+            .filter(|(_, c)| *c == ' ')
+            .last()
+            .map(|(i, _)| text[..i].chars().count())
+            .unwrap_or(at);
+        let take = boundary.saturating_sub(consumed);
+        if take == 0 {
+            continue;
+        }
+        let head = keep_prefix(rest.clone(), take);
+        rest = drop_prefix(rest, take);
+        consumed += take;
+        out.push(Cell {
+            left,
+            right: stop,
+            spans: tidy(head),
+        });
+        left = stop;
+    }
+    out.push(Cell {
+        left,
+        right: cell.right,
+        spans: tidy(rest),
+    });
+    out.retain(|c| c.spans.iter().any(|s| !s.text.trim().is_empty()));
+    out
+}
+
+/// The stretches of lines that stood in columns, as [start, end) line indices.
+///
+/// A table is not one row: one line with a gap in it is a heading with a page
+/// number after it, a sentence with a tab, a name and a date. What makes it a
+/// table is that the NEXT line stands in the same columns, and the one after
+/// that. Two rows is the least that can say so.
+///
+/// Rows must also be near each other: the same columns half a page apart are
+/// two different things that happen to share a margin.
+fn table_ranges(lines: &[Line]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let here = &lines[i];
+        if here.cells.len() < 2 || here.rule.is_some() || here.picture.is_some() {
+            i += 1;
+            continue;
+        }
+        let mut end = i + 1;
+        let mut last_row = i;
+        while end < lines.len() {
+            let next = &lines[end];
+            let close = (lines[end - 1].y - next.y).abs() < here.size * 3.0;
+            if next.page != here.page || !close {
+                break;
+            }
+            if rows_align(&lines[last_row].cells, &next.cells, here.size) {
+                last_row = end;
+                end += 1;
+                continue;
+            }
+            // A cell whose words did not fit on one line. "Ansvarlig for
+            // internationalt samarbejde" wraps, and the tail sits alone under
+            // its own column -- fewer cells than the row, every one of them
+            // standing in a column the row already has.
+            if continues_row(&lines[last_row].cells, &next.cells, here.size) {
+                end += 1;
+                continue;
+            }
+            break;
+        }
+        // Two rows or it is not a table.
+        if end - i >= 2 {
+            out.push((i, end));
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Whether a line is the tail of the row above rather than a row of its own.
+///
+/// Fewer cells than the row, and each one standing in a column the row already
+/// has. A row of its own would fill the columns; a wrapped cell fills one.
+fn continues_row(row: &[Cell], tail: &[Cell], size: f64) -> bool {
+    if tail.is_empty() || tail.len() >= row.len() {
+        return false;
+    }
+    let slack = (size * 1.5).max(6.0);
+    tail.iter()
+        .all(|t| row.iter().any(|c| (c.left - t.left).abs() <= slack))
+}
+
+/// The rows of a table, with each wrapped tail folded back into its column.
+fn table_rows(lines: &[Line], size: f64) -> Vec<Vec<Vec<Span>>> {
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
+    for line in lines {
+        let continuation = rows
+            .last()
+            .is_some_and(|row| continues_row(row, &line.cells, size));
+        if !continuation {
+            rows.push(line.cells.clone());
+            continue;
+        }
+        let slack = (size * 1.5).max(6.0);
+        if let Some(row) = rows.last_mut() {
+            for tail in &line.cells {
+                // Into the column it sits in, with a space where the line broke.
+                if let Some(cell) = row
+                    .iter_mut()
+                    .find(|c| (c.left - tail.left).abs() <= slack)
+                {
+                    if let Some(last) = cell.spans.last_mut() {
+                        last.text.push(' ');
+                    }
+                    cell.spans.extend(tail.spans.iter().cloned());
+                    cell.spans = tidy(std::mem::take(&mut cell.spans));
+                }
+            }
+        }
+    }
+    rows.into_iter()
+        .map(|row| row.into_iter().map(|c| c.spans).collect())
+        .collect()
+}
+
+/// Whether two rows stand in the same columns.
+///
+/// The same number of groups, each starting within a size of the one above it.
+/// Generous, because a column's contents are not all the same width and a
+/// right-aligned figure starts wherever its digits begin -- but the LEFT edges
+/// of a column's cells are set by the column, and they line up or they do not.
+fn rows_align(a: &[Cell], b: &[Cell], size: f64) -> bool {
+    if a.len() != b.len() || a.len() < 2 {
+        return false;
+    }
+    let slack = (size * 1.5).max(6.0);
+    a.iter()
+        .zip(b.iter())
+        .all(|(x, y)| (x.left - y.left).abs() <= slack)
+}
+
 /// A mark too small to be a picture, and where it sits.
 struct Mark {
     x: f64,
@@ -1868,6 +2109,14 @@ fn show(
 
 // --- Reconstructing the document -------------------------------------------
 
+/// One group of words on a line, and where it sat.
+#[derive(Debug, Clone)]
+struct Cell {
+    left: f64,
+    right: f64,
+    spans: Vec<Span>,
+}
+
 /// One reconstructed line: the runs that share a baseline, joined.
 #[derive(Debug, Clone)]
 struct Line {
@@ -1902,6 +2151,17 @@ struct Line {
     /// to go by: "Ledelsespåtegning" and its "4" are a third of the page apart,
     /// and nothing in the text says so.
     tail_gap: f64,
+    /// Where this line's words sat, in groups, when gaps too wide to be spaces
+    /// separated them: (left, right, the words). One group is an ordinary line.
+    /// Several is a row of something -- a name over each role, a label and two
+    /// years of figures -- and a reader who is handed it as one run of words
+    /// cannot tell which figure belongs to which year.
+    cells: Vec<Cell>,
+    /// How many groups the line's OWN gaps made, before the page's columns were
+    /// applied to it. A contents row has two, whatever the page does elsewhere:
+    /// the page numbers are right-aligned, so a range like "5 - 10" starts left
+    /// of where a single digit does and the column stop falls inside it.
+    natural_cells: usize,
 }
 
 /// Group runs into lines by baseline, then join each line left to right,
@@ -1937,6 +2197,7 @@ fn lines_from(mut runs: Vec<Run>) -> Vec<Line> {
     if let Some(line) = join_line(&current) {
         lines.push(line);
     }
+    align_to_column_stops(&mut lines);
     lines
 }
 
@@ -1970,6 +2231,78 @@ fn word_gap() -> f64 {
         }
     }
     WORD_GAP
+}
+
+/// How wide a gap starts a new COLUMN rather than a new word, in type sizes.
+///
+/// Wider than a word space by a long way and narrower than the gaps a table
+/// leaves: the annual report's figures stand five sizes clear of their labels,
+/// and the board's three columns twice that. A justified line can stretch a
+/// space to about one, so two is the first width that cannot be one.
+const COLUMN_GAP: f64 = 2.0;
+
+/// Split a line's runs where the gaps are too wide to be spaces.
+///
+/// A page draws a row of a table exactly as it draws a sentence: glyphs at
+/// positions, with nothing to say that this group and that one are different
+/// cells. The gap is the whole of the evidence.
+fn cells_of(runs: &[Run], size: f64) -> Vec<Cell> {
+    if size <= 0.0 {
+        return Vec::new();
+    }
+    let mut sorted: Vec<&Run> = runs.iter().collect();
+    sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let mut cells: Vec<Cell> = Vec::new();
+    let mut prev_end = f64::NEG_INFINITY;
+    for run in sorted {
+        let starts_cell = !prev_end.is_finite() || (run.x - prev_end) > size * COLUMN_GAP;
+        if starts_cell {
+            cells.push(Cell {
+                left: run.x,
+                right: run.end_x,
+                spans: Vec::new(),
+            });
+        }
+        if let Some(cell) = cells.last_mut() {
+            cell.right = cell.right.max(run.end_x);
+            let wants_space = !starts_cell
+                && !cell.spans.is_empty()
+                && (run.x - prev_end) > run.size * word_gap();
+            let here = Span {
+                text: String::new(),
+                color: run.color.clone(),
+                bold: run.bold,
+                italic: run.italic,
+                underline: run.underline,
+                link: run.link.clone(),
+            };
+            match cell.spans.last_mut() {
+                Some(last) if last.matches(&here) => {
+                    if wants_space {
+                        last.text.push(' ');
+                    }
+                    last.text.push_str(&run.text);
+                }
+                _ => {
+                    let mut text = String::new();
+                    if wants_space {
+                        match cell.spans.last_mut() {
+                            Some(last) => last.text.push(' '),
+                            None => text.push(' '),
+                        }
+                    }
+                    text.push_str(&run.text);
+                    cell.spans.push(Span { text, ..here });
+                }
+            }
+        }
+        prev_end = run.end_x;
+    }
+    for cell in &mut cells {
+        cell.spans = tidy(std::mem::take(&mut cell.spans));
+    }
+    cells.retain(|c| c.spans.iter().any(|s| !s.text.trim().is_empty()));
+    cells
 }
 
 fn join_line(runs: &[Run]) -> Option<Line> {
@@ -2025,6 +2358,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         }
         prev_end = run.end_x;
     }
+    let cells = cells_of(runs, size);
     let spans = mend_written_links(tidy(spans));
     if spans.is_empty() {
         return None;
@@ -2043,6 +2377,8 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         spans,
         rule: None,
         tail_gap,
+        natural_cells: cells.len(),
+        cells,
         left,
         // Filled in by the caller, which is the only place that knows.
         page: 0,
@@ -2522,13 +2858,17 @@ fn blocks_from(
     let mut para_lines: Vec<(f64, f64)> = Vec::new();
     // The gap before the last word of the line being built, carried the way the
     // drawn bullet is: it is a property of the LINE and the decision it feeds is
-    // made about the block.
+    // made about the block. With how many columns it stood in, which is what
+    // tells a contents row from a row of figures: both end in a number after a
+    // wide gap, and only one of them has just the two.
     let mut para_gap = 0.0_f64;
+    let mut para_cells = 0usize;
     let flush = |para: &mut Vec<Span>,
                  size: f64,
                  geometry: &mut Vec<(f64, f64)>,
                  bullet: &mut Option<String>,
                  gap: &mut f64,
+                 cells: &mut usize,
                  blocks: &mut Vec<Block>| {
         let drawn_bullet = bullet.take();
         let align = alignment_of(geometry, col_left, column, size);
@@ -2552,7 +2892,12 @@ fn blocks_from(
         }
         let text: String = spans.iter().map(|s| s.text.as_str()).collect();
         let tail = std::mem::take(gap);
-        if let Some((title, page)) = index_entry(&text, tail) {
+        // Two columns, or it is a row of a table that happens to end in a
+        // figure: "I alt -1.260.170 -1.016.876 197.801" was arriving as a
+        // contents entry pointing at page 801.
+        let two_columns = std::mem::replace(cells, 0) == 2;
+        if let Some((title, page)) = index_entry(&text, tail).filter(|_| two_columns || tail == 0.0)
+        {
             let keep = title.chars().count();
             let page = page.to_string();
             blocks.push(Block::IndexEntry {
@@ -2607,7 +2952,32 @@ fn blocks_from(
     let lines_ref = lines;
     let mut para_bullet: Option<String> = None;
     let mut page = lines_ref.first().map(|l| l.page).unwrap_or(1);
+    // Which stretches of lines stood in columns. Worked out before the reading,
+    // because the question is about a run of lines together and the loop below
+    // decides one at a time.
+    let tables = table_ranges(&lines_ref);
+    let mut skip_to = 0usize;
     for (at, line) in lines_ref.iter().enumerate() {
+        if at < skip_to {
+            continue;
+        }
+        if let Some((_, end)) = tables.iter().find(|(start, _)| *start == at) {
+            flush(
+                &mut para,
+                para_size,
+                &mut para_lines,
+                &mut para_bullet,
+                &mut para_gap,
+                &mut para_cells,
+                &mut blocks,
+            );
+            blocks.push(Block::Table {
+                rows: table_rows(&lines_ref[at..*end], line.size),
+            });
+            skip_to = *end;
+            prev = None;
+            continue;
+        }
         // An anchor goes BEFORE what it points at, so whatever was being built
         // ends here: a link should land on the start of the thing it names, not
         // in the middle of the paragraph above it.
@@ -2618,6 +2988,7 @@ fn blocks_from(
                 &mut para_lines,
                 &mut para_bullet,
                 &mut para_gap,
+                &mut para_cells,
                 &mut blocks,
             );
             prev = None;
@@ -2633,6 +3004,7 @@ fn blocks_from(
                 &mut para_lines,
                 &mut para_bullet,
                 &mut para_gap,
+                &mut para_cells,
                 &mut blocks,
             );
             blocks.push(Block::PageBreak {
@@ -2650,6 +3022,7 @@ fn blocks_from(
                 &mut para_lines,
                 &mut para_bullet,
                 &mut para_gap,
+                &mut para_cells,
                 &mut blocks,
             );
             blocks.push(Block::Image(picture.clone()));
@@ -2665,6 +3038,7 @@ fn blocks_from(
                 &mut para_lines,
                 &mut para_bullet,
                 &mut para_gap,
+                &mut para_cells,
                 &mut blocks,
             );
             blocks.push(Block::Rule { width });
@@ -2707,6 +3081,7 @@ fn blocks_from(
                     // The same row without leader dots: the page number is a
                     // third of the page away and only the geometry says so.
                     || (line.tail_gap >= CONTENTS_GAP
+                        && line.natural_cells == 2
                         && index_entry(&line.text, line.tail_gap).is_some())
                     || list_marker(&line.text).is_some()
                     // A bullet the page DREW starts an item as surely as one
@@ -2729,6 +3104,7 @@ fn blocks_from(
                 &mut para_lines,
                 &mut para_bullet,
                 &mut para_gap,
+                &mut para_cells,
                 &mut blocks,
             );
         }
@@ -2757,6 +3133,7 @@ fn blocks_from(
         // it. Taking the last rather than the widest keeps a table row from
         // being read as a contents entry for having columns.
         para_gap = line.tail_gap;
+        para_cells = line.natural_cells;
         prev = Some(line);
     }
     flush(
@@ -2765,6 +3142,7 @@ fn blocks_from(
         &mut para_lines,
         &mut para_bullet,
         &mut para_gap,
+        &mut para_cells,
         &mut blocks,
     );
     blocks
@@ -3337,6 +3715,8 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 picture: Some(picture),
                 rule: None,
                 tail_gap: 0.0,
+                cells: Vec::new(),
+                natural_cells: 0,
             });
         }
         // And so does a line the page drew. A rule that turned out to be an
@@ -3361,6 +3741,8 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 picture: None,
                 rule: Some(width),
                 tail_gap: 0.0,
+                cells: Vec::new(),
+                natural_cells: 0,
             });
         }
         lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
@@ -4277,6 +4659,9 @@ mod harness {
                             None => format!("li>{indent}"),
                         },
                         super::Block::Rule { width } => format!("hr {:.0}%", width * 100.0),
+                        super::Block::Table { rows } => {
+                            format!("table {}x{}", rows.len(), rows.first().map_or(0, Vec::len))
+                        }
                         super::Block::Paragraph { indent, .. } => match indent {
                             0 => "p".into(),
                             n => format!("p>{n}"),
@@ -4376,6 +4761,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         let lines = vec![line(100.0, 50.0, 300.0)];
         let rule = |x0: f64, x1: f64, y: f64| super::Rule { x0, x1, y, thickness: 0.5 };
@@ -4485,6 +4872,37 @@ mod tests {
     fn dump_a_pdf() {
         let path = std::env::var("PDF").expect("PDF=<path>");
         let bytes = std::fs::read(&path).expect("readable");
+        // LINES=<page> dumps that page's lines with their columns, which is what
+        // the table pass reads.
+        if let Ok(want) = std::env::var("LINES") {
+            let want: usize = want.parse().unwrap_or(1);
+            let doc = lopdf::Document::load_mem(&bytes).expect("loads");
+            for (n, (page_no, page_id)) in doc.get_pages().into_iter().enumerate() {
+                if page_no as usize != want {
+                    continue;
+                }
+                let _ = n;
+                let mut budget = 0usize;
+                let drawn = super::page_runs(&doc, page_id, &mut budget, &[]);
+                for line in super::lines_from(drawn.runs) {
+                    let cells: Vec<String> = line
+                        .cells
+                        .iter()
+                        .map(|c| {
+                            format!(
+                                "[{:.0}..{:.0}]{}",
+                                c.left,
+                                c.right,
+                                c.spans.iter().map(|s| s.text.as_str()).collect::<String>()
+                            )
+                        })
+                        .collect();
+                    println!("y={:.0} size={:.1} cells={} {}", line.y, line.size, line.cells.len(), cells.join(" "));
+                }
+                return;
+            }
+            return;
+        }
         let out = super::extract(&bytes).expect("extracts");
         let text = |spans: &[super::Span]| spans.iter().map(|s| s.text.clone()).collect::<String>();
         println!("PAGES {} (without text: {})", out.pages, out.pages_without_text);
@@ -4498,6 +4916,16 @@ mod tests {
                 super::Block::IndexEntry { spans, page, .. } => println!("{i:>4} TOC  {} .... {page}", text(spans)),
                 super::Block::Image(_) => println!("{i:>4} IMG"),
                 super::Block::Rule { width } => println!("{i:>4} ---- {:.0}%", width * 100.0),
+                super::Block::Table { rows } => {
+                    println!("{i:>4} TABLE {}x{}", rows.len(), rows.first().map_or(0, Vec::len));
+                    for row in rows {
+                        let cells: Vec<String> = row
+                            .iter()
+                            .map(|c| c.iter().map(|s| s.text.as_str()).collect())
+                            .collect();
+                        println!("        | {}", cells.join(" | "));
+                    }
+                }
                 other => println!("{i:>4} {}", format!("{other:?}").chars().take(60).collect::<String>()),
             }
         }
@@ -4610,6 +5038,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         }
     }
 
@@ -4853,6 +5283,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         // Column runs to 400. The first line stops at 180, far short of it.
         let blocks = blocks_from(
@@ -5057,6 +5489,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         let blocks = blocks_from(
             vec![
@@ -5310,6 +5744,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         // The songbook: a hundred short verse lines, and a contents list whose
         // rows all run to the margin. A tenth down the range gave 392 and the
@@ -5346,6 +5782,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         // Single-spaced at 18.8, as the songbook sets them, then a blank line
         // before the next stanza. The prose line at the top is what sets the
@@ -5442,6 +5880,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         // The alkoholpolitik: the line stops sixty points short because
         // "internationale" is what comes next, and it does not fit.
@@ -5505,6 +5945,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         // The alkoholpolitik: a title and three lines at the margin, and forty
         // in a list one step in. A tenth percentile lands on the LIST, which
@@ -5556,6 +5998,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         let folio = |page: usize, text: &str| Line {
             y: 37.7,
@@ -5569,6 +6013,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
             .map(|p| {
@@ -5607,6 +6053,8 @@ mod tests {
             picture: None,
             rule: None,
             tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
             .map(|p| {

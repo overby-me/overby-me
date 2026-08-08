@@ -129,6 +129,26 @@ fn jump_to(id: &str) {
 
 /// The same words with their links taken off, for when something around them is
 /// already the link. An anchor inside an anchor is not a thing HTML has.
+/// Whether a cell holds a figure rather than words.
+///
+/// Right-aligned when it does, the way the page set it: a column of amounts
+/// reads down its last digit, and ragged-right numbers are a column only by
+/// accident. Danish figures carry thousands dots and a decimal comma, an amount
+/// may be negative or bracketed, and a note number is a bare digit -- all of
+/// them numbers, none of them plain integers.
+fn cell_is_number(cell: &[Span]) -> bool {
+    let text: String = cell.iter().map(|s| s.text.as_str()).collect();
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+    let digits = text.chars().filter(char::is_ascii_digit).count();
+    digits > 0
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '(' | ')' | '%' | ' ' | '\u{2013}' | '\u{2212}'))
+}
+
 fn unlinked(spans: &[Span]) -> Vec<Span> {
     spans
         .iter()
@@ -336,6 +356,30 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             // arrives looking at a hairline reading 37.
                             "data-page-ends": "true",
                             span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
+                        }
+                    },
+                    // Rows that stood in the same columns. Laid out as a real
+                    // table so the columns line up here as they did there: a
+                    // name over its role, a figure under its year. Scrolls
+                    // inside itself rather than pushing the reading column
+                    // wider, which is the one thing a phone cannot give it.
+                    Some(Block::Table { rows }) => rsx! {
+                        div { key: "{i}", class: "pdf-table-scroll",
+                            table { class: "pdf-table",
+                                tbody {
+                                    for (r , row) in rows.iter().enumerate() {
+                                        tr { key: "{r}",
+                                            for (c , cell) in row.iter().enumerate() {
+                                                td {
+                                                    key: "{c}",
+                                                    class: if cell_is_number(cell) { "pdf-cell-number" } else { "" },
+                                                    Spans { spans: cell.clone() }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     },
                     // A line the page drew across itself. It cannot be kept

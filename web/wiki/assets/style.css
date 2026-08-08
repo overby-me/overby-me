@@ -8772,6 +8772,36 @@ a.list-item:hover {
 /* Something the page drew rather than placed: a signature, a diagram. It takes
    the reading colour, so it is legible on a dark surface where a black bitmap
    would not be, and it never outgrows the column. */
+/* Rows that stood in columns on the page, standing in columns here. Its own
+   scroller: a statement with four columns of figures is wider than a phone, and
+   the choice is between scrolling the table and squeezing the reading column
+   that the rest of the document is set in. */
+.pdf-table-scroll {
+	width: 100%;
+	overflow-x: auto;
+	margin: var(--md-sys-spacing-3) 0;
+}
+.pdf-table {
+	border-collapse: collapse;
+	width: 100%;
+}
+.pdf-table td {
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3)
+		var(--md-sys-spacing-1) 0;
+	vertical-align: top;
+	/* A cell wraps rather than forcing the table wider, except a figure, which
+	   is read as one thing and broken across two lines by nobody. */
+	overflow-wrap: anywhere;
+}
+/* Figures read down their last digit, which is the whole reason a statement
+   sets them in a column. */
+.pdf-table .pdf-cell-number {
+	text-align: right;
+	white-space: nowrap;
+	overflow-wrap: normal;
+	font-variant-numeric: tabular-nums;
+}
+
 /* A rule the page drew, at the share of the width it spanned. Centred when it
    is short, because a stroke over one column's total sat over that column and
    hanging it on the margin would point at the wrong thing. */
