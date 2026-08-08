@@ -273,6 +273,16 @@ natural.
 Gates: standing set + 10-mount, 22-tmpfiles, then a 60-mount-ratelimit attempt.
 Flip candidate: 60-MOUNT-RATELIMIT once the throttle exists.
 
+Status: mount and swap activation run off the RuntimeInfo read lock, and the
+mountinfo watcher's event-source rate limiting (interval 1s / burst 5, matching
+upstream) is implemented in `mount_monitor.rs` with the enter/leave transitions
+logged like sd-event. 60-MOUNT-RATELIMIT is green (three of four subtests;
+`testcase_issue_23796` needs an external mount(8) type helper and reexec job
+serialization, deferred). Not yet done: delaying mount *start jobs* while the
+watcher is throttled and re-enqueuing them on expiry (upstream's
+`mount_on_ratelimit_expire`); the explicit-`systemctl start` race it guarded is
+handled separately by the stale-`Started` re-mount check in `control.rs`.
+
 ### Inc 6: single-writer collapse
 
 Every remaining mutation path routes through the dispatcher. Delete

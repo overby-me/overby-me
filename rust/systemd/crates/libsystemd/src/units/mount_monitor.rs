@@ -469,9 +469,12 @@ pub fn sync_mount_units(
 
 /// Start the `/proc/self/mountinfo` monitor thread. Does an initial sync, then
 /// blocks in `poll(POLLPRI|POLLERR)` on the mountinfo fd (which the kernel wakes
-/// on any mount-table change), re-syncing on each change. A 1s timeout also
-/// re-syncs periodically, which additionally picks up delayed `/run/mount/utab`
-/// updates (e.g. userspace `_netdev`).
+/// on any mount-table change), reconciling on each change. Each change is one
+/// rate-limited "dispatch" (upstream's interval 1s / burst 5): a storm past the
+/// burst throttles reconciliation for the rest of the window. Delayed
+/// `/run/mount/utab` updates (e.g. userspace `_netdev`) are caught by a short
+/// series of follow-up re-syncs scheduled via the poll timeout, not inline
+/// sleeps, so the dispatch cadence stays fast enough to trip the rate limit.
 pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
     std::thread::spawn(move || {
         use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
@@ -493,20 +496,50 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
         };
         let fd = file.as_raw_fd();
         let mut scratch = Vec::new();
+
+        // Event-source rate limiting, a faithful port of upstream's mount monitor
+        // (src/core/mount.c: sd_event_source_set_ratelimit with interval 1s /
+        // burst 5). Each /proc/self/mountinfo change is one "dispatch"; once more
+        // than RL_BURST land within RL_INTERVAL, reconciliation is throttled for
+        // the rest of the window so a mount/unmount storm cannot pin PID 1
+        // re-reading the mount table. The enter/leave log lines mirror
+        // sd-event.c's wording so `journalctl -u init.scope` shows the transitions
+        // (TEST-60-MOUNT-RATELIMIT testcase_mount_ratelimit greps for them).
+        const RL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+        const RL_BURST: u32 = 5;
+        let mut win_begin: Option<std::time::Instant> = None;
+        let mut win_num: u32 = 0;
+        let mut ratelimited_until: Option<std::time::Instant> = None;
+        // Delayed /run/mount/utab catch-up: libmount writes utab (where `_netdev`
+        // lives) slightly AFTER the kernel mount, so a mount's network
+        // classification can appear only on a later pass. Re-sync a few times at
+        // 300ms spacing, driven by poll timeouts rather than inline sleeps, so a
+        // rapid storm still yields one dispatch per change and can trip the limit.
+        let mut utab_checks_left: u32 = 0;
+        let mut next_utab_check: Option<std::time::Instant> = None;
+
         loop {
+            // Wake for the soonest of: rate-limit expiry, a scheduled utab
+            // re-sync, or the long idle safety timeout. Staying at the 30s idle
+            // whenever nothing is pending keeps the monitor off the RuntimeInfo
+            // lock during mount-free transaction stress (TEST-03-JOBS).
+            let now = std::time::Instant::now();
+            let mut timeout = std::time::Duration::from_secs(30);
+            if let Some(u) = ratelimited_until {
+                timeout = timeout.min(u.saturating_duration_since(now));
+            }
+            if let Some(u) = next_utab_check {
+                timeout = timeout.min(u.saturating_duration_since(now));
+            }
+            let timeout = timeout.max(std::time::Duration::from_millis(1));
+
             let mut fds = [PollFd::new(
                 unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) },
                 PollFlags::POLLPRI | PollFlags::POLLERR,
             )];
-            // Block until the kernel signals a mount-table change (POLLPRI), with
-            // a long safety timeout. Do NOT sync on the timeout: the monitor
-            // stays idle (never contends for the RuntimeInfo lock) whenever there
-            // is no mount activity, which keeps it clear of PID 1 during
-            // transaction stress with no mounts (TEST-03-JOBS deadlocked when the
-            // old 1s periodic sync contended there).
             let n = match poll(
                 &mut fds,
-                PollTimeout::try_from(30_000).unwrap_or(PollTimeout::ZERO),
+                PollTimeout::try_from(timeout.as_millis() as i32).unwrap_or(PollTimeout::ZERO),
             ) {
                 Ok(n) => n,
                 Err(nix::errno::Errno::EINTR) => continue,
@@ -515,23 +548,74 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
                     return;
                 }
             };
-            if n == 0 {
-                continue; // timeout, no mount change: stay idle
+            let now = std::time::Instant::now();
+            // Consume any POLLPRI readiness by re-reading the file from the start,
+            // so the next poll blocks again instead of spinning.
+            if n > 0 {
+                let _ = file.seek(SeekFrom::Start(0));
+                scratch.clear();
+                let _ = file.read_to_end(&mut scratch);
             }
-            // Consume the readiness by re-reading the file from the start, so
-            // the next poll blocks again instead of spinning on POLLPRI.
-            let _ = file.seek(SeekFrom::Start(0));
-            scratch.clear();
-            let _ = file.read_to_end(&mut scratch);
-            // Sync now, then re-sync a few times: libmount writes /run/mount/utab
-            // (where `_netdev` lives) slightly AFTER the kernel mount, so a
-            // mount's network classification can appear only on a later pass. No
-            // lock is held across the sleeps, and these run only right after a
-            // real change, so they never contend during mount-idle stress.
-            sync_mount_units(&run_info, &mut synthesized, &mut overridden);
-            for _ in 0..4 {
-                std::thread::sleep(std::time::Duration::from_millis(300));
+
+            // Throttled window: skip reconciliation until it expires, then leave
+            // the rate-limited state and catch up.
+            if let Some(u) = ratelimited_until {
+                if now >= u {
+                    crate::entrypoints::kmsg(
+                        "Event source (mount-monitor-dispatch) left rate limit state.",
+                    );
+                    ratelimited_until = None;
+                    win_begin = None;
+                    win_num = 0;
+                    sync_mount_units(&run_info, &mut synthesized, &mut overridden);
+                    utab_checks_left = 4;
+                    next_utab_check = Some(now + std::time::Duration::from_millis(300));
+                }
+                continue;
+            }
+
+            if n > 0 {
+                // A real mount-table change. Account it against the rate limit
+                // (ratelimit_below: up to RL_BURST dispatches per RL_INTERVAL
+                // window, then throttle).
+                let allowed = match win_begin {
+                    Some(b) if now.duration_since(b) <= RL_INTERVAL => {
+                        win_num += 1;
+                        win_num <= RL_BURST
+                    }
+                    _ => {
+                        win_begin = Some(now);
+                        win_num = 1;
+                        true
+                    }
+                };
+                if !allowed {
+                    crate::entrypoints::kmsg(
+                        "Event source (mount-monitor-dispatch) entered rate limit state.",
+                    );
+                    ratelimited_until = Some(win_begin.unwrap_or(now) + RL_INTERVAL);
+                    utab_checks_left = 0;
+                    next_utab_check = None;
+                    continue;
+                }
                 sync_mount_units(&run_info, &mut synthesized, &mut overridden);
+                utab_checks_left = 4;
+                next_utab_check = Some(now + std::time::Duration::from_millis(300));
+                continue;
+            }
+
+            // Timeout, no new change: run a scheduled utab catch-up sync if due,
+            // otherwise stay idle (never sync on a pure idle timeout).
+            if let Some(nc) = next_utab_check
+                && now >= nc
+            {
+                sync_mount_units(&run_info, &mut synthesized, &mut overridden);
+                utab_checks_left = utab_checks_left.saturating_sub(1);
+                next_utab_check = if utab_checks_left > 0 {
+                    Some(now + std::time::Duration::from_millis(300))
+                } else {
+                    None
+                };
             }
         }
     });
