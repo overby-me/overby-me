@@ -8115,6 +8115,11 @@ a.list-item:hover {
    anything but compact the board may have the whole of it. */
 .app-shell:not([data-size-class="compact"]) {
 	--pixel-board-share: 100svh;
+	/* And now that this figure is the one deciding, it has to be right: with the
+	   share out of the way the old allowance left the palette 26px below the
+	   fold at every desktop size, having never been exact because it was never
+	   what bound the board. Measured, plus a few pixels. */
+	--pixel-board-furniture: 14rem;
 }
 
 /* The zoom control. It lives in the card header now, beside the count, where it
