@@ -7974,7 +7974,11 @@ a.list-item:hover {
    there is room for, keeps every row the same, and centres what is left over. */
 .pixel-palette {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(22px, var(--md-sys-spacing-8)));
+	/* Literal sizes, not tokens: a custom property inside minmax() that fails to
+	   resolve takes the whole declaration down with it at computed-value time,
+	   and the grid falls back to a single column -- which is what happened here,
+	   twenty-six swatches in a column a thousand pixels tall. */
+	grid-template-columns: repeat(auto-fit, minmax(22px, 32px));
 	justify-content: center;
 	gap: var(--md-sys-spacing-1-5);
 }
