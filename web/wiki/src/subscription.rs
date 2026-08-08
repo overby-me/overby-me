@@ -29,6 +29,21 @@ use web_sys::{MessageEvent, WebSocket};
 use crate::nhost::graphql_url;
 use crate::session::use_session;
 
+/// Whether a pushed payload is news, or just the state on arrival.
+///
+/// A subscription with no cursor answers immediately with everything matching
+/// it, and that first answer is what the view has just finished querying. Acting
+/// on it fetched the same rows a second time about half a second after the
+/// first, on every live view: a folder opening measured two identical children
+/// queries, 500 ms apart, for one screen that never changed.
+///
+/// Only the first. A reconnect delivers the state again, and there this counts
+/// as news on purpose: the socket was down, and what arrived while it was down
+/// is exactly what the view does not have.
+fn push_is_a_change(pushes: u32) -> bool {
+    pushes > 1
+}
+
 /// Wire a subscription to a component's refresh counter: every pushed update
 /// bumps `refresh`, so a `use_resource` keyed on it re-fetches live. This is the
 /// common pattern — the payload itself is ignored; the query just needs to
@@ -39,11 +54,13 @@ pub fn use_live(wire: crate::graphql::Wire, mut refresh: Signal<u32>) {
     let sub = use_graphql_subscription(wire);
     let coalescer = use_hook(|| Rc::new(RefCell::new(Coalescer::default())));
     let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    let pushes = use_hook(|| Rc::new(std::cell::Cell::new(0u32)));
     let runtime = Runtime::current();
 
     use_effect({
         let coalescer = coalescer.clone();
         let timer = timer.clone();
+        let pushes = pushes.clone();
         move || {
             // Reading the subscription signal ties this effect to each push.
             let pushed = sub.read().is_some();
@@ -51,6 +68,10 @@ pub fn use_live(wire: crate::graphql::Wire, mut refresh: Signal<u32>) {
             // Refreshing then re-fetches data the view has only just loaded —
             // two round trips per live view per device, for the same rows.
             if !pushed {
+                return;
+            }
+            pushes.set(pushes.get() + 1);
+            if !push_is_a_change(pushes.get()) {
                 return;
             }
             let now = js_sys::Date::now();
@@ -600,7 +621,22 @@ fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff_delay_ms, Coalescer, Registry, COALESCE_MS, SPREAD_MS};
+    use super::{backoff_delay_ms, push_is_a_change, Coalescer, Registry, COALESCE_MS, SPREAD_MS};
+
+    /// The state on arrival is not a change to it.
+    ///
+    /// A cursorless subscription answers with everything it matches the moment
+    /// it connects, and the view has just queried exactly those rows. Treating
+    /// that as news meant every live view fetched twice on open. A reconnect
+    /// delivers the state again and DOES count: what changed while the socket
+    /// was down is what the view is missing.
+    #[test]
+    fn the_first_payload_is_the_state_not_a_change() {
+        assert!(!push_is_a_change(0), "nothing has arrived yet");
+        assert!(!push_is_a_change(1), "the state the view just fetched");
+        assert!(push_is_a_change(2), "something actually changed");
+        assert!(push_is_a_change(9));
+    }
 
     /// A burst of pushes costs one refresh, not one per push.
     ///

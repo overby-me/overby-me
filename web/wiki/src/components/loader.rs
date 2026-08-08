@@ -64,6 +64,19 @@ pub fn Home(app: Option<String>) -> Element {
 /// the rail/bar item entry animation).
 pub(crate) static CTX_IS_OWNER: GlobalSignal<Option<bool>> = Signal::global(|| None);
 
+/// Which context the flag above was worked out for, as its path.
+///
+/// Ownership belongs to the CONTEXT, not to the node inside it, so stepping from
+/// one document to the next in the same place cannot change the answer. It was
+/// being recomputed from each page's own node all the same, so it went unknown
+/// on every step and the owner-only rail items vanished and came back at every
+/// move.
+///
+/// Remembering what the answer was ABOUT keeps both halves: within the context
+/// the answer stands while the next node loads, and going somewhere else still
+/// goes unknown, which is what stops the previous place's apps from flashing.
+static CTX_OWNER_FOR: GlobalSignal<Option<Vec<String>>> = Signal::global(|| None);
+
 /// Resolves a path to a node and renders the matching app. The query re-runs
 /// whenever the path (or token) changes.
 #[component]
@@ -97,14 +110,29 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // a navigation is still resolving the state is UNKNOWN (`None`): the owner
     // apps stay hidden rather than flashing the previous context's set and
     // then disappearing.
+    let owner_segments = segments.clone();
     use_effect(move || {
+        // Subscribed, not peeked: the depth arrives with the crumbs, which can
+        // land after this runs. Re-running then is the point -- a step that
+        // turns out to have entered a NEW context stops counting as the same
+        // one, and the answer goes back to unknown until this node says.
+        let here = super::layout::context_path(&owner_segments);
+        let answered = node_future.read().is_some();
         let owner = match &*node_future.read() {
             Some(Ok(Some(node))) => Some(node.is_context_owner.unwrap_or(false)),
             Some(_) => Some(false),
-            None => None,
+            // Still resolving. The answer stands if it was about this same
+            // context; anywhere else is unknown.
+            None => match CTX_OWNER_FOR.peek().as_deref() == Some(here.as_slice()) {
+                true => *CTX_IS_OWNER.peek(),
+                false => None,
+            },
         };
         if *CTX_IS_OWNER.peek() != owner {
             *CTX_IS_OWNER.write() = owner;
+        }
+        if answered && CTX_OWNER_FOR.peek().as_deref() != Some(here.as_slice()) {
+            *CTX_OWNER_FOR.write() = Some(here);
         }
     });
 
