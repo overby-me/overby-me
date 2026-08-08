@@ -88,6 +88,93 @@ fn is_mutation(query: &str) -> bool {
     query.trim_start().starts_with("mutation")
 }
 
+/// The requests currently in the air, by exactly what was asked and by whom.
+///
+/// Two components that ask the same question at the same moment ask it once.
+/// Opening a page did this twice over: the page and the drawer each resolve the
+/// path in the address bar, so the same path lookup and then the same node query
+/// went out about a hundred milliseconds apart, while the first was still
+/// unanswered. Measured on the test event: 15 requests to open a page, of which
+/// two pairs were a request overlapping itself.
+///
+/// The same principle as the subscription hub, which folds every watcher of one
+/// scope into a single subscription; this is the one-shot half of it.
+///
+/// Only for the duration of the flight, and never for a mutation. Nothing is
+/// remembered after the answer lands: a request that starts after the last one
+/// finished is a new question and gets a new answer, so this cannot serve a
+/// stale row the way a cache with a lifetime could. Two identical writes stay
+/// two writes.
+type Envelope = Result<serde_json::Value, String>;
+type SharedRequest = futures_util::future::Shared<
+    std::pin::Pin<Box<dyn std::future::Future<Output = Envelope> + 'static>>,
+>;
+
+thread_local! {
+    static IN_FLIGHT: std::cell::RefCell<std::collections::HashMap<String, SharedRequest>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// POST one GraphQL body, sharing a request that is already on its way.
+///
+/// Returns the whole envelope (`data` and `errors` both), because the callers
+/// disagree about what to do with it: the typed path hands it to cynic, the raw
+/// ones read the two keys themselves.
+/// What identifies a request that may be shared, or `None` for one that may not.
+///
+/// A write is never shared: two identical mutations are two comments, two votes,
+/// two pixels. Anything whose text is not a readable query is not shared either,
+/// on the same principle - if it cannot be recognised, it is sent.
+///
+/// The token is part of the key. Two readers on one device must never be handed
+/// each other's answer, for the same reason the query cache says so, and the
+/// variables are in it because they are what makes two questions different.
+fn flight_key(access_token: Option<&str>, body: &serde_json::Value) -> Option<String> {
+    let query = body.get("query")?.as_str()?;
+    match is_mutation(query) {
+        true => None,
+        false => Some(format!("{}|{body}", access_token.unwrap_or(""))),
+    }
+}
+
+async fn post_body(access_token: Option<&str>, body: serde_json::Value) -> Envelope {
+    let Some(key) = flight_key(access_token, &body) else {
+        return post_body_once(access_token, &body).await;
+    };
+    let shared = IN_FLIGHT.with(|m| {
+        if let Some(flight) = m.borrow().get(&key) {
+            return flight.clone();
+        }
+        let token = access_token.map(str::to_string);
+        let owned = body.clone();
+        let fut: std::pin::Pin<Box<dyn std::future::Future<Output = Envelope>>> =
+            Box::pin(async move { post_body_once(token.as_deref(), &owned).await });
+        let flight = futures_util::FutureExt::shared(fut);
+        m.borrow_mut().insert(key.clone(), flight.clone());
+        flight
+    });
+    let out = shared.await;
+    // Off the board as soon as it lands, so the next asker asks the server. A
+    // holder that is dropped before the answer arrives leaves its entry behind;
+    // the next caller to want it drives the same future to completion and clears
+    // it, so nothing is ever left waiting on a request nobody is polling.
+    IN_FLIGHT.with(|m| {
+        m.borrow_mut().remove(&key);
+    });
+    out
+}
+
+/// One request, actually sent.
+async fn post_body_once(access_token: Option<&str>, body: &serde_json::Value) -> Envelope {
+    let client = reqwest::Client::new();
+    let mut req = client.post(graphql_url());
+    if let Some(token) = access_token {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.json(body).send().await.map_err(|e| e.to_string())?;
+    resp.json().await.map_err(|e| e.to_string())
+}
+
 /// Run `attempt`, retrying a read that failed because the request never
 /// completed.
 ///
@@ -121,20 +208,12 @@ where
     Q: serde::de::DeserializeOwned + 'static,
     V: serde::Serialize,
 {
-    let client = reqwest::Client::new();
-    let mut req = client.post(graphql_url());
-
-    if let Some(token) = access_token {
-        req = req.bearer_auth(token);
-    }
-
-    let resp = req
-        .json(operation)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let body: cynic::GraphQlResponse<Q> = resp.json().await.map_err(|e| e.to_string())?;
+    // Through `post_body` rather than straight to reqwest, so an identical
+    // question already in the air is answered by that one.
+    let sent = serde_json::to_value(operation).map_err(|e| e.to_string())?;
+    let envelope = post_body(access_token, sent).await?;
+    let body: cynic::GraphQlResponse<Q> =
+        serde_json::from_value(envelope).map_err(|e| e.to_string())?;
 
     if let Some(errors) = body.errors {
         let msgs: Vec<String> = errors.into_iter().map(|e| e.message).collect();
@@ -274,17 +353,7 @@ async fn execute_raw_once(
     access_token: Option<&str>,
     query: &str,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
-    let mut req = client.post(graphql_url());
-
-    if let Some(token) = access_token {
-        req = req.bearer_auth(token);
-    }
-
-    let body = serde_json::json!({ "query": query });
-    let resp = req.json(&body).send().await.map_err(|e| e.to_string())?;
-
-    let result: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let result = post_body(access_token, serde_json::json!({ "query": query })).await?;
 
     if let Some(errors) = result.get("errors") {
         return Err(errors.to_string());
@@ -351,14 +420,8 @@ async fn execute_raw_vars_once(
     query: &str,
     variables: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
-    let mut req = client.post(graphql_url());
-    if let Some(token) = access_token {
-        req = req.bearer_auth(token);
-    }
     let body = serde_json::json!({ "query": query, "variables": variables });
-    let resp = req.json(&body).send().await.map_err(|e| e.to_string())?;
-    let result: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let result = post_body(access_token, body).await?;
     if let Some(errors) = result.get("errors") {
         return Err(errors.to_string());
     }
@@ -433,6 +496,41 @@ fn offline_copy<T: serde::de::DeserializeOwned>(key: &str, error: &str) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The same keyword decides whether two requests may become one.
+    ///
+    /// The danger is the mirror of the retry's: a write folded into another
+    /// write is a comment that was posted once when it was sent twice. So the
+    /// key exists only for reads, and it carries the token and the variables,
+    /// because a question asked by someone else, or asked about something else,
+    /// is a different question.
+    #[test]
+    fn only_a_read_may_share_a_flight() {
+        let read = serde_json::json!({ "query": "query Q($id: uuid!) { node(id: $id) { id } }",
+                                       "variables": { "id": "a" } });
+        let write = serde_json::json!({ "query": "mutation M { insertNode { id } }" });
+        let anonymous = serde_json::json!({ "query": "{ nodes { id } }" });
+
+        assert!(flight_key(None, &write).is_none(), "a write is never shared");
+        assert!(flight_key(Some("tok"), &write).is_none());
+
+        let mine = flight_key(Some("tok"), &read).expect("a read is shareable");
+        assert_eq!(mine, flight_key(Some("tok"), &read).unwrap(), "same question");
+        assert_ne!(
+            mine,
+            flight_key(Some("other"), &read).unwrap(),
+            "another reader's answer is not mine"
+        );
+        let elsewhere = serde_json::json!({ "query": "query Q($id: uuid!) { node(id: $id) { id } }",
+                                            "variables": { "id": "b" } });
+        assert_ne!(
+            mine,
+            flight_key(Some("tok"), &elsewhere).unwrap(),
+            "another node is another question"
+        );
+        // The anonymous shorthand is a read, and only a read may use it.
+        assert!(flight_key(None, &anonymous).is_some());
+    }
 
     /// What decides whether a dropped request is tried again. A mutation read as
     /// a query could cast a second vote, so the keyword is the whole safeguard:
