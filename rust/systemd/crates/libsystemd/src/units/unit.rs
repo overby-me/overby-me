@@ -1437,6 +1437,7 @@ impl From<ParsedSwapSection> for SwapConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct MountConfig {
     /// What= — the device, file, or resource to mount.
     pub what: String,
@@ -2218,7 +2219,7 @@ fn remove_runtime_directories(runtime: &[String]) {
 /// status is set to `Started(Running)`; on failure it is set to
 /// `Stopped(StoppedUnexpected)`.
 #[cfg(target_os = "linux")]
-fn activate_mount(
+pub(crate) fn activate_mount(
     id: &UnitId,
     conf: &MountConfig,
     status: &RwLock<UnitStatus>,
@@ -2394,7 +2395,7 @@ fn activate_mount(
 /// Non-Linux stub for mount activation — always succeeds and marks the unit
 /// as started.
 #[cfg(not(target_os = "linux"))]
-fn activate_mount(
+pub(crate) fn activate_mount(
     id: &UnitId,
     _conf: &MountConfig,
     status: &RwLock<UnitStatus>,
