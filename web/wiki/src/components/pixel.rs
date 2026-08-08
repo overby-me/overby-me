@@ -777,7 +777,10 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                 // The wrapper, not the canvas, carries the zoom: the tooltip is
                 // placed as a percentage of THIS box, so growing the box keeps
                 // the tip on its cell.
-                style: "width: {zoom() * 100}%; max-width: {board_px(cols) * zoom()}px;",
+                // The zoom as a number the stylesheet can multiply by. The
+                // sizing itself is CSS: it has to weigh the width available
+                // against the height allowed, which only the layout knows.
+                style: "--zoom: {zoom()};",
                 // Leaving is the WRAPPER's business, not the canvas's. The tip
                 // hangs a small gap away from its cell, and that gap belongs to
                 // neither element: crossing it to reach the profile link fired

@@ -8034,6 +8034,11 @@ a.list-item:hover {
 	   wide on a 500px screen. */
 	width: 100%;
 	max-width: 100%;
+	/* And never taller than its share of the screen, so the palette is on it.
+	   A board sized only by width is square, so on a phone it took the whole
+	   viewport and the colours were somewhere below the fold -- and picking a
+	   colour is the first half of painting. */
+	max-height: var(--pixel-board-cap);
 	/* A drag pans the board; a tap still paints, because a browser does not
 	   raise a click after a scrolling gesture. */
 	touch-action: pan-x pan-y;
@@ -8042,7 +8047,28 @@ a.list-item:hover {
 
 .pixel-board-wrap {
 	position: relative;
-	width: 100%;
+	/* The board fits BOTH ways: as wide as there is room for, or as wide as the
+	   height cap allows it to be while staying square, whichever is smaller.
+	   Then times the zoom, which is how zooming grows past the cap and the
+	   scroller above starts to pan instead.
+
+	   Sized here rather than on the canvas because the tooltip is placed as a
+	   percentage of this box, so the box has to be the board exactly. */
+	width: calc(min(100%, var(--pixel-board-cap)) * var(--zoom, 1));
+	max-width: none;
+}
+
+/* How much of the screen the board may take. Deliberately less than half on a
+   phone: the header, the zoom control, three rows of colour and the line that
+   says whose turn it is all have to fit under it. */
+:root {
+	--pixel-board-cap: 46svh;
+}
+
+@media (min-width: 900px) {
+	:root {
+		--pixel-board-cap: 62svh;
+	}
 }
 
 /* The zoom control, under the board and out of the way of the palette. */
