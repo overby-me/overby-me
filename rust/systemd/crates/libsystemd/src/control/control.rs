@@ -9970,6 +9970,26 @@ pub fn execute_command(
                             *status = crate::units::UnitStatus::NeverStarted;
                         }
                     }
+                    // A mount unit may read Started while its mount was removed
+                    // out-of-band (a manual `umount`) before the mountinfo monitor
+                    // reconciled it. An explicit `systemctl start` must re-run the
+                    // mount rather than no-op on the stale Started status
+                    // (TEST-60-MOUNT-RATELIMIT).
+                    if id.kind == crate::units::UnitIdKind::Mount
+                        && let Some(u) = ri.unit_table.get(&id)
+                    {
+                        let where_ = if let Specific::Mount(m) = &u.specific {
+                            m.conf.where_.clone()
+                        } else {
+                            String::new()
+                        };
+                        if !where_.is_empty() && !crate::units::is_path_mounted(&where_) {
+                            let mut status = u.common.status.write_poisoned();
+                            if matches!(&*status, crate::units::UnitStatus::Started(_)) {
+                                *status = crate::units::UnitStatus::NeverStarted;
+                            }
+                        }
+                    }
                 }
                 let errs = if ignore_deps {
                     // Activate only this unit, not its dependencies

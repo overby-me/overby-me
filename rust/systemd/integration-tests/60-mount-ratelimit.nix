@@ -1,23 +1,27 @@
 {
   name = "60-MOUNT-RATELIMIT";
-  # Skips rather than passes: no mountinfo event-source rate limiting
-  # See ../docs/TEST-OVERRIDES.md.
-  expectedSkip = true;
-  # The /proc/self/mountinfo-driven mount monitor is now implemented (shared
-  # with 10-MOUNT), and this session added SubState=mounted for active mount
-  # units plus a guard so the monitor never deactivates a mount unit PID 1 is
-  # starting. But testcase_issue_20329 additionally requires systemd's mountinfo
-  # *event-source rate-limiting* with delayed mount start-job handling: after a
-  # burst of mount/unmount events the monitor is throttled and mount start jobs
-  # must be DELAYED until it recovers. rust-systemd has no event-source
-  # rate-limiter, so a post-burst `systemctl start` races the backlogged monitor
-  # and fails. Re-skipped until that recovery path is implemented.
+
+  # Skip testcase_issue_23796 only. It exercises an external mount(8) type
+  # helper (`mount.mytmpfs`, a wrapper that sleeps then execs mount) driven by a
+  # `--no-block` mount start that must survive `daemon-reexec`. Our activate_mount
+  # performs the mount(2) syscall directly (crates/libsystemd/src/units/unit.rs),
+  # so an unknown Type= like `mytmpfs` is never handed to /sbin/mount.<type> the
+  # way C systemd does, and background mount jobs are not yet serialized across
+  # reexec. Both are separable gaps tracked in docs/TEST-OVERRIDES.md. The three
+  # remaining subtests (issue_20329, long_path, mount_ratelimit) exercise the
+  # actual /proc/self/mountinfo monitor + rate-limit behavior and must pass.
+  testEnv = {
+    TEST_SKIP_TESTCASES = "testcase_issue_23796";
+  };
+
+  # The preamble writes RateLimitBurst=0 and reloads journald so its own noisy
+  # mount churn is not rate-limited out of the journal. rust-systemd reloads
+  # journald fine; the C oracle on NixOS fails this reload: its journald reloads
+  # the config ("Config file reloaded") but the reload control process then hangs
+  # ~37s and exits 1, a NixOS C-systemd journald quirk unrelated to the mount
+  # behavior under test. Make the reload non-fatal so the oracle reaches the
+  # subtests; it is a no-op for rust-systemd (whose reload succeeds).
   patchScript = ''
-    {
-      echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: mountinfo monitor rate-limit recovery not implemented, skipping' >/skipped"
-      echo "exit 77"
-    } > TEST-60-MOUNT-RATELIMIT.sh
-    chmod +x TEST-60-MOUNT-RATELIMIT.sh
+    sed -i 's#^systemctl reload systemd-journald\.service$#systemctl reload systemd-journald.service || true#' TEST-60-MOUNT-RATELIMIT.sh
   '';
 }

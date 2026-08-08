@@ -181,7 +181,12 @@ pub(crate) fn path_to_mount_unit_name(path: &str) -> String {
     } else {
         format!("/{path}")
     };
-    format!("{}.mount", crate::unit_name::unit_name_path_escape(&abs))
+    let name = format!("{}.mount", crate::unit_name::unit_name_path_escape(&abs));
+    // A path whose escaped name would exceed UNIT_NAME_MAX is hashed rather than
+    // rejected, matching C's unit_name_from_path (which falls back to
+    // unit_name_hash_long). Every caller routes through here, so a long mount
+    // path yields one stable hashed name across sync, dep resolution and mangle.
+    crate::unit_name::unit_name_hash_long(&name).unwrap_or(name)
 }
 
 /// Return mount unit names for every prefix of the given absolute path,

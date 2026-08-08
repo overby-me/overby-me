@@ -883,20 +883,21 @@ fn main() {
     // Matches upstream systemd's `unit_name_mangle_with_suffix`.
     // Skip positional[0] since that's the subcommand.
     for arg in positional.iter_mut().skip(1) {
-        if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
-            *arg = format!(
-                "{}.device",
-                libsystemd::unit_name::unit_name_path_escape(arg),
-            );
+        let suffix = if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
+            ".device"
         } else if arg.starts_with('/') {
             // Any other absolute path is a mount point: resolve it to the
             // corresponding `.mount` unit (e.g. `/tmp/x` -> `tmp-x.mount`), as
             // upstream `systemctl show /tmp/x` does.
-            *arg = format!(
-                "{}.mount",
-                libsystemd::unit_name::unit_name_path_escape(arg),
-            );
-        }
+            ".mount"
+        } else {
+            continue;
+        };
+        let name = format!("{}{suffix}", libsystemd::unit_name::unit_name_path_escape(arg));
+        // Hash an over-long name exactly as the manager does (unit_name_from_path
+        // → unit_name_hash_long), so `systemctl show /very/long/path` resolves to
+        // the same hashed unit the mount monitor synthesized for that mount.
+        *arg = libsystemd::unit_name::unit_name_hash_long(&name).unwrap_or(name);
     }
 
     // Parse signal name from --signal / -s flag captured in first pass

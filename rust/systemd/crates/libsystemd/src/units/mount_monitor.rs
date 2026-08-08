@@ -65,6 +65,12 @@ fn parse_mountinfo() -> Vec<(String, String, String)> {
     mounts
 }
 
+/// Whether `path` is currently a mount point, from a fresh read of
+/// `/proc/self/mountinfo`.
+pub(crate) fn is_path_mounted(path: &str) -> bool {
+    parse_mountinfo().iter().any(|(mp, _, _)| mp == path)
+}
+
 /// True for filesystem types that are inherently network filesystems, which get
 /// remote-fs ordering even without an explicit `_netdev`.
 pub(crate) fn fstype_is_network(fstype: &str) -> bool {
@@ -436,14 +442,24 @@ pub fn sync_mount_units(
             name: name.clone(),
         };
         if let Some(u) = ri.unit_table.get_mut(&id) {
-            let (what, is_net) = if let crate::units::Specific::Mount(m) = &u.specific {
+            let (what, is_net, where_) = if let crate::units::Specific::Mount(m) = &u.specific {
                 (
                     m.conf.what.clone(),
                     mount_is_network_static(m.conf.fs_type.as_deref(), m.conf.options.as_deref()),
+                    m.conf.where_.clone(),
                 )
             } else {
-                (String::new(), false)
+                (String::new(), false, String::new())
             };
+            // Re-verify against a FRESH /proc/self/mountinfo read: this pass's
+            // `current` snapshot can predate a concurrent `systemctl start`'s
+            // mount, and stopping a mount that is actually present clobbers the
+            // just-started unit ("a required dependency failed",
+            // TEST-60-MOUNT-RATELIMIT). If it is mounted now, leave it Started
+            // and keep it in `overridden`.
+            if !where_.is_empty() && parse_mountinfo().iter().any(|(mp, _, _)| *mp == where_) {
+                continue;
+            }
             apply_mount_deps_in_place(&mut u.common.dependencies, &what, is_net);
             try_set_stopped(&u.common.status);
         }
