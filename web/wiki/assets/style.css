@@ -8058,17 +8058,16 @@ a.list-item:hover {
 	max-width: none;
 }
 
-/* How much of the screen the board may take. Deliberately less than half on a
-   phone: the header, the zoom control, three rows of colour and the line that
-   says whose turn it is all have to fit under it. */
+/* How much of the screen the board may take.
+   Two limits, whichever is smaller. A share of the screen, so the board is not
+   a postage stamp on a tall monitor; and the screen MINUS the furniture, which
+   is what actually decides whether the colours are on it. The furniture is the
+   card header, the zoom control, three rows of swatches and the line that says
+   whose turn it is -- about twenty-one rems together.
+   Measured, not guessed: at 62svh on a 757px window the last three swatches sat
+   26px below the fold, and picking a colour is the first half of painting. */
 :root {
-	--pixel-board-cap: 46svh;
-}
-
-@media (min-width: 900px) {
-	:root {
-		--pixel-board-cap: 62svh;
-	}
+	--pixel-board-cap: min(60svh, calc(100svh - 21rem));
 }
 
 /* The zoom control, under the board and out of the way of the palette. */
