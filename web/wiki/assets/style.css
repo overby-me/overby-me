@@ -7984,7 +7984,12 @@ a.list-item:hover {
 	   resolve takes the whole declaration down with it at computed-value time,
 	   and the grid falls back to a single column -- which is what happened here,
 	   twenty-six swatches in a column a thousand pixels tall. */
-	grid-template-columns: repeat(auto-fit, minmax(22px, 32px));
+	/* The max must be FLEXIBLE. auto-fit counts how many repetitions fit using
+	   the track's max when that max is a fixed length, so minmax(22px, 32px)
+	   asked "how many 32s fit" -- 23 in a 902px palette, and 26 swatches then
+	   need two rows. With 1fr it counts by the minimum instead, fits all 26,
+	   and shares the leftover between them. */
+	grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
 	justify-content: center;
 	gap: var(--md-sys-spacing-1-5);
 }
@@ -8003,10 +8008,14 @@ a.list-item:hover {
 }
 
 .pixel-swatch {
-	/* The track decides how wide; the swatch stays square inside it. */
+	/* The track decides how wide, up to a point: a swatch on a very wide palette
+	   should not become a tile. Centred in its track, so a capped swatch sits
+	   under the one above it. */
 	width: auto;
 	height: auto;
 	min-width: 0;
+	max-width: var(--md-sys-spacing-8);
+	justify-self: center;
 	aspect-ratio: 1;
 	border: 2px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
