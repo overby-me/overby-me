@@ -836,9 +836,22 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     // wrapper above handles leaving.
                     onpointerup: on_up,
                 }
-                if hint() && can_paint && cooling() == 0 {
-                    div { class: "pixel-hint", aria_hidden: "true",
-                        span { "{t(\"pixel.yourTurn\")}" }
+                // One place for both things the board has to say: what to do,
+                // and how long until it will listen. On the board rather than
+                // under it, because a line under it is a line the board does
+                // not get -- and only one of them is ever true at a time.
+                if can_paint && (cooling() > 0 || hint()) {
+                    div {
+                        class: "pixel-hint",
+                        // The countdown is worth announcing; the hint is not.
+                        aria_live: if cooling() > 0 { "polite" } else { "off" },
+                        span {
+                            if cooling() > 0 {
+                                "{t(\"pixel.waitSeconds\")} {cooling()}"
+                            } else {
+                                "{t(\"pixel.yourTurn\")}"
+                            }
+                        }
                     }
                 }
                 if let Some(cell) = at {
@@ -896,13 +909,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                         }
                     }
                 }
-                // Only the wait keeps a line of its own: it is a number that
-                // changes and a reason the board is not answering.
-                if cooling() > 0 {
-                    div { class: "pixel-status",
-                        span { class: "pixel-wait", "{t(\"pixel.waitSeconds\")} {cooling()}" }
-                    }
-                }
+
             }
             }
         }

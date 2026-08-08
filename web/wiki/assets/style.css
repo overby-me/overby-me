@@ -8081,7 +8081,7 @@ a.list-item:hover {
 	--pixel-board-share: 60svh;
 	/* And what has to be seen with it: the card header, the zoom control, three
 	   rows of swatches and the line saying whose turn it is. */
-	--pixel-board-furniture: 19rem;
+	--pixel-board-furniture: 17rem;
 	--pixel-dock-clear: 0px;
 }
 
