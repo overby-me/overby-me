@@ -1204,6 +1204,7 @@ fn start_service_with_filedescriptors(
         system_call_architectures: conf.exec_config.system_call_architectures.clone(),
         system_call_filter: conf.exec_config.system_call_filter.clone(),
         system_call_log: conf.exec_config.system_call_log.clone(),
+        system_call_error_number: conf.exec_config.system_call_error_number.clone(),
         restrict_file_systems: conf.exec_config.restrict_file_systems.clone(),
         protect_proc: match conf.exec_config.protect_proc {
             crate::units::ProtectProc::Default => "default".to_owned(),

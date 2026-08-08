@@ -886,6 +886,12 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub system_call_log: Vec<String>,
 
+    /// SystemCallErrorNumber= sets the errno (a name like "EPERM" or a number)
+    /// returned to a filtered syscall instead of the default action of killing
+    /// the process. See systemd.exec(5).
+    #[serde(default)]
+    pub system_call_error_number: Option<String>,
+
     /// RestrictFileSystems= — filesystem type restriction.
     /// Space-separated list of filesystem type names (e.g. ext4, tmpfs).
     /// A leading `~` inverts the list (deny-list). See systemd.exec(5).
@@ -3717,6 +3723,11 @@ pub fn run_exec_helper() {
         }
     }
 
+    // ── SystemCallFilter= seccomp syscall filter ─────────────────────
+    // Installed last (after NoNewPrivileges, before exec) so nothing later needs
+    // a filtered syscall. Using any filter implies NoNewPrivileges.
+    install_system_call_filter(&config);
+
     log::trace!(
         "about to execv {} (uid={}, gid={}, env_count={})",
         effective_cmd.display(),
@@ -5318,6 +5329,287 @@ fn seccomp_block_hostname() {
     log::warn!("ProtectHostname=yes seccomp hostname lock not implemented for this target");
 }
 
+/// Resolve a syscall name to its x86_64 number. This is a curated subset of the
+/// syscall table covering the syscalls commonly named in a `SystemCallFilter=`
+/// deny-list; unknown names return None and are ignored (a deny-list defaults to
+/// allow, so an unresolved name is simply not blocked). @group sets are not yet
+/// resolved here.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn syscall_name_to_nr(name: &str) -> Option<i64> {
+    let nr = match name {
+        // filesystem / mounts
+        "mkdir" => libc::SYS_mkdir,
+        "mkdirat" => libc::SYS_mkdirat,
+        "rmdir" => libc::SYS_rmdir,
+        "unlink" => libc::SYS_unlink,
+        "unlinkat" => libc::SYS_unlinkat,
+        "rename" => libc::SYS_rename,
+        "renameat" => libc::SYS_renameat,
+        "renameat2" => libc::SYS_renameat2,
+        "link" => libc::SYS_link,
+        "symlink" => libc::SYS_symlink,
+        "chmod" => libc::SYS_chmod,
+        "fchmod" => libc::SYS_fchmod,
+        "fchmodat" => libc::SYS_fchmodat,
+        "chown" => libc::SYS_chown,
+        "fchown" => libc::SYS_fchown,
+        "open" => libc::SYS_open,
+        "openat" => libc::SYS_openat,
+        "creat" => libc::SYS_creat,
+        "truncate" => libc::SYS_truncate,
+        "mount" => libc::SYS_mount,
+        "umount2" => libc::SYS_umount2,
+        "pivot_root" => libc::SYS_pivot_root,
+        "chroot" => libc::SYS_chroot,
+        "swapon" => libc::SYS_swapon,
+        "swapoff" => libc::SYS_swapoff,
+        // process / privilege
+        "clone" => libc::SYS_clone,
+        "fork" => libc::SYS_fork,
+        "vfork" => libc::SYS_vfork,
+        "execve" => libc::SYS_execve,
+        "execveat" => libc::SYS_execveat,
+        "ptrace" => libc::SYS_ptrace,
+        "kill" => libc::SYS_kill,
+        "tkill" => libc::SYS_tkill,
+        "tgkill" => libc::SYS_tgkill,
+        "setuid" => libc::SYS_setuid,
+        "setgid" => libc::SYS_setgid,
+        "setresuid" => libc::SYS_setresuid,
+        "setresgid" => libc::SYS_setresgid,
+        "setgroups" => libc::SYS_setgroups,
+        "capset" => libc::SYS_capset,
+        "prctl" => libc::SYS_prctl,
+        "seccomp" => libc::SYS_seccomp,
+        "personality" => libc::SYS_personality,
+        // modules / kernel
+        "init_module" => libc::SYS_init_module,
+        "finit_module" => libc::SYS_finit_module,
+        "delete_module" => libc::SYS_delete_module,
+        "kexec_load" => libc::SYS_kexec_load,
+        "kexec_file_load" => libc::SYS_kexec_file_load,
+        "reboot" => libc::SYS_reboot,
+        "bpf" => libc::SYS_bpf,
+        "perf_event_open" => libc::SYS_perf_event_open,
+        "syslog" => libc::SYS_syslog,
+        "acct" => libc::SYS_acct,
+        "quotactl" => libc::SYS_quotactl,
+        "_sysctl" | "sysctl" => 156, // __x64_sys__sysctl (no libc constant)
+        // clock / host identity
+        "sethostname" => libc::SYS_sethostname,
+        "setdomainname" => libc::SYS_setdomainname,
+        "settimeofday" => libc::SYS_settimeofday,
+        "clock_settime" => libc::SYS_clock_settime,
+        "adjtimex" => libc::SYS_adjtimex,
+        "clock_adjtime" => libc::SYS_clock_adjtime,
+        // namespaces / scheduling / io ports
+        "unshare" => libc::SYS_unshare,
+        "setns" => libc::SYS_setns,
+        "ioperm" => libc::SYS_ioperm,
+        "iopl" => libc::SYS_iopl,
+        // memory policy / keyring
+        "mbind" => libc::SYS_mbind,
+        "set_mempolicy" => libc::SYS_set_mempolicy,
+        "get_mempolicy" => libc::SYS_get_mempolicy,
+        "migrate_pages" => libc::SYS_migrate_pages,
+        "move_pages" => libc::SYS_move_pages,
+        "keyctl" => libc::SYS_keyctl,
+        "add_key" => libc::SYS_add_key,
+        "request_key" => libc::SYS_request_key,
+        "uselib" => libc::SYS_uselib,
+        "ustat" => libc::SYS_ustat,
+        "sysfs" => libc::SYS_sysfs,
+        // basic io (mostly for tests / completeness)
+        "read" => libc::SYS_read,
+        "write" => libc::SYS_write,
+        "close" => libc::SYS_close,
+        "getpid" => libc::SYS_getpid,
+        _ => return None,
+    };
+    Some(nr)
+}
+
+/// Resolve a `SystemCallErrorNumber=` value (an errno name like "EPERM" or a
+/// decimal number) to its numeric value.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn parse_syscall_errno(s: &str) -> Option<u16> {
+    let s = s.trim();
+    if let Ok(n) = s.parse::<u16>() {
+        return Some(n);
+    }
+    let n = match s {
+        "EPERM" => libc::EPERM,
+        "EACCES" => libc::EACCES,
+        "EINVAL" => libc::EINVAL,
+        "ENOSYS" => libc::ENOSYS,
+        "ENOMEM" => libc::ENOMEM,
+        "EIO" => libc::EIO,
+        "ENOENT" => libc::ENOENT,
+        "EAGAIN" => libc::EAGAIN,
+        "EBADF" => libc::EBADF,
+        "EBUSY" => libc::EBUSY,
+        "ENOTTY" => libc::ENOTTY,
+        "EOPNOTSUPP" => libc::EOPNOTSUPP,
+        _ => return None,
+    };
+    Some(n as u16)
+}
+
+/// Build a seccomp cBPF program that allows every syscall except those in
+/// `blocked`, which receive `action` (a `SECCOMP_RET_*` value). The filter is
+/// x86_64-only; on any other audited arch it allows everything (matching how the
+/// hostname filter is scoped).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn build_seccomp_deny_filter(blocked: &[i64], action: u32) -> Vec<libc::sock_filter> {
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const ALLOW: u32 = 0x7fff_0000; // SECCOMP_RET_ALLOW
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    // seccomp_data: nr @ offset 0, arch @ offset 4.
+    let mut prog = vec![
+        f(0x20, 0, 0, 4), // BPF_LD|W|ABS arch
+        f(0x15, 1, 0, AUDIT_ARCH_X86_64), // JEQ arch==x86_64 -> load nr, else allow
+        f(0x06, 0, 0, ALLOW), // other arch: allow (filter is x86_64-only)
+        f(0x20, 0, 0, 0), // BPF_LD|W|ABS nr
+    ];
+    for &nr in blocked {
+        // JEQ nr: on match fall through to the RET action; else skip it.
+        prog.push(f(0x15, 0, 1, nr as u32));
+        prog.push(f(0x06, 0, 0, action));
+    }
+    prog.push(f(0x06, 0, 0, ALLOW)); // default: allow everything else
+    prog
+}
+
+/// Install a seccomp deny-list filter for `blocked`, returning false on failure.
+/// Sets `PR_SET_NO_NEW_PRIVS` first (a precondition for an unprivileged filter,
+/// and implied by using `SystemCallFilter=`).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_seccomp_deny_filter(blocked: &[i64], action: u32) -> bool {
+    if blocked.is_empty() {
+        return true;
+    }
+    let filter = build_seccomp_deny_filter(blocked, action);
+    let prog = libc::sock_fprog {
+        len: filter.len() as u16,
+        filter: filter.as_ptr() as *mut libc::sock_filter,
+    };
+    unsafe {
+        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+            log::warn!(
+                "SystemCallFilter: PR_SET_NO_NEW_PRIVS failed: {}",
+                std::io::Error::last_os_error()
+            );
+            return false;
+        }
+        if libc::prctl(
+            libc::PR_SET_SECCOMP,
+            2, // SECCOMP_MODE_FILTER
+            &prog as *const libc::sock_fprog as usize as libc::c_ulong,
+            0,
+            0,
+        ) != 0
+        {
+            log::warn!(
+                "SystemCallFilter: seccomp filter load failed: {}",
+                std::io::Error::last_os_error()
+            );
+            return false;
+        }
+    }
+    true
+}
+
+/// Apply `SystemCallFilter=` for the child.
+///
+/// Increment 1 supports the deny-list form (`SystemCallFilter=~a b c`), which
+/// defaults to allowing every syscall and blocks only the named ones, so it can
+/// never accidentally break a service by under-specifying. The allow-list form
+/// and `@group` sets require porting systemd's `@default`/`@system-service`/…
+/// syscall-set tables and are deferred; until then those cases run without a
+/// filter (permissive) rather than risk killing the service. The default action
+/// for a blocked syscall is to kill the process (systemd's default), unless
+/// `SystemCallErrorNumber=` selects an errno instead.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_system_call_filter(config: &ExecHelperConfig) {
+    if config.system_call_filter.is_empty() {
+        return;
+    }
+    let deny_list = config.system_call_filter[0].starts_with('~');
+    if !deny_list {
+        log::warn!(
+            "SystemCallFilter= allow-list (and @group sets) not yet enforced; \
+             running {} without a seccomp filter",
+            config.name
+        );
+        return;
+    }
+
+    let mut blocked: Vec<i64> = Vec::new();
+    let mut skipped_group = false;
+    for (i, tok) in config.system_call_filter.iter().enumerate() {
+        // The leading '~' marks the whole list as a deny-list; strip it from the
+        // first token to recover the syscall name.
+        let name = if i == 0 {
+            tok.strip_prefix('~').unwrap_or(tok)
+        } else {
+            tok.as_str()
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(stripped) = name.strip_prefix('@') {
+            let _ = stripped;
+            skipped_group = true;
+            continue;
+        }
+        match syscall_name_to_nr(name) {
+            Some(nr) => {
+                if !blocked.contains(&nr) {
+                    blocked.push(nr);
+                }
+            }
+            None => log::debug!("SystemCallFilter: unknown syscall '{name}', ignoring"),
+        }
+    }
+    if skipped_group {
+        log::warn!(
+            "SystemCallFilter=: @group syscall sets are not yet resolved; only \
+             concrete syscall names in the deny-list are enforced for {}",
+            config.name
+        );
+    }
+    if blocked.is_empty() {
+        return;
+    }
+
+    // Default action is to kill the process (systemd's SECCOMP_ERROR_NUMBER_KILL
+    // default); SystemCallErrorNumber= overrides it to return an errno.
+    const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
+    const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+    let action = match config
+        .system_call_error_number
+        .as_deref()
+        .and_then(parse_syscall_errno)
+    {
+        Some(errno) => SECCOMP_RET_ERRNO | (errno as u32 & 0xffff),
+        None => SECCOMP_RET_KILL_PROCESS,
+    };
+
+    if install_seccomp_deny_filter(&blocked, action) {
+        log::debug!(
+            "SystemCallFilter: installed deny filter ({} syscalls) for {}",
+            blocked.len(),
+            config.name
+        );
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_system_call_filter(_config: &ExecHelperConfig) {
+    log::warn!("SystemCallFilter= not implemented for this target");
+}
+
 /// Bring up the loopback interface in a new network namespace.
 fn bring_up_loopback() {
     // Use a netlink socket to bring up lo
@@ -6251,6 +6543,45 @@ mod tests {
         assert_eq!(get(fd), (132, 50));
 
         unsafe { libc::close(fd) };
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_seccomp_deny_filter_blocks_syscall() {
+        // Fork: a seccomp filter is one-way, so it must be installed in a child
+        // to avoid confining the test runner.
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+        let action = SECCOMP_RET_ERRNO | (libc::EPERM as u32);
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // Child: block mkdir with EPERM, then verify behaviour. Only raw
+            // syscalls and _exit are used (async-signal-safe after fork).
+            if !install_seccomp_deny_filter(&[libc::SYS_mkdir], action) {
+                unsafe { libc::_exit(10) };
+            }
+            let r = unsafe {
+                libc::syscall(libc::SYS_mkdir, c"/tmp/rs-seccomp-test".as_ptr(), 0o755)
+            };
+            let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if r != -1 || e != libc::EPERM {
+                unsafe { libc::_exit(11) };
+            }
+            // A syscall not in the deny-list still works.
+            if unsafe { libc::syscall(libc::SYS_getpid) } <= 0 {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "child seccomp checks failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
     }
     use aes_gcm::aead::OsRng;
 
