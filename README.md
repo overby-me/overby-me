@@ -402,6 +402,13 @@
 | 🚧 | Signing (atproto) | [P-256 & secp256k1 🌀📖](https://atproto.com/specs/cryptography) | | 🆗 | |
 | 🚧 | Blind Signatures | [RFC 9474 (RSA) 📖](https://www.rfc-editor.org/rfc/rfc9474) | [blind-rsa-signatures 🦀](https://github.com/jedisct1/rust-blind-rsa-signatures) | 🆗 | |
 
+#### Secret Management
+
+| Status | Component | Current | Research & Development | Compatibility | Legacy |
+|:-:|-|-|-|-|-|
+| 🚧 | Secret Service Provider | [GNOME Keyring 💣](https://gitlab.gnome.org/GNOME/gnome-keyring) | [oo7 🦀](https://github.com/linux-credentials/oo7) | [Secret Service 📖](https://specifications.freedesktop.org/secret-service-spec/latest/) | |
+| 🚧 | Secret Service Client | [libsecret 💣](https://gitlab.gnome.org/GNOME/libsecret) | [oo7 🦀](https://github.com/linux-credentials/oo7) | [Secret Service 📖](https://specifications.freedesktop.org/secret-service-spec/latest/) | |
+
 </details>
 
 <a id="-system"></a>
