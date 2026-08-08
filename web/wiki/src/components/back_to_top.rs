@@ -69,9 +69,7 @@ pub fn dock_hidden() -> bool {
 /// Smooth via the `html { scroll-behavior: smooth }` rule, which reduced-motion
 /// neutralises.
 pub fn scroll_to_top() {
-    if let Some(win) = web_sys::window() {
-        win.scroll_to_with_x_and_y(0.0, 0.0);
-    }
+    crate::scroll_host::scroll_to(0.0);
 }
 
 /// How far through the page the reader has scrolled, 0-100. Reactive: reading it
@@ -85,10 +83,10 @@ pub fn near_bottom() -> bool {
     NEAR_BOTTOM()
 }
 
-/// Attach the single window scroll listener that feeds all scroll-driven signals.
-/// Leaked so it lives for the app's lifetime (the shell hosts these for the run).
+/// Attach the single scroll listener that feeds all scroll-driven signals, on
+/// whichever box scrolls (see `scroll_host`). Leaked so it lives for the app's
+/// lifetime (the shell hosts these for the run).
 fn install_listener() {
-    let Some(win) = web_sys::window() else { return };
     // Last observed scroll position, for the dock's scroll-direction detection.
     let mut last_y = 0.0f64;
     // When this page's scroll was last filed, so a reload lands where the reader
@@ -99,8 +97,7 @@ fn install_listener() {
         // The browser calls this, so the runtime has to be put back before
         // touching a signal (see `crate::runtime`).
         crate::runtime::enter(|| {
-            let Some(w) = web_sys::window() else { return };
-            let y = w.scroll_y().unwrap_or(0.0);
+            let y = crate::scroll_host::scroll_top();
 
             let now = y > SHOW_AFTER;
             if now != *VISIBLE.peek() {
@@ -128,16 +125,8 @@ fn install_listener() {
             }
             last_y = y;
 
-            let doc_h = w
-                .document()
-                .and_then(|d| d.document_element())
-                .map(|e| e.scroll_height() as f64)
-                .unwrap_or(0.0);
-            let inner_h = w
-                .inner_height()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            let doc_h = crate::scroll_host::scroll_height();
+            let inner_h = crate::scroll_host::client_height();
             let scrollable = (doc_h - inner_h).max(1.0);
             let pct = (y / scrollable * 100.0).clamp(0.0, 100.0).round() as i32;
             if pct != *PROGRESS.peek() {
@@ -164,7 +153,7 @@ fn install_listener() {
             }
         });
     });
-    let _ = win.add_event_listener_with_callback("scroll", cb.as_ref().unchecked_ref());
+    crate::scroll_host::on_scroll(&cb);
     cb.forget();
 }
 

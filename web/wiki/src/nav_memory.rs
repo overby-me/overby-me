@@ -141,20 +141,7 @@ pub(crate) fn worth_recording(y: f64, remembered: Option<f64>, reachable: f64) -
 
 /// How far down this page can be scrolled right now.
 fn reachable_scroll() -> f64 {
-    let Some(win) = web_sys::window() else {
-        return 0.0;
-    };
-    let doc_h = win
-        .document()
-        .and_then(|d| d.document_element())
-        .map(|e| e.scroll_height() as f64)
-        .unwrap_or(0.0);
-    let inner_h = win
-        .inner_height()
-        .ok()
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    (doc_h - inner_h).max(0.0)
+    (crate::scroll_host::scroll_height() - crate::scroll_host::client_height()).max(0.0)
 }
 
 /// Note how far down `url` was left.

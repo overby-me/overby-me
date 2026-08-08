@@ -32,7 +32,7 @@ const DAMPING: f64 = 0.5;
 /// spliced in without moving anything the reader is looking at.
 pub(crate) fn at_top() -> bool {
     web_sys::window()
-        .map(|w| w.scroll_y().unwrap_or(0.0) <= 0.0)
+        .map(|_| crate::scroll_host::scroll_top() <= 0.0)
         .unwrap_or(false)
 }
 

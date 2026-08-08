@@ -78,28 +78,18 @@ fn restore_scroll(target: f64) {
     const POLL_MS: u32 = 50;
     const ATTEMPTS: u32 = 40;
     spawn(async move {
-        let Some(win) = web_sys::window() else {
-            return;
-        };
         // Start at the top, the way an unremembered page would.
-        win.scroll_to_with_x_and_y(0.0, 0.0);
+        crate::scroll_host::scroll_to(0.0);
         for _ in 0..ATTEMPTS {
             gloo_timers::future::TimeoutFuture::new(POLL_MS).await;
             // Anything but where we left it means the reader took over.
-            if win.scroll_y().unwrap_or(0.0).abs() > 2.0 {
+            if crate::scroll_host::scroll_top().abs() > 2.0 {
                 return;
             }
-            let Some(doc) = win.document().and_then(|d| d.document_element()) else {
-                return;
-            };
-            let reachable = doc.scroll_height() as f64
-                - win
-                    .inner_height()
-                    .ok()
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
+            let reachable =
+                crate::scroll_host::scroll_height() - crate::scroll_host::client_height();
             if reachable >= target {
-                win.scroll_to_with_x_and_y(0.0, target);
+                crate::scroll_host::scroll_to(target);
                 // File it as well as perform it. Getting here means the throttled
                 // trail still holds whatever tiny value was written on the way in
                 // (this function starts at the top), and a reload before the
@@ -222,9 +212,6 @@ pub fn Layout() -> Element {
     // filed under.
     let mut previous = use_signal(|| Option::<(Vec<String>, Option<String>, String)>::None);
     use_effect(use_reactive!(|(path_key, app_key)| {
-        let Some(win) = web_sys::window() else {
-            return;
-        };
         let leaving = previous.peek().clone();
         if let Some((segments, app, url)) = &leaving {
             crate::nav_memory::remember(&context_path_peek(segments), app.as_deref(), segments);
@@ -236,7 +223,7 @@ pub fn Layout() -> Element {
             // over the position of the page being left, which is what made
             // coming back to a context land at the top.
             let leaving_at = crate::nav_memory::last_scroll(url)
-                .unwrap_or_else(|| win.scroll_y().unwrap_or(0.0));
+                .unwrap_or_else(crate::scroll_host::scroll_top);
             crate::nav_memory::stash_scroll(url, leaving_at);
         }
 
@@ -270,7 +257,7 @@ pub fn Layout() -> Element {
         match crate::nav_memory::stashed_scroll(&url) {
             Some(y) if y > 1.0 => restore_scroll(y),
             _ if same_page => {}
-            _ => win.scroll_to_with_x_and_y(0.0, 0.0),
+            _ => crate::scroll_host::scroll_to(0.0),
         }
     }));
     // Record each navigation as a diagnostics breadcrumb (remote-logging builds),

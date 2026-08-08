@@ -44,9 +44,7 @@ fn pages_on_screen() -> Vec<(f64, String)> {
     let Ok(marks) = document.query_selector_all("[data-page]") else {
         return Vec::new();
     };
-    let scrolled = web_sys::window()
-        .and_then(|w| w.scroll_y().ok())
-        .unwrap_or(0.0);
+    let scrolled = crate::scroll_host::scroll_top();
     let mut out = Vec::new();
     for at in 0..marks.length() {
         let Some(node) = marks.item(at) else { continue };
@@ -221,17 +219,10 @@ fn page_here(pages: &[(f64, String)], first: &str) -> String {
     let Some(window) = web_sys::window() else {
         return first.to_string();
     };
-    let scrolled = window.scroll_y().unwrap_or(0.0);
-    let seen = window
-        .inner_height()
-        .ok()
-        .and_then(|h| h.as_f64())
-        .unwrap_or(0.0);
-    let tall = window
-        .document()
-        .and_then(|d| d.document_element())
-        .map(|e| e.scroll_height() as f64)
-        .unwrap_or(0.0);
+    let _ = &window;
+    let scrolled = crate::scroll_host::scroll_top();
+    let seen = crate::scroll_host::client_height();
+    let tall = crate::scroll_host::scroll_height();
     page_at(
         pages,
         first,
@@ -278,11 +269,7 @@ pub fn PageControl(first: String, last: String) -> Element {
     // only thing this should wake for.
     use_effect(use_reactive!(|(scrolled,)| {
         let _ = scrolled;
-        let tall = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.document_element())
-            .map(|e| e.scroll_height())
-            .unwrap_or(0);
+        let tall = crate::scroll_host::scroll_height() as i32;
         if tall != *height.peek() || pages.peek().is_empty() {
             height.set(tall);
             pages.set(pages_on_screen());

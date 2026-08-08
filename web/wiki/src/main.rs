@@ -23,6 +23,7 @@ mod pwa;
 mod query_cache;
 mod route;
 mod runtime;
+mod scroll_host;
 mod session;
 pub mod snackbar;
 mod subscription;

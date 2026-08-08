@@ -453,11 +453,7 @@ pub(super) fn BreadcrumbCrumb(
             style: "--crumb-i: {step}",
             // Clicking a crumb (navigating to an ancestor, or re-clicking the
             // current node) scrolls the content back to the top.
-            onclick: move |_| {
-                if let Some(win) = web_sys::window() {
-                    win.scroll_to_with_x_and_y(0.0, 0.0);
-                }
-            },
+            onclick: move |_| crate::scroll_host::scroll_to(0.0),
             Link { to, class: "crumb-link",
                 div { class: "avatar small crumb-avatar",
                     {crate::components::loader::node_avatar(&mime, &name, ordinal)}

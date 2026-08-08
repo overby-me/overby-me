@@ -960,8 +960,21 @@ html {
 	margin-left: var(--md-sys-rail-width);
 	margin-top: var(--md-sys-spacing-16);
 	margin-right: var(--md-sys-margin);
-	min-height: calc(100vh - 64px);
-	min-height: calc(100dvh - 64px);
+	margin-bottom: var(--md-sys-margin);
+	/* A FRAME, not a sheet that scrolls away. The well is drawn as a rounded
+	   panel floating in the chrome, and while the window scrolled it the panel
+	   went too: its top corners slid under the bar within a couple of hundred
+	   pixels and did not come back until you returned to the top. Sized to the
+	   space between the bar and the bottom margin, it scrolls its own content
+	   and keeps its corners where they were drawn.
+
+	   Compact keeps the window scrolling (see `scroll_host.rs`): a phone browser
+	   hides its address bar only for the window, and no corner is worth that. */
+	height: calc(100vh - 64px - var(--md-sys-margin));
+	height: calc(100dvh - 64px - var(--md-sys-margin));
+	overflow-y: auto;
+	/* The page is the last thing that should scroll behind a sheet or a menu. */
+	overscroll-behavior: contain;
 	/* margin-top clears the bar now, so the pane's own top padding is normal. */
 	padding-top: var(--md-sys-margin);
 	background: var(--md-surface);
