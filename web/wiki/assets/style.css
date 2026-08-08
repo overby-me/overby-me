@@ -8108,6 +8108,15 @@ a.list-item:hover {
 	--pixel-dock-clear: 8rem;
 }
 
+/* With a rail instead of a dock there is room to spare, and the share was
+   spending it on nothing: 60svh of a 900px screen is a 540px board under 200px
+   of empty card. The height budget beside it is the honest constraint -- it
+   already subtracts everything that has to be seen WITH the board -- so on
+   anything but compact the board may have the whole of it. */
+.app-shell:not([data-size-class="compact"]) {
+	--pixel-board-share: 100svh;
+}
+
 /* The zoom control. It lives in the card header now, beside the count, where it
    costs no height of its own. */
 .pixel-zoom {
