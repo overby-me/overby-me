@@ -8115,7 +8115,13 @@ a.list-item:hover {
 .pixel-hint span {
 	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3);
 	border-radius: var(--md-sys-shape-corner-full);
+	/* Translucent, because it sits ON the picture and the picture is the point:
+	   it should say its piece without hiding a corner of the board. The opaque
+	   colour stays as the first declaration for anything that cannot mix, and
+	   the blur keeps the words legible over whatever is painted underneath. */
 	background: var(--md-inverse-surface);
+	background: color-mix(in srgb, var(--md-inverse-surface) 62%, transparent);
+	backdrop-filter: blur(3px);
 	color: var(--md-inverse-on-surface);
 	font-size: var(--md-sys-typescale-label-medium-size);
 	box-shadow: var(--md-sys-elevation-2);
