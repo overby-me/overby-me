@@ -46,6 +46,14 @@ pub const DEFAULT_SIDE: u32 = 64;
 /// itself, which is where the countdown reads it.
 pub const DEFAULT_COOLDOWN: u32 = 10;
 
+/// How far the board may be zoomed in.
+///
+/// Four steps, because four is what the smallest screen needs: a 64-cell board
+/// on a 360px phone gives a cell about five pixels, and four times that is
+/// twenty-two -- comfortably bigger than the 44px target a finger wants, once
+/// the cell is the thing being aimed at rather than the whole board.
+pub const MAX_ZOOM: u32 = 4;
+
 /// The palette, as CSS colours. The stored value is the INDEX, so a cell costs a
 /// single digit in the database and the palette can be restyled later without
 /// rewriting every row.
@@ -487,6 +495,18 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     // Locking is the owner's, and it takes effect for everyone: the board reads
     // `mutable`, and so does the trigger that refuses a placement, so a closed
     // canvas is closed to anything that is not this board as well.
+    // How far in the board is drawn, in whole steps.
+    //
+    // A 64-cell board on a 360px phone gives a cell about five pixels, which is
+    // not something a finger can aim at. Pinching works -- nothing disables it --
+    // but it zooms the PAGE, so the palette leaves the screen and the thing you
+    // came to press goes with it. This zooms the board inside its own scroller
+    // and leaves the rest of the app where it was.
+    //
+    // Nothing else has to change for it: a click is mapped through the board's
+    // own bounding rect, so a board drawn three times wider maps a tap to the
+    // same cell without any arithmetic knowing about zoom.
+    let mut zoom = use_signal(|| 1u32);
     let mut locking = use_signal(|| false);
     let lock_id = canvas_id.clone();
     let toggle_lock = move |_| {
@@ -751,9 +771,13 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             // board, so it lands on the right cell at any width — a phone's
             // scaled-down board, a desktop's full one, or a pinch zoom — with
             // nothing measured in JavaScript.
+            div { class: "pixel-board-scroll",
             div {
                 class: "pixel-board-wrap",
-                style: "max-width: {board_px(cols)}px;",
+                // The wrapper, not the canvas, carries the zoom: the tooltip is
+                // placed as a percentage of THIS box, so growing the box keeps
+                // the tip on its cell.
+                style: "width: {zoom() * 100}%; max-width: {board_px(cols) * zoom()}px;",
                 // Leaving is the WRAPPER's business, not the canvas's. The tip
                 // hangs a small gap away from its cell, and that gap belongs to
                 // neither element: crossing it to reach the profile link fired
@@ -818,7 +842,32 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     }
                 }
             }
+            }
 
+            // How far in. Offered to everyone, painter or not: a board is worth
+            // looking at closely as well as painting on, and a projector at the
+            // back of a hall wants it too.
+            div { class: "pixel-zoom",
+                button {
+                    class: "btn-icon",
+                    r#type: "button",
+                    disabled: zoom() <= 1,
+                    aria_label: "{t(\"pixel.zoomOut\")}",
+                    title: "{t(\"pixel.zoomOut\")}",
+                    onclick: move |_| zoom.set((zoom() - 1).max(1)),
+                    span { class: "material-icons", "zoom_out" }
+                }
+                span { class: "body-small text-muted", "{zoom()}\u{00d7}" }
+                button {
+                    class: "btn-icon",
+                    r#type: "button",
+                    disabled: zoom() >= MAX_ZOOM,
+                    aria_label: "{t(\"pixel.zoomIn\")}",
+                    title: "{t(\"pixel.zoomIn\")}",
+                    onclick: move |_| zoom.set((zoom() + 1).min(MAX_ZOOM)),
+                    span { class: "material-icons", "zoom_in" }
+                }
+            }
 
             if can_paint {
                 div { class: "pixel-palette",

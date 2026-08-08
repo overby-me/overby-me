@@ -8022,9 +8022,30 @@ a.list-item:hover {
 
 /* The board and its tooltip share a coordinate system: the tip is positioned as
    a percentage of this box, so it lands on its cell at any board width. */
+/* The scroller the board is zoomed inside. Zooming the PAGE would work -- and
+   nothing stops a pinch -- but it takes the palette off the screen with it, and
+   the palette is what you came to press. This keeps the zoom local to the board:
+   the app stays where it is and the board is panned within its own box. */
+.pixel-board-scroll {
+	overflow: auto;
+	max-width: 100%;
+	/* A drag pans the board; a tap still paints, because a browser does not
+	   raise a click after a scrolling gesture. */
+	touch-action: pan-x pan-y;
+	overscroll-behavior: contain;
+}
+
 .pixel-board-wrap {
 	position: relative;
 	width: 100%;
+}
+
+/* The zoom control, under the board and out of the way of the palette. */
+.pixel-zoom {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--md-sys-spacing-2);
 }
 
 /* A rich tooltip (M3): it holds a link and an avatar, so it takes a surface

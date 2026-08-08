@@ -286,7 +286,30 @@ pub fn MimeLoader(
         "vote/poll" => rsx! { PollApp { node: node.clone(), projector } },
         // A canvas is a node type, like a poll or a speaker list, so a context
         // can hold as many as it likes and each lives wherever it was made.
-        "canvas/canvas" => rsx! { super::pixel::PixelApp { node: node.clone(), projector } },
+        //
+        // On the projector it is the board and nothing else: a hall does not
+        // want the talk about the picture up beside the picture.
+        "canvas/canvas" if projector => {
+            rsx! { super::pixel::PixelApp { node: node.clone(), projector } }
+        }
+        // Off the projector it takes comments like any other thing worth
+        // discussing, in the same supporting pane a document and a candidature
+        // use. A locked canvas still takes them: the rule that enforces the lock
+        // exempts discussion (`migrations/0015`), so a finished board can still
+        // be talked about.
+        "canvas/canvas" => rsx! {
+            super::widgets::SupportingPaneLayout {
+                primary: rsx! {
+                    super::pixel::PixelApp { node: node.clone(), projector }
+                },
+                supporting: rsx! {
+                    super::comments::CommentSection {
+                        node_id: node.id.0.clone(),
+                        context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+                    }
+                },
+            }
+        },
         "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
         // Leaf text nodes (a plain note, a Q&A question, a single comment) carry
         // their body in `data.text` / `data.content`; without an arm they fell to
