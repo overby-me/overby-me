@@ -998,6 +998,8 @@ fn start_service_with_filedescriptors(
             if bytes.is_empty() { None } else { Some(bytes) }
         },
         tty_path: conf.exec_config.tty_path.clone(),
+        tty_columns: conf.exec_config.tty_columns,
+        tty_rows: conf.exec_config.tty_rows,
         tty_reset: conf.exec_config.tty_reset,
         tty_vhangup: conf.exec_config.tty_vhangup,
         tty_vt_disallocate: conf.exec_config.tty_vt_disallocate,

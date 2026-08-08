@@ -3518,6 +3518,8 @@ fn create_transient_unit(
         runtime_directory: vec![],
         runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve::No,
         tty_path: None,
+        tty_columns: None,
+        tty_rows: None,
         tty_reset: false,
         tty_vhangup: false,
         tty_vt_disallocate: false,
@@ -4828,6 +4830,20 @@ fn create_transient_unit(
                 }
                 "TTYPath" => {
                     service_conf.exec_config.tty_path = Some(std::path::PathBuf::from(value));
+                }
+                "TTYColumns" => {
+                    service_conf.exec_config.tty_columns = value
+                        .trim()
+                        .parse::<u32>()
+                        .ok()
+                        .map(|v| v.min(u16::MAX as u32) as u16);
+                }
+                "TTYRows" => {
+                    service_conf.exec_config.tty_rows = value
+                        .trim()
+                        .parse::<u32>()
+                        .ok()
+                        .map(|v| v.min(u16::MAX as u32) as u16);
                 }
                 "TTYReset" => {
                     service_conf.exec_config.tty_reset = matches!(value, "yes" | "true" | "1");

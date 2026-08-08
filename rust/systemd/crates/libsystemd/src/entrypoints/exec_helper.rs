@@ -473,6 +473,13 @@ pub struct ExecHelperConfig {
     /// Defaults to /dev/console if not set.
     pub tty_path: Option<PathBuf>,
 
+    /// TTYColumns= / TTYRows=: terminal window size applied via TIOCSWINSZ when
+    /// the service connects to a TTY. None = unset (leave the current size).
+    #[serde(default)]
+    pub tty_columns: Option<u16>,
+    #[serde(default)]
+    pub tty_rows: Option<u16>,
+
     /// TTYReset= — reset the TTY to sane defaults before use.
     /// Matches systemd: resets termios, keyboard mode, switches to text mode.
     #[serde(default)]
@@ -1133,6 +1140,44 @@ fn open_terminal(path: &std::ffi::CStr, flags: libc::c_int) -> libc::c_int {
     -1
 }
 
+/// Apply TTYColumns=/TTYRows= to the terminal at `fd` via TIOCSWINSZ, matching
+/// systemd's terminal_set_size_fd(): a dimension left unset (None) keeps the
+/// current value read via TIOCGWINSZ, and if both are unset this is a no-op. The
+/// window size is a property of the TTY device, so setting it on any fd open to
+/// the device (here the service's stdio TTY) takes effect for the service.
+fn apply_tty_size(fd: libc::c_int, config: &ExecHelperConfig) {
+    set_tty_winsize(fd, config.tty_columns, config.tty_rows);
+}
+
+/// Core of terminal_set_size_fd(): set the window size of the TTY at `fd`. An
+/// unset (None) dimension keeps the current value read via TIOCGWINSZ; both
+/// unset is a no-op.
+fn set_tty_winsize(fd: libc::c_int, cols: Option<u16>, rows: Option<u16>) {
+    if cols.is_none() && rows.is_none() {
+        return;
+    }
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) } < 0 {
+        log::debug!(
+            "TIOCGWINSZ failed, not setting terminal size: {}",
+            std::io::Error::last_os_error()
+        );
+        return;
+    }
+    if let Some(rows) = rows {
+        ws.ws_row = rows;
+    }
+    if let Some(cols) = cols {
+        ws.ws_col = cols;
+    }
+    if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &ws) } < 0 {
+        log::debug!(
+            "TIOCSWINSZ failed setting terminal size: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
 /// Perform a "destructive" TTY reset before the service uses it.
 /// This matches systemd's exec_context_tty_reset(): it resets terminal settings,
 /// hangs up prior sessions, and optionally disallocates the VT.
@@ -1322,6 +1367,8 @@ fn setup_tty_output(config: &ExecHelperConfig) {
         );
         return;
     }
+
+    apply_tty_size(tty_fd, config);
 
     if config.stdout_is_tty {
         unsafe {
@@ -1717,6 +1764,8 @@ fn setup_stdin(config: &ExecHelperConfig) {
                 }
                 return;
             }
+
+            apply_tty_size(tty_fd, config);
 
             // Make this TTY our controlling terminal.
             // For tty-force, pass 1 to steal the TTY even if another session owns it.
@@ -6169,6 +6218,40 @@ fn is_valid_env_name_cont(b: u8) -> bool {
 mod tests {
     use super::*;
     use aes_gcm::AeadCore;
+
+    #[test]
+    fn test_set_tty_winsize() {
+        // A pty master supports the winsize ioctls; posix_openpt avoids the
+        // libutil link that openpty()/nix::pty would pull in.
+        let fd = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
+        assert!(fd >= 0, "posix_openpt failed");
+
+        // Seed a known starting size.
+        let mut seed: libc::winsize = unsafe { std::mem::zeroed() };
+        seed.ws_col = 100;
+        seed.ws_row = 40;
+        assert_eq!(unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &seed) }, 0);
+
+        let get = |fd| {
+            let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+            unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) };
+            (ws.ws_col, ws.ws_row)
+        };
+
+        // Both unset: no-op.
+        set_tty_winsize(fd, None, None);
+        assert_eq!(get(fd), (100, 40));
+
+        // Columns only: rows preserved from the current size.
+        set_tty_winsize(fd, Some(80), None);
+        assert_eq!(get(fd), (80, 40));
+
+        // Both set.
+        set_tty_winsize(fd, Some(132), Some(50));
+        assert_eq!(get(fd), (132, 50));
+
+        unsafe { libc::close(fd) };
+    }
     use aes_gcm::aead::OsRng;
 
     /// Build an encrypted credential blob in our wire format using null-key sealing.

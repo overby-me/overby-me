@@ -3915,6 +3915,31 @@ fn test_tty_reset_explicit_yes() {
 }
 
 #[test]
+fn test_tty_size_parsing() {
+    let parse = |body: &str| {
+        crate::units::parse_service(
+            crate::units::parse_file(body).unwrap(),
+            &std::path::PathBuf::from("/x.service"),
+        )
+        .unwrap()
+    };
+
+    // Unset by default (upstream's UINT_MAX / "leave as-is").
+    let s = parse("[Service]\nExecStart=/bin/true\n");
+    assert_eq!(s.srvc.exec_section.tty_columns, None);
+    assert_eq!(s.srvc.exec_section.tty_rows, None);
+
+    // Explicit columns/rows parse.
+    let s = parse("[Service]\nExecStart=/bin/true\nTTYColumns=80\nTTYRows=24\n");
+    assert_eq!(s.srvc.exec_section.tty_columns, Some(80));
+    assert_eq!(s.srvc.exec_section.tty_rows, Some(24));
+
+    // Over-u16 saturates, matching C's USHRT_MAX ceiling.
+    let s = parse("[Service]\nExecStart=/bin/true\nTTYColumns=70000\n");
+    assert_eq!(s.srvc.exec_section.tty_columns, Some(u16::MAX));
+}
+
+#[test]
 fn test_tty_reset_explicit_no() {
     let test_service_str = r#"
     [Service]

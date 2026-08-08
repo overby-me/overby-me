@@ -1442,6 +1442,8 @@ pub fn parse_exec_section(
     let runtime_directory = section.remove("RUNTIMEDIRECTORY");
     let runtime_directory_preserve = section.remove("RUNTIMEDIRECTORYPRESERVE");
     let tty_path = section.remove("TTYPATH");
+    let tty_columns = section.remove("TTYCOLUMNS");
+    let tty_rows = section.remove("TTYROWS");
     let tty_reset = section.remove("TTYRESET");
     let tty_vhangup = section.remove("TTYVHANGUP");
     let tty_vt_disallocate = section.remove("TTYVTDISALLOCATE");
@@ -1665,6 +1667,47 @@ pub fn parse_exec_section(
                 None
             }
         }
+    };
+
+    // TTYColumns=/TTYRows=: an empty or unparseable value leaves the size unset
+    // (leave the terminal as-is), matching C's config_parse_tty_size default of
+    // UINT_MAX; a value is capped at u16 (upstream's USHRT_MAX ceiling).
+    let tty_columns = match tty_columns {
+        Some(vec) => {
+            if vec.len() == 1 {
+                vec[0]
+                    .1
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .map(|v| v.min(u16::MAX as u32) as u16)
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "TTYColumns".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
+    };
+
+    let tty_rows = match tty_rows {
+        Some(vec) => {
+            if vec.len() == 1 {
+                vec[0]
+                    .1
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .map(|v| v.min(u16::MAX as u32) as u16)
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "TTYRows".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
     };
 
     let tty_reset = match tty_reset {
@@ -2233,6 +2276,8 @@ pub fn parse_exec_section(
             }
         },
         tty_path,
+        tty_columns,
+        tty_rows,
         tty_reset,
         tty_vhangup,
         tty_vt_disallocate,

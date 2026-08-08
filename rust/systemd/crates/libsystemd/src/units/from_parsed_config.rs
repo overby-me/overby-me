@@ -703,6 +703,8 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             runtime_directory: parsed.runtime_directory,
             runtime_directory_preserve: parsed.runtime_directory_preserve,
             tty_path: parsed.tty_path,
+            tty_columns: parsed.tty_columns,
+            tty_rows: parsed.tty_rows,
             tty_reset: parsed.tty_reset,
             tty_vhangup: parsed.tty_vhangup,
             tty_vt_disallocate: parsed.tty_vt_disallocate,

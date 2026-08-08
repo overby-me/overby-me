@@ -3104,6 +3104,10 @@ pub struct ParsedExecSection {
     /// stored; no runtime enforcement yet. See systemd.exec(5).
     pub runtime_directory_preserve: RuntimeDirectoryPreserve,
     pub tty_path: Option<PathBuf>,
+    /// TTYColumns= / TTYRows=: terminal window size applied via TIOCSWINSZ when
+    /// the service connects to a TTY. None = unset (leave the current size).
+    pub tty_columns: Option<u16>,
+    pub tty_rows: Option<u16>,
     /// TTYReset= — reset the TTY to sane defaults before use (default: false).
     /// Matches systemd behavior: resets termios, keyboard mode, switches to text mode.
     pub tty_reset: bool,
