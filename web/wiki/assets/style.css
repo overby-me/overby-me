@@ -8027,6 +8027,12 @@ a.list-item:hover {
    the palette is what you came to press. This keeps the zoom local to the board:
    the app stays where it is and the board is panned within its own box. */
 .pixel-board-scroll {
+	/* Assembled HERE, not on :root, so the dock clearance is the one this box
+	   inherits. */
+	--pixel-board-cap: min(
+		var(--pixel-board-share),
+		calc(100svh - var(--pixel-board-furniture) - var(--pixel-dock-clear))
+	);
 	/* A window onto the board, and a window of a FIXED size: as wide as there is
 	   room for or as wide as the height allows, whichever is smaller, and shaped
 	   like the board so nothing is letterboxed. Fixed is the point -- zoom
@@ -8050,22 +8056,25 @@ a.list-item:hover {
 	width: calc(100% * var(--zoom, 1));
 }
 
-/* How much of the screen the board may take.
-   Two limits, whichever is smaller. A share of the screen, so the board is not
-   a postage stamp on a tall monitor; and the screen MINUS everything else that
-   has to be seen with it -- the card header, the zoom control, three rows of
-   swatches, the line saying whose turn it is, and on compact the floating dock
-   that sits ON TOP of the page rather than in it.
-   Measured, not guessed. At 62svh the last three swatches sat 26px below the
-   fold on a 757px window; and on a phone the dock covered the bottom 120px, so
-   a cap that only counted the viewport still hid the last row of colours. */
+/* How much of the screen the board may take, as PARTS rather than a finished
+   figure. The parts have to stay parts: a var() inside a custom property is
+   substituted where that property is DEFINED, so a cap assembled here on :root
+   would freeze the dock clearance at the :root value of zero and go on hiding
+   the last row of colours on exactly the screens that needed the allowance.
+   It is put together on the board's own box below, where the clearance is
+   whatever that box inherits. */
 :root {
+	/* A share of the screen, so the board is not a postage stamp on a tall
+	   monitor. */
+	--pixel-board-share: 60svh;
+	/* And what has to be seen with it: the card header, the zoom control, three
+	   rows of swatches and the line saying whose turn it is. */
+	--pixel-board-furniture: 21rem;
 	--pixel-dock-clear: 0px;
-	--pixel-board-cap: min(60svh, calc(100svh - 17rem - var(--pixel-dock-clear)));
 }
 
-/* The dock floats over the page on compact, so its height is not in the layout
-   and has to be taken off by hand: two 56px tiers and the inset it floats on. */
+/* On compact the dock FLOATS over the page -- 112px of bar on an 8px inset --
+   so its height is not in the layout and has to be taken off by hand. */
 .app-shell[data-size-class="compact"] {
 	--pixel-dock-clear: 8rem;
 }
