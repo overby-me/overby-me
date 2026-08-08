@@ -1220,7 +1220,12 @@ html {
    needs the reset a link never did. The chevron is what says it opens
    something, and the tinted open state says the list below belongs to it. */
 .drawer-context-switch {
-	border: none;
+	/* Every edge but the bottom one. That edge is the bar's separator from the
+	   tree below it, declared above, and a blanket `border: none` here wiped it:
+	   same weight, later in the sheet. The header lost the rule that divides it
+	   from the list, which is the one thing this reset was never about. */
+	border-block-start: none;
+	border-inline: none;
 	appearance: none;
 	font: inherit;
 	text-align: start;
