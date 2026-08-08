@@ -282,7 +282,7 @@ pub fn FollowApp(node: NodeWithChildren) -> Element {
             match active {
                 Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new() } },
                 None => rsx! {
-                    div { class: "card",
+                    div { class: "card app-card",
                         // In-card, so the small orb — the large one belongs to a
                         // page-level state (not found) or to the projector, which
                         // is read across a room.

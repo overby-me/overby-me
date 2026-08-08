@@ -15,7 +15,7 @@ pub fn MapApp(node: NodeWithChildren) -> Element {
     let src = "https://www.openstreetmap.org/export/embed.html?bbox=7.0%2C54.5%2C15.5%2C57.9&layer=mapnik";
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("map/map")} }
                 h3 { class: "title-medium", "{name}" }

@@ -15,7 +15,7 @@ pub fn NodeApp(node: NodeWithChildren, title: String) -> Element {
     let children = &children;
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", span { class: "material-icons", "{icon}" } }
                 div {

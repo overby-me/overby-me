@@ -189,7 +189,7 @@ pub fn ContentApp(
     );
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             // Identity zone: when the document carries an image it becomes a full-bleed
             // cover hero with the title/date overlaid on a legibility scrim, so the
             // image frames the document instead of sitting as a plain block above it.

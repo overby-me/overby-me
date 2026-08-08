@@ -30,7 +30,7 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     ));
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("app/graph")} }
                 h3 { class: "title-medium", "{node.name}" }

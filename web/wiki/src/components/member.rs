@@ -250,7 +250,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             supporting: rsx! {
                 // Invite input (owner action, mirroring React InvitesFab).
                 if can_manage {
-                    div { class: "card",
+                    div { class: "card app-card",
                         // DESIGN: give the invite card a header identity like the
                         // other cards (it was headerless).
                         div { class: "card-header",

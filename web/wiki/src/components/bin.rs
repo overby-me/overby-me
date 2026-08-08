@@ -54,7 +54,7 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
     let can_purge = node.is_context_owner.unwrap_or(false) || node.is_owner.unwrap_or(false);
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", span { class: "material-icons", "restore_from_trash" } }
                 h3 { class: "title-medium", "{t(\"bin.title\")}" }

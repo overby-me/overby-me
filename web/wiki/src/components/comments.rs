@@ -231,7 +231,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     let pending_shown = reconcile_pending(&pending.read(), &fetched_keys);
 
     rsx! {
-        div { class: "card comment-section",
+        div { class: "card app-card comment-section",
             div { class: "card-header",
                 div { class: "avatar small", {crate::components::loader::icon_el("vote/comment")} }
                 h3 { class: "title-medium", "{t(\"vote.comments\")}" }

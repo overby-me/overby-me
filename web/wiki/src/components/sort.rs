@@ -76,7 +76,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
     };
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("app/sort")} }
                 h3 { class: "title-medium", "{t(\"mime.sort\")}" }

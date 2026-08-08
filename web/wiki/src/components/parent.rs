@@ -37,7 +37,7 @@ pub fn ParentApp() -> Element {
     let mut busy = use_signal(|| false);
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("app/parent")} }
                 div {

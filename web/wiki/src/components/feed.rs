@@ -39,7 +39,7 @@ pub fn FeedApp(node: model::NodeWithChildren) -> Element {
     };
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar small", span { class: "material-icons", "view_agenda" } }
                 h3 { class: "title-large", "{t(\"layout.feed\")}" }

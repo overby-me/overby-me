@@ -14,7 +14,7 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let items = visible_sorted(&node.children);
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("app/program")} }
                 h3 { class: "title-medium", "{node.name}" }

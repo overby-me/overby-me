@@ -367,7 +367,7 @@ fn TextNode(node: NodeWithChildren) -> Element {
         .unwrap_or("")
         .to_string();
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el(&mime)} }
                 h3 { class: "title-medium", "{name}" }

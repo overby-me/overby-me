@@ -73,7 +73,7 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
 
     if lists.is_empty() {
         return rsx! {
-            div { class: "card",
+            div { class: "card app-card",
                 // DESIGN: orb empty state instead of a plain muted line.
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
@@ -401,7 +401,7 @@ fn SpeakList(
     }
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div {
                     class: if mutable { "avatar secondary" } else { "avatar" },

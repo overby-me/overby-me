@@ -89,7 +89,7 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
     };
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", span { class: "material-icons", "lock" } }
                 h3 { class: "title-medium", "{node.name}" }

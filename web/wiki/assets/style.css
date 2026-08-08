@@ -1294,6 +1294,45 @@ html {
 	box-shadow: var(--md-sys-elevation-3);
 }
 
+/* DESIGN (an app is not a card): the outermost surface of an app view.
+
+   A card contains ONE subject among siblings you can compare or tap; its fill,
+   its radius and its shadow all say "this is one of several". Every app view
+   opened with a card all the same, and on a desktop page that card was the only
+   one on the screen, sitting inside the content well, which is already the app's
+   surface. Three nested containers before any content, two of them saying
+   nothing, each charging padding for the privilege -- and once the whole app is
+   elevated, nothing inside it can use elevation to stand out.
+
+   So an app surface keeps the card's INSIDES (the header row, the content
+   padding on compact) and drops the chrome. Structure comes from the header, the
+   spacing and the type, which is where M3 puts it. Cards stay for what they are
+   for, and those are mostly tappable: the groups and events on the home screen,
+   a poll in a list of polls, a file tile, a notice.
+
+   Compact is untouched: it already flattens every card to an edge-to-edge
+   section for exactly this reason. */
+.app-shell:not([data-size-class="compact"]) .app-card,
+.app-shell:not([data-size-class="compact"]) .app-card:hover {
+	background: none;
+	box-shadow: none;
+	border-radius: 0;
+	/* The card clipped its own content; a plain section has nothing to clip, and
+	   sticky headers inside an app need to be able to reach the well's edge. */
+	overflow: visible;
+	margin-bottom: 0;
+}
+/* The pane already pays the side margin, so the app's own padding would be a
+   second one. The vertical padding stays: it is the gap under the bar. */
+.app-shell:not([data-size-class="compact"]) .app-card > .card-content {
+	padding-inline: 0;
+}
+/* The header keeps its wash but loses the inset that only made sense inside a
+   card, so an app's title lines up with its content and with the bar above. */
+.app-shell:not([data-size-class="compact"]) .app-card > .card-header {
+	padding-inline: 0;
+}
+
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
    collapse transitions/animations to near-instant. */
 @media (prefers-reduced-motion: reduce) {

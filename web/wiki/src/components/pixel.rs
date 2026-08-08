@@ -750,7 +750,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         // what this is, its name, and what kind of thing it is underneath. This
         // was a bare heading of its own invention, which read as a different
         // product from the speaker list sitting next to it in the rail.
-        div { class: "card pixel-app",
+        div { class: "card app-card pixel-app",
             div { class: "card-header",
                 div {
                     class: if open { "avatar secondary" } else { "avatar" },

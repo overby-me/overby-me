@@ -70,7 +70,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     // DESIGN: an expressive empty state (floating ballot orb) instead of a dull
     // text card when there is no active vote.
     let no_vote = rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             // Matches the speaker list beside it: the small orb and the message,
             // no heading. A title here made the same situation look weightier in
             // the vote app than in every other app, and the card is already under
@@ -121,7 +121,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
         // Wrap the loading spinner in the same card the empty/poll states use, so
         // the app does not visibly jump from a bare overlay to a card on load.
         None => rsx! {
-            div { class: "card",
+            div { class: "card app-card",
                 crate::components::widgets::Spinner {}
             }
         },
