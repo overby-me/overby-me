@@ -1330,6 +1330,24 @@ pub fn deep_copy_node(
     })
 }
 
+/// The id of a node's parent, and nothing else.
+///
+/// For walking the tree, where every hop wants one field and the typed page query
+/// would bring back a whole node with its children.
+async fn parent_of(access_token: Option<&str>, id: &str) -> Option<String> {
+    let data = execute_raw_vars(
+        access_token,
+        "query($id: uuid!) { node(id: $id) { parentId } }",
+        serde_json::json!({ "id": id }),
+    )
+    .await
+    .ok()?;
+    data.get("node")?
+        .get("parentId")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Whether `target` is `ancestor` itself or a descendant of it, by walking up the
 /// parent chain. Blocks pasting a folder into itself or its own subtree (which
 /// would recurse forever). Depth-bounded as a safety net.
@@ -1344,11 +1362,12 @@ pub async fn is_descendant_of(access_token: Option<&str>, target: &str, ancestor
         if guard > 64 {
             break;
         }
-        cur = query_node_by_id(access_token, &id)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|n| n.parent_id.map(|p| p.0));
+        // One id per hop, not a whole node: this asks the same question of every
+        // ancestor, and the page query it used to call brings back that
+        // ancestor's children, their mimes, their owners and their documents.
+        // Pasting into a folder five deep in a large group fetched a couple of
+        // hundred kilobytes to learn five parent ids.
+        cur = parent_of(access_token, &id).await;
     }
     false
 }
