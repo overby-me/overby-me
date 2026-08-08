@@ -9,7 +9,7 @@ use crate::model::NodeWithChildren;
 pub fn CowApp(node: NodeWithChildren) -> Element {
     let art = cowsay(&format!("Moo! You found {}.", node.name));
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-content",
                 pre { class: "cowsay", "{art}" }
             }

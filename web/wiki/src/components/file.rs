@@ -1169,7 +1169,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
         // console or a profile, and wrong here: the primary content is a document
         // viewer, and a spreadsheet or a slide wants every pixel of width it can
         // get far more than a comment thread does.
-        div { class: "card file-card {accent}",
+        div { class: "card app-card file-card {accent}",
             div { class: "card-header",
                 div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
                 div {

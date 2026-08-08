@@ -1346,7 +1346,7 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
             if let Some(canvas) = board.read().clone().flatten() {
                 PixelApp { key: "{canvas.id.0}", node: canvas }
             } else if still_looking {
-                div { class: "card",
+                div { class: "card app-card",
                     div { class: "empty-state empty-state-sm",
                         div { class: "spinner spinner-sm" }
                     }

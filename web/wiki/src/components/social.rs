@@ -28,7 +28,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
     });
 
     rsx! {
-        div { class: "card",
+        div { class: "card app-card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("app/social")} }
                 div {
