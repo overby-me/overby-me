@@ -1327,10 +1327,15 @@ html {
 .app-shell:not([data-size-class="compact"]) .app-card > .card-content {
 	padding-inline: 0;
 }
-/* The header keeps its wash but loses the inset that only made sense inside a
-   card, so an app's title lines up with its content and with the bar above. */
+/* The header loses the inset that only made sense inside a card, so an app's
+   title lines up with its content and with the bar above -- and it loses the
+   accent wash with it. That wash is a BROW: it tints the top of a card and fades
+   into the body, which needs a card top to tint. On a flat surface it is a green
+   rectangle with square corners floating in the well, which is the same reason
+   compact dropped it. The accent still reads, from the avatar it sits beside. */
 .app-shell:not([data-size-class="compact"]) .app-card > .card-header {
 	padding-inline: 0;
+	background: none;
 }
 
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
