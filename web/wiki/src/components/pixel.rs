@@ -507,6 +507,11 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     // own bounding rect, so a board drawn three times wider maps a tap to the
     // same cell without any arithmetic knowing about zoom.
     let mut zoom = use_signal(|| 1u32);
+    // Whether the "pick a colour, then tap" hint is still needed. It says what
+    // to do, which is worth a line of the screen exactly once: after the first
+    // tap the reader has demonstrably worked it out, and the line was costing
+    // the board height on every visit afterwards.
+    let mut hint = use_signal(|| true);
     let mut locking = use_signal(|| false);
     let lock_id = canvas_id.clone();
     let toggle_lock = move |_| {
@@ -632,6 +637,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             return;
         };
         let c = colour();
+        hint.set(false);
         // What is under the finger already, kept so a refusal can put it back.
         let was = cells.read().get(&(x, y)).copied();
         // Optimistic: the cell is painted now and corrected by the stream if the
@@ -745,6 +751,30 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                 }
                 div { class: "flex-grow" }
                 span { class: "body-small text-muted", "{painted} / {cols * rows_n}" }
+                // How far in. Offered to everyone, painter or not: a board is worth
+                // looking at closely as well as painting on, and a projector at the
+                // back of a hall wants it too.
+                div { class: "pixel-zoom",
+                    button {
+                        class: "btn-icon",
+                        r#type: "button",
+                        disabled: zoom() <= 1,
+                        aria_label: "{t(\"pixel.zoomOut\")}",
+                        title: "{t(\"pixel.zoomOut\")}",
+                        onclick: move |_| zoom.set((zoom() - 1).max(1)),
+                        span { class: "material-icons", "zoom_out" }
+                    }
+                    span { class: "body-small text-muted", "{zoom()}\u{00d7}" }
+                    button {
+                        class: "btn-icon",
+                        r#type: "button",
+                        disabled: zoom() >= MAX_ZOOM,
+                        aria_label: "{t(\"pixel.zoomIn\")}",
+                        title: "{t(\"pixel.zoomIn\")}",
+                        onclick: move |_| zoom.set((zoom() + 1).min(MAX_ZOOM)),
+                        span { class: "material-icons", "zoom_in" }
+                    }
+                }
                 if !open {
                     span { class: "chip", "{t(\"pixel.closed\")}" }
                 }
@@ -806,6 +836,11 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     // wrapper above handles leaving.
                     onpointerup: on_up,
                 }
+                if hint() && can_paint && cooling() == 0 {
+                    div { class: "pixel-hint", aria_hidden: "true",
+                        span { "{t(\"pixel.yourTurn\")}" }
+                    }
+                }
                 if let Some(cell) = at {
                     div {
                         class: "pixel-tip",
@@ -848,31 +883,6 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             }
             }
 
-            // How far in. Offered to everyone, painter or not: a board is worth
-            // looking at closely as well as painting on, and a projector at the
-            // back of a hall wants it too.
-            div { class: "pixel-zoom",
-                button {
-                    class: "btn-icon",
-                    r#type: "button",
-                    disabled: zoom() <= 1,
-                    aria_label: "{t(\"pixel.zoomOut\")}",
-                    title: "{t(\"pixel.zoomOut\")}",
-                    onclick: move |_| zoom.set((zoom() - 1).max(1)),
-                    span { class: "material-icons", "zoom_out" }
-                }
-                span { class: "body-small text-muted", "{zoom()}\u{00d7}" }
-                button {
-                    class: "btn-icon",
-                    r#type: "button",
-                    disabled: zoom() >= MAX_ZOOM,
-                    aria_label: "{t(\"pixel.zoomIn\")}",
-                    title: "{t(\"pixel.zoomIn\")}",
-                    onclick: move |_| zoom.set((zoom() + 1).min(MAX_ZOOM)),
-                    span { class: "material-icons", "zoom_in" }
-                }
-            }
-
             if can_paint {
                 div { class: "pixel-palette",
                     for (i , hex) in PALETTE.iter().enumerate() {
@@ -886,11 +896,11 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                         }
                     }
                 }
-                div { class: "pixel-status",
-                    if cooling() > 0 {
+                // Only the wait keeps a line of its own: it is a number that
+                // changes and a reason the board is not answering.
+                if cooling() > 0 {
+                    div { class: "pixel-status",
                         span { class: "pixel-wait", "{t(\"pixel.waitSeconds\")} {cooling()}" }
-                    } else {
-                        span { "{t(\"pixel.yourTurn\")}" }
                     }
                 }
             }

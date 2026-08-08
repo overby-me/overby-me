@@ -7987,8 +7987,16 @@ a.list-item:hover {
 }
 
 .pixel-swatch {
-	width: var(--md-sys-spacing-8);
-	height: var(--md-sys-spacing-8);
+	/* Share the row and shrink to fit it. Twenty-six swatches at a fixed 32px
+	   need 982px and the palette has 630-782px, so they wrapped to three rows
+	   and took 114px of the screen the board wanted. Sharing the row costs them
+	   a few pixels each and gives the board back most of that.
+	   The floor is what a finger still hits; below it they wrap as before. */
+	flex: 1 1 auto;
+	min-width: 22px;
+	max-width: var(--md-sys-spacing-8);
+	aspect-ratio: 1;
+	height: auto;
 	border: 2px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
 	padding: 0;
@@ -8039,6 +8047,9 @@ a.list-item:hover {
 	   changes what is inside the window, never the window, so going from 1x to
 	   2x does not shove the palette down the page. */
 	width: min(100%, var(--pixel-board-cap));
+	/* Centred: the window is often narrower than the card, and a board pinned
+	   to the left of a wide card reads as a mistake. */
+	margin-inline: auto;
 	aspect-ratio: var(--board-aspect, 1);
 	max-height: var(--pixel-board-cap);
 	overflow: auto;
@@ -8079,12 +8090,32 @@ a.list-item:hover {
 	--pixel-dock-clear: 8rem;
 }
 
-/* The zoom control, under the board and out of the way of the palette. */
+/* The zoom control. It lives in the card header now, beside the count, where it
+   costs no height of its own. */
 .pixel-zoom {
 	display: flex;
 	align-items: center;
-	justify-content: flex-end;
-	gap: var(--md-sys-spacing-2);
+	gap: var(--md-sys-spacing-1);
+}
+
+/* What to do, said once, ON the board rather than under it. Centred, and inert:
+   the tap that dismisses it is the tap that paints, so it must not swallow it. */
+.pixel-hint {
+	position: absolute;
+	inset: auto 0 var(--md-sys-spacing-3) 0;
+	display: flex;
+	justify-content: center;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.pixel-hint span {
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-inverse-surface);
+	color: var(--md-inverse-on-surface);
+	font-size: var(--md-sys-typescale-label-medium-size);
+	box-shadow: var(--md-sys-elevation-2);
 }
 
 /* A rich tooltip (M3): it holds a link and an avatar, so it takes a surface
