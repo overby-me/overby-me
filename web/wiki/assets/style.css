@@ -1350,6 +1350,16 @@ html {
 	background: var(--card-brow);
 }
 
+/* The place's identity band was a tinted block filling the top of the card. On a
+   flat surface it is a green rectangle with square corners and nothing to sit
+   against, which is the same thing the header brow was. The avatar and the name
+   carry the identity on their own, and they line up with the content below now
+   that the inset is gone. */
+.app-shell:not([data-size-class="compact"]) .app-card .context-header:not(.has-cover) {
+	background: none;
+	padding-inline: 0;
+}
+
 /* The cover photo kept its rounded corners by being clipped to the card's; with
    the card flat it has to hold its own shape, which is what an image on a plain
    surface wants anyway. */
@@ -5273,6 +5283,11 @@ h6,
 	overflow: hidden;
 	white-space: nowrap;
 	opacity: 0;
+	/* A CONSTANT line box. Revealing a name switches it to title-medium at weight
+	   600, and a taller line box in a centre-aligned row re-centres the row: the
+	   whole trail hopped two pixels the moment the pointer touched it. Fixed
+	   here, so the type may change size without the bar moving. */
+	line-height: var(--md-sys-spacing-7);
 	/* On the tonal top app bar (was white on the old green bar). */
 	color: var(--md-on-surface);
 	transition:
