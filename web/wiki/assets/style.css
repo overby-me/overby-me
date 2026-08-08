@@ -7992,7 +7992,11 @@ a.list-item:hover {
 	   and took 114px of the screen the board wanted. Sharing the row costs them
 	   a few pixels each and gives the board back most of that.
 	   The floor is what a finger still hits; below it they wrap as before. */
-	flex: 1 1 auto;
+	/* The basis is the FLOOR, not the preferred size: a wrapping flex line is
+	   broken using the base size and only then are the items shrunk, so a 32px
+	   basis wrapped to two rows and then politely shrank them to 22px on a row
+	   that had space for all of them. Starting at 22 they fit, then grow. */
+	flex: 1 1 22px;
 	min-width: 22px;
 	max-width: var(--md-sys-spacing-8);
 	aspect-ratio: 1;
@@ -8080,7 +8084,7 @@ a.list-item:hover {
 	--pixel-board-share: 60svh;
 	/* And what has to be seen with it: the card header, the zoom control, three
 	   rows of swatches and the line saying whose turn it is. */
-	--pixel-board-furniture: 21rem;
+	--pixel-board-furniture: 19rem;
 	--pixel-dock-clear: 0px;
 }
 
