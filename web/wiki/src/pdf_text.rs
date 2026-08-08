@@ -65,6 +65,15 @@ pub enum Block {
         page: String,
         indent: u8,
     },
+    /// A flat line the page drew across itself: the rule over a total, the one
+    /// under a table's headings, the one that separates two sections.
+    ///
+    /// A reflowed page cannot keep a rule where it was drawn -- it was drawn at
+    /// an x, and the text under it is a different width now -- but WHICH lines
+    /// it separated survives, and that is what the rule was for. `width` is how
+    /// much of the page's width it spanned, so a full separator and the short
+    /// stroke over one column's total do not come out the same.
+    Rule { width: f64 },
     /// A picture the page drew, where it drew it.
     Image(Picture),
     /// A place a link in this document points at. Carries nothing to read: it
@@ -97,7 +106,9 @@ impl Block {
             | Block::Paragraph { spans, .. }
             | Block::IndexEntry { spans, .. }
             | Block::ListItem { spans, .. } => spans,
-            Block::Image(_) | Block::Anchor(_) | Block::PageBreak { .. } => &[],
+            Block::Image(_) | Block::Anchor(_) | Block::PageBreak { .. } | Block::Rule { .. } => {
+                &[]
+            }
         }
     }
 
@@ -1100,8 +1111,8 @@ struct Drawn {
     /// The small marks: bullets, rules, and whatever else a page draws too small
     /// to be looked at. Sorted out against the lines afterwards.
     marks: Vec<Mark>,
-    /// The flat lines the page drew, kept for the harness to look at.
-    #[cfg(test)]
+    /// The flat lines the page drew. The ones that turned out to be underlines
+    /// are marked as such on their runs; what is left separated something.
     rules: Vec<Rule>,
 }
 
@@ -1391,6 +1402,42 @@ fn underline_runs(runs: &mut [Run], rules: &[Rule]) {
     }
 }
 
+/// The rules that separated something, as (y, share of the widest line's width).
+///
+/// Not every flat line a page draws belongs in the reading. An underline is
+/// already carried by the words above it. A hairline the width of a character
+/// is a tick in a form. Two strokes a fraction apart are one rule drawn twice,
+/// which is what a table does when every cell draws its own edge.
+///
+/// What is left is the rule over a total, the one under a table's headings, and
+/// the one that divides two sections -- which is how a financial statement says
+/// which numbers belong together, and the whole of what it had to say before
+/// this kept any of them.
+fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for rule in rules {
+        let width = rule.x1 - rule.x0;
+        // A tenth of the column: shorter is a tick, a bullet's stroke, or the
+        // box around a single word.
+        if width < page_width * 0.1 {
+            continue;
+        }
+        let underlines = lines.iter().any(|line| {
+            let over = rule.y < line.y && rule.y > line.y - line.size * 0.45;
+            over && rule.x0 < line.right && rule.x1 > line.left
+        });
+        if underlines {
+            continue;
+        }
+        // One rule, however many strokes drew it.
+        if out.iter().any(|(y, _)| (y - rule.y).abs() < 2.0) {
+            continue;
+        }
+        out.push((rule.y, (width / page_width).min(1.0)));
+    }
+    out
+}
+
 /// A mark too small to be a picture, and where it sits.
 struct Mark {
     x: f64,
@@ -1418,7 +1465,6 @@ fn page_runs(
             runs: Vec::new(),
             pictures: Vec::new(),
             marks: Vec::new(),
-            #[cfg(test)]
             rules: Vec::new(),
         };
     };
@@ -1722,7 +1768,6 @@ fn page_runs(
         runs,
         pictures,
         marks,
-        #[cfg(test)]
         rules,
     }
 }
@@ -1848,6 +1893,9 @@ struct Line {
     /// Set when this "line" is a picture rather than words. It takes its place
     /// in the flow by where it was drawn, like everything else.
     picture: Option<Picture>,
+    /// Set when it is a flat line the page drew, carrying how much of the page's
+    /// width it spanned. Same idea: it belongs where it was drawn.
+    rule: Option<f64>,
 }
 
 /// Group runs into lines by baseline, then join each line left to right,
@@ -1983,6 +2031,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
         right,
         text,
         spans,
+        rule: None,
         left,
         // Filled in by the caller, which is the only place that knows.
         page: 0,
@@ -2558,6 +2607,20 @@ fn blocks_from(
                 &mut blocks,
             );
             blocks.push(Block::Image(picture.clone()));
+            prev = None;
+            continue;
+        }
+        // A rule ends whatever was being built, which is the point of it: the
+        // paragraph above and the one below were separated on the page.
+        if let Some(width) = line.rule {
+            flush(
+                &mut para,
+                para_size,
+                &mut para_lines,
+                &mut para_bullet,
+                &mut blocks,
+            );
+            blocks.push(Block::Rule { width });
             prev = None;
             continue;
         }
@@ -3214,6 +3277,30 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 spans: Vec::new(),
                 bullet: None,
                 picture: Some(picture),
+                rule: None,
+            });
+        }
+        // And so does a line the page drew. A rule that turned out to be an
+        // underline is already carried by its run and must not be drawn twice;
+        // what is left separated one thing from another, which is worth keeping.
+        let page_width = lines
+            .iter()
+            .filter(|l| l.right.is_finite() && l.left.is_finite())
+            .map(|l| l.right - l.left)
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
+        for (y, width) in separators(&drawn.rules, &lines, page_width) {
+            lines.push(Line {
+                y,
+                size: 1.0,
+                right: f64::NEG_INFINITY,
+                left: f64::INFINITY,
+                page: page_no + 1,
+                text: String::new(),
+                spans: Vec::new(),
+                bullet: None,
+                picture: None,
+                rule: Some(width),
             });
         }
         lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
@@ -4129,6 +4216,7 @@ mod harness {
                             Some(_) => format!("li*>{indent}"),
                             None => format!("li>{indent}"),
                         },
+                        super::Block::Rule { width } => format!("hr {:.0}%", width * 100.0),
                         super::Block::Paragraph { indent, .. } => match indent {
                             0 => "p".into(),
                             n => format!("p>{n}"),
@@ -4176,6 +4264,48 @@ mod harness {
 
 #[cfg(test)]
 mod tests {
+    /// A rule that separated something is content; one under a word is not.
+    ///
+    /// The 2024 annual report draws a half-width rule over every subtotal --
+    /// "Indtægter i alt", "Resultat af primær drift" -- and those rules are how
+    /// the statement says which numbers add up to which. They were being read
+    /// only for whether they underlined a word, and dropped when they did not.
+    #[test]
+    fn a_rule_that_separates_survives_and_an_underline_does_not() {
+        let line = |y: f64, left: f64, right: f64| super::Line {
+            y,
+            size: 10.0,
+            right,
+            left,
+            text: "x".into(),
+            spans: Vec::new(),
+            page: 1,
+            bullet: None,
+            picture: None,
+            rule: None,
+        };
+        let lines = vec![line(100.0, 50.0, 300.0)];
+        let rule = |x0: f64, x1: f64, y: f64| super::Rule { x0, x1, y, thickness: 0.5 };
+
+        // Under the words on the line above: that is an underline, carried by
+        // the run itself.
+        let under = super::separators(&[rule(50.0, 300.0, 97.0)], &lines, 500.0);
+        assert!(under.is_empty(), "an underline is not a separator: {under:?}");
+
+        // Clear of any line: a separator, at the share of the width it spanned.
+        let between = super::separators(&[rule(50.0, 300.0, 60.0)], &lines, 500.0);
+        assert_eq!(between.len(), 1);
+        assert!((between[0].1 - 0.5).abs() < 0.01, "half the width: {between:?}");
+
+        // Too short to be anything but a tick.
+        assert!(super::separators(&[rule(50.0, 70.0, 60.0)], &lines, 500.0).is_empty());
+
+        // One rule, however many strokes drew it: a table's cells each draw
+        // their own edge along the same line.
+        let doubled = vec![rule(50.0, 300.0, 60.0), rule(300.0, 450.0, 60.4)];
+        assert_eq!(super::separators(&doubled, &lines, 500.0).len(), 1);
+    }
+
     /// Text at a right angle to the page is not part of the sentence.
     ///
     /// The 2024 annual report carries a signing service's document key up the
@@ -4274,6 +4404,7 @@ mod tests {
                 super::Block::ListItem { spans, indent, .. } => println!("{i:>4} LI{indent}  {}", text(spans)),
                 super::Block::IndexEntry { spans, page, .. } => println!("{i:>4} TOC  {} .... {page}", text(spans)),
                 super::Block::Image(_) => println!("{i:>4} IMG"),
+                super::Block::Rule { width } => println!("{i:>4} ---- {:.0}%", width * 100.0),
                 other => println!("{i:>4} {}", format!("{other:?}").chars().take(60).collect::<String>()),
             }
         }
@@ -4384,6 +4515,7 @@ mod tests {
             }],
             bullet: None,
             picture: None,
+            rule: None,
         }
     }
 
@@ -4625,6 +4757,7 @@ mod tests {
             }],
             bullet: None,
             picture: None,
+            rule: None,
         };
         // Column runs to 400. The first line stops at 180, far short of it.
         let blocks = blocks_from(
@@ -4827,6 +4960,7 @@ mod tests {
             spans: vec![span(text, None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         let blocks = blocks_from(
             vec![
@@ -5078,6 +5212,7 @@ mod tests {
             spans: vec![span("noget", None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         // The songbook: a hundred short verse lines, and a contents list whose
         // rows all run to the margin. A tenth down the range gave 392 and the
@@ -5112,6 +5247,7 @@ mod tests {
             spans: vec![span(text, None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         // Single-spaced at 18.8, as the songbook sets them, then a blank line
         // before the next stanza. The prose line at the top is what sets the
@@ -5206,6 +5342,7 @@ mod tests {
             spans: vec![span(text, None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         // The alkoholpolitik: the line stops sixty points short because
         // "internationale" is what comes next, and it does not fit.
@@ -5267,6 +5404,7 @@ mod tests {
             spans: vec![span("noget", None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         // The alkoholpolitik: a title and three lines at the margin, and forty
         // in a list one step in. A tenth percentile lands on the LIST, which
@@ -5316,6 +5454,7 @@ mod tests {
             spans: vec![span(text, None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         let folio = |page: usize, text: &str| Line {
             y: 37.7,
@@ -5327,6 +5466,7 @@ mod tests {
             spans: vec![span(text, None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
             .map(|p| {
@@ -5363,6 +5503,7 @@ mod tests {
             spans: vec![span(text, None)],
             bullet: None,
             picture: None,
+            rule: None,
         };
         let mut pages: Vec<Vec<Line>> = (1..=4)
             .map(|p| {

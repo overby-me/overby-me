@@ -8772,6 +8772,16 @@ a.list-item:hover {
 /* Something the page drew rather than placed: a signature, a diagram. It takes
    the reading colour, so it is legible on a dark surface where a black bitmap
    would not be, and it never outgrows the column. */
+/* A rule the page drew, at the share of the width it spanned. Centred when it
+   is short, because a stroke over one column's total sat over that column and
+   hanging it on the margin would point at the wrong thing. */
+.pdf-rule {
+	width: var(--rule-width, 100%);
+	margin: var(--md-sys-spacing-3) auto;
+	border: none;
+	border-top: 1px solid var(--md-outline);
+}
+
 .pdf-drawing {
 	display: block;
 	max-width: 100%;

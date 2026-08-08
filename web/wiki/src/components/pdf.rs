@@ -338,6 +338,17 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             span { {printed.clone().unwrap_or_else(|| ended.to_string())} }
                         }
                     },
+                    // A line the page drew across itself. It cannot be kept
+                    // where it was -- the text under it is a different width
+                    // now -- but it separated one thing from another, and drawn
+                    // to the share of the width it spanned it still says which.
+                    Some(Block::Rule { width }) => rsx! {
+                        hr {
+                            key: "{i}",
+                            class: "pdf-rule",
+                            style: "--rule-width: {(width * 100.0).clamp(8.0, 100.0):.1}%;",
+                        }
+                    },
                     Some(Block::Image(picture)) => match &picture.path {
                         // The page DREW this rather than placing it: a signature
                         // is a thousand line segments and no image at all. Drawn
