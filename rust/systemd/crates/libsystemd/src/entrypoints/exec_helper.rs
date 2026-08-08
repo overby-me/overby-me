@@ -5329,104 +5329,34 @@ fn seccomp_block_hostname() {
     log::warn!("ProtectHostname=yes seccomp hostname lock not implemented for this target");
 }
 
-/// Resolve a syscall name to its x86_64 number. This is a curated subset of the
-/// syscall table covering the syscalls commonly named in a `SystemCallFilter=`
-/// deny-list; unknown names return None and are ignored (a deny-list defaults to
-/// allow, so an unresolved name is simply not blocked). @group sets are not yet
-/// resolved here.
+/// Recursively resolve a list of SystemCallFilter tokens (concrete syscall names
+/// and `@group` references) into the set of x86_64 syscall numbers they name.
+/// Unknown syscall names, syscalls absent on this arch, and unknown groups are
+/// skipped. `visited` guards against cyclic `@group` references.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn syscall_name_to_nr(name: &str) -> Option<i64> {
-    let nr = match name {
-        // filesystem / mounts
-        "mkdir" => libc::SYS_mkdir,
-        "mkdirat" => libc::SYS_mkdirat,
-        "rmdir" => libc::SYS_rmdir,
-        "unlink" => libc::SYS_unlink,
-        "unlinkat" => libc::SYS_unlinkat,
-        "rename" => libc::SYS_rename,
-        "renameat" => libc::SYS_renameat,
-        "renameat2" => libc::SYS_renameat2,
-        "link" => libc::SYS_link,
-        "symlink" => libc::SYS_symlink,
-        "chmod" => libc::SYS_chmod,
-        "fchmod" => libc::SYS_fchmod,
-        "fchmodat" => libc::SYS_fchmodat,
-        "chown" => libc::SYS_chown,
-        "fchown" => libc::SYS_fchown,
-        "open" => libc::SYS_open,
-        "openat" => libc::SYS_openat,
-        "creat" => libc::SYS_creat,
-        "truncate" => libc::SYS_truncate,
-        "mount" => libc::SYS_mount,
-        "umount2" => libc::SYS_umount2,
-        "pivot_root" => libc::SYS_pivot_root,
-        "chroot" => libc::SYS_chroot,
-        "swapon" => libc::SYS_swapon,
-        "swapoff" => libc::SYS_swapoff,
-        // process / privilege
-        "clone" => libc::SYS_clone,
-        "fork" => libc::SYS_fork,
-        "vfork" => libc::SYS_vfork,
-        "execve" => libc::SYS_execve,
-        "execveat" => libc::SYS_execveat,
-        "ptrace" => libc::SYS_ptrace,
-        "kill" => libc::SYS_kill,
-        "tkill" => libc::SYS_tkill,
-        "tgkill" => libc::SYS_tgkill,
-        "setuid" => libc::SYS_setuid,
-        "setgid" => libc::SYS_setgid,
-        "setresuid" => libc::SYS_setresuid,
-        "setresgid" => libc::SYS_setresgid,
-        "setgroups" => libc::SYS_setgroups,
-        "capset" => libc::SYS_capset,
-        "prctl" => libc::SYS_prctl,
-        "seccomp" => libc::SYS_seccomp,
-        "personality" => libc::SYS_personality,
-        // modules / kernel
-        "init_module" => libc::SYS_init_module,
-        "finit_module" => libc::SYS_finit_module,
-        "delete_module" => libc::SYS_delete_module,
-        "kexec_load" => libc::SYS_kexec_load,
-        "kexec_file_load" => libc::SYS_kexec_file_load,
-        "reboot" => libc::SYS_reboot,
-        "bpf" => libc::SYS_bpf,
-        "perf_event_open" => libc::SYS_perf_event_open,
-        "syslog" => libc::SYS_syslog,
-        "acct" => libc::SYS_acct,
-        "quotactl" => libc::SYS_quotactl,
-        "_sysctl" | "sysctl" => 156, // __x64_sys__sysctl (no libc constant)
-        // clock / host identity
-        "sethostname" => libc::SYS_sethostname,
-        "setdomainname" => libc::SYS_setdomainname,
-        "settimeofday" => libc::SYS_settimeofday,
-        "clock_settime" => libc::SYS_clock_settime,
-        "adjtimex" => libc::SYS_adjtimex,
-        "clock_adjtime" => libc::SYS_clock_adjtime,
-        // namespaces / scheduling / io ports
-        "unshare" => libc::SYS_unshare,
-        "setns" => libc::SYS_setns,
-        "ioperm" => libc::SYS_ioperm,
-        "iopl" => libc::SYS_iopl,
-        // memory policy / keyring
-        "mbind" => libc::SYS_mbind,
-        "set_mempolicy" => libc::SYS_set_mempolicy,
-        "get_mempolicy" => libc::SYS_get_mempolicy,
-        "migrate_pages" => libc::SYS_migrate_pages,
-        "move_pages" => libc::SYS_move_pages,
-        "keyctl" => libc::SYS_keyctl,
-        "add_key" => libc::SYS_add_key,
-        "request_key" => libc::SYS_request_key,
-        "uselib" => libc::SYS_uselib,
-        "ustat" => libc::SYS_ustat,
-        "sysfs" => libc::SYS_sysfs,
-        // basic io (mostly for tests / completeness)
-        "read" => libc::SYS_read,
-        "write" => libc::SYS_write,
-        "close" => libc::SYS_close,
-        "getpid" => libc::SYS_getpid,
-        _ => return None,
-    };
-    Some(nr)
+fn resolve_syscall_set(tokens: &[&str], out: &mut Vec<i64>, visited: &mut Vec<String>) {
+    for tok in tokens {
+        let tok = tok.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        if let Some(group) = tok.strip_prefix('@') {
+            if visited.iter().any(|v| v == group) {
+                continue;
+            }
+            visited.push(group.to_owned());
+            match super::seccomp_filter_sets::syscall_group(group) {
+                Some(members) => resolve_syscall_set(members, out, visited),
+                None => log::debug!("SystemCallFilter: unknown @group '@{group}', ignoring"),
+            }
+        } else if let Some(nr) = super::seccomp_filter_sets::syscall_nr(tok) {
+            if !out.contains(&nr) {
+                out.push(nr);
+            }
+        } else {
+            log::debug!("SystemCallFilter: unknown or unavailable syscall '{tok}', ignoring");
+        }
+    }
 }
 
 /// Resolve a `SystemCallErrorNumber=` value (an errno name like "EPERM" or a
@@ -5537,48 +5467,30 @@ fn install_system_call_filter(config: &ExecHelperConfig) {
     let deny_list = config.system_call_filter[0].starts_with('~');
     if !deny_list {
         log::warn!(
-            "SystemCallFilter= allow-list (and @group sets) not yet enforced; \
-             running {} without a seccomp filter",
+            "SystemCallFilter= allow-list not yet enforced; running {} without a \
+             seccomp filter",
             config.name
         );
         return;
     }
 
-    let mut blocked: Vec<i64> = Vec::new();
-    let mut skipped_group = false;
-    for (i, tok) in config.system_call_filter.iter().enumerate() {
-        // The leading '~' marks the whole list as a deny-list; strip it from the
-        // first token to recover the syscall name.
-        let name = if i == 0 {
-            tok.strip_prefix('~').unwrap_or(tok)
-        } else {
-            tok.as_str()
-        };
-        let name = name.trim();
-        if name.is_empty() {
-            continue;
-        }
-        if let Some(stripped) = name.strip_prefix('@') {
-            let _ = stripped;
-            skipped_group = true;
-            continue;
-        }
-        match syscall_name_to_nr(name) {
-            Some(nr) => {
-                if !blocked.contains(&nr) {
-                    blocked.push(nr);
-                }
+    // Strip the leading '~' (deny-list marker) from the first token, then resolve
+    // every name and @group set to concrete x86_64 syscall numbers.
+    let tokens: Vec<&str> = config
+        .system_call_filter
+        .iter()
+        .enumerate()
+        .map(|(i, tok)| {
+            if i == 0 {
+                tok.strip_prefix('~').unwrap_or(tok)
+            } else {
+                tok.as_str()
             }
-            None => log::debug!("SystemCallFilter: unknown syscall '{name}', ignoring"),
-        }
-    }
-    if skipped_group {
-        log::warn!(
-            "SystemCallFilter=: @group syscall sets are not yet resolved; only \
-             concrete syscall names in the deny-list are enforced for {}",
-            config.name
-        );
-    }
+        })
+        .collect();
+    let mut blocked: Vec<i64> = Vec::new();
+    let mut visited: Vec<String> = Vec::new();
+    resolve_syscall_set(&tokens, &mut blocked, &mut visited);
     if blocked.is_empty() {
         return;
     }
@@ -6582,6 +6494,38 @@ mod tests {
             "child seccomp checks failed (code {})",
             libc::WEXITSTATUS(status)
         );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_resolve_syscall_set() {
+        // @mount expands to the mount-family syscalls.
+        let (mut out, mut visited) = (Vec::new(), Vec::new());
+        resolve_syscall_set(&["@mount"], &mut out, &mut visited);
+        assert!(out.contains(&libc::SYS_mount));
+        assert!(out.contains(&libc::SYS_umount2));
+        assert!(out.contains(&libc::SYS_pivot_root));
+
+        // @system-service recursively pulls in its sub-groups (execve via
+        // @default, read via @basic-io) and resolves to a broad set.
+        let (mut out2, mut visited2) = (Vec::new(), Vec::new());
+        resolve_syscall_set(&["@system-service"], &mut out2, &mut visited2);
+        assert!(out2.contains(&libc::SYS_execve));
+        assert!(out2.contains(&libc::SYS_read));
+        assert!(
+            out2.len() > 100,
+            "@system-service should resolve to many syscalls, got {}",
+            out2.len()
+        );
+
+        // A concrete name resolves; unknown group and unknown syscall are skipped.
+        let (mut out3, mut visited3) = (Vec::new(), Vec::new());
+        resolve_syscall_set(
+            &["mkdir", "@no-such-group", "not_a_syscall"],
+            &mut out3,
+            &mut visited3,
+        );
+        assert_eq!(out3, vec![libc::SYS_mkdir]);
     }
     use aes_gcm::aead::OsRng;
 
