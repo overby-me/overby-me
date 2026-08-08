@@ -1119,6 +1119,26 @@ struct Rule {
     thickness: f64,
 }
 
+/// Whether a text matrix has turned the baseline off horizontal.
+///
+/// Not a slant: `slanted` asks whether the letters lean along their own
+/// baseline, which is a fake italic. This asks where that baseline points. A
+/// signing stamp up the page edge, a watermark across the corner and a rotated
+/// table label are all set at an angle to the page, and none of them belongs in
+/// the sentence a reader is halfway through.
+///
+/// Generous about what counts as horizontal (30 degrees), because the thing this
+/// separates is upright text from text at a right angle, and nothing sets a
+/// paragraph at twenty degrees by accident.
+fn turned(m: [f64; 6]) -> bool {
+    let along = (m[0] * m[0] + m[1] * m[1]).sqrt();
+    if along <= 0.0 {
+        return false;
+    }
+    // The baseline's rise against its run: tan(30 degrees) is about 0.577.
+    (m[1] / along).abs() > 0.5
+}
+
 /// Whether a text matrix slants the letters it draws.
 ///
 /// A file with no italic face to hand fakes one by shearing the matrix, and
@@ -1723,6 +1743,19 @@ fn show(
 ) {
     let Some(font) = font else { return };
     let at = mul(*tm, ctm);
+    // Sideways text is not part of the reading, and reading it as though it were
+    // puts it in the middle of a sentence. The annual report carries a signing
+    // service's document key up the edge of all 27 pages, and it landed between
+    // the paragraphs on every one of them: "Penneo dokumentnøgle: UMG2H-..."
+    // where the next line of the balance sheet should be. A stamp, a watermark
+    // and a rotated page label are all this shape.
+    if turned(at) {
+        // The pen still has to move, or everything after it lands in the wrong
+        // place: a matrix that draws nothing is not a matrix that drew nothing.
+        let width = bytes.len() as f64 * size * h_scale;
+        tm[4] += width * at[0].signum().max(0.0);
+        return;
+    }
     let scale = (at[0] * at[0] + at[1] * at[1]).sqrt().max(0.01);
     // A link covers a BOX, and a draw call is under no obligation to stop at its
     // edge: one call can carry a name, an address and a telephone number, of
@@ -4143,6 +4176,25 @@ mod harness {
 
 #[cfg(test)]
 mod tests {
+    /// Text at a right angle to the page is not part of the sentence.
+    ///
+    /// The 2024 annual report carries a signing service's document key up the
+    /// edge of every page. Read as ordinary text it landed between the
+    /// paragraphs: "Penneo dokumentnøgle: UMG2H-..." where the next line of the
+    /// balance sheet belongs, on all 27 pages. It is separate from a slant,
+    /// which is a fake italic and must still read as text.
+    #[test]
+    fn text_turned_on_its_side_is_not_in_the_sentence() {
+        assert!(!super::turned([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]), "upright");
+        assert!(super::turned([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]), "up the page");
+        assert!(super::turned([0.0, -1.0, 1.0, 0.0, 0.0, 0.0]), "down the page");
+        // The songbook's faked italic: sheared, not turned, and still readable.
+        assert!(!super::turned([50.0, 0.0, 16.99, 50.0, 0.0, 0.0]));
+        assert!(super::slanted([50.0, 0.0, 16.99, 50.0, 0.0, 0.0]));
+        // A few degrees off level is a scan or a rounding, not a stamp.
+        assert!(!super::turned([1.0, 0.05, 0.0, 1.0, 0.0, 0.0]));
+    }
+
     /// A font's codes mean what the FONT says they mean.
     ///
     /// From "Kritisk revision rapport LM25" in production: two of its three
