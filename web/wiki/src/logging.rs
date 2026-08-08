@@ -629,23 +629,28 @@ fn setup_global_error_handlers() {
             // script. Say so, rather than leaving a report that looks like a
             // failure in the app and cannot be chased.
             //
-            // And say it at warn. Naming it opaque while still filing it as an
-            // error was having it both ways: the reader of the report is told in
-            // the same breath that something failed and that nothing can be
-            // learned about it, and it lands in the same list as a real crash.
-            // Warn keeps the record (a burst of these is still worth seeing)
-            // without claiming the app broke, which nothing here establishes.
+            // And do not file it at all. It was an error, then a warning, and
+            // both were having it both ways: the report says in one breath that
+            // something failed and that nothing can be learned about it. There
+            // is no file, no line, no stack and no message -- "Script error." is
+            // the whole of it -- so there is nothing to act on and nothing to
+            // fix, and the thing that threw is as likely to be an extension or
+            // the browser's own injected script as this app. A record nobody can
+            // work from is not a record, it is a queue to be triaged and closed.
+            //
+            // It stays on the console, where whoever is actually debugging that
+            // device can see it happened.
             let opaque = stack.is_none() && ee.filename().is_empty() && ee.lineno() == 0;
-            let (level, message) = if opaque {
-                (
-                    "warn",
-                    format!("UNCAUGHT (opaque, no detail from the browser): {msg}"),
-                )
-            } else {
-                let at = format!("{}:{}:{}", ee.filename(), ee.lineno(), ee.colno());
-                ("error", format!("UNCAUGHT: {msg} @ {at}"))
-            };
-            queue(make_entry_with_stack(level, message, stack));
+            if opaque {
+                log::info!("uncaught, opaque (no detail from the browser): {msg}");
+                return;
+            }
+            let at = format!("{}:{}:{}", ee.filename(), ee.lineno(), ee.colno());
+            queue(make_entry_with_stack(
+                "error",
+                format!("UNCAUGHT: {msg} @ {at}"),
+                stack,
+            ));
         }
     });
     add_listener(et, "unhandledrejection", |ev| {

@@ -222,8 +222,13 @@ struct Font {
     /// Code to width in 1/1000 em, for advancing the pen.
     widths: HashMap<u32, f64>,
     default_width: f64,
-    /// No `/ToUnicode`: fall back to treating codes as an 8-bit encoding.
-    win_ansi: bool,
+    /// No `/ToUnicode`: the 8-bit table this font's codes are to be read
+    /// through, as the font itself declares. `None` when a ToUnicode map
+    /// answered instead, or when codes are two bytes.
+    base: Option<Base>,
+    /// The font's own `/Differences`: codes it re-points at named glyphs,
+    /// overriding the table above. A subset font commonly ships nothing else.
+    differences: HashMap<u32, char>,
     /// Weight and slant, which in a PDF are properties of the FONT rather than
     /// of the text. There is no "make this bold" operator: the writer switches
     /// to a different font resource, and the only way to know is to ask that
@@ -257,12 +262,16 @@ impl Font {
         if let Some(s) = self.to_unicode.get(&code) {
             return s.clone();
         }
-        if self.win_ansi {
-            return win_ansi_char(code as u8)
-                .map(String::from)
-                .unwrap_or_default();
+        if let Some(c) = self.differences.get(&code) {
+            return ligature_text(*c);
         }
-        String::new()
+        match self.base {
+            Some(base) => base
+                .char_for(code as u8)
+                .map(ligature_text)
+                .unwrap_or_default(),
+            None => String::new(),
+        }
     }
 
     fn width(&self, code: u32) -> f64 {
@@ -291,6 +300,135 @@ fn win_ansi_char(b: u8) -> Option<char> {
         0x80..=0x9F => Some(HIGH[(b - 0x80) as usize]).filter(|c| *c != '\u{FFFD}'),
         _ => Some(b as char),
     }
+}
+
+/// Mac OS Roman's upper half, which `/MacRomanEncoding` names.
+///
+/// Not an exotic case: anything laid out on a Mac and printed to PDF declares
+/// it, and such a font often ships no `/ToUnicode` because the encoding IS the
+/// answer. Read as WinAnsi instead, a Danish document comes out as `Œrsrapport`
+/// for `årsrapport` and `¿konomi` for `økonomi` -- every å, ø and æ wrong, which
+/// is most of the words that matter, on the reports this wiki carries.
+const MAC_ROMAN_HIGH: [char; 128] = [
+    'Ä', 'Å', 'Ç', 'É', 'Ñ', 'Ö', 'Ü', 'á', 'à', 'â', 'ä', 'ã', 'å', 'ç', 'é', 'è', 'ê', 'ë', 'í',
+    'ì', 'î', 'ï', 'ñ', 'ó', 'ò', 'ô', 'ö', 'õ', 'ú', 'ù', 'û', 'ü', '†', '°', '¢', '£', '§', '•',
+    '¶', 'ß', '®', '©', '™', '´', '¨', '≠', 'Æ', 'Ø', '∞', '±', '≤', '≥', '¥', 'µ', '∂', '∑', '∏',
+    'π', '∫', 'ª', 'º', 'Ω', 'æ', 'ø', '¿', '¡', '¬', '√', 'ƒ', '≈', '∆', '«', '»', '…', '\u{00A0}',
+    'À', 'Ã', 'Õ', 'Œ', 'œ', '–', '—', '“', '”', '‘', '’', '÷', '◊', 'ÿ', 'Ÿ', '⁄', '€', '‹', '›',
+    'ﬁ', 'ﬂ', '‡', '·', '‚', '„', '‰', 'Â', 'Ê', 'Á', 'Ë', 'È', 'Í', 'Î', 'Ï', 'Ì', 'Ó', 'Ô', '\u{FFFD}',
+    'Ò', 'Ú', 'Û', 'Ù', 'ı', 'ˆ', '˜', '¯', '˘', '˙', '˚', '¸', '˝', '˛', 'ˇ',
+];
+
+/// The 8-bit table a simple font's codes are read through when it ships no
+/// `/ToUnicode`. The font says which in its `/Encoding`; the default for a
+/// non-symbolic font is close enough to WinAnsi for the Latin range.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+enum Base {
+    #[default]
+    WinAnsi,
+    MacRoman,
+}
+
+impl Base {
+    fn char_for(self, b: u8) -> Option<char> {
+        match self {
+            Base::WinAnsi => win_ansi_char(b),
+            Base::MacRoman => match b {
+                0x00..=0x1F => None,
+                0x20..=0x7F => Some(b as char),
+                _ => Some(MAC_ROMAN_HIGH[(b - 0x80) as usize]).filter(|c| *c != '\u{FFFD}'),
+            },
+        }
+    }
+}
+
+/// A ligature as the letters it stands for.
+///
+/// The glyph is one character in the font and two letters to a reader, and to
+/// the browser's find. A page that says `ﬂere` answers no search for `flere`,
+/// so the pair goes in as a pair. (Poppler drops these entirely, which is worse
+/// than either.)
+fn ligature_text(c: char) -> String {
+    match c {
+        'ﬁ' => "fi".to_string(),
+        'ﬂ' => "fl".to_string(),
+        'ﬀ' => "ff".to_string(),
+        'ﬃ' => "ffi".to_string(),
+        'ﬄ' => "ffl".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// A glyph name from a `/Differences` array as the character it names.
+///
+/// The Adobe glyph list is thousands of entries; this is the part a European
+/// document uses, plus the two mechanical forms (`uniXXXX`, and a single letter
+/// naming itself) that cover most of the rest.
+fn glyph_char(name: &str) -> Option<char> {
+    if let Some(hex) = name.strip_prefix("uni") {
+        if hex.len() >= 4 {
+            if let Ok(cp) = u32::from_str_radix(&hex[..4], 16) {
+                return char::from_u32(cp);
+            }
+        }
+    }
+    let mut chars = name.chars();
+    if let (Some(c), None) = (chars.next(), chars.next()) {
+        return Some(c);
+    }
+    Some(match name {
+        "aring" => 'å', "Aring" => 'Å', "oslash" => 'ø', "Oslash" => 'Ø',
+        "ae" => 'æ', "AE" => 'Æ', "adieresis" => 'ä', "Adieresis" => 'Ä',
+        "odieresis" => 'ö', "Odieresis" => 'Ö', "udieresis" => 'ü', "Udieresis" => 'Ü',
+        "eacute" => 'é', "Eacute" => 'É', "egrave" => 'è', "agrave" => 'à',
+        "acute" => '´', "ccedilla" => 'ç', "Ccedilla" => 'Ç', "ntilde" => 'ñ',
+        "atilde" => 'ã', "otilde" => 'õ', "aacute" => 'á', "iacute" => 'í',
+        "oacute" => 'ó', "uacute" => 'ú', "ocircumflex" => 'ô', "ecircumflex" => 'ê',
+        "acircumflex" => 'â', "icircumflex" => 'î', "ucircumflex" => 'û',
+        "fi" => 'ﬁ', "fl" => 'ﬂ', "ff" => 'ﬀ', "ffi" => 'ﬃ', "ffl" => 'ﬄ',
+        "quoteright" => '’', "quoteleft" => '‘', "quotedblleft" => '“',
+        "quotedblright" => '”', "quotedblbase" => '„', "quotesinglbase" => '‚',
+        "endash" => '–', "emdash" => '—', "bullet" => '•', "periodcentered" => '·',
+        "ellipsis" => '…', "dagger" => '†', "daggerdbl" => '‡', "section" => '§',
+        "paragraph" => '¶', "germandbls" => 'ß', "sterling" => '£', "yen" => '¥',
+        "currency" => '¤', "Euro" => '€', "euro" => '€', "trademark" => '™',
+        "copyright" => '©', "registered" => '®', "degree" => '°', "plusminus" => '±',
+        "guillemotleft" => '«', "guillemotright" => '»', "questiondown" => '¿',
+        "exclamdown" => '¡', "space" => ' ', "hyphen" => '-', "period" => '.',
+        "comma" => ',', "colon" => ':', "semicolon" => ';', "slash" => '/',
+        "parenleft" => '(', "parenright" => ')', "percent" => '%', "ampersand" => '&',
+        "zero" => '0', "one" => '1', "two" => '2', "three" => '3', "four" => '4',
+        "five" => '5', "six" => '6', "seven" => '7', "eight" => '8', "nine" => '9',
+        _ => return None,
+    })
+}
+
+/// The base table a `/Encoding` name asks for.
+fn base_named(name: &[u8]) -> Base {
+    match name {
+        b"MacRomanEncoding" => Base::MacRoman,
+        _ => Base::WinAnsi,
+    }
+}
+
+/// A `/Differences` array: numbers set the next code, names claim one each.
+fn read_differences(items: &[lopdf::Object]) -> HashMap<u32, char> {
+    let mut out = HashMap::new();
+    let mut code: u32 = 0;
+    for item in items {
+        match item {
+            lopdf::Object::Integer(n) => code = (*n).max(0) as u32,
+            lopdf::Object::Real(n) => code = (*n).max(0.0) as u32,
+            lopdf::Object::Name(name) => {
+                if let Some(c) = glyph_char(&String::from_utf8_lossy(name)) {
+                    out.insert(code, c);
+                }
+                code += 1;
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Parse a `/ToUnicode` CMap: the `bfchar` and `bfrange` sections that map codes
@@ -465,7 +603,34 @@ fn read_font(doc: &Document, dict: &Dictionary) -> Font {
             font.to_unicode = parse_to_unicode(&bytes);
         }
     }
-    font.win_ansi = font.to_unicode.is_empty() && !font.two_byte;
+    // What the codes MEAN, when the font did not spell it out in a ToUnicode
+    // map. `/Encoding` is either a name or a dictionary naming a base and then
+    // re-pointing individual codes; both are common, and a subset font that
+    // ships neither is read as WinAnsi, which is the sensible default for the
+    // Latin range and what this did for every font until now.
+    if font.to_unicode.is_empty() && !font.two_byte {
+        let mut base = Base::WinAnsi;
+        match dict.get(b"Encoding").ok() {
+            Some(obj) => {
+                if let Ok(name) = obj.as_name() {
+                    base = base_named(name);
+                } else if let Ok(enc) = obj.as_dict().or_else(|_| {
+                    obj.as_reference()
+                        .and_then(|r| doc.get_object(r))
+                        .and_then(|o| o.as_dict())
+                }) {
+                    if let Ok(name) = enc.get(b"BaseEncoding").and_then(|o| o.as_name()) {
+                        base = base_named(name);
+                    }
+                    if let Ok(diffs) = enc.get(b"Differences").and_then(|o| o.as_array()) {
+                        font.differences = read_differences(diffs);
+                    }
+                }
+            }
+            None => {}
+        }
+        font.base = Some(base);
+    }
 
     // Weight and slant, from the two places that state them. The name is the
     // reliable one for Word, which embeds subsets called things like
@@ -3978,6 +4143,90 @@ mod harness {
 
 #[cfg(test)]
 mod tests {
+    /// A font's codes mean what the FONT says they mean.
+    ///
+    /// From "Kritisk revision rapport LM25" in production: two of its three
+    /// fonts declare MacRomanEncoding and ship no ToUnicode, so every code above
+    /// 0x7F was being read through WinAnsi. The four that matter in Danish, and
+    /// what they came out as: å→Œ, ø→¿, æ→¾, and the fl ligature→ß. That is most
+    /// of the words in a Danish sentence.
+    #[test]
+    fn a_mac_roman_font_reads_as_mac_roman() {
+        let mac = super::Base::MacRoman;
+        assert_eq!(mac.char_for(0x8C), Some('å'));
+        assert_eq!(mac.char_for(0xBF), Some('ø'));
+        assert_eq!(mac.char_for(0xBE), Some('æ'));
+        assert_eq!(mac.char_for(0xAF), Some('Ø'));
+        assert_eq!(mac.char_for(0xAE), Some('Æ'));
+        assert_eq!(mac.char_for(0x81), Some('Å'));
+        // ASCII is ASCII in both, which is why this went unnoticed for so long.
+        assert_eq!(mac.char_for(b'a'), Some('a'));
+        // And the same codes through the table that was being used instead.
+        let win = super::Base::WinAnsi;
+        assert_eq!(win.char_for(0x8C), Some('Œ'));
+        assert_eq!(win.char_for(0xBF), Some('¿'));
+        assert_eq!(win.char_for(0xE5), Some('å'), "WinAnsi has its own å elsewhere");
+    }
+
+    /// A ligature is the letters it stands for, or nobody can search for them.
+    #[test]
+    fn a_ligature_comes_out_as_its_letters() {
+        assert_eq!(super::ligature_text('ﬂ'), "fl");
+        assert_eq!(super::ligature_text('ﬁ'), "fi");
+        assert_eq!(super::ligature_text('ﬄ'), "ffl");
+        assert_eq!(super::ligature_text('a'), "a");
+        // The MacRoman code that made "flere" read as "ßere".
+        assert_eq!(
+            super::Base::MacRoman.char_for(0xDF).map(super::ligature_text),
+            Some("fl".to_string())
+        );
+    }
+
+    /// `/Differences` re-points individual codes at named glyphs, and a number
+    /// in the array moves the cursor.
+    #[test]
+    fn a_differences_array_names_its_glyphs() {
+        use lopdf::Object;
+        let items = vec![
+            Object::Integer(200),
+            Object::Name(b"aring".to_vec()),
+            Object::Name(b"oslash".to_vec()),
+            Object::Integer(65),
+            Object::Name(b"fl".to_vec()),
+            Object::Name(b"uni00E6".to_vec()),
+        ];
+        let map = super::read_differences(&items);
+        assert_eq!(map.get(&200), Some(&'å'));
+        assert_eq!(map.get(&201), Some(&'ø'), "the code advances by one");
+        assert_eq!(map.get(&65), Some(&'ﬂ'), "a number resets it");
+        assert_eq!(map.get(&66), Some(&'æ'), "and uniXXXX is read as its code point");
+        assert_eq!(super::glyph_char("notaglyphname"), None);
+    }
+
+    /// Scratch: dump what the extractor makes of a real file.
+    /// `PDF=/path/to.pdf cargo test dump_a_pdf -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn dump_a_pdf() {
+        let path = std::env::var("PDF").expect("PDF=<path>");
+        let bytes = std::fs::read(&path).expect("readable");
+        let out = super::extract(&bytes).expect("extracts");
+        let text = |spans: &[super::Span]| spans.iter().map(|s| s.text.clone()).collect::<String>();
+        println!("PAGES {} (without text: {})", out.pages, out.pages_without_text);
+        let first: usize = std::env::var("FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let count: usize = std::env::var("COUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+        for (i, b) in out.blocks.iter().enumerate().skip(first).take(count) {
+            match b {
+                super::Block::Heading { level, spans, .. } => println!("{i:>4} H{level}  {}", text(spans)),
+                super::Block::Paragraph { spans, indent, .. } => println!("{i:>4} P{indent}   {}", text(spans)),
+                super::Block::ListItem { spans, indent, .. } => println!("{i:>4} LI{indent}  {}", text(spans)),
+                super::Block::IndexEntry { spans, page, .. } => println!("{i:>4} TOC  {} .... {page}", text(spans)),
+                super::Block::Image(_) => println!("{i:>4} IMG"),
+                other => println!("{i:>4} {}", format!("{other:?}").chars().take(60).collect::<String>()),
+            }
+        }
+    }
+
     use super::*;
 
     /// The map most of Word's fonts ship, in both of its shapes.
