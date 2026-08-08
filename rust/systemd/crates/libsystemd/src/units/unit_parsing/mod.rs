@@ -3362,18 +3362,18 @@ pub struct ParsedExecSection {
     /// IOSchedulingClass= — sets the I/O scheduling class for executed
     /// processes. Takes one of "none" (or "0"), "realtime" (or "1"),
     /// "best-effort" (or "2"), or "idle" (or "3"). Defaults to None
-    /// (kernel default, which is best-effort). Parsed and stored; no
-    /// runtime ioprio_set() enforcement yet. See systemd.exec(5).
+    /// (kernel default, which is best-effort). Applied via ioprio_set() in
+    /// the exec helper. See systemd.exec(5).
     pub io_scheduling_class: IOSchedulingClass,
     /// IOSchedulingPriority= — sets the I/O scheduling priority for executed
     /// processes. Takes an integer between 0 (highest priority) and 7
     /// (lowest priority). The default priority for the best-effort scheduling
-    /// class is 4. Parsed and stored; no runtime enforcement yet.
+    /// class is 4. Applied via ioprio_set() in the exec helper.
     /// See systemd.exec(5).
     pub io_scheduling_priority: Option<u8>,
     /// UMask= — sets the file mode creation mask (umask) for executed
     /// processes. Takes an octal value (e.g. 0022, 0077). Defaults to 0022.
-    /// Parsed and stored; no runtime enforcement yet. See systemd.exec(5).
+    /// Applied via umask() in the exec helper. See systemd.exec(5).
     pub umask: Option<u32>,
     /// ProcSubset= — controls which subset of /proc/ is mounted for the
     /// unit. Takes one of "all" (full /proc, default) or "pid" (only
@@ -3382,8 +3382,8 @@ pub struct ParsedExecSection {
     pub proc_subset: ProcSubset,
     /// Nice= — sets the default nice level (scheduling priority) for
     /// executed processes. Takes an integer between -20 (highest priority)
-    /// and 19 (lowest priority). Parsed and stored; no runtime enforcement
-    /// yet. See systemd.exec(5).
+    /// and 19 (lowest priority). Applied via setpriority() in the exec
+    /// helper. See systemd.exec(5).
     pub nice: Option<i32>,
     /// RemoveIPC= — if true, all System V and POSIX IPC objects owned by
     /// the user and group of the executed processes are removed when the
