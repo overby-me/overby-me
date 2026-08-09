@@ -14,8 +14,10 @@
 use crate::runtime::Saver;
 
 pub mod coral;
+pub mod cwaves;
 pub mod decayscreen;
 pub mod deco;
+pub mod fadeplot;
 pub mod grav;
 pub mod greynetic;
 pub mod halo;
@@ -35,9 +37,11 @@ pub mod vines;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
     &coral::SAVER,
+    &cwaves::SAVER,
     &deco::SAVER,
     &decayscreen::SAVER,
     &greynetic::SAVER,
+    &fadeplot::SAVER,
     &grav::SAVER,
     &halo::SAVER,
     &kaleidescope::SAVER,

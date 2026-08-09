@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::coral::start
 );
 saver!(
+    "cwaves",
+    cwaves_body,
+    cwaves_start,
+    xscreensaver::hacks2d::cwaves::start
+);
+saver!(
     "deco",
     deco_body,
     deco_start,
@@ -98,6 +104,12 @@ saver!(
     greynetic_body,
     greynetic_start,
     xscreensaver::hacks2d::greynetic::start
+);
+saver!(
+    "fadeplot",
+    fadeplot_body,
+    fadeplot_start,
+    xscreensaver::hacks2d::fadeplot::start
 );
 saver!(
     "grav",
@@ -164,6 +176,11 @@ pub static SAVERS: &[Entry] = &[
         start: coral_start,
     },
     Entry {
+        slug: "cwaves",
+        label: "C Waves",
+        start: cwaves_start,
+    },
+    Entry {
         slug: "deco",
         label: "Deco",
         start: deco_start,
@@ -177,6 +194,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
+    },
+    Entry {
+        slug: "fadeplot",
+        label: "Fade Plot",
+        start: fadeplot_start,
     },
     Entry {
         slug: "grav",
