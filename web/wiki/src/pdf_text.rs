@@ -1611,11 +1611,18 @@ fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64,
         if underlines {
             continue;
         }
-        // One rule, however many strokes drew it -- and it is as heavy as the
-        // heaviest of them, since a bar is often laid down as a stack of thin
-        // strokes rather than one thick one.
-        if let Some((_, _, thick)) = out.iter_mut().find(|(y, _, _)| (*y - rule.y).abs() < 2.0) {
-            *thick = thick.max(rule.thickness);
+        // One rule, however many strokes drew it -- and as heavy as the STACK,
+        // not as the heaviest stroke in it. This is how the annual report draws
+        // a weight: a 0.48pt rule is four hairlines a tenth of a point apart and
+        // a 0.72pt rule is six, which is why every line in it was arriving at
+        // the same hairline and no two looked different. Measured against the
+        // ink: the rules on the income statement come out 0.48pt and 0.72pt,
+        // exactly where these say they are.
+        if let Some((y, _, thick)) = out.iter_mut().find(|(y, _, _)| (*y - rule.y).abs() < 2.0) {
+            let top = y.max(rule.y);
+            let bottom = y.min(rule.y);
+            *thick = thick.max(rule.thickness).max(top - bottom + rule.thickness);
+            *y = (top + bottom) / 2.0;
             continue;
         }
         out.push((rule.y, (width / page_width).min(1.0), rule.thickness));
@@ -1896,8 +1903,10 @@ fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageL
             Some((y, a, b, thick)) => {
                 *a = a.min(x0);
                 *b = b.max(x1);
-                *thick = thick.max(rule.thickness);
-                *y = (*y + rule.y) / 2.0;
+                // As thick as the stack reaches, for the reason above.
+                let (top, bottom) = (y.max(rule.y), y.min(rule.y));
+                *thick = thick.max(rule.thickness).max(top - bottom + rule.thickness);
+                *y = (top + bottom) / 2.0;
             }
             None => drawn_rules.push((rule.y, x0, x1, rule.thickness)),
         }
@@ -2080,7 +2089,7 @@ fn page_runs(
     // graphics state, and a heading's colour set inside one would otherwise leak
     // into the body text after it.
     let mut fill: Option<String> = None;
-    let mut stack: Vec<([f64; 6], Option<String>)> = Vec::new();
+    let mut stack: Vec<([f64; 6], Option<String>, f64)> = Vec::new();
     let mut tm = IDENTITY;
     let mut tlm = IDENTITY;
     let mut font: Option<Font> = None;
@@ -2093,11 +2102,18 @@ fn page_runs(
     for op in content.operations {
         let nums: Vec<f64> = op.operands.iter().filter_map(|o| number(o).ok()).collect();
         match op.operator.as_str() {
-            "q" => stack.push((ctm, fill.clone())),
+            // The pen rides with the rest of the graphics state. Leaving it out
+            // meant a `0 w` set inside one block -- "as thin as this device can
+            // draw" -- stayed in force after the block closed, and every rule
+            // drawn afterwards came out at the floor. The annual report's rules
+            // measure 0.48pt and 0.72pt in the ink; all 141 of them were
+            // arriving as 0.2, which is why no two lines looked different.
+            "q" => stack.push((ctm, fill.clone(), pen)),
             "Q" => {
-                let (c, f) = stack.pop().unwrap_or((IDENTITY, None));
+                let (c, f, w) = stack.pop().unwrap_or((IDENTITY, None, 1.0));
                 ctm = c;
                 fill = f;
+                pen = w;
             }
             // A PDF has no underline: it has a line drawn under some words. The
             // path is gathered here and turned into rules when it is painted,
