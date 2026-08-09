@@ -159,9 +159,162 @@ fn unlinked(spans: &[Span]) -> Vec<Span> {
         .collect()
 }
 
+/// How this app draws a PDF: as the pages were set, or reflowed to the column.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PdfLayout {
+    /// Each page at its own proportions, everything where the page put it.
+    Page,
+    /// The words, in the reading order, wrapped to whatever width there is.
+    Reflow,
+}
+
+impl PdfLayout {
+    fn key(self) -> &'static str {
+        match self {
+            PdfLayout::Page => "page",
+            PdfLayout::Reflow => "reflow",
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            PdfLayout::Page => "file.pdfLayoutPage",
+            PdfLayout::Reflow => "file.pdfLayoutReflow",
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "reflow" => PdfLayout::Reflow,
+            _ => PdfLayout::Page,
+        }
+    }
+}
+
+/// The chosen layout, remembered per device like the viewer choices.
+pub static PDF_LAYOUT: GlobalSignal<PdfLayout> = Signal::global(|| {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item("wiki_pdf_layout").ok().flatten())
+        .map(|v| PdfLayout::from_key(&v))
+        .unwrap_or(PdfLayout::Page)
+});
+
+/// Choose a layout, and remember it.
+pub fn set_pdf_layout(layout: PdfLayout) {
+    *PDF_LAYOUT.write() = layout;
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item("wiki_pdf_layout", layout.key());
+    }
+}
+
+/// The document as it was laid out: each page at its own size, everything where
+/// the page put it.
+///
+/// Possible because the substitute faces are metric-compatible with what a PDF
+/// normally carries (Liberation Sans for Helvetica and Arial, Liberation Serif
+/// for Times, Carlito for Calibri): a run placed at its x, at its size, in the
+/// stand-in face, is the width the page drew it. Nothing is measured in the
+/// browser and nothing is scaled to fit afterwards.
+///
+/// Sized in container units, so a page is the width it is given and everything
+/// on it scales with it: on a phone that is a whole A4 page shrunk to the
+/// screen, which is what a PDF looks like everywhere else.
+#[component]
+fn PdfPages(pages: Vec<crate::pdf_text::PageLayout>) -> Element {
+    use crate::pdf_text::{Family, What};
+    rsx! {
+        div { class: "pdf-pages",
+            for (n , page) in pages.iter().enumerate() {
+                div {
+                    key: "{n}",
+                    class: "pdf-page",
+                    id: "pdf-page-{n + 1}",
+                    "data-page": "{n + 1}",
+                    style: "aspect-ratio: {page.width} / {page.height};",
+                    for (i , item) in page.items.iter().enumerate() {
+                        {
+                            // Every measurement as a share of the page, so the
+                            // whole thing scales with whatever box it is given.
+                            let left = item.x / page.width * 100.0;
+                            let top = item.y / page.height * 100.0;
+                            let wide = item.width / page.width * 100.0;
+                            match &item.what {
+                                What::Text { text, size, color, bold, italic, family, .. } => {
+                                    let face = match family {
+                                        Family::Serif => "var(--pdf-serif)",
+                                        Family::Mono => "var(--pdf-mono)",
+                                        Family::Sans => "var(--pdf-sans)",
+                                    };
+                                    let ink = color.clone().unwrap_or_else(|| "inherit".to_string());
+                                    let em = size / page.width * 100.0;
+                                    // Computed here: a format segment in rsx
+                                    // takes an expression, not a statement.
+                                    let weight = match bold { true => 700, false => 400 };
+                                    let slant = match italic { true => "italic", false => "normal" };
+                                    rsx! {
+                                        span {
+                                            key: "{i}",
+                                            class: "pdf-run",
+                                            style: "left: {left:.3}%; top: {top:.3}%; font-size: {em:.3}cqw; font-family: {face}; color: {ink}; font-weight: {weight}; font-style: {slant};",
+                                            "{text}"
+                                        }
+                                    }
+                                }
+                                What::Image(picture) => {
+                                    let tall = item.height / page.height * 100.0;
+                                    match &picture.path {
+                                        Some(d) => rsx! {
+                                            svg {
+                                                key: "{i}",
+                                                class: "pdf-page-art",
+                                                style: "left: {left:.3}%; top: {top:.3}%; width: {wide:.3}%; height: {tall:.3}%;",
+                                                view_box: "0 0 {picture.width} {picture.height}",
+                                                path { d: "{d}", fill: "none", stroke: "currentColor", stroke_width: "1" }
+                                            }
+                                        },
+                                        None => rsx! {
+                                            img {
+                                                key: "{i}",
+                                                class: "pdf-page-img",
+                                                style: "left: {left:.3}%; top: {top:.3}%; width: {wide:.3}%; height: {tall:.3}%;",
+                                                src: "{picture.src}",
+                                                alt: "",
+                                            }
+                                        },
+                                    }
+                                }
+                                What::Rule => {
+                                    let thick = item.height.max(0.4) / page.height * 100.0;
+                                    rsx! {
+                                        div {
+                                            key: "{i}",
+                                            class: "pdf-page-rule",
+                                            style: "left: {left:.3}%; top: {top:.3}%; width: {wide:.3}%; height: {thick:.3}%;",
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Render what was read out of a PDF.
+///
+/// As the pages were laid out, which is what a PDF is: a reader who opens the
+/// annual report is looking at a document somebody set, and its cover is
+/// nine-tenths deliberate whitespace that a reflow throws away. The reading view
+/// stays one tap behind [`PDF_LAYOUT`], for the case a fixed page is the wrong
+/// shape for the screen.
 #[component]
 pub fn PdfDocument(doc: Extracted) -> Element {
+    if PDF_LAYOUT() == PdfLayout::Page && !doc.layout.is_empty() {
+        return rsx! { PdfPages { pages: doc.layout.clone() } };
+    }
     // Consecutive items of one kind become one group, so a bulleted run reads as
     // a single list rather than a column of one-item lists, and a contents list
     // as one aligned table rather than a stack of unrelated rows.

@@ -155,6 +155,10 @@ impl Block {
 /// an `<svg>`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Picture {
+    /// Where its left edge sat on the page, in points. Meaningless to a reflow,
+    /// which puts a picture in the column like everything else, and everything
+    /// to a page laid out as it was drawn.
+    pub left: f64,
     /// SVG path data, when the page DREW this instead of placing an image. A
     /// signature is the case that matters: it arrives as a thousand little line
     /// segments and no image at all, so there is nothing for an `<img>` to show.
@@ -222,10 +226,63 @@ impl Span {
     }
 }
 
+/// Which of the faces this app ships a PDF's font is closest to.
+///
+/// The substitutes are metric-compatible on purpose (see `main.rs`): Liberation
+/// Sans has Helvetica's and Arial's advance widths, Liberation Serif has Times',
+/// Carlito has Calibri's. That is what makes a fixed layout possible without
+/// measuring anything in the browser -- a run placed at its x with its size is
+/// the width the page drew it, because the letters are the same widths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Family {
+    #[default]
+    Sans,
+    Serif,
+    Mono,
+}
+
+/// One thing a page drew, where it drew it. Points, y from the TOP.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placed {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub what: What,
+}
+
+/// What the thing is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum What {
+    Text {
+        text: String,
+        size: f64,
+        color: Option<String>,
+        bold: bool,
+        italic: bool,
+        family: Family,
+        link: Option<Link>,
+    },
+    Image(Picture),
+    /// A flat line: `height` is its thickness.
+    Rule,
+}
+
+/// One page as it was laid out, for the reader who wants the document rather
+/// than the reading.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageLayout {
+    pub width: f64,
+    pub height: f64,
+    pub items: Vec<Placed>,
+}
+
 /// What came out of a PDF, and how much of it there was to find.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Extracted {
     pub blocks: Vec<Block>,
+    /// Every page as it was drawn, in order. Empty when nothing could be read.
+    pub layout: Vec<PageLayout>,
     pub pages: usize,
     /// Pages that yielded no text at all. All of them means a scan, and the
     /// caller should offer the browser's viewer instead of an empty page.
@@ -271,6 +328,10 @@ struct Font {
     /// resource what it is.
     bold: bool,
     italic: bool,
+    /// Which shipped face stands in for it. Only the shape of the letters
+    /// differs; the widths are the same, which is what makes a fixed layout
+    /// possible without measuring anything.
+    family: Family,
 }
 
 impl Font {
@@ -620,6 +681,31 @@ fn hex_to_string(s: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&units))
 }
 
+/// Which shipped face stands in for a font, from its name.
+///
+/// Only three, because only three are needed: the substitutes are chosen for
+/// having the same advance widths as what they replace, and a name this does not
+/// know is likelier to be a sans than anything else -- that is what an unnamed
+/// subset of a corporate typeface almost always is.
+fn family_of(base: &str) -> Family {
+    const SERIF: &[&str] = &[
+        "times", "serif", "georgia", "garamond", "book", "roman", "minion",
+        "cambria", "caladea", "palatino", "century",
+    ];
+    const MONO: &[&str] = &["courier", "mono", "consol", "menlo"];
+    if MONO.iter().any(|n| base.contains(n)) {
+        return Family::Mono;
+    }
+    // "Sans" wins over "serif" inside it: "SansSerif" is a sans.
+    if base.contains("sans") {
+        return Family::Sans;
+    }
+    match SERIF.iter().any(|n| base.contains(n)) {
+        true => Family::Serif,
+        false => Family::Sans,
+    }
+}
+
 /// Build a decoder for one font dictionary.
 fn read_font(doc: &Document, dict: &Dictionary) -> Font {
     let mut font = Font {
@@ -680,6 +766,7 @@ fn read_font(doc: &Document, dict: &Dictionary) -> Font {
         .unwrap_or_default();
     font.bold = base.contains("bold") || base.contains("black") || base.contains("heavy");
     font.italic = base.contains("italic") || base.contains("oblique");
+    font.family = family_of(&base);
 
     let descriptor = descriptor_of(doc, dict);
     if let Some(desc) = descriptor {
@@ -1045,6 +1132,8 @@ fn page_xobjects(doc: &Document, page_id: lopdf::ObjectId) -> HashMap<Vec<u8>, l
 /// One run of text, where it landed and how big it was.
 #[derive(Debug, Clone)]
 struct Run {
+    /// Which of the shipped faces this run's font is closest to.
+    family: Family,
     x: f64,
     /// Where the pen ENDED, exactly, from the advance widths. Estimating this
     /// from the character count put spaces inside words: Word emits a line as
@@ -1286,6 +1375,7 @@ impl Art {
     /// and sized in points, so it lands at the size it was drawn.
     fn into_picture(self) -> Option<Picture> {
         let (width, height) = (self.x1 - self.x0, self.y1 - self.y0);
+        let left = self.x0;
         if !width.is_finite() || width <= 1.0 || height <= 1.0 {
             return None;
         }
@@ -1311,6 +1401,7 @@ impl Art {
         Some(Picture {
             path: Some(d),
             src: String::new(),
+            left,
             width,
             height,
         })
@@ -1563,6 +1654,99 @@ fn cut_at_stops(cell: Cell, stops: &[f64]) -> Vec<Cell> {
     });
     out.retain(|c| c.spans.iter().any(|s| !s.text.trim().is_empty()));
     out
+}
+
+/// A page's size in points, from its own box or the one it inherits.
+fn page_size(doc: &Document, page_id: lopdf::ObjectId) -> (f64, f64) {
+    // A4 when the file does not say, which is what every document here is.
+    const A4: (f64, f64) = (595.276, 841.89);
+    let Ok(page) = doc.get_dictionary(page_id) else {
+        return A4;
+    };
+    // CropBox is what a reader is shown when it differs from the media.
+    let box_of = |name: &[u8]| {
+        page.get(name)
+            .ok()
+            .and_then(|o| resolve(doc, o).ok())
+            .and_then(|o| o.as_array().ok().cloned())
+            .or_else(|| {
+                doc.get_dictionary(page_id)
+                    .ok()
+                    .and_then(|p| p.get(b"Parent").ok().cloned())
+                    .and_then(|parent| parent.as_reference().ok())
+                    .and_then(|id| doc.get_dictionary(id).ok())
+                    .and_then(|p| p.get(name).ok())
+                    .and_then(|o| resolve(doc, o).ok())
+                    .and_then(|o| o.as_array().ok().cloned())
+            })
+    };
+    let rect = box_of(b"CropBox").or_else(|| box_of(b"MediaBox"));
+    let Some(rect) = rect else { return A4 };
+    let nums: Vec<f64> = rect.iter().filter_map(|o| number(o).ok()).collect();
+    match nums.as_slice() {
+        [x0, y0, x1, y1] => {
+            let (w, h) = ((x1 - x0).abs(), (y1 - y0).abs());
+            match w > 1.0 && h > 1.0 {
+                true => (w, h),
+                false => A4,
+            }
+        }
+        _ => A4,
+    }
+}
+
+/// One page as it was drawn: everything with its place on it.
+///
+/// The y axis is turned over here, once: a PDF measures up from the foot of the
+/// page and a screen measures down from the top, and every consumer of this
+/// would otherwise have to remember which it was holding.
+fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageLayout {
+    let (width, height) = page_size(doc, page_id);
+    let mut items: Vec<Placed> = Vec::new();
+    for run in &drawn.runs {
+        if run.text.trim().is_empty() {
+            continue;
+        }
+        items.push(Placed {
+            x: run.x,
+            // The baseline, from the top. What sits ON it is drawn above it.
+            y: height - run.y,
+            width: (run.end_x - run.x).max(0.0),
+            height: run.size,
+            what: What::Text {
+                text: run.text.clone(),
+                size: run.size,
+                color: run.color.clone(),
+                bold: run.bold,
+                italic: run.italic,
+                family: run.family,
+                link: run.link.clone(),
+            },
+        });
+    }
+    for (top, picture) in &drawn.pictures {
+        items.push(Placed {
+            x: picture.left,
+            y: height - top,
+            width: picture.width,
+            height: picture.height,
+            what: What::Image(picture.clone()),
+        });
+    }
+    for rule in &drawn.rules {
+        items.push(Placed {
+            x: rule.x0,
+            y: height - rule.y,
+            width: (rule.x1 - rule.x0).max(0.0),
+            height: rule.thickness.max(0.4),
+            what: What::Rule,
+        });
+    }
+    PageLayout {
+        width,
+        height,
+        items,
+    }
 }
 
 /// The stretches of lines that stood in columns, as [start, end) line indices.
@@ -1995,6 +2179,7 @@ fn page_runs(
                     Picture {
                         path: None,
                         src,
+                        left: ctm[4],
                         width,
                         height,
                     },
@@ -2065,6 +2250,7 @@ fn show(
                 size: size * scale,
                 text: std::mem::take(text),
                 color: color.map(str::to_string),
+                family: font.family,
                 bold: font.bold,
                 // A file may say italic in the font, or draw it with a shear.
                 italic: font.italic || slanted(at),
@@ -3688,12 +3874,18 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
         .collect();
     let mut places: Vec<Place> = Vec::new();
     let mut per_page: Vec<Vec<Line>> = Vec::new();
+    let mut layout: Vec<PageLayout> = Vec::new();
     let mut budget = PICTURE_BUDGET;
     for (page_no, (_, page_id)) in pages.into_iter().enumerate() {
         // The links live beside the content stream rather than in it, so they
         // are read first and handed to the walk, which cuts its runs on them.
         let areas = page_links(&doc, page_id, &by_id, &mut places);
         let drawn = page_runs(&doc, page_id, &mut budget, &areas);
+        // The page as it was drawn, before the reading takes it apart. Built
+        // here because this is the last place the positions exist: `lines_from`
+        // turns the runs into lines and the lines into a reading order, which is
+        // a different thing from a page and cannot be turned back into one.
+        layout.push(page_layout(&doc, page_id, &drawn));
         let mut lines = lines_from(drawn.runs);
         mark_the_lines(&mut lines, &drawn.marks);
         for line in &mut lines {
@@ -3765,6 +3957,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
     drop_unused_anchors(&mut blocks);
     Ok(Extracted {
         blocks,
+        layout,
         pages: total,
         pages_without_text: empty,
     })
@@ -5114,11 +5307,13 @@ mod tests {
     fn a_document_with_no_text_says_so() {
         let scan = Extracted {
             blocks: vec![],
+            layout: Vec::new(),
             pages: 7,
             pages_without_text: 7,
         };
         assert!(!scan.has_text());
         let real = Extracted {
+            layout: Vec::new(),
             blocks: vec![Block::Paragraph {
                 indent: 0,
                 spans: vec![Span {
@@ -5186,6 +5381,7 @@ mod tests {
 
     fn run(x: f64, end_x: f64, text: &str, color: Option<&str>, bold: bool) -> Run {
         Run {
+            family: super::Family::Sans,
             underline: false,
             link: None,
             x,

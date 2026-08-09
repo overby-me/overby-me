@@ -1223,6 +1223,29 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         // be shown exactly by the browser or reflowed by
                         // this app. Not on an image, where it would be a
                         // choice that changes nothing.
+                        // How this app draws it, before who draws it: a
+                        // reader who wants the page as printed and a reader who
+                        // wants it to reflow are asking about the same renderer.
+                        if file_mime == "application/pdf" && PDF_VIEWER() == PdfViewer::Native {
+                            super::widgets::SheetGroup {
+                                div { class: "sheet-label", "{t(\"file.pdfLayout\")}" }
+                                for layout in [
+                                    super::pdf::PdfLayout::Page,
+                                    super::pdf::PdfLayout::Reflow,
+                                ] {
+                                    button {
+                                        key: "{layout.label_key()}",
+                                        class: if super::pdf::PDF_LAYOUT() == layout { "sheet-action selected" } else { "sheet-action" },
+                                        "aria-pressed": if super::pdf::PDF_LAYOUT() == layout { "true" } else { "false" },
+                                        onclick: move |_| super::pdf::set_pdf_layout(layout),
+                                        span { class: "material-icons",
+                                            if super::pdf::PDF_LAYOUT() == layout { "radio_button_checked" } else { "radio_button_unchecked" }
+                                        }
+                                        "{t(layout.label_key())}"
+                                    }
+                                }
+                            }
+                        }
                         if file_mime == "application/pdf" {
                             super::widgets::SheetGroup {
                                 div { class: "sheet-label", "{t(\"file.renderedBy\")}" }

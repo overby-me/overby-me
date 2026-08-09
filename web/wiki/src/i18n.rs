@@ -671,6 +671,9 @@ const EN_JSON: &str = r#"{
     },
     "file": {
         "renderedBy": "Rendered by",
+        "pdfLayout": "Layout",
+        "pdfLayoutPage": "As printed",
+        "pdfLayoutReflow": "Reflowed to fit",
         "pdfViewerBrowser": "Your browser",
         "pdfViewerNative": "This app (reflows)",
         "goToPage": "Go to a page",
@@ -1284,6 +1287,9 @@ const DA_JSON: &str = r#"{
     },
     "file": {
         "renderedBy": "Vises af",
+        "pdfLayout": "Visning",
+        "pdfLayoutPage": "Som trykt",
+        "pdfLayoutReflow": "Tilpasset skærmen",
         "pdfViewerBrowser": "Din browser",
         "pdfViewerNative": "Denne app (ombryder)",
         "goToPage": "Gå til en side",

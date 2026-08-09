@@ -8772,6 +8772,58 @@ a.list-item:hover {
 /* Something the page drew rather than placed: a signature, a diagram. It takes
    the reading colour, so it is legible on a dark surface where a black bitmap
    would not be, and it never outgrows the column. */
+/* DESIGN (a PDF as a PDF): each page at its own proportions, everything on it
+   placed where the page placed it.
+
+   The whole layout is expressed as a share of the page and sized in container
+   units, so one rule scales a page to a phone, to a laptop, and to a projector
+   without measuring anything: `cqw` is a hundredth of the page box's width, and
+   a 10pt letter on a 595pt page is 1.68cqw wherever that box happens to be.
+
+   The faces are the metric-compatible ones this app already ships for reading
+   Word documents, which is what makes the placement land: Liberation Sans has
+   Helvetica's and Arial's widths, Liberation Serif has Times', Carlito has
+   Calibri's. */
+.pdf-pages {
+	--pdf-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
+	--pdf-serif: "Liberation Serif", "Times New Roman", Times, serif;
+	--pdf-mono: ui-monospace, "Courier New", monospace;
+	display: flex;
+	flex-direction: column;
+	gap: var(--md-sys-spacing-4);
+	align-items: center;
+}
+.pdf-page {
+	container-type: inline-size;
+	position: relative;
+	width: 100%;
+	/* The page is paper: white, whatever the app's surface is, because that is
+	   what the ink on it was chosen against. */
+	background: #fff;
+	color: #000;
+	border-radius: var(--md-sys-shape-corner-small);
+	box-shadow: var(--md-sys-elevation-1);
+	overflow: hidden;
+}
+.pdf-run {
+	position: absolute;
+	/* The baseline is what a PDF places, so the box hangs from it. */
+	transform: translateY(-100%);
+	transform-origin: left bottom;
+	white-space: pre;
+	line-height: 1;
+}
+.pdf-page-img,
+.pdf-page-art {
+	position: absolute;
+	object-fit: fill;
+}
+.pdf-page-rule {
+	position: absolute;
+	background: currentColor;
+	min-height: 1px;
+}
+
 /* Rows that stood in columns on the page, standing in columns here. Its own
    scroller: a statement with four columns of figures is wider than a phone, and
    the choice is between scrolling the table and squeezing the reading column
