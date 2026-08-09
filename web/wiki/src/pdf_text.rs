@@ -1761,11 +1761,13 @@ fn underline_runs(runs: &mut [Run], rules: &[Rule]) {
 /// the one that divides two sections -- which is how a financial statement says
 /// which numbers belong together, and the whole of what it had to say before
 /// this kept any of them.
-/// Where a rule sat and how heavy it was: its middle, where it began and how
-/// wide it ran as shares of the text column, and its thickness in points.
+/// Where a rule sat and how heavy it was: its middle, where it began and where
+/// it ended in the page's own points, and its thickness. Turned into shares of
+/// the text column later, against the margin the TEXT is laid out from -- which
+/// is a property of the document and not of the page it happens to be on.
 type Separator = (f64, f64, f64, f64);
 
-fn separators(rules: &[Rule], lines: &[Line], col_left: f64, page_width: f64) -> Vec<Separator> {
+fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<Separator> {
     // How far the stack reaches, not where its middle is: top, bottom, left,
     // right, and the heaviest single stroke in it.
     let mut out: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
@@ -1811,12 +1813,7 @@ fn separators(rules: &[Rule], lines: &[Line], col_left: f64, page_width: f64) ->
     }
     out.into_iter()
         .map(|(top, bottom, left, right, stroke)| {
-            (
-                (top + bottom) / 2.0,
-                ((left - col_left) / page_width).clamp(0.0, 1.0),
-                ((right - left) / page_width).min(1.0),
-                top - bottom + stroke,
-            )
+            ((top + bottom) / 2.0, left, right, top - bottom + stroke)
         })
         .collect()
 }
@@ -4131,7 +4128,7 @@ fn blocks_from(
         }
         // A rule ends whatever was being built, which is the point of it: the
         // paragraph above and the one below were separated on the page.
-        if let Some((offset, width, thickness)) = line.rule {
+        if let Some((x0, x1, thickness)) = line.rule {
             flush(
                 &mut para,
                 para_size,
@@ -4144,9 +4141,15 @@ fn blocks_from(
             if let Some(ems) = space_before(&lines_ref, at, body, usual) {
                 blocks.push(Block::Space { ems });
             }
+            // As shares of the text column, against the margin the text is
+            // laid out from. Not the leftmost thing on the PAGE: the income
+            // statement hangs its note numbers out to the left of the text, so
+            // measured from those every rule on the page began a twentieth of
+            // the width in from the words it was drawn level with.
+            let span = (column - col_left).max(1.0);
             blocks.push(Block::Rule {
-                offset,
-                width,
+                offset: ((x0 - col_left) / span).clamp(0.0, 1.0),
+                width: ((x1 - x0) / span).clamp(0.0, 1.0),
                 thickness,
             });
             prev = None;
@@ -4863,17 +4866,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
             .map(|l| l.right - l.left)
             .fold(0.0_f64, f64::max)
             .max(1.0);
-        let col_left = lines
-            .iter()
-            .filter(|l| l.left.is_finite())
-            .map(|l| l.left)
-            .fold(f64::INFINITY, f64::min);
-        let col_left = match col_left.is_finite() {
-            true => col_left,
-            false => 0.0,
-        };
-        for (y, offset, width, thickness) in separators(&drawn.rules, &lines, col_left, page_width)
-        {
+        for (y, x0, x1, thickness) in separators(&drawn.rules, &lines, page_width) {
             lines.push(Line {
                 y,
                 size: 1.0,
@@ -4884,7 +4877,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 spans: Vec::new(),
                 bullet: None,
                 picture: None,
-                rule: Some((offset, width, thickness)),
+                rule: Some((x0, x1, thickness)),
                 tail_gap: 0.0,
                 cells: Vec::new(),
                 natural_cells: 0,
@@ -5968,33 +5961,34 @@ mod tests {
 
         // Under the words on the line above: that is an underline, carried by
         // the run itself.
-        let under = super::separators(&[rule(50.0, 300.0, 97.0)], &lines, 50.0, 500.0);
+        let under = super::separators(&[rule(50.0, 300.0, 97.0)], &lines, 500.0);
         assert!(
             under.is_empty(),
             "an underline is not a separator: {under:?}"
         );
 
         // Clear of any line: a separator, at the share of the width it spanned.
-        let between = super::separators(&[rule(50.0, 300.0, 60.0)], &lines, 50.0, 500.0);
+        let between = super::separators(&[rule(50.0, 300.0, 60.0)], &lines, 500.0);
         assert_eq!(between.len(), 1);
+        // Where it began and where it ended, in the page's own points; the
+        // share of the column is worked out later, against the margin the text
+        // is laid out from.
         assert!(
-            (between[0].2 - 0.5).abs() < 0.01,
-            "half the width: {between:?}"
+            (between[0].1 - 50.0).abs() < 0.01 && (between[0].2 - 300.0).abs() < 0.01,
+            "50..300: {between:?}"
         );
-        // And it began at the margin it was drawn from.
-        assert!(between[0].1.abs() < 0.01, "at the left: {between:?}");
 
         // Too short to be anything but a tick.
-        assert!(super::separators(&[rule(50.0, 70.0, 60.0)], &lines, 50.0, 500.0).is_empty());
+        assert!(super::separators(&[rule(50.0, 70.0, 60.0)], &lines, 500.0).is_empty());
 
         // One rule, however many strokes drew it: a table's cells each draw
         // their own edge along the same line.
         let doubled = vec![rule(50.0, 300.0, 60.0), rule(300.0, 450.0, 60.4)];
-        let joined = super::separators(&doubled, &lines, 50.0, 500.0);
+        let joined = super::separators(&doubled, &lines, 500.0);
         assert_eq!(joined.len(), 1);
         // And as wide as the two of them together, not as wide as the first.
         assert!(
-            (joined[0].2 - 0.8).abs() < 0.01,
+            (joined[0].1 - 50.0).abs() < 0.01 && (joined[0].2 - 450.0).abs() < 0.01,
             "the whole span: {joined:?}"
         );
     }
@@ -6021,14 +6015,14 @@ mod tests {
                 .collect()
         };
 
-        let masthead = super::separators(&stack(16, 822.12), &lines, 113.0, 440.0);
+        let masthead = super::separators(&stack(16, 822.12), &lines, 440.0);
         assert_eq!(masthead.len(), 1);
         assert!(
             (masthead[0].3 - 1.92).abs() < 0.01,
             "sixteen strokes span 1.92pt: {masthead:?}"
         );
 
-        let ordinary = super::separators(&stack(4, 784.20), &lines, 113.0, 440.0);
+        let ordinary = super::separators(&stack(4, 784.20), &lines, 440.0);
         assert!(
             (ordinary[0].3 - 0.48).abs() < 0.01,
             "four strokes span 0.48pt: {ordinary:?}"
