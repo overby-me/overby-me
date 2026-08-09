@@ -82,7 +82,12 @@ pub enum Block {
     /// it separated survives, and that is what the rule was for. `width` is how
     /// much of the page's width it spanned, so a full separator and the short
     /// stroke over one column's total do not come out the same.
-    Rule { width: f64 },
+    ///
+    /// `thickness` is in points, as the page drew it. A statement says "this is
+    /// a total" by drawing a heavier line, and a hairline between two rows of a
+    /// contents list means something quieter; one weight for both throws that
+    /// away.
+    Rule { width: f64, thickness: f64 },
     /// A picture the page drew, where it drew it.
     Image(Picture),
     /// A place a link in this document points at. Carries nothing to read: it
@@ -1324,22 +1329,46 @@ impl Shape {
     /// This shape as a rule when the path is STROKED: a flat segment drawn with
     /// the pen. A stroked box is a border round something and not an underline
     /// under anything, so it draws none.
-    fn stroked(&self, ctm: [f64; 6], pen: f64) -> Option<Rule> {
-        let Shape::Line { .. } = self else {
-            return None;
-        };
-        let [(x0, y0), (x1, y1)] = self.corners(ctm);
-        // Flat, within a hair: a diagonal is a drawing, not a rule.
-        if (y1 - y0).abs() > 0.6 {
-            return None;
-        }
+    fn stroked(&self, ctm: [f64; 6], pen: f64) -> Vec<Rule> {
         let scale = (ctm[2].powi(2) + ctm[3].powi(2)).sqrt();
-        Some(Rule {
-            x0: x0.min(x1),
-            x1: x0.max(x1),
-            y: (y0 + y1) / 2.0,
-            thickness: (pen * scale).max(0.2),
-        })
+        let thickness = (pen * scale).max(0.2);
+        let [(x0, y0), (x1, y1)] = self.corners(ctm);
+        match self {
+            Shape::Line { .. } => {
+                // Flat, within a hair: a diagonal is a drawing, not a rule.
+                match (y1 - y0).abs() > 0.6 {
+                    true => Vec::new(),
+                    false => vec![Rule {
+                        x0: x0.min(x1),
+                        x1: x0.max(x1),
+                        y: (y0 + y1) / 2.0,
+                        thickness,
+                    }],
+                }
+            }
+            // A STROKED box is a frame, and its horizontal edges are rules like
+            // any other: the line over a table's totals is commonly drawn as one.
+            // Skipping them left a page with only the hairlines it happened to
+            // draw as segments, so every line in the report came out at the
+            // thinnest weight there is and the heavy ones were missing entirely.
+            //
+            // The uprights are dropped, as they always were: a column's edge
+            // means nothing once the text it bounded has reflowed.
+            Shape::Box { .. } => {
+                let (top, bottom) = (y0.max(y1), y0.min(y1));
+                let (left, right) = (x0.min(x1), x0.max(x1));
+                // A BAR drawn as a stroked rectangle: both its edges are the
+                // line. A tall one is a frame, and its edges are the frame's --
+                // a box around a verse is not two rules across the page.
+                match right - left < 4.0 || top - bottom > 2.5 {
+                    true => Vec::new(),
+                    false => vec![
+                        Rule { x0: left, x1: right, y: top, thickness },
+                        Rule { x0: left, x1: right, y: bottom, thickness },
+                    ],
+                }
+            }
+        }
     }
 }
 
@@ -1480,26 +1509,48 @@ fn gather_drawings(arts: Vec<Art>) -> Vec<(f64, Picture)> {
 /// into an underline under it, twenty-nine times a page: the box's top and
 /// bottom edges each looked like a hairline, and one of them always sat just
 /// under some words.
-fn filled_rule(shapes: &[Shape], ctm: [f64; 6]) -> Option<Rule> {
+fn filled_rule(shapes: &[Shape], ctm: [f64; 6]) -> Vec<Rule> {
+    // EACH shape, not the path they share. A page is free to lay out every rule
+    // of a table in one path and fill it once, and the annual report does: the
+    // bounding box of that path is the height of the table, which is not a rule
+    // by any measure, so every bar in the statement was discarded and the only
+    // lines left were the hairlines drawn one at a time. The weights that mark a
+    // total -- 1.2pt and 2.4pt in this file -- never reached the reader at all.
+    // How tall the whole path is decides which question to ask. A path no taller
+    // than a heavy stroke IS one bar, however many pieces drew it. A taller one
+    // is either a frame around something -- four segments enclosing a verse, in
+    // the songbook -- or a stack of separate bars, and only the second kind has
+    // rules in it: a frame's edges are not lines the reader is meant to see once
+    // the text has reflowed out of it.
     let corners: Vec<(f64, f64)> = shapes.iter().flat_map(|s| s.corners(ctm)).collect();
-    let (mut x0, mut x1) = (f64::INFINITY, f64::NEG_INFINITY);
-    let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
-    for (x, y) in corners {
-        x0 = x0.min(x);
-        x1 = x1.max(x);
-        y0 = y0.min(y);
-        y1 = y1.max(y);
-    }
-    // An underline is a hairline. Anything taller is a box, whatever is in it.
-    if !x0.is_finite() || y1 - y0 > 2.5 || x1 - x0 < 4.0 {
-        return None;
-    }
-    Some(Rule {
-        x0,
-        x1,
-        y: (y0 + y1) / 2.0,
-        thickness: (y1 - y0).max(0.2),
-    })
+    let (lo, hi) = corners.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (_, y)| {
+        (lo.min(*y), hi.max(*y))
+    });
+    let framed = hi - lo > 2.5;
+    shapes
+        .iter()
+        .filter_map(|shape| {
+            // Inside a tall path, only a filled bar counts; a segment there is
+            // one side of a frame.
+            if framed && !matches!(shape, Shape::Box { .. }) {
+                return None;
+            }
+            let [(ax, ay), (bx, by)] = shape.corners(ctm);
+            let (x0, x1) = (ax.min(bx), ax.max(bx));
+            let (y0, y1) = (ay.min(by), ay.max(by));
+            // A rule is a bar: wide, and no taller than a heavy stroke. Anything
+            // taller is a box with something in it.
+            match !x0.is_finite() || y1 - y0 > 2.5 || x1 - x0 < 4.0 {
+                true => None,
+                false => Some(Rule {
+                    x0,
+                    x1,
+                    y: (y0 + y1) / 2.0,
+                    thickness: (y1 - y0).max(0.2),
+                }),
+            }
+        })
+        .collect()
 }
 
 /// Whether a colour is too pale to be a mark on white paper.
@@ -1544,8 +1595,8 @@ fn underline_runs(runs: &mut [Run], rules: &[Rule]) {
 /// the one that divides two sections -- which is how a financial statement says
 /// which numbers belong together, and the whole of what it had to say before
 /// this kept any of them.
-fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64)> {
-    let mut out: Vec<(f64, f64)> = Vec::new();
+fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64, f64)> {
+    let mut out: Vec<(f64, f64, f64)> = Vec::new();
     for rule in rules {
         let width = rule.x1 - rule.x0;
         // A tenth of the column: shorter is a tick, a bullet's stroke, or the
@@ -1560,11 +1611,14 @@ fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64)
         if underlines {
             continue;
         }
-        // One rule, however many strokes drew it.
-        if out.iter().any(|(y, _)| (y - rule.y).abs() < 2.0) {
+        // One rule, however many strokes drew it -- and it is as heavy as the
+        // heaviest of them, since a bar is often laid down as a stack of thin
+        // strokes rather than one thick one.
+        if let Some((_, _, thick)) = out.iter_mut().find(|(y, _, _)| (*y - rule.y).abs() < 2.0) {
+            *thick = thick.max(rule.thickness);
             continue;
         }
-        out.push((rule.y, (width / page_width).min(1.0)));
+        out.push((rule.y, (width / page_width).min(1.0), rule.thickness));
     }
     out
 }
@@ -1828,12 +1882,32 @@ fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageL
             what: What::Image(picture.clone()),
         });
     }
+    // One line, however many strokes drew it. A bar is commonly laid down as a
+    // stack of hairlines a tenth of a point apart -- the report's header rule is
+    // eight of them -- and drawing each is eight elements for one line, at the
+    // weight of the thinnest rather than of the bar.
+    let mut drawn_rules: Vec<(f64, f64, f64, f64)> = Vec::new();
     for rule in &drawn.rules {
+        let (x0, x1) = (rule.x0.min(rule.x1), rule.x0.max(rule.x1));
+        let same = drawn_rules.iter_mut().find(|(y, a, b, _)| {
+            (*y - rule.y).abs() < 1.0 && x0 <= *b + 1.0 && x1 >= *a - 1.0
+        });
+        match same {
+            Some((y, a, b, thick)) => {
+                *a = a.min(x0);
+                *b = b.max(x1);
+                *thick = thick.max(rule.thickness);
+                *y = (*y + rule.y) / 2.0;
+            }
+            None => drawn_rules.push((rule.y, x0, x1, rule.thickness)),
+        }
+    }
+    for (y, x0, x1, thickness) in drawn_rules {
         items.push(Placed {
-            x: rule.x0,
-            y: height - rule.y,
-            width: (rule.x1 - rule.x0).max(0.0),
-            height: rule.thickness.max(0.4),
+            x: x0,
+            y: height - y,
+            width: (x1 - x0).max(0.0),
+            height: thickness.max(0.4),
             what: What::Rule,
         });
     }
@@ -2065,12 +2139,10 @@ fn page_runs(
                     }
                 }
                 if filling && !pale_fill {
-                    if let Some(rule) = filled_rule(&shapes, ctm) {
-                        rules.push(rule);
-                    }
+                    rules.extend(filled_rule(&shapes, ctm));
                 }
                 if stroking && !pale_stroke {
-                    rules.extend(shapes.iter().filter_map(|s| s.stroked(ctm, pen)));
+                    rules.extend(shapes.iter().flat_map(|s| s.stroked(ctm, pen)));
                 }
                 shapes.clear();
             }
@@ -2423,9 +2495,9 @@ struct Line {
     /// Set when this "line" is a picture rather than words. It takes its place
     /// in the flow by where it was drawn, like everything else.
     picture: Option<Picture>,
-    /// Set when it is a flat line the page drew, carrying how much of the page's
-    /// width it spanned. Same idea: it belongs where it was drawn.
-    rule: Option<f64>,
+    /// Set when it is a flat line the page drew: how much of the page's width it
+    /// spanned, and how heavy it was. Same idea: it belongs where it was drawn.
+    rule: Option<(f64, f64)>,
     /// The gap before the line's last word, in multiples of its type size.
     ///
     /// What tells a contents row from a sentence when there are no leader dots
@@ -3328,7 +3400,7 @@ fn blocks_from(
         }
         // A rule ends whatever was being built, which is the point of it: the
         // paragraph above and the one below were separated on the page.
-        if let Some(width) = line.rule {
+        if let Some((width, thickness)) = line.rule {
             flush(
                 &mut para,
                 para_size,
@@ -3338,7 +3410,7 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
-            blocks.push(Block::Rule { width });
+            blocks.push(Block::Rule { width, thickness });
             prev = None;
             continue;
         }
@@ -4030,7 +4102,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
             .map(|l| l.right - l.left)
             .fold(0.0_f64, f64::max)
             .max(1.0);
-        for (y, width) in separators(&drawn.rules, &lines, page_width) {
+        for (y, width, thickness) in separators(&drawn.rules, &lines, page_width) {
             lines.push(Line {
                 y,
                 size: 1.0,
@@ -4041,7 +4113,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 spans: Vec::new(),
                 bullet: None,
                 picture: None,
-                rule: Some(width),
+                rule: Some((width, thickness)),
                 tail_gap: 0.0,
                 cells: Vec::new(),
                 natural_cells: 0,
@@ -4961,7 +5033,7 @@ mod harness {
                             Some(_) => format!("li*>{indent}"),
                             None => format!("li>{indent}"),
                         },
-                        super::Block::Rule { width } => format!("hr {:.0}%", width * 100.0),
+                        super::Block::Rule { width, .. } => format!("hr {:.0}%", width * 100.0),
                         super::Block::Table { rows } => {
                             format!("table {}x{}", rows.len(), rows.first().map_or(0, Vec::len))
                         }
@@ -5229,6 +5301,12 @@ mod tests {
             if let Some(page) = out.layout.get(want.saturating_sub(1)) {
                 println!("page {want}: {:.0} x {:.0}", page.width, page.height);
                 for item in &page.items {
+                    if let super::What::Rule = &item.what {
+                        println!(
+                            "  RULE x={:7.1} y={:7.1} w={:6.1} thick={:.2}",
+                            item.x, item.y, item.width, item.height
+                        );
+                    }
                     if let super::What::Text { text, size, family, .. } = &item.what {
                         println!(
                             "  x={:7.1} y={:7.1} w={:6.1} size={:4.1} {family:?} {text:?}",
@@ -5282,7 +5360,9 @@ mod tests {
                 super::Block::ListItem { spans, indent, .. } => println!("{i:>4} LI{indent}  {}", text(spans)),
                 super::Block::IndexEntry { spans, page, .. } => println!("{i:>4} TOC  {} .... {page}", text(spans)),
                 super::Block::Image(_) => println!("{i:>4} IMG"),
-                super::Block::Rule { width } => println!("{i:>4} ---- {:.0}%", width * 100.0),
+                super::Block::Rule { width, thickness } => {
+                    println!("{i:>4} ---- {:.0}% {thickness:.2}pt", width * 100.0)
+                }
                 super::Block::Table { rows } => {
                     println!("{i:>4} TABLE {}x{}", rows.len(), rows.first().map_or(0, Vec::len));
                     for row in rows {
@@ -5957,7 +6037,7 @@ mod tests {
             },
         ];
         assert!(
-            filled_rule(&box_path, IDENTITY).is_none(),
+            filled_rule(&box_path, IDENTITY).is_empty(),
             "a box the height of a line is a box"
         );
         // A hairline the same width IS a rule.
@@ -5967,9 +6047,23 @@ mod tests {
             w: 484.8,
             h: 0.8,
         }];
-        let rule = filled_rule(&hairline, IDENTITY).expect("a hairline is a rule");
+        let found = filled_rule(&hairline, IDENTITY);
+        let rule = found.first().expect("a hairline is a rule");
         assert!((rule.thickness - 0.8).abs() < 0.01);
         assert!((rule.y - 654.6).abs() < 0.01);
+
+        // And a path holding a whole table's worth of bars gives one rule per
+        // bar, at the weight each was drawn: taking the path as a whole makes a
+        // box the height of the table and throws all of them away.
+        let many = vec![
+            Shape::Box { x: 55.0, y: 700.0, w: 480.0, h: 1.2 },
+            Shape::Box { x: 55.0, y: 600.0, w: 480.0, h: 2.4 },
+            Shape::Box { x: 55.0, y: 500.0, w: 480.0, h: 1.2 },
+        ];
+        let bars = filled_rule(&many, IDENTITY);
+        assert_eq!(bars.len(), 3, "one rule per bar");
+        let weights: Vec<f64> = bars.iter().map(|r| (r.thickness * 10.0).round() / 10.0).collect();
+        assert_eq!(weights, vec![1.2, 2.4, 1.2]);
     }
 
     /// And white ink marks nothing at all.

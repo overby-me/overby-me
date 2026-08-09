@@ -8869,7 +8869,7 @@ a.list-item:hover {
 	width: var(--rule-width, 100%);
 	margin: var(--md-sys-spacing-3) auto;
 	border: none;
-	border-top: 1px solid var(--md-outline);
+	border-top: var(--rule-thickness, 1px) solid var(--md-outline);
 }
 
 .pdf-drawing {

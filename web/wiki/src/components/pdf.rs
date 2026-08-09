@@ -548,13 +548,21 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     // where it was -- the text under it is a different width
                     // now -- but it separated one thing from another, and drawn
                     // to the share of the width it spanned it still says which.
-                    Some(Block::Rule { width }) => rsx! {
-                        hr {
-                            key: "{i}",
-                            class: "pdf-rule",
-                            style: "--rule-width: {(width * 100.0).clamp(8.0, 100.0):.1}%;",
+                    Some(Block::Rule { width, thickness }) => {
+                        // As heavy as the page drew it. A point is about a third
+                        // more than a pixel at the usual density; the floor is a
+                        // hairline, which is the thinnest a screen has, and the
+                        // ceiling stops a filled bar from becoming a black band
+                        // across the reading.
+                        let heavy = (thickness * 1.33).clamp(1.0, 5.0);
+                        rsx! {
+                            hr {
+                                key: "{i}",
+                                class: "pdf-rule",
+                                style: "--rule-width: {(width * 100.0).clamp(8.0, 100.0):.1}%; --rule-thickness: {heavy:.1}px;",
+                            }
                         }
-                    },
+                    }
                     Some(Block::Image(picture)) => match &picture.path {
                         // The page DREW this rather than placing it: a signature
                         // is a thousand line segments and no image at all. Drawn
