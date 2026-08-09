@@ -8784,7 +8784,7 @@ a.list-item:hover {
    Word documents, which is what makes the placement land: Liberation Sans has
    Helvetica's and Arial's widths, Liberation Serif has Times', Carlito has
    Calibri's. */
-.pdf-pages {
+.pdf-sheets {
 	--pdf-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
 	--pdf-serif: "Liberation Serif", "Times New Roman", Times, serif;
 	--pdf-mono: ui-monospace, "Courier New", monospace;

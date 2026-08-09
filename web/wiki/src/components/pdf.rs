@@ -224,7 +224,10 @@ pub fn set_pdf_layout(layout: PdfLayout) {
 fn PdfPages(pages: Vec<crate::pdf_text::PageLayout>) -> Element {
     use crate::pdf_text::{Family, What};
     rsx! {
-        div { class: "pdf-pages",
+        // `pdf-sheets`, not `pdf-pages`: the page CONTROL has had that name
+        // since it was built, and taking it made this stack `position: fixed`
+        // and eight pixels wide, which took every page on it to nothing.
+        div { class: "pdf-sheets",
             for (n , page) in pages.iter().enumerate() {
                 div {
                     key: "{n}",
