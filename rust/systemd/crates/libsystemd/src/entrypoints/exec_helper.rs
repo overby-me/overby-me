@@ -3859,6 +3859,8 @@ pub fn run_exec_helper() {
     install_protect_clock(&config);
     install_protect_kernel_logs(&config);
     install_protect_kernel_tunables(&config);
+    // PrivateDevices= also blocks raw port I/O (@raw-io) via seccomp.
+    install_private_devices_seccomp(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -6102,6 +6104,29 @@ fn install_protect_kernel_tunables(config: &ExecHelperConfig) {
     }
 }
 
+/// Apply the seccomp half of `PrivateDevices=`: block the raw-I/O syscalls (the
+/// @raw-io set: iopl/ioperm and friends) with EPERM, matching systemd's
+/// apply_private_devices. This complements the private /dev mount (a device a
+/// service cannot see via /dev it also must not reach through port I/O).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_private_devices_seccomp(config: &ExecHelperConfig) {
+    if !config.private_devices {
+        return;
+    }
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    let (mut set, mut visited) = (Vec::new(), Vec::new());
+    resolve_syscall_set(&["@raw-io"], &mut set, &mut visited);
+    if !set.is_empty() && install_seccomp_deny_filter(&set, eperm) {
+        log::debug!(
+            "PrivateDevices: blocked {} raw-io syscalls for {}",
+            set.len(),
+            config.name
+        );
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_private_devices_seccomp(_config: &ExecHelperConfig) {}
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn install_protect_kernel_modules(_config: &ExecHelperConfig) {}
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
