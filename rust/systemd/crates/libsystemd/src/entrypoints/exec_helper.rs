@@ -2781,32 +2781,15 @@ pub fn run_exec_helper() {
     // service cannot change the hostname even within its own namespace even if
     // it holds CAP_SYS_ADMIN, matching systemd. "private" leaves those calls
     // allowed. The filter is installed AFTER our own initial sethostname().
-    if config.protect_hostname && !config.privileged_prefix {
-        let ret = unsafe { libc::unshare(libc::CLONE_NEWUTS) };
-        if ret != 0 {
-            log::warn!(
-                "Failed to create UTS namespace for ProtectHostname=: {}",
-                std::io::Error::last_os_error()
-            );
-            // Non-fatal: continue without UTS isolation
-        } else {
-            if let Some(ref hostname) = config.protect_hostname_name {
-                // Set the hostname in the new UTS namespace
-                let cname = std::ffi::CString::new(hostname.as_str()).unwrap_or_default();
-                let ret = unsafe { libc::sethostname(cname.as_ptr(), hostname.len()) };
-                if ret != 0 {
-                    log::warn!(
-                        "Failed to set hostname '{}' in UTS namespace: {}",
-                        hostname,
-                        std::io::Error::last_os_error()
-                    );
-                }
-            }
-            // ProtectHostname=yes (the default mode) locks the hostname down.
-            if config.protect_hostname_mode.as_deref() != Some("private") {
-                seccomp_block_hostname();
-            }
-        }
+    //
+    // DelegateNamespaces=uts: the UTS namespace must be owned by the service's
+    // user namespace (created below) so the service, root inside it, can call
+    // sethostname(); defer it there. Otherwise set it up here.
+    let defer_uts_ns_for_delegation = config.protect_hostname
+        && !config.privileged_prefix
+        && config.delegate_namespaces.iter().any(|n| n == "uts");
+    if config.protect_hostname && !config.privileged_prefix && !defer_uts_ns_for_delegation {
+        setup_uts_namespace(&config);
     }
 
     // ── PrivateNetwork= — network namespace ───────────────────────────
@@ -2990,6 +2973,10 @@ pub fn run_exec_helper() {
     if defer_net_ns_for_delegation {
         log::trace!("net_ns: setting up (deferred) under delegated user namespace");
         setup_private_network();
+    }
+    if defer_uts_ns_for_delegation {
+        log::trace!("uts_ns: setting up (deferred) under delegated user namespace");
+        setup_uts_namespace(&config);
     }
 
     // ── PrivatePIDs= — PID namespace /proc remount ─────────────────────
@@ -3919,6 +3906,36 @@ fn setup_private_network() {
     } else {
         // Bring up the loopback interface in the new namespace.
         bring_up_loopback();
+    }
+}
+
+/// Create a new UTS namespace for ProtectHostname=, set the requested hostname,
+/// and (for the non-private mode) lock hostname changes down with seccomp.
+fn setup_uts_namespace(config: &ExecHelperConfig) {
+    let ret = unsafe { libc::unshare(libc::CLONE_NEWUTS) };
+    if ret != 0 {
+        log::warn!(
+            "Failed to create UTS namespace for ProtectHostname=: {}",
+            std::io::Error::last_os_error()
+        );
+        // Non-fatal: continue without UTS isolation
+    } else {
+        if let Some(ref hostname) = config.protect_hostname_name {
+            // Set the hostname in the new UTS namespace
+            let cname = std::ffi::CString::new(hostname.as_str()).unwrap_or_default();
+            let ret = unsafe { libc::sethostname(cname.as_ptr(), hostname.len()) };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to set hostname '{}' in UTS namespace: {}",
+                    hostname,
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+        // ProtectHostname=yes (the default mode) locks the hostname down.
+        if config.protect_hostname_mode.as_deref() != Some("private") {
+            seccomp_block_hostname();
+        }
     }
 }
 
