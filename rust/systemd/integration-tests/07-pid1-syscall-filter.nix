@@ -375,12 +375,15 @@
     elif probe == "tunables":
         r = libc.syscall(156); e = ctypes.get_errno()
         out = eperm(r, e) or ("code%d" % e)
-    else:
+    elif probe == "rawio":
         r = libc.syscall(172, 3); e = ctypes.get_errno()
+        out = eperm(r, e) or ("OK" if r == 0 else "code%d" % e)
+    else:
+        r = libc.syscall(272, 0x04000000); e = ctypes.get_errno()
         out = eperm(r, e) or ("OK" if r == 0 else "code%d" % e)
     open(outp, "w").write(out)
     PYEOF
-        for spec in "modules:ProtectKernelModules" "clock:ProtectClock" "logs:ProtectKernelLogs" "tunables:ProtectKernelTunables" "rawio:PrivateDevices"; do
+        for spec in "modules:ProtectKernelModules" "clock:ProtectClock" "logs:ProtectKernelLogs" "tunables:ProtectKernelTunables" "rawio:PrivateDevices" "namespaces:RestrictNamespaces"; do
             probe="''${spec%%:*}"
             directive="''${spec##*:}"
             UP="scfprot-$probe-$RANDOM"

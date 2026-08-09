@@ -3861,6 +3861,8 @@ pub fn run_exec_helper() {
     install_protect_kernel_tunables(&config);
     // PrivateDevices= also blocks raw port I/O (@raw-io) via seccomp.
     install_private_devices_seccomp(&config);
+    // RestrictNamespaces= filters unshare()/clone()/setns() by namespace type.
+    install_restrict_namespaces(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -6125,8 +6127,104 @@ fn install_private_devices_seccomp(config: &ExecHelperConfig) {
     }
 }
 
+/// Namespace name to its CLONE_NEW* flag, matching systemd's namespace_info[].
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const NAMESPACE_FLAGS: &[(&str, u32)] = &[
+    ("cgroup", 0x0200_0000), // CLONE_NEWCGROUP
+    ("ipc", 0x0800_0000),    // CLONE_NEWIPC
+    ("mnt", 0x0002_0000),    // CLONE_NEWNS
+    ("net", 0x4000_0000),    // CLONE_NEWNET
+    ("pid", 0x2000_0000),    // CLONE_NEWPID
+    ("user", 0x1000_0000),   // CLONE_NEWUSER
+    ("uts", 0x0400_0000),    // CLONE_NEWUTS
+    ("time", 0x0000_0080),   // CLONE_NEWTIME
+];
+
+/// Parse a `RestrictNamespaces=` value (as threaded from the config: "no" / "yes"
+/// / "ns..." allow-list / "~ns..." deny-list) into the set of namespace flags to
+/// RETAIN (permit). Returns None when nothing is restricted (retain == all).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn restrict_namespaces_retain(value: &str) -> Option<u32> {
+    let all: u32 = NAMESPACE_FLAGS.iter().fold(0, |a, &(_, f)| a | f);
+    let flags_of = |names: &str| -> u32 {
+        names
+            .split_whitespace()
+            .filter_map(|tok| NAMESPACE_FLAGS.iter().find(|&&(n, _)| n == tok))
+            .fold(0u32, |a, &(_, f)| a | f)
+    };
+    let v = value.trim();
+    let retain = if v.is_empty() || v == "no" || v == "false" || v == "0" {
+        return None; // no restriction
+    } else if v == "yes" || v == "true" || v == "1" {
+        0 // deny all namespaces
+    } else if let Some(rest) = v.strip_prefix('~') {
+        all & !flags_of(rest) // deny-list: retain all but the listed
+    } else {
+        flags_of(v) // allow-list: retain only the listed
+    };
+    if retain == all {
+        None
+    } else {
+        Some(retain)
+    }
+}
+
+/// Apply `RestrictNamespaces=`: block creating or joining the forbidden namespace
+/// types via unshare()/clone()/setns(), and force clone3() to ENOSYS so callers
+/// fall back to the filterable clone(). Blocked calls get EPERM. Mirrors
+/// systemd's seccomp_restrict_namespaces (including its known gap: setns(fd, 0)
+/// is only blocked when no namespace is retained). Thread/fork clones carry no
+/// CLONE_NEW* flag, so they are unaffected.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_restrict_namespaces(config: &ExecHelperConfig) {
+    let Some(retain) = restrict_namespaces_retain(&config.restrict_namespaces) else {
+        return;
+    };
+    let all: u32 = NAMESPACE_FLAGS.iter().fold(0, |a, &(_, f)| a | f);
+    let forbidden = all & !retain;
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+
+    // clone3() takes its flags in a struct we cannot inspect, so disable it and
+    // let callers retry with clone(), which is filtered below.
+    const SYS_CLONE3: i64 = 435;
+    let enosys = 0x0005_0000 | (libc::ENOSYS as u32);
+    install_seccomp_deny_filter(&[SYS_CLONE3], enosys);
+
+    // unshare(flags=arg0@16) and clone(flags=arg0@16, x86_64) requesting a
+    // forbidden namespace; setns(nstype=arg1@24) joining one.
+    let mut rules: Vec<(i64, Vec<(u32, u32)>)> = Vec::new();
+    for &(_, f) in NAMESPACE_FLAGS {
+        if forbidden & f != 0 {
+            rules.push((libc::SYS_unshare, vec![(16, f)]));
+            rules.push((libc::SYS_clone, vec![(16, f)]));
+        }
+    }
+    if retain == 0 {
+        // Nothing retained: block every setns() (a zero mask always matches),
+        // including the setns(fd, 0) "join whatever the fd is" form.
+        rules.push((libc::SYS_setns, vec![(24, 0)]));
+    } else {
+        for &(_, f) in NAMESPACE_FLAGS {
+            if forbidden & f != 0 {
+                rules.push((libc::SYS_setns, vec![(24, f)]));
+            }
+        }
+    }
+    if !rules.is_empty()
+        && install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, eperm))
+    {
+        log::debug!(
+            "RestrictNamespaces: installed namespace filter ({} rules) for {}",
+            rules.len(),
+            config.name
+        );
+    }
+}
+
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn install_private_devices_seccomp(_config: &ExecHelperConfig) {}
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_restrict_namespaces(_config: &ExecHelperConfig) {}
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn install_protect_kernel_modules(_config: &ExecHelperConfig) {}
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
@@ -7258,6 +7356,65 @@ mod tests {
             libc::WEXITSTATUS(status),
             0,
             "RestrictSUIDSGID child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_restrict_namespaces_retain() {
+        let all: u32 = NAMESPACE_FLAGS.iter().fold(0, |a, &(_, f)| a | f);
+        // "no" / empty: no restriction.
+        assert_eq!(restrict_namespaces_retain("no"), None);
+        assert_eq!(restrict_namespaces_retain(""), None);
+        // "yes": deny all -> retain nothing.
+        assert_eq!(restrict_namespaces_retain("yes"), Some(0));
+        // Allow-list retains exactly the named ones.
+        let user = 0x1000_0000u32;
+        let pid = 0x2000_0000u32;
+        assert_eq!(restrict_namespaces_retain("user pid"), Some(user | pid));
+        // Deny-list retains all but the named ones.
+        assert_eq!(restrict_namespaces_retain("~user"), Some(all & !user));
+        // A deny-list naming nothing known is equivalent to no restriction.
+        assert_eq!(restrict_namespaces_retain("~"), None);
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_restrict_namespaces_filter() {
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+        let action = SECCOMP_RET_ERRNO | (libc::EPERM as u32);
+        // Deny-all: block every setns() and unshare() of a namespace flag.
+        let rules: Vec<(i64, Vec<(u32, u32)>)> = vec![
+            (libc::SYS_unshare, vec![(16, 0x0400_0000)]), // CLONE_NEWUTS
+            (libc::SYS_setns, vec![(24, 0)]),             // any setns
+        ];
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            if !install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, action)) {
+                unsafe { libc::_exit(10) };
+            }
+            // unshare(0) requests no namespace, so it is permitted (a broken
+            // filter would over-block it).
+            if unsafe { libc::syscall(libc::SYS_unshare, 0) } != 0 {
+                unsafe { libc::_exit(11) };
+            }
+            // setns(-1, 0) is blocked with EPERM; without the filter it would
+            // fail with EBADF, so EPERM can only come from the filter.
+            let r = unsafe { libc::syscall(libc::SYS_setns, -1, 0) };
+            if r != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "RestrictNamespaces child failed (code {})",
             libc::WEXITSTATUS(status)
         );
     }
