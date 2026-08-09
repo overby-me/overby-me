@@ -8865,11 +8865,16 @@ a.list-item:hover {
 /* A rule the page drew, at the share of the width it spanned. Centred when it
    is short, because a stroke over one column's total sat over that column and
    hanging it on the margin would point at the wrong thing. */
+/* A rule the document DREW is its ink, not this app's furniture, so it takes
+   the reading colour the way the drawn artwork does. It used to take
+   --md-outline, which resolves to the outline-variant grey (#c1c9bf in the
+   light theme): a hairline in a colour meant for the edge of a card, where the
+   page has a black line under a heading. */
 .pdf-rule {
 	width: var(--rule-width, 100%);
 	margin: var(--md-sys-spacing-3) auto;
 	border: none;
-	border-top: var(--rule-thickness, 1px) solid var(--md-outline);
+	border-top: var(--rule-thickness, 2px) solid var(--md-on-surface-variant);
 }
 
 .pdf-drawing {

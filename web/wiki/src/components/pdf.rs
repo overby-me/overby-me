@@ -591,14 +591,19 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         // above it is twice that, and one at double is three
                         // times.
                         //
-                        // In proportion: an ordinary rule is a hairline, and one
-                        // the document drew four times as heavy is four times as
-                        // heavy here. Capped, because a reflow has no scale of
-                        // its own and a rule is a separator before it is a
-                        // measurement.
+                        // In proportion, from a floor of two: an ordinary rule in
+                        // the document is an ordinary rule here, and one it drew
+                        // four times as heavy is four times as heavy here. The
+                        // floor is what a line on a screen has to be to read as
+                        // one -- to scale these would be sub-pixel, since the
+                        // rules on the annual report are half a point on a page
+                        // whose text is nine, and a hairline in a reflow that
+                        // sets that text at sixteen pixels is not the same line.
+                        // Capped, because a reflow has no scale of its own.
+                        const ORDINARY: f64 = 2.0;
                         let heavy = match ordinary_rule > 0.0 {
-                            true => (thickness / ordinary_rule).clamp(1.0, 6.0),
-                            false => 1.0,
+                            true => (thickness / ordinary_rule * ORDINARY).clamp(ORDINARY, 8.0),
+                            false => ORDINARY,
                         };
                         rsx! {
                             hr {
