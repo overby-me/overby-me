@@ -13,8 +13,10 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
 
+pub mod anemone;
 pub mod cloudlife;
 pub mod coral;
+pub mod critical;
 pub mod cwaves;
 pub mod decayscreen;
 pub mod deco;
@@ -32,6 +34,7 @@ pub mod kaleidescope;
 pub mod laser;
 pub mod lcdscrub;
 pub mod lissie;
+pub mod metaballs;
 pub mod moire;
 pub mod moire2;
 pub mod mountain;
@@ -59,8 +62,10 @@ pub mod xspirograph;
 /// the main module. See [`crate::all`].
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
+    &anemone::SAVER,
     &cloudlife::SAVER,
     &coral::SAVER,
+    &critical::SAVER,
     &cwaves::SAVER,
     &deco::SAVER,
     &decayscreen::SAVER,
@@ -79,6 +84,7 @@ pub static ALL: &[&Saver] = &[
     &lcdscrub::SAVER,
     &lissie::SAVER,
     &moire::SAVER,
+    &metaballs::SAVER,
     &moire2::SAVER,
     &mountain::SAVER,
     &munch::SAVER,

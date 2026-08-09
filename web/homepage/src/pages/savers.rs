@@ -76,6 +76,12 @@ macro_rules! saver {
 }
 
 saver!(
+    "anemone",
+    anemone_body,
+    anemone_start,
+    xscreensaver::hacks2d::anemone::start
+);
+saver!(
     "cloudlife",
     cloudlife_body,
     cloudlife_start,
@@ -86,6 +92,12 @@ saver!(
     coral_body,
     coral_start,
     xscreensaver::hacks2d::coral::start
+);
+saver!(
+    "critical",
+    critical_body,
+    critical_start,
+    xscreensaver::hacks2d::critical::start
 );
 saver!(
     "cwaves",
@@ -194,6 +206,12 @@ saver!(
     moire_body,
     moire_start,
     xscreensaver::hacks2d::moire::start
+);
+saver!(
+    "metaballs",
+    metaballs_body,
+    metaballs_start,
+    xscreensaver::hacks2d::metaballs::start
 );
 saver!(
     "moire2",
@@ -309,6 +327,11 @@ saver!(
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
     Entry {
+        slug: "anemone",
+        label: "Anemone",
+        start: anemone_start,
+    },
+    Entry {
         slug: "cloudlife",
         label: "Cloud Life",
         start: cloudlife_start,
@@ -317,6 +340,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "coral",
         label: "Coral",
         start: coral_start,
+    },
+    Entry {
+        slug: "critical",
+        label: "Critical",
+        start: critical_start,
     },
     Entry {
         slug: "cwaves",
@@ -407,6 +435,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "moire",
         label: "Moiré",
         start: moire_start,
+    },
+    Entry {
+        slug: "metaballs",
+        label: "Meta Balls",
+        start: metaballs_start,
     },
     Entry {
         slug: "moire2",
