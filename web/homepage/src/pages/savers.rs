@@ -76,6 +76,12 @@ macro_rules! saver {
 }
 
 saver!(
+    "coral",
+    coral_body,
+    coral_start,
+    xscreensaver::hacks2d::coral::start
+);
+saver!(
     "decayscreen",
     decayscreen_body,
     decayscreen_start,
@@ -86,6 +92,12 @@ saver!(
     greynetic_body,
     greynetic_start,
     xscreensaver::hacks2d::greynetic::start
+);
+saver!(
+    "moire",
+    moire_body,
+    moire_start,
+    xscreensaver::hacks2d::moire::start
 );
 saver!(
     "munch",
@@ -117,6 +129,11 @@ saver!(
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
     Entry {
+        slug: "coral",
+        label: "Coral",
+        start: coral_start,
+    },
+    Entry {
         slug: "decayscreen",
         label: "Decay Screen",
         start: decayscreen_start,
@@ -125,6 +142,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
+    },
+    Entry {
+        slug: "moire",
+        label: "Moiré",
+        start: moire_start,
     },
     Entry {
         slug: "munch",
