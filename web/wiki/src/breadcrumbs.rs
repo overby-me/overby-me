@@ -147,6 +147,9 @@ pub(crate) fn target_element(ev: &web_sys::Event) -> Option<web_sys::Element> {
     ev.target()?.dyn_into::<web_sys::Element>().ok()
 }
 
+/// Bubble-phase, for the window's own error hooks: only [`crate::logging`] wants
+/// those, and only in a build that ships them.
+#[cfg(feature = "remote-logging")]
 pub(crate) fn add_listener<F: FnMut(&web_sys::Event) + 'static>(
     target: &web_sys::EventTarget,
     event: &str,
@@ -158,23 +161,44 @@ pub(crate) fn add_listener<F: FnMut(&web_sys::Event) + 'static>(
     closure.forget();
 }
 
+/// The same, but in the CAPTURE phase: down the tree to the target rather than
+/// up from it.
+///
+/// This is what a trail needs. A press that panics traps the wasm inside the
+/// element's OWN handler, and a listener waiting on the way back up never runs
+/// -- so the one click a crash report most wants to name was the one click never
+/// recorded. Going down, it is already written before the handler runs.
+fn add_capturing<F: FnMut(&web_sys::Event) + 'static>(
+    target: &web_sys::EventTarget,
+    event: &str,
+    mut f: F,
+) {
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| f(&ev));
+    let _ = target.add_event_listener_with_callback_and_bool(
+        event,
+        closure.as_ref().unchecked_ref(),
+        true,
+    );
+    closure.forget();
+}
+
 /// Record clicks, field edits and form submissions as breadcrumbs (no values).
 pub fn watch() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
     let et: &web_sys::EventTarget = doc.as_ref();
-    add_listener(et, "click", |ev| {
+    add_capturing(et, "click", |ev| {
         if let Some(el) = target_element(ev) {
             record(format!("click {}", describe(&el)));
         }
     });
-    add_listener(et, "change", |ev| {
+    add_capturing(et, "change", |ev| {
         if let Some(el) = target_element(ev) {
             record(format!("change {}", describe(&el)));
         }
     });
-    add_listener(et, "submit", |ev| {
+    add_capturing(et, "submit", |ev| {
         if let Some(el) = target_element(ev) {
             record(format!("submit {}", describe(&el)));
         }
