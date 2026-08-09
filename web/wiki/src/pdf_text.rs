@@ -79,6 +79,10 @@ pub enum Block {
         /// when the page had no grid to measure, and then the columns are as
         /// wide as what is in them.
         widths: Vec<f64>,
+        /// How each column was set, from the geometry of the page. Empty for the
+        /// same reason, and then a cell that holds a figure is hung right on its
+        /// own account.
+        aligns: Vec<Align>,
     },
     /// A flat line the page drew across itself: the rule over a total, the one
     /// under a table's headings, the one that separates two sections.
@@ -2178,6 +2182,47 @@ fn page_grid(lines: &[Line]) -> Vec<(f64, f64)> {
     cols
 }
 
+/// How each column of the grid was set.
+///
+/// From the geometry, not from what is in the cells. A column of figures is
+/// flush right: its cells end in the same place and begin wherever their digits
+/// happen to start, and that is as true of the "DKK" and the "2024" over the
+/// column as of the amounts under them. Reading it off the cell instead -- this
+/// one looks like a number, so hang it right -- put the headings of every
+/// statement in the annual report on the wrong side of their own columns.
+fn column_alignments(lines: &[Line], grid: &[(f64, f64)]) -> Vec<Align> {
+    let spread = |v: &[f64]| match v.len() >= 2 {
+        true => Some(
+            v.iter().copied().fold(f64::MIN, f64::max) - v.iter().copied().fold(f64::MAX, f64::min),
+        ),
+        false => None,
+    };
+    (0..grid.len())
+        .map(|i| {
+            let mut lefts: Vec<f64> = Vec::new();
+            let mut rights: Vec<f64> = Vec::new();
+            for line in lines {
+                let Some(columns) = stands_in_grid(line, grid) else {
+                    continue;
+                };
+                let Some(at) = columns.iter().position(|c| *c == i) else {
+                    continue;
+                };
+                if let Some(cell) = line.cells.get(at) {
+                    lefts.push(cell.left);
+                    rights.push(cell.right);
+                }
+            }
+            match (spread(&lefts), spread(&rights)) {
+                // Ending together while beginning apart, and ending together
+                // within a point or two: that is a column set against its right.
+                (Some(l), Some(r)) if r <= 2.0 && r < l => Align::Right,
+                _ => Align::Left,
+            }
+        })
+        .collect()
+}
+
 /// Which column a cell stands in, if it stands in one at all.
 ///
 /// The last column it reaches, and it has to stop before the next one begins.
@@ -2289,9 +2334,10 @@ fn grid_ranges(lines: &[Line], grid: &[(f64, f64)]) -> Vec<(usize, usize)> {
     out
 }
 
-/// Where a table starts, where it ends, and the columns it stands in. Empty
-/// columns mean the page had no grid and the table found its own.
-type FoundTable = (usize, usize, Vec<(f64, f64)>);
+/// Where a table starts, where it ends, the columns it stands in and how each of
+/// them was set. Empty columns mean the page had no grid and the table found its
+/// own.
+type FoundTable = (usize, usize, Vec<(f64, f64)>, Vec<Align>);
 
 /// Every table on a page, with the grid it stands in.
 ///
@@ -2313,13 +2359,16 @@ fn tables_on_each_page(lines: &[Line]) -> Vec<FoundTable> {
             true => out.extend(
                 table_ranges(here)
                     .into_iter()
-                    .map(|(s, e)| (s + at, e + at, Vec::new())),
+                    .map(|(s, e)| (s + at, e + at, Vec::new(), Vec::new())),
             ),
-            false => out.extend(
-                grid_ranges(here, &grid)
-                    .into_iter()
-                    .map(|(s, e)| (s + at, e + at, grid.clone())),
-            ),
+            false => {
+                let aligns = column_alignments(here, &grid);
+                out.extend(
+                    grid_ranges(here, &grid)
+                        .into_iter()
+                        .map(|(s, e)| (s + at, e + at, grid.clone(), aligns.clone())),
+                );
+            }
         }
         at = end;
     }
@@ -3938,7 +3987,7 @@ fn blocks_from(
         if at < skip_to {
             continue;
         }
-        if let Some((_, end, grid)) = tables.iter().find(|(start, ..)| *start == at) {
+        if let Some((_, end, grid, aligns)) = tables.iter().find(|(start, ..)| *start == at) {
             flush(
                 &mut para,
                 para_size,
@@ -3954,6 +4003,7 @@ fn blocks_from(
                     false => rows_in_grid(&lines_ref[at..*end], grid),
                 },
                 widths: column_widths(grid),
+                aligns: aligns.clone(),
             });
             skip_to = *end;
             prev = None;
@@ -6757,6 +6807,15 @@ mod tests {
         assert!(
             (widths.iter().sum::<f64>() - 1.0).abs() < 0.001,
             "the columns fill the width: {widths:?}"
+        );
+
+        // And which side each column is set on comes from the column, so the
+        // "DKK" over a column of amounts hangs where the amounts hang.
+        let aligns = super::column_alignments(&lines, &grid);
+        assert_eq!(
+            aligns,
+            vec![Align::Left, Align::Right, Align::Right],
+            "labels left, figures right"
         );
     }
 

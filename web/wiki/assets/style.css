@@ -8858,6 +8858,11 @@ a.list-item:hover {
 	   is read as one thing and broken across two lines by nobody. */
 	overflow-wrap: anywhere;
 }
+/* A column the page set against its right, holding something other than a
+   figure: the "DKK" and the year over a column of amounts. */
+.pdf-table .pdf-cell-right {
+	text-align: right;
+}
 /* Figures read down their last digit, which is the whole reason a statement
    sets them in a column. */
 .pdf-table .pdf-cell-number {

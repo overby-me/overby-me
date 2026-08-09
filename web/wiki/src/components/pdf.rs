@@ -545,7 +545,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     // name over its role, a figure under its year. Scrolls
                     // inside itself rather than pushing the reading column
                     // wider, which is the one thing a phone cannot give it.
-                    Some(Block::Table { rows, widths }) => rsx! {
+                    Some(Block::Table { rows, widths, aligns }) => rsx! {
                         div { key: "{i}", class: "pdf-table-scroll",
                             table {
                                 // The page's own column widths, so the tables a
@@ -567,10 +567,33 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                     for (r , row) in rows.iter().enumerate() {
                                         tr { key: "{r}",
                                             for (c , cell) in row.iter().enumerate() {
-                                                td {
-                                                    key: "{c}",
-                                                    class: if cell_is_number(cell) { "pdf-cell-number" } else { "" },
-                                                    Spans { spans: cell.clone() }
+                                                {
+                                                    // The COLUMN decides which
+                                                    // side a cell hangs on, not
+                                                    // the cell: "DKK" and "2024"
+                                                    // are set against the right
+                                                    // of a column of figures the
+                                                    // way the figures are, and
+                                                    // asking each cell whether
+                                                    // it looked like a number
+                                                    // left every heading on the
+                                                    // wrong side of its own
+                                                    // column.
+                                                    let figure = cell_is_number(cell);
+                                                    let right = match aligns.get(c) {
+                                                        Some(align) => *align == Align::Right,
+                                                        None => figure,
+                                                    };
+                                                    let class = match (right, figure) {
+                                                        (true, true) => "pdf-cell-number",
+                                                        (true, false) => "pdf-cell-right",
+                                                        _ => "",
+                                                    };
+                                                    rsx! {
+                                                        td { key: "{c}", class: "{class}",
+                                                            Spans { spans: cell.clone() }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
