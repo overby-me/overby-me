@@ -40,6 +40,14 @@ const STATUS_ID: &str = "wiki-crash-status";
 /// on the far side (the backend's own cap is 4000 chars, applied after).
 const MAX_REPORT_CHARS: usize = 2000;
 
+/// How much of the reader's trail goes with it. What broke is only half a
+/// report; the other half is what they were doing when it did, and a stack that
+/// names a dependency (`dioxus-core/src/diff/...`) is exactly the case where the
+/// trail is the only thing that says which of OUR views was on screen. Budgeted
+/// separately from the stack so neither crowds the other out, and both together
+/// stay under the backend's cap.
+const MAX_TRAIL_CHARS: usize = 700;
+
 thread_local! {
     /// What panicked, captured in the hook so the report can carry it. Read when
     /// building the overlay, which happens in the same call.
@@ -122,6 +130,12 @@ fn report_fetch_js(message: &str) -> String {
     // comes back 414. Cutting the TAIL is right: the panic's own message leads,
     // and the frames after it are ordered innermost first.
     let message: String = message.chars().take(MAX_REPORT_CHARS).collect();
+    // The last steps before it broke, newest last, under their own budget.
+    let trail = crate::breadcrumbs::tail(MAX_TRAIL_CHARS);
+    let message = match trail.is_empty() {
+        true => message,
+        false => format!("{message}\n\n--- what led here ---\n{trail}"),
+    };
 
     let url = format!(
         "{}/feedback?kind=crash&message={}&path={}&app={}&commit={}&ua={}",

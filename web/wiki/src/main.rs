@@ -6,6 +6,9 @@ mod errors;
 mod export;
 // cynic query-result structs must select fields the code doesn't read (e.g. an
 // insert's returned `id`, a delete's `affected_rows`), which reads as dead code.
+/// The trail of what the reader did, kept in every build: a crash report says
+/// what broke, and this says what they were doing when it did.
+mod breadcrumbs;
 #[allow(dead_code)]
 mod graphql;
 mod i18n;
@@ -96,6 +99,9 @@ fn main() {
     console_error_panic_hook::set_once();
     // With `remote-logging`, ship warn/error (plus breadcrumbs + panics) to
     // Logtail and mirror to the console; otherwise just log to the console.
+    // Whether or not anyone is collecting logs, the trail is collected: it is
+    // what a crash report needs to be worth reading.
+    breadcrumbs::watch();
     #[cfg(feature = "remote-logging")]
     logging::init();
     #[cfg(not(feature = "remote-logging"))]

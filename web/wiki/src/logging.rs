@@ -15,7 +15,6 @@
 //! ```
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use serde_json::{json, Value};
@@ -26,14 +25,12 @@ use wasm_bindgen::prelude::*;
 /// actual ingest token lives on the backend, which does the Better Stack call
 /// (see `backend/src/logs.rs`), so no secret is baked into the wasm bundle.
 const SOURCE_TOKEN: Option<&str> = option_env!("BETTERSTACK_SOURCE_TOKEN");
-const MAX_BREADCRUMBS: usize = 50;
 const FLUSH_INTERVAL_MS: u32 = 5000;
 
 thread_local! {
     /// Log entries waiting to be shipped on the next flush.
     static PENDING: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
     /// The rolling trail of recent DOM interactions.
-    static BREADCRUMBS: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
     /// A random id identifying this browser tab/session.
     static SESSION_ID: RefCell<String> = const { RefCell::new(String::new()) };
     /// Which build the service worker serving this page came from, once it has
@@ -82,20 +79,6 @@ fn current_user() -> (Option<String>, Option<String>) {
         Some((id, name))
     };
     read().unwrap_or((None, None))
-}
-
-fn push_breadcrumb(text: String) {
-    BREADCRUMBS.with(|b| {
-        let mut b = b.borrow_mut();
-        if b.len() >= MAX_BREADCRUMBS {
-            b.pop_front();
-        }
-        b.push_back(text);
-    });
-}
-
-fn breadcrumbs() -> Vec<String> {
-    BREADCRUMBS.with(|b| b.borrow().iter().cloned().collect())
 }
 
 /// The JS call stack at the point of logging (from a throwaway `Error`), so an
@@ -197,7 +180,7 @@ fn make_entry_with_stack(level: &str, message: String, stack: Option<String>) ->
         "stack": stack_frames(stack),
         "user_agent": web_sys::window()
             .and_then(|w| w.navigator().user_agent().ok()),
-        "breadcrumbs": breadcrumbs(),
+        "breadcrumbs": crate::breadcrumbs::trail(),
         // The state of the thing it happened IN. Every one of these has been
         // the answer to a real report: the window's size decides where a page
         // control thinks the reader is, whether a service worker is serving the
@@ -420,105 +403,6 @@ impl Log for RemoteLogger {
     fn flush(&self) {}
 }
 
-/// A compact description of an element for a breadcrumb: `tag#id.class "label"`,
-/// resolved to the nearest interactive ancestor. Never includes input values.
-fn describe(el: &web_sys::Element) -> String {
-    let target = el
-        .closest("button, a, input, textarea, select, [role=button], .btn, .btn-icon, .list-item, .folder-item")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| el.clone());
-    let tag = target.tag_name().to_lowercase();
-    let id = target.id();
-    let id_part = if id.is_empty() {
-        String::new()
-    } else {
-        format!("#{id}")
-    };
-    let class = target.get_attribute("class").unwrap_or_default();
-    let class_part = class
-        .split_whitespace()
-        .next()
-        .map(|c| format!(".{c}"))
-        .unwrap_or_default();
-    // Field inputs: identity only, never the value; hide password fields.
-    if matches!(tag.as_str(), "input" | "textarea" | "select") {
-        if target.get_attribute("type").as_deref() == Some("password") {
-            return format!("{tag}{id_part} [password]");
-        }
-        let name = target
-            .get_attribute("name")
-            .map(|n| format!("[name={n}]"))
-            .unwrap_or_default();
-        return format!("{tag}{id_part}{name}");
-    }
-    let label = target
-        .get_attribute("aria-label")
-        .or_else(|| target.get_attribute("title"))
-        .or_else(|| {
-            let t = target.text_content().unwrap_or_default();
-            let t = t.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.chars().take(40).collect())
-            }
-        })
-        .map(|l| format!(" \"{}\"", l.replace('"', "'")))
-        .unwrap_or_default();
-    // For a link, also record where it points (the destination is the relevant
-    // context for a click that navigates). A same-origin href is trimmed to its
-    // path so the trail reads as in-app routes.
-    let href = if tag == "a" {
-        target
-            .get_attribute("href")
-            .filter(|h| !h.is_empty())
-            .map(|h| format!(" -> {h}"))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    format!("{tag}{id_part}{class_part}{label}{href}")
-}
-
-fn target_element(ev: &web_sys::Event) -> Option<web_sys::Element> {
-    ev.target()?.dyn_into::<web_sys::Element>().ok()
-}
-
-fn add_listener<F: FnMut(&web_sys::Event) + 'static>(
-    target: &web_sys::EventTarget,
-    event: &str,
-    mut f: F,
-) {
-    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| f(&ev));
-    let _ = target.add_event_listener_with_callback(event, closure.as_ref().unchecked_ref());
-    // Leak the closure so the listener lives for the app's lifetime.
-    closure.forget();
-}
-
-/// Record clicks, field edits and form submissions as breadcrumbs (no values).
-fn setup_breadcrumbs() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let et: &web_sys::EventTarget = doc.as_ref();
-    add_listener(et, "click", |ev| {
-        if let Some(el) = target_element(ev) {
-            push_breadcrumb(format!("click {}", describe(&el)));
-        }
-    });
-    add_listener(et, "change", |ev| {
-        if let Some(el) = target_element(ev) {
-            push_breadcrumb(format!("change {}", describe(&el)));
-        }
-    });
-    add_listener(et, "submit", |ev| {
-        if let Some(el) = target_element(ev) {
-            push_breadcrumb(format!("submit {}", describe(&el)));
-        }
-    });
-}
-
 /// Ship any queued entries via a batched HTTP POST to the backend proxy (browser
 /// fetch via reqwest). No auth header: the request is same-origin-friendly and
 /// the backend holds the ingest token.
@@ -605,7 +489,7 @@ fn setup_global_error_handlers() {
         return;
     };
     let et: &web_sys::EventTarget = win.as_ref();
-    add_listener(et, "error", |ev| {
+    crate::breadcrumbs::add_listener(et, "error", |ev| {
         // Nothing after a panic is news: the instance is trapped and every call
         // into it throws. The panic itself was already shipped.
         if panicked() {
@@ -652,7 +536,7 @@ fn setup_global_error_handlers() {
             ));
         }
     });
-    add_listener(et, "unhandledrejection", |ev| {
+    crate::breadcrumbs::add_listener(et, "unhandledrejection", |ev| {
         if panicked() {
             return;
         }
@@ -688,30 +572,6 @@ fn queue(entry: Value) {
     PENDING.with(|p| p.borrow_mut().push(entry));
 }
 
-thread_local! {
-    /// The last path recorded as a navigation breadcrumb, to dedupe the router's
-    /// initial + repeated route effects.
-    static LAST_NAV: RefCell<String> = const { RefCell::new(String::new()) };
-}
-
-/// Record a client-side navigation as a breadcrumb. Called by the router on each
-/// route change (see `layout::Layout`), so an error's trail shows the pages the
-/// user moved through, not just the URL they were on when it broke.
-pub fn record_navigation(path: &str) {
-    let changed = LAST_NAV.with(|l| {
-        let mut l = l.borrow_mut();
-        if *l == path {
-            false
-        } else {
-            *l = path.to_string();
-            true
-        }
-    });
-    if changed {
-        push_breadcrumb(format!("navigate {path}"));
-    }
-}
-
 /// Install the remote logger, breadcrumb listeners, panic hook and flush loop.
 pub fn init() {
     let sid = format!("{:x}", (js_sys::Math::random() * 1e18) as u64);
@@ -720,7 +580,6 @@ pub fn init() {
     let _ = log::set_boxed_logger(Box::new(RemoteLogger));
     log::set_max_level(LevelFilter::Info);
 
-    setup_breadcrumbs();
     setup_panic_hook();
     setup_global_error_handlers();
     start_flush_loop();
