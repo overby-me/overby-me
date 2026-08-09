@@ -1201,6 +1201,7 @@ fn start_service_with_filedescriptors(
             crate::units::RestrictNamespaces::Allow(ref v) => v.join(" "),
             crate::units::RestrictNamespaces::Deny(ref v) => format!("~{}", v.join(" ")),
         },
+        delegate_namespaces: conf.exec_config.delegate_namespaces.clone(),
         system_call_architectures: conf.exec_config.system_call_architectures.clone(),
         restrict_address_families: conf.exec_config.restrict_address_families.clone(),
         system_call_filter: conf.exec_config.system_call_filter.clone(),

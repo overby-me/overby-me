@@ -3251,6 +3251,10 @@ pub struct ExecConfig {
     /// mnt, pid, user, uts). A `~` prefix inverts the list. Parsed and stored;
     /// no runtime seccomp enforcement yet. See systemd.exec(5).
     pub restrict_namespaces: RestrictNamespaces,
+    /// DelegateNamespaces= names namespace types the service may manage itself
+    /// (mnt/net/pid/uts/ipc/cgroup), run inside an owned user namespace. Empty =
+    /// none. See systemd.exec(5).
+    pub delegate_namespaces: Vec<String>,
     /// RestrictFileSystems= — a list of Linux file system type names (e.g.
     /// `ext4`, `tmpfs`, `proc`, `btrfs`) for BPF LSM-based file system type
     /// restriction. Entries prefixed with `~` form a deny-list; without the

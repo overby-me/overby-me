@@ -726,6 +726,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             protect_system: parsed.protect_system,
             memory_thp: parsed.memory_thp,
             restrict_namespaces: parsed.restrict_namespaces,
+            delegate_namespaces: parsed.delegate_namespaces,
             restrict_realtime: parsed.restrict_realtime,
             restrict_address_families: parsed.restrict_address_families,
             restrict_file_systems: parsed.restrict_file_systems,

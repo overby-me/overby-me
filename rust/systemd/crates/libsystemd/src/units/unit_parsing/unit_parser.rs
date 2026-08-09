@@ -1465,6 +1465,7 @@ pub fn parse_exec_section(
     let protect_system = section.remove("PROTECTSYSTEM");
     let memory_thp = section.remove("MEMORYTHP");
     let restrict_namespaces = section.remove("RESTRICTNAMESPACES");
+    let delegate_namespaces = section.remove("DELEGATENAMESPACES");
     let restrict_realtime = section.remove("RESTRICTREALTIME");
     let restrict_address_families = section.remove("RESTRICTADDRESSFAMILIES");
     let restrict_file_systems = section.remove("RESTRICTFILESYSTEMS");
@@ -2593,6 +2594,20 @@ pub fn parse_exec_section(
                 }
             }
             None => super::RestrictNamespaces::default(),
+        },
+        delegate_namespaces: match delegate_namespaces {
+            Some(vec) => {
+                let raw = vec.last().map(|(_, v)| v.trim()).unwrap_or("");
+                match raw.to_lowercase().as_str() {
+                    "" | "no" | "false" | "0" => Vec::new(),
+                    "yes" | "true" | "1" => ["mnt", "net", "pid", "uts", "ipc", "cgroup"]
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
+                    _ => raw.split_whitespace().map(str::to_lowercase).collect(),
+                }
+            }
+            None => Vec::new(),
         },
         restrict_realtime,
         restrict_address_families: match restrict_address_families {

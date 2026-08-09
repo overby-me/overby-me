@@ -869,6 +869,9 @@ pub struct ExecHelperConfig {
     /// See systemd.exec(5).
     #[serde(default)]
     pub restrict_namespaces: String,
+    /// DelegateNamespaces= names namespace types (mnt/net/pid/uts/ipc/cgroup) the
+    /// service may manage itself, run inside an owned user namespace.
+    pub delegate_namespaces: Vec<String>,
 
     /// SystemCallArchitectures= — allowed syscall architectures.
     /// See systemd.exec(5).

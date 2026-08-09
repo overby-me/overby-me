@@ -3541,6 +3541,7 @@ fn create_transient_unit(
         protect_system: crate::units::ProtectSystem::No,
         memory_thp,
         restrict_namespaces: crate::units::RestrictNamespaces::No,
+        delegate_namespaces: Vec::new(),
         restrict_realtime: false,
         restrict_address_families: vec![],
         restrict_file_systems: vec![],
@@ -4096,6 +4097,7 @@ fn create_transient_unit(
                 | "PrivateUsers"
                 | "PrivateUsersEx"
                 | "PrivatePIDs"
+                | "DelegateNamespaces"
                 | "ProtectSystem"
                 | "ProtectHome" => {
                     // These sandbox properties are parsed but may not all be
@@ -4129,6 +4131,18 @@ fn create_transient_unit(
                         "PrivatePIDs" => {
                             service_conf.exec_config.private_pids =
                                 Some(matches!(value, "yes" | "true" | "1"));
+                        }
+                        "DelegateNamespaces" => {
+                            service_conf.exec_config.delegate_namespaces = match value {
+                                "" | "no" | "false" | "0" => Vec::new(),
+                                "yes" | "true" | "1" => {
+                                    ["mnt", "net", "pid", "uts", "ipc", "cgroup"]
+                                        .iter()
+                                        .map(|s| (*s).to_owned())
+                                        .collect()
+                                }
+                                v => v.split_whitespace().map(str::to_lowercase).collect(),
+                            };
                         }
                         "ProtectSystem" => {
                             service_conf.exec_config.protect_system = match value {

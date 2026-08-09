@@ -3221,6 +3221,10 @@ pub struct ParsedExecSection {
     /// mnt, pid, user, uts). A `~` prefix inverts the list. Parsed and stored;
     /// no runtime seccomp enforcement yet. See systemd.exec(5).
     pub restrict_namespaces: RestrictNamespaces,
+    /// DelegateNamespaces= names namespace types (mnt/net/pid/uts/ipc/cgroup) the
+    /// service is allowed to manage itself, run inside an owned user namespace.
+    /// Empty = none. See systemd.exec(5).
+    pub delegate_namespaces: Vec<String>,
     /// RestrictRealtime= — if true, any attempts to enable realtime scheduling
     /// in a process of the unit are refused via seccomp. Defaults to false.
     /// Parsed and stored; no runtime seccomp enforcement yet. See systemd.exec(5).
