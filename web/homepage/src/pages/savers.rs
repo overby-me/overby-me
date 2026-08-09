@@ -106,6 +106,18 @@ saver!(
     xscreensaver::hacks2d::grav::start
 );
 saver!(
+    "halo",
+    halo_body,
+    halo_start,
+    xscreensaver::hacks2d::halo::start
+);
+saver!(
+    "kaleidescope",
+    kaleidescope_body,
+    kaleidescope_start,
+    xscreensaver::hacks2d::kaleidescope::start
+);
+saver!(
     "moire",
     moire_body,
     moire_start,
@@ -170,6 +182,16 @@ pub static SAVERS: &[Entry] = &[
         slug: "grav",
         label: "Grav",
         start: grav_start,
+    },
+    Entry {
+        slug: "halo",
+        label: "Halo",
+        start: halo_start,
+    },
+    Entry {
+        slug: "kaleidescope",
+        label: "Kaleidescope",
+        start: kaleidescope_start,
     },
     Entry {
         slug: "moire",

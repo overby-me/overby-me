@@ -18,6 +18,8 @@ pub mod decayscreen;
 pub mod deco;
 pub mod grav;
 pub mod greynetic;
+pub mod halo;
+pub mod kaleidescope;
 pub mod moire;
 pub mod munch;
 pub mod pedal;
@@ -37,6 +39,8 @@ pub static ALL: &[&Saver] = &[
     &decayscreen::SAVER,
     &greynetic::SAVER,
     &grav::SAVER,
+    &halo::SAVER,
+    &kaleidescope::SAVER,
     &moire::SAVER,
     &munch::SAVER,
     &pedal::SAVER,

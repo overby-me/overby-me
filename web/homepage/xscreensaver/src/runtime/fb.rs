@@ -76,6 +76,26 @@ pub enum GXFunc {
 }
 
 impl GXFunc {
+    /// The same operation on a single bit, for depth-1 drawables. There is no
+    /// alpha to preserve, so the result is just 0 or 1.
+    #[inline]
+    fn apply_bit(self, dst: Pixel, src: Pixel) -> Pixel {
+        let (d, s) = (dst & 1, src & 1);
+        let v = match self {
+            GXFunc::Copy => s,
+            GXFunc::Xor => d ^ s,
+            GXFunc::And => d & s,
+            GXFunc::Or => d | s,
+            GXFunc::AndInverted => (!d) & s,
+            GXFunc::OrInverted => (!d) | s,
+            GXFunc::Invert => !d,
+            GXFunc::Set => 1,
+            GXFunc::Clear => 0,
+            GXFunc::Nop => d,
+        };
+        v & 1
+    }
+
     #[inline]
     fn apply(self, dst: Pixel, src: Pixel) -> Pixel {
         let (d, s) = (dst & RGB_MASK, src & RGB_MASK);
@@ -184,11 +204,17 @@ impl Gc {
 }
 
 /// A drawable: window, pixmap or image.
+///
+/// Almost always full colour, but X also has depth-1 drawables (bitmaps), and
+/// ten of the hacks build their picture in one before blitting it through
+/// [`Fb::copy_plane`]. A depth-1 `Fb` stores 0 or 1 per pixel rather than a
+/// colour, and its raster operations work on that single bit.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Fb {
     width: i32,
     height: i32,
     px: Vec<Pixel>,
+    depth: u8,
 }
 
 impl Fb {
@@ -199,6 +225,46 @@ impl Fb {
             width,
             height,
             px: vec![ALPHA; (width * height) as usize],
+            depth: 32,
+        }
+    }
+
+    /// `XCreatePixmap` with a depth of 1: a bitmap, all bits clear.
+    pub fn new_bitmap(width: i32, height: i32) -> Self {
+        let width = width.max(1);
+        let height = height.max(1);
+        Self {
+            width,
+            height,
+            px: vec![0; (width * height) as usize],
+            depth: 1,
+        }
+    }
+
+    /// 1 for a bitmap, 32 for a full-colour drawable.
+    #[inline]
+    pub fn depth(&self) -> u8 {
+        self.depth
+    }
+
+    /// Coerce a value into what this drawable stores: a single bit for a
+    /// bitmap, an opaque colour otherwise.
+    #[inline]
+    fn store(&self, v: Pixel) -> Pixel {
+        if self.depth == 1 {
+            v & 1
+        } else {
+            (v & RGB_MASK) | ALPHA
+        }
+    }
+
+    /// Apply a raster operation in this drawable's depth.
+    #[inline]
+    fn combine(&self, dst: Pixel, src: Pixel, func: GXFunc) -> Pixel {
+        if self.depth == 1 {
+            func.apply_bit(dst, src)
+        } else {
+            func.apply(dst, src)
         }
     }
 
@@ -228,7 +294,8 @@ impl Fb {
         &mut self.px
     }
 
-    /// The buffer as RGBA bytes, ready for `putImageData`.
+    /// The buffer as RGBA bytes, ready for `putImageData`. Only meaningful for
+    /// a full-colour drawable; a bitmap's bytes are bits, not pixels.
     pub fn as_bytes(&self) -> &[u8] {
         // SAFETY: `Pixel` is `u32`, which has no padding and no invalid bit
         // patterns, so any `[u32]` is a valid `[u8]` four times as long. The
@@ -245,8 +312,9 @@ impl Fb {
         }
         self.width = width;
         self.height = height;
+        let blank = if self.depth == 1 { 0 } else { ALPHA };
         self.px.clear();
-        self.px.resize((width * height) as usize, ALPHA);
+        self.px.resize((width * height) as usize, blank);
     }
 
     #[inline]
@@ -277,7 +345,8 @@ impl Fb {
     #[inline]
     pub fn put_pixel(&mut self, x: i32, y: i32, p: Pixel) {
         if self.in_bounds(x, y) {
-            self.px[(y * self.width + x) as usize] = p | ALPHA;
+            let v = self.store(p);
+            self.px[(y * self.width + x) as usize] = v;
         }
     }
 
@@ -287,7 +356,7 @@ impl Fb {
             return;
         }
         let i = (y * self.width + x) as usize;
-        self.px[i] = gc.function.apply(self.px[i], gc.foreground);
+        self.px[i] = self.combine(self.px[i], gc.foreground, gc.function);
     }
 
     /// A horizontal span, the workhorse for every filled shape.
@@ -314,11 +383,11 @@ impl Fb {
         let row = (y * self.width) as usize;
         let fg = gc.foreground;
         if gc.function == GXFunc::Copy {
-            let fg = (fg & RGB_MASK) | ALPHA;
+            let fg = self.store(fg);
             self.px[row + x0 as usize..=row + x1 as usize].fill(fg);
         } else {
             for i in row + x0 as usize..=row + x1 as usize {
-                self.px[i] = gc.function.apply(self.px[i], fg);
+                self.px[i] = self.combine(self.px[i], fg, gc.function);
             }
         }
     }
@@ -327,7 +396,8 @@ impl Fb {
 
     /// `XClearWindow`: fill with the background colour.
     pub fn clear(&mut self, background: Pixel) {
-        self.px.fill(background | ALPHA);
+        let v = self.store(background);
+        self.px.fill(v);
     }
 
     /// `XClearArea`.
@@ -674,7 +744,7 @@ impl Fb {
                     continue;
                 }
                 let idx = (dy * self.width + dx) as usize;
-                self.px[idx] = gc.function.apply(self.px[idx], p);
+                self.px[idx] = self.combine(self.px[idx], p, gc.function);
             }
         }
     }
@@ -696,6 +766,50 @@ impl Fb {
         }
         let src = self.sub_image(src_x, src_y, w, h);
         self.copy_area(gc, &src, 0, 0, w, h, dst_x, dst_y);
+    }
+
+    /// `XCopyPlane` from a depth-1 bitmap: set bits are drawn in the GC's
+    /// foreground, clear bits in its background.
+    ///
+    /// This is how the hacks that compose a picture as a bitmap get it onto the
+    /// screen, and the only way a depth-1 drawable becomes visible.
+    pub fn copy_plane(
+        &mut self,
+        gc: &Gc,
+        src: &Fb,
+        src_x: i32,
+        src_y: i32,
+        w: i32,
+        h: i32,
+        dst_x: i32,
+        dst_y: i32,
+    ) {
+        if w <= 0 || h <= 0 {
+            return;
+        }
+        for j in 0..h {
+            let (sy, dy) = (src_y + j, dst_y + j);
+            if dy < 0 || dy >= self.height || sy < 0 || sy >= src.height {
+                continue;
+            }
+            for i in 0..w {
+                let (sx, dx) = (src_x + i, dst_x + i);
+                if sx < 0 || sx >= src.width {
+                    continue;
+                }
+                if !self.in_bounds(dx, dy) || Self::clipped_out(gc, dx, dy) {
+                    continue;
+                }
+                let bit = src.px[(sy * src.width + sx) as usize] & 1;
+                let color = if bit != 0 {
+                    gc.foreground
+                } else {
+                    gc.background
+                };
+                let idx = (dy * self.width + dx) as usize;
+                self.px[idx] = self.combine(self.px[idx], color, gc.function);
+            }
+        }
     }
 
     /// `XGetImage`: a copy of a rectangle. Areas outside the drawable come back
@@ -893,6 +1007,50 @@ mod tests {
         // Degenerate sizes are clamped rather than producing an empty buffer.
         fb.resize(0, 0);
         assert_eq!(fb.pixels().len(), 1);
+    }
+
+    #[test]
+    fn a_bitmap_stores_bits_not_colours() {
+        let mut bm = Fb::new_bitmap(8, 8);
+        assert_eq!(bm.depth(), 1);
+        assert!(bm.pixels().iter().all(|p| *p == 0), "should start clear");
+
+        let mut gc = Gc::default();
+        gc.set_foreground(1);
+        bm.fill_rectangle(&gc, 2, 2, 4, 4);
+        assert_eq!(bm.get_pixel(3, 3), 1);
+        assert_eq!(bm.get_pixel(0, 0), 0);
+
+        // XOR on a bitmap toggles the bit, and stays a bit.
+        gc.set_function(GXFunc::Xor);
+        bm.fill_rectangle(&gc, 2, 2, 4, 4);
+        assert!(bm.pixels().iter().all(|p| *p == 0), "XOR did not clear");
+    }
+
+    #[test]
+    fn copy_plane_paints_set_bits_and_clear_ones() {
+        let mut bm = Fb::new_bitmap(8, 8);
+        let mut one = Gc::default();
+        one.set_foreground(1);
+        bm.fill_rectangle(&one, 0, 0, 4, 8);
+
+        let mut fb = Fb::new(8, 8);
+        let gc = Gc::new(WHITE, rgb(9, 9, 9));
+        fb.copy_plane(&gc, &bm, 0, 0, 8, 8, 0, 0);
+        assert_eq!(fb.get_pixel(1, 1), WHITE, "set bit should be foreground");
+        assert_eq!(
+            fb.get_pixel(6, 1),
+            rgb(9, 9, 9),
+            "clear bit should be background"
+        );
+    }
+
+    #[test]
+    fn a_resized_bitmap_is_still_a_bitmap() {
+        let mut bm = Fb::new_bitmap(4, 4);
+        bm.resize(9, 3);
+        assert_eq!(bm.depth(), 1);
+        assert!(bm.pixels().iter().all(|p| *p == 0));
     }
 
     #[test]
