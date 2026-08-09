@@ -61,6 +61,8 @@ const R4: u8 = 4;
 const R5: u8 = 5;
 const R6: u8 = 6;
 const R7: u8 = 7;
+const R8: u8 = 8;
+const R9: u8 = 9;
 
 // Instruction helpers
 const fn insn(code: u8, dst: u8, src: u8, off: i16, imm: i32) -> BpfInsn {
@@ -580,11 +582,11 @@ pub fn apply_restrict_network_interfaces(
 
 // ── IPAddressAllow= / IPAddressDeny= (BPF_PROG_TYPE_CGROUP_SKB) ───────────
 //
-// Increment 1 handles IPv4 only. The packet's address (source on ingress,
-// destination on egress) is masked against each configured prefix; the
-// longest-matching prefix wins (allow beats deny on a tie). IPv6 packets are not
-// yet filtered and are always allowed, so an IPv6-using service is never broken
-// (an honest gap, not a silent block).
+// The packet's address (source on ingress, destination on egress) is masked
+// against each configured prefix; the longest-matching prefix wins (allow beats
+// deny on a tie). Both IPv4 and IPv6 are filtered: the program reads the IP
+// version nibble and takes the matching path. A packet whose version is neither
+// 4 nor 6, or which is too short to parse, is allowed.
 
 /// Offsets of `data` / `data_end` in `struct __sk_buff`.
 const SK_BUFF_DATA_OFF: i16 = 76;
@@ -593,6 +595,11 @@ const SK_BUFF_DATA_END_OFF: i16 = 80;
 /// where a cgroup/skb program's packet data begins).
 const IPV4_SRC_OFF: i16 = 12;
 const IPV4_DST_OFF: i16 = 16;
+/// IPv6 header field offsets (16-byte source at 8, destination at 24).
+const IPV6_SRC_OFF: i16 = 8;
+const IPV6_DST_OFF: i16 = 24;
+/// `BPF_JMP | BPF_JA`: an unconditional jump by `off`.
+const BPF_JA: u8 = 0x05;
 
 /// Parse an `A.B.C.D[/len]` string into `(network, mask, prefixlen)` where the
 /// network and mask are in the byte order a BPF `LDX_W` of the packet address
@@ -631,47 +638,170 @@ fn ipv4_prefix_from_entry(entry: &str) -> Option<(u32, u32, u8)> {
         "localhost" => parse_ipv4_cidr("127.0.0.0/8"),
         "link-local" => parse_ipv4_cidr("169.254.0.0/16"),
         "multicast" => parse_ipv4_cidr("224.0.0.0/4"),
-        e if e.contains(':') => None, // IPv6, not yet filtered
+        e if e.contains(':') => None, // IPv6, handled separately
         e => parse_ipv4_cidr(e),
     }
 }
 
-/// Build a cgroup/skb program that checks the IPv4 address at `addr_off` against
-/// `prefixes` (each `(network, mask, verdict)`, pre-sorted longest-prefix first).
-/// The first matching prefix's verdict is returned; unmatched IPv4 packets get
-/// `default_verdict`; non-IPv4 packets and unparseable ones are allowed.
+/// Parse an IPv6 `addr[/len]` string into `(net_words, mask_words, prefixlen)`,
+/// each of the four words in the byte order a BPF `LDX_W` of that 4-byte group
+/// produces (little-endian load of the wire bytes), so a per-word masked compare
+/// against the loaded address works.
+fn parse_ipv6_cidr(s: &str) -> Option<([u32; 4], [u32; 4], u8)> {
+    let (addr_s, len) = match s.split_once('/') {
+        Some((a, l)) => (a, l.trim().parse::<u8>().ok()?),
+        None => (s, 128),
+    };
+    if len > 128 {
+        return None;
+    }
+    let addr: std::net::Ipv6Addr = addr_s.trim().parse().ok()?;
+    let a = addr.octets();
+    // The 16-byte prefix mask: the high `len` bits set (network bit order).
+    let mut mask_octets = [0u8; 16];
+    let mut bits = len as usize;
+    for byte in mask_octets.iter_mut() {
+        if bits >= 8 {
+            *byte = 0xff;
+            bits -= 8;
+        } else if bits > 0 {
+            *byte = 0xffu8 << (8 - bits);
+            bits = 0;
+        } else {
+            break;
+        }
+    }
+    let mut net_words = [0u32; 4];
+    let mut mask_words = [0u32; 4];
+    for i in 0..4 {
+        let m = [
+            mask_octets[i * 4],
+            mask_octets[i * 4 + 1],
+            mask_octets[i * 4 + 2],
+            mask_octets[i * 4 + 3],
+        ];
+        let n = [
+            a[i * 4] & m[0],
+            a[i * 4 + 1] & m[1],
+            a[i * 4 + 2] & m[2],
+            a[i * 4 + 3] & m[3],
+        ];
+        net_words[i] = u32::from_le_bytes(n);
+        mask_words[i] = u32::from_le_bytes(m);
+    }
+    Some((net_words, mask_words, len))
+}
+
+/// Resolve one `IPAddress{Allow,Deny}=` entry to its IPv6 prefix, if any. The
+/// special names expand to their IPv6 halves (matching systemd); a bare IPv4
+/// entry returns None.
+fn ipv6_prefix_from_entry(entry: &str) -> Option<([u32; 4], [u32; 4], u8)> {
+    match entry.trim() {
+        "any" => Some(([0; 4], [0; 4], 0)),
+        "localhost" => parse_ipv6_cidr("::1/128"),
+        "link-local" => parse_ipv6_cidr("fe80::/64"),
+        "multicast" => parse_ipv6_cidr("ff00::/8"),
+        e if e.contains(':') => parse_ipv6_cidr(e),
+        _ => None, // bare IPv4 or a plain name: not an IPv6 prefix
+    }
+}
+
+/// Build a cgroup/skb program that reads the IP version and checks the packet
+/// address (at the IPv4/IPv6 source or destination offset, per `egress`) against
+/// the sorted `v4` and `v6` prefix lists (each `(network, mask, verdict)`,
+/// longest-prefix first). The first matching prefix's verdict is returned;
+/// unmatched packets of a filtered family get `default_verdict`; packets that are
+/// neither IPv4 nor IPv6, or too short to parse, are allowed. Forward jumps to the
+/// shared ALLOW/DEFAULT tails and the IPv6 path are patched after layout.
 fn build_ip_filter_program(
-    prefixes: &[(u32, u32, i32)],
+    v4: &[(u32, u32, i32)],
+    v6: &[([u32; 4], [u32; 4], i32)],
     default_verdict: i32,
-    addr_off: i16,
+    egress: bool,
 ) -> Vec<BpfInsn> {
     const ALLOW: i32 = 1;
-    let n = prefixes.len() as i16;
-    // Layout: 0..9 header, then 5 insns per prefix, then DEFAULT (2), ALLOW (2).
-    let default_idx = 9 + 5 * n;
-    let allow_idx = default_idx + 2;
-    let mut insns = vec![
-        ldx_mem_w(R2, R1, SK_BUFF_DATA_OFF),     // 0: r2 = data
-        ldx_mem_w(R3, R1, SK_BUFF_DATA_END_OFF), // 1: r3 = data_end
-        mov64_reg(R4, R2),                       // 2: r4 = data
-        alu64_add_imm(R4, 20),                   // 3: r4 = data + 20 (IPv4 min header)
-        jgt_reg(R4, R3, allow_idx - 4 - 1),      // 4: too short -> ALLOW
-        ldx_mem_b(R5, R2, 0),                    // 5: r5 = data[0] (version<<4 | ihl)
-        alu64_rsh_imm(R5, 4),                    // 6: r5 = version
-        jne32_imm(R5, 4, allow_idx - 7 - 1),     // 7: not IPv4 -> ALLOW
-        ldx_mem_w(R6, R2, addr_off),             // 8: r6 = address (little-endian load)
-    ];
-    for &(network, mask, verdict) in prefixes {
-        insns.push(mov64_reg(R7, R6)); // r7 = addr
-        insns.push(alu32_and_imm(R7, mask as i32)); // r7 &= mask
-        insns.push(jne32_imm(R7, network as i32, 2)); // if != network, skip verdict
+    let v4_off = if egress { IPV4_DST_OFF } else { IPV4_SRC_OFF };
+    let v6_off = if egress { IPV6_DST_OFF } else { IPV6_SRC_OFF };
+
+    let mut insns: Vec<BpfInsn> = Vec::new();
+    let mut allow_patches: Vec<usize> = Vec::new();
+    let mut default_patches: Vec<usize> = Vec::new();
+
+    // Header: load bounds, ensure one byte, read the version nibble.
+    insns.push(ldx_mem_w(R2, R1, SK_BUFF_DATA_OFF)); // r2 = data
+    insns.push(ldx_mem_w(R3, R1, SK_BUFF_DATA_END_OFF)); // r3 = data_end
+    insns.push(mov64_reg(R4, R2));
+    insns.push(alu64_add_imm(R4, 1));
+    allow_patches.push(insns.len());
+    insns.push(jgt_reg(R4, R3, 0)); // < 1 byte -> ALLOW
+    insns.push(ldx_mem_b(R5, R2, 0));
+    insns.push(alu64_rsh_imm(R5, 4)); // r5 = version
+    let to_v6 = insns.len();
+    insns.push(jne32_imm(R5, 4, 0)); // not IPv4 -> IPv6 path (patched)
+
+    // ── IPv4 path ── r6 = address; each prefix masks + compares.
+    insns.push(mov64_reg(R4, R2));
+    insns.push(alu64_add_imm(R4, 20));
+    allow_patches.push(insns.len());
+    insns.push(jgt_reg(R4, R3, 0)); // < 20 bytes -> ALLOW
+    insns.push(ldx_mem_w(R6, R2, v4_off));
+    for &(network, mask, verdict) in v4 {
+        insns.push(mov64_reg(R7, R6));
+        insns.push(alu32_and_imm(R7, mask as i32));
+        insns.push(jne32_imm(R7, network as i32, 2)); // skip mov + exit
         insns.push(mov64_imm(R0, verdict));
         insns.push(exit_insn());
     }
-    insns.push(mov64_imm(R0, default_verdict)); // DEFAULT (unmatched IPv4)
+    default_patches.push(insns.len());
+    insns.push(insn(BPF_JA, 0, 0, 0, 0)); // -> DEFAULT (patched)
+
+    // ── IPv6 path ── r6..r9 = the four address words; each prefix ANDs and
+    // compares all four (any mismatch skips to the next prefix). r5 is the temp.
+    let v6_start = insns.len();
+    insns[to_v6].off = (v6_start - to_v6 - 1) as i16;
+    allow_patches.push(insns.len());
+    insns.push(jne32_imm(R5, 6, 0)); // not IPv6 either -> ALLOW
+    insns.push(mov64_reg(R4, R2));
+    insns.push(alu64_add_imm(R4, 40));
+    allow_patches.push(insns.len());
+    insns.push(jgt_reg(R4, R3, 0)); // < 40 bytes -> ALLOW
+    insns.push(ldx_mem_w(R6, R2, v6_off));
+    insns.push(ldx_mem_w(R7, R2, v6_off + 4));
+    insns.push(ldx_mem_w(R8, R2, v6_off + 8));
+    insns.push(ldx_mem_w(R9, R2, v6_off + 12));
+    let words = [R6, R7, R8, R9];
+    for &(network, mask, verdict) in v6 {
+        let mut skips: Vec<usize> = Vec::new();
+        for w in 0..4 {
+            insns.push(mov64_reg(R5, words[w]));
+            insns.push(alu32_and_imm(R5, mask[w] as i32));
+            skips.push(insns.len());
+            insns.push(jne32_imm(R5, network[w] as i32, 0)); // -> next prefix (patched)
+        }
+        insns.push(mov64_imm(R0, verdict));
+        insns.push(exit_insn());
+        let next = insns.len();
+        for s in skips {
+            insns[s].off = (next - s - 1) as i16;
+        }
+    }
+    default_patches.push(insns.len());
+    insns.push(insn(BPF_JA, 0, 0, 0, 0)); // -> DEFAULT (patched)
+
+    // ── DEFAULT (unmatched, filtered family) then ALLOW (unfiltered) tails.
+    let default_idx = insns.len();
+    insns.push(mov64_imm(R0, default_verdict));
     insns.push(exit_insn());
-    insns.push(mov64_imm(R0, ALLOW)); // ALLOW (non-IPv4 / too short)
+    let allow_idx = insns.len();
+    insns.push(mov64_imm(R0, ALLOW));
     insns.push(exit_insn());
+
+    for p in default_patches {
+        insns[p].off = (default_idx - p - 1) as i16;
+    }
+    for p in allow_patches {
+        insns[p].off = (allow_idx - p - 1) as i16;
+    }
     insns
 }
 
@@ -688,29 +818,37 @@ pub fn apply_ip_address_policy(
     if allow.is_empty() && deny.is_empty() {
         return Ok(());
     }
-    // (network, mask, prefixlen, is_allow)
-    let mut prefixes: Vec<(u32, u32, u8, bool)> = Vec::new();
-    for e in allow {
-        if let Some((net, mask, len)) = ipv4_prefix_from_entry(e) {
-            prefixes.push((net, mask, len, true));
-        }
-    }
-    for e in deny {
-        if let Some((net, mask, len)) = ipv4_prefix_from_entry(e) {
-            prefixes.push((net, mask, len, false));
+    // (network, mask, prefixlen, is_allow) per family. A special name (localhost,
+    // any, ...) resolves in both families, so one entry can feed both lists.
+    let mut v4: Vec<(u32, u32, u8, bool)> = Vec::new();
+    let mut v6: Vec<([u32; 4], [u32; 4], u8, bool)> = Vec::new();
+    for (list, is_allow) in [(allow, true), (deny, false)] {
+        for e in list {
+            if let Some((net, mask, len)) = ipv4_prefix_from_entry(e) {
+                v4.push((net, mask, len, is_allow));
+            }
+            if let Some((net, mask, len)) = ipv6_prefix_from_entry(e) {
+                v6.push((net, mask, len, is_allow));
+            }
         }
     }
     // Longest prefix first; allow before deny on a tie so allow wins.
-    prefixes.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)));
-    let sorted: Vec<(u32, u32, i32)> = prefixes
+    v4.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)));
+    v6.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)));
+    let v4s: Vec<(u32, u32, i32)> = v4
         .iter()
         .map(|&(net, mask, _len, is_allow)| (net, mask, if is_allow { 1 } else { 0 }))
         .collect();
-    // If any IPAddressAllow= is configured, unmatched IPv4 traffic is denied.
+    let v6s: Vec<([u32; 4], [u32; 4], i32)> = v6
+        .iter()
+        .map(|&(net, mask, _len, is_allow)| (net, mask, if is_allow { 1 } else { 0 }))
+        .collect();
+    // If any IPAddressAllow= is configured, unmatched traffic (of a filtered
+    // family) is denied.
     let default_verdict: i32 = if allow.is_empty() { 1 } else { 0 };
 
-    let egress = build_ip_filter_program(&sorted, default_verdict, IPV4_DST_OFF);
-    let ingress = build_ip_filter_program(&sorted, default_verdict, IPV4_SRC_OFF);
+    let egress = build_ip_filter_program(&v4s, &v6s, default_verdict, true);
+    let ingress = build_ip_filter_program(&v4s, &v6s, default_verdict, false);
 
     let e_fd = bpf_prog_load(&egress, BPF_PROG_TYPE_CGROUP_SKB)?;
     let e_res = bpf_prog_attach(e_fd, cgroup_path, BPF_CGROUP_INET_EGRESS);
@@ -755,5 +893,46 @@ mod tests {
         assert_eq!(ipv4_prefix_from_entry("localhost").unwrap().2, 8);
         assert!(ipv4_prefix_from_entry("::1").is_none());
         assert!(ipv4_prefix_from_entry("fe80::/64").is_none());
+    }
+
+    /// Load 16 address octets as the four little-endian words a BPF `LDX_W`
+    /// produces (what the program compares against).
+    fn ipv6_words_le(octets: &[u8; 16]) -> [u32; 4] {
+        let mut w = [0u32; 4];
+        for (i, word) in w.iter_mut().enumerate() {
+            *word = u32::from_le_bytes([
+                octets[i * 4],
+                octets[i * 4 + 1],
+                octets[i * 4 + 2],
+                octets[i * 4 + 3],
+            ]);
+        }
+        w
+    }
+
+    #[test]
+    fn test_parse_ipv6_cidr_endianness() {
+        let (net, mask, len) = parse_ipv6_cidr("::1/128").unwrap();
+        assert_eq!(len, 128);
+        // A packet to ::1 loaded as four LE words must match ::1/128.
+        let lo = ipv6_words_le(&std::net::Ipv6Addr::LOCALHOST.octets());
+        assert!((0..4).all(|i| lo[i] & mask[i] == net[i]));
+        let other = ipv6_words_le(&"2001:db8::1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+        assert!((0..4).any(|i| other[i] & mask[i] != net[i]));
+
+        // fe80::/64 matches any fe80:: address on the high 64 bits only.
+        let (n64, m64, l64) = parse_ipv6_cidr("fe80::/64").unwrap();
+        assert_eq!(l64, 64);
+        let ll = ipv6_words_le(&"fe80::abcd:1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+        assert!((0..4).all(|i| ll[i] & m64[i] == n64[i]));
+        let g = ipv6_words_le(&"2001:db8::1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+        assert!(g[0] & m64[0] != n64[0]);
+
+        // Special names resolve to their IPv6 halves; bare IPv4 has no v6 prefix.
+        assert_eq!(ipv6_prefix_from_entry("any"), Some(([0; 4], [0; 4], 0)));
+        assert_eq!(ipv6_prefix_from_entry("localhost").unwrap().2, 128);
+        assert_eq!(ipv6_prefix_from_entry("link-local").unwrap().2, 64);
+        assert!(ipv6_prefix_from_entry("127.0.0.0/8").is_none());
+        assert!(ipv6_prefix_from_entry("10.0.0.0/8").is_none());
     }
 }

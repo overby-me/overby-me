@@ -202,6 +202,49 @@
         rm -f "/run/systemd/system/$UNIT_IPD.service" "/run/systemd/system/$UNIT_IPA.service" \
               "$OUT_IPD" "$OUT_IPA" "$IPHELPER"
     fi
+
+    : "IPAddressDeny=::1/128 blocks IPv6 loopback (EPERM); IPAddressAllow=::1/128 permits it"
+    PYI6="$(command -v python3 || true)"
+    if [ -n "$PYI6" ] && [ -e /proc/net/if_inet6 ]; then
+        IP6HELPER="/run/scf-ip6-check.py"
+        cat > "$IP6HELPER" << 'PYEOF'
+    import socket, sys, errno
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    try: s.sendto(b"x", ("::1", 9)); r = "OK"
+    except OSError as e: r = "BLOCKED" if e.errno == errno.EPERM else "ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_IP6D="scfip6d-$RANDOM"
+        OUT_IP6D="/run/scfip6d-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_IP6D.service" << EOF
+    [Service]
+    Type=oneshot
+    IPAddressDeny=::1/128
+    ExecStart=$PYI6 $IP6HELPER $OUT_IP6D
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_IP6D.service"
+        cat "$OUT_IP6D"
+        grep -qx BLOCKED "$OUT_IP6D"
+
+        UNIT_IP6A="scfip6a-$RANDOM"
+        OUT_IP6A="/run/scfip6a-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_IP6A.service" << EOF
+    [Service]
+    Type=oneshot
+    IPAddressAllow=::1/128
+    ExecStart=$PYI6 $IP6HELPER $OUT_IP6A
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_IP6A.service"
+        cat "$OUT_IP6A"
+        grep -qx OK "$OUT_IP6A"
+
+        systemctl stop "$UNIT_IP6D.service" "$UNIT_IP6A.service" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_IP6D.service" "$UNIT_IP6A.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_IP6D.service" "/run/systemd/system/$UNIT_IP6A.service" \
+              "$OUT_IP6D" "$OUT_IP6A" "$IP6HELPER"
+    fi
     RIDEOF
   '';
 }
