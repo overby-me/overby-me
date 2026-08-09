@@ -130,6 +130,12 @@ saver!(
     xscreensaver::hacks2d::halo::start
 );
 saver!(
+    "helix",
+    helix_body,
+    helix_start,
+    xscreensaver::hacks2d::helix::start
+);
+saver!(
     "kaleidescope",
     kaleidescope_body,
     kaleidescope_start,
@@ -172,6 +178,12 @@ saver!(
     xscreensaver::hacks2d::pedal::start
 );
 saver!(
+    "popsquares",
+    popsquares_body,
+    popsquares_start,
+    xscreensaver::hacks2d::popsquares::start
+);
+saver!(
     "rorschach",
     rorschach_body,
     rorschach_start,
@@ -195,6 +207,12 @@ saver!(
     spiral_body,
     spiral_start,
     xscreensaver::hacks2d::spiral::start
+);
+saver!(
+    "squiral",
+    squiral_body,
+    squiral_start,
+    xscreensaver::hacks2d::squiral::start
 );
 saver!(
     "thornbird",
@@ -264,6 +282,11 @@ pub static SAVERS: &[Entry] = &[
         start: halo_start,
     },
     Entry {
+        slug: "helix",
+        label: "Helix",
+        start: helix_start,
+    },
+    Entry {
         slug: "kaleidescope",
         label: "Kaleidescope",
         start: kaleidescope_start,
@@ -299,6 +322,11 @@ pub static SAVERS: &[Entry] = &[
         start: pedal_start,
     },
     Entry {
+        slug: "popsquares",
+        label: "Pop Squares",
+        start: popsquares_start,
+    },
+    Entry {
         slug: "rorschach",
         label: "Rorschach",
         start: rorschach_start,
@@ -317,6 +345,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "spiral",
         label: "Spiral",
         start: spiral_start,
+    },
+    Entry {
+        slug: "squiral",
+        label: "Squiral",
+        start: squiral_start,
     },
     Entry {
         slug: "thornbird",

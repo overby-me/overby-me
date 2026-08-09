@@ -22,6 +22,7 @@ pub mod forest;
 pub mod grav;
 pub mod greynetic;
 pub mod halo;
+pub mod helix;
 pub mod kaleidescope;
 pub mod laser;
 pub mod lissie;
@@ -29,10 +30,12 @@ pub mod moire;
 pub mod mountain;
 pub mod munch;
 pub mod pedal;
+pub mod popsquares;
 pub mod rorschach;
 pub mod sierpinski;
 pub mod sphere;
 pub mod spiral;
+pub mod squiral;
 pub mod thornbird;
 pub mod vines;
 pub mod wander;
@@ -53,6 +56,7 @@ pub static ALL: &[&Saver] = &[
     &forest::SAVER,
     &grav::SAVER,
     &halo::SAVER,
+    &helix::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
     &lissie::SAVER,
@@ -60,10 +64,12 @@ pub static ALL: &[&Saver] = &[
     &mountain::SAVER,
     &munch::SAVER,
     &pedal::SAVER,
+    &popsquares::SAVER,
     &rorschach::SAVER,
     &sierpinski::SAVER,
     &sphere::SAVER,
     &spiral::SAVER,
+    &squiral::SAVER,
     &thornbird::SAVER,
     &vines::SAVER,
     &wander::SAVER,
