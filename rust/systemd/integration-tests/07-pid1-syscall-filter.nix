@@ -351,6 +351,52 @@
         systemctl reset-failed "$UNIT_S.service" 2>/dev/null || true
         rm -f "/run/systemd/system/$UNIT_S.service" "$OUT_S" "$TGT_S" "$SHELPER"
     fi
+
+    : "ProtectKernelModules/Clock/KernelLogs/KernelTunables=yes block their syscalls (EPERM)"
+    PYP="$(command -v python3 || true)"
+    if [ -n "$PYP" ]; then
+        PHELPER="/run/scf-protect.py"
+        cat > "$PHELPER" << 'PYEOF'
+    import ctypes, sys, errno, time
+    libc = ctypes.CDLL(None, use_errno=True)
+    probe, outp = sys.argv[1], sys.argv[2]
+    def eperm(r, e): return "BLOCKED" if (r == -1 and e == errno.EPERM) else None
+    if probe == "modules":
+        r = libc.syscall(176, b"nonexistent_xyz", 0); e = ctypes.get_errno()
+        out = eperm(r, e) or ("code%d" % e if r == -1 else "OK")
+    elif probe == "clock":
+        try:
+            time.clock_settime(time.CLOCK_REALTIME, time.clock_gettime(time.CLOCK_REALTIME)); out = "OK"
+        except OSError as ex:
+            out = "BLOCKED" if ex.errno == errno.EPERM else "code%d" % ex.errno
+    elif probe == "logs":
+        r = libc.syscall(103, 10, 0, 0); e = ctypes.get_errno()
+        out = eperm(r, e) or ("OK" if r >= 0 else "code%d" % e)
+    else:
+        r = libc.syscall(156); e = ctypes.get_errno()
+        out = eperm(r, e) or ("code%d" % e)
+    open(outp, "w").write(out)
+    PYEOF
+        for spec in "modules:ProtectKernelModules" "clock:ProtectClock" "logs:ProtectKernelLogs" "tunables:ProtectKernelTunables"; do
+            probe="''${spec%%:*}"
+            directive="''${spec##*:}"
+            UP="scfprot-$probe-$RANDOM"
+            OP="/run/scfprot-$probe.$RANDOM"
+            cat > "/run/systemd/system/$UP.service" << EOF
+    [Service]
+    Type=oneshot
+    $directive=yes
+    ExecStart=$PYP $PHELPER $probe $OP
+    EOF
+            systemctl daemon-reload
+            systemctl start "$UP.service"
+            echo "$probe: $(cat "$OP")"
+            grep -qx BLOCKED "$OP"
+            systemctl reset-failed "$UP.service" 2>/dev/null || true
+            rm -f "/run/systemd/system/$UP.service" "$OP"
+        done
+        rm -f "$PHELPER"
+    fi
     RIDEOF
   '';
 }

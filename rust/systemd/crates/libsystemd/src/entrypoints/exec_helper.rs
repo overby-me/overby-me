@@ -3852,6 +3852,13 @@ pub fn run_exec_helper() {
     install_restrict_realtime(&config);
     // RestrictSUIDSGID= blocks setting the setuid/setgid mode bits.
     install_restrict_suid_sgid(&config);
+    // Protect{KernelModules,Clock,KernelLogs,KernelTunables}= seccomp complements
+    // to their mount-namespace protections (block the module/clock/klog/sysctl
+    // syscalls).
+    install_protect_kernel_modules(&config);
+    install_protect_clock(&config);
+    install_protect_kernel_logs(&config);
+    install_protect_kernel_tunables(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -6025,6 +6032,85 @@ fn install_restrict_realtime(_config: &ExecHelperConfig) {}
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn install_restrict_suid_sgid(_config: &ExecHelperConfig) {}
 
+/// Apply `ProtectKernelModules=`: block the module-management syscalls (the
+/// @module set: init_module/finit_module/delete_module) with EPERM, matching
+/// systemd. This is the seccomp complement to the read-only module directories.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_protect_kernel_modules(config: &ExecHelperConfig) {
+    if !config.protect_kernel_modules {
+        return;
+    }
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    let (mut set, mut visited) = (Vec::new(), Vec::new());
+    resolve_syscall_set(&["@module"], &mut set, &mut visited);
+    if !set.is_empty() && install_seccomp_deny_filter(&set, eperm) {
+        log::debug!(
+            "ProtectKernelModules: blocked {} module syscalls for {}",
+            set.len(),
+            config.name
+        );
+    }
+}
+
+/// Apply `ProtectClock=`: block the clock-setting syscalls (the @clock set:
+/// settimeofday/clock_settime/adjtimex and friends) with EPERM, matching systemd.
+/// This is the seccomp complement to the /dev/rtc device denial.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_protect_clock(config: &ExecHelperConfig) {
+    if !config.protect_clock {
+        return;
+    }
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    let (mut set, mut visited) = (Vec::new(), Vec::new());
+    resolve_syscall_set(&["@clock"], &mut set, &mut visited);
+    if !set.is_empty() && install_seccomp_deny_filter(&set, eperm) {
+        log::debug!(
+            "ProtectClock: blocked {} clock syscalls for {}",
+            set.len(),
+            config.name
+        );
+    }
+}
+
+/// Apply `ProtectKernelLogs=`: block syslog(2) (the kernel-log syscall) with
+/// EPERM, matching systemd's seccomp_protect_syslog(). This is the seccomp
+/// complement to the /dev/kmsg and /proc/kmsg denial.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_protect_kernel_logs(config: &ExecHelperConfig) {
+    if !config.protect_kernel_logs {
+        return;
+    }
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    if install_seccomp_deny_filter(&[libc::SYS_syslog], eperm) {
+        log::debug!("ProtectKernelLogs: blocked syslog(2) for {}", config.name);
+    }
+}
+
+/// Apply `ProtectKernelTunables=`: block the (long-removed) _sysctl syscall with
+/// EPERM, matching systemd's seccomp_protect_sysctl(). This is vestigial on
+/// modern kernels (the syscall is gone); the read-only /proc/sys mount is the
+/// substantive protection.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_protect_kernel_tunables(config: &ExecHelperConfig) {
+    if !config.protect_kernel_tunables {
+        return;
+    }
+    const SYS_SYSCTL: i64 = 156; // _sysctl on x86_64
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    if install_seccomp_deny_filter(&[SYS_SYSCTL], eperm) {
+        log::debug!("ProtectKernelTunables: blocked _sysctl for {}", config.name);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_protect_kernel_modules(_config: &ExecHelperConfig) {}
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_protect_clock(_config: &ExecHelperConfig) {}
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_protect_kernel_logs(_config: &ExecHelperConfig) {}
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_protect_kernel_tunables(_config: &ExecHelperConfig) {}
+
 /// Bring up the loopback interface in a new network namespace.
 fn bring_up_loopback() {
     // Use a netlink socket to bring up lo
@@ -7149,6 +7235,23 @@ mod tests {
             "RestrictSUIDSGID child failed (code {})",
             libc::WEXITSTATUS(status)
         );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_protect_syscall_sets_resolve() {
+        // ProtectKernelModules= blocks the module syscalls.
+        let (mut m, mut vm) = (Vec::new(), Vec::new());
+        resolve_syscall_set(&["@module"], &mut m, &mut vm);
+        assert!(m.contains(&libc::SYS_init_module));
+        assert!(m.contains(&libc::SYS_finit_module));
+        assert!(m.contains(&libc::SYS_delete_module));
+        // ProtectClock= blocks the clock-setting syscalls.
+        let (mut c, mut vc) = (Vec::new(), Vec::new());
+        resolve_syscall_set(&["@clock"], &mut c, &mut vc);
+        assert!(c.contains(&libc::SYS_clock_settime));
+        assert!(c.contains(&libc::SYS_settimeofday));
+        assert!(c.contains(&libc::SYS_adjtimex));
     }
 
     #[test]
