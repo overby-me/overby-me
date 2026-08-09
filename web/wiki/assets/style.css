@@ -1373,15 +1373,28 @@ html {
 .app-shell:not([data-size-class="compact"]) .card.app-card > .card-header {
 	padding-block-start: var(--md-sys-spacing-6);
 }
-.app-shell .card.app-card > .card-header > h3 {
+.app-shell .card.app-card > .card-header h3 {
 	font-size: var(--md-sys-typescale-title-large-size);
 	line-height: var(--md-sys-typescale-title-large-line);
 }
-/* A genuine card inside the app keeps its own smaller heading: it is one topic
-   on the surface, not the surface. */
-.app-shell .card.app-card .card:not(.app-card) .card-header > h3 {
+/* And ONLY the first surface in the pane. A view is often several app surfaces
+   stacked -- the document, then its amendments, then its comments -- and they
+   are sections of one view rather than one app each. Every one of them taking
+   the app title turned the hierarchy upside down: "Comments" came out at 22px
+   over a document called "Årsrapport 2024 (test)" at 16, which is the section
+   shouting down the thing it hangs under.
+   
+   The same for the headings that merely live INSIDE an app's header (the tool
+   sheet's "Actions") and for a genuine card on the surface: one topic on the
+   surface is not the surface. */
+.app-shell .card.app-card ~ .card.app-card > .card-header h3,
+.app-shell .card.app-card > .card-header .tool-sheet h3,
+.app-shell .card.app-card .card:not(.app-card) .card-header h3 {
 	font-size: var(--md-sys-typescale-title-medium-size);
 	line-height: var(--md-sys-typescale-title-medium-line);
+}
+.app-shell:not([data-size-class="compact"]) .card.app-card ~ .card.app-card > .card-header {
+	padding-block-start: var(--md-sys-spacing-4-5);
 }
 /* Except a genuine card sitting inside one -- a place on the home screen, a
    canvas in the picker. It is still a card, so it still has a top to tint. */
