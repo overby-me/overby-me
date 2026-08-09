@@ -464,6 +464,20 @@ pub fn pre_fork_os_specific(
                 Err(e) => trace!("Could not apply RestrictNetworkInterfaces: {}", e),
             }
         }
+        // ── IPAddressAllow= / IPAddressDeny= (BPF cgroup/skb) ─────────────
+        if !srvc.ip_address_allow.is_empty() || !srvc.ip_address_deny.is_empty() {
+            match cgroups::bpf_devices::apply_ip_address_policy(
+                &srvc.platform_specific.cgroup_path,
+                &srvc.ip_address_allow,
+                &srvc.ip_address_deny,
+            ) {
+                Ok(()) => trace!(
+                    "IPAddress policy applied for cgroup {:?}",
+                    &srvc.platform_specific.cgroup_path
+                ),
+                Err(e) => trace!("Could not apply IPAddress policy: {}", e),
+            }
+        }
     }
     let _ = srvc;
     Ok(())

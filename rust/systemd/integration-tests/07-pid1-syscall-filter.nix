@@ -159,6 +159,49 @@
         systemctl reset-failed "$UNIT_NET.service" 2>/dev/null || true
         rm -f "/run/systemd/system/$UNIT_NET.service" "$OUT_NET" "$NETHELPER"
     fi
+
+    : "IPAddressDeny=127.0.0.0/8 blocks loopback (EPERM); IPAddressAllow=127.0.0.0/8 permits it"
+    PYI="$(command -v python3 || true)"
+    if [ -n "$PYI" ]; then
+        IPHELPER="/run/scf-ip-check.py"
+        cat > "$IPHELPER" << 'PYEOF'
+    import socket, sys, errno
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try: s.sendto(b"x", ("127.0.0.1", 9)); r = "OK"
+    except OSError as e: r = "BLOCKED" if e.errno == errno.EPERM else "ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_IPD="scfipd-$RANDOM"
+        OUT_IPD="/run/scfipd-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_IPD.service" << EOF
+    [Service]
+    Type=oneshot
+    IPAddressDeny=127.0.0.0/8
+    ExecStart=$PYI $IPHELPER $OUT_IPD
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_IPD.service"
+        cat "$OUT_IPD"
+        grep -qx BLOCKED "$OUT_IPD"
+
+        UNIT_IPA="scfipa-$RANDOM"
+        OUT_IPA="/run/scfipa-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_IPA.service" << EOF
+    [Service]
+    Type=oneshot
+    IPAddressAllow=127.0.0.0/8
+    ExecStart=$PYI $IPHELPER $OUT_IPA
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_IPA.service"
+        cat "$OUT_IPA"
+        grep -qx OK "$OUT_IPA"
+
+        systemctl stop "$UNIT_IPD.service" "$UNIT_IPA.service" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_IPD.service" "$UNIT_IPA.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_IPD.service" "/run/systemd/system/$UNIT_IPA.service" \
+              "$OUT_IPD" "$OUT_IPA" "$IPHELPER"
+    fi
     RIDEOF
   '';
 }
