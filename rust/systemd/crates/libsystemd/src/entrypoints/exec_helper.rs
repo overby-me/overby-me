@@ -2946,16 +2946,21 @@ pub fn run_exec_helper() {
                     (um, gm, true)
                 }
             };
-            // identity/full are RANGE maps. A range (or multi-line) map cannot be
-            // self-written after unshare(CLONE_NEWUSER): the kernel requires
-            // CAP_SETUID over the PARENT user namespace, which the unsharer does
-            // not hold. So a helper forked while still in the parent namespace
-            // (root there) writes it from outside. The single-line self/yes map
-            // is the common path and is written directly.
-            if matches!(config.private_users_mode.as_str(), "identity" | "full") {
+            // A range (identity/full) OR a multi-line map cannot be self-written
+            // after unshare(CLONE_NEWUSER): the kernel requires CAP_SETUID over
+            // the PARENT user namespace, which the unsharer does not hold. The
+            // multi-line case is the two-line self/yes map of a service whose
+            // target id differs from the caller's (e.g. DynamicUser=), where
+            // line 2 maps a second id; self-writing it leaves the map EMPTY, so
+            // the service runs as nobody. So a helper forked while still in the
+            // parent namespace (root there) writes it from outside. Only the
+            // single-line self/yes map (target id == caller id) is written here.
+            let multi_line_self = config.user != uid || config.group != gid;
+            if matches!(config.private_users_mode.as_str(), "identity" | "full") || multi_line_self
+            {
                 if !unshare_userns_with_helper_written_map(&uid_map, &gid_map, deny_setgroups) {
                     log::warn!(
-                        "Failed to set up user namespace with a range map for PrivateUsers={}",
+                        "Failed to set up user namespace with a range or multi-line map for PrivateUsers={}",
                         config.private_users_mode
                     );
                 }
