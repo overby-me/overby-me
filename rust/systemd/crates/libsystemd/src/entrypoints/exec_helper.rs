@@ -3836,6 +3836,8 @@ pub fn run_exec_helper() {
     install_system_call_filter(&config);
     // SystemCallLog= stacks a non-blocking audit-logging filter on top.
     install_system_call_log(&config);
+    // SystemCallArchitectures= restricts which CPU architectures may be used.
+    install_system_call_architectures(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -5626,6 +5628,68 @@ fn install_system_call_log(_config: &ExecHelperConfig) {
     log::warn!("SystemCallLog= not implemented for this target");
 }
 
+/// Build a seccomp cBPF program that permits syscalls issued from any audited
+/// architecture in `allowed` and applies `action` to all others (by inspecting
+/// seccomp_data.arch, not the syscall number).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn build_seccomp_arch_filter(allowed: &[u32], action: u32) -> Vec<libc::sock_filter> {
+    const ALLOW: u32 = 0x7fff_0000; // SECCOMP_RET_ALLOW
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    let mut prog = vec![f(0x20, 0, 0, 4)]; // BPF_LD|W|ABS arch (offset 4)
+    for &arch in allowed {
+        // JEQ arch==A: on match fall through to RET ALLOW; else skip it.
+        prog.push(f(0x15, 0, 1, arch));
+        prog.push(f(0x06, 0, 0, ALLOW));
+    }
+    prog.push(f(0x06, 0, 0, action)); // default: architecture not permitted
+    prog
+}
+
+/// Apply `SystemCallArchitectures=`: restrict which CPU architectures the
+/// service may issue syscalls from (hardening against e.g. the i386 compat ABI
+/// on x86_64). Syscalls from any non-listed architecture are killed. If any
+/// listed architecture cannot be mapped, the filter is skipped (run permissive)
+/// rather than risk killing the service by wrongly restricting it.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_system_call_architectures(config: &ExecHelperConfig) {
+    if config.system_call_architectures.is_empty() {
+        return;
+    }
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const AUDIT_ARCH_I386: u32 = 0x4000_0003;
+    const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
+    let mut archs: Vec<u32> = Vec::new();
+    for a in &config.system_call_architectures {
+        let v = match a.trim() {
+            "native" | "x86-64" | "x86_64" | "amd64" => AUDIT_ARCH_X86_64,
+            "x86" | "i386" => AUDIT_ARCH_I386,
+            other => {
+                log::warn!(
+                    "SystemCallArchitectures: unsupported architecture '{other}' for {}; \
+                     not restricting",
+                    config.name
+                );
+                return;
+            }
+        };
+        if !archs.contains(&v) {
+            archs.push(v);
+        }
+    }
+    if install_seccomp_program(&build_seccomp_arch_filter(&archs, SECCOMP_RET_KILL_PROCESS)) {
+        log::debug!(
+            "SystemCallArchitectures: restricted to {} architecture(s) for {}",
+            archs.len(),
+            config.name
+        );
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_system_call_architectures(_config: &ExecHelperConfig) {
+    log::warn!("SystemCallArchitectures= not implemented for this target");
+}
+
 /// Bring up the loopback interface in a new network namespace.
 fn bring_up_loopback() {
     // Use a netlink socket to bring up lo
@@ -6700,6 +6764,36 @@ mod tests {
             libc::WEXITSTATUS(status),
             0,
             "log-filter child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_seccomp_arch_filter_allows_native() {
+        const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+        const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // Restrict to x86_64 only; native syscalls must still work (only a
+            // non-native arch, e.g. the i386 compat ABI, would be killed).
+            let prog = build_seccomp_arch_filter(&[AUDIT_ARCH_X86_64], SECCOMP_RET_KILL_PROCESS);
+            if !install_seccomp_program(&prog) {
+                unsafe { libc::_exit(10) };
+            }
+            if unsafe { libc::syscall(libc::SYS_getpid) } <= 0 {
+                unsafe { libc::_exit(11) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "arch-filter child failed (code {})",
             libc::WEXITSTATUS(status)
         );
     }

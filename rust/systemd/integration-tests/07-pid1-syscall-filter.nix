@@ -87,6 +87,22 @@
     cat "$OUT_ALLOW"
     grep -qx MOUNT-BLOCKED "$OUT_ALLOW"
     ! mountpoint -q /run/scf-allow-mnt
+
+    : "SystemCallArchitectures=native does not break a normal (native) service"
+    UNIT_ARCH="scfarch-$RANDOM"
+    OUT_ARCH="/run/scfarch-out.$RANDOM"
+    cat > "/run/systemd/system/$UNIT_ARCH.service" << EOF
+    [Service]
+    Type=oneshot
+    SystemCallArchitectures=native
+    ExecStart=/bin/sh -c 'echo arch-native-ran > $OUT_ARCH'
+    EOF
+    systemctl daemon-reload
+    systemctl start "$UNIT_ARCH.service"
+    grep -qx arch-native-ran "$OUT_ARCH"
+    systemctl stop "$UNIT_ARCH.service" 2>/dev/null || true
+    systemctl reset-failed "$UNIT_ARCH.service" 2>/dev/null || true
+    rm -f "/run/systemd/system/$UNIT_ARCH.service" "$OUT_ARCH"
     RIDEOF
   '';
 }
