@@ -2693,7 +2693,15 @@ pub fn run_exec_helper() {
             )
             || config.proc_subset == "pid");
 
-    if needs_mount_ns {
+    // DelegateNamespaces=: the mount namespace must be owned by the service's
+    // user namespace so the service (root inside it) can manage its own mounts.
+    // The user namespace is created further below, so for a delegated service
+    // defer the mount-namespace setup until after it (see below); otherwise set
+    // it up here as usual.
+    let defer_mount_ns_for_delegation =
+        needs_mount_ns && !config.delegate_namespaces.is_empty();
+
+    if needs_mount_ns && !defer_mount_ns_for_delegation {
         if let Some(ns_pid) = config.join_namespace_pid {
             // JoinsNamespaceOf=: join the running service's mount namespace
             // instead of creating a new one. The target already has all
@@ -2972,6 +2980,15 @@ pub fn run_exec_helper() {
             }
             let _ = std::fs::write("/proc/self/gid_map", &gid_map);
         }
+    }
+
+    // DelegateNamespaces=: now that the user namespace exists, create the mount
+    // namespace under it (deferred from above) so it is owned by the service's
+    // user namespace. The service, root inside that user namespace, then holds
+    // CAP_SYS_ADMIN over its mount namespace and can create its own mounts.
+    if defer_mount_ns_for_delegation {
+        log::trace!("mount_ns: setting up (deferred) under delegated user namespace");
+        setup_mount_namespace(&config);
     }
 
     // ── PrivatePIDs= — PID namespace /proc remount ─────────────────────
