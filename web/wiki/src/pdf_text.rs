@@ -3203,6 +3203,45 @@ fn cells_at_columns(runs: &[Run], grid: &[(f64, f64)], size: f64) -> Vec<Cell> {
         .collect()
 }
 
+/// What separates two WORDS on a line whose letters are spaced apart.
+///
+/// A page that letter-spaces a title draws every letter as its own run: the
+/// cover of the annual report sets "GODKENDT REVISIONSPARTNERSELSKAB" with a
+/// point and a fifth between each pair of letters, which at seven points is a
+/// fifth of the em -- twice the gap that means a word break -- so the reading
+/// came out "G O D K E N D T". On such a line the gap between letters is the
+/// TRACKING, and a space has to be wider than that: the middle gap on the line,
+/// half as much again. Never LESS than the ordinary word gap, which is what the
+/// first attempt got wrong -- the address beside the title is drawn in pieces
+/// too, and a threshold below the word gap put spaces inside its words: "Aarhus
+/// Tan gen 9", "r e vision sne tværk".
+fn tracking_gap(runs: &[Run]) -> Option<f64> {
+    let singles = runs
+        .iter()
+        .filter(|r| r.text.trim().chars().count() == 1)
+        .count();
+    // Nearly all of them, not merely most: a page that draws ordinary text one
+    // glyph at a time still draws its longer words in pieces.
+    if runs.len() < 4 || singles * 5 < runs.len() * 4 {
+        return None;
+    }
+    let mut sorted: Vec<&Run> = runs.iter().collect();
+    sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    // Every gap, the closed ones included. Counting only the gaps that are
+    // wider than nothing takes the median of a glyph-by-glyph line's WORD
+    // spaces, and then a threshold half again as wide swallows them: the
+    // songbook's contents read "Kommunisterilysthuset".
+    let mut gaps: Vec<f64> = sorted
+        .windows(2)
+        .map(|pair| pair[1].x - pair[0].end_x)
+        .collect();
+    if gaps.is_empty() {
+        return None;
+    }
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Some(gaps[gaps.len() / 2] * 1.5)
+}
+
 /// How wide a gap between two runs has to be, as a fraction of the em, before it
 /// is a word break.
 ///
@@ -3254,6 +3293,7 @@ fn cells_of(runs: &[Run], size: f64) -> Vec<Cell> {
     }
     let mut sorted: Vec<&Run> = runs.iter().collect();
     sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let tracked = tracking_gap(runs);
     let mut cells: Vec<Cell> = Vec::new();
     let mut prev_end = f64::NEG_INFINITY;
     for run in sorted {
@@ -3269,7 +3309,7 @@ fn cells_of(runs: &[Run], size: f64) -> Vec<Cell> {
             cell.right = cell.right.max(run.end_x);
             let wants_space = !starts_cell
                 && !cell.spans.is_empty()
-                && (run.x - prev_end) > run.size * word_gap();
+                && (run.x - prev_end) > (run.size * word_gap()).max(tracked.unwrap_or(0.0));
             let here = Span {
                 text: String::new(),
                 color: run.color.clone(),
@@ -3315,6 +3355,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
     let mut size: f64 = 0.0;
     let mut sorted: Vec<&Run> = runs.iter().collect();
     sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let tracked = tracking_gap(runs);
     for run in sorted {
         size = size.max(run.size);
         // Compared against the pen's TRUE end, not a guess from the character
@@ -3324,7 +3365,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
             tail_gap = gap / run.size;
         }
         let wants_space = prev_end.is_finite()
-            && gap > run.size * word_gap()
+            && gap > (run.size * word_gap()).max(tracked.unwrap_or(0.0))
             && !spans.last().is_some_and(|s| s.text.ends_with(' '));
         // A run continues the one before it when the colour has not changed, so
         // a paragraph in one colour is one span rather than one per draw call.
