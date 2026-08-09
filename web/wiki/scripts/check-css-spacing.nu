@@ -47,6 +47,7 @@ const LOCAL_PROPS = [
     "--state-color"
     "--board-aspect"
     "--page-spare"
+    "--space"
     "--rule-start"
     "--rule-thickness"
     "--rule-width"

@@ -602,6 +602,19 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             }
                         }
                     },
+                    // Room the page left. Composition is not only what is on a
+                    // page: a statement sets its headings two lines clear of the
+                    // figures and a signature stands well below what it signs,
+                    // and at one paragraph's air between everything the reader
+                    // loses the grouping the page was making.
+                    Some(Block::Space { ems }) => rsx! {
+                        div {
+                            key: "{i}",
+                            class: "pdf-space",
+                            role: "presentation",
+                            style: "--space: {ems:.2}em;",
+                        }
+                    },
                     // A line the page drew across itself. It cannot be kept
                     // where it was -- the text under it is a different width
                     // now -- but it separated one thing from another, and drawn

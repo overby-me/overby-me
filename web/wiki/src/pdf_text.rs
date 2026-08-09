@@ -106,6 +106,16 @@ pub enum Block {
         width: f64,
         thickness: f64,
     },
+    /// Room the page left, in ems of its body text.
+    ///
+    /// Composition is not only what is on a page. A statement sets its headings
+    /// two lines clear of the figures, a signature stands well below what it
+    /// signs, and a section begins after a space that says a section is
+    /// beginning. Reflowed at one paragraph's air between everything, all of
+    /// that reads as one dense column, and the reader loses the grouping the
+    /// page was making. Only the room BEYOND a paragraph's own separation is
+    /// carried, so ordinary prose is unaffected.
+    Space { ems: f64 },
     /// A picture the page drew, where it drew it.
     Image(Picture),
     /// A place a link in this document points at. Carries nothing to read: it
@@ -139,6 +149,7 @@ impl Block {
             | Block::IndexEntry { spans, .. }
             | Block::ListItem { spans, .. } => spans,
             Block::Image(_)
+            | Block::Space { .. }
             | Block::Anchor(_)
             | Block::PageBreak { .. }
             | Block::Rule { .. }
@@ -3879,12 +3890,51 @@ fn next_word_width(line: &Line, fallback_size: f64) -> f64 {
 
 /// Turn lines into blocks: paragraphs broken on the vertical gap, headings on
 /// relative size, list items on a leading marker.
+/// What this document ordinarily leaves between one block and the next.
+///
+/// Measured rather than assumed, because it is a property of the document: the
+/// auditor's report sets its paragraphs 2.8 ems apart and the songbook sets its
+/// verses closer. Against a fixed figure, every paragraph of that report came
+/// out with room after it, which is the opposite of the point -- what is worth
+/// showing is the space a page left that it does not leave everywhere.
+fn usual_break(lines: &[Line], body: f64) -> f64 {
+    let mut gaps: Vec<f64> = lines
+        .windows(2)
+        .filter(|pair| pair[0].page == pair[1].page)
+        .map(|pair| pair[0].y - pair[1].y)
+        .filter(|gap| *gap > body * 1.6 && *gap < body * 6.0)
+        .collect();
+    if gaps.is_empty() {
+        return body * 2.2;
+    }
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    gaps[gaps.len() / 2]
+}
+
+/// The room the page left above this line, beyond what it leaves between blocks
+/// anyway.
+///
+/// Measured against the body text rather than the line's own size, because the
+/// line above may be a rule, whose height is not a height. Nothing across a page
+/// break: the space at the foot of a page is the page ending, and the page mark
+/// says so.
+fn space_before(lines: &[Line], at: usize, body: f64, usual: f64) -> Option<f64> {
+    let line = lines.get(at)?;
+    let prev = lines.get(at.checked_sub(1)?)?;
+    if prev.page != line.page || body <= 0.0 {
+        return None;
+    }
+    let extra = (prev.y - line.y) - usual;
+    (extra > body * 0.6).then(|| (extra / body).min(8.0))
+}
+
 fn blocks_from(
     lines: Vec<Line>,
     printed: &HashMap<usize, String>,
     anchors: &HashMap<usize, Vec<String>>,
 ) -> Vec<Block> {
     let body = body_size(&lines);
+    let usual = usual_break(&lines, body);
     let column = column_right(&lines);
     let col_left = column_left(&lines);
     let mut blocks: Vec<Block> = Vec::new();
@@ -4010,6 +4060,9 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
+            if let Some(ems) = space_before(&lines_ref, at, body, usual) {
+                blocks.push(Block::Space { ems });
+            }
             blocks.push(Block::Table {
                 rows: match grid.is_empty() {
                     true => table_rows(&lines_ref[at..*end], line.size),
@@ -4069,6 +4122,9 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
+            if let Some(ems) = space_before(&lines_ref, at, body, usual) {
+                blocks.push(Block::Space { ems });
+            }
             blocks.push(Block::Image(picture.clone()));
             prev = None;
             continue;
@@ -4085,6 +4141,9 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
+            if let Some(ems) = space_before(&lines_ref, at, body, usual) {
+                blocks.push(Block::Space { ems });
+            }
             blocks.push(Block::Rule {
                 offset,
                 width,
@@ -4154,6 +4213,11 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
+            // Whatever room the page left before this one, over and above the
+            // air a new block already gets.
+            if let Some(ems) = space_before(&lines_ref, at, body, usual) {
+                blocks.push(Block::Space { ems });
+            }
         }
         if para.is_empty() {
             para_size = line.size;
@@ -5741,6 +5805,7 @@ mod harness {
                             None => format!("li>{indent}"),
                         },
                         super::Block::Rule { width, .. } => format!("hr {:.0}%", width * 100.0),
+                        super::Block::Space { ems } => format!("space {ems:.1}em"),
                         super::Block::Table { rows, .. } => {
                             format!("table {}x{}", rows.len(), rows.first().map_or(0, Vec::len))
                         }
@@ -6335,8 +6400,14 @@ mod tests {
         }
     }
 
+    /// What the blocks say, which is what these tests are about. Room the page
+    /// left has no words in it and is not part of the reading.
     fn texts(blocks: &[Block]) -> Vec<String> {
-        blocks.iter().map(|b| b.text()).collect()
+        blocks
+            .iter()
+            .filter(|b| !matches!(b, Block::Space { .. }))
+            .map(|b| b.text())
+            .collect()
     }
 
     /// Lines close together are one paragraph; a wider gap starts another. This
@@ -6382,8 +6453,16 @@ mod tests {
                 "Brødtekst her. Mere brødtekst. Endnu mere.",
             ]
         );
-        assert!(matches!(blocks[0], Block::Heading { level: 1, .. }));
-        assert!(matches!(blocks[1], Block::Heading { level: 2, .. }));
+        // Room the page left stands between them, so the headings are picked
+        // out by kind rather than by position.
+        let headings: Vec<u8> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Heading { level, .. } => Some(*level),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(headings, vec![1, 2]);
     }
 
     /// A page break sends y back UP the page, and must not be read as the

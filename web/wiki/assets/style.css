@@ -8888,6 +8888,12 @@ a.list-item:hover {
 	border-top: var(--rule-thickness, 2px) solid var(--md-on-surface-variant);
 }
 
+/* Room the page left, in ems of its own body text: a spacer rather than a
+   margin, so it does not collapse into the margins of what stands round it. */
+.pdf-space {
+	height: var(--space, 0);
+}
+
 .pdf-drawing {
 	display: block;
 	max-width: 100%;
