@@ -8,8 +8,13 @@ The landing page renders a 3D force-directed graph where nodes represent profile
 
 The graph is a Rust/WebAssembly rewrite of the original React version: it draws directly to WebGL and runs a faithful port of [d3-force-3d](https://github.com/vasturiano/d3-force-3d) (the force model [react-force-graph-3d](https://github.com/vasturiano/react-force-graph) uses) for the layout.
 
-Additional utility routes:
+Additional routes:
 
+- `/screensaver` — Picks one of the [XScreenSaver](https://www.jwz.org/xscreensaver/)
+  ports at random and redirects to it
+- `/screensaver/<name>` — Runs that screensaver, with its options behind a button
+  (see [`xscreensaver/`](./xscreensaver/README.md))
+- `/cardioid` — An epicyclic curve tracer
 - `/search` — Redirects search queries to [Startpage](https://startpage.com)
 - `/x` — Redirects X/Twitter links through [xcancel.com](https://xcancel.com)
 - `/yt` — Embeds YouTube videos in a clean full-screen player
@@ -47,6 +52,19 @@ just build
 ```
 
 The static site is written to `target/dx/homepage/release/web/public`.
+
+`just build-split` produces the same bundle with one wasm chunk per screensaver.
+See [`xscreensaver/README.md`](./xscreensaver/README.md) for how that is wired
+and why it is not the default yet.
+
+### Test
+
+```sh
+just test
+```
+
+Runs the screensaver ports headlessly: every saver renders frames at several
+window sizes and option values with no browser involved.
 
 ### Clean
 

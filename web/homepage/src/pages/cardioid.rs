@@ -25,6 +25,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
+use crate::pages::ui::{Details, Slider, Toggle};
+use crate::url::captured_query;
+
 const TAU: f64 = std::f64::consts::TAU;
 /// Radius (px) of the little construction dots.
 const DOT_R: f64 = 5.0;
@@ -32,24 +35,6 @@ const DOT_R: f64 = 5.0;
 const LINE_WIDTH: f64 = 1.0;
 /// Upper bound on the number of rotating arms.
 const MAX_ARMS: usize = 6;
-
-thread_local! {
-    /// The page's initial `?query`, snapshotted in `main()` before the Dioxus
-    /// web router normalizes it off `window.location` on load.
-    static INITIAL_QUERY: RefCell<String> = const { RefCell::new(String::new()) };
-}
-
-/// Snapshot the URL query string. Must be called from `main()` before
-/// `dioxus::launch`, while a shared link's query is still on the location.
-pub fn capture_url_query() {
-    if let Some(search) = web_sys::window().and_then(|w| w.location().search().ok()) {
-        INITIAL_QUERY.with(|q| *q.borrow_mut() = search);
-    }
-}
-
-fn captured_query() -> String {
-    INITIAL_QUERY.with(|q| q.borrow().clone())
-}
 
 /// A tiny xorshift PRNG seeded from `js_sys::Math::random`, so "Randomize" and
 /// per-segment colors vary without pulling in a rng crate.
@@ -1237,71 +1222,6 @@ pub fn Cardioid() -> Element {
                     style: "display:inline-block;margin-top:12px;color:#888;font-size:13px;",
                     "← home"
                 }
-            }
-        }
-    }
-}
-
-/// A collapsible advanced section (native `<details>`, closed by default).
-#[component]
-fn Details(summary: String, children: Element) -> Element {
-    rsx! {
-        details {
-            style: "margin-top:10px;border-top:1px solid #333;padding-top:8px;",
-            summary {
-                style: "cursor:pointer;font-size:13px;color:#9aa;font-weight:600;margin-bottom:6px;",
-                "{summary}"
-            }
-            {children}
-        }
-    }
-}
-
-/// A small on/off pill button.
-#[component]
-fn Toggle(label: String, on: bool, onclick: EventHandler<MouseEvent>) -> Element {
-    let bg = if on {
-        "background:#2f7d32;border-color:#3faf43"
-    } else {
-        "background:#333;border-color:#555"
-    };
-    rsx! {
-        button {
-            style: "flex:0 0 auto;padding:5px 10px;border:1px solid;border-radius:6px;\
-                    color:#eee;cursor:pointer;font:inherit;font-size:13px;{bg}",
-            onclick: move |e| onclick.call(e),
-            "{label}"
-        }
-    }
-}
-
-#[component]
-fn Slider(
-    label: String,
-    min: String,
-    max: String,
-    step: String,
-    value: f64,
-    decimals: u8,
-    oninput: EventHandler<f64>,
-) -> Element {
-    let shown = format!("{:.1$}", value, decimals as usize);
-    rsx! {
-        div {
-            style: "margin-bottom:8px;",
-            div {
-                style: "display:flex;justify-content:space-between;font-size:12px;color:#bbb;margin-bottom:2px;",
-                span { "{label}" }
-                span { style: "color:#ff8fb8;font-variant-numeric:tabular-nums;", "{shown}" }
-            }
-            input {
-                r#type: "range", min, max, step, value: "{value}",
-                style: "width:100%;accent-color:#ff4d8d;",
-                oninput: move |e| {
-                    if let Ok(v) = e.value().parse::<f64>() {
-                        oninput.call(v);
-                    }
-                },
             }
         }
     }

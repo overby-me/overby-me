@@ -45,6 +45,8 @@
           ./justfile
           ./src
           ./assets
+          # The screensaver ports are a path dependency of the app crate.
+          ./xscreensaver
         ];
       };
 

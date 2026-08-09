@@ -14,6 +14,9 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = "=0.2.121"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
+# `lazy_loader!` expands to unqualified `wasm_split::` paths, so the crate has
+# to be in scope under that exact name.
+wasm_split = { package = "wasm-splitter", version = "0.7.9", optional = true }
 web-sys = { version = "0.3", features = [
   "AddEventListenerOptions",
   "CanvasRenderingContext2d",
@@ -28,6 +31,8 @@ web-sys = { version = "0.3", features = [
   "HtmlCanvasElement",
   "HtmlElement",
   "HtmlImageElement",
+  "ImageData",
+  "KeyboardEvent",
   "Location",
   "MouseEvent",
   "Node",
@@ -46,6 +51,21 @@ web-sys = { version = "0.3", features = [
   "Window",
   "console",
 ] }
+xscreensaver = { path = "xscreensaver" }
+
+[features]
+# Split each screensaver into its own lazily-loaded wasm chunk. Must be paired
+# with `dx build --wasm-split`, which is what rewrites the module: with the
+# feature on and the flag off, the generated `./__wasm_split.js` imports are
+# never resolved and the app fails to instantiate. `just build-split` sets both.
+#
+# Deliberately depends on `wasm-splitter` directly rather than on
+# `dioxus/wasm-split`. Turning the dioxus feature on also makes the router
+# macro split every route, which is both more than we want and enough to crash
+# dioxus-cli 0.7.9's splitter ("Failed to find data symbol", reproducible with
+# no screensaver code involved). This way the only split points in the module
+# are the ones declared in `src/pages/savers.rs`.
+split = ["dep:wasm_split"]
 
 [profile.release]
 opt-level = "z"

@@ -1,0 +1,407 @@
+//! The `screenhack.h` contract, in Rust.
+//!
+//! Upstream every 2D hack exports five C functions and a table:
+//!
+//! ```text
+//! static void *NAME_init    (Display *, Window);
+//! static unsigned long NAME_draw (Display *, Window, void *closure);
+//! static void NAME_reshape  (Display *, Window, void *, unsigned, unsigned);
+//! static Bool NAME_event    (Display *, Window, void *, XEvent *);
+//! static void NAME_free     (Display *, Window, void *);
+//! XSCREENSAVER_MODULE ("Name", name)
+//! ```
+//!
+//! `init` returns the hack's private state, `draw` renders one step and returns
+//! how many microseconds it would like to wait, and the driver loops. That maps
+//! onto [`Screenhack`] with the state as `Self`, `free` as `Drop`, and the
+//! module table as [`SaverDef`].
+//!
+//! [`Runner`] is the driver. The browser host and the tests both go through it,
+//! so a saver behaves identically in a `cargo test` and on the page.
+
+pub mod color;
+pub mod erase;
+pub mod fb;
+pub mod opts;
+pub mod rand;
+
+pub use color::{Pixel, XColor};
+pub use fb::{Fb, GXFunc, Gc, Pixmap, XArc, XImage, XPoint, XRectangle, XSegment};
+pub use opts::{Opt, OptKind, Resources, SelectItem};
+pub use rand::{frand, random, random_below, ya_rand_init};
+
+/// An input event, reduced to what the hacks actually look at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum XEvent {
+    ButtonPress { x: i32, y: i32, button: u32 },
+    ButtonRelease { x: i32, y: i32, button: u32 },
+    MotionNotify { x: i32, y: i32 },
+    KeyPress { key: char },
+}
+
+/// `screenhack_event_helper`: upstream's "did the user poke it" test, which
+/// most hacks use to mean "start over".
+pub fn screenhack_event_helper(event: &XEvent) -> bool {
+    matches!(event, XEvent::ButtonPress { .. } | XEvent::KeyPress { .. })
+}
+
+/// The display: the window's framebuffer, the resource database, and the clock.
+///
+/// The `Display *` and `Window` that every upstream call takes are both folded
+/// in here, so `XFillRectangle (dpy, window, gc, ..)` ports to
+/// `d.win().fill_rectangle(&gc, ..)`.
+pub struct Dpy {
+    window: Fb,
+    /// The resolved resources. Hacks read these in `new`, as the C reads them
+    /// in `init`.
+    pub res: Resources,
+    /// Seconds since the saver started. Set by [`Runner`] before each draw.
+    pub time: f64,
+    /// Upstream's `mono_p` global. Always false here (a canvas is TrueColor),
+    /// but hacks branch on it and a few assign to it.
+    pub mono_p: bool,
+}
+
+impl Dpy {
+    pub fn new(width: i32, height: i32, res: Resources) -> Self {
+        let background = res.pixel("background");
+        let mut window = Fb::new(width, height);
+        window.clear(background);
+        Self {
+            window,
+            res,
+            time: 0.0,
+            mono_p: false,
+        }
+    }
+
+    /// The window, as a drawable.
+    #[inline]
+    pub fn win(&mut self) -> &mut Fb {
+        &mut self.window
+    }
+
+    /// The window, read-only. `XGetImage`-ish reads go through here.
+    #[inline]
+    pub fn win_ref(&self) -> &Fb {
+        &self.window
+    }
+
+    /// `XGetWindowAttributes(..).width`.
+    #[inline]
+    pub fn width(&self) -> i32 {
+        self.window.width()
+    }
+
+    /// `XGetWindowAttributes(..).height`.
+    #[inline]
+    pub fn height(&self) -> i32 {
+        self.window.height()
+    }
+
+    /// `XCreatePixmap`, initialised to opaque black as X leaves it undefined.
+    pub fn new_pixmap(&self, width: i32, height: i32) -> Pixmap {
+        Pixmap::new(width, height)
+    }
+
+    /// `XClearWindow`.
+    pub fn clear_window(&mut self) {
+        let bg = self.res.pixel("background");
+        self.window.clear(bg);
+    }
+
+    fn resize(&mut self, width: i32, height: i32) {
+        let bg = self.res.pixel("background");
+        self.window.resize(width, height);
+        self.window.clear(bg);
+    }
+}
+
+/// A ported hack.
+///
+/// `init` has no place here: construction is the port's own constructor, which
+/// is what the `new` field of [`SaverDef`] points at. `free` has no place
+/// either; `Drop` covers it, and most hacks only `free` their own state.
+pub trait Screenhack {
+    /// `NAME_draw`: render one step, and return how many microseconds to wait
+    /// before the next one.
+    fn draw(&mut self, d: &mut Dpy) -> u32;
+
+    /// `NAME_reshape`.
+    fn reshape(&mut self, d: &mut Dpy, width: i32, height: i32) {
+        let _ = (d, width, height);
+    }
+
+    /// `NAME_event`: return true if the event was consumed.
+    fn event(&mut self, d: &mut Dpy, event: &XEvent) -> bool {
+        let _ = (d, event);
+        false
+    }
+}
+
+/// Attribution, parsed out of the `<_description>` in the upstream config XML.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct About {
+    pub author: &'static str,
+    pub year: &'static str,
+    /// The upstream demo video, from `<video href>`.
+    pub video: Option<&'static str>,
+    pub blurb: &'static str,
+}
+
+/// Everything the host needs to run one saver.
+///
+/// This is deliberately plain data with a function pointer rather than a
+/// component: it is what each lazily-loaded wasm chunk hands back, so the whole
+/// runtime (canvas, frame loop, panel) can stay in the main module instead of
+/// being duplicated into every chunk.
+pub struct SaverDef {
+    /// URL slug, matching the upstream binary name.
+    pub slug: &'static str,
+    /// Display name, from the XML `_label`.
+    pub label: &'static str,
+    pub new: fn(&mut Dpy) -> Box<dyn Screenhack>,
+    /// The hack's `NAME_defaults[]`, copied verbatim from the C.
+    pub defaults: &'static [&'static str],
+    /// The knobs the panel shows, derived from `hacks/config/NAME.xml`.
+    pub opts: &'static [Opt],
+    pub about: About,
+}
+
+/// The most frames [`Runner::tick`] will draw for one call, however far behind
+/// the clock it is. A backgrounded tab or a slow frame must not turn into an
+/// unbounded catch-up burst.
+const MAX_FRAMES_PER_TICK: u32 = 8;
+
+/// A hack that asks for no delay still gets paced, or it would draw
+/// [`MAX_FRAMES_PER_TICK`] times per animation frame for no visible gain.
+const MIN_DELAY: f64 = 1.0 / 240.0;
+
+/// Drives one saver: owns the display, the hack, and the frame pacing.
+pub struct Runner {
+    pub dpy: Dpy,
+    hack: Box<dyn Screenhack>,
+    def: &'static SaverDef,
+    next_due: f64,
+    started: bool,
+}
+
+impl Runner {
+    /// Start a saver at the given size, with settings from a URL query.
+    ///
+    /// `seed` fixes the random stream, so the same seed and size reproduce the
+    /// same frames. The host passes a random seed; the tests pass a constant.
+    pub fn new(def: &'static SaverDef, width: i32, height: i32, query: &str, seed: u32) -> Self {
+        ya_rand_init(seed);
+        let res = Resources::new(def.defaults, def.opts, query);
+        let mut dpy = Dpy::new(width, height, res);
+        let hack = (def.new)(&mut dpy);
+        Self {
+            dpy,
+            hack,
+            def,
+            next_due: 0.0,
+            started: false,
+        }
+    }
+
+    pub fn def(&self) -> &'static SaverDef {
+        self.def
+    }
+
+    /// Draw exactly one step and advance the clock by however long the hack
+    /// asked to wait.
+    ///
+    /// Tests use this instead of [`Runner::tick`]: it runs the saver at its own
+    /// requested rate with no wall clock involved, so the output depends only
+    /// on the seed. The clock still has to move, because anything time-based
+    /// (the shared erasers, most obviously) would otherwise never finish.
+    pub fn step(&mut self) -> u32 {
+        let delay = self.hack.draw(&mut self.dpy);
+        self.dpy.time += (delay as f64 / 1_000_000.0).max(MIN_DELAY);
+        delay
+    }
+
+    /// Advance to wall-clock `now` (seconds), drawing as many steps as the
+    /// hack's requested delays call for.
+    pub fn tick(&mut self, now: f64) {
+        self.dpy.time = now;
+        if !self.started {
+            self.started = true;
+            self.next_due = now;
+        }
+        let mut budget = MAX_FRAMES_PER_TICK;
+        while self.next_due <= now && budget > 0 {
+            let delay = self.hack.draw(&mut self.dpy);
+            self.next_due += (delay as f64 / 1_000_000.0).max(MIN_DELAY);
+            budget -= 1;
+        }
+        // Whatever we could not keep up with is dropped rather than queued.
+        if self.next_due < now {
+            self.next_due = now;
+        }
+    }
+
+    /// `NAME_reshape`. A no-op if the size did not actually change, because
+    /// several hacks restart themselves on reshape.
+    pub fn resize(&mut self, width: i32, height: i32) {
+        if width == self.dpy.width() && height == self.dpy.height() {
+            return;
+        }
+        self.dpy.resize(width, height);
+        let (w, h) = (self.dpy.width(), self.dpy.height());
+        self.hack.reshape(&mut self.dpy, w, h);
+    }
+
+    /// `NAME_event`.
+    pub fn event(&mut self, event: XEvent) -> bool {
+        self.hack.event(&mut self.dpy, &event)
+    }
+
+    /// The current frame as RGBA bytes, ready for `putImageData`.
+    pub fn frame_bytes(&self) -> &[u8] {
+        self.dpy.win_ref().as_bytes()
+    }
+
+    /// A cheap content hash of the current frame, for regression tests.
+    pub fn frame_hash(&self) -> u64 {
+        // FNV-1a over the pixels. Not cryptographic, just stable.
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for p in self.dpy.win_ref().pixels() {
+            for b in p.to_le_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        h
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        static DRAWS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    struct Counter {
+        delay: u32,
+    }
+
+    impl Screenhack for Counter {
+        fn draw(&mut self, d: &mut Dpy) -> u32 {
+            DRAWS.with(|c| c.set(c.get() + 1));
+            let gc = Gc::new(color::WHITE, color::BLACK);
+            d.win().draw_point(&gc, 0, 0);
+            self.delay
+        }
+    }
+
+    static SLOW: SaverDef = SaverDef {
+        slug: "slow",
+        label: "Slow",
+        new: |_| Box::new(Counter { delay: 10_000 }),
+        defaults: &[".background: black", ".foreground: white"],
+        opts: &[],
+        about: About {
+            author: "test",
+            year: "2026",
+            video: None,
+            blurb: "",
+        },
+    };
+
+    static GREEDY: SaverDef = SaverDef {
+        slug: "greedy",
+        label: "Greedy",
+        new: |_| Box::new(Counter { delay: 0 }),
+        defaults: &[".background: black", ".foreground: white"],
+        opts: &[],
+        about: About {
+            author: "test",
+            year: "2026",
+            video: None,
+            blurb: "",
+        },
+    };
+
+    fn draws_during(f: impl FnOnce()) -> u32 {
+        DRAWS.with(|c| c.set(0));
+        f();
+        DRAWS.with(|c| c.get())
+    }
+
+    #[test]
+    fn pacing_follows_the_requested_delay() {
+        // 10ms delay over a 100ms tick is ten steps, not one.
+        let n = draws_during(|| {
+            let mut r = Runner::new(&SLOW, 64, 64, "", 1);
+            r.tick(0.0);
+            r.tick(0.1);
+        });
+        assert!((9..=MAX_FRAMES_PER_TICK + 1).contains(&n), "drew {n} times");
+    }
+
+    #[test]
+    fn catch_up_is_bounded() {
+        // A tab that was hidden for an hour must not draw an hour of frames.
+        let n = draws_during(|| {
+            let mut r = Runner::new(&SLOW, 64, 64, "", 1);
+            r.tick(0.0);
+            r.tick(3600.0);
+        });
+        assert!(
+            n <= MAX_FRAMES_PER_TICK + 1,
+            "drew {n} times after a long pause"
+        );
+    }
+
+    #[test]
+    fn a_zero_delay_hack_is_still_paced() {
+        let n = draws_during(|| {
+            let mut r = Runner::new(&GREEDY, 64, 64, "", 1);
+            r.tick(0.0);
+            r.tick(1.0 / 60.0);
+        });
+        assert!(n <= MAX_FRAMES_PER_TICK + 1, "drew {n} times in one frame");
+    }
+
+    #[test]
+    fn the_same_seed_gives_the_same_frame() {
+        let mut a = Runner::new(&SLOW, 64, 64, "", 7);
+        let mut b = Runner::new(&SLOW, 64, 64, "", 7);
+        for _ in 0..10 {
+            a.step();
+            b.step();
+        }
+        assert_eq!(a.frame_hash(), b.frame_hash());
+    }
+
+    #[test]
+    fn resize_is_a_no_op_when_the_size_is_unchanged() {
+        let mut r = Runner::new(&SLOW, 64, 64, "", 1);
+        r.step();
+        let before = r.frame_hash();
+        r.resize(64, 64);
+        assert_eq!(r.frame_hash(), before);
+        r.resize(80, 40);
+        assert_eq!(r.dpy.width(), 80);
+        assert_eq!(r.dpy.height(), 40);
+    }
+
+    #[test]
+    fn event_helper_only_fires_on_a_poke() {
+        assert!(screenhack_event_helper(&XEvent::KeyPress { key: 'x' }));
+        assert!(screenhack_event_helper(&XEvent::ButtonPress {
+            x: 0,
+            y: 0,
+            button: 1
+        }));
+        assert!(!screenhack_event_helper(&XEvent::MotionNotify {
+            x: 0,
+            y: 0
+        }));
+    }
+}
