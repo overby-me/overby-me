@@ -19,6 +19,7 @@ wasm-logger = "0.2"
 wasm_split = { package = "wasm-splitter", version = "0.7.9", optional = true }
 web-sys = { version = "0.3", features = [
   "AddEventListenerOptions",
+  "Blob",
   "CanvasRenderingContext2d",
   "CssStyleDeclaration",
   "Document",
@@ -31,9 +32,11 @@ web-sys = { version = "0.3", features = [
   "HtmlCanvasElement",
   "HtmlElement",
   "HtmlImageElement",
+  "ImageBitmap",
   "ImageData",
   "KeyboardEvent",
   "Location",
+  "MessageEvent",
   "MouseEvent",
   "Node",
   "Performance",
@@ -47,6 +50,7 @@ web-sys = { version = "0.3", features = [
   "WebGlShader",
   "WebGlTexture",
   "WebGlUniformLocation",
+  "WebSocket",
   "WheelEvent",
   "Window",
   "console",

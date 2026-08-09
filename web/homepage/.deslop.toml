@@ -95,4 +95,7 @@ disabled_rules = [
   # its `RefCell` borrows are each scoped to one statement, none of them
   # anywhere near the `await` inside the spawned block.
   "rust_lock_across_await",
+  # `Source::from_query` returns the unit variant `Source::None` when there is
+  # no `images` parameter to read. That is the answer, not a half-built value.
+  "rust_partial_init_escape",
 ]

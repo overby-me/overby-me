@@ -14,6 +14,8 @@ Additional routes:
   ports at random and redirects to it
 - `/screensaver/<name>` — Runs that screensaver, with its options behind a button
   (see [`xscreensaver/`](./xscreensaver/README.md))
+- `/screensaver/<name>?images=@handle` — Savers that work on a picture take it
+  from that account's posts; `?images=%23tag` takes them live off the firehose
 - `/cardioid` — An epicyclic curve tracer
 - `/search` — Redirects search queries to [Startpage](https://startpage.com)
 - `/x` — Redirects X/Twitter links through [xcancel.com](https://xcancel.com)

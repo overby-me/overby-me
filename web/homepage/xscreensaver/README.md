@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (4) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -66,6 +66,34 @@ The tests in `src/hacks2d/mod.rs` then cover the new saver automatically: they
 check every registered saver draws something, keeps changing, is reproducible
 from its seed, and survives degenerate window sizes, mid-run resizes, pointer
 events and both extremes of every option it declares.
+
+## Pictures
+
+About thirty of the hacks work on an image rather than drawing from nothing.
+Upstream grabs the screen or a file from your pictures directory; in a browser
+there is neither, so a saver takes its pictures from atproto:
+
+```text
+/screensaver/decayscreen?images=@overby.me    that account's own photographs
+/screensaver/decayscreen?images=%23caturday   whatever anyone posts under the tag, live
+/screensaver/decayscreen                      colour bars
+```
+
+This crate never fetches anything, which is what keeps it dependency-free and
+testable without a browser. Instead `runtime::image` is a channel: a hack asks
+for a picture, the host answers when it can, and if nothing is going to answer
+the hack gets SMPTE colour bars, which is upstream's fallback too
+(`utils/colorbars.c`). The native tests register no host, so every
+image-consuming saver runs against the test card.
+
+The host side lives in `../src/images.rs`, which explains why every route goes
+through the posting account's own PDS rather than `cdn.bsky.app` (no CORS
+headers there, so the canvas would be tainted and unreadable) and why hashtags
+come off the Jetstream firehose rather than a search endpoint.
+
+One thing to know when porting an image-consuming saver: hacks ask for their
+picture in `init`, so whether a host is available has to arrive with
+`StartArgs::with_image_host`, not be set afterwards.
 
 ## Code splitting
 

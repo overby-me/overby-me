@@ -76,6 +76,12 @@ macro_rules! saver {
 }
 
 saver!(
+    "decayscreen",
+    decayscreen_body,
+    decayscreen_start,
+    xscreensaver::hacks2d::decayscreen::start
+);
+saver!(
     "greynetic",
     greynetic_body,
     greynetic_start,
@@ -97,6 +103,11 @@ saver!(
 /// Every saver, by slug. Only the slug, the label and a function pointer live
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
+    Entry {
+        slug: "decayscreen",
+        label: "Decay Screen",
+        start: decayscreen_start,
+    },
     Entry {
         slug: "greynetic",
         label: "Greynetic",

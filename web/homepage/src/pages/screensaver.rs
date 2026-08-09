@@ -21,9 +21,14 @@ use xscreensaver::SaverDef;
 use xscreensaver::runtime::{OptKind, Runner, StartArgs, XEvent};
 
 use crate::Route;
+use crate::images::{self, Source};
 use crate::pages::savers;
 use crate::pages::ui::{Choice, Details, Slider, Toggle};
 use crate::url::{captured_query, replace_query};
+
+/// How long to wait before asking an image source again after it came up
+/// empty. A live hashtag can be quiet for a while.
+const IMAGE_RETRY_SECONDS: f64 = 2.0;
 
 /// The largest framebuffer edge we will rasterise, in pixels.
 ///
@@ -52,11 +57,28 @@ struct Host {
     /// The query the running hack was started with, so that the settings effect
     /// firing for an unrelated reason does not restart it.
     query: String,
+    /// Where this saver's pictures come from, for the hacks that want one.
+    source: Source,
+    /// A hack has asked for a picture and has not been given one yet.
+    image_wanted: bool,
+    /// A fetch is in flight, so we do not start a second one.
+    image_fetching: bool,
+    /// Do not hammer a hashtag firehose that has not produced anything yet.
+    image_retry_at: f64,
 }
 
 impl Host {
     fn def(&self) -> &'static SaverDef {
         self.runner.def()
+    }
+
+    /// Reset the picture bookkeeping after a restart. The saver itself was
+    /// told about the source through its [`StartArgs`], because hacks ask for
+    /// their image while starting up.
+    fn announce_image_source(&mut self) {
+        self.image_wanted = false;
+        self.image_fetching = false;
+        self.image_retry_at = 0.0;
     }
 
     fn start_args(&self, query: &str) -> StartArgs {
@@ -66,6 +88,7 @@ impl Host {
             query,
             seed(),
         )
+        .with_image_host(self.source != Source::None)
     }
 
     fn sync_size(&mut self) {
@@ -137,6 +160,7 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
     let g = Rc::clone(&f);
 
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+        let mut fetch: Option<(Source, i32, i32)> = None;
         let connected = {
             let mut h = host.borrow_mut();
             if h.canvas.is_connected() {
@@ -146,11 +170,45 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                     h.runner.tick(now);
                 }
                 h.blit();
+
+                if h.runner.dpy.take_image_request() {
+                    h.image_wanted = true;
+                    h.image_retry_at = 0.0;
+                }
+                let now = now_seconds();
+                if h.image_wanted && !h.image_fetching && now >= h.image_retry_at {
+                    h.image_fetching = true;
+                    fetch = Some((
+                        h.source.clone(),
+                        h.runner.dpy.width(),
+                        h.runner.dpy.height(),
+                    ));
+                }
                 true
             } else {
                 false
             }
         };
+
+        // Started outside the borrow: the fetch outlives this frame, and the
+        // next one must be able to draw while it is in flight.
+        if let Some((source, w, h_px)) = fetch {
+            let host = Rc::clone(&host);
+            wasm_bindgen_futures::spawn_local(async move {
+                let picture = images::next_picture(&source, w, h_px).await;
+                let mut h = host.borrow_mut();
+                h.image_fetching = false;
+                match picture {
+                    Some(p) => {
+                        h.image_wanted = false;
+                        h.runner.dpy.deliver_image(p.image, p.title);
+                    }
+                    // Nothing to show yet: a hashtag nobody has posted under
+                    // since we started listening. Ask again shortly.
+                    None => h.image_retry_at = now_seconds() + IMAGE_RETRY_SECONDS,
+                }
+            });
+        }
         if connected && let Some(window) = web_sys::window() {
             let _ = window
                 .request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref());
@@ -170,6 +228,21 @@ fn to_query(settings: &BTreeMap<String, String>) -> String {
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join("&")
+}
+
+/// The address-bar query: the panel's settings plus the picture source, which
+/// the panel does not own but which has to survive being written back or a
+/// reload would lose it.
+fn shareable_query(settings: &BTreeMap<String, String>, source: &Source) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(images) = source.as_param() {
+        parts.push(format!("images={images}"));
+    }
+    let settings = to_query(settings);
+    if !settings.is_empty() {
+        parts.push(settings);
+    }
+    parts.join("&")
 }
 
 /// `/screensaver`: pick one at random and redirect to it.
@@ -251,7 +324,12 @@ fn SaverStage(slug: String) -> Element {
     // means "Reset" also re-rolls anything the hack randomises at startup.
     use_effect(move || {
         let query = to_query(&settings.read());
-        replace_query(&query);
+        let source = host
+            .read()
+            .as_ref()
+            .map(|h| h.borrow().source.clone())
+            .unwrap_or(Source::None);
+        replace_query(&shareable_query(&settings.read(), &source));
         let Some(h) = host.read().clone() else { return };
         // Every borrow of the host is scoped to a single statement on purpose:
         // the restart has to await the saver's chunk, and a `RefCell` borrow
@@ -268,6 +346,7 @@ fn SaverStage(slug: String) -> Element {
                 let mut h = h.borrow_mut();
                 h.runner = runner;
                 h.query = query;
+                h.announce_image_source();
             }
         });
     });
@@ -293,13 +372,16 @@ fn SaverStage(slug: String) -> Element {
                 canvas.set_width(w as u32);
                 canvas.set_height(h as u32);
 
+                let source = Source::from_query(&captured_query());
                 let query = to_query(&settings.peek());
                 // Fetches the saver's own wasm chunk the first time.
-                let Some(runner) = (entry.start)(StartArgs::new(w, h, &query, seed())).await else {
+                let args =
+                    StartArgs::new(w, h, &query, seed()).with_image_host(source != Source::None);
+                let Some(runner) = (entry.start)(args).await else {
                     failed.set(true);
                     return;
                 };
-                let h = Rc::new(RefCell::new(Host {
+                let mut built = Host {
                     canvas,
                     ctx,
                     runner,
@@ -308,7 +390,13 @@ fn SaverStage(slug: String) -> Element {
                     css_w,
                     css_h,
                     query,
-                }));
+                    source,
+                    image_wanted: false,
+                    image_fetching: false,
+                    image_retry_at: 0.0,
+                };
+                built.announce_image_source();
+                let h = Rc::new(RefCell::new(built));
                 host.set(Some(Rc::clone(&h)));
                 start_animation_loop(h);
             });
@@ -330,6 +418,13 @@ fn SaverStage(slug: String) -> Element {
     // The saver's definition only exists once its chunk has loaded and the hack
     // has started, so the panel appears with it rather than before it.
     let def = host.read().as_ref().map(|h| h.borrow().def());
+    // Where the pictures come from, and what the one on screen is called.
+    let pictures = host.read().as_ref().and_then(|h| {
+        let h = h.borrow();
+        h.source
+            .describe()
+            .map(|from| (from, h.runner.dpy.image_title().map(str::to_string)))
+    });
 
     rsx! {
         div {
@@ -448,6 +543,19 @@ fn SaverStage(slug: String) -> Element {
                                     background:#203a30;color:#9dffc0;cursor:pointer;font:inherit;font-size:13px;",
                             onclick: move |_| settings.write().clear(),
                             "Reset"
+                        }
+                    }
+
+                    if let Some((from , caption)) = pictures.clone() {
+                        Details { summary: "Pictures",
+                            div {
+                                style: "font-size:12px;color:#bbb;line-height:1.5;",
+                                "From {from}"
+                                if let Some(caption) = caption {
+                                    br {}
+                                    span { style: "color:#888;font-style:italic;", "{caption}" }
+                                }
+                            }
                         }
                     }
 
@@ -597,6 +705,10 @@ fn current_bool(settings: &Signal<BTreeMap<String, String>>, key: &str, default:
     )
 }
 
+/// Query parameters the host owns rather than the saver. The panel must not
+/// adopt them as settings, or it would write them back a second time.
+const RESERVED_PARAMS: &[&str] = &["images"];
+
 /// Seed the panel from a shared link's query string.
 fn initial_settings(query: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
@@ -609,6 +721,9 @@ fn initial_settings(query: &str) -> BTreeMap<String, String> {
         let Some((k, _)) = pair.split_once('=') else {
             continue;
         };
+        if RESERVED_PARAMS.contains(&k) {
+            continue;
+        }
         if let Some(v) = params.get(k) {
             out.insert(k.to_string(), v);
         }

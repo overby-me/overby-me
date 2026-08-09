@@ -22,11 +22,13 @@
 pub mod color;
 pub mod erase;
 pub mod fb;
+pub mod image;
 pub mod opts;
 pub mod rand;
 
 pub use color::{Pixel, XColor};
 pub use fb::{Fb, GXFunc, Gc, Pixmap, XArc, XImage, XPoint, XRectangle, XSegment};
+pub use image::ImageLoad;
 pub use opts::{Opt, OptKind, Resources, SelectItem};
 pub use rand::{frand, random, random_below, ya_rand_init};
 
@@ -60,6 +62,7 @@ pub struct Dpy {
     /// Upstream's `mono_p` global. Always false here (a canvas is TrueColor),
     /// but hacks branch on it and a few assign to it.
     pub mono_p: bool,
+    images: image::ImageChannel,
 }
 
 impl Dpy {
@@ -72,7 +75,49 @@ impl Dpy {
             res,
             time: 0.0,
             mono_p: false,
+            images: image::ImageChannel::default(),
         }
+    }
+
+    /// `load_image_async_simple`: ask for a picture to work on.
+    ///
+    /// Pass `None` to start, then hand back what you get until it returns
+    /// `None`, at which point the image has been drawn into the window. If no
+    /// host is supplying images you get colour bars, exactly as upstream does
+    /// when it cannot grab a screen or find a file.
+    pub fn load_image_async_simple(&mut self, pending: Option<ImageLoad>) -> Option<ImageLoad> {
+        // Split the borrow: the channel draws into the window it is told about.
+        let Dpy {
+            window,
+            images,
+            time,
+            ..
+        } = self;
+        images.poll(window, *time, pending)
+    }
+
+    /// Host side: tell the runtime that images can be fetched. Without this a
+    /// request is answered immediately with colour bars, which is what makes
+    /// the native tests work with no host at all.
+    pub fn set_image_host(&mut self, supplies: bool) {
+        self.images.host_supplies = supplies;
+    }
+
+    /// Host side: has a hack asked for an image since the last check?
+    pub fn take_image_request(&mut self) -> bool {
+        std::mem::take(&mut self.images.requested)
+    }
+
+    /// Host side: hand over a decoded image, and optionally what to call it.
+    pub fn deliver_image(&mut self, image: XImage, title: Option<String>) {
+        self.images.ready = Some(image);
+        self.images.title = title;
+    }
+
+    /// The caption of the image on screen, if the host gave one. The panel
+    /// shows it, so you can tell whose picture you are looking at.
+    pub fn image_title(&self) -> Option<&str> {
+        self.images.title.as_deref()
     }
 
     /// The window, as a drawable.
@@ -163,6 +208,12 @@ pub struct StartArgs {
     /// Fixes the random stream: the same seed and size reproduce the same
     /// frames. The host passes a random seed; the tests pass a constant.
     pub seed: u32,
+    /// Whether the host can supply pictures for the hacks that want one.
+    ///
+    /// It has to be known before the hack starts, not after: several of them
+    /// ask for their image in `init`, and a request made before the host has
+    /// spoken up is answered on the spot with colour bars.
+    pub image_host: bool,
 }
 
 impl StartArgs {
@@ -172,7 +223,14 @@ impl StartArgs {
             height,
             query: query.to_string(),
             seed,
+            image_host: false,
         }
+    }
+
+    /// Declare that the host will answer image requests.
+    pub fn with_image_host(mut self, image_host: bool) -> Self {
+        self.image_host = image_host;
+        self
     }
 }
 
@@ -236,6 +294,7 @@ impl Runner {
         ya_rand_init(args.seed);
         let res = Resources::new(def.defaults, def.opts, &args.query);
         let mut dpy = Dpy::new(args.width, args.height, res);
+        dpy.set_image_host(args.image_host);
         let hack = new(&mut dpy);
         Self {
             dpy,

@@ -1,6 +1,7 @@
 mod atproto;
 mod atproto_web;
 mod graph;
+mod images;
 mod pages;
 mod url;
 

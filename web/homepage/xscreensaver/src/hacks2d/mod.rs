@@ -13,6 +13,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
 
+pub mod decayscreen;
 pub mod greynetic;
 pub mod munch;
 pub mod rorschach;
@@ -23,7 +24,12 @@ pub mod rorschach;
 /// naming every saver's entry point in one place is what would keep them all in
 /// the main module. See [`crate::all`].
 #[cfg(not(target_arch = "wasm32"))]
-pub static ALL: &[&Saver] = &[&greynetic::SAVER, &munch::SAVER, &rorschach::SAVER];
+pub static ALL: &[&Saver] = &[
+    &decayscreen::SAVER,
+    &greynetic::SAVER,
+    &munch::SAVER,
+    &rorschach::SAVER,
+];
 
 #[cfg(test)]
 mod tests {
