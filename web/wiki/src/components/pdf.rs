@@ -165,6 +165,8 @@ pub enum PdfLayout {
     /// Each page at its own proportions, everything where the page put it.
     Page,
     /// The words, in the reading order, wrapped to whatever width there is.
+    /// The default: most of what this wiki carries is read on a phone at a
+    /// meeting, and there a fixed A4 page is a thing to pinch at.
     Reflow,
 }
 
@@ -183,10 +185,11 @@ impl PdfLayout {
         }
     }
 
+    /// Anything unrecognised is the default, which is the reading view.
     fn from_key(key: &str) -> Self {
         match key {
-            "reflow" => PdfLayout::Reflow,
-            _ => PdfLayout::Page,
+            "page" => PdfLayout::Page,
+            _ => PdfLayout::Reflow,
         }
     }
 }
@@ -197,7 +200,7 @@ pub static PDF_LAYOUT: GlobalSignal<PdfLayout> = Signal::global(|| {
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|s| s.get_item("wiki_pdf_layout").ok().flatten())
         .map(|v| PdfLayout::from_key(&v))
-        .unwrap_or(PdfLayout::Page)
+        .unwrap_or(PdfLayout::Reflow)
 });
 
 /// Choose a layout, and remember it.
@@ -310,11 +313,12 @@ fn PdfPages(pages: Vec<crate::pdf_text::PageLayout>) -> Element {
 
 /// Render what was read out of a PDF.
 ///
-/// As the pages were laid out, which is what a PDF is: a reader who opens the
-/// annual report is looking at a document somebody set, and its cover is
-/// nine-tenths deliberate whitespace that a reflow throws away. The reading view
-/// stays one tap behind [`PDF_LAYOUT`], for the case a fixed page is the wrong
-/// shape for the screen.
+/// Reflowed to the reading column by default, because that is how this is read:
+/// on a phone, at a meeting, where a fixed A4 page is a thing to pinch at.
+///
+/// The document as it was SET is one tap away in [`PDF_LAYOUT`], and it is the
+/// honest view of a page whose layout carries meaning -- the annual report's
+/// cover is nine-tenths deliberate whitespace, which no reflow can keep.
 #[component]
 pub fn PdfDocument(doc: Extracted) -> Element {
     if PDF_LAYOUT() == PdfLayout::Page && !doc.layout.is_empty() {
