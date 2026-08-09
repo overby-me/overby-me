@@ -136,6 +136,12 @@ saver!(
     xscreensaver::hacks2d::moire::start
 );
 saver!(
+    "mountain",
+    mountain_body,
+    mountain_start,
+    xscreensaver::hacks2d::mountain::start
+);
+saver!(
     "munch",
     munch_body,
     munch_start,
@@ -225,6 +231,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "moire",
         label: "Moiré",
         start: moire_start,
+    },
+    Entry {
+        slug: "mountain",
+        label: "Mountain",
+        start: mountain_start,
     },
     Entry {
         slug: "munch",

@@ -23,6 +23,7 @@ pub mod greynetic;
 pub mod halo;
 pub mod kaleidescope;
 pub mod moire;
+pub mod mountain;
 pub mod munch;
 pub mod pedal;
 pub mod rorschach;
@@ -47,6 +48,7 @@ pub static ALL: &[&Saver] = &[
     &halo::SAVER,
     &kaleidescope::SAVER,
     &moire::SAVER,
+    &mountain::SAVER,
     &munch::SAVER,
     &pedal::SAVER,
     &rorschach::SAVER,
