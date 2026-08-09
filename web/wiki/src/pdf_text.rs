@@ -369,6 +369,16 @@ impl Font {
     }
 
     fn text_for(&self, code: u32) -> String {
+        let text = self.mapped(code);
+        // Every route out of a font can land in the private use area, so the
+        // reading happens once, here, rather than at each of them.
+        match text.chars().any(is_private_use) {
+            true => text.chars().filter_map(out_of_private_use).collect(),
+            false => text,
+        }
+    }
+
+    fn mapped(&self, code: u32) -> String {
         if let Some(s) = self.to_unicode.get(&code) {
             return s.clone();
         }
@@ -475,6 +485,51 @@ fn ligature_text(c: char) -> String {
 /// The Adobe glyph list is thousands of entries; this is the part a European
 /// document uses, plus the two mechanical forms (`uniXXXX`, and a single letter
 /// naming itself) that cover most of the rest.
+/// The private use area: a codepoint that means whatever the font that drew it
+/// says it means, and nothing at all to any other font.
+fn is_private_use(c: char) -> bool {
+    ('\u{E000}'..='\u{F8FF}').contains(&c)
+}
+
+/// What a symbol font's private glyph was drawing.
+///
+/// Word writes a bulleted list's marker as a character of Symbol or Wingdings
+/// and maps it into the private use area: the auditor's report in the 2024
+/// annual report carries U+F0B7, which is Symbol's own 0xB7, a bullet. No font a
+/// reader has says anything about U+F0B7, so a browser drew the missing-glyph
+/// box for every item in that list, and the bullet was not recognised as a
+/// marker either -- the items came out as paragraphs beginning with a box.
+///
+/// The F000 block is the symbol font's byte with F000 added, so the byte is what
+/// has to be read. The named ones are the markers Word actually writes; the rest
+/// fall back to the byte read as Latin-1, which is right for the letters and
+/// digits a symbol-encoded subset carries.
+fn out_of_private_use(c: char) -> Option<char> {
+    let code = u32::from(c);
+    if !(0xF000..=0xF0FF).contains(&code) {
+        // Some other font's private glyph, whose meaning is not knowable from
+        // the file. Dropped rather than kept: a box in the middle of a sentence
+        // says nothing a reader can use, and the sentence reads without it.
+        return (!is_private_use(c)).then_some(c);
+    }
+    let byte = (code - 0xF000) as u8;
+    Some(match byte {
+        // Symbol: the bullet Word's first list level uses.
+        0xB7 => '•',
+        // Wingdings: the square and circle of its second and third levels.
+        0xA7 => '▪',
+        0x6C => '●',
+        0x6E => '■',
+        0xFC => '✓',
+        0xFD => '✗',
+        // Anything else: the byte itself, which is right for the letters and
+        // digits a symbol-encoded subset carries, and for the Latin-1 block.
+        b if b.is_ascii_graphic() || b == b' ' => b as char,
+        b if b >= 0xA0 => char::from(b),
+        _ => return None,
+    })
+}
+
 fn glyph_char(name: &str) -> Option<char> {
     if let Some(hex) = name.strip_prefix("uni") {
         if hex.len() >= 4 {
@@ -6203,6 +6258,31 @@ mod tests {
     fn a_long_lone_line_is_not_a_title() {
         let (l, r) = (72.0, 472.0);
         assert_eq!(alignment_of(&[(100.0, 444.0)], l, r, 11.0), Align::Left);
+    }
+
+    /// A bullet a symbol font drew is a bullet, not a box.
+    ///
+    /// Word writes the marker of a bulleted list as a character of Symbol or
+    /// Wingdings mapped into the private use area. The auditor's report in the
+    /// 2024 annual report carries U+F0B7 at the head of five items, and no font
+    /// a reader has knows what that is.
+    #[test]
+    fn a_symbol_fonts_bullet_reads_as_a_bullet() {
+        assert_eq!(out_of_private_use('\u{F0B7}'), Some('•'));
+        assert_eq!(out_of_private_use('\u{F0A7}'), Some('▪'));
+        // A letter in a symbol-encoded subset is that letter.
+        assert_eq!(out_of_private_use('\u{F041}'), Some('A'));
+        // Ordinary text passes through untouched.
+        assert_eq!(out_of_private_use('å'), Some('å'));
+        // A private glyph from some other font means nothing here, and a
+        // sentence reads better without a box in it.
+        assert_eq!(out_of_private_use('\u{E123}'), None);
+
+        // And once it is a bullet, the list rule takes it as the marker.
+        assert_eq!(
+            list_marker("• Identificerer og vurderer vi risikoen"),
+            Some("Identificerer og vurderer vi risikoen")
+        );
     }
 
     /// A title set against the right margin stays there.
