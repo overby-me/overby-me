@@ -605,8 +605,9 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     // A line the page drew across itself. It cannot be kept
                     // where it was -- the text under it is a different width
                     // now -- but it separated one thing from another, and drawn
-                    // to the share of the width it spanned it still says which.
-                    Some(Block::Rule { width, thickness }) => {
+                    // to the share of the width it spanned, from the side of the
+                    // column it began on, it still says which.
+                    Some(Block::Rule { offset, width, thickness }) => {
                         // Heavy RELATIVE to the document's own lines, not in
                         // points. A reflowed page is re-typeset, and a page's
                         // rules are mostly under a point: converting them to
@@ -643,11 +644,18 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             true => (thickness / ordinary_rule * ORDINARY).clamp(ORDINARY, 8.0),
                             false => ORDINARY,
                         };
+                        // Where it began, rather than in the middle. A short
+                        // rule used to be centred, on the reasoning that a
+                        // stroke over one column's total should not hang on the
+                        // margin -- but the page says where it hung, and the bar
+                        // over the annual report's masthead hangs on the left.
+                        let start = (offset * 100.0).clamp(0.0, 92.0);
+                        let across = (width * 100.0).clamp(8.0, 100.0 - start);
                         rsx! {
                             hr {
                                 key: "{i}",
                                 class: "pdf-rule",
-                                style: "--rule-width: {(width * 100.0).clamp(8.0, 100.0):.1}%; --rule-thickness: {heavy:.1}px;",
+                                style: "--rule-width: {across:.1}%; --rule-start: {start:.1}%; --rule-thickness: {heavy:.1}px;",
                             }
                         }
                     }

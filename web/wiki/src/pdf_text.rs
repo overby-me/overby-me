@@ -97,7 +97,15 @@ pub enum Block {
     /// a total" by drawing a heavier line, and a hairline between two rows of a
     /// contents list means something quieter; one weight for both throws that
     /// away.
-    Rule { width: f64, thickness: f64 },
+    /// `offset` is where it began, as a share of that width, so a rule keeps
+    /// the side of the column it was drawn on: the bar over the masthead of the
+    /// annual report starts at the left margin, and centring every short rule
+    /// hung it in the middle of the page with nothing under it.
+    Rule {
+        offset: f64,
+        width: f64,
+        thickness: f64,
+    },
     /// A picture the page drew, where it drew it.
     Image(Picture),
     /// A place a link in this document points at. Carries nothing to read: it
@@ -1742,7 +1750,11 @@ fn underline_runs(runs: &mut [Run], rules: &[Rule]) {
 /// the one that divides two sections -- which is how a financial statement says
 /// which numbers belong together, and the whole of what it had to say before
 /// this kept any of them.
-fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64, f64)> {
+/// Where a rule sat and how heavy it was: its middle, where it began and how
+/// wide it ran as shares of the text column, and its thickness in points.
+type Separator = (f64, f64, f64, f64);
+
+fn separators(rules: &[Rule], lines: &[Line], col_left: f64, page_width: f64) -> Vec<Separator> {
     // How far the stack reaches, not where its middle is: top, bottom, left,
     // right, and the heaviest single stroke in it.
     let mut out: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
@@ -1790,6 +1802,7 @@ fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64,
         .map(|(top, bottom, left, right, stroke)| {
             (
                 (top + bottom) / 2.0,
+                ((left - col_left) / page_width).clamp(0.0, 1.0),
                 ((right - left) / page_width).min(1.0),
                 top - bottom + stroke,
             )
@@ -3027,7 +3040,7 @@ struct Line {
     picture: Option<Picture>,
     /// Set when it is a flat line the page drew: how much of the page's width it
     /// spanned, and how heavy it was. Same idea: it belongs where it was drawn.
-    rule: Option<(f64, f64)>,
+    rule: Option<(f64, f64, f64)>,
     /// The gap before the line's last word, in multiples of its type size.
     ///
     /// What tells a contents row from a sentence when there are no leader dots
@@ -4062,7 +4075,7 @@ fn blocks_from(
         }
         // A rule ends whatever was being built, which is the point of it: the
         // paragraph above and the one below were separated on the page.
-        if let Some((width, thickness)) = line.rule {
+        if let Some((offset, width, thickness)) = line.rule {
             flush(
                 &mut para,
                 para_size,
@@ -4072,7 +4085,11 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
-            blocks.push(Block::Rule { width, thickness });
+            blocks.push(Block::Rule {
+                offset,
+                width,
+                thickness,
+            });
             prev = None;
             continue;
         }
@@ -4695,10 +4712,28 @@ fn strip_running_furniture(pages: &mut [Vec<Line>]) -> HashMap<usize, String> {
                 printed.insert(*page_no, digits);
             }
             condemned.push((*page_no, *index));
+            // And the line the page drew with it. A running header is often
+            // ruled: the annual report puts a heavy bar over "Radikal Ungdom" on
+            // all 27 pages. Taking the words and leaving the bar left a black
+            // stroke at the top of every page in the reading with nothing under
+            // it, which is not what the page says and not what a reader wants
+            // repeated 27 times.
+            let line = &pages[*page_no][*index];
+            let (y, size) = (line.y, line.size);
+            let ruled: Vec<usize> = pages[*page_no]
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| l.rule.is_some() && (l.y - y).abs() < size * 2.5)
+                .map(|(i, _)| i)
+                .collect();
+            condemned.extend(ruled.into_iter().map(|i| (*page_no, i)));
         }
     }
-    // Back to front, so removing one does not move the next.
+    // Back to front, so removing one does not move the next. Deduplicated
+    // first: two condemned lines on a page can share the rule between them, and
+    // removing an index twice takes an innocent line with it.
     condemned.sort_unstable();
+    condemned.dedup();
     for (page_no, index) in condemned.into_iter().rev() {
         pages[page_no].remove(index);
     }
@@ -4764,7 +4799,17 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
             .map(|l| l.right - l.left)
             .fold(0.0_f64, f64::max)
             .max(1.0);
-        for (y, width, thickness) in separators(&drawn.rules, &lines, page_width) {
+        let col_left = lines
+            .iter()
+            .filter(|l| l.left.is_finite())
+            .map(|l| l.left)
+            .fold(f64::INFINITY, f64::min);
+        let col_left = match col_left.is_finite() {
+            true => col_left,
+            false => 0.0,
+        };
+        for (y, offset, width, thickness) in separators(&drawn.rules, &lines, col_left, page_width)
+        {
             lines.push(Line {
                 y,
                 size: 1.0,
@@ -4775,7 +4820,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
                 spans: Vec::new(),
                 bullet: None,
                 picture: None,
-                rule: Some((width, thickness)),
+                rule: Some((offset, width, thickness)),
                 tail_gap: 0.0,
                 cells: Vec::new(),
                 natural_cells: 0,
@@ -5858,31 +5903,33 @@ mod tests {
 
         // Under the words on the line above: that is an underline, carried by
         // the run itself.
-        let under = super::separators(&[rule(50.0, 300.0, 97.0)], &lines, 500.0);
+        let under = super::separators(&[rule(50.0, 300.0, 97.0)], &lines, 50.0, 500.0);
         assert!(
             under.is_empty(),
             "an underline is not a separator: {under:?}"
         );
 
         // Clear of any line: a separator, at the share of the width it spanned.
-        let between = super::separators(&[rule(50.0, 300.0, 60.0)], &lines, 500.0);
+        let between = super::separators(&[rule(50.0, 300.0, 60.0)], &lines, 50.0, 500.0);
         assert_eq!(between.len(), 1);
         assert!(
-            (between[0].1 - 0.5).abs() < 0.01,
+            (between[0].2 - 0.5).abs() < 0.01,
             "half the width: {between:?}"
         );
+        // And it began at the margin it was drawn from.
+        assert!(between[0].1.abs() < 0.01, "at the left: {between:?}");
 
         // Too short to be anything but a tick.
-        assert!(super::separators(&[rule(50.0, 70.0, 60.0)], &lines, 500.0).is_empty());
+        assert!(super::separators(&[rule(50.0, 70.0, 60.0)], &lines, 50.0, 500.0).is_empty());
 
         // One rule, however many strokes drew it: a table's cells each draw
         // their own edge along the same line.
         let doubled = vec![rule(50.0, 300.0, 60.0), rule(300.0, 450.0, 60.4)];
-        let joined = super::separators(&doubled, &lines, 500.0);
+        let joined = super::separators(&doubled, &lines, 50.0, 500.0);
         assert_eq!(joined.len(), 1);
         // And as wide as the two of them together, not as wide as the first.
         assert!(
-            (joined[0].1 - 0.8).abs() < 0.01,
+            (joined[0].2 - 0.8).abs() < 0.01,
             "the whole span: {joined:?}"
         );
     }
@@ -5909,20 +5956,20 @@ mod tests {
                 .collect()
         };
 
-        let masthead = super::separators(&stack(16, 822.12), &lines, 440.0);
+        let masthead = super::separators(&stack(16, 822.12), &lines, 113.0, 440.0);
         assert_eq!(masthead.len(), 1);
         assert!(
-            (masthead[0].2 - 1.92).abs() < 0.01,
+            (masthead[0].3 - 1.92).abs() < 0.01,
             "sixteen strokes span 1.92pt: {masthead:?}"
         );
 
-        let ordinary = super::separators(&stack(4, 784.20), &lines, 440.0);
+        let ordinary = super::separators(&stack(4, 784.20), &lines, 113.0, 440.0);
         assert!(
-            (ordinary[0].2 - 0.48).abs() < 0.01,
+            (ordinary[0].3 - 0.48).abs() < 0.01,
             "four strokes span 0.48pt: {ordinary:?}"
         );
         assert!(
-            masthead[0].2 / ordinary[0].2 > 3.5,
+            masthead[0].3 / ordinary[0].3 > 3.5,
             "and the masthead is four times the weight of an ordinary rule"
         );
     }
@@ -6145,9 +6192,15 @@ mod tests {
                     println!("{i:>4} TOC  {} .... {page}", text(spans))
                 }
                 super::Block::Image(_) => println!("{i:>4} IMG"),
-                super::Block::Rule { width, thickness } => {
-                    println!("{i:>4} ---- {:.0}% {thickness:.2}pt", width * 100.0)
-                }
+                super::Block::Rule {
+                    offset,
+                    width,
+                    thickness,
+                } => println!(
+                    "{i:>4} ---- at {:.0}% {:.0}% {thickness:.2}pt",
+                    offset * 100.0,
+                    width * 100.0
+                ),
                 super::Block::Table { rows, .. } => {
                     println!(
                         "{i:>4} TABLE {}x{}",

@@ -8882,7 +8882,8 @@ a.list-item:hover {
    page has a black line under a heading. */
 .pdf-rule {
 	width: var(--rule-width, 100%);
-	margin: var(--md-sys-spacing-3) auto;
+	margin: var(--md-sys-spacing-3) auto var(--md-sys-spacing-3)
+		var(--rule-start, 0%);
 	border: none;
 	border-top: var(--rule-thickness, 2px) solid var(--md-on-surface-variant);
 }
