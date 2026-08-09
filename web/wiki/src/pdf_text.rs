@@ -1671,7 +1671,7 @@ fn cut_at_stops(cell: Cell, stops: &[f64]) -> Vec<Cell> {
     out
 }
 
-/// One word of a page, with where it starts and how wide the page drew it.
+/// One phrase of a page, with where it starts and how wide the page drew it.
 struct Word {
     x: f64,
     y: f64,
@@ -1685,13 +1685,20 @@ struct Word {
     link: Option<Link>,
 }
 
-/// Gather a page's runs into words: same baseline, same styling, no gap between
-/// them wider than a space.
+/// Gather a page's runs into PHRASES: everything on one baseline that no gap
+/// wider than a column separates, with the spaces put back in.
 ///
-/// The gap rule is the reading view's own ([`word_gap`]), measured against an
-/// oracle: it is the width that tells a space from the join between two runs of
-/// one word, and it is the same question here.
-fn words_of(runs: &[Run]) -> Vec<Word> {
+/// Not words. A word placed on its own has only its position to say where the
+/// next one starts, and the stand-in face draws it a few per cent wider than the
+/// file's own advances -- so the space between two words is eaten and the page
+/// reads "RadikalUngdomsSangbog2025". A phrase carries its spaces as text and
+/// the browser lays them out, which is what a face with the right metrics does
+/// well.
+///
+/// Cut at the COLUMN gap rather than the word gap, so what the page set apart
+/// stays apart: a label and its figure, a name and its role. Inside a phrase the
+/// spacing is the font's; between phrases it is the page's.
+fn phrases_of(runs: &[Run]) -> Vec<Word> {
     let mut sorted: Vec<&Run> = runs.iter().filter(|r| !r.text.trim().is_empty()).collect();
     sorted.sort_by(|a, b| {
         b.y.partial_cmp(&a.y)
@@ -1701,6 +1708,7 @@ fn words_of(runs: &[Run]) -> Vec<Word> {
     let mut out: Vec<Word> = Vec::new();
     let mut last_end = f64::NEG_INFINITY;
     for run in sorted {
+        let gap = run.x - last_end;
         let joins = out.last().is_some_and(|w| {
             (w.y - run.y).abs() < (w.size.max(run.size) * 0.3).max(0.5)
                 && w.bold == run.bold
@@ -1708,14 +1716,21 @@ fn words_of(runs: &[Run]) -> Vec<Word> {
                 && w.family == run.family
                 && w.color == run.color
                 && w.link == run.link
-                && (run.x - last_end) <= run.size * word_gap()
-                // Not backwards: a file that returns to an earlier x has started
-                // something else, whatever the gap says.
-                && run.x + 0.5 >= last_end
+                && gap <= run.size * COLUMN_GAP
+                // Not backwards -- but kerning IS backwards, by a little. The
+                // songbook tucks the "o" of "Tobias" under the arm of its "T",
+                // which a strict rule read as a new phrase and split the name in
+                // two. A third of a size is more than any pair kerns and less
+                // than any column steps back.
+                && run.x >= last_end - run.size * 0.3
         });
         match joins {
             true => {
                 if let Some(word) = out.last_mut() {
+                    // The space the page left rather than drew.
+                    if gap > run.size * word_gap() && !word.text.ends_with(' ') {
+                        word.text.push(' ');
+                    }
                     word.text.push_str(&run.text);
                     word.width = run.end_x - word.x;
                     word.size = word.size.max(run.size);
@@ -1796,7 +1811,7 @@ fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageL
     // original had. Any error is a fraction of a point over a word rather than a
     // collision at every letter -- and there are twenty-five words on a page
     // where there were a hundred and fifty glyphs, which the DOM notices too.
-    for word in words_of(&drawn.runs) {
+    for word in phrases_of(&drawn.runs) {
         items.push(Placed {
             x: word.x,
             // The baseline, from the top. What sits ON it is drawn above it.
