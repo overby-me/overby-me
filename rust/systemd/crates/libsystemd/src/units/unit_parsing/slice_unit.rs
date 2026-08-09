@@ -45,6 +45,19 @@ pub fn parse_slice(
     })
 }
 
+/// Parse a `ConcurrencyHardMax=`/`ConcurrencySoftMax=` value: empty or
+/// "infinity" means no limit (None); otherwise a plain unsigned count.
+fn parse_concurrency_max(value: &str, key: &str) -> Result<Option<u32>, ParsingErrorReason> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("infinity") {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<u32>()
+        .map(Some)
+        .map_err(|_| ParsingErrorReason::Generic(format!("{key} is not a valid count: {value}")))
+}
+
 fn parse_slice_section(
     section: &std::collections::HashMap<String, Vec<(u32, String)>>,
     slice: &mut ParsedSliceSection,
@@ -152,6 +165,14 @@ fn parse_slice_section(
                     })?;
                     slice.tasks_max = Some(super::TasksMax::Value(num));
                 }
+            }
+
+            // --- Concurrency limits ---
+            "CONCURRENCYSOFTMAX" => {
+                slice.concurrency_soft_max = parse_concurrency_max(value, "ConcurrencySoftMax")?;
+            }
+            "CONCURRENCYHARDMAX" => {
+                slice.concurrency_hard_max = parse_concurrency_max(value, "ConcurrencyHardMax")?;
             }
 
             // --- Delegation ---

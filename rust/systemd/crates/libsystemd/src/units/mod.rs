@@ -5,6 +5,7 @@ mod id;
 pub mod jobs;
 pub(crate) mod loading;
 mod mount_monitor;
+pub mod slice_concurrency;
 mod status;
 mod udev_event;
 mod unit;

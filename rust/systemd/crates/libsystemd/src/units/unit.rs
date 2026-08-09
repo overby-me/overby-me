@@ -1064,6 +1064,12 @@ pub struct SliceConfig {
     pub io_write_iops_max: Vec<IoDeviceLimit>,
     /// TasksMax= — maximum number of tasks. See systemd.resource-control(5).
     pub tasks_max: Option<TasksMax>,
+    /// ConcurrencySoftMax= sets a soft limit on concurrently-active units; new
+    /// starts queue when reached. None = infinity. See systemd.resource-control(5).
+    pub concurrency_soft_max: Option<u32>,
+    /// ConcurrencyHardMax= sets a hard limit on concurrently-active-or-pending
+    /// units; new starts are refused when reached. None = infinity. See systemd.resource-control(5).
+    pub concurrency_hard_max: Option<u32>,
     /// Delegate= — delegate cgroup subtree. See systemd.resource-control(5).
     pub delegate: Delegate,
     /// CPUAccounting= — enable CPU accounting. See systemd.resource-control(5).
@@ -1151,6 +1157,8 @@ impl From<ParsedSliceSection> for SliceConfig {
             io_read_iops_max: s.io_read_iops_max,
             io_write_iops_max: s.io_write_iops_max,
             tasks_max: s.tasks_max,
+            concurrency_soft_max: s.concurrency_soft_max,
+            concurrency_hard_max: s.concurrency_hard_max,
             delegate: s.delegate,
             cpu_accounting: s.cpu_accounting,
             memory_accounting: s.memory_accounting,

@@ -688,7 +688,7 @@ pub fn activate_unit(
 /// Activate the slice hierarchy for a unit that just started.
 /// In systemd, when a service runs in a slice, the slice and all its
 /// ancestor slices are implicitly activated.
-fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
+pub(crate) fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
     // Extract the slice name from the unit's specific config
     let slice_name = match &unit.specific {
         Specific::Service(svc) => svc.conf.slice.clone(),

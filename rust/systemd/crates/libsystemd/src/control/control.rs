@@ -9879,6 +9879,25 @@ pub fn execute_command(
                         "Start request repeated too quickly for unit {unit_name}."
                     ));
                 }
+                // ConcurrencyHardMax=: refuse the start when the unit's slice (or
+                // any ancestor slice) has reached its hard concurrency limit,
+                // mirroring upstream's transaction-time refusal
+                // (BUS_ERROR_CONCURRENCY_LIMIT_REACHED). Counts live members plus
+                // pending starts across the slice subtree.
+                let concurrency_hard_reached = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .and_then(crate::units::slice_concurrency::unit_slice_name)
+                        .is_some_and(|slice| {
+                            crate::units::slice_concurrency::hard_max_reached(&ri, &slice, &id.name)
+                        })
+                };
+                if concurrency_hard_reached {
+                    return Err(format!(
+                        "Concurrency limit of the slice unit the unit {unit_name} is contained in (or any of its parents) has been reached, refusing start job."
+                    ));
+                }
                 // Installed for the whole inline start of this unit; the
                 // failure paths below return early, which drops the handle
                 // and finishes the job as failed.
@@ -10005,6 +10024,55 @@ pub fn execute_command(
                                 *status = crate::units::UnitStatus::NeverStarted;
                             }
                         }
+                    }
+                }
+                // ConcurrencySoftMax=: if the unit's slice (or an ancestor) is at
+                // its soft limit, hold the start here instead of activating. The
+                // unit stays inactive and its start job stays queued (Waiting)
+                // until a member elsewhere stops and frees a slot, which we observe
+                // by re-checking. This mirrors upstream keeping the job queued on
+                // -EAGAIN, so a blocking `systemctl start` hangs until released
+                // (the connection has its own thread, so blocking it is safe).
+                let soft_slice = if ignore_deps {
+                    None
+                } else {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table.get(&id).and_then(|u| {
+                        crate::units::slice_concurrency::concurrency_limited_slice(&ri, u)
+                    })
+                };
+                if let Some(slice) = soft_slice {
+                    // Activate the unit's slice hierarchy up front so the slices it
+                    // will occupy count toward the limit while it waits: upstream
+                    // starts the parent slice before dispatching the service, so a
+                    // unit whose slice is not yet active must not undercount by the
+                    // slots its own slice chain takes ("two slots: slice + service").
+                    {
+                        let ri = run_info.read_poisoned();
+                        if let Some(u) = ri.unit_table.get(&id) {
+                            crate::units::activate_slice_hierarchy(u, &ri);
+                        }
+                    }
+                    let waited_since = std::time::Instant::now();
+                    let mut parked = false;
+                    while {
+                        let ri = run_info.read_poisoned();
+                        crate::units::slice_concurrency::soft_max_reached(&ri, &slice, &id.name)
+                    } {
+                        if !parked {
+                            jobs_registry.lock().unwrap().set_waiting(start_job.id());
+                            parked = true;
+                        }
+                        // Give up waiting after a generous bound so a permanently
+                        // over-limit start cannot poll forever; a freed slot
+                        // normally arrives far sooner.
+                        if waited_since.elapsed() > std::time::Duration::from_secs(90) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                    }
+                    if parked {
+                        jobs_registry.lock().unwrap().set_running(start_job.id());
                     }
                 }
                 let errs = if ignore_deps {

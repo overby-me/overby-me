@@ -2658,6 +2658,8 @@ mod tests {
             io_read_iops_max: Vec::new(),
             io_write_iops_max: Vec::new(),
             tasks_max: None,
+            concurrency_soft_max: None,
+            concurrency_hard_max: None,
             delegate: crate::units::Delegate::No,
             cpu_accounting: None,
             memory_accounting: None,
