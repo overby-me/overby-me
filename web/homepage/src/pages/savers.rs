@@ -100,6 +100,12 @@ saver!(
     xscreensaver::hacks2d::greynetic::start
 );
 saver!(
+    "grav",
+    grav_body,
+    grav_start,
+    xscreensaver::hacks2d::grav::start
+);
+saver!(
     "moire",
     moire_body,
     moire_start,
@@ -159,6 +165,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
+    },
+    Entry {
+        slug: "grav",
+        label: "Grav",
+        start: grav_start,
     },
     Entry {
         slug: "moire",

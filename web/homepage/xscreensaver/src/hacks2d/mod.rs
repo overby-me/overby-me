@@ -16,6 +16,7 @@ use crate::runtime::Saver;
 pub mod coral;
 pub mod decayscreen;
 pub mod deco;
+pub mod grav;
 pub mod greynetic;
 pub mod moire;
 pub mod munch;
@@ -35,6 +36,7 @@ pub static ALL: &[&Saver] = &[
     &deco::SAVER,
     &decayscreen::SAVER,
     &greynetic::SAVER,
+    &grav::SAVER,
     &moire::SAVER,
     &munch::SAVER,
     &pedal::SAVER,
