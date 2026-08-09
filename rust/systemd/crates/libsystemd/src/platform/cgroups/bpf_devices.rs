@@ -338,13 +338,13 @@ fn build_bpf_program(rules: &[DeviceRule], default_allow: bool) -> Vec<BpfInsn> 
 
 // ── BPF syscall wrappers ─────────────────────────────────────────────────
 
-fn bpf_prog_load(insns: &[BpfInsn]) -> Result<i32, String> {
+fn bpf_prog_load(insns: &[BpfInsn], prog_type: u32) -> Result<i32, String> {
     let license = b"GPL\0";
     // Use a zeroed buffer large enough for the bpf_attr union.
     let mut attr = [0u8; 128];
 
     // prog_type at offset 0
-    attr[0..4].copy_from_slice(&BPF_PROG_TYPE_CGROUP_DEVICE.to_ne_bytes());
+    attr[0..4].copy_from_slice(&prog_type.to_ne_bytes());
     // insn_cnt at offset 4
     attr[4..8].copy_from_slice(&(insns.len() as u32).to_ne_bytes());
     // insns pointer at offset 8
@@ -370,7 +370,7 @@ fn bpf_prog_load(insns: &[BpfInsn]) -> Result<i32, String> {
     Ok(ret as i32)
 }
 
-fn bpf_prog_attach(prog_fd: i32, cgroup_path: &Path) -> Result<(), String> {
+fn bpf_prog_attach(prog_fd: i32, cgroup_path: &Path, attach_type: u32) -> Result<(), String> {
     // Open the cgroup directory with O_DIRECTORY to ensure correct fd type
     let path_cstr = std::ffi::CString::new(
         cgroup_path
@@ -392,7 +392,7 @@ fn bpf_prog_attach(prog_fd: i32, cgroup_path: &Path) -> Result<(), String> {
     let mut attr = [0u8; 128];
     attr[0..4].copy_from_slice(&(target_fd as u32).to_ne_bytes());
     attr[4..8].copy_from_slice(&(prog_fd as u32).to_ne_bytes());
-    attr[8..12].copy_from_slice(&BPF_CGROUP_DEVICE.to_ne_bytes());
+    attr[8..12].copy_from_slice(&attach_type.to_ne_bytes());
     attr[12..16].copy_from_slice(&0u32.to_ne_bytes());
 
     let ret = unsafe {
@@ -457,8 +457,8 @@ pub fn apply_device_policy(
         if default_allow { "allow" } else { "deny" },
     );
 
-    let prog_fd = bpf_prog_load(&program)?;
-    let result = bpf_prog_attach(prog_fd, cgroup_path);
+    let prog_fd = bpf_prog_load(&program, BPF_PROG_TYPE_CGROUP_DEVICE)?;
+    let result = bpf_prog_attach(prog_fd, cgroup_path, BPF_CGROUP_DEVICE);
 
     // Close the program fd — the kernel keeps its own reference after attach.
     unsafe {
@@ -466,4 +466,85 @@ pub fn apply_device_policy(
     }
 
     result
+}
+
+// ── RestrictNetworkInterfaces= (BPF_PROG_TYPE_CGROUP_SKB) ─────────────────
+
+const BPF_PROG_TYPE_CGROUP_SKB: u32 = 8;
+const BPF_CGROUP_INET_INGRESS: u32 = 0;
+const BPF_CGROUP_INET_EGRESS: u32 = 1;
+/// Offset of `ifindex` in `struct __sk_buff` (uapi/linux/bpf.h).
+const SK_BUFF_IFINDEX_OFF: i16 = 40;
+
+/// Build a cgroup/skb program that inspects the packet's interface index
+/// (`__sk_buff.ifindex`). For an allow-list, packets on a listed interface are
+/// accepted (return 1) and all others dropped (return 0); a deny-list inverts
+/// this. Straight-line, so the verifier accepts it trivially.
+fn build_restrict_ifaces_program(ifindices: &[u32], deny_list: bool) -> Vec<BpfInsn> {
+    let (match_ret, default_ret) = if deny_list { (0, 1) } else { (1, 0) };
+    let mut insns = vec![ldx_mem_w(R2, R1, SK_BUFF_IFINDEX_OFF)]; // r2 = ctx->ifindex
+    for &idx in ifindices {
+        // if r2 != idx, skip the next two insns; else return match_ret.
+        insns.push(jne_imm(R2, idx as i32, 2));
+        insns.push(mov64_imm(R0, match_ret));
+        insns.push(exit_insn());
+    }
+    insns.push(mov64_imm(R0, default_ret));
+    insns.push(exit_insn());
+    insns
+}
+
+/// Apply `RestrictNetworkInterfaces=` by attaching a cgroup/skb filter to the
+/// service's cgroup (both ingress and egress). An allow-list permits only the
+/// listed interfaces; a deny-list (`~eth0`) blocks the listed ones. Interface
+/// names are resolved to indices via if_nametoindex(); names not present are
+/// skipped. A blocked packet's send fails with EPERM (kernel behaviour for a
+/// dropped cgroup/skb egress), never a kill.
+pub fn apply_restrict_network_interfaces(
+    cgroup_path: &Path,
+    interfaces: &[String],
+) -> Result<(), String> {
+    if interfaces.is_empty() {
+        return Ok(());
+    }
+    let deny_list = interfaces[0].starts_with('~');
+    let mut ifindices: Vec<u32> = Vec::new();
+    for (i, name) in interfaces.iter().enumerate() {
+        let n = if i == 0 {
+            name.strip_prefix('~').unwrap_or(name)
+        } else {
+            name.as_str()
+        };
+        let n = n.trim();
+        if n.is_empty() {
+            continue;
+        }
+        let cname = match std::ffi::CString::new(n) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let idx = unsafe { libc::if_nametoindex(cname.as_ptr()) };
+        if idx == 0 {
+            trace!("RestrictNetworkInterfaces: interface '{n}' not present, ignoring");
+            continue;
+        }
+        if !ifindices.contains(&idx) {
+            ifindices.push(idx);
+        }
+    }
+    if ifindices.is_empty() {
+        // Nothing resolvable: for a deny-list there is nothing to block, and for
+        // an allow-list installing a drop-everything filter would break the
+        // service. Either way, do not install one.
+        return Ok(());
+    }
+
+    let program = build_restrict_ifaces_program(&ifindices, deny_list);
+    let prog_fd = bpf_prog_load(&program, BPF_PROG_TYPE_CGROUP_SKB)?;
+    let ingress = bpf_prog_attach(prog_fd, cgroup_path, BPF_CGROUP_INET_INGRESS);
+    let egress = bpf_prog_attach(prog_fd, cgroup_path, BPF_CGROUP_INET_EGRESS);
+    unsafe {
+        libc::close(prog_fd);
+    }
+    ingress.and(egress)
 }

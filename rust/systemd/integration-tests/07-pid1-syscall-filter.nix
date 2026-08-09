@@ -131,6 +131,34 @@
         systemctl reset-failed "$UNIT_AF.service" 2>/dev/null || true
         rm -f "/run/systemd/system/$UNIT_AF.service" "$OUT_AF" "$PYHELPER"
     fi
+
+    : "RestrictNetworkInterfaces=eth0 blocks loopback (127.0.0.1 via lo) with EPERM, proving the cgroup/skb filter attached"
+    PYN="$(command -v python3 || true)"
+    if [ -n "$PYN" ]; then
+        NETHELPER="/run/scf-net-check.py"
+        cat > "$NETHELPER" << 'PYEOF'
+    import socket, sys, errno
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try: s.sendto(b"x", ("127.0.0.1", 9)); r = "LO-SENT"
+    except OSError as e: r = "LO-BLOCKED" if e.errno == errno.EPERM else "LO-ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_NET="scfnet-$RANDOM"
+        OUT_NET="/run/scfnet-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_NET.service" << EOF
+    [Service]
+    Type=oneshot
+    RestrictNetworkInterfaces=eth0
+    ExecStart=$PYN $NETHELPER $OUT_NET
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_NET.service"
+        cat "$OUT_NET"
+        grep -qx LO-BLOCKED "$OUT_NET"
+        systemctl stop "$UNIT_NET.service" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_NET.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_NET.service" "$OUT_NET" "$NETHELPER"
+    fi
     RIDEOF
   '';
 }

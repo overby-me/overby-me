@@ -451,6 +451,19 @@ pub fn pre_fork_os_specific(
                 }
             }
         }
+        // ── Network interface restriction (BPF cgroup/skb) ────────────────
+        if !srvc.restrict_network_interfaces.is_empty() {
+            match cgroups::bpf_devices::apply_restrict_network_interfaces(
+                &srvc.platform_specific.cgroup_path,
+                &srvc.restrict_network_interfaces,
+            ) {
+                Ok(()) => trace!(
+                    "RestrictNetworkInterfaces applied for cgroup {:?}",
+                    &srvc.platform_specific.cgroup_path
+                ),
+                Err(e) => trace!("Could not apply RestrictNetworkInterfaces: {}", e),
+            }
+        }
     }
     let _ = srvc;
     Ok(())
