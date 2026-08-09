@@ -288,6 +288,11 @@ in
               lib.mkForce "${config.systemd.package}/lib/systemd/systemd-timesyncd";
             StateDirectory = lib.mkForce "systemd/timesync";
             RuntimeDirectory = lib.mkForce "systemd/timesync";
+            # Run as the systemd-timesync user so it may own org.freedesktop.timesync1
+            # per the D-Bus policy (org.freedesktop.timesync1.conf allows that user);
+            # without this the daemon runs as root and D-Bus refuses the name.
+            User = lib.mkForce "systemd-timesync";
+            Group = lib.mkForce "systemd-timesync";
           };
           # Use Type=simple so the service is immediately active.
           # ExecReload uses a token-based handshake: it writes a unique

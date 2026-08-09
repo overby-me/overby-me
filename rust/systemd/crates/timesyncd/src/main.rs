@@ -936,6 +936,9 @@ struct TimesyncState {
     frequency: i64,
     /// Last NTP message fields for NTPMessage property.
     ntp_message: NtpMessageFields,
+    /// Runtime NTP servers set via the SetRuntimeNTPServers() D-Bus method,
+    /// exposed as the RuntimeNTPServers property.
+    runtime_ntp_servers: Vec<String>,
 }
 
 /// Fields from the last NTP exchange, exposed as the NTPMessage property.
@@ -983,6 +986,7 @@ impl Default for TimesyncState {
             server_address: String::new(),
             frequency: 0,
             ntp_message: NtpMessageFields::default(),
+            runtime_ntp_servers: Vec::new(),
         }
     }
 }
@@ -1075,6 +1079,12 @@ impl Timesync1Manager {
         s.poll_interval_usec
     }
 
+    #[zbus(property, name = "RuntimeNTPServers")]
+    fn runtime_ntp_servers(&self) -> Vec<String> {
+        let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        s.runtime_ntp_servers.clone()
+    }
+
     // --- Methods ---
 
     // Describe() → s (JSON description)
@@ -1133,6 +1143,25 @@ impl Timesync1Manager {
             ntp.offset_usec,
             ntp.delay_usec,
         )
+    }
+
+    // SetRuntimeNTPServers(as): replace the runtime NTP server list and emit a
+    // PropertiesChanged signal for RuntimeNTPServers when it actually changes.
+    #[zbus(name = "SetRuntimeNTPServers")]
+    async fn set_runtime_ntp_servers(
+        &self,
+        servers: Vec<String>,
+        #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        {
+            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if s.runtime_ntp_servers == servers {
+                return Ok(());
+            }
+            s.runtime_ntp_servers = servers;
+        }
+        self.runtime_n_t_p_servers_changed(&emitter).await?;
+        Ok(())
     }
 }
 
