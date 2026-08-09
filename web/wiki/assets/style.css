@@ -8787,6 +8787,8 @@ a.list-item:hover {
 .pdf-sheets {
 	--pdf-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
 	--pdf-serif: "Liberation Serif", "Times New Roman", Times, serif;
+	--pdf-calibri: "Carlito", Calibri, "Liberation Sans", sans-serif;
+	--pdf-cambria: "Caladea", Cambria, "Liberation Serif", serif;
 	--pdf-mono: ui-monospace, "Courier New", monospace;
 	display: flex;
 	flex-direction: column;

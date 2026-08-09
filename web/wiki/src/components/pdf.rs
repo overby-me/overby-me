@@ -246,6 +246,8 @@ fn PdfPages(pages: Vec<crate::pdf_text::PageLayout>) -> Element {
                                 What::Text { text, size, color, bold, italic, family, .. } => {
                                     let face = match family {
                                         Family::Serif => "var(--pdf-serif)",
+                                        Family::Calibri => "var(--pdf-calibri)",
+                                        Family::Cambria => "var(--pdf-cambria)",
                                         Family::Mono => "var(--pdf-mono)",
                                         Family::Sans => "var(--pdf-sans)",
                                     };

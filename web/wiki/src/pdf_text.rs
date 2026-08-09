@@ -238,6 +238,13 @@ pub enum Family {
     #[default]
     Sans,
     Serif,
+    /// Calibri, which Carlito matches. Word's default face for two decades, so
+    /// most of what this wiki carries is set in it.
+    Calibri,
+    /// Cambria, which Caladea matches. Word's default SERIF over the same years,
+    /// and not Times: substituting Times for it made every letter of the
+    /// songbook's imprint page a little too wide, so each ran into the next.
+    Cambria,
     Mono,
 }
 
@@ -690,11 +697,19 @@ fn hex_to_string(s: &str) -> Option<String> {
 fn family_of(base: &str) -> Family {
     const SERIF: &[&str] = &[
         "times", "serif", "georgia", "garamond", "book", "roman", "minion",
-        "cambria", "caladea", "palatino", "century",
+        "palatino", "century",
     ];
     const MONO: &[&str] = &["courier", "mono", "consol", "menlo"];
     if MONO.iter().any(|n| base.contains(n)) {
         return Family::Mono;
+    }
+    // Named before the general rules, because the match is exact: these two have
+    // stand-ins with their own metrics rather than a family resemblance.
+    if base.contains("cambria") || base.contains("caladea") {
+        return Family::Cambria;
+    }
+    if base.contains("calibri") || base.contains("carlito") {
+        return Family::Calibri;
     }
     // "Sans" wins over "serif" inside it: "SansSerif" is a sans.
     if base.contains("sans") {
@@ -4902,6 +4917,28 @@ mod harness {
 
 #[cfg(test)]
 mod tests {
+    /// A font is matched to the stand-in with ITS metrics, not a lookalike.
+    ///
+    /// The songbook's imprint page is set in Cambria and drawn a letter at a
+    /// time, each glyph placed at its own x. Substituting Times for Cambria made
+    /// every letter a fraction too wide, so each ran into the next and a name
+    /// read as a jumble. Caladea has Cambria's widths and Carlito has Calibri's,
+    /// which is why this app already ships them.
+    #[test]
+    fn a_font_is_matched_by_its_metrics() {
+        use super::Family;
+        assert_eq!(super::family_of("aaaaac+cambriamath"), Family::Cambria);
+        assert_eq!(super::family_of("aaaaae+calibri-bold"), Family::Calibri);
+        assert_eq!(super::family_of("aaaaak+timesnewromanpsmt"), Family::Serif);
+        assert_eq!(super::family_of("arialmt"), Family::Sans);
+        assert_eq!(super::family_of("helvetica-bold"), Family::Sans);
+        assert_eq!(super::family_of("couriernew"), Family::Mono);
+        // A name nobody knows is likelier a sans than anything else.
+        assert_eq!(super::family_of("bcdeee+corporatefacename"), Family::Sans);
+        // And "sans" inside a name wins over "serif" inside it.
+        assert_eq!(super::family_of("dejavusansserif"), Family::Sans);
+    }
+
     /// A contents row whose leader is empty space, not dots.
     ///
     /// The annual report's contents page sets each entry against a page number
@@ -5065,6 +5102,24 @@ mod tests {
     fn dump_a_pdf() {
         let path = std::env::var("PDF").expect("PDF=<path>");
         let bytes = std::fs::read(&path).expect("readable");
+        // ITEMS=<page> dumps that page's placed items: what the fixed layout
+        // draws, in the order it draws them.
+        if let Ok(want) = std::env::var("ITEMS") {
+            let want: usize = want.parse().unwrap_or(1);
+            let out = super::extract(&bytes).expect("extracts");
+            if let Some(page) = out.layout.get(want.saturating_sub(1)) {
+                println!("page {want}: {:.0} x {:.0}", page.width, page.height);
+                for item in &page.items {
+                    if let super::What::Text { text, size, family, .. } = &item.what {
+                        println!(
+                            "  x={:7.1} y={:7.1} w={:6.1} size={:4.1} {family:?} {text:?}",
+                            item.x, item.y, item.width, size
+                        );
+                    }
+                }
+            }
+            return;
+        }
         // LINES=<page> dumps that page's lines with their columns, which is what
         // the table pass reads.
         if let Ok(want) = std::env::var("LINES") {
