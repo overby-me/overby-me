@@ -1338,10 +1338,16 @@ fn start_service_with_filedescriptors(
         "Start main executable for service: {name}: {:?} {:?}",
         exec_helper_conf.cmd, exec_helper_conf.args
     );
-    // When PrivatePIDs= is set, use clone(CLONE_NEWPID) so the child is
-    // PID 1 in a new PID namespace from the start — no extra fork needed
-    // in exec_helper.
-    let fork_result = if exec_helper_conf.private_pids {
+    // When PrivatePIDs= is set (and pid is NOT delegated), clone(CLONE_NEWPID)
+    // so the child is PID 1 in a new PID namespace from the start, no extra fork
+    // needed in exec_helper. For DelegateNamespaces=pid the PID namespace must
+    // instead be owned by the service's user namespace, so it is created later
+    // in exec_helper (after the user namespace); use a plain fork here.
+    let pid_delegated = exec_helper_conf
+        .delegate_namespaces
+        .iter()
+        .any(|n| n == "pid");
+    let fork_result = if exec_helper_conf.private_pids && !pid_delegated {
         let pid = unsafe {
             libc::syscall(
                 libc::SYS_clone,

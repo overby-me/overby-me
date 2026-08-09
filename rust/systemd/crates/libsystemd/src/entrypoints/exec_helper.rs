@@ -2996,6 +2996,53 @@ pub fn run_exec_helper() {
         setup_uts_namespace(&config);
     }
 
+    // DelegateNamespaces=pid: the PID namespace must be owned by the service's
+    // user namespace, so (unlike plain PrivatePIDs=, which clones CLONE_NEWPID
+    // in start_service under PID 1's user namespace) it is created HERE, after
+    // the user namespace. A PID namespace only takes effect for the next fork's
+    // children, so unshare then fork: the grandchild becomes PID 1 in the new
+    // namespace and continues the exec setup, while this process becomes a thin
+    // shim that waits for it and mirrors its exit status, since PID 1 tracks
+    // this process as the service's main PID.
+    if config.private_pids
+        && !config.privileged_prefix
+        && config.delegate_namespaces.iter().any(|n| n == "pid")
+    {
+        let ret = unsafe { libc::unshare(libc::CLONE_NEWPID) };
+        if ret != 0 {
+            log::warn!(
+                "Failed to create PID namespace for DelegateNamespaces=pid: {}",
+                std::io::Error::last_os_error()
+            );
+        } else {
+            let child = unsafe { libc::fork() };
+            if child < 0 {
+                log::warn!(
+                    "Failed to fork into delegated PID namespace: {}",
+                    std::io::Error::last_os_error()
+                );
+            } else if child > 0 {
+                // Shim: wait for the grandchild (PID 1 in the new PID namespace)
+                // and exit mirroring its status, so PID 1 records the true
+                // Result= (exit-code vs signal) for the service.
+                let mut status: libc::c_int = 0;
+                unsafe { libc::waitpid(child, &mut status, 0) };
+                if libc::WIFSIGNALED(status) {
+                    let sig = libc::WTERMSIG(status);
+                    unsafe {
+                        libc::signal(sig, libc::SIG_DFL);
+                        libc::raise(sig);
+                        libc::_exit(128 + sig);
+                    }
+                }
+                unsafe { libc::_exit(libc::WEXITSTATUS(status)) };
+            }
+            // Grandchild (PID 1 in the new PID namespace): fall through and
+            // continue the exec setup; the /proc remount below now runs in the
+            // correct namespace.
+        }
+    }
+
     // ── PrivatePIDs= — PID namespace /proc remount ─────────────────────
     // The process is already PID 1 in a new PID namespace (clone was called
     // with CLONE_NEWPID in start_service). We just need to remount /proc to
