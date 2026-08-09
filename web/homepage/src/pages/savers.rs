@@ -136,6 +136,12 @@ saver!(
     xscreensaver::hacks2d::kaleidescope::start
 );
 saver!(
+    "laser",
+    laser_body,
+    laser_start,
+    xscreensaver::hacks2d::laser::start
+);
+saver!(
     "lissie",
     lissie_body,
     lissie_start,
@@ -185,6 +191,12 @@ saver!(
     xscreensaver::hacks2d::sphere::start
 );
 saver!(
+    "spiral",
+    spiral_body,
+    spiral_start,
+    xscreensaver::hacks2d::spiral::start
+);
+saver!(
     "thornbird",
     thornbird_body,
     thornbird_start,
@@ -195,6 +207,12 @@ saver!(
     vines_body,
     vines_start,
     xscreensaver::hacks2d::vines::start
+);
+saver!(
+    "wander",
+    wander_body,
+    wander_start,
+    xscreensaver::hacks2d::wander::start
 );
 
 /// Every saver, by slug. Only the slug, the label and a function pointer live
@@ -251,6 +269,11 @@ pub static SAVERS: &[Entry] = &[
         start: kaleidescope_start,
     },
     Entry {
+        slug: "laser",
+        label: "Laser",
+        start: laser_start,
+    },
+    Entry {
         slug: "lissie",
         label: "Lissie",
         start: lissie_start,
@@ -291,6 +314,11 @@ pub static SAVERS: &[Entry] = &[
         start: sphere_start,
     },
     Entry {
+        slug: "spiral",
+        label: "Spiral",
+        start: spiral_start,
+    },
+    Entry {
         slug: "thornbird",
         label: "Thornbird",
         start: thornbird_start,
@@ -299,6 +327,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "vines",
         label: "Vines",
         start: vines_start,
+    },
+    Entry {
+        slug: "wander",
+        label: "Wander",
+        start: wander_start,
     },
 ];
 

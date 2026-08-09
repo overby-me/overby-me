@@ -23,6 +23,7 @@ pub mod grav;
 pub mod greynetic;
 pub mod halo;
 pub mod kaleidescope;
+pub mod laser;
 pub mod lissie;
 pub mod moire;
 pub mod mountain;
@@ -31,8 +32,10 @@ pub mod pedal;
 pub mod rorschach;
 pub mod sierpinski;
 pub mod sphere;
+pub mod spiral;
 pub mod thornbird;
 pub mod vines;
+pub mod wander;
 
 /// Every 2D saver ported so far.
 ///
@@ -51,6 +54,7 @@ pub static ALL: &[&Saver] = &[
     &grav::SAVER,
     &halo::SAVER,
     &kaleidescope::SAVER,
+    &laser::SAVER,
     &lissie::SAVER,
     &moire::SAVER,
     &mountain::SAVER,
@@ -59,8 +63,10 @@ pub static ALL: &[&Saver] = &[
     &rorschach::SAVER,
     &sierpinski::SAVER,
     &sphere::SAVER,
+    &spiral::SAVER,
     &thornbird::SAVER,
     &vines::SAVER,
+    &wander::SAVER,
 ];
 
 #[cfg(test)]
