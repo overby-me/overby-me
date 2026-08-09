@@ -116,6 +116,21 @@ impl Opt {
         }
     }
 
+    pub const fn spin(
+        key: &'static str,
+        label: &'static str,
+        low: f64,
+        high: f64,
+        default: &'static str,
+    ) -> Self {
+        Self {
+            key,
+            label,
+            kind: OptKind::Spin { low, high },
+            default,
+        }
+    }
+
     pub const fn boolean(key: &'static str, label: &'static str, default: &'static str) -> Self {
         Self {
             key,

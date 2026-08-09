@@ -18,16 +18,19 @@ pub mod cwaves;
 pub mod decayscreen;
 pub mod deco;
 pub mod fadeplot;
+pub mod forest;
 pub mod grav;
 pub mod greynetic;
 pub mod halo;
 pub mod kaleidescope;
+pub mod lissie;
 pub mod moire;
 pub mod mountain;
 pub mod munch;
 pub mod pedal;
 pub mod rorschach;
 pub mod sierpinski;
+pub mod sphere;
 pub mod thornbird;
 pub mod vines;
 
@@ -44,15 +47,18 @@ pub static ALL: &[&Saver] = &[
     &decayscreen::SAVER,
     &greynetic::SAVER,
     &fadeplot::SAVER,
+    &forest::SAVER,
     &grav::SAVER,
     &halo::SAVER,
     &kaleidescope::SAVER,
+    &lissie::SAVER,
     &moire::SAVER,
     &mountain::SAVER,
     &munch::SAVER,
     &pedal::SAVER,
     &rorschach::SAVER,
     &sierpinski::SAVER,
+    &sphere::SAVER,
     &thornbird::SAVER,
     &vines::SAVER,
 ];

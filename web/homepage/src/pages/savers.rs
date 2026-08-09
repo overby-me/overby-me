@@ -112,6 +112,12 @@ saver!(
     xscreensaver::hacks2d::fadeplot::start
 );
 saver!(
+    "forest",
+    forest_body,
+    forest_start,
+    xscreensaver::hacks2d::forest::start
+);
+saver!(
     "grav",
     grav_body,
     grav_start,
@@ -128,6 +134,12 @@ saver!(
     kaleidescope_body,
     kaleidescope_start,
     xscreensaver::hacks2d::kaleidescope::start
+);
+saver!(
+    "lissie",
+    lissie_body,
+    lissie_start,
+    xscreensaver::hacks2d::lissie::start
 );
 saver!(
     "moire",
@@ -165,6 +177,12 @@ saver!(
     sierpinski_body,
     sierpinski_start,
     xscreensaver::hacks2d::sierpinski::start
+);
+saver!(
+    "sphere",
+    sphere_body,
+    sphere_start,
+    xscreensaver::hacks2d::sphere::start
 );
 saver!(
     "thornbird",
@@ -213,6 +231,11 @@ pub static SAVERS: &[Entry] = &[
         start: fadeplot_start,
     },
     Entry {
+        slug: "forest",
+        label: "Forest",
+        start: forest_start,
+    },
+    Entry {
         slug: "grav",
         label: "Grav",
         start: grav_start,
@@ -226,6 +249,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "kaleidescope",
         label: "Kaleidescope",
         start: kaleidescope_start,
+    },
+    Entry {
+        slug: "lissie",
+        label: "Lissie",
+        start: lissie_start,
     },
     Entry {
         slug: "moire",
@@ -256,6 +284,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sierpinski",
         label: "Sierpinski",
         start: sierpinski_start,
+    },
+    Entry {
+        slug: "sphere",
+        label: "Sphere",
+        start: sphere_start,
     },
     Entry {
         slug: "thornbird",
