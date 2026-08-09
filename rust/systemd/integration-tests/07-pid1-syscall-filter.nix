@@ -403,6 +403,37 @@
         done
         rm -f "$PHELPER"
     fi
+
+    : "IPAddress*= and RestrictNetworkInterfaces= on one unit both apply (no clobber)"
+    PYC="$(command -v python3 || true)"
+    if [ -n "$PYC" ]; then
+        CHELPER="/run/scf-combo.py"
+        cat > "$CHELPER" << 'PYEOF'
+    import socket, sys, errno
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try: s.sendto(b"x", ("127.0.0.1", 9)); r = "OK"
+    except OSError as e: r = "BLOCKED" if e.errno == errno.EPERM else "ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_C="scfcombo-$RANDOM"
+        OUT_C="/run/scfcombo-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_C.service" << EOF
+    [Service]
+    Type=oneshot
+    IPAddressAllow=127.0.0.0/8
+    RestrictNetworkInterfaces=eth0
+    ExecStart=$PYC $CHELPER $OUT_C
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_C.service"
+        cat "$OUT_C"
+        # IPAddress allows 127/8, but RestrictNetworkInterfaces denies lo, so the
+        # loopback send must still be blocked: both skb filters have to stay
+        # attached (with only the last one, IPAddress, the send would succeed).
+        grep -qx BLOCKED "$OUT_C"
+        systemctl reset-failed "$UNIT_C.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_C.service" "$OUT_C" "$CHELPER"
+    fi
     RIDEOF
   '';
 }

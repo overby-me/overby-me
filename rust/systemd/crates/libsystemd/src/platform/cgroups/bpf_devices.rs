@@ -26,6 +26,11 @@ const BPF_PROG_LOAD: libc::c_int = 5;
 const BPF_PROG_ATTACH: libc::c_int = 8;
 const BPF_PROG_TYPE_CGROUP_DEVICE: u32 = 15;
 const BPF_CGROUP_DEVICE: u32 = 6;
+/// Attach flag allowing several programs of the same type on one cgroup, and the
+/// whole ancestor chain to run (all must pass, for skb). Without it a second
+/// attach of the same type silently replaces the first, so a unit setting both
+/// IPAddress*= and RestrictNetworkInterfaces= would keep only the last program.
+const BPF_F_ALLOW_MULTI: u32 = 1 << 1;
 
 // ── Device type / access constants (from linux/bpf.h) ────────────────────
 const BPF_DEVCG_DEV_BLOCK: u32 = 1;
@@ -424,7 +429,11 @@ fn bpf_prog_attach(prog_fd: i32, cgroup_path: &Path, attach_type: u32) -> Result
     attr[0..4].copy_from_slice(&(target_fd as u32).to_ne_bytes());
     attr[4..8].copy_from_slice(&(prog_fd as u32).to_ne_bytes());
     attr[8..12].copy_from_slice(&attach_type.to_ne_bytes());
-    attr[12..16].copy_from_slice(&0u32.to_ne_bytes());
+    // ALLOW_MULTI so distinct programs of the same type coexist (a unit's own
+    // IPAddress skb filter and its RestrictNetworkInterfaces skb filter both run,
+    // rather than the second clobbering the first). The service cgroup is created
+    // fresh on each start and removed on stop, so no stale programs accumulate.
+    attr[12..16].copy_from_slice(&BPF_F_ALLOW_MULTI.to_ne_bytes());
 
     let ret = unsafe {
         libc::syscall(
