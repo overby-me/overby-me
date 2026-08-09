@@ -35,6 +35,12 @@ struct Cli {
     #[arg(long, global = true)]
     no_pager: bool,
 
+    /// Control recursive error checking (verify). Accepted globally, i.e. it
+    /// may precede the verb (`--recursive-errors=no verify ...`) as upstream's
+    /// getopt allows, as well as follow it. Parsed for compatibility; ignored.
+    #[arg(long, global = true, value_name = "MODE")]
+    recursive_errors: Option<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -132,10 +138,6 @@ enum Command {
         /// Also check man page references
         #[arg(long, num_args = 0..=1, default_missing_value = "yes")]
         man: Option<String>,
-
-        /// Control recursive error checking
-        #[arg(long, value_name = "MODE")]
-        recursive_errors: Option<String>,
 
         /// Also check generator output
         #[arg(long)]
