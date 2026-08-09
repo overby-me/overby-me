@@ -22,14 +22,17 @@ pub mod decayscreen;
 pub mod deco;
 pub mod discrete;
 pub mod fadeplot;
+pub mod fiberlamp;
 pub mod flame;
 pub mod forest;
 pub mod grav;
 pub mod greynetic;
+pub mod halftone;
 pub mod halo;
 pub mod helix;
 pub mod hexadrop;
 pub mod imsmap;
+pub mod julia;
 pub mod kaleidescope;
 pub mod laser;
 pub mod lcdscrub;
@@ -72,13 +75,16 @@ pub static ALL: &[&Saver] = &[
     &discrete::SAVER,
     &greynetic::SAVER,
     &fadeplot::SAVER,
+    &fiberlamp::SAVER,
     &flame::SAVER,
     &forest::SAVER,
     &grav::SAVER,
     &halo::SAVER,
+    &halftone::SAVER,
     &helix::SAVER,
     &hexadrop::SAVER,
     &imsmap::SAVER,
+    &julia::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
     &lcdscrub::SAVER,

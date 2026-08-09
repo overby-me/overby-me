@@ -136,6 +136,12 @@ saver!(
     xscreensaver::hacks2d::fadeplot::start
 );
 saver!(
+    "fiberlamp",
+    fiberlamp_body,
+    fiberlamp_start,
+    xscreensaver::hacks2d::fiberlamp::start
+);
+saver!(
     "flame",
     flame_body,
     flame_start,
@@ -160,6 +166,12 @@ saver!(
     xscreensaver::hacks2d::halo::start
 );
 saver!(
+    "halftone",
+    halftone_body,
+    halftone_start,
+    xscreensaver::hacks2d::halftone::start
+);
+saver!(
     "helix",
     helix_body,
     helix_start,
@@ -176,6 +188,12 @@ saver!(
     imsmap_body,
     imsmap_start,
     xscreensaver::hacks2d::imsmap::start
+);
+saver!(
+    "julia",
+    julia_body,
+    julia_start,
+    xscreensaver::hacks2d::julia::start
 );
 saver!(
     "kaleidescope",
@@ -377,6 +395,11 @@ pub static SAVERS: &[Entry] = &[
         start: fadeplot_start,
     },
     Entry {
+        slug: "fiberlamp",
+        label: "Fiber Lamp",
+        start: fiberlamp_start,
+    },
+    Entry {
         slug: "flame",
         label: "Flame",
         start: flame_start,
@@ -397,6 +420,11 @@ pub static SAVERS: &[Entry] = &[
         start: halo_start,
     },
     Entry {
+        slug: "halftone",
+        label: "Halftone",
+        start: halftone_start,
+    },
+    Entry {
         slug: "helix",
         label: "Helix",
         start: helix_start,
@@ -410,6 +438,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "imsmap",
         label: "IMS Map",
         start: imsmap_start,
+    },
+    Entry {
+        slug: "julia",
+        label: "Julia",
+        start: julia_start,
     },
     Entry {
         slug: "kaleidescope",

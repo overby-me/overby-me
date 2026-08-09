@@ -23,6 +23,7 @@ extend-ignore-re = [
   # into the Rust ports in web/homepage/xscreensaver.
   "Orignal",
   "10ths",
+  "descrete",
 ]
 
 [default.extend-words]
