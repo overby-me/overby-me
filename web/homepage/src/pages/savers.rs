@@ -76,6 +76,12 @@ macro_rules! saver {
 }
 
 saver!(
+    "cloudlife",
+    cloudlife_body,
+    cloudlife_start,
+    xscreensaver::hacks2d::cloudlife::start
+);
+saver!(
     "coral",
     coral_body,
     coral_start,
@@ -160,6 +166,12 @@ saver!(
     xscreensaver::hacks2d::laser::start
 );
 saver!(
+    "lcdscrub",
+    lcdscrub_body,
+    lcdscrub_start,
+    xscreensaver::hacks2d::lcdscrub::start
+);
+saver!(
     "lissie",
     lissie_body,
     lissie_start,
@@ -200,6 +212,12 @@ saver!(
     popsquares_body,
     popsquares_start,
     xscreensaver::hacks2d::popsquares::start
+);
+saver!(
+    "pyro",
+    pyro_body,
+    pyro_start,
+    xscreensaver::hacks2d::pyro::start
 );
 saver!(
     "rorschach",
@@ -273,6 +291,11 @@ saver!(
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
     Entry {
+        slug: "cloudlife",
+        label: "Cloud Life",
+        start: cloudlife_start,
+    },
+    Entry {
         slug: "coral",
         label: "Coral",
         start: coral_start,
@@ -343,6 +366,11 @@ pub static SAVERS: &[Entry] = &[
         start: laser_start,
     },
     Entry {
+        slug: "lcdscrub",
+        label: "LCD Scrub",
+        start: lcdscrub_start,
+    },
+    Entry {
         slug: "lissie",
         label: "Lissie",
         start: lissie_start,
@@ -376,6 +404,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "popsquares",
         label: "Pop Squares",
         start: popsquares_start,
+    },
+    Entry {
+        slug: "pyro",
+        label: "Pyro",
+        start: pyro_start,
     },
     Entry {
         slug: "rorschach",

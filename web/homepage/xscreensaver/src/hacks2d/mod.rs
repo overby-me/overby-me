@@ -13,6 +13,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
 
+pub mod cloudlife;
 pub mod coral;
 pub mod cwaves;
 pub mod decayscreen;
@@ -27,6 +28,7 @@ pub mod helix;
 pub mod hexadrop;
 pub mod kaleidescope;
 pub mod laser;
+pub mod lcdscrub;
 pub mod lissie;
 pub mod moire;
 pub mod moire2;
@@ -34,6 +36,7 @@ pub mod mountain;
 pub mod munch;
 pub mod pedal;
 pub mod popsquares;
+pub mod pyro;
 pub mod rorschach;
 pub mod rotor;
 pub mod sierpinski;
@@ -53,6 +56,7 @@ pub mod xspirograph;
 /// the main module. See [`crate::all`].
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
+    &cloudlife::SAVER,
     &coral::SAVER,
     &cwaves::SAVER,
     &deco::SAVER,
@@ -67,6 +71,7 @@ pub static ALL: &[&Saver] = &[
     &hexadrop::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
+    &lcdscrub::SAVER,
     &lissie::SAVER,
     &moire::SAVER,
     &moire2::SAVER,
@@ -74,6 +79,7 @@ pub static ALL: &[&Saver] = &[
     &munch::SAVER,
     &pedal::SAVER,
     &popsquares::SAVER,
+    &pyro::SAVER,
     &rorschach::SAVER,
     &rotor::SAVER,
     &sierpinski::SAVER,
@@ -105,32 +111,59 @@ mod tests {
         r
     }
 
+    fn lit(r: &Runner) -> usize {
+        r.dpy
+            .win_ref()
+            .pixels()
+            .iter()
+            .filter(|p| **p != ALPHA)
+            .count()
+    }
+
+    /// Sampled as the run goes rather than measured at the end: pyro's shells
+    /// fly off the top of the screen between launches, so its last frame can be
+    /// nearly empty while the hack is drawing plenty.
     #[test]
     fn every_saver_draws_something() {
         for saver in ALL {
             let def = saver.def;
-            let r = run(saver, 320, 240, "");
-            let lit = r
-                .dpy
-                .win_ref()
-                .pixels()
-                .iter()
-                .filter(|p| **p != ALPHA)
-                .count();
-            assert!(lit > 100, "{} drew almost nothing ({lit} pixels)", def.slug);
+            let mut r = (saver.start)(StartArgs::new(320, 240, "", 20260809));
+            let mut best = 0;
+            for i in 0..FRAMES {
+                r.step();
+                if i % 10 == 0 {
+                    best = best.max(lit(&r));
+                }
+            }
+            best = best.max(lit(&r));
+            assert!(
+                best > 100,
+                "{} drew almost nothing ({best} pixels)",
+                def.slug
+            );
         }
     }
 
+    /// Looking once is not enough: lcdscrub slides its pattern one pixel a
+    /// frame and repeats every eight, so a fixed stride can land on the same
+    /// picture twice and read as frozen.
     #[test]
     fn every_saver_keeps_changing() {
         for saver in ALL {
             let def = saver.def;
             let mut r = run(saver, 320, 240, "");
             let a = r.frame_hash();
-            for _ in 0..FRAMES {
-                r.step();
+            let mut changed = false;
+            for _ in 0..5 {
+                for _ in 0..37 {
+                    r.step();
+                }
+                if r.frame_hash() != a {
+                    changed = true;
+                    break;
+                }
             }
-            assert_ne!(r.frame_hash(), a, "{} froze", def.slug);
+            assert!(changed, "{} froze", def.slug);
         }
     }
 
