@@ -1358,6 +1358,31 @@ html {
 .app-shell .card.app-card .card-header {
 	background: none;
 }
+/* What now says "a new part of the app": the type and the space around it.
+   M3 puts the boundary between panes in spacing and colour rather than in a
+   line -- "implicit grouping uses close proximity and open space (rather than
+   lines and shadows)" -- and reserves an explicit boundary (an outline, a
+   divider, a shadow) for grouping that also reads as INTERACTIVE. An app view is
+   the screen, not an object to press, which is the same reason the card had to
+   go: it made the whole view look tappable.
+
+   So the app's title steps up a size and a weight (M3 Expressive's "emphasized
+   text", which the update is explicit about being for hierarchy), and the space
+   above it is a clear step larger than the rhythm inside the app. The navigation
+   already says WHICH part you are in; this says that a part has begun. */
+.app-shell:not([data-size-class="compact"]) .card.app-card > .card-header {
+	padding-block-start: var(--md-sys-spacing-6);
+}
+.app-shell .card.app-card > .card-header > h3 {
+	font-size: var(--md-sys-typescale-title-large-size);
+	line-height: var(--md-sys-typescale-title-large-line);
+}
+/* A genuine card inside the app keeps its own smaller heading: it is one topic
+   on the surface, not the surface. */
+.app-shell .card.app-card .card:not(.app-card) .card-header > h3 {
+	font-size: var(--md-sys-typescale-title-medium-size);
+	line-height: var(--md-sys-typescale-title-medium-line);
+}
 /* Except a genuine card sitting inside one -- a place on the home screen, a
    canvas in the picker. It is still a card, so it still has a top to tint. */
 .app-shell:not([data-size-class="compact"]) .card.app-card .card:not(.app-card) .card-header {
@@ -7122,6 +7147,16 @@ a.list-item:hover {
 /* Comment system (nested, Bluesky-style) */
 .comment-section {
 	margin-top: var(--md-sys-spacing-2);
+}
+/* And here a line IS right. The comments are a different kind of content from
+   the document they hang under -- M3: "use full-width dividers to separate
+   larger sections of unrelated content", and they separate an interactive area
+   from a non-interactive one, which is the other case the guidance names. Used
+   sparingly, as it also says: this is the only one on the screen. */
+.app-shell .card.app-card.comment-section {
+	border-top: 1px solid var(--md-outline-variant);
+	margin-top: var(--md-sys-spacing-6);
+	padding-top: var(--md-sys-spacing-2);
 }
 
 /* DESIGN (conversational thread): an inviting tertiary-tinted composer well. */
