@@ -8791,12 +8791,18 @@ a.list-item:hover {
 	display: flex;
 	flex-direction: column;
 	gap: var(--md-sys-spacing-4);
-	align-items: center;
+	/* NOT `center`: a flex item is sized to its CONTENT when the cross axis is
+	   centred, and a page's content is absolutely positioned, so it has none.
+	   The page came out zero wide, which took every measurement on it -- all of
+	   them a share of that width -- to zero with it. Stretched, and centred by
+	   its own margins instead. */
+	align-items: stretch;
 }
 .pdf-page {
 	container-type: inline-size;
 	position: relative;
 	width: 100%;
+	margin-inline: auto;
 	/* The page is paper: white, whatever the app's surface is, because that is
 	   what the ink on it was chosen against. */
 	background: #fff;
