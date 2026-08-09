@@ -2911,16 +2911,10 @@ pub fn run_exec_helper() {
         // anything together. Upstream keeps them separate for the same reason.
         let joined = false;
 
-        let ret = if joined { 0 } else { unsafe { libc::unshare(libc::CLONE_NEWUSER) } };
         if joined {
             // Maps were written by whoever created the namespace.
-        } else if ret != 0 {
-            log::warn!(
-                "Failed to create user namespace for PrivateUsers=: {}",
-                std::io::Error::last_os_error()
-            );
         } else {
-            // Write uid_map/gid_map per PrivateUsers(Ex)= mode:
+            // Compute uid_map/gid_map per PrivateUsers(Ex)= mode:
             //   yes/self -> "0 <uid> 1" (root maps to the caller's uid),
             //   identity -> "0 0 65536", full -> "0 0 4294967295" (identity map).
             // setgroups is denied for every mode except "full", which allows it.
@@ -2952,13 +2946,36 @@ pub fn run_exec_helper() {
                     (um, gm, true)
                 }
             };
-            let _ = std::fs::write("/proc/self/uid_map", &uid_map);
-            if deny_setgroups {
-                // Must deny setgroups before writing gid_map (kernel requirement
-                // when unprivileged; harmless when privileged).
-                let _ = std::fs::write("/proc/self/setgroups", "deny\n");
+            // identity/full are RANGE maps. A range (or multi-line) map cannot be
+            // self-written after unshare(CLONE_NEWUSER): the kernel requires
+            // CAP_SETUID over the PARENT user namespace, which the unsharer does
+            // not hold. So a helper forked while still in the parent namespace
+            // (root there) writes it from outside. The single-line self/yes map
+            // is the common path and is written directly.
+            if matches!(config.private_users_mode.as_str(), "identity" | "full") {
+                if !unshare_userns_with_helper_written_map(&uid_map, &gid_map, deny_setgroups) {
+                    log::warn!(
+                        "Failed to set up user namespace with a range map for PrivateUsers={}",
+                        config.private_users_mode
+                    );
+                }
+            } else {
+                let ret = unsafe { libc::unshare(libc::CLONE_NEWUSER) };
+                if ret != 0 {
+                    log::warn!(
+                        "Failed to create user namespace for PrivateUsers=: {}",
+                        std::io::Error::last_os_error()
+                    );
+                } else {
+                    let _ = std::fs::write("/proc/self/uid_map", &uid_map);
+                    if deny_setgroups {
+                        // Must deny setgroups before writing gid_map (kernel
+                        // requirement when unprivileged; harmless when privileged).
+                        let _ = std::fs::write("/proc/self/setgroups", "deny\n");
+                    }
+                    let _ = std::fs::write("/proc/self/gid_map", &gid_map);
+                }
             }
-            let _ = std::fs::write("/proc/self/gid_map", &gid_map);
         }
     }
 
@@ -4734,6 +4751,125 @@ struct MountAttr {
     attr_clr: u64,
     propagation: u64,
     userns_fd: u64,
+}
+
+/// Write `data` to `path` in a single `write()` using only async-signal-safe
+/// calls, for use in a post-fork child. /proc map files require the whole map
+/// in one write, so a short write is treated as failure rather than retried.
+unsafe fn write_proc_file_raw(path: *const std::os::raw::c_char, data: &[u8]) -> bool {
+    let fd = unsafe { libc::open(path, libc::O_WRONLY) };
+    if fd < 0 {
+        return false;
+    }
+    let n = unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
+    unsafe { libc::close(fd) };
+    n == data.len() as isize
+}
+
+/// Create THIS process's user namespace and have a forked helper write a range
+/// (identity/full) uid_map/gid_map for it.
+///
+/// A range or multi-line map cannot be written by the process that just
+/// unshared CLONE_NEWUSER: the kernel requires CAP_SETUID over the PARENT user
+/// namespace, which the unsharer does not hold. So fork a helper FIRST, while
+/// still in the parent namespace and root there; this process then unshares and
+/// asks the helper, over a pipe, to write /proc/<us>/{setgroups,uid_map,gid_map}
+/// from outside. Mirrors create_mapped_userns() with the roles reversed: there
+/// the child unshares and the parent writes; here the parent unshares and the
+/// forked helper writes, because it is the parent that must end up in the new
+/// namespace.
+///
+/// Returns true if the namespace was created and the helper reported writing
+/// the maps.
+fn unshare_userns_with_helper_written_map(uid_map: &str, gid_map: &str, deny_setgroups: bool) -> bool {
+    let my_pid = unsafe { libc::getpid() };
+
+    // Prepare paths and payloads BEFORE forking: the helper child must stay
+    // async-signal-safe (no allocation) after the fork.
+    let (uid_path, gid_path, sg_path) = match (
+        std::ffi::CString::new(format!("/proc/{my_pid}/uid_map")),
+        std::ffi::CString::new(format!("/proc/{my_pid}/gid_map")),
+        std::ffi::CString::new(format!("/proc/{my_pid}/setgroups")),
+    ) {
+        (Ok(u), Ok(g), Ok(s)) => (u, g, s),
+        _ => return false,
+    };
+    let uid_bytes = uid_map.as_bytes();
+    let gid_bytes = gid_map.as_bytes();
+
+    let mut ready = [-1i32; 2];
+    let mut done = [-1i32; 2];
+    if unsafe { libc::pipe(ready.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    if unsafe { libc::pipe(done.as_mut_ptr()) } != 0 {
+        unsafe {
+            libc::close(ready[0]);
+            libc::close(ready[1]);
+        }
+        return false;
+    }
+
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        unsafe {
+            libc::close(ready[0]);
+            libc::close(ready[1]);
+            libc::close(done[0]);
+            libc::close(done[1]);
+        }
+        return false;
+    }
+
+    if pid == 0 {
+        // Helper child: still in the parent user namespace, root there. Wait for
+        // the parent to unshare, then write its maps from outside. setgroups must
+        // be denied before gid_map (kernel requirement when unprivileged).
+        unsafe {
+            libc::close(ready[1]);
+            libc::close(done[0]);
+            let mut buf = [0u8; 1];
+            let got = libc::read(ready[0], buf.as_mut_ptr().cast(), 1);
+            if got == 1 && buf[0] == 1 {
+                if deny_setgroups {
+                    write_proc_file_raw(sg_path.as_ptr(), b"deny\n");
+                }
+                write_proc_file_raw(uid_path.as_ptr(), uid_bytes);
+                write_proc_file_raw(gid_path.as_ptr(), gid_bytes);
+            }
+            let byte = [1u8];
+            libc::write(done[1], byte.as_ptr().cast(), 1);
+            libc::_exit(0);
+        }
+    }
+
+    // Parent (this process): unshare, signal the helper, wait for it, reap.
+    unsafe {
+        libc::close(ready[0]);
+        libc::close(done[1]);
+    }
+    let unshared = unsafe { libc::unshare(libc::CLONE_NEWUSER) } == 0;
+    if !unshared {
+        log::warn!(
+            "Failed to create user namespace for PrivateUsers=: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut ok = unshared;
+    unsafe {
+        let signal = [u8::from(unshared)];
+        libc::write(ready[1], signal.as_ptr().cast(), 1);
+        libc::close(ready[1]);
+        let mut buf = [0u8; 1];
+        let got = libc::read(done[0], buf.as_mut_ptr().cast(), 1);
+        libc::close(done[0]);
+        let mut status = 0;
+        libc::waitpid(pid, &mut status, 0);
+        if got != 1 {
+            ok = false;
+        }
+    }
+    ok
 }
 
 /// Mint a user namespace whose uid/gid maps match the ones the service will
