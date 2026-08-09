@@ -401,7 +401,10 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                 if let Block::Anchor(id) = item {
                                     li { key: "{j}", id: "{id}", class: "pdf-anchor pdf-anchor-item" }
                                 }
-                                if let Block::ListItem { spans, marker, indent } = item {
+                                if let Block::ListItem { spans, marker, indent, scale } = item {
+                                    // The item is set at the size the page set
+                                    // it, the drawn bullet included: the mark is
+                                    // sized in ems, so it follows.
                                     match marker {
                                         // The page drew its own bullet, and here
                                         // it is a logo rather than a dot, so it
@@ -411,7 +414,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                             li {
                                                 key: "{j}",
                                                 class: "pdf-li-drawn",
-                                                style: "{indent_var(*indent)}",
+                                                style: "{indent_var(*indent)}{size_style(*scale)}",
                                                 img {
                                                     class: "pdf-li-mark",
                                                     src: "{src}",
@@ -422,7 +425,9 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                             }
                                         },
                                         None => rsx! {
-                                            li { key: "{j}", style: "{indent_var(*indent)}",
+                                            li {
+                                                key: "{j}",
+                                                style: "{indent_var(*indent)}{size_style(*scale)}",
                                                 Spans { spans: spans.clone() }
                                             }
                                         },
@@ -447,11 +452,12 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         spans,
                         align,
                         indent,
+                        scale,
                     }) => rsx! {
                         p {
                             key: "{i}",
                             class: "docx-p",
-                            style: "{align_style(*align)}{indent_style(*indent)}",
+                            style: "{align_style(*align)}{indent_style(*indent)}{size_style(*scale)}",
                             Spans { spans: spans.clone() }
                         }
                     },
@@ -467,7 +473,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                 if let Block::Anchor(id) = entry {
                                     span { key: "{j}", id: "{id}", class: "pdf-anchor" }
                                 }
-                                if let Block::IndexEntry { spans, page, indent } = entry {
+                                if let Block::IndexEntry { spans, page, indent, scale } = entry {
                                     {
                                         // The file draws its link across the whole
                                         // row, number included, so the whole row is
@@ -481,7 +487,8 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                             span { class: "pdf-toc-leader", aria_hidden: "true" }
                                             span { class: "pdf-toc-page", "{page}" }
                                         };
-                                        let style = indent_style(*indent);
+                                        let style =
+                                            format!("{}{}", indent_style(*indent), size_style(*scale));
                                         match spans.iter().find_map(|s| s.link.clone()) {
                                             Some(link) => rsx! {
                                                 LinkTo {
@@ -772,6 +779,20 @@ fn indent_style(indent: u8) -> String {
     match indent {
         0 => String::new(),
         n => format!("margin-inline-start:calc(var(--pdf-indent-step) * {n});"),
+    }
+}
+
+/// The size the page set a block at, against its own body text.
+///
+/// A document says things with size below the size that makes a heading: the
+/// fine print of an auditor's boilerplate, a note under a table, the address on
+/// a cover. In ems, so it follows whatever the reading surface is set to, and
+/// only when the page meant it -- anything within a twelfth of the body text is
+/// body text.
+fn size_style(scale: f64) -> String {
+    match (scale - 1.0).abs() > 0.01 {
+        true => format!("font-size:{scale:.2}em;"),
+        false => String::new(),
     }
 }
 

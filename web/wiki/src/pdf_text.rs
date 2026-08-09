@@ -41,6 +41,11 @@ pub enum Block {
         /// a quoted passage, a sub-clause or a nested entry, and a reflow that
         /// flattens everything to the margin throws that away.
         indent: u8,
+        /// How big the page set it, against its own body text. A document says
+        /// things with size below the size that makes a heading: the fine print
+        /// of an auditor's boilerplate, a note under a table, an address block
+        /// on a cover. Read at one size they all shout equally.
+        scale: f64,
     },
     /// A line that began with a bullet or a number, with that marker stripped.
     /// `marker` is set when the bullet was a picture rather than a character,
@@ -53,6 +58,8 @@ pub enum Block {
         /// without this the bullets came out at the margin, to the LEFT of the
         /// words introducing them.
         indent: u8,
+        /// How big the page set it, as a paragraph carries it.
+        scale: f64,
     },
     /// A row of a table of contents: what it points at, and the page it points
     /// to. Kept apart from a paragraph because the two are laid out differently
@@ -64,6 +71,8 @@ pub enum Block {
         spans: Vec<Span>,
         page: String,
         indent: u8,
+        /// How big the page set it, as a paragraph carries it.
+        scale: f64,
     },
     /// Rows whose words stood in the same columns down the page.
     ///
@@ -4009,6 +4018,13 @@ fn blocks_from(
                  cells: &mut usize,
                  blocks: &mut Vec<Block>| {
         let drawn_bullet = bullet.take();
+        // What the page set this at, against its body text. Held back from
+        // anything near the body size, so ordinary text is ordinary text and
+        // only a document that MEANT a different size gets one.
+        let scale = match body > 0.0 && (size / body - 1.0).abs() > 0.08 {
+            true => (size / body).clamp(0.7, 1.4),
+            false => 1.0,
+        };
         let align = alignment_of(geometry, col_left, column, size);
         // The block's own left edge is the leftmost its lines reached. Not the
         // first line's: a paragraph whose opening line is indented has not moved
@@ -4041,6 +4057,7 @@ fn blocks_from(
                 spans: keep_prefix(spans, keep),
                 page,
                 indent,
+                scale,
             });
         } else if let Some(rest) = list_marker(&text) {
             // Drop the marker from the spans, keeping the colours of the words
@@ -4050,6 +4067,7 @@ fn blocks_from(
                 spans: drop_prefix(spans, dropped),
                 marker: drawn_bullet,
                 indent,
+                scale,
             });
         } else if drawn_bullet.is_some() {
             // A bullet the page DREW, so there is no marker in the text to take
@@ -4058,6 +4076,7 @@ fn blocks_from(
                 spans,
                 marker: drawn_bullet,
                 indent,
+                scale,
             });
         } else if size > body * 1.12 {
             // Calibrated against Word's own defaults rather than picked: on an
@@ -4082,6 +4101,7 @@ fn blocks_from(
                 spans,
                 align,
                 indent,
+                scale,
             });
         }
     };
@@ -5902,6 +5922,9 @@ mod harness {
                         super::Block::Table { rows, .. } => {
                             format!("table {}x{}", rows.len(), rows.first().map_or(0, Vec::len))
                         }
+                        super::Block::Paragraph { indent, scale, .. } if *scale != 1.0 => {
+                            format!("p{indent} {:.0}%", scale * 100.0)
+                        }
                         super::Block::Paragraph { indent, .. } => match indent {
                             0 => "p".into(),
                             n => format!("p>{n}"),
@@ -6588,6 +6611,7 @@ mod tests {
             layout: Vec::new(),
             blocks: vec![Block::Paragraph {
                 indent: 0,
+                scale: 1.0,
                 spans: vec![Span {
                     underline: false,
                     link: None,
@@ -7518,6 +7542,7 @@ mod tests {
     #[test]
     fn an_anchor_nobody_points_at_is_taken_out() {
         let row = |text: &str, to: Option<&str>| Block::IndexEntry {
+            scale: 1.0,
             spans: vec![Span {
                 text: text.into(),
                 color: None,
