@@ -1671,6 +1671,74 @@ fn cut_at_stops(cell: Cell, stops: &[f64]) -> Vec<Cell> {
     out
 }
 
+/// One word of a page, with where it starts and how wide the page drew it.
+struct Word {
+    x: f64,
+    y: f64,
+    width: f64,
+    size: f64,
+    text: String,
+    color: Option<String>,
+    bold: bool,
+    italic: bool,
+    family: Family,
+    link: Option<Link>,
+}
+
+/// Gather a page's runs into words: same baseline, same styling, no gap between
+/// them wider than a space.
+///
+/// The gap rule is the reading view's own ([`word_gap`]), measured against an
+/// oracle: it is the width that tells a space from the join between two runs of
+/// one word, and it is the same question here.
+fn words_of(runs: &[Run]) -> Vec<Word> {
+    let mut sorted: Vec<&Run> = runs.iter().filter(|r| !r.text.trim().is_empty()).collect();
+    sorted.sort_by(|a, b| {
+        b.y.partial_cmp(&a.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    let mut out: Vec<Word> = Vec::new();
+    let mut last_end = f64::NEG_INFINITY;
+    for run in sorted {
+        let joins = out.last().is_some_and(|w| {
+            (w.y - run.y).abs() < (w.size.max(run.size) * 0.3).max(0.5)
+                && w.bold == run.bold
+                && w.italic == run.italic
+                && w.family == run.family
+                && w.color == run.color
+                && w.link == run.link
+                && (run.x - last_end) <= run.size * word_gap()
+                // Not backwards: a file that returns to an earlier x has started
+                // something else, whatever the gap says.
+                && run.x + 0.5 >= last_end
+        });
+        match joins {
+            true => {
+                if let Some(word) = out.last_mut() {
+                    word.text.push_str(&run.text);
+                    word.width = run.end_x - word.x;
+                    word.size = word.size.max(run.size);
+                }
+            }
+            false => out.push(Word {
+                x: run.x,
+                y: run.y,
+                width: (run.end_x - run.x).max(0.0),
+                size: run.size,
+                text: run.text.clone(),
+                color: run.color.clone(),
+                bold: run.bold,
+                italic: run.italic,
+                family: run.family,
+                link: run.link.clone(),
+            }),
+        }
+        last_end = run.end_x;
+    }
+    out
+}
+
 /// A page's size in points, from its own box or the one it inherits.
 fn page_size(doc: &Document, page_id: lopdf::ObjectId) -> (f64, f64) {
     // A4 when the file does not say, which is what every document here is.
@@ -1718,24 +1786,34 @@ fn page_size(doc: &Document, page_id: lopdf::ObjectId) -> (f64, f64) {
 fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageLayout {
     let (width, height) = page_size(doc, page_id);
     let mut items: Vec<Placed> = Vec::new();
-    for run in &drawn.runs {
-        if run.text.trim().is_empty() {
-            continue;
-        }
+    // WORDS, not glyphs. A file is free to place every letter itself, and the
+    // songbook does: each glyph at its own x, spaced tighter than the font's own
+    // advances. Placed one by one in a stand-in face, each letter is drawn at
+    // ITS width and reaches into the next, and a name comes out a jumble.
+    //
+    // A word placed at its start and drawn by the browser cannot do that: the
+    // letters inside it are spaced by the face, which has the widths the
+    // original had. Any error is a fraction of a point over a word rather than a
+    // collision at every letter -- and there are twenty-five words on a page
+    // where there were a hundred and fifty glyphs, which the DOM notices too.
+    for word in words_of(&drawn.runs) {
         items.push(Placed {
-            x: run.x,
+            x: word.x,
             // The baseline, from the top. What sits ON it is drawn above it.
-            y: height - run.y,
-            width: (run.end_x - run.x).max(0.0),
-            height: run.size,
+            y: height - word.y,
+            width: word.width,
+            height: word.size,
             what: What::Text {
-                text: run.text.clone(),
-                size: run.size,
-                color: run.color.clone(),
-                bold: run.bold,
-                italic: run.italic,
-                family: run.family,
-                link: run.link.clone(),
+                // A tab drawn inside a word is a space: the page positions its
+                // words itself, so the character is only there to be seen, and
+                // `pre` would draw it eight columns wide.
+                text: word.text.replace(['\t', '\n', '\r'], " "),
+                size: word.size,
+                color: word.color,
+                bold: word.bold,
+                italic: word.italic,
+                family: word.family,
+                link: word.link,
             },
         });
     }
