@@ -17,12 +17,14 @@ pub mod coral;
 pub mod cwaves;
 pub mod decayscreen;
 pub mod deco;
+pub mod discrete;
 pub mod fadeplot;
 pub mod forest;
 pub mod grav;
 pub mod greynetic;
 pub mod halo;
 pub mod helix;
+pub mod hexadrop;
 pub mod kaleidescope;
 pub mod laser;
 pub mod lissie;
@@ -33,6 +35,7 @@ pub mod munch;
 pub mod pedal;
 pub mod popsquares;
 pub mod rorschach;
+pub mod rotor;
 pub mod sierpinski;
 pub mod sphere;
 pub mod spiral;
@@ -54,12 +57,14 @@ pub static ALL: &[&Saver] = &[
     &cwaves::SAVER,
     &deco::SAVER,
     &decayscreen::SAVER,
+    &discrete::SAVER,
     &greynetic::SAVER,
     &fadeplot::SAVER,
     &forest::SAVER,
     &grav::SAVER,
     &halo::SAVER,
     &helix::SAVER,
+    &hexadrop::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
     &lissie::SAVER,
@@ -70,6 +75,7 @@ pub static ALL: &[&Saver] = &[
     &pedal::SAVER,
     &popsquares::SAVER,
     &rorschach::SAVER,
+    &rotor::SAVER,
     &sierpinski::SAVER,
     &sphere::SAVER,
     &spiral::SAVER,

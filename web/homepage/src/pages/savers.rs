@@ -100,6 +100,12 @@ saver!(
     xscreensaver::hacks2d::decayscreen::start
 );
 saver!(
+    "discrete",
+    discrete_body,
+    discrete_start,
+    xscreensaver::hacks2d::discrete::start
+);
+saver!(
     "greynetic",
     greynetic_body,
     greynetic_start,
@@ -134,6 +140,12 @@ saver!(
     helix_body,
     helix_start,
     xscreensaver::hacks2d::helix::start
+);
+saver!(
+    "hexadrop",
+    hexadrop_body,
+    hexadrop_start,
+    xscreensaver::hacks2d::hexadrop::start
 );
 saver!(
     "kaleidescope",
@@ -196,6 +208,12 @@ saver!(
     xscreensaver::hacks2d::rorschach::start
 );
 
+saver!(
+    "rotor",
+    rotor_body,
+    rotor_start,
+    xscreensaver::hacks2d::rotor::start
+);
 saver!(
     "sierpinski",
     sierpinski_body,
@@ -275,6 +293,11 @@ pub static SAVERS: &[Entry] = &[
         start: decayscreen_start,
     },
     Entry {
+        slug: "discrete",
+        label: "Discrete",
+        start: discrete_start,
+    },
+    Entry {
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
@@ -303,6 +326,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "helix",
         label: "Helix",
         start: helix_start,
+    },
+    Entry {
+        slug: "hexadrop",
+        label: "Hexadrop",
+        start: hexadrop_start,
     },
     Entry {
         slug: "kaleidescope",
@@ -353,6 +381,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "rorschach",
         label: "Rorschach",
         start: rorschach_start,
+    },
+    Entry {
+        slug: "rotor",
+        label: "Rotor",
+        start: rotor_start,
     },
     Entry {
         slug: "sierpinski",
