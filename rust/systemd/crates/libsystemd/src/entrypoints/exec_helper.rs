@@ -875,6 +875,13 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub system_call_architectures: Vec<String>,
 
+    /// RestrictAddressFamilies=: address families the service may use. An
+    /// allow-list (e.g. "AF_UNIX AF_INET") permits only those; a deny-list
+    /// ("~AF_PACKET") blocks the listed ones. Enforced via a seccomp filter on
+    /// socket(2). See systemd.exec(5).
+    #[serde(default)]
+    pub restrict_address_families: Vec<String>,
+
     /// SystemCallFilter= — seccomp syscall filter.
     /// See systemd.exec(5).
     #[serde(default)]
@@ -3838,6 +3845,8 @@ pub fn run_exec_helper() {
     install_system_call_log(&config);
     // SystemCallArchitectures= restricts which CPU architectures may be used.
     install_system_call_architectures(&config);
+    // RestrictAddressFamilies= filters socket(2) by address family.
+    install_restrict_address_families(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -5690,6 +5699,149 @@ fn install_system_call_architectures(_config: &ExecHelperConfig) {
     log::warn!("SystemCallArchitectures= not implemented for this target");
 }
 
+/// Resolve an `AF_*` address-family name to its number.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn address_family_from_name(name: &str) -> Option<u32> {
+    let v: libc::c_int = match name {
+        "AF_UNSPEC" => libc::AF_UNSPEC,
+        "AF_UNIX" | "AF_LOCAL" => libc::AF_UNIX,
+        "AF_INET" => libc::AF_INET,
+        "AF_INET6" => libc::AF_INET6,
+        "AF_NETLINK" | "AF_ROUTE" => libc::AF_NETLINK,
+        "AF_PACKET" => libc::AF_PACKET,
+        "AF_VSOCK" => libc::AF_VSOCK,
+        "AF_ALG" => libc::AF_ALG,
+        "AF_BLUETOOTH" => libc::AF_BLUETOOTH,
+        "AF_KEY" => libc::AF_KEY,
+        "AF_CAN" => libc::AF_CAN,
+        "AF_TIPC" => libc::AF_TIPC,
+        "AF_RDS" => libc::AF_RDS,
+        "AF_LLC" => libc::AF_LLC,
+        "AF_PPPOX" => libc::AF_PPPOX,
+        "AF_NFC" => libc::AF_NFC,
+        "AF_APPLETALK" => libc::AF_APPLETALK,
+        "AF_IPX" => libc::AF_IPX,
+        "AF_X25" => libc::AF_X25,
+        "AF_AX25" => libc::AF_AX25,
+        "AF_ATMPVC" => libc::AF_ATMPVC,
+        "AF_BRIDGE" => libc::AF_BRIDGE,
+        "AF_NETROM" => libc::AF_NETROM,
+        "AF_ROSE" => libc::AF_ROSE,
+        "AF_SECURITY" => libc::AF_SECURITY,
+        "AF_PHONET" => libc::AF_PHONET,
+        "AF_IEEE802154" => libc::AF_IEEE802154,
+        "AF_CAIF" => libc::AF_CAIF,
+        "AF_ISDN" => libc::AF_ISDN,
+        "AF_IUCV" => libc::AF_IUCV,
+        "AF_RXRPC" => libc::AF_RXRPC,
+        _ => return None,
+    };
+    Some(v as u32)
+}
+
+/// Build a seccomp cBPF program that restricts the address family passed to
+/// socket(2). For an allow-list, socket() with a family in `families` is allowed
+/// and any other family gets EAFNOSUPPORT; for a deny-list, the listed families
+/// get EAFNOSUPPORT and others are allowed. Non-socket syscalls always pass.
+/// Reads the low 32 bits of args[0] (the family), matching how the kernel
+/// truncates socket()'s int domain.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn build_restrict_address_families_filter(
+    families: &[u32],
+    deny_list: bool,
+    errno: u32,
+) -> Vec<libc::sock_filter> {
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const ALLOW: u32 = 0x7fff_0000;
+    let errno_act = 0x0005_0000 | (errno & 0xffff);
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    let n = families.len();
+    // Index of the trailing RET ALLOW, used as a jump target.
+    let final_idx: usize = if deny_list { 6 + 2 * n } else { 6 + n + 1 };
+    let mut prog = vec![
+        f(0x20, 0, 0, 4),                 // 0 LD arch
+        f(0x15, 1, 0, AUDIT_ARCH_X86_64), // 1 JEQ x86_64 -> [3], else [2]
+        f(0x06, 0, 0, ALLOW),             // 2 RET ALLOW (non-x86_64)
+        f(0x20, 0, 0, 0),                 // 3 LD nr
+        // 4 JEQ nr==socket -> [5]; else jump to the trailing RET ALLOW.
+        f(0x15, 0, (final_idx - 5) as u8, libc::SYS_socket as u32),
+        f(0x20, 0, 0, 16), // 5 LD args[0] low word (the family)
+    ];
+    if deny_list {
+        for &fam in families {
+            prog.push(f(0x15, 0, 1, fam)); // JEQ fam -> RET errno; else skip
+            prog.push(f(0x06, 0, 0, errno_act));
+        }
+        prog.push(f(0x06, 0, 0, ALLOW)); // family not listed: allow
+    } else {
+        for (i, &fam) in families.iter().enumerate() {
+            // JEQ fam -> jump to the trailing RET ALLOW; else fall through.
+            prog.push(f(0x15, (final_idx - (6 + i) - 1) as u8, 0, fam));
+        }
+        prog.push(f(0x06, 0, 0, errno_act)); // family not allowed
+        prog.push(f(0x06, 0, 0, ALLOW)); // allowed family / non-socket land here
+    }
+    prog
+}
+
+/// Apply `RestrictAddressFamilies=`: filter socket(2) by address family.
+/// Blocked families get EAFNOSUPPORT (systemd's default), never a kill, so this
+/// cannot crash a service. For an allow-list, any unmappable family name means
+/// we cannot safely restrict, so the filter is skipped (run permissive).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_restrict_address_families(config: &ExecHelperConfig) {
+    if config.restrict_address_families.is_empty() {
+        return;
+    }
+    let deny_list = config.restrict_address_families[0].starts_with('~');
+    let mut families: Vec<u32> = Vec::new();
+    for (i, tok) in config.restrict_address_families.iter().enumerate() {
+        let name = if i == 0 {
+            tok.strip_prefix('~').unwrap_or(tok)
+        } else {
+            tok.as_str()
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match address_family_from_name(name) {
+            Some(af) => {
+                if !families.contains(&af) {
+                    families.push(af);
+                }
+            }
+            None if deny_list => {
+                log::debug!("RestrictAddressFamilies: unknown family '{name}', ignoring");
+            }
+            None => {
+                log::warn!(
+                    "RestrictAddressFamilies: unknown family '{name}' for {}; not restricting",
+                    config.name
+                );
+                return;
+            }
+        }
+    }
+    if families.is_empty() {
+        return;
+    }
+    let prog =
+        build_restrict_address_families_filter(&families, deny_list, libc::EAFNOSUPPORT as u32);
+    if install_seccomp_program(&prog) {
+        log::debug!(
+            "RestrictAddressFamilies: installed socket() family filter ({} families) for {}",
+            families.len(),
+            config.name
+        );
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_restrict_address_families(_config: &ExecHelperConfig) {
+    log::warn!("RestrictAddressFamilies= not implemented for this target");
+}
+
 /// Bring up the loopback interface in a new network namespace.
 fn bring_up_loopback() {
     // Use a netlink socket to bring up lo
@@ -6794,6 +6946,46 @@ mod tests {
             libc::WEXITSTATUS(status),
             0,
             "arch-filter child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_restrict_address_families_filter() {
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // Allow-list AF_UNIX only.
+            let prog = build_restrict_address_families_filter(
+                &[libc::AF_UNIX as u32],
+                false,
+                libc::EAFNOSUPPORT as u32,
+            );
+            if !install_seccomp_program(&prog) {
+                unsafe { libc::_exit(10) };
+            }
+            // An AF_UNIX socket is permitted.
+            let s = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+            if s < 0 {
+                unsafe { libc::_exit(11) };
+            }
+            unsafe { libc::close(s) };
+            // An AF_INET socket is blocked with EAFNOSUPPORT.
+            let s2 = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+            let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if s2 >= 0 || e != libc::EAFNOSUPPORT {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "restrict-address-families child failed (code {})",
             libc::WEXITSTATUS(status)
         );
     }

@@ -103,6 +103,34 @@
     systemctl stop "$UNIT_ARCH.service" 2>/dev/null || true
     systemctl reset-failed "$UNIT_ARCH.service" 2>/dev/null || true
     rm -f "/run/systemd/system/$UNIT_ARCH.service" "$OUT_ARCH"
+
+    : "RestrictAddressFamilies=AF_UNIX permits AF_UNIX sockets but blocks AF_INET with EAFNOSUPPORT (97)"
+    PY="$(command -v python3 || true)"
+    if [ -n "$PY" ]; then
+        PYHELPER="/run/scf-af-check.py"
+        cat > "$PYHELPER" << 'PYEOF'
+    import socket, sys
+    socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).close()
+    try: socket.socket(socket.AF_INET, socket.SOCK_STREAM).close(); r = "INET-OK"
+    except OSError as e: r = "INET-BLOCKED-%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_AF="scfaf-$RANDOM"
+        OUT_AF="/run/scfaf-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_AF.service" << EOF
+    [Service]
+    Type=oneshot
+    RestrictAddressFamilies=AF_UNIX
+    ExecStart=$PY $PYHELPER $OUT_AF
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_AF.service"
+        cat "$OUT_AF"
+        grep -qx INET-BLOCKED-97 "$OUT_AF"
+        systemctl stop "$UNIT_AF.service" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_AF.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_AF.service" "$OUT_AF" "$PYHELPER"
+    fi
     RIDEOF
   '';
 }
