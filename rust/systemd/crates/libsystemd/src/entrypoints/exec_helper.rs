@@ -4714,6 +4714,20 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             if source == dest && mapped_self.contains(source.as_str()) {
                 continue;
             }
+            // An alias exec directory (source != dest, e.g. StateDirectory=x:y)
+            // is a SYMLINK to the real private/ directory, which the self-map
+            // (source == dest) id-maps in place. The symlink then resolves to the
+            // mapped directory, so the alias needs no id-map of its own. Trying
+            // to move_mount the id-mapped tree onto the symlink itself fails
+            // EINVAL, because a mount target must be a real directory, not a
+            // symlink (measured: dest is a symlink whose realpath == source).
+            if source != dest
+                && std::fs::symlink_metadata(dest)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+            {
+                continue;
+            }
             match idmapped_bind(source, dest, userns.as_fd()) {
                 Ok(()) => {
                     if source == dest {
