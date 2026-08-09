@@ -3834,6 +3834,8 @@ pub fn run_exec_helper() {
     // exec-dir reachability check above runs unconfined, and @default includes
     // execve). Using any filter implies NoNewPrivileges.
     install_system_call_filter(&config);
+    // SystemCallLog= stacks a non-blocking audit-logging filter on top.
+    install_system_call_log(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -5570,6 +5572,60 @@ fn install_system_call_filter(_config: &ExecHelperConfig) {
     log::warn!("SystemCallFilter= not implemented for this target");
 }
 
+/// Apply `SystemCallLog=`: a non-blocking seccomp filter that audit-logs
+/// (SECCOMP_RET_LOG) selected syscalls while still permitting them. An allow-list
+/// (`SystemCallLog=a b c`) logs only the listed syscalls (listed -> LOG, default
+/// ALLOW); a deny-list (`~a b c`) logs everything except them (listed -> ALLOW,
+/// default LOG). Stacks with any SystemCallFilter= filter. Because LOG permits
+/// the syscall, this can never break a service.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_system_call_log(config: &ExecHelperConfig) {
+    if config.system_call_log.is_empty() {
+        return;
+    }
+    const SECCOMP_RET_LOG: u32 = 0x7ffc_0000;
+    let deny_list = config.system_call_log[0].starts_with('~');
+    let tokens: Vec<&str> = config
+        .system_call_log
+        .iter()
+        .enumerate()
+        .map(|(i, tok)| {
+            if i == 0 {
+                tok.strip_prefix('~').unwrap_or(tok)
+            } else {
+                tok.as_str()
+            }
+        })
+        .collect();
+    let mut set: Vec<i64> = Vec::new();
+    let mut visited: Vec<String> = Vec::new();
+    resolve_syscall_set(&tokens, &mut set, &mut visited);
+    if set.is_empty() {
+        return;
+    }
+    // Reuse the block-filter builders with LOG as the action: the deny-list
+    // builder gives "listed -> action, default ALLOW" (the allow-list log case),
+    // and the allow-list builder gives "listed -> ALLOW, default action" (the
+    // deny-list log case).
+    let prog = if deny_list {
+        build_seccomp_allow_filter(&set, SECCOMP_RET_LOG)
+    } else {
+        build_seccomp_deny_filter(&set, SECCOMP_RET_LOG)
+    };
+    if install_seccomp_program(&prog) {
+        log::debug!(
+            "SystemCallLog: installed log filter ({} syscalls) for {}",
+            set.len(),
+            config.name
+        );
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_system_call_log(_config: &ExecHelperConfig) {
+    log::warn!("SystemCallLog= not implemented for this target");
+}
+
 /// Bring up the loopback interface in a new network namespace.
 fn bring_up_loopback() {
     // Use a netlink socket to bring up lo
@@ -6610,6 +6666,40 @@ mod tests {
             libc::WEXITSTATUS(status),
             0,
             "allow-list child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_seccomp_log_filter_is_nonblocking() {
+        const SECCOMP_RET_LOG: u32 = 0x7ffc_0000;
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // SystemCallLog=getpid (allow-list): getpid -> LOG, everything else
+            // ALLOW. LOG permits the syscall, so nothing is ever blocked.
+            let prog = build_seccomp_deny_filter(&[libc::SYS_getpid], SECCOMP_RET_LOG);
+            if !install_seccomp_program(&prog) {
+                unsafe { libc::_exit(10) };
+            }
+            // The logged syscall still returns normally.
+            if unsafe { libc::syscall(libc::SYS_getpid) } <= 0 {
+                unsafe { libc::_exit(11) };
+            }
+            // A non-logged syscall (default ALLOW) also works.
+            if unsafe { libc::syscall(libc::SYS_getppid) } <= 0 {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "log-filter child failed (code {})",
             libc::WEXITSTATUS(status)
         );
     }
