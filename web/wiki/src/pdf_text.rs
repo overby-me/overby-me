@@ -1582,7 +1582,7 @@ fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64)
 /// second column begins at x=259 and every third at x=408, line after line. So
 /// the starts that RECUR are taken as the page's columns, and every line is cut
 /// at them -- including the lines whose own gaps were too small to see.
-fn align_to_column_stops(lines: &mut [Line]) {
+fn align_to_column_stops(lines: &mut [Line], per_line: &[Vec<Run>]) {
     // Where cells began, from the lines whose gaps were wide enough to be sure.
     let mut seen: Vec<(f64, usize)> = Vec::new();
     for line in lines.iter().filter(|l| l.cells.len() > 1) {
@@ -1603,72 +1603,59 @@ fn align_to_column_stops(lines: &mut [Line]) {
         return;
     }
     stops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    for line in lines.iter_mut() {
+    for (line, runs) in lines.iter_mut().zip(per_line.iter()) {
         if line.cells.is_empty() {
             continue;
         }
-        let mut split: Vec<Cell> = Vec::new();
-        for cell in std::mem::take(&mut line.cells) {
-            split.extend(cut_at_stops(cell, &stops));
-        }
-        line.cells = split;
+        line.cells = cells_at_stops(runs, &stops, line.size);
     }
 }
 
-/// Cut one cell wherever a column starts inside it.
+/// Cut a line's runs at the page's column stops.
 ///
-/// The words are all there is to cut by: a cell knows where it began and ended
-/// but not where each word sat, so the split is made on the text in proportion
-/// to the width, which is exact enough for a column stop that is a third of the
-/// page away from the last word before it.
-fn cut_at_stops(cell: Cell, stops: &[f64]) -> Vec<Cell> {
-    let inside: Vec<f64> = stops
-        .iter()
-        .copied()
-        .filter(|x| *x > cell.left + 1.0 && *x < cell.right - 1.0)
-        .collect();
-    if inside.is_empty() {
-        return vec![cell];
-    }
-    let text: String = cell.spans.iter().map(|s| s.text.as_str()).collect();
-    let width = (cell.right - cell.left).max(1.0);
-    let mut out: Vec<Cell> = Vec::new();
-    let mut rest = cell.spans;
-    let mut left = cell.left;
-    let mut consumed = 0usize;
-    for stop in inside {
-        // Which character the stop falls at, then back to the word boundary
-        // before it: a column starts at a word, never inside one.
-        let at = ((stop - cell.left) / width * text.chars().count() as f64).round() as usize;
-        let at = at.min(text.chars().count());
-        let boundary = text
-            .char_indices()
-            .take(at)
-            .filter(|(_, c)| *c == ' ')
-            .last()
-            .map(|(i, _)| text[..i].chars().count())
-            .unwrap_or(at);
-        let take = boundary.saturating_sub(consumed);
-        if take == 0 {
-            continue;
+/// Exact, because a run knows its own x: a word belongs to the last column that
+/// starts at or before it. Nothing is guessed from the text, which is what made
+/// "1.400.000" come apart into "1." and "400.000".
+fn cells_at_stops(runs: &[Run], stops: &[f64], size: f64) -> Vec<Cell> {
+    let mut groups: Vec<Vec<&Run>> = Vec::new();
+    let mut sorted: Vec<&Run> = runs.iter().collect();
+    sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let mut current_stop: Option<f64> = None;
+    for run in sorted {
+        // Which column this word is in: the last stop it reaches. A word left of
+        // every stop is in the first column, which no stop names.
+        let mine = stops
+            .iter()
+            .copied()
+            .filter(|x| run.x + 1.0 >= *x)
+            .fold(None, |_, x| Some(x));
+        if groups.is_empty() || mine != current_stop {
+            groups.push(Vec::new());
+            current_stop = mine;
         }
-        let head = keep_prefix(rest.clone(), take);
-        rest = drop_prefix(rest, take);
-        consumed += take;
-        out.push(Cell {
-            left,
-            right: stop,
-            spans: tidy(head),
-        });
-        left = stop;
+        if let Some(g) = groups.last_mut() {
+            g.push(run);
+        }
     }
-    out.push(Cell {
-        left,
-        right: cell.right,
-        spans: tidy(rest),
-    });
-    out.retain(|c| c.spans.iter().any(|s| !s.text.trim().is_empty()));
-    out
+    groups
+        .into_iter()
+        .filter_map(|g| {
+            let owned: Vec<Run> = g.into_iter().cloned().collect();
+            let cell = cells_of(&owned, size);
+            // One group is one cell: the gaps inside it were not columns.
+            let left = owned.first()?.x;
+            let right = owned.iter().map(|r| r.end_x).fold(f64::MIN, f64::max);
+            let spans: Vec<Span> = cell.into_iter().flat_map(|c| c.spans).collect();
+            match spans.iter().any(|s| !s.text.trim().is_empty()) {
+                true => Some(Cell {
+                    left,
+                    right,
+                    spans: tidy(spans),
+                }),
+                false => None,
+            }
+        })
+        .collect()
 }
 
 /// One phrase of a page, with where it starts and how wide the page drew it.
@@ -2472,6 +2459,12 @@ fn lines_from(mut runs: Vec<Run>) -> Vec<Line> {
     });
 
     let mut lines: Vec<Line> = Vec::new();
+    // Each line's runs, kept beside it: the page's columns are worked out from
+    // all the lines together and then applied to the RUNS, which know where each
+    // word sat. Applying them to joined text instead meant guessing where a word
+    // fell from how far along the string it was, and a guess inside "1.400.000"
+    // cuts a number in half.
+    let mut per_line: Vec<Vec<Run>> = Vec::new();
     let mut current: Vec<Run> = Vec::new();
     for run in runs {
         let same_line = current.first().is_some_and(|f: &Run| {
@@ -2484,14 +2477,16 @@ fn lines_from(mut runs: Vec<Run>) -> Vec<Line> {
         } else {
             if let Some(line) = join_line(&current) {
                 lines.push(line);
+                per_line.push(std::mem::take(&mut current));
             }
             current = vec![run];
         }
     }
     if let Some(line) = join_line(&current) {
         lines.push(line);
+        per_line.push(current);
     }
-    align_to_column_stops(&mut lines);
+    align_to_column_stops(&mut lines, &per_line);
     lines
 }
 
