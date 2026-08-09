@@ -3707,10 +3707,9 @@ pub fn run_exec_helper() {
     }
 
     // ── RestrictRealtime= — prevent realtime scheduling ───────────────
-    // Applied via prctl: if NoNewPrivileges is also set, the kernel will
-    // prevent gaining SCHED_FIFO/SCHED_RR after exec. For full enforcement
-    // seccomp would be needed; we log a note but apply what we can.
-    // (The prctl approach relies on NoNewPrivileges being set to be effective.)
+    // Enforced via a seccomp filter on sched_setscheduler() installed just
+    // before execve (install_restrict_realtime), matching systemd. Nothing to
+    // do here.
 
     // ── NoNewPrivileges= — must be applied last before exec ───────────
     // This is a one-way flag: once set, it cannot be unset, and it prevents
@@ -3847,6 +3846,12 @@ pub fn run_exec_helper() {
     install_system_call_architectures(&config);
     // RestrictAddressFamilies= filters socket(2) by address family.
     install_restrict_address_families(&config);
+    // MemoryDenyWriteExecute= blocks creating writable+executable memory.
+    install_memory_deny_write_execute(&config);
+    // RestrictRealtime= denies realtime scheduling policies.
+    install_restrict_realtime(&config);
+    // RestrictSUIDSGID= blocks setting the setuid/setgid mode bits.
+    install_restrict_suid_sgid(&config);
 
     // Absolute paths go through execv so that unreadable shebangs / empty
     // exec files fail with ENOEXEC instead of being auto-shelled by execvp
@@ -5842,6 +5847,184 @@ fn install_restrict_address_families(_config: &ExecHelperConfig) {
     log::warn!("RestrictAddressFamilies= not implemented for this target");
 }
 
+/// Build a seccomp cBPF program that returns `action` when a syscall matches one
+/// of `rules` and *every* `(offset, mask)` check in that rule holds, where a
+/// check holds iff `(seccomp_data word at offset) & mask == mask`. `offset` is the
+/// byte offset of an argument's low 32-bit word in `struct seccomp_data`
+/// (16 + 8*arg_index). Any unmatched syscall, or a matched syscall failing a
+/// check, is allowed. Jumps to the shared block/allow tails and to each rule's
+/// successor are patched after layout, so the rule count is unconstrained (within
+/// cBPF's 255-instruction jump reach).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn build_seccomp_arg_masked_filter(
+    rules: &[(i64, Vec<(u32, u32)>)],
+    action: u32,
+) -> Vec<libc::sock_filter> {
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const ALLOW: u32 = 0x7fff_0000;
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    let mut insns = vec![
+        f(0x20, 0, 0, 4),                 // LD arch
+        f(0x15, 1, 0, AUDIT_ARCH_X86_64), // JEQ x86_64 -> rules, else next
+        f(0x06, 0, 0, ALLOW),             // RET ALLOW (non-x86_64)
+    ];
+    let mut to_block: Vec<usize> = Vec::new();
+    for (nr, checks) in rules {
+        // Indices whose jf must reach this rule's successor (a failed check or a
+        // non-matching nr means "not this rule": allow / try the next rule).
+        let mut to_next: Vec<usize> = Vec::new();
+        insns.push(f(0x20, 0, 0, 0)); // LD nr
+        to_next.push(insns.len());
+        insns.push(f(0x15, 0, 0, *nr as u32)); // JEQ nr == RN (jf -> next rule)
+        let last = checks.len().saturating_sub(1);
+        for (j, &(off, mask)) in checks.iter().enumerate() {
+            insns.push(f(0x20, 0, 0, off)); // LD arg low word
+            insns.push(f(0x54, 0, 0, mask)); // A &= mask (BPF_ALU|BPF_AND|BPF_K)
+            let jeq = insns.len();
+            insns.push(f(0x15, 0, 0, mask)); // JEQ (arg & mask) == mask
+            to_next.push(jeq); // jf -> next rule (check failed)
+            if j == last {
+                to_block.push(jeq); // jt -> block (every check held)
+            }
+            // Intermediate checks keep jt = 0 and fall through to the next check.
+        }
+        let next_rule = insns.len();
+        for idx in to_next {
+            insns[idx].jf = (next_rule - idx - 1) as u8;
+        }
+    }
+    // The last rule's successor is this ALLOW tail; the block tail follows it.
+    let allow_idx = insns.len();
+    insns.push(f(0x06, 0, 0, ALLOW)); // RET ALLOW (fallthrough)
+    let block_idx = insns.len();
+    insns.push(f(0x06, 0, 0, action)); // RET action
+    debug_assert_eq!(allow_idx + 1, block_idx);
+    for idx in to_block {
+        insns[idx].jt = (block_idx - idx - 1) as u8;
+    }
+    insns
+}
+
+/// Build the `RestrictRealtime=` filter: `sched_setscheduler()` is denied unless
+/// its policy (args[1]) is one of the permitted non-realtime policies
+/// (SCHED_OTHER, SCHED_BATCH, SCHED_IDLE); everything else, including realtime
+/// policies and any value with SCHED_RESET_ON_FORK set, gets `action`.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn build_restrict_realtime_filter(action: u32) -> Vec<libc::sock_filter> {
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const ALLOW: u32 = 0x7fff_0000;
+    let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
+    vec![
+        f(0x20, 0, 0, 4),                                   // 0 LD arch
+        f(0x15, 1, 0, AUDIT_ARCH_X86_64),                   // 1 JEQ x86_64 -> [3], else [2]
+        f(0x06, 0, 0, ALLOW),                               // 2 RET ALLOW
+        f(0x20, 0, 0, 0),                                   // 3 LD nr
+        f(0x15, 0, 5, libc::SYS_sched_setscheduler as u32), // 4 JEQ setscheduler, else ALLOW[10]
+        f(0x20, 0, 0, 24),                                  // 5 LD args[1] (policy)
+        f(0x15, 3, 0, 0),                                   // 6 JEQ SCHED_OTHER -> ALLOW[10]
+        f(0x15, 2, 0, 3),                                   // 7 JEQ SCHED_BATCH -> ALLOW[10]
+        f(0x15, 1, 0, 5),                                   // 8 JEQ SCHED_IDLE  -> ALLOW[10]
+        f(0x06, 0, 0, action),                              // 9 RET action (realtime policy)
+        f(0x06, 0, 0, ALLOW),                               // 10 RET ALLOW
+    ]
+}
+
+/// Apply `MemoryDenyWriteExecute=`: deny mmap() of writable+executable memory,
+/// mprotect()/pkey_mprotect() adding PROT_EXEC, and shmat() with SHM_EXEC. All
+/// return EPERM (never a kill), matching systemd. A normally-linked program is
+/// unaffected; only runtime code generation (JITs) is blocked.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_memory_deny_write_execute(config: &ExecHelperConfig) {
+    if !config.memory_deny_write_execute {
+        return;
+    }
+    let prot_wx = (libc::PROT_EXEC | libc::PROT_WRITE) as u32;
+    let prot_x = libc::PROT_EXEC as u32;
+    const SHM_EXEC: u32 = 0o100000; // not in every libc
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    // args[2] (prot / shmflg) is at byte offset 16 + 2*8 = 32 in seccomp_data.
+    let rules: Vec<(i64, Vec<(u32, u32)>)> = vec![
+        (libc::SYS_mmap, vec![(32, prot_wx)]),
+        (libc::SYS_mprotect, vec![(32, prot_x)]),
+        (libc::SYS_pkey_mprotect, vec![(32, prot_x)]),
+        (libc::SYS_shmat, vec![(32, SHM_EXEC)]),
+    ];
+    if install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, eperm)) {
+        log::debug!(
+            "MemoryDenyWriteExecute: installed W^X seccomp filter for {}",
+            config.name
+        );
+    }
+}
+
+/// Apply `RestrictRealtime=`: deny realtime scheduling policies via seccomp on
+/// sched_setscheduler(). Blocked calls get EPERM.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_restrict_realtime(config: &ExecHelperConfig) {
+    if !config.restrict_realtime {
+        return;
+    }
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    if install_seccomp_program(&build_restrict_realtime_filter(eperm)) {
+        log::debug!(
+            "RestrictRealtime: installed sched_setscheduler filter for {}",
+            config.name
+        );
+    }
+}
+
+/// Apply `RestrictSUIDSGID=`: deny setting the setuid/setgid mode bits via
+/// chmod/fchmod/fchmodat(2), mkdir/mkdirat, mknod/mknodat, creat, and
+/// open/openat (the latter two only when O_CREAT is set, so a plain open() with a
+/// stray mode value is not blocked). Blocked calls get EPERM.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn install_restrict_suid_sgid(config: &ExecHelperConfig) {
+    if !config.restrict_suid_sgid {
+        return;
+    }
+    let suid = libc::S_ISUID as u32;
+    let sgid = libc::S_ISGID as u32;
+    let o_creat = libc::O_CREAT as u32;
+    const SYS_FCHMODAT2: i64 = 452;
+    let eperm = 0x0005_0000 | (libc::EPERM as u32);
+    // (nr, byte offset of the mode argument's low word in seccomp_data).
+    let simple: [(i64, u32); 9] = [
+        (libc::SYS_chmod, 24),    // chmod(path, MODE)
+        (libc::SYS_fchmod, 24),   // fchmod(fd, MODE)
+        (libc::SYS_fchmodat, 32), // fchmodat(dfd, path, MODE, flags)
+        (SYS_FCHMODAT2, 32),      // fchmodat2(dfd, path, MODE, flags)
+        (libc::SYS_creat, 24),    // creat(path, MODE)
+        (libc::SYS_mkdir, 24),    // mkdir(path, MODE)
+        (libc::SYS_mkdirat, 32),  // mkdirat(dfd, path, MODE)
+        (libc::SYS_mknod, 24),    // mknod(path, MODE, dev)
+        (libc::SYS_mknodat, 32),  // mknodat(dfd, path, MODE, dev)
+    ];
+    let mut rules: Vec<(i64, Vec<(u32, u32)>)> = Vec::new();
+    for &(nr, off) in &simple {
+        rules.push((nr, vec![(off, suid)]));
+        rules.push((nr, vec![(off, sgid)]));
+    }
+    for &bit in &[suid, sgid] {
+        // open(path, FLAGS, MODE): flags args[1]@24, mode args[2]@32.
+        rules.push((libc::SYS_open, vec![(24, o_creat), (32, bit)]));
+        // openat(dfd, path, FLAGS, MODE): flags args[2]@32, mode args[3]@40.
+        rules.push((libc::SYS_openat, vec![(32, o_creat), (40, bit)]));
+    }
+    if install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, eperm)) {
+        log::debug!(
+            "RestrictSUIDSGID: installed setuid/setgid mode filter for {}",
+            config.name
+        );
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_memory_deny_write_execute(_config: &ExecHelperConfig) {}
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_restrict_realtime(_config: &ExecHelperConfig) {}
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn install_restrict_suid_sgid(_config: &ExecHelperConfig) {}
+
 /// Bring up the loopback interface in a new network namespace.
 fn bring_up_loopback() {
     // Use a netlink socket to bring up lo
@@ -6812,6 +6995,158 @@ mod tests {
             libc::WEXITSTATUS(status),
             0,
             "child seccomp checks failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_memory_deny_write_execute_filter() {
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+        let action = SECCOMP_RET_ERRNO | (libc::EPERM as u32);
+        let rules: Vec<(i64, Vec<(u32, u32)>)> = vec![
+            (
+                libc::SYS_mmap,
+                vec![(32, (libc::PROT_EXEC | libc::PROT_WRITE) as u32)],
+            ),
+            (libc::SYS_mprotect, vec![(32, libc::PROT_EXEC as u32)]),
+        ];
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            if !install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, action)) {
+                unsafe { libc::_exit(10) };
+            }
+            // A writable+executable mapping is blocked with EPERM.
+            let p = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    4096,
+                    libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                    -1,
+                    0,
+                )
+            };
+            if p != libc::MAP_FAILED {
+                unsafe { libc::_exit(11) };
+            }
+            if std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+                unsafe { libc::_exit(12) };
+            }
+            // A writable, non-executable mapping still works.
+            let q = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    4096,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                    -1,
+                    0,
+                )
+            };
+            if q == libc::MAP_FAILED {
+                unsafe { libc::_exit(13) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "MemoryDenyWriteExecute child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_restrict_realtime_filter() {
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+        let action = SECCOMP_RET_ERRNO | (libc::EPERM as u32);
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            if !install_seccomp_program(&build_restrict_realtime_filter(action)) {
+                unsafe { libc::_exit(10) };
+            }
+            let param = libc::sched_param { sched_priority: 0 };
+            // SCHED_OTHER (policy 0) is permitted: setting it on self succeeds,
+            // proving the filter does not over-block sched_setscheduler().
+            let r = unsafe {
+                libc::syscall(libc::SYS_sched_setscheduler, 0, 0, &param as *const _)
+            };
+            if r != 0 {
+                unsafe { libc::_exit(11) };
+            }
+            // SCHED_FIFO (policy 1, realtime) is denied with EPERM.
+            let r2 = unsafe {
+                libc::syscall(libc::SYS_sched_setscheduler, 0, 1, &param as *const _)
+            };
+            if r2 != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "RestrictRealtime child failed (code {})",
+            libc::WEXITSTATUS(status)
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn test_restrict_suid_sgid_filter() {
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+        let action = SECCOMP_RET_ERRNO | (libc::EPERM as u32);
+        // chmod's mode is args[1] (offset 24); one rule per suid/sgid bit.
+        let rules: Vec<(i64, Vec<(u32, u32)>)> = vec![
+            (libc::SYS_chmod, vec![(24, libc::S_ISUID as u32)]),
+            (libc::SYS_chmod, vec![(24, libc::S_ISGID as u32)]),
+        ];
+        let path = c"/tmp/rs-scf-suid-test";
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            // Create an owned file before confining, so the chmod EPERM below can
+            // only come from the filter (owner chmod would otherwise succeed).
+            let fd = unsafe { libc::open(path.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o644) };
+            if fd < 0 {
+                unsafe { libc::_exit(10) };
+            }
+            unsafe { libc::close(fd) };
+            if !install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, action)) {
+                unsafe { libc::_exit(11) };
+            }
+            // Setting the setuid bit is blocked with EPERM.
+            let r = unsafe { libc::syscall(libc::SYS_chmod, path.as_ptr(), 0o4755) };
+            if r != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+                unsafe { libc::_exit(12) };
+            }
+            // A plain mode (no setuid/setgid bit) is still allowed.
+            let r2 = unsafe { libc::syscall(libc::SYS_chmod, path.as_ptr(), 0o644) };
+            if r2 != 0 {
+                unsafe { libc::_exit(13) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status: libc::c_int = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        unsafe {
+            libc::unlink(path.as_ptr());
+        }
+        assert!(libc::WIFEXITED(status), "child did not exit normally");
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "RestrictSUIDSGID child failed (code {})",
             libc::WEXITSTATUS(status)
         );
     }

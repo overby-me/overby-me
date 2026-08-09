@@ -245,6 +245,112 @@
         rm -f "/run/systemd/system/$UNIT_IP6D.service" "/run/systemd/system/$UNIT_IP6A.service" \
               "$OUT_IP6D" "$OUT_IP6A" "$IP6HELPER"
     fi
+
+    : "MemoryDenyWriteExecute=yes blocks a writable+executable mmap but the service still runs"
+    PYM="$(command -v python3 || true)"
+    if [ -n "$PYM" ]; then
+        MHELPER="/run/scf-mdwe.py"
+        cat > "$MHELPER" << 'PYEOF'
+    import mmap, sys
+    try:
+        m = mmap.mmap(-1, 4096, prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+        m.close(); r = "RWX-OK"
+    except (OSError, PermissionError):
+        r = "MDWE-BLOCKED"
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_M="scfmdwe-$RANDOM"
+        OUT_M="/run/scfmdwe-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_M.service" << EOF
+    [Service]
+    Type=oneshot
+    MemoryDenyWriteExecute=yes
+    ExecStart=$PYM $MHELPER $OUT_M
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_M.service"
+        cat "$OUT_M"
+        grep -qx MDWE-BLOCKED "$OUT_M"
+        systemctl reset-failed "$UNIT_M.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_M.service" "$OUT_M" "$MHELPER"
+    fi
+
+    : "RestrictRealtime=yes blocks SCHED_FIFO that root could otherwise set"
+    PYR="$(command -v python3 || true)"
+    if [ -n "$PYR" ]; then
+        RHELPER="/run/scf-rt.py"
+        cat > "$RHELPER" << 'PYEOF'
+    import os, sys, errno
+    try:
+        os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(1)); r = "RT-OK"
+    except PermissionError:
+        r = "RT-BLOCKED"
+    except OSError as e:
+        r = "RT-BLOCKED" if e.errno == errno.EPERM else "RT-ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_RC="scfrtc-$RANDOM"
+        OUT_RC="/run/scfrtc-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_RC.service" << EOF
+    [Service]
+    Type=oneshot
+    ExecStart=$PYR $RHELPER $OUT_RC
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_RC.service"
+        cat "$OUT_RC"
+        grep -qx RT-OK "$OUT_RC"
+        UNIT_R="scfrt-$RANDOM"
+        OUT_R="/run/scfrt-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_R.service" << EOF
+    [Service]
+    Type=oneshot
+    RestrictRealtime=yes
+    ExecStart=$PYR $RHELPER $OUT_R
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_R.service"
+        cat "$OUT_R"
+        grep -qx RT-BLOCKED "$OUT_R"
+        systemctl reset-failed "$UNIT_RC.service" "$UNIT_R.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_RC.service" "/run/systemd/system/$UNIT_R.service" \
+              "$OUT_RC" "$OUT_R" "$RHELPER"
+    fi
+
+    : "RestrictSUIDSGID=yes blocks chmod of the setuid bit but not a plain chmod"
+    PYS="$(command -v python3 || true)"
+    if [ -n "$PYS" ]; then
+        SHELPER="/run/scf-sxid.py"
+        cat > "$SHELPER" << 'PYEOF'
+    import os, sys, errno
+    p = sys.argv[2]
+    open(p, "w").close()
+    try:
+        os.chmod(p, 0o4755); r = "SUID-OK"
+    except OSError as e:
+        r = "SUID-BLOCKED" if e.errno == errno.EPERM else "SUID-ERR%d" % e.errno
+    try:
+        os.chmod(p, 0o644); r += ",PLAIN-OK"
+    except OSError as e:
+        r += ",PLAIN-ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        UNIT_S="scfsxid-$RANDOM"
+        OUT_S="/run/scfsxid-out.$RANDOM"
+        TGT_S="/run/scfsxid-tgt.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_S.service" << EOF
+    [Service]
+    Type=oneshot
+    RestrictSUIDSGID=yes
+    ExecStart=$PYS $SHELPER $OUT_S $TGT_S
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_S.service"
+        cat "$OUT_S"
+        grep -qx "SUID-BLOCKED,PLAIN-OK" "$OUT_S"
+        systemctl reset-failed "$UNIT_S.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_S.service" "$OUT_S" "$TGT_S" "$SHELPER"
+    fi
     RIDEOF
   '';
 }
