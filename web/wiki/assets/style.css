@@ -8888,6 +8888,20 @@ a.list-item:hover {
 	border-top: var(--rule-thickness, 2px) solid var(--md-on-surface-variant);
 }
 
+/* What the page runs at its head and its foot. Part of the page rather than of
+   the reading, so it is set smaller and quieter than the text it stands over,
+   and it keeps the side of the column it was drawn on. */
+.pdf-running {
+	margin: 0;
+	font-size: var(--md-sys-typescale-label-small-size);
+	line-height: var(--md-sys-typescale-label-small-line);
+	letter-spacing: var(--md-sys-typescale-label-small-tracking);
+	color: var(--md-on-surface-variant);
+}
+.pdf-running-foot {
+	margin-top: var(--md-sys-spacing-2);
+}
+
 /* Room the page left, in ems of its own body text: a spacer rather than a
    margin, so it does not collapse into the margins of what stands round it. */
 .pdf-space {

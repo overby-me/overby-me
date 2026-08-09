@@ -602,6 +602,19 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                             }
                         }
                     },
+                    // What the page ran at its head or its foot, drawn where it
+                    // ran it and set back from the reading: it belongs to the
+                    // page rather than to the sentence it would otherwise land
+                    // between.
+                    Some(Block::Running { spans, foot }) => {
+                        let side = match foot {
+                            true => "pdf-running pdf-running-foot",
+                            false => "pdf-running",
+                        };
+                        rsx! {
+                            p { key: "{i}", class: "{side}", Spans { spans: spans.clone() } }
+                        }
+                    }
                     // Room the page left. Composition is not only what is on a
                     // page: a statement sets its headings two lines clear of the
                     // figures and a signature stands well below what it signs,

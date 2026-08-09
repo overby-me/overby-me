@@ -106,6 +106,14 @@ pub enum Block {
         width: f64,
         thickness: f64,
     },
+    /// What the page ran at its head or its foot, drawn once where it ran it.
+    ///
+    /// A running header repeats on every page and belongs to none of them, so
+    /// it is taken off the reading -- otherwise it lands between two paragraphs
+    /// 27 times over. It is still part of the page, though, and a reader who
+    /// asked for the pages reflowed did not ask for them stripped: it is drawn
+    /// at the top of the page it heads, quietly, as the page draws it.
+    Running { spans: Vec<Span>, foot: bool },
     /// Room the page left, in ems of its body text.
     ///
     /// Composition is not only what is on a page. A statement sets its headings
@@ -147,6 +155,7 @@ impl Block {
             Block::Heading { spans, .. }
             | Block::Paragraph { spans, .. }
             | Block::IndexEntry { spans, .. }
+            | Block::Running { spans, .. }
             | Block::ListItem { spans, .. } => spans,
             Block::Image(_)
             | Block::Space { .. }
@@ -3968,9 +3977,10 @@ fn space_before(lines: &[Line], at: usize, body: f64, usual: f64) -> Option<f64>
 
 fn blocks_from(
     lines: Vec<Line>,
-    printed: &HashMap<usize, String>,
+    running: &Running,
     anchors: &HashMap<usize, Vec<String>>,
 ) -> Vec<Block> {
+    let printed = &running.printed;
     let body = body_size(&lines);
     let usual = usual_break(&lines, body);
     let column = column_right(&lines);
@@ -4079,6 +4089,10 @@ fn blocks_from(
     let lines_ref = lines;
     let mut para_bullet: Option<String> = None;
     let mut page = lines_ref.first().map(|l| l.page).unwrap_or(1);
+    // The words the page runs at its head, waiting for the reading to come down
+    // the page far enough to be under them: the rule drawn above a running head
+    // is still in the stream, and the words belong below it.
+    let mut pending_head: Option<(Vec<Span>, f64)> = running.head.get(&(page - 1)).cloned();
     // Which stretches of lines stood in columns. Worked out before the reading,
     // because the question is about a run of lines together and the loop below
     // decides one at a time.
@@ -4087,6 +4101,26 @@ fn blocks_from(
     for (at, line) in lines_ref.iter().enumerate() {
         if at < skip_to {
             continue;
+        }
+        // Far enough down the page to be under the running head: it goes in
+        // here, so what the page drew ABOVE it -- the rule over a masthead --
+        // still stands above it in the reading.
+        if pending_head
+            .as_ref()
+            .is_some_and(|(_, y)| line.page != page || line.y < *y)
+        {
+            if let Some((spans, _)) = pending_head.take() {
+                flush(
+                    &mut para,
+                    para_size,
+                    &mut para_lines,
+                    &mut para_bullet,
+                    &mut para_gap,
+                    &mut para_cells,
+                    &mut blocks,
+                );
+                blocks.push(Block::Running { spans, foot: false });
+            }
         }
         if let Some((_, end, grid, aligns)) = tables.iter().find(|(start, ..)| *start == at) {
             flush(
@@ -4142,12 +4176,19 @@ fn blocks_from(
                 &mut para_cells,
                 &mut blocks,
             );
+            if let Some(spans) = running.foot.get(&(page - 1)) {
+                blocks.push(Block::Running {
+                    spans: spans.clone(),
+                    foot: true,
+                });
+            }
             blocks.push(Block::PageBreak {
                 ended: page,
                 printed: printed.get(&(page - 1)).cloned(),
                 starts: printed.get(&page).cloned(),
             });
             page = line.page;
+            pending_head = running.head.get(&(page - 1)).cloned();
             prev = None;
         }
         if let Some(picture) = &line.picture {
@@ -4746,7 +4787,20 @@ fn safe_url(url: String) -> Option<String> {
 /// THAT would behead every page. And agreement: the lines either say the same
 /// thing every time, which is a running head, or they are numbers, which is a
 /// folio. A line that varies and is not a number is prose, and stays.
-fn strip_running_furniture(pages: &mut [Vec<Line>]) -> HashMap<usize, String> {
+/// What a page repeats: the folio it prints, and the words it runs at head and
+/// foot. Taken off the reading so they do not land between two paragraphs, and
+/// handed back so they can be drawn where the page ran them.
+#[derive(Default)]
+struct Running {
+    printed: HashMap<usize, String>,
+    /// The words, and how far up the page they ran: a running head often has a
+    /// rule drawn above it, and the rule is still in the reading, so the words
+    /// have to go back in under it rather than in front of it.
+    head: HashMap<usize, (Vec<Span>, f64)>,
+    foot: HashMap<usize, Vec<Span>>,
+}
+
+fn strip_running_furniture(pages: &mut [Vec<Line>]) -> Running {
     /// Where a candidate sat, to a couple of points: page geometry repeats
     /// exactly, but not always to the last decimal.
     fn key(y: f64, top: bool) -> (i64, bool) {
@@ -4791,9 +4845,9 @@ fn strip_running_furniture(pages: &mut [Vec<Line>]) -> HashMap<usize, String> {
         .iter()
         .filter(|ls| ls.iter().any(|l| !l.text.trim().is_empty()))
         .count();
-    let mut printed: HashMap<usize, String> = HashMap::new();
+    let mut running = Running::default();
     let mut condemned: Vec<(usize, usize)> = Vec::new();
-    for (_, seen) in tally {
+    for ((_, top), seen) in tally {
         if seen.len() < 3 || seen.len() * 2 < with_text {
             continue;
         }
@@ -4817,24 +4871,25 @@ fn strip_running_furniture(pages: &mut [Vec<Line>]) -> HashMap<usize, String> {
         }
         for ((page_no, index), text) in seen.iter().zip(texts.iter()) {
             if let Some(digits) = numeric(text) {
-                printed.insert(*page_no, digits);
+                running.printed.insert(*page_no, digits);
             }
             condemned.push((*page_no, *index));
-            // And the line the page drew with it. A running header is often
-            // ruled: the annual report puts a heavy bar over "Radikal Ungdom" on
-            // all 27 pages. Taking the words and leaving the bar left a black
-            // stroke at the top of every page in the reading with nothing under
-            // it, which is not what the page says and not what a reader wants
-            // repeated 27 times.
+            // The words are KEPT, to be drawn once where the page ran them
+            // rather than in the middle of the reading. A folio is not: the page
+            // mark already carries the number, and printing it twice says the
+            // page ended twice.
+            if numeric(text).is_some() {
+                continue;
+            }
             let line = &pages[*page_no][*index];
-            let (y, size) = (line.y, line.size);
-            let ruled: Vec<usize> = pages[*page_no]
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| l.rule.is_some() && (l.y - y).abs() < size * 2.5)
-                .map(|(i, _)| i)
-                .collect();
-            condemned.extend(ruled.into_iter().map(|i| (*page_no, i)));
+            match top {
+                true => {
+                    running.head.insert(*page_no, (line.spans.clone(), line.y));
+                }
+                false => {
+                    running.foot.insert(*page_no, line.spans.clone());
+                }
+            }
         }
     }
     // Back to front, so removing one does not move the next. Deduplicated
@@ -4845,7 +4900,7 @@ fn strip_running_furniture(pages: &mut [Vec<Line>]) -> HashMap<usize, String> {
     for (page_no, index) in condemned.into_iter().rev() {
         pages[page_no].remove(index);
     }
-    printed
+    running
 }
 
 /// Read a PDF and hand back what it says.
@@ -4927,7 +4982,7 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
         lines.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
         per_page.push(lines);
     }
-    let printed = strip_running_furniture(&mut per_page);
+    let running = strip_running_furniture(&mut per_page);
     // Counted after the furniture goes: a page holding nothing but its own page
     // number has nothing on it to read.
     let empty = per_page
@@ -4939,8 +4994,8 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
         .count();
     let all_lines: Vec<Line> = per_page.into_iter().flatten().collect();
     let anchors = anchors_for(&places, &all_lines);
-    let mut blocks = blocks_from(all_lines, &printed, &anchors);
-    mend_contents_links(&mut blocks, &places, &printed, total);
+    let mut blocks = blocks_from(all_lines, &running, &anchors);
+    mend_contents_links(&mut blocks, &places, &running.printed, total);
     drop_unused_anchors(&mut blocks);
     Ok(Extracted {
         blocks,
@@ -5232,7 +5287,7 @@ fn furniture_of(bytes: &[u8]) -> (Vec<String>, HashMap<usize, String>) {
         .map(|l| format!("{}|{}", l.page, l.text))
         .collect();
     let gone = before.into_iter().filter(|k| !after.contains(k)).collect();
-    (gone, printed)
+    (gone, printed.printed)
 }
 
 /// The operators one page runs, for when a rule turns up that the page does not
@@ -5840,6 +5895,10 @@ mod harness {
                         },
                         super::Block::Rule { width, .. } => format!("hr {:.0}%", width * 100.0),
                         super::Block::Space { ems } => format!("space {ems:.1}em"),
+                        super::Block::Running { foot, .. } => match foot {
+                            true => "foot".into(),
+                            false => "head".into(),
+                        },
                         super::Block::Table { rows, .. } => {
                             format!("table {}x{}", rows.len(), rows.first().map_or(0, Vec::len))
                         }
@@ -6456,7 +6515,7 @@ mod tests {
                 // A gap of 30 against a size of 11: a new paragraph.
                 line(656.0, 11.0, "Et nyt afsnit."),
             ],
-            &HashMap::new(),
+            &Running::default(),
             &HashMap::new(),
         );
         assert_eq!(
@@ -6477,7 +6536,7 @@ mod tests {
                 line(616.0, 11.0, "Mere brødtekst."),
                 line(600.0, 11.0, "Endnu mere."),
             ],
-            &HashMap::new(),
+            &Running::default(),
             &HashMap::new(),
         );
         assert_eq!(
@@ -6509,7 +6568,7 @@ mod tests {
                 line(60.0, 11.0, "Sidste linje på siden."),
                 line(700.0, 11.0, "Første linje på næste side."),
             ],
-            &HashMap::new(),
+            &Running::default(),
             &HashMap::new(),
         );
         assert_eq!(blocks.len(), 2, "a page break starts a new block");
@@ -6702,7 +6761,7 @@ mod tests {
                 short(686.0, 400.0, "17:50 Åbning af landsmødet"),
                 short(672.0, 398.0, "og en fortsættelse af samme punkt"),
             ],
-            &HashMap::new(),
+            &Running::default(),
             &HashMap::new(),
         );
         assert_eq!(
@@ -7086,7 +7145,7 @@ mod tests {
                 on_page(1, 700.0, "Sidste linje på side et"),
                 on_page(2, 700.0, "Første linje på side to"),
             ],
-            &HashMap::new(),
+            &Running::default(),
             &HashMap::new(),
         );
         assert_eq!(blocks.len(), 3, "text, break, text");
@@ -7440,7 +7499,7 @@ mod tests {
                 verse(337.9, 150.0, "ÆRU:"),
                 verse(319.1, 210.0, "Nu’ det ÆRU, der synger,"),
             ],
-            &HashMap::new(),
+            &Running::default(),
             &HashMap::new(),
         );
         assert_eq!(
@@ -7665,8 +7724,8 @@ mod tests {
             pages.iter().all(|ls| ls.len() == 3),
             "the folio goes, the body stays"
         );
-        assert_eq!(printed.get(&0).map(String::as_str), Some("3"));
-        assert_eq!(printed.get(&3).map(String::as_str), Some("6"));
+        assert_eq!(printed.printed.get(&0).map(String::as_str), Some("3"));
+        assert_eq!(printed.printed.get(&3).map(String::as_str), Some("6"));
     }
 
     /// And the guard that matters: in an ordinary document the first line of
@@ -7701,7 +7760,7 @@ mod tests {
             })
             .collect();
         let printed = strip_running_furniture(&mut pages);
-        assert!(printed.is_empty());
+        assert!(printed.printed.is_empty());
         assert!(
             pages.iter().all(|ls| ls.len() == 3),
             "prose that varies is not furniture"
