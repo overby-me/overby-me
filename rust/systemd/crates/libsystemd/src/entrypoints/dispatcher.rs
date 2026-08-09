@@ -314,6 +314,10 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
                         expire_due_start_waits(&run_info, &mut chains, &mut start_waits);
                     }
                 }
+                // A unit may have gone inactive this cycle (a child exit settled to
+                // Stopped); wake any soft-limited starts parked on a concurrency
+                // limit so they re-check. Cheap and only matters when one is parked.
+                crate::units::slice_concurrency::notify_slot_freed();
                 // Increment 4: drive the job run queue after event intake (step 4
                 // of the loop contract), but ONLY while the boot producer is
                 // draining its closure (job_graph_boot_draining()). The

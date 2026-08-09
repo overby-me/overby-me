@@ -7,6 +7,29 @@
 
 use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::RuntimeInfo;
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
+
+/// Wakes control threads parked on a soft concurrency limit when a unit becomes
+/// inactive (freeing a slot), so the release is event-driven rather than a slow
+/// poll. The Mutex guards a generation counter bumped on each notify.
+static RELEASE: (Mutex<u64>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// Signal that a slot may have freed (a member went inactive): wake all parked
+/// soft-limited starts so they re-check their limit.
+pub fn notify_slot_freed() {
+    let (m, cv) = &RELEASE;
+    *m.lock_poisoned() += 1;
+    cv.notify_all();
+}
+
+/// Block up to `timeout` for a `notify_slot_freed` (or the timeout, as a safety
+/// fallback), used by a parked soft-limited start instead of a busy sleep.
+pub fn wait_for_slot(timeout: Duration) {
+    let (m, cv) = &RELEASE;
+    let guard = m.lock_poisoned();
+    let _ = cv.wait_timeout(guard, timeout);
+}
 use crate::units::from_parsed_config::mangle_slice_name;
 use crate::units::id::{UnitId, UnitIdKind};
 use crate::units::jobs::{JobKind, JobState};

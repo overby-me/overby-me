@@ -10069,7 +10069,11 @@ pub fn execute_command(
                         if waited_since.elapsed() > std::time::Duration::from_secs(90) {
                             break;
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(150));
+                        // Sleep until a member frees a slot (notified from the
+                        // stop/exit paths), with a timeout as a safety net.
+                        crate::units::slice_concurrency::wait_for_slot(
+                            std::time::Duration::from_millis(200),
+                        );
                     }
                     if parked {
                         jobs_registry.lock().unwrap().set_running(start_job.id());

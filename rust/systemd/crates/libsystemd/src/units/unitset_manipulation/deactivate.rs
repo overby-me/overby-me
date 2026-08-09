@@ -93,6 +93,24 @@ pub fn deactivate_unit(
     };
     unit.deactivate(run_info)?;
 
+    // A slice unit has no process and no exit handler; ensure its status reflects
+    // the stop so it stops counting toward concurrency limits (services get their
+    // Stopped status from the exit handler instead).
+    if id_to_kill.kind == crate::units::UnitIdKind::Slice {
+        use crate::lock_ext::RwLockExt;
+        let mut status = unit.common.status.write_poisoned();
+        if !matches!(&*status, crate::units::UnitStatus::Stopped(..)) {
+            *status = crate::units::UnitStatus::Stopped(
+                crate::units::StatusStopped::StoppedFinal,
+                Vec::new(),
+            );
+        }
+    }
+
+    // A unit went inactive: wake any soft-limited starts parked on a slice
+    // concurrency limit so they re-check and can proceed.
+    crate::units::slice_concurrency::notify_slot_freed();
+
     Ok(())
 }
 
