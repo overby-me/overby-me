@@ -2190,6 +2190,19 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
         None => insert(props, "TasksMax", "infinity"),
     }
 
+    // Concurrency limits (D-Bus type "u"; UINT_MAX means infinity/unset, matching
+    // systemd's bus_property_get_unsigned over the UINT_MAX default).
+    insert(
+        props,
+        "ConcurrencySoftMax",
+        &conf.concurrency_soft_max.unwrap_or(u32::MAX).to_string(),
+    );
+    insert(
+        props,
+        "ConcurrencyHardMax",
+        &conf.concurrency_hard_max.unwrap_or(u32::MAX).to_string(),
+    );
+
     // Accounting toggles
     match conf.cpu_accounting {
         Some(v) => insert_bool(props, "CPUAccounting", v),
@@ -2886,6 +2899,23 @@ mod tests {
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("TasksMax").unwrap(), "4096");
+    }
+
+    #[test]
+    fn test_slice_config_concurrency_max() {
+        let mut conf = default_slice_config();
+        conf.concurrency_soft_max = Some(3);
+        conf.concurrency_hard_max = Some(4);
+        let mut props = PropertyMap::new();
+        insert_slice_config(&mut props, &conf);
+        assert_eq!(props.get("ConcurrencySoftMax").unwrap(), "3");
+        assert_eq!(props.get("ConcurrencyHardMax").unwrap(), "4");
+
+        // Unset reports UINT_MAX (infinity), matching systemd.
+        let mut props2 = PropertyMap::new();
+        insert_slice_config(&mut props2, &default_slice_config());
+        assert_eq!(props2.get("ConcurrencySoftMax").unwrap(), "4294967295");
+        assert_eq!(props2.get("ConcurrencyHardMax").unwrap(), "4294967295");
     }
 
     #[test]
