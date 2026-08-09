@@ -355,6 +355,22 @@ pub fn PdfDocument(doc: Extracted) -> Element {
             }
         )
     });
+    // What an ordinary line weighs in this document: the middle of the weights it
+    // draws. Everything is measured against it, so "heavier than the rest" is a
+    // property of the document rather than a number of points -- which is the
+    // only thing that survives a reflow.
+    let ordinary_rule = {
+        let mut weights: Vec<f64> = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Rule { thickness, .. } => Some(*thickness),
+                _ => None,
+            })
+            .collect();
+        weights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        weights.get(weights.len() / 2).copied().unwrap_or(0.0)
+    };
     let mut groups: Vec<Vec<Block>> = Vec::new();
     for block in doc.blocks.iter() {
         // Against the run's KIND rather than its last block, so a run of items
@@ -549,12 +565,22 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     // now -- but it separated one thing from another, and drawn
                     // to the share of the width it spanned it still says which.
                     Some(Block::Rule { width, thickness }) => {
-                        // As heavy as the page drew it. A point is about a third
-                        // more than a pixel at the usual density; the floor is a
-                        // hairline, which is the thinnest a screen has, and the
-                        // ceiling stops a filled bar from becoming a black band
-                        // across the reading.
-                        let heavy = (thickness * 1.33).clamp(1.0, 5.0);
+                        // Heavy RELATIVE to the document's own lines, not in
+                        // points. A reflowed page is re-typeset, and a page's
+                        // rules are mostly under a point: converting them to
+                        // pixels put every one of them under the floor of one,
+                        // so a hairline and a bar came out identical -- which is
+                        // what a reader saw. Against the document's ordinary
+                        // rule, a bar is a multiple and shows as one.
+                        // Not rounded. A browser draws a fractional border as a
+                        // lighter or darker line rather than snapping it, so a
+                        // document whose weights differ by a fifth still reads
+                        // as two weights; rounding to whole pixels put every
+                        // rule in this report back on the same 1px line.
+                        let heavy = match ordinary_rule > 0.0 {
+                            true => (thickness / ordinary_rule).clamp(0.7, 4.0),
+                            false => 1.0,
+                        };
                         rsx! {
                             hr {
                                 key: "{i}",
