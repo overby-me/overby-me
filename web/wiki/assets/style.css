@@ -1388,6 +1388,7 @@ html {
    sheet's "Actions") and for a genuine card on the surface: one topic on the
    surface is not the surface. */
 .app-shell .card.app-card ~ .card.app-card > .card-header h3,
+.app-shell .card.app-card > .card-header-section h3,
 .app-shell .card.app-card > .card-header .tool-sheet h3,
 .app-shell .card.app-card .card:not(.app-card) .card-header h3 {
 	font-size: var(--md-sys-typescale-title-medium-size);
@@ -1395,6 +1396,22 @@ html {
 }
 .app-shell:not([data-size-class="compact"]) .card.app-card ~ .card.app-card > .card-header {
 	padding-block-start: var(--md-sys-spacing-4-5);
+}
+/* And here a line IS right, for every one of them. A section stacked under the
+   app -- the amendments under a resolution, the polls, the comments, what a
+   group is credited on -- is a different KIND of content from the one above it,
+   which is the case M3 names for a full-width divider; the comments also put an
+   interactive area under a non-interactive one, which is the other case. One
+   rule rather than one per section, so a new section cannot be forgotten.
+   Sparingly, as the guidance also says: one line where one section ends and the
+   next begins, and none inside them.
+
+   The candidates under a position are the same idea INSIDE the card, and they
+   already rule off through `.card-header-section`. */
+.app-shell .card.app-card ~ .card.app-card {
+	border-top: 1px solid var(--md-outline-variant);
+	margin-top: var(--md-sys-spacing-6);
+	padding-top: var(--md-sys-spacing-2);
 }
 /* Except a genuine card sitting inside one -- a place on the home screen, a
    canvas in the picker. It is still a card, so it still has a top to tint. */
@@ -7161,16 +7178,7 @@ a.list-item:hover {
 .comment-section {
 	margin-top: var(--md-sys-spacing-2);
 }
-/* And here a line IS right. The comments are a different kind of content from
-   the document they hang under -- M3: "use full-width dividers to separate
-   larger sections of unrelated content", and they separate an interactive area
-   from a non-interactive one, which is the other case the guidance names. Used
-   sparingly, as it also says: this is the only one on the screen. */
-.app-shell .card.app-card.comment-section {
-	border-top: 1px solid var(--md-outline-variant);
-	margin-top: var(--md-sys-spacing-6);
-	padding-top: var(--md-sys-spacing-2);
-}
+
 
 /* DESIGN (conversational thread): an inviting tertiary-tinted composer well. */
 /* The composer's tinted box now belongs to the WRAP, not to the input row, so an
