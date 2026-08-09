@@ -39,6 +39,7 @@ pub mod hypercube;
 pub mod imsmap;
 pub mod julia;
 pub mod kaleidescope;
+pub mod kumppa;
 pub mod laser;
 pub mod lcdscrub;
 pub mod lissie;
@@ -97,6 +98,7 @@ pub static ALL: &[&Saver] = &[
     &julia::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
+    &kumppa::SAVER,
     &lcdscrub::SAVER,
     &lissie::SAVER,
     &moire::SAVER,

@@ -238,6 +238,12 @@ saver!(
     xscreensaver::hacks2d::laser::start
 );
 saver!(
+    "kumppa",
+    kumppa_body,
+    kumppa_start,
+    xscreensaver::hacks2d::kumppa::start
+);
+saver!(
     "lcdscrub",
     lcdscrub_body,
     lcdscrub_start,
@@ -508,6 +514,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "laser",
         label: "Laser",
         start: laser_start,
+    },
+    Entry {
+        slug: "kumppa",
+        label: "Kumppa",
+        start: kumppa_start,
     },
     Entry {
         slug: "lcdscrub",
