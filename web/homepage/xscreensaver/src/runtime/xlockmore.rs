@@ -109,6 +109,18 @@ impl ModeInfo {
         self.colors.len() <= 2
     }
 
+    /// Throw the colormap away and ask for a fresh one. A hack that draws
+    /// discrete scenes (triangle) does this between them, so each landscape
+    /// gets its own palette.
+    pub fn remake_colors(&mut self, scheme: ColorScheme, ncolors: usize) {
+        self.colors = match scheme {
+            ColorScheme::Uniform => color::make_uniform_colormap(ncolors),
+            ColorScheme::Smooth => color::make_smooth_colormap(ncolors),
+            ColorScheme::Bright => color::make_random_colormap(ncolors, true),
+            ColorScheme::Random => color::make_random_colormap(ncolors, false),
+        };
+    }
+
     /// `MI_CLEARWINDOW`.
     pub fn clear_window(&self, d: &mut Dpy) {
         d.clear_window();

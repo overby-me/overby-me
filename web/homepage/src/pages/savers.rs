@@ -160,6 +160,12 @@ saver!(
     xscreensaver::hacks2d::moire::start
 );
 saver!(
+    "moire2",
+    moire2_body,
+    moire2_start,
+    xscreensaver::hacks2d::moire2::start
+);
+saver!(
     "mountain",
     mountain_body,
     mountain_start,
@@ -221,6 +227,12 @@ saver!(
     xscreensaver::hacks2d::thornbird::start
 );
 saver!(
+    "triangle",
+    triangle_body,
+    triangle_start,
+    xscreensaver::hacks2d::triangle::start
+);
+saver!(
     "vines",
     vines_body,
     vines_start,
@@ -231,6 +243,12 @@ saver!(
     wander_body,
     wander_start,
     xscreensaver::hacks2d::wander::start
+);
+saver!(
+    "xspirograph",
+    xspirograph_body,
+    xspirograph_start,
+    xscreensaver::hacks2d::xspirograph::start
 );
 
 /// Every saver, by slug. Only the slug, the label and a function pointer live
@@ -307,6 +325,11 @@ pub static SAVERS: &[Entry] = &[
         start: moire_start,
     },
     Entry {
+        slug: "moire2",
+        label: "Moiré 2",
+        start: moire2_start,
+    },
+    Entry {
         slug: "mountain",
         label: "Mountain",
         start: mountain_start,
@@ -357,6 +380,11 @@ pub static SAVERS: &[Entry] = &[
         start: thornbird_start,
     },
     Entry {
+        slug: "triangle",
+        label: "Triangle",
+        start: triangle_start,
+    },
+    Entry {
         slug: "vines",
         label: "Vines",
         start: vines_start,
@@ -365,6 +393,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "wander",
         label: "Wander",
         start: wander_start,
+    },
+    Entry {
+        slug: "xspirograph",
+        label: "XSpirograph",
+        start: xspirograph_start,
     },
 ];
 

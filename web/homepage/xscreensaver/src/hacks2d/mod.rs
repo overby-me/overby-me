@@ -27,6 +27,7 @@ pub mod kaleidescope;
 pub mod laser;
 pub mod lissie;
 pub mod moire;
+pub mod moire2;
 pub mod mountain;
 pub mod munch;
 pub mod pedal;
@@ -37,8 +38,10 @@ pub mod sphere;
 pub mod spiral;
 pub mod squiral;
 pub mod thornbird;
+pub mod triangle;
 pub mod vines;
 pub mod wander;
+pub mod xspirograph;
 
 /// Every 2D saver ported so far.
 ///
@@ -61,6 +64,7 @@ pub static ALL: &[&Saver] = &[
     &laser::SAVER,
     &lissie::SAVER,
     &moire::SAVER,
+    &moire2::SAVER,
     &mountain::SAVER,
     &munch::SAVER,
     &pedal::SAVER,
@@ -71,8 +75,10 @@ pub static ALL: &[&Saver] = &[
     &spiral::SAVER,
     &squiral::SAVER,
     &thornbird::SAVER,
+    &triangle::SAVER,
     &vines::SAVER,
     &wander::SAVER,
+    &xspirograph::SAVER,
 ];
 
 #[cfg(test)]

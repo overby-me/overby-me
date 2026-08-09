@@ -19,9 +19,10 @@ extend-ignore-re = [
   # GNU tar upstream test names (tests/extrac*.at in tar-1.35)
   "extrac[0-9]+",
   "extrac\\*",
-  # XScreenSaver copyright headers, transcribed verbatim into the Rust ports in
-  # web/homepage/xscreensaver (sphere.c's revision history).
+  # XScreenSaver copyright headers and revision histories, transcribed verbatim
+  # into the Rust ports in web/homepage/xscreensaver.
   "Orignal",
+  "10ths",
 ]
 
 [default.extend-words]
