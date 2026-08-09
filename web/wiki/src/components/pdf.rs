@@ -697,7 +697,12 @@ fn indent_style(indent: u8) -> String {
     }
 }
 
-/// "Reflowed from N pages. Layout, figures and tables are not shown."
+/// "Reflowed from N pages, so the words wrap to this screen."
+///
+/// It used to say that layout, figures and tables were not shown, which was true
+/// when the reflow was only text. Pictures, drawings, tables and the geometry of
+/// a contents row all survive it now, and what a reader loses is the page: so
+/// the sentence says that, and points at the view that keeps it.
 ///
 /// Counted the same way the page control counts, because saying "104 pages"
 /// under a control that reads "37 / 99" makes a reader wonder which of the two
