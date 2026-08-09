@@ -100,6 +100,19 @@ saver!(
     xscreensaver::hacks2d::rorschach::start
 );
 
+saver!(
+    "sierpinski",
+    sierpinski_body,
+    sierpinski_start,
+    xscreensaver::hacks2d::sierpinski::start
+);
+saver!(
+    "vines",
+    vines_body,
+    vines_start,
+    xscreensaver::hacks2d::vines::start
+);
+
 /// Every saver, by slug. Only the slug, the label and a function pointer live
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
@@ -122,6 +135,16 @@ pub static SAVERS: &[Entry] = &[
         slug: "rorschach",
         label: "Rorschach",
         start: rorschach_start,
+    },
+    Entry {
+        slug: "sierpinski",
+        label: "Sierpinski",
+        start: sierpinski_start,
+    },
+    Entry {
+        slug: "vines",
+        label: "Vines",
+        start: vines_start,
     },
 ];
 

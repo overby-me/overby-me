@@ -17,6 +17,8 @@ pub mod decayscreen;
 pub mod greynetic;
 pub mod munch;
 pub mod rorschach;
+pub mod sierpinski;
+pub mod vines;
 
 /// Every 2D saver ported so far.
 ///
@@ -29,6 +31,8 @@ pub static ALL: &[&Saver] = &[
     &greynetic::SAVER,
     &munch::SAVER,
     &rorschach::SAVER,
+    &sierpinski::SAVER,
+    &vines::SAVER,
 ];
 
 #[cfg(test)]

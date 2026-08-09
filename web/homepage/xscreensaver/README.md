@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (4) |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (6) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -66,6 +66,13 @@ The tests in `src/hacks2d/mod.rs` then cover the new saver automatically: they
 check every registered saver draws something, keeps changing, is reproducible
 from its seed, and survives degenerate window sizes, mid-run resizes, pointer
 events and both extremes of every option it declares.
+
+Thirty-eight of the 2D hacks came from xlockmore and are written against
+`ModeInfo` and the `MI_*` accessors rather than `screenhack.h`. They go through
+`runtime::xlockmore`, which is the same adaptor `hacks/xlockmore.c` is upstream:
+build a `ModeInfo` in `init` with the colour scheme the hack `#define`s, then
+translate `MI_WIDTH` to `mi.width` and so on. Everything else about the port is
+the same.
 
 ## Pictures
 
