@@ -523,6 +523,10 @@ pub fn setup_slice_cgroup(
         return;
     };
 
+    // Whether the slice cgroup already existed: its IP filter is attached once,
+    // when the cgroup is first created (see the end of this function).
+    let slice_existed = slice_path.exists();
+
     // Create the slice cgroup directory
     if let Err(e) = std::fs::create_dir_all(slice_path) {
         trace!("Could not create slice cgroup {:?}: {}", slice_path, e);
@@ -666,6 +670,29 @@ pub fn setup_slice_cgroup(
                 "Could not enable controllers in slice subtree_control {:?}: {}",
                 subtree_control, e
             );
+        }
+    }
+
+    // Slice-level IPAddressAllow=/IPAddressDeny= apply to every unit in the
+    // slice. Attach the filter to the slice cgroup when it is first created;
+    // BPF_F_ALLOW_MULTI (see bpf_prog_attach) makes it run in addition to each
+    // member unit's own IP filter, so both the slice's and the unit's rules are
+    // enforced hierarchically. Re-running this per service start would stack
+    // duplicate programs, so gate on first creation: an emptied slice cgroup is
+    // pruned and recreated fresh, which re-attaches with the current config.
+    if !slice_existed
+        && (!slice_conf.ip_address_allow.is_empty() || !slice_conf.ip_address_deny.is_empty())
+    {
+        match cgroups::bpf_devices::apply_ip_address_policy(
+            slice_path,
+            &slice_conf.ip_address_allow,
+            &slice_conf.ip_address_deny,
+        ) {
+            Ok(()) => trace!("Applied slice IPAddress policy to {:?}", slice_path),
+            Err(e) => trace!(
+                "Could not apply slice IPAddress policy to {:?}: {}",
+                slice_path, e
+            ),
         }
     }
 }

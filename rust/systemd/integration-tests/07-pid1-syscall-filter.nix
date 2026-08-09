@@ -434,6 +434,42 @@
         systemctl reset-failed "$UNIT_C.service" 2>/dev/null || true
         rm -f "/run/systemd/system/$UNIT_C.service" "$OUT_C" "$CHELPER"
     fi
+
+    : "IPAddressDeny= on a .slice is inherited by a unit in that slice"
+    PYSL="$(command -v python3 || true)"
+    if [ -n "$PYSL" ]; then
+        SLHELPER="/run/scf-slice.py"
+        cat > "$SLHELPER" << 'PYEOF'
+    import socket, sys, errno
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try: s.sendto(b"x", ("127.0.0.1", 9)); r = "OK"
+    except OSError as e: r = "BLOCKED" if e.errno == errno.EPERM else "ERR%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        SLICE="scfslice-$RANDOM"
+        cat > "/run/systemd/system/$SLICE.slice" << EOF
+    [Slice]
+    IPAddressDeny=127.0.0.0/8
+    EOF
+        UNIT_SL="scfsl-$RANDOM"
+        OUT_SL="/run/scfsl-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_SL.service" << EOF
+    [Service]
+    Type=oneshot
+    Slice=$SLICE.slice
+    ExecStart=$PYSL $SLHELPER $OUT_SL
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_SL.service"
+        cat "$OUT_SL"
+        # The unit sets no IPAddress of its own; the deny is inherited from its
+        # slice's cgroup filter, so the loopback send must still be blocked.
+        grep -qx BLOCKED "$OUT_SL"
+        systemctl stop "$UNIT_SL.service" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_SL.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_SL.service" "/run/systemd/system/$SLICE.slice" \
+              "$OUT_SL" "$SLHELPER"
+    fi
     RIDEOF
   '';
 }
