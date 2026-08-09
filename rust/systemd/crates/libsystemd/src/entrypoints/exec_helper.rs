@@ -2810,17 +2810,14 @@ pub fn run_exec_helper() {
     }
 
     // ── PrivateNetwork= — network namespace ───────────────────────────
-    if config.private_network && !config.privileged_prefix {
-        let ret = unsafe { libc::unshare(libc::CLONE_NEWNET) };
-        if ret != 0 {
-            log::warn!(
-                "Failed to create network namespace for PrivateNetwork=: {}",
-                std::io::Error::last_os_error()
-            );
-        } else {
-            // Bring up the loopback interface in the new namespace
-            bring_up_loopback();
-        }
+    // DelegateNamespaces=net: the network namespace must be owned by the
+    // service's user namespace (created below) so the service, root inside it,
+    // can manage links; defer it there. Otherwise set it up here.
+    let defer_net_ns_for_delegation = config.private_network
+        && !config.privileged_prefix
+        && config.delegate_namespaces.iter().any(|n| n == "net");
+    if config.private_network && !config.privileged_prefix && !defer_net_ns_for_delegation {
+        setup_private_network();
     }
 
     // ── NetworkNamespacePath= — join existing network namespace ────────
@@ -2989,6 +2986,10 @@ pub fn run_exec_helper() {
     if defer_mount_ns_for_delegation {
         log::trace!("mount_ns: setting up (deferred) under delegated user namespace");
         setup_mount_namespace(&config);
+    }
+    if defer_net_ns_for_delegation {
+        log::trace!("net_ns: setting up (deferred) under delegated user namespace");
+        setup_private_network();
     }
 
     // ── PrivatePIDs= — PID namespace /proc remount ─────────────────────
@@ -3904,6 +3905,20 @@ pub fn run_exec_helper() {
             // exit code).
             std::process::exit(203);
         }
+    }
+}
+
+/// Create a new network namespace for PrivateNetwork= and bring up loopback.
+fn setup_private_network() {
+    let ret = unsafe { libc::unshare(libc::CLONE_NEWNET) };
+    if ret != 0 {
+        log::warn!(
+            "Failed to create network namespace for PrivateNetwork=: {}",
+            std::io::Error::last_os_error()
+        );
+    } else {
+        // Bring up the loopback interface in the new namespace.
+        bring_up_loopback();
     }
 }
 
