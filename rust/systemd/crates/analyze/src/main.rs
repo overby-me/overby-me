@@ -1499,6 +1499,8 @@ fn verify_unit_file(path: &str) -> Vec<String> {
     let mut has_service_section = false;
     let mut has_exec_start = false;
     let mut has_type = false;
+    let mut service_type: Option<String> = None;
+    let mut private_pids: Option<String> = None;
     let mut current_section = String::new();
 
     for (lineno, line) in content.lines().enumerate() {
@@ -1534,14 +1536,19 @@ fn verify_unit_file(path: &str) -> Vec<String> {
             continue;
         }
 
-        if let Some((key, _val)) = line.split_once('=') {
+        if let Some((key, val)) = line.split_once('=') {
             let key = key.trim();
+            let val = val.trim();
             if current_section.as_str() == "Service" {
                 if key == "ExecStart" {
                     has_exec_start = true;
                 }
                 if key == "Type" {
                     has_type = true;
+                    service_type = Some(val.to_string());
+                }
+                if key == "PrivatePIDs" {
+                    private_pids = Some(val.to_string());
                 }
             }
         }
@@ -1554,6 +1561,17 @@ fn verify_unit_file(path: &str) -> Vec<String> {
         if has_service_section && !has_exec_start && !has_type {
             issues.push(format!(
                 "{path}: Service has no ExecStart= and no Type= setting"
+            ));
+        }
+        // PrivatePIDs=yes cannot be combined with Type=forking: the forked main
+        // process cannot be tracked across the new PID namespace, so upstream
+        // (service_verify) refuses to load such a unit.
+        if has_service_section
+            && matches!(private_pids.as_deref(), Some("yes" | "true" | "1" | "on"))
+            && service_type.as_deref() == Some("forking")
+        {
+            issues.push(format!(
+                "{path}: Service type forking is not compatible with PrivatePIDs=yes"
             ));
         }
     }
@@ -5778,6 +5796,40 @@ mod tests {
         let issues = verify_unit_file("/nonexistent/test.service");
         assert!(!issues.is_empty());
         assert!(issues[0].contains("Cannot open"));
+    }
+
+    #[test]
+    fn test_verify_privatepids_forking_incompatible() {
+        let path = std::env::temp_dir().join("test-verify-ppfork.service");
+        std::fs::write(
+            &path,
+            "[Service]\nExecStart=echo hi\nPrivatePIDs=yes\nType=forking\n",
+        )
+        .unwrap();
+        let issues = verify_unit_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("forking") && i.contains("PrivatePIDs")),
+            "expected a PrivatePIDs/forking incompatibility issue, got {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_verify_privatepids_oneshot_ok() {
+        let path = std::env::temp_dir().join("test-verify-pponeshot.service");
+        std::fs::write(
+            &path,
+            "[Service]\nExecStart=echo hi\nPrivatePIDs=yes\nType=oneshot\n",
+        )
+        .unwrap();
+        let issues = verify_unit_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            issues.iter().any(|i| i.ends_with(": OK")),
+            "expected OK for a valid PrivatePIDs=yes oneshot, got {issues:?}"
+        );
     }
 
     // Condition tests
