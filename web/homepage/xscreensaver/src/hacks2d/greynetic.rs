@@ -17,8 +17,11 @@
 //! that gives each rectangle a random alpha; this follows the plain X11 build,
 //! so the rectangles are opaque and unstippled.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime::Saver;
 use crate::runtime::{
-    About, Dpy, Gc, Opt, Pixel, SaverDef, Screenhack, XColor, random, random_below,
+    About, Dpy, Gc, Opt, Pixel, Runner, SaverDef, Screenhack, StartArgs, XColor, random,
+    random_below,
 };
 
 /// How many distinct colours to allocate before starting to reuse them.
@@ -108,7 +111,6 @@ const OPTS: &[Opt] = &[
 pub static DEF: SaverDef = SaverDef {
     slug: "greynetic",
     label: "Greynetic",
-    new: init,
     defaults: DEFAULTS,
     opts: OPTS,
     about: About {
@@ -118,3 +120,14 @@ pub static DEF: SaverDef = SaverDef {
         blurb: "Colored, stippled and transparent rectangles.",
     },
 };
+
+/// The saver's entry point, and the one function its wasm chunk exports.
+///
+/// Naming `init` here rather than storing it in [`DEF`] is what lets the
+/// splitter see this hack's code as reachable from this chunk and nowhere else.
+pub fn start(args: StartArgs) -> Runner {
+    Runner::start(&DEF, init, args)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub static SAVER: Saver = Saver { def: &DEF, start };

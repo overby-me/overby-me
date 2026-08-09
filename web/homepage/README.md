@@ -53,9 +53,9 @@ just build
 
 The static site is written to `target/dx/homepage/release/web/public`.
 
-`just build-split` produces the same bundle with one wasm chunk per screensaver.
-See [`xscreensaver/README.md`](./xscreensaver/README.md) for how that is wired
-and why it is not the default yet.
+The release build gives each screensaver its own wasm chunk, so opening one
+downloads only that one. See [`xscreensaver/README.md`](./xscreensaver/README.md)
+for how that is wired and what it measures.
 
 ### Test
 

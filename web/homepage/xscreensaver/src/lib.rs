@@ -30,13 +30,13 @@ pub use runtime::{Dpy, SaverDef, Screenhack};
 /// keep them all in the main module instead. The web host goes through
 /// `pages::savers` instead, which holds only slugs and function pointers.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn all() -> &'static [&'static SaverDef] {
+pub fn all() -> &'static [&'static runtime::Saver] {
     hacks2d::ALL
 }
 
 /// Look a saver up by its URL slug. Native only, for the same reason as
 /// [`all`].
 #[cfg(not(target_arch = "wasm32"))]
-pub fn find(slug: &str) -> Option<&'static SaverDef> {
-    all().iter().copied().find(|d| d.slug == slug)
+pub fn find(slug: &str) -> Option<&'static runtime::Saver> {
+    all().iter().copied().find(|s| s.def.slug == slug)
 }

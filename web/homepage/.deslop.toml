@@ -90,4 +90,9 @@ disabled_rules = [
   # leaves the document.
   "rust_blocking_io_in_async",
   "rust_async_spawn_cancel_at_await",
+  # The rule fires per function, and the screensaver's settings effect is a
+  # synchronous closure that happens to `spawn` a future. Its signal reads and
+  # its `RefCell` borrows are each scoped to one statement, none of them
+  # anywhere near the `await` inside the spawned block.
+  "rust_lock_across_await",
 ]

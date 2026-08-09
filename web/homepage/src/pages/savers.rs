@@ -7,56 +7,61 @@
 //! opening any saver would download all of them. The `lazy_loader!` macro
 //! underneath it does take a module name, so each saver declares its own.
 //!
-//! The chunk hands back **data, not UI**: a [`SaverDef`] is a constructor
-//! function pointer plus two static tables. Everything else, the canvas, the
-//! frame loop, the software framebuffer, the whole Xlib runtime, stays in the
-//! main module and is shared. That is deliberate: `wasm-split` 0.7.9 never
-//! emits a shared chunk (`build_split_chunks` computes an empty set), so code
-//! reachable from two split modules but not from `main` is *copied into both*.
-//! Returning a bare `SaverDef` keeps each chunk down to the one hack in it.
+//! Each chunk exports exactly one function, the saver's own `start`, which
+//! **runs** rather than returning a pointer to something the host will run.
+//! That direction is what makes splitting work: the splitter follows real calls
+//! out of the exported function, so the hack's code and data are reachable from
+//! that chunk and nowhere else. An earlier version handed back a `SaverDef`
+//! containing a constructor pointer, and every hack stayed in the main module
+//! because the only thing that ever *called* it was main-resident code.
+//!
+//! The shared runtime (framebuffer, Xlib façade, `Runner`, the panel) stays in
+//! the main module on purpose. `wasm-split` 0.7.9 never emits a shared chunk
+//! (`build_split_chunks` computes an empty set), so anything reachable from two
+//! split modules but not from `main` would be copied into *both*.
 //!
 //! For the same reason nothing here may touch `xscreensaver::all()` or
-//! `xscreensaver::find()`: those reference every `SaverDef`, which would drag
-//! the entire collection into the main module.
+//! `xscreensaver::find()`: those name every saver's entry point, which would
+//! drag the entire collection back into the main module.
 
 use std::future::Future;
 use std::pin::Pin;
 
-use xscreensaver::SaverDef;
+use xscreensaver::runtime::{Runner, StartArgs};
 
-type DefFuture = Pin<Box<dyn Future<Output = Option<&'static SaverDef>>>>;
+type RunnerFuture = Pin<Box<dyn Future<Output = Option<Runner>>>>;
 
-/// One saver, as the router and the picker see it before its code is loaded.
+/// One saver, as the router sees it before its code is loaded.
 pub struct Entry {
     pub slug: &'static str,
     pub label: &'static str,
-    /// Downloads the saver's chunk if it is not already resident, then returns
-    /// its definition. Returns `None` if the chunk could not be fetched.
-    pub load: fn() -> DefFuture,
+    /// Downloads the saver's chunk if it is not already resident, then starts
+    /// it. Resolves immediately once the chunk is in memory, so restarting a
+    /// saver after a settings change costs nothing extra. `None` if the chunk
+    /// could not be fetched.
+    pub start: fn(StartArgs) -> RunnerFuture,
 }
 
-/// Declare a saver: the body function that the splitter uses as a chunk entry
-/// point, and the loader that awaits it.
+/// Declare a saver: the entry point its chunk exports, and the loader that
+/// awaits it.
 ///
 /// Without the `split` feature this compiles to a direct call, so `dx serve`
-/// works normally and the native build has no wasm machinery in it at all.
+/// works normally and there is no wasm machinery in the build at all.
 macro_rules! saver {
-    ($slug:literal, $label:literal, $body:ident, $load:ident, $path:path) => {
-        fn $body(_: ()) -> &'static SaverDef {
-            &$path
+    ($slug:literal, $body:ident, $load:ident, $path:path) => {
+        fn $body(args: StartArgs) -> Runner {
+            $path(args)
         }
 
         #[cfg(feature = "split")]
-        fn $load() -> DefFuture {
+        fn $load(args: StartArgs) -> RunnerFuture {
             Box::pin(async {
                 // The module name is the slug, so the emitted chunk is
                 // recognisable in the network tab and in the bundle.
-                static MODULE: wasm_split::LazyLoader<(), &'static SaverDef> =
-                    wasm_split::lazy_loader!(
-                        extern $slug fn $body(props: ()) -> &'static SaverDef
-                    );
+                static MODULE: wasm_split::LazyLoader<StartArgs, Runner> =
+            wasm_split::lazy_loader!(extern $slug fn $body(props: StartArgs) -> Runner);
                 if MODULE.load().await {
-                    MODULE.call(()).ok()
+                    MODULE.call(args).ok()
                 } else {
                     None
                 }
@@ -64,32 +69,29 @@ macro_rules! saver {
         }
 
         #[cfg(not(feature = "split"))]
-        fn $load() -> DefFuture {
-            Box::pin(async { Some($body(())) })
+        fn $load(args: StartArgs) -> RunnerFuture {
+            Box::pin(async { Some($body(args)) })
         }
     };
 }
 
 saver!(
     "greynetic",
-    "Greynetic",
     greynetic_body,
-    greynetic_load,
-    xscreensaver::hacks2d::greynetic::DEF
+    greynetic_start,
+    xscreensaver::hacks2d::greynetic::start
 );
 saver!(
     "munch",
-    "Munch",
     munch_body,
-    munch_load,
-    xscreensaver::hacks2d::munch::DEF
+    munch_start,
+    xscreensaver::hacks2d::munch::start
 );
 saver!(
     "rorschach",
-    "Rorschach",
     rorschach_body,
-    rorschach_load,
-    xscreensaver::hacks2d::rorschach::DEF
+    rorschach_start,
+    xscreensaver::hacks2d::rorschach::start
 );
 
 /// Every saver, by slug. Only the slug, the label and a function pointer live
@@ -98,17 +100,17 @@ pub static SAVERS: &[Entry] = &[
     Entry {
         slug: "greynetic",
         label: "Greynetic",
-        load: greynetic_load,
+        start: greynetic_start,
     },
     Entry {
         slug: "munch",
         label: "Munch",
-        load: munch_load,
+        start: munch_start,
     },
     Entry {
         slug: "rorschach",
         label: "Rorschach",
-        load: rorschach_load,
+        start: rorschach_start,
     },
 ];
 

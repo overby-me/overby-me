@@ -32,7 +32,7 @@ XSCREENSAVER_MODULE ("Name", name)
 `init` returns the hack's state, `draw` renders one step and returns how many
 microseconds it wants to wait, and the driver loops. The port keeps that shape:
 the state is a struct, `Screenhack` is the trait, `free` is `Drop`, and the
-module table is a `SaverDef`.
+module table is a `SaverDef` plus a `start` entry point.
 
 The Xlib side is implemented in software. `runtime::Fb` is a `Vec<u32>` that
 `fill_rectangle`, `draw_line`, `fill_polygon` and friends rasterise into, and
@@ -47,9 +47,10 @@ without a browser.
 
 1. Copy `hacks/<name>.c` to `src/hacks2d/<name>.rs`, keeping the upstream
    copyright header verbatim.
-2. `struct state` becomes a Rust struct; `NAME_init` becomes the `new` function
-   the `SaverDef` points at; `NAME_draw/reshape/event` become the `Screenhack`
-   impl.
+2. `struct state` becomes a Rust struct; `NAME_init` becomes `init`;
+   `NAME_draw/reshape/event` become the `Screenhack` impl. Add the module's
+   `start`, which is `Runner::start(&DEF, init, args)` and nothing else: naming
+   `init` there is what lets the splitter move the hack into its own chunk.
 3. Copy `NAME_defaults[]` across verbatim. It is parsed at runtime, so the C
    strings work as-is.
 4. Translate the knobs from `hacks/config/<name>.xml` into the `opts` table.
@@ -76,12 +77,13 @@ changing it:
   `"lazy"`, so every lazy component in the app shares one chunk and opening any
   saver would download all of them. The `lazy_loader!` macro underneath it takes
   a module name, so each saver declares its own.
-- **The chunk returns data, not UI.** `wasm-split` 0.7.9 never emits a shared
-  chunk (`build_split_chunks` computes an empty set), so anything reachable from
-  two split modules but not from `main` is copied into *both*. Handing back a
-  bare `SaverDef` keeps the shared runtime in the main module and each chunk
-  down to the one hack in it. Nothing in `savers.rs` may call
-  `xscreensaver::all()` or `find()`, which reference every saver.
+- **The chunk exports the saver's own `start`, which runs the hack.** See
+  below for why returning data instead does not work. `wasm-split` 0.7.9 never
+  emits a shared chunk (`build_split_chunks` computes an empty set), so anything
+  reachable from two split modules but not from `main` is copied into *both*;
+  keeping the runtime reachable from `main` is what stops that. Nothing in
+  `savers.rs` may call `xscreensaver::all()` or `find()`, which name every
+  saver's entry point.
 
 The `split` cargo feature deliberately depends on `wasm-splitter` directly
 rather than on `dioxus/wasm-split`: enabling the dioxus feature also makes the
@@ -89,30 +91,33 @@ router split every route, which is both more than we want and enough to crash
 dioxus-cli 0.7.9's splitter (`Failed to find data symbol`, reproducible with no
 screensaver code involved).
 
-### It does not pay for itself yet
+### The boundary has to run code, not return it
 
-`just build-split` works: the chunks are emitted, and loading
-`/screensaver/munch` fetches `homepage_bg.wasm` and `module_1_munch_body.wasm`
-and nothing else. But measured on a clean build with three savers registered:
+Measured on clean builds of the same source, three savers registered:
 
 | Build | main.wasm | chunks |
 |-|-|-|
 | no savers at all | 935,996 (376,517 gz) | n/a |
-| savers, no split | 1,027,475 (413,569 gz) | n/a |
-| savers, split | 1,041,033 (418,732 gz) | 3 x ~485 bytes |
+| savers, one module (`just build-whole`) | 1,025,257 (412,894 gz) | n/a |
+| savers, split (`just build`) | 1,014,604 (406,909 gz) | 9.4 / 12.3 / 21.5 KB |
 
-The savers plus the shared runtime cost 91,479 bytes (37,052 gzipped) in the
-main module, and splitting moves ~1.5 KB of that out while adding ~13.5 KB of
-splitter overhead. So `just build` does not split today.
+Loading `/screensaver/munch` fetches `homepage_bg.wasm` and
+`module_1_munch_body.wasm` and nothing else.
 
-The reason is the split boundary. Each chunk's entry point returns a
-`&'static SaverDef`, and everything that *runs* a hack (`Runner`, and the
-indirect call through `SaverDef::new`) lives in the main module, so the
-splitter attributes the hack's code to main and leaves a pointer in the chunk.
-Fixing that means moving the boundary from returning data to running code,
-without going back to duplicating the whole runtime into every chunk. It is
-worth solving before the bulk of the 141 ports land, because otherwise the main
-module grows by every saver ever added.
+The first attempt at this did not work: each chunk's entry point returned a
+`&'static SaverDef` holding a constructor pointer, and every hack stayed in the
+main module while the chunks came out at ~485 bytes. The splitter follows real
+calls out of the exported function, and nothing in the chunk *called* the hack:
+the only caller was `Runner`, in main, through a function pointer. Turning the
+boundary around, so the chunk exports the saver's own `start` which names its
+constructor directly, is what moves the code. Keep it that way when adding
+savers, and do not reintroduce a table that names entry points.
+
+Note that the main module shrank by 10.6 KB while 43 KB moved out: the
+difference is splitter overhead (the indirect-call table, the import stubs).
+Per visit the split build is therefore about break-even at three savers. The
+property that matters is the other one: a new saver now grows only its own
+chunk.
 
 `--debug-symbols false` applies either way: DWARF is ~90 KB gzipped and needs a
 browser extension to read.

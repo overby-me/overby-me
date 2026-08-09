@@ -20,10 +20,12 @@
 //! out of iterations it lingers, then wipes the screen with one of the shared
 //! erasers and starts again in a new colour.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime::Saver;
 use crate::runtime::erase::{Eraser, erase_window};
 use crate::runtime::{
-    About, Dpy, Gc, Opt, Pixel, SaverDef, Screenhack, XColor, XEvent, XRectangle,
-    color::hsv_to_rgb, random_below, screenhack_event_helper,
+    About, Dpy, Gc, Opt, Pixel, Runner, SaverDef, Screenhack, StartArgs, XColor, XEvent,
+    XRectangle, color::hsv_to_rgb, random_below, screenhack_event_helper,
 };
 
 /// Points plotted per `draw` call. Upstream picks this so one call is a
@@ -210,7 +212,6 @@ const OPTS: &[Opt] = &[
 pub static DEF: SaverDef = SaverDef {
     slug: "rorschach",
     label: "Rorschach",
-    new: init,
     defaults: DEFAULTS,
     opts: OPTS,
     about: About {
@@ -220,3 +221,14 @@ pub static DEF: SaverDef = SaverDef {
         blurb: "Inkblot patterns via a reflected random walk.",
     },
 };
+
+/// The saver's entry point, and the one function its wasm chunk exports.
+///
+/// Naming `init` here rather than storing it in [`DEF`] is what lets the
+/// splitter see this hack's code as reachable from this chunk and nowhere else.
+pub fn start(args: StartArgs) -> Runner {
+    Runner::start(&DEF, init, args)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub static SAVER: Saver = Saver { def: &DEF, start };

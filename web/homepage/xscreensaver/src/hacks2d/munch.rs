@@ -25,9 +25,11 @@
 //! Almost all of the look comes from drawing in XOR, so this is the port that
 //! proves the framebuffer's raster operations.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime::Saver;
 use crate::runtime::{
-    About, Dpy, GXFunc, Gc, Opt, SaverDef, Screenhack, SelectItem, XColor, XEvent, random,
-    random_below, screenhack_event_helper,
+    About, Dpy, GXFunc, Gc, Opt, Runner, SaverDef, Screenhack, SelectItem, StartArgs, XColor,
+    XEvent, random, random_below, screenhack_event_helper,
 };
 
 struct Muncher {
@@ -362,7 +364,6 @@ const OPTS: &[Opt] = &[
 pub static DEF: SaverDef = SaverDef {
     slug: "munch",
     label: "Munch",
-    new: init,
     defaults: DEFAULTS,
     opts: OPTS,
     about: About {
@@ -373,3 +374,14 @@ pub static DEF: SaverDef = SaverDef {
                 broken misimplementation of the same idea.",
     },
 };
+
+/// The saver's entry point, and the one function its wasm chunk exports.
+///
+/// Naming `init` here rather than storing it in [`DEF`] is what lets the
+/// splitter see this hack's code as reachable from this chunk and nowhere else.
+pub fn start(args: StartArgs) -> Runner {
+    Runner::start(&DEF, init, args)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub static SAVER: Saver = Saver { def: &DEF, start };

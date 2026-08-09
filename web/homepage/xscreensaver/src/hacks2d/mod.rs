@@ -1,15 +1,17 @@
 //! The 2D (Xlib) savers: upstream's `hacks/*.c`.
 //!
 //! Each module is one hack, ported against [`crate::runtime`] and keeping its
-//! upstream copyright header. A hack exposes exactly one public item, its
-//! [`SaverDef`], because that is all the host ever asks for: on the web each of
-//! these becomes its own lazily-loaded wasm chunk, reached through a function
-//! pointer rather than by name.
+//! upstream copyright header. A hack exposes its [`SaverDef`] (identity and
+//! knobs) and a `start` function that builds a [`Runner`] for it. `start` is the
+//! only way in, and on the web it is the single function its wasm chunk
+//! exports, which is what lets the splitter attribute the hack's code to that
+//! chunk instead of the main module.
 //!
 //! [`SaverDef`]: crate::runtime::SaverDef
+//! [`Runner`]: crate::runtime::Runner
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::runtime::SaverDef;
+use crate::runtime::Saver;
 
 pub mod greynetic;
 pub mod munch;
@@ -18,23 +20,23 @@ pub mod rorschach;
 /// Every 2D saver ported so far.
 ///
 /// Native only: on wasm this table is exactly what must not exist, because
-/// naming every saver in one place is what would keep them all in the main
-/// module. See [`crate::all`].
+/// naming every saver's entry point in one place is what would keep them all in
+/// the main module. See [`crate::all`].
 #[cfg(not(target_arch = "wasm32"))]
-pub static ALL: &[&SaverDef] = &[&greynetic::DEF, &munch::DEF, &rorschach::DEF];
+pub static ALL: &[&Saver] = &[&greynetic::SAVER, &munch::SAVER, &rorschach::SAVER];
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::{Runner, XEvent, color::ALPHA};
+    use crate::runtime::{Runner, StartArgs, XEvent, color::ALPHA};
 
     /// Frames to render per saver in the smoke tests. Enough for a hack with a
     /// slow start (rorschach spends its first calls on a single chunk of the
     /// walk) to have put something on screen.
     const FRAMES: usize = 120;
 
-    fn run(def: &'static SaverDef, w: i32, h: i32, query: &str) -> Runner {
-        let mut r = Runner::new(def, w, h, query, 20260809);
+    fn run(saver: &'static Saver, w: i32, h: i32, query: &str) -> Runner {
+        let mut r = (saver.start)(StartArgs::new(w, h, query, 20260809));
         for _ in 0..FRAMES {
             r.step();
         }
@@ -43,8 +45,9 @@ mod tests {
 
     #[test]
     fn every_saver_draws_something() {
-        for def in ALL {
-            let r = run(def, 320, 240, "");
+        for saver in ALL {
+            let def = saver.def;
+            let r = run(saver, 320, 240, "");
             let lit = r
                 .dpy
                 .win_ref()
@@ -58,8 +61,9 @@ mod tests {
 
     #[test]
     fn every_saver_keeps_changing() {
-        for def in ALL {
-            let mut r = run(def, 320, 240, "");
+        for saver in ALL {
+            let def = saver.def;
+            let mut r = run(saver, 320, 240, "");
             let a = r.frame_hash();
             for _ in 0..FRAMES {
                 r.step();
@@ -70,9 +74,10 @@ mod tests {
 
     #[test]
     fn every_saver_is_reproducible_from_its_seed() {
-        for def in ALL {
-            let a = run(def, 320, 240, "");
-            let b = run(def, 320, 240, "");
+        for saver in ALL {
+            let def = saver.def;
+            let a = run(saver, 320, 240, "");
+            let b = run(saver, 320, 240, "");
             assert_eq!(
                 a.frame_hash(),
                 b.frame_hash(),
@@ -87,9 +92,10 @@ mod tests {
     /// tall, or square.
     #[test]
     fn every_saver_survives_a_degenerate_window() {
-        for def in ALL {
+        for saver in ALL {
+            let def = saver.def;
             for (w, h) in [(1, 1), (3, 200), (200, 3), (49, 49), (2560, 4)] {
-                let mut r = Runner::new(def, w, h, "", 1);
+                let mut r = (saver.start)(StartArgs::new(w, h, "", 1));
                 for _ in 0..30 {
                     r.step();
                 }
@@ -100,8 +106,9 @@ mod tests {
 
     #[test]
     fn every_saver_survives_a_resize_mid_run() {
-        for def in ALL {
-            let mut r = run(def, 320, 240, "");
+        for saver in ALL {
+            let def = saver.def;
+            let mut r = run(saver, 320, 240, "");
             r.resize(64, 480);
             for _ in 0..60 {
                 r.step();
@@ -116,8 +123,8 @@ mod tests {
 
     #[test]
     fn every_saver_survives_being_poked() {
-        for def in ALL {
-            let mut r = run(def, 320, 240, "");
+        for saver in ALL {
+            let mut r = run(saver, 320, 240, "");
             r.event(XEvent::ButtonPress {
                 x: 10,
                 y: 10,
@@ -135,10 +142,11 @@ mod tests {
     /// database, or the panel would show a control that changes nothing.
     #[test]
     fn declared_options_reach_the_hack() {
-        for def in ALL {
+        for saver in ALL {
+            let def = saver.def;
             for opt in def.opts {
                 let query = format!("{}={}", opt.key, opt.default);
-                let r = Runner::new(def, 320, 240, &query, 1);
+                let r = (saver.start)(StartArgs::new(320, 240, &query, 1));
                 assert_eq!(
                     r.dpy.res.value_of(opt),
                     opt.default,
@@ -155,7 +163,8 @@ mod tests {
     #[test]
     fn extreme_option_values_are_survivable() {
         use crate::runtime::OptKind;
-        for def in ALL {
+        for saver in ALL {
+            let def = saver.def;
             for opt in def.opts {
                 let values: Vec<String> = match opt.kind {
                     OptKind::Slider { low, high, .. } | OptKind::Spin { low, high } => {
@@ -166,7 +175,7 @@ mod tests {
                 };
                 for v in values {
                     let query = format!("{}={}", opt.key, v);
-                    let mut r = Runner::new(def, 200, 150, &query, 3);
+                    let mut r = (saver.start)(StartArgs::new(200, 150, &query, 3));
                     for _ in 0..40 {
                         r.step();
                     }
@@ -178,7 +187,8 @@ mod tests {
     #[test]
     fn slugs_are_unique_and_url_safe() {
         let mut seen = std::collections::HashSet::new();
-        for def in ALL {
+        for saver in ALL {
+            let def = saver.def;
             assert!(seen.insert(def.slug), "duplicate slug {}", def.slug);
             assert!(
                 def.slug

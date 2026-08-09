@@ -23,7 +23,7 @@ fn main() {
             args[0],
             xscreensaver::all()
                 .iter()
-                .map(|d| d.slug)
+                .map(|s| s.def.slug)
                 .collect::<Vec<_>>()
                 .join(" ")
         );
@@ -47,14 +47,16 @@ fn main() {
     let out = &args[5];
     let query = args.get(6).cloned().unwrap_or_default();
 
-    let Some(def) = xscreensaver::find(slug) else {
+    let Some(saver) = xscreensaver::find(slug) else {
         eprintln!("no such saver: {slug}");
         std::process::exit(1);
     };
 
     // A fixed seed, so re-running after an edit shows what the edit changed and
     // nothing else.
-    let mut runner = xscreensaver::runtime::Runner::new(def, width, height, &query, 20260809);
+    let mut runner = (saver.start)(xscreensaver::runtime::StartArgs::new(
+        width, height, &query, 20260809,
+    ));
     for _ in 0..frames {
         runner.step();
     }

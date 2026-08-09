@@ -18,7 +18,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 use xscreensaver::SaverDef;
-use xscreensaver::runtime::{OptKind, Runner, XEvent};
+use xscreensaver::runtime::{OptKind, Runner, StartArgs, XEvent};
 
 use crate::Route;
 use crate::pages::savers;
@@ -44,7 +44,6 @@ struct Host {
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
     runner: Runner,
-    def: &'static SaverDef,
     paused: bool,
     /// CSS pixels per framebuffer pixel, for mapping pointer coordinates back.
     scale: i32,
@@ -56,23 +55,17 @@ struct Host {
 }
 
 impl Host {
-    /// Rebuild the saver from scratch with new settings.
-    ///
-    /// Hacks read their resources once, in `init`, exactly as the C does, so
-    /// changing an option means starting the hack again. A fresh seed each time
-    /// means "Reset" also re-rolls anything the hack randomises at startup.
-    fn restart(&mut self, query: &str) {
-        if query == self.query {
-            return;
-        }
-        self.query = query.to_string();
-        self.runner = Runner::new(
-            self.def,
+    fn def(&self) -> &'static SaverDef {
+        self.runner.def()
+    }
+
+    fn start_args(&self, query: &str) -> StartArgs {
+        StartArgs::new(
             self.runner.dpy.width(),
             self.runner.dpy.height(),
             query,
             seed(),
-        );
+        )
     }
 
     fn sync_size(&mut self) {
@@ -248,26 +241,36 @@ fn SaverStage(slug: String) -> Element {
     let mut panel_open = use_signal(|| false);
     let mut paused = use_signal(|| false);
     let host: Signal<Option<Rc<RefCell<Host>>>> = use_signal(|| None);
-
-    // The saver's own wasm chunk. Nothing renders a canvas until it arrives.
-    let def = use_resource(move || async move { (entry.load)().await });
+    let mut failed = use_signal(|| false);
 
     // Restart the hack whenever a setting changes, and mirror the settings into
     // the URL. `replaceState` keeps the canvas alive across a slider drag.
+    //
+    // Hacks read their resources once, in `init`, exactly as the C does, so
+    // changing an option means starting the hack again. A fresh seed each time
+    // means "Reset" also re-rolls anything the hack randomises at startup.
     use_effect(move || {
         let query = to_query(&settings.read());
         replace_query(&query);
-        if let Some(h) = host.read().clone() {
-            h.borrow_mut().restart(&query);
+        let Some(h) = host.read().clone() else { return };
+        // Every borrow of the host is scoped to a single statement on purpose:
+        // the restart has to await the saver's chunk, and a `RefCell` borrow
+        // still open at that point would panic the moment the animation frame
+        // in flight touched the host.
+        let unchanged = h.borrow().query == query;
+        if unchanged {
+            return;
         }
+        spawn(async move {
+            let args = h.borrow().start_args(&query);
+            // Already resident by now, so this resolves without another fetch.
+            if let Some(runner) = (entry.start)(args).await {
+                let mut h = h.borrow_mut();
+                h.runner = runner;
+                h.query = query;
+            }
+        });
     });
-
-    let Some(loaded) = def.cloned() else {
-        return rsx! { Stage { message: "Loading {entry.label}" } };
-    };
-    let Some(def) = loaded else {
-        return rsx! { Stage { message: "Could not load {entry.label}" } };
-    };
 
     let onmounted = {
         let mut host = host;
@@ -291,12 +294,15 @@ fn SaverStage(slug: String) -> Element {
                 canvas.set_height(h as u32);
 
                 let query = to_query(&settings.peek());
-                let runner = Runner::new(def, w, h, &query, seed());
+                // Fetches the saver's own wasm chunk the first time.
+                let Some(runner) = (entry.start)(StartArgs::new(w, h, &query, seed())).await else {
+                    failed.set(true);
+                    return;
+                };
                 let h = Rc::new(RefCell::new(Host {
                     canvas,
                     ctx,
                     runner,
-                    def,
                     paused: false,
                     scale,
                     css_w,
@@ -320,6 +326,10 @@ fn SaverStage(slug: String) -> Element {
     } else {
         ("Pause", "background:#8a5a1a;border-color:#c98a2a")
     };
+
+    // The saver's definition only exists once its chunk has loaded and the hack
+    // has started, so the panel appears with it rather than before it.
+    let def = host.read().as_ref().map(|h| h.borrow().def());
 
     rsx! {
         div {
@@ -363,6 +373,15 @@ fn SaverStage(slug: String) -> Element {
                 },
             }
 
+            if failed() {
+                div {
+                    style: "position:absolute;inset:0;display:flex;align-items:center;\
+                            justify-content:center;color:#777;font-size:14px;",
+                    "Could not load {entry.label}"
+                }
+            }
+
+            {def.map(|def| rsx! {
             if !panel_open() {
                 button {
                     id: "screensaver-panel-toggle",
@@ -464,6 +483,7 @@ fn SaverStage(slug: String) -> Element {
                     }
                 }
             }
+            })}
         }
     }
 }

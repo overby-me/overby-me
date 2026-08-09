@@ -149,23 +149,55 @@ pub struct About {
     pub blurb: &'static str,
 }
 
-/// Everything the host needs to run one saver.
+/// What a saver needs to know to start: everything the host can decide without
+/// having loaded the saver yet.
 ///
-/// This is deliberately plain data with a function pointer rather than a
-/// component: it is what each lazily-loaded wasm chunk hands back, so the whole
-/// runtime (canvas, frame loop, panel) can stay in the main module instead of
-/// being duplicated into every chunk.
+/// A struct rather than five parameters because it crosses the code-splitting
+/// boundary, and a `LazyLoader` entry point takes exactly one argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartArgs {
+    pub width: i32,
+    pub height: i32,
+    /// The URL query, which is the settings the panel has changed.
+    pub query: String,
+    /// Fixes the random stream: the same seed and size reproduce the same
+    /// frames. The host passes a random seed; the tests pass a constant.
+    pub seed: u32,
+}
+
+impl StartArgs {
+    pub fn new(width: i32, height: i32, query: &str, seed: u32) -> Self {
+        Self {
+            width,
+            height,
+            query: query.to_string(),
+            seed,
+        }
+    }
+}
+
+/// A saver's identity and its knobs: everything about it except its code.
 pub struct SaverDef {
     /// URL slug, matching the upstream binary name.
     pub slug: &'static str,
     /// Display name, from the XML `_label`.
     pub label: &'static str,
-    pub new: fn(&mut Dpy) -> Box<dyn Screenhack>,
     /// The hack's `NAME_defaults[]`, copied verbatim from the C.
     pub defaults: &'static [&'static str],
     /// The knobs the panel shows, derived from `hacks/config/NAME.xml`.
     pub opts: &'static [Opt],
     pub about: About,
+}
+
+/// A saver as a table can hold it: its definition plus its entry point.
+///
+/// Native only. Naming a saver's entry point from a shared table is exactly
+/// what stops the web build from splitting it out, so the web host reaches each
+/// saver through its own lazily-loaded chunk instead. See [`crate::all`].
+#[cfg(not(target_arch = "wasm32"))]
+pub struct Saver {
+    pub def: &'static SaverDef,
+    pub start: fn(StartArgs) -> Runner,
 }
 
 /// The most frames [`Runner::tick`] will draw for one call, however far behind
@@ -187,15 +219,24 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// Start a saver at the given size, with settings from a URL query.
+    /// Start a saver. Called by the saver itself, from inside its own module.
     ///
-    /// `seed` fixes the random stream, so the same seed and size reproduce the
-    /// same frames. The host passes a random seed; the tests pass a constant.
-    pub fn new(def: &'static SaverDef, width: i32, height: i32, query: &str, seed: u32) -> Self {
-        ya_rand_init(seed);
-        let res = Resources::new(def.defaults, def.opts, query);
-        let mut dpy = Dpy::new(width, height, res);
-        let hack = (def.new)(&mut dpy);
+    /// The direction matters for code splitting. If the host called into a
+    /// saver through a function pointer it fetched, the splitter would see the
+    /// hack only as an indirect call from main-resident code and would leave it
+    /// in the main module. Because the saver's own `start` names its
+    /// constructor directly, everything the hack reaches is reachable from that
+    /// one exported function and nowhere else, which is what lets it move into
+    /// the saver's chunk. Everything in here is shared and stays in main.
+    pub fn start(
+        def: &'static SaverDef,
+        new: fn(&mut Dpy) -> Box<dyn Screenhack>,
+        args: StartArgs,
+    ) -> Self {
+        ya_rand_init(args.seed);
+        let res = Resources::new(def.defaults, def.opts, &args.query);
+        let mut dpy = Dpy::new(args.width, args.height, res);
+        let hack = new(&mut dpy);
         Self {
             dpy,
             hack,
@@ -302,7 +343,6 @@ mod tests {
     static SLOW: SaverDef = SaverDef {
         slug: "slow",
         label: "Slow",
-        new: |_| Box::new(Counter { delay: 10_000 }),
         defaults: &[".background: black", ".foreground: white"],
         opts: &[],
         about: About {
@@ -316,7 +356,6 @@ mod tests {
     static GREEDY: SaverDef = SaverDef {
         slug: "greedy",
         label: "Greedy",
-        new: |_| Box::new(Counter { delay: 0 }),
         defaults: &[".background: black", ".foreground: white"],
         opts: &[],
         about: About {
@@ -326,6 +365,14 @@ mod tests {
             blurb: "",
         },
     };
+
+    fn slow(args: StartArgs) -> Runner {
+        Runner::start(&SLOW, |_| Box::new(Counter { delay: 10_000 }), args)
+    }
+
+    fn greedy(args: StartArgs) -> Runner {
+        Runner::start(&GREEDY, |_| Box::new(Counter { delay: 0 }), args)
+    }
 
     fn draws_during(f: impl FnOnce()) -> u32 {
         DRAWS.with(|c| c.set(0));
@@ -337,7 +384,7 @@ mod tests {
     fn pacing_follows_the_requested_delay() {
         // 10ms delay over a 100ms tick is ten steps, not one.
         let n = draws_during(|| {
-            let mut r = Runner::new(&SLOW, 64, 64, "", 1);
+            let mut r = slow(StartArgs::new(64, 64, "", 1));
             r.tick(0.0);
             r.tick(0.1);
         });
@@ -348,7 +395,7 @@ mod tests {
     fn catch_up_is_bounded() {
         // A tab that was hidden for an hour must not draw an hour of frames.
         let n = draws_during(|| {
-            let mut r = Runner::new(&SLOW, 64, 64, "", 1);
+            let mut r = slow(StartArgs::new(64, 64, "", 1));
             r.tick(0.0);
             r.tick(3600.0);
         });
@@ -361,7 +408,7 @@ mod tests {
     #[test]
     fn a_zero_delay_hack_is_still_paced() {
         let n = draws_during(|| {
-            let mut r = Runner::new(&GREEDY, 64, 64, "", 1);
+            let mut r = greedy(StartArgs::new(64, 64, "", 1));
             r.tick(0.0);
             r.tick(1.0 / 60.0);
         });
@@ -370,8 +417,8 @@ mod tests {
 
     #[test]
     fn the_same_seed_gives_the_same_frame() {
-        let mut a = Runner::new(&SLOW, 64, 64, "", 7);
-        let mut b = Runner::new(&SLOW, 64, 64, "", 7);
+        let mut a = slow(StartArgs::new(64, 64, "", 7));
+        let mut b = slow(StartArgs::new(64, 64, "", 7));
         for _ in 0..10 {
             a.step();
             b.step();
@@ -381,7 +428,7 @@ mod tests {
 
     #[test]
     fn resize_is_a_no_op_when_the_size_is_unchanged() {
-        let mut r = Runner::new(&SLOW, 64, 64, "", 1);
+        let mut r = slow(StartArgs::new(64, 64, "", 1));
         r.step();
         let before = r.frame_hash();
         r.resize(64, 64);
