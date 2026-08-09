@@ -49,8 +49,23 @@ fn main() {
         "--version" => print_version(),
         "list" => cmd_list(),
         "status" => {
-            let link_name = args.get(2).map(|s| s.as_str());
-            cmd_status(link_name);
+            // status [--json[=MODE]] [LINK]: --json emits machine-readable
+            // per-link output, used by `timedatectl ntp-servers` assertions
+            // (`networkctl status IF --json=short | jq '.NTP'`).
+            let mut link_name = None;
+            let mut json = false;
+            for a in &args[2..] {
+                if a == "--json" || a.starts_with("--json=") {
+                    json = true;
+                } else if !a.starts_with('-') {
+                    link_name = Some(a.as_str());
+                }
+            }
+            if json {
+                cmd_status_json(link_name);
+            } else {
+                cmd_status(link_name);
+            }
         }
         "lldp" => cmd_lldp(),
         "reload" => cmd_reload(),
@@ -1112,6 +1127,7 @@ struct LinkEntry {
     config_file: Option<String>,
     dns_servers: Vec<String>,
     search_domains: Vec<String>,
+    ntp_servers: Vec<String>,
     lease_address: Option<String>,
     lease_gateway: Option<String>,
     lease_server: Option<String>,
@@ -1196,6 +1212,11 @@ fn enumerate_links() -> Vec<LinkEntry> {
             .filter(|(k, _)| k == "DOMAINS")
             .map(|(_, v)| v.clone())
             .collect();
+        let ntp_servers: Vec<String> = state
+            .iter()
+            .filter(|(k, _)| k == "NTP")
+            .map(|(_, v)| v.clone())
+            .collect();
 
         // Read lease file if available.
         let lease_file = format!("/run/systemd/netif/leases/{index}");
@@ -1218,6 +1239,7 @@ fn enumerate_links() -> Vec<LinkEntry> {
             config_file,
             dns_servers,
             search_domains,
+            ntp_servers,
             lease_address,
             lease_gateway,
             lease_server,
@@ -1275,6 +1297,84 @@ fn cmd_list() {
 
     println!();
     println!("{} links listed.", links.len());
+}
+
+/// `networkctl status LINK --json[=MODE]`: emit machine-readable per-link
+/// state. Only a subset of upstream's fields is produced; notably the `NTP`
+/// array is included so `timedatectl ntp-servers` assertions
+/// (`networkctl status IF --json=short | jq '.NTP'`) work. A single interface
+/// is emitted as a bare object (so `jq '.NTP'` resolves against the top level).
+fn cmd_status_json(link_filter: Option<&str>) {
+    let links = enumerate_links();
+    let filtered: Vec<&LinkEntry> = match link_filter {
+        Some(name) => links.iter().filter(|l| l.name == name).collect(),
+        None => links.iter().collect(),
+    };
+    if filtered.is_empty() {
+        if let Some(name) = link_filter {
+            eprintln!("No link found: {name}");
+            std::process::exit(1);
+        }
+        println!("{{}}");
+        return;
+    }
+    if filtered.len() == 1 {
+        println!("{}", link_status_json(filtered[0]));
+    } else {
+        let objs: Vec<String> = filtered.iter().map(|l| link_status_json(l)).collect();
+        println!("[{}]", objs.join(","));
+    }
+}
+
+/// Build the per-link JSON object. Each `NTP` entry is an IPv4 address object
+/// `{"Family":2,"Address":[a,b,c,d]}` for address literals, or a
+/// `{"Server":"name"}` object for hostnames, matching upstream networkd's
+/// representation (see the `assert_networkd_ntp` jq expression in upstream's
+/// TEST-45-TIMEDATE).
+fn link_status_json(link: &LinkEntry) -> String {
+    let ntp: Vec<String> = link.ntp_servers.iter().map(|s| ntp_json_entry(s)).collect();
+    let dns: Vec<String> = link
+        .dns_servers
+        .iter()
+        .map(|d| format!("{{\"Server\":\"{}\"}}", json_escape_str(d)))
+        .collect();
+    format!(
+        "{{\"Index\":{},\"Name\":\"{}\",\"DNS\":[{}],\"NTP\":[{}]}}",
+        link.index,
+        json_escape_str(&link.name),
+        dns.join(","),
+        ntp.join(","),
+    )
+}
+
+/// Classify one NTP server token into its upstream JSON object form.
+fn ntp_json_entry(token: &str) -> String {
+    if let Ok(v4) = token.parse::<std::net::Ipv4Addr>() {
+        let o = v4.octets();
+        format!(
+            "{{\"Family\":2,\"Address\":[{},{},{},{}]}}",
+            o[0], o[1], o[2], o[3]
+        )
+    } else {
+        format!("{{\"Server\":\"{}\"}}", json_escape_str(token))
+    }
+}
+
+/// Minimal JSON string escaping for the fields emitted by `--json`.
+fn json_escape_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn cmd_status(link_filter: Option<&str>) {
@@ -1663,6 +1763,7 @@ mod tests {
             config_file: None,
             dns_servers: Vec::new(),
             search_domains: Vec::new(),
+            ntp_servers: Vec::new(),
             lease_address: None,
             lease_gateway: None,
             lease_server: None,
@@ -1689,6 +1790,7 @@ mod tests {
             config_file: Some("/etc/systemd/network/10-eth.network".into()),
             dns_servers: vec!["8.8.8.8".into()],
             search_domains: vec!["example.com".into()],
+            ntp_servers: Vec::new(),
             lease_address: Some("192.168.1.100".into()),
             lease_gateway: Some("192.168.1.1".into()),
             lease_server: Some("192.168.1.1".into()),
@@ -1716,6 +1818,7 @@ mod tests {
             config_file: None,
             dns_servers: Vec::new(),
             search_domains: Vec::new(),
+            ntp_servers: Vec::new(),
             lease_address: None,
             lease_gateway: None,
             lease_server: None,

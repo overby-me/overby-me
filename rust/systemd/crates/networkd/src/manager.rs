@@ -195,6 +195,13 @@ pub struct NetworkManager {
     /// Global IPv6 DNS servers (aggregated from RA RDNSS).
     pub dns6_servers: Vec<Ipv6Addr>,
 
+    /// Runtime per-link NTP servers, keyed by interface index, set via the
+    /// network1 `SetLinkNTP` D-Bus method (used by `timedatectl ntp-servers`).
+    /// A present entry overrides the `NTP=` servers from the link's `.network`
+    /// configuration; absent means fall back to the configured servers. Each
+    /// value entry is a server string (an IP literal or a hostname), verbatim.
+    pub link_ntp: HashMap<u32, Vec<String>>,
+
     /// Whether we've completed initial configuration.
     pub initial_config_done: bool,
 }
@@ -209,6 +216,7 @@ impl NetworkManager {
             dns_servers: Vec::new(),
             search_domains: Vec::new(),
             dns6_servers: Vec::new(),
+            link_ntp: HashMap::new(),
             initial_config_done: false,
         }
     }
@@ -1241,6 +1249,23 @@ impl NetworkManager {
         file.map(|f| (f, dropins))
     }
 
+    /// Set the runtime NTP servers for a link (network1 `SetLinkNTP`). The
+    /// override is recorded even when empty, so an explicit empty list means
+    /// "no link NTP" rather than "fall back to the configured servers" (use
+    /// [`Self::revert_link_ntp`] for the latter). Returns whether the link is
+    /// currently managed.
+    pub fn set_link_ntp(&mut self, ifindex: u32, servers: Vec<String>) -> bool {
+        let managed = self.links.contains_key(&ifindex);
+        self.link_ntp.insert(ifindex, servers);
+        managed
+    }
+
+    /// Clear the runtime NTP override for a link (network1 `RevertLinkNTP`),
+    /// reverting to the `NTP=` servers from the link's `.network` config.
+    pub fn revert_link_ntp(&mut self, ifindex: u32) {
+        self.link_ntp.remove(&ifindex);
+    }
+
     /// Write runtime state files to `/run/systemd/netif/`.
     pub fn write_state_files(&self) {
         let state_dir = std::path::Path::new("/run/systemd/netif/links");
@@ -1311,6 +1336,20 @@ impl NetworkManager {
             }
             for domain6 in &managed.search6_domains {
                 content.push_str(&format!("DOMAINS={domain6}\n"));
+            }
+            // Per-link NTP servers. A runtime override set via the network1
+            // SetLinkNTP D-Bus method (timedatectl ntp-servers) takes precedence
+            // over the configured NTP= servers. timesyncd reads these NTP= lines
+            // to build its per-link LinkNTPServers property.
+            let ntp: Vec<String> = if let Some(rt) = self.link_ntp.get(&managed.link.index) {
+                rt.clone()
+            } else if let Some(ref cfg) = managed.config {
+                cfg.network_section.ntp.clone()
+            } else {
+                Vec::new()
+            };
+            for server in &ntp {
+                content.push_str(&format!("NTP={server}\n"));
             }
             // Include delegated prefixes from DHCPv6-PD.
             if let Some(ref dhcpv6_lease) = managed.dhcpv6_lease

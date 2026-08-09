@@ -956,48 +956,82 @@ fn cmd_timesync_status() {
 
 // ── Usage ──────────────────────────────────────────────────────────────────
 
+/// Resolve an interface name (or numeric index) to its ifindex via
+/// `/sys/class/net/<name>/ifindex`, matching networkctl's resolver.
+fn resolve_ifindex(name: &str) -> Option<u32> {
+    if let Ok(idx) = name.parse::<u32>() {
+        return Some(idx);
+    }
+    let content = fs::read_to_string(format!("/sys/class/net/{name}/ifindex")).ok()?;
+    content.trim().parse::<u32>().ok()
+}
+
 fn cmd_ntp_servers(iface: &str, servers: &[&str]) {
-    // Write a networkd drop-in that sets NTP servers for this link.
-    // Real systemd-timedated writes to /run/systemd/network/XX-<iface>.network.d/
-    let dropin_dir = format!("/run/systemd/network/50-{iface}.network.d");
-    let dropin_file = format!("{dropin_dir}/ntp.conf");
-
-    if let Err(e) = fs::create_dir_all(&dropin_dir) {
-        eprintln!("Failed to create drop-in directory {dropin_dir}: {e}");
+    // Route to networkd's org.freedesktop.network1.Manager.SetLinkNTP(i, as),
+    // matching upstream timedatectl (src/timedate/timedatectl.c verb_ntp_servers).
+    // networkd records the per-link NTP override and exposes it via
+    // `networkctl status <iface> --json` and its link state file, which
+    // timesyncd reads for its LinkNTPServers property.
+    let Some(ifindex) = resolve_ifindex(iface) else {
+        eprintln!("Failed to resolve interface '{iface}'.");
         process::exit(1);
+    };
+    let mut cmd = process::Command::new("busctl");
+    cmd.args([
+        "call",
+        "org.freedesktop.network1",
+        "/org/freedesktop/network1",
+        "org.freedesktop.network1.Manager",
+        "SetLinkNTP",
+        "ias",
+    ]);
+    cmd.arg(ifindex.to_string());
+    cmd.arg(servers.len().to_string());
+    for s in servers {
+        cmd.arg(s);
     }
-
-    let ntp_list = servers.join(" ");
-    let content = format!("[Network]\nNTP={ntp_list}\n");
-
-    if let Err(e) = fs::write(&dropin_file, content) {
-        eprintln!("Failed to write {dropin_file}: {e}");
-        process::exit(1);
+    match cmd.status() {
+        Ok(st) if st.success() => {}
+        Ok(st) => {
+            eprintln!("Failed to set NTP servers: busctl call exited with {st}");
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to set NTP servers (could not run busctl): {e}");
+            process::exit(1);
+        }
     }
-
-    // Reload networkd to pick up the change
-    let _ = process::Command::new("networkctl")
-        .args(["reload"])
-        .status();
-    let _ = process::Command::new("networkctl")
-        .args(["reconfigure", iface])
-        .status();
 }
 
 fn cmd_revert(iface: &str) {
-    let dropin_dir = format!("/run/systemd/network/50-{iface}.network.d");
-    if Path::new(&dropin_dir).exists()
-        && let Err(e) = fs::remove_dir_all(&dropin_dir)
-    {
-        eprintln!("Failed to remove {dropin_dir}: {e}");
+    // Route to networkd's RevertLinkNTP(i), matching upstream timedatectl
+    // (verb_revert), clearing the per-link NTP override.
+    let Some(ifindex) = resolve_ifindex(iface) else {
+        eprintln!("Failed to resolve interface '{iface}'.");
         process::exit(1);
+    };
+    let status = process::Command::new("busctl")
+        .args([
+            "call",
+            "org.freedesktop.network1",
+            "/org/freedesktop/network1",
+            "org.freedesktop.network1.Manager",
+            "RevertLinkNTP",
+            "i",
+        ])
+        .arg(ifindex.to_string())
+        .status();
+    match status {
+        Ok(st) if st.success() => {}
+        Ok(st) => {
+            eprintln!("Failed to revert interface configuration: busctl call exited with {st}");
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to revert interface configuration (could not run busctl): {e}");
+            process::exit(1);
+        }
     }
-    let _ = process::Command::new("networkctl")
-        .args(["reload"])
-        .status();
-    let _ = process::Command::new("networkctl")
-        .args(["reconfigure", iface])
-        .status();
 }
 
 fn print_usage() {

@@ -260,6 +260,10 @@ struct SignalFlags {
     reload: AtomicBool,
     /// ifindex of link to force-renew; 0 means no pending renew, -1 means all.
     force_renew_ifindex: std::sync::atomic::AtomicI32,
+    /// Pending per-link NTP operations from the D-Bus SetLinkNTP/RevertLinkNTP
+    /// methods, drained by the main loop: `(ifindex, Some(servers))` sets the
+    /// runtime override, `(ifindex, None)` reverts to the configured servers.
+    link_ntp_ops: Mutex<Vec<(i32, Option<Vec<String>>)>>,
 }
 
 impl SignalFlags {
@@ -267,6 +271,7 @@ impl SignalFlags {
         Self {
             reload: AtomicBool::new(false),
             force_renew_ifindex: std::sync::atomic::AtomicI32::new(0),
+            link_ntp_ops: Mutex::new(Vec::new()),
         }
     }
 }
@@ -487,6 +492,36 @@ impl Network1Manager {
         self.signals
             .force_renew_ifindex
             .store(ifindex, Ordering::Relaxed);
+    }
+
+    /// SetLinkNTP(i ifindex, as servers): set per-link NTP servers, matching
+    /// upstream org.freedesktop.network1.Manager. Used by `timedatectl
+    /// ntp-servers`. Queued for the main loop, which records the override and
+    /// rewrites the link state file so timesyncd can pick it up.
+    #[zbus(name = "SetLinkNTP")]
+    fn set_link_ntp(&self, ifindex: i32, servers: Vec<String>) {
+        log::info!(
+            "D-Bus SetLinkNTP() called for ifindex={} ({} servers)",
+            ifindex,
+            servers.len()
+        );
+        self.signals
+            .link_ntp_ops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((ifindex, Some(servers)));
+    }
+
+    /// RevertLinkNTP(i ifindex): clear the per-link NTP override, reverting to
+    /// the configured NTP= servers. Used by `timedatectl revert`.
+    #[zbus(name = "RevertLinkNTP")]
+    fn revert_link_ntp(&self, ifindex: i32) {
+        log::info!("D-Bus RevertLinkNTP() called for ifindex={}", ifindex);
+        self.signals
+            .link_ntp_ops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((ifindex, None));
     }
 }
 
@@ -835,6 +870,29 @@ fn main() {
             mgr.write_state_files();
             update_shared_state(&shared_state, &mgr);
             sd_notify(&format!("STATUS={}", mgr.overall_state()));
+        }
+
+        // Apply pending SetLinkNTP/RevertLinkNTP operations from D-Bus
+        // (timedatectl ntp-servers / revert). Recording the override and
+        // rewriting the link state file lets timesyncd observe the change.
+        let ntp_ops: Vec<(i32, Option<Vec<String>>)> = {
+            let mut q = signal_flags
+                .link_ntp_ops
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *q)
+        };
+        if !ntp_ops.is_empty() {
+            for (ifindex, op) in ntp_ops {
+                let idx = ifindex.max(0) as u32;
+                match op {
+                    Some(servers) => {
+                        mgr.set_link_ntp(idx, servers);
+                    }
+                    None => mgr.revert_link_ntp(idx),
+                }
+            }
+            mgr.write_state_files();
         }
 
         // Process DHCP: receive replies, handle timeouts, send retransmits.
