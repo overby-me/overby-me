@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::anemone::start
 );
 saver!(
+    "braid",
+    braid_body,
+    braid_start,
+    xscreensaver::hacks2d::braid::start
+);
+saver!(
     "cloudlife",
     cloudlife_body,
     cloudlife_start,
@@ -112,6 +118,12 @@ saver!(
     xscreensaver::hacks2d::deco::start
 );
 saver!(
+    "cynosure",
+    cynosure_body,
+    cynosure_start,
+    xscreensaver::hacks2d::cynosure::start
+);
+saver!(
     "decayscreen",
     decayscreen_body,
     decayscreen_start,
@@ -122,6 +134,12 @@ saver!(
     discrete_body,
     discrete_start,
     xscreensaver::hacks2d::discrete::start
+);
+saver!(
+    "galaxy",
+    galaxy_body,
+    galaxy_start,
+    xscreensaver::hacks2d::galaxy::start
 );
 saver!(
     "greynetic",
@@ -350,6 +368,11 @@ pub static SAVERS: &[Entry] = &[
         start: anemone_start,
     },
     Entry {
+        slug: "braid",
+        label: "Braid",
+        start: braid_start,
+    },
+    Entry {
         slug: "cloudlife",
         label: "Cloud Life",
         start: cloudlife_start,
@@ -375,6 +398,11 @@ pub static SAVERS: &[Entry] = &[
         start: deco_start,
     },
     Entry {
+        slug: "cynosure",
+        label: "Cynosure",
+        start: cynosure_start,
+    },
+    Entry {
         slug: "decayscreen",
         label: "Decay Screen",
         start: decayscreen_start,
@@ -383,6 +411,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "discrete",
         label: "Discrete",
         start: discrete_start,
+    },
+    Entry {
+        slug: "galaxy",
+        label: "Galaxy",
+        start: galaxy_start,
     },
     Entry {
         slug: "greynetic",

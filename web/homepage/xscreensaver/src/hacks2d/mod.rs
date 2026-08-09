@@ -14,10 +14,12 @@
 use crate::runtime::Saver;
 
 pub mod anemone;
+pub mod braid;
 pub mod cloudlife;
 pub mod coral;
 pub mod critical;
 pub mod cwaves;
+pub mod cynosure;
 pub mod decayscreen;
 pub mod deco;
 pub mod discrete;
@@ -25,6 +27,7 @@ pub mod fadeplot;
 pub mod fiberlamp;
 pub mod flame;
 pub mod forest;
+pub mod galaxy;
 pub mod grav;
 pub mod greynetic;
 pub mod halftone;
@@ -66,13 +69,16 @@ pub mod xspirograph;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
     &anemone::SAVER,
+    &braid::SAVER,
     &cloudlife::SAVER,
     &coral::SAVER,
     &critical::SAVER,
     &cwaves::SAVER,
     &deco::SAVER,
+    &cynosure::SAVER,
     &decayscreen::SAVER,
     &discrete::SAVER,
+    &galaxy::SAVER,
     &greynetic::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,

@@ -56,4 +56,9 @@ exclude = [
   # real URL is built at analysis time (base + version + platform + ext), so
   # the bare base 404s and is not link-checkable.
   'go\.dev/dl',
+  # Author home pages cited in XScreenSaver copyright headers, transcribed
+  # verbatim into the Rust ports in web/homepage/xscreensaver. Some are from
+  # the nineties and no longer resolve; the headers stay as upstream wrote
+  # them either way.
+  'www\.organic\.com/staff/',
 ]
