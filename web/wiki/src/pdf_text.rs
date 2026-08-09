@@ -2809,7 +2809,7 @@ const CONTENTS_GAP: f64 = 2.5;
 /// nothing between them, and read as text that is a sentence ending in a digit.
 /// `gap` is how far apart the last two words were, in type sizes, which is the
 /// only place that distinction survives.
-fn index_entry(text: &str, gap: f64) -> Option<(&str, &str)> {
+fn index_entry(text: &str, gap: f64, two_columns: bool) -> Option<(&str, &str)> {
     let trimmed = text.trim_end();
     // A page, or a range of them: "13", "5 - 10", "17 - 25".
     let tail_start = trimmed
@@ -2833,8 +2833,17 @@ fn index_entry(text: &str, gap: f64) -> Option<(&str, &str)> {
         .take_while(|c| matches!(c, '.' | '\u{00B7}' | '\u{2024}' | '\u{2026}' | ' '))
         .filter(|c| *c != ' ')
         .count();
+    // Dots say so by themselves: they ARE the row, and they bridge the gap they
+    // fill, so such a row is one group of words and asking it for two columns
+    // refuses every dotted contents page there is -- which is what happened to
+    // the songbook's, links and all.
+    //
+    // A gap says so only with the columns to back it: a statement's row also
+    // ends in a figure after a wide gap, and "I alt -1.260.170 -1.016.876
+    // 197.801" is not an entry pointing at page 801.
     let by_dots = dots >= 3;
-    if !by_dots && gap < CONTENTS_GAP {
+    let by_gap = gap >= CONTENTS_GAP && two_columns;
+    if !by_dots && !by_gap {
         return None;
     }
     // Only strip a leader that is actually there. "Foreningsoplysninger m.v."
@@ -3190,8 +3199,7 @@ fn blocks_from(
         // figure: "I alt -1.260.170 -1.016.876 197.801" was arriving as a
         // contents entry pointing at page 801.
         let two_columns = std::mem::replace(cells, 0) == 2;
-        if let Some((title, page)) = index_entry(&text, tail).filter(|_| two_columns || tail == 0.0)
-        {
+        if let Some((title, page)) = index_entry(&text, tail, two_columns) {
             let keep = title.chars().count();
             let page = page.to_string();
             blocks.push(Block::IndexEntry {
@@ -3372,11 +3380,10 @@ fn blocks_from(
                 let apart = gap > p.size * 1.6
                     || (line.size - p.size).abs() > p.size * 0.15
                     || is_index_entry(&line.text)
-                    // The same row without leader dots: the page number is a
-                    // third of the page away and only the geometry says so.
-                    || (line.tail_gap >= CONTENTS_GAP
-                        && line.natural_cells == 2
-                        && index_entry(&line.text, line.tail_gap).is_some())
+                    // Or the same row without leader dots, where the page
+                    // number is a third of the page away and only the geometry
+                    // says so.
+                    || index_entry(&line.text, line.tail_gap, line.natural_cells == 2).is_some()
                     || list_marker(&line.text).is_some()
                     // A bullet the page DREW starts an item as surely as one
                     // written in the text does, and without this a whole list
@@ -5032,6 +5039,30 @@ mod tests {
         assert_eq!(super::family_of("dejavusansserif"), Family::Sans);
     }
 
+    /// A dotted contents row needs nothing but its dots.
+    ///
+    /// The regression this exists to stop: asking every contents row for two
+    /// columns of words refused the dotted ones, because the dots bridge the very
+    /// gap that would have made two -- so the songbook's index stopped being an
+    /// index, and its links to each song went with it.
+    #[test]
+    fn dots_carry_a_row_on_their_own() {
+        // One group of words, no gap to speak of: the dots are the whole signal.
+        assert_eq!(
+            super::index_entry("Kampsange...............................3", 0.2, false),
+            Some(("Kampsange", "3"))
+        );
+        assert_eq!(
+            super::index_entry("Ode til Rohde......  62", 0.4, false),
+            Some(("Ode til Rohde", "62"))
+        );
+        // A gap without the columns is a row of figures, not an entry.
+        assert_eq!(
+            super::index_entry("I alt -1.260.170 -1.016.876 197.801", 5.0, false),
+            None
+        );
+    }
+
     /// A contents row whose leader is empty space, not dots.
     ///
     /// The annual report's contents page sets each entry against a page number
@@ -5042,24 +5073,24 @@ mod tests {
     fn a_contents_row_can_be_carried_by_the_gap_alone() {
         let wide = super::CONTENTS_GAP + 1.0;
         assert_eq!(
-            super::index_entry("Ledelsespåtegning 4", wide),
+            super::index_entry("Ledelsespåtegning 4", wide, true),
             Some(("Ledelsespåtegning", "4"))
         );
         // A range of pages is a page too.
         assert_eq!(
-            super::index_entry("Den uafhængige revisors erklæring 5 - 10", wide),
+            super::index_entry("Den uafhængige revisors erklæring 5 - 10", wide, true),
             Some(("Den uafhængige revisors erklæring", "5 - 10"))
         );
         // The abbreviation keeps its full stop: there is no leader to strip.
         assert_eq!(
-            super::index_entry("Foreningsoplysninger m.v. 3", wide),
+            super::index_entry("Foreningsoplysninger m.v. 3", wide, true),
             Some(("Foreningsoplysninger m.v.", "3"))
         );
         // Without the gap it is a sentence that happens to end in a number.
-        assert_eq!(super::index_entry("Vi var 12", 0.5), None);
+        assert_eq!(super::index_entry("Vi var 12", 0.5, true), None);
         // And a leader still works with no gap to speak of.
         assert_eq!(
-            super::index_entry("Kampsange...........3", 0.0),
+            super::index_entry("Kampsange...........3", 0.0, false),
             Some(("Kampsange", "3"))
         );
     }
@@ -6043,17 +6074,17 @@ mod tests {
     #[test]
     fn a_contents_row_splits_into_what_it_names_and_where() {
         assert_eq!(
-            index_entry("Kampsange....................3", 0.0),
+            index_entry("Kampsange....................3", 0.0, false),
             Some(("Kampsange", "3"))
         );
         // The file may leave a space before the leader, or none before the
         // number, and both are the same row.
         assert_eq!(
-            index_entry("Radikal Ungdoms holdning til rigsfællesskabet .........19", 0.0),
+            index_entry("Radikal Ungdoms holdning til rigsfællesskabet .........19", 0.0, false),
             Some(("Radikal Ungdoms holdning til rigsfællesskabet", "19"))
         );
         assert_eq!(
-            index_entry("Internationale................................9", 0.0),
+            index_entry("Internationale................................9", 0.0, false),
             Some(("Internationale", "9"))
         );
     }
@@ -6061,15 +6092,15 @@ mod tests {
     /// And a sentence that merely ends in a digit is left alone.
     #[test]
     fn prose_is_not_a_contents_row() {
-        assert_eq!(index_entry("Vi mødes i 2025", 0.0), None);
+        assert_eq!(index_entry("Vi mødes i 2025", 0.0, false), None);
         assert_eq!(
-            index_entry("Der var engang… 7", 0.0),
+            index_entry("Der var engang… 7", 0.0, false),
             None,
             "one ellipsis is not a leader"
         );
-        assert_eq!(index_entry("1. maj 2025", 0.0), None);
-        assert_eq!(index_entry("Kampsange....", 0.0), None, "no page, no row");
-        assert_eq!(index_entry("....7", 0.0), None, "no title, no row");
+        assert_eq!(index_entry("1. maj 2025", 0.0, false), None);
+        assert_eq!(index_entry("Kampsange....", 0.0, false), None, "no page, no row");
+        assert_eq!(index_entry("....7", 0.0, false), None, "no title, no row");
     }
 
     /// The margin is near the end of the range, not a tenth down it: a book of
