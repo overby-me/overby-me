@@ -57,6 +57,7 @@ pub mod sierpinski;
 pub mod sphere;
 pub mod spiral;
 pub mod squiral;
+pub mod starfish;
 pub mod thornbird;
 pub mod triangle;
 pub mod vines;
@@ -115,6 +116,7 @@ pub static ALL: &[&Saver] = &[
     &sphere::SAVER,
     &spiral::SAVER,
     &squiral::SAVER,
+    &starfish::SAVER,
     &thornbird::SAVER,
     &triangle::SAVER,
     &vines::SAVER,

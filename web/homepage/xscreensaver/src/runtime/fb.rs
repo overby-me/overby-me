@@ -581,15 +581,47 @@ impl Fb {
             .unwrap_or(0)
             .min(self.height - 1);
 
+        if ymin > ymax {
+            return;
+        }
+
+        // An edge can only cross the scanlines between its endpoints, so file
+        // each one under the first row it reaches and carry it forward until
+        // it is spent. Without this a polygon of a thousand edges costs every
+        // one of them on every row, which the spline-drawing hacks feel.
+        let n = points.len();
+        let rows = (ymax - ymin + 1) as usize;
+        let mut starts: Vec<Vec<usize>> = vec![Vec::new(); rows];
+        for i in 0..n {
+            let a = points[i];
+            let b = points[(i + 1) % n];
+            if a.y == b.y {
+                continue;
+            }
+            let (ylo, yhi) = (a.y.min(b.y), a.y.max(b.y));
+            if yhi <= ymin || ylo > ymax {
+                continue;
+            }
+            starts[(ylo.max(ymin) - ymin) as usize].push(i);
+        }
+
         // Crossings for one scanline: x where the edge cuts it, and which way
         // the edge is pointing (for the winding rule).
         let mut xs: Vec<(f64, i32)> = Vec::with_capacity(points.len());
+        let mut active: Vec<usize> = Vec::new();
         for y in ymin..=ymax {
-            xs.clear();
+            active.extend_from_slice(&starts[(y - ymin) as usize]);
             let yc = y as f64 + 0.5;
-            for i in 0..points.len() {
+            active.retain(|&i| {
                 let a = points[i];
-                let b = points[(i + 1) % points.len()];
+                let b = points[(i + 1) % n];
+                (a.y.max(b.y) as f64) > yc
+            });
+
+            xs.clear();
+            for &i in &active {
+                let a = points[i];
+                let b = points[(i + 1) % n];
                 let (ay, by) = (a.y as f64, b.y as f64);
                 if (ay <= yc && by > yc) || (by <= yc && ay > yc) {
                     let t = (yc - ay) / (by - ay);

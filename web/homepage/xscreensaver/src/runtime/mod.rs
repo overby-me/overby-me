@@ -25,6 +25,7 @@ pub mod fb;
 pub mod image;
 pub mod opts;
 pub mod rand;
+pub mod spline;
 pub mod xlockmore;
 
 pub use color::{Pixel, XColor};
