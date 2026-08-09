@@ -470,6 +470,44 @@
         rm -f "/run/systemd/system/$UNIT_SL.service" "/run/systemd/system/$SLICE.slice" \
               "$OUT_SL" "$SLHELPER"
     fi
+
+    : "DevicePolicy=closed on a .slice is inherited: a non-base device is denied"
+    PYSD="$(command -v python3 || true)"
+    if [ -n "$PYSD" ]; then
+        SDHELPER="/run/scf-slicedev.py"
+        cat > "$SDHELPER" << 'PYEOF'
+    import sys, errno
+    try:
+        open("/dev/kmsg", "rb").close(); r = "OK"
+    except OSError as e:
+        r = "BLOCKED" if e.errno in (errno.EPERM, errno.EACCES) else "code%d" % e.errno
+    open(sys.argv[1], "w").write(r)
+    PYEOF
+        SLICED="scfslicedev-$RANDOM"
+        cat > "/run/systemd/system/$SLICED.slice" << EOF
+    [Slice]
+    DevicePolicy=closed
+    EOF
+        UNIT_SD="scfsd-$RANDOM"
+        OUT_SD="/run/scfsd-out.$RANDOM"
+        cat > "/run/systemd/system/$UNIT_SD.service" << EOF
+    [Service]
+    Type=oneshot
+    Slice=$SLICED.slice
+    ExecStart=$PYSD $SDHELPER $OUT_SD
+    EOF
+        systemctl daemon-reload
+        systemctl start "$UNIT_SD.service"
+        cat "$OUT_SD"
+        # The unit sets no device policy; the closed policy is inherited from its
+        # slice, so /dev/kmsg (not a base pseudo-device) is denied while the base
+        # devices the unit needs to run (/dev/null, /dev/urandom) stay allowed.
+        grep -qx BLOCKED "$OUT_SD"
+        systemctl stop "$UNIT_SD.service" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_SD.service" 2>/dev/null || true
+        rm -f "/run/systemd/system/$UNIT_SD.service" "/run/systemd/system/$SLICED.slice" \
+              "$OUT_SD" "$SDHELPER"
+    fi
     RIDEOF
   '';
 }

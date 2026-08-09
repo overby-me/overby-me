@@ -673,6 +673,23 @@ pub fn setup_slice_cgroup(
         }
     }
 
+    // Slice-level DeviceAllow=/DevicePolicy= apply to every unit in the slice,
+    // attached on first creation like the IP filter below. apply_device_policy
+    // no-ops for the default auto policy with no DeviceAllow=, and ALLOW_MULTI
+    // makes the slice's device filter combine with each unit's own.
+    if !slice_existed
+        && let Err(e) = cgroups::bpf_devices::apply_device_policy(
+            slice_path,
+            &slice_conf.device_policy,
+            &slice_conf.device_allow,
+        )
+    {
+        trace!(
+            "Could not apply slice device policy to {:?}: {}",
+            slice_path, e
+        );
+    }
+
     // Slice-level IPAddressAllow=/IPAddressDeny= apply to every unit in the
     // slice. Attach the filter to the slice cgroup when it is first created;
     // BPF_F_ALLOW_MULTI (see bpf_prog_attach) makes it run in addition to each
