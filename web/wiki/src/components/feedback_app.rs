@@ -811,7 +811,10 @@ mod tests {
             "- reported by: Marie",
             "- report id: abc-123",
         ] {
-            assert!(text.contains(wanted), "the report left out {wanted:?}:\n{text}");
+            assert!(
+                text.contains(wanted),
+                "the report left out {wanted:?}:\n{text}"
+            );
         }
         // The stack survives the paste, which is what the fence is for.
         assert!(text.contains("```\npanicked at 'already borrowed'\n  at pdf.rs:602\n```"));
@@ -832,8 +835,18 @@ mod tests {
         };
         let text = report_text(&item, &[]);
         assert!(text.starts_with("# Idea in the wiki"));
-        for absent in ["- build:", "- browser:", "- where:", "- how often:", "- last seen:", "- reported by:"] {
-            assert!(!text.contains(absent), "the report claimed {absent:?} it does not have:\n{text}");
+        for absent in [
+            "- build:",
+            "- browser:",
+            "- where:",
+            "- how often:",
+            "- last seen:",
+            "- reported by:",
+        ] {
+            assert!(
+                !text.contains(absent),
+                "the report claimed {absent:?} it does not have:\n{text}"
+            );
         }
     }
 

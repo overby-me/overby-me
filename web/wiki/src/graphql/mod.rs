@@ -511,11 +511,18 @@ mod tests {
         let write = serde_json::json!({ "query": "mutation M { insertNode { id } }" });
         let anonymous = serde_json::json!({ "query": "{ nodes { id } }" });
 
-        assert!(flight_key(None, &write).is_none(), "a write is never shared");
+        assert!(
+            flight_key(None, &write).is_none(),
+            "a write is never shared"
+        );
         assert!(flight_key(Some("tok"), &write).is_none());
 
         let mine = flight_key(Some("tok"), &read).expect("a read is shareable");
-        assert_eq!(mine, flight_key(Some("tok"), &read).unwrap(), "same question");
+        assert_eq!(
+            mine,
+            flight_key(Some("tok"), &read).unwrap(),
+            "same question"
+        );
         assert_ne!(
             mine,
             flight_key(Some("other"), &read).unwrap(),

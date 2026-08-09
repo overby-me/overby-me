@@ -422,10 +422,11 @@ const MAC_ROMAN_HIGH: [char; 128] = [
     'Ä', 'Å', 'Ç', 'É', 'Ñ', 'Ö', 'Ü', 'á', 'à', 'â', 'ä', 'ã', 'å', 'ç', 'é', 'è', 'ê', 'ë', 'í',
     'ì', 'î', 'ï', 'ñ', 'ó', 'ò', 'ô', 'ö', 'õ', 'ú', 'ù', 'û', 'ü', '†', '°', '¢', '£', '§', '•',
     '¶', 'ß', '®', '©', '™', '´', '¨', '≠', 'Æ', 'Ø', '∞', '±', '≤', '≥', '¥', 'µ', '∂', '∑', '∏',
-    'π', '∫', 'ª', 'º', 'Ω', 'æ', 'ø', '¿', '¡', '¬', '√', 'ƒ', '≈', '∆', '«', '»', '…', '\u{00A0}',
-    'À', 'Ã', 'Õ', 'Œ', 'œ', '–', '—', '“', '”', '‘', '’', '÷', '◊', 'ÿ', 'Ÿ', '⁄', '€', '‹', '›',
-    'ﬁ', 'ﬂ', '‡', '·', '‚', '„', '‰', 'Â', 'Ê', 'Á', 'Ë', 'È', 'Í', 'Î', 'Ï', 'Ì', 'Ó', 'Ô', '\u{FFFD}',
-    'Ò', 'Ú', 'Û', 'Ù', 'ı', 'ˆ', '˜', '¯', '˘', '˙', '˚', '¸', '˝', '˛', 'ˇ',
+    'π', '∫', 'ª', 'º', 'Ω', 'æ', 'ø', '¿', '¡', '¬', '√', 'ƒ', '≈', '∆', '«', '»', '…',
+    '\u{00A0}', 'À', 'Ã', 'Õ', 'Œ', 'œ', '–', '—', '“', '”', '‘', '’', '÷', '◊', 'ÿ', 'Ÿ', '⁄',
+    '€', '‹', '›', 'ﬁ', 'ﬂ', '‡', '·', '‚', '„', '‰', 'Â', 'Ê', 'Á', 'Ë', 'È', 'Í', 'Î', 'Ï', 'Ì',
+    'Ó', 'Ô', '\u{FFFD}', 'Ò', 'Ú', 'Û', 'Ù', 'ı', 'ˆ', '˜', '¯', '˘', '˙', '˚', '¸', '˝', '˛',
+    'ˇ',
 ];
 
 /// The 8-bit table a simple font's codes are read through when it ships no
@@ -486,28 +487,93 @@ fn glyph_char(name: &str) -> Option<char> {
         return Some(c);
     }
     Some(match name {
-        "aring" => 'å', "Aring" => 'Å', "oslash" => 'ø', "Oslash" => 'Ø',
-        "ae" => 'æ', "AE" => 'Æ', "adieresis" => 'ä', "Adieresis" => 'Ä',
-        "odieresis" => 'ö', "Odieresis" => 'Ö', "udieresis" => 'ü', "Udieresis" => 'Ü',
-        "eacute" => 'é', "Eacute" => 'É', "egrave" => 'è', "agrave" => 'à',
-        "acute" => '´', "ccedilla" => 'ç', "Ccedilla" => 'Ç', "ntilde" => 'ñ',
-        "atilde" => 'ã', "otilde" => 'õ', "aacute" => 'á', "iacute" => 'í',
-        "oacute" => 'ó', "uacute" => 'ú', "ocircumflex" => 'ô', "ecircumflex" => 'ê',
-        "acircumflex" => 'â', "icircumflex" => 'î', "ucircumflex" => 'û',
-        "fi" => 'ﬁ', "fl" => 'ﬂ', "ff" => 'ﬀ', "ffi" => 'ﬃ', "ffl" => 'ﬄ',
-        "quoteright" => '’', "quoteleft" => '‘', "quotedblleft" => '“',
-        "quotedblright" => '”', "quotedblbase" => '„', "quotesinglbase" => '‚',
-        "endash" => '–', "emdash" => '—', "bullet" => '•', "periodcentered" => '·',
-        "ellipsis" => '…', "dagger" => '†', "daggerdbl" => '‡', "section" => '§',
-        "paragraph" => '¶', "germandbls" => 'ß', "sterling" => '£', "yen" => '¥',
-        "currency" => '¤', "Euro" => '€', "euro" => '€', "trademark" => '™',
-        "copyright" => '©', "registered" => '®', "degree" => '°', "plusminus" => '±',
-        "guillemotleft" => '«', "guillemotright" => '»', "questiondown" => '¿',
-        "exclamdown" => '¡', "space" => ' ', "hyphen" => '-', "period" => '.',
-        "comma" => ',', "colon" => ':', "semicolon" => ';', "slash" => '/',
-        "parenleft" => '(', "parenright" => ')', "percent" => '%', "ampersand" => '&',
-        "zero" => '0', "one" => '1', "two" => '2', "three" => '3', "four" => '4',
-        "five" => '5', "six" => '6', "seven" => '7', "eight" => '8', "nine" => '9',
+        "aring" => 'å',
+        "Aring" => 'Å',
+        "oslash" => 'ø',
+        "Oslash" => 'Ø',
+        "ae" => 'æ',
+        "AE" => 'Æ',
+        "adieresis" => 'ä',
+        "Adieresis" => 'Ä',
+        "odieresis" => 'ö',
+        "Odieresis" => 'Ö',
+        "udieresis" => 'ü',
+        "Udieresis" => 'Ü',
+        "eacute" => 'é',
+        "Eacute" => 'É',
+        "egrave" => 'è',
+        "agrave" => 'à',
+        "acute" => '´',
+        "ccedilla" => 'ç',
+        "Ccedilla" => 'Ç',
+        "ntilde" => 'ñ',
+        "atilde" => 'ã',
+        "otilde" => 'õ',
+        "aacute" => 'á',
+        "iacute" => 'í',
+        "oacute" => 'ó',
+        "uacute" => 'ú',
+        "ocircumflex" => 'ô',
+        "ecircumflex" => 'ê',
+        "acircumflex" => 'â',
+        "icircumflex" => 'î',
+        "ucircumflex" => 'û',
+        "fi" => 'ﬁ',
+        "fl" => 'ﬂ',
+        "ff" => 'ﬀ',
+        "ffi" => 'ﬃ',
+        "ffl" => 'ﬄ',
+        "quoteright" => '’',
+        "quoteleft" => '‘',
+        "quotedblleft" => '“',
+        "quotedblright" => '”',
+        "quotedblbase" => '„',
+        "quotesinglbase" => '‚',
+        "endash" => '–',
+        "emdash" => '—',
+        "bullet" => '•',
+        "periodcentered" => '·',
+        "ellipsis" => '…',
+        "dagger" => '†',
+        "daggerdbl" => '‡',
+        "section" => '§',
+        "paragraph" => '¶',
+        "germandbls" => 'ß',
+        "sterling" => '£',
+        "yen" => '¥',
+        "currency" => '¤',
+        "Euro" => '€',
+        "euro" => '€',
+        "trademark" => '™',
+        "copyright" => '©',
+        "registered" => '®',
+        "degree" => '°',
+        "plusminus" => '±',
+        "guillemotleft" => '«',
+        "guillemotright" => '»',
+        "questiondown" => '¿',
+        "exclamdown" => '¡',
+        "space" => ' ',
+        "hyphen" => '-',
+        "period" => '.',
+        "comma" => ',',
+        "colon" => ':',
+        "semicolon" => ';',
+        "slash" => '/',
+        "parenleft" => '(',
+        "parenright" => ')',
+        "percent" => '%',
+        "ampersand" => '&',
+        "zero" => '0',
+        "one" => '1',
+        "two" => '2',
+        "three" => '3',
+        "four" => '4',
+        "five" => '5',
+        "six" => '6',
+        "seven" => '7',
+        "eight" => '8',
+        "nine" => '9',
         _ => return None,
     })
 }
@@ -701,8 +767,7 @@ fn hex_to_string(s: &str) -> Option<String> {
 /// subset of a corporate typeface almost always is.
 fn family_of(base: &str) -> Family {
     const SERIF: &[&str] = &[
-        "times", "serif", "georgia", "garamond", "book", "roman", "minion",
-        "palatino", "century",
+        "times", "serif", "georgia", "garamond", "book", "roman", "minion", "palatino", "century",
     ];
     const MONO: &[&str] = &["courier", "mono", "consol", "menlo"];
     if MONO.iter().any(|n| base.contains(n)) {
@@ -752,24 +817,21 @@ fn read_font(doc: &Document, dict: &Dictionary) -> Font {
     // Latin range and what this did for every font until now.
     if font.to_unicode.is_empty() && !font.two_byte {
         let mut base = Base::WinAnsi;
-        match dict.get(b"Encoding").ok() {
-            Some(obj) => {
-                if let Ok(name) = obj.as_name() {
+        if let Ok(obj) = dict.get(b"Encoding") {
+            if let Ok(name) = obj.as_name() {
+                base = base_named(name);
+            } else if let Ok(enc) = obj.as_dict().or_else(|_| {
+                obj.as_reference()
+                    .and_then(|r| doc.get_object(r))
+                    .and_then(|o| o.as_dict())
+            }) {
+                if let Ok(name) = enc.get(b"BaseEncoding").and_then(|o| o.as_name()) {
                     base = base_named(name);
-                } else if let Ok(enc) = obj.as_dict().or_else(|_| {
-                    obj.as_reference()
-                        .and_then(|r| doc.get_object(r))
-                        .and_then(|o| o.as_dict())
-                }) {
-                    if let Ok(name) = enc.get(b"BaseEncoding").and_then(|o| o.as_name()) {
-                        base = base_named(name);
-                    }
-                    if let Ok(diffs) = enc.get(b"Differences").and_then(|o| o.as_array()) {
-                        font.differences = read_differences(diffs);
-                    }
+                }
+                if let Ok(diffs) = enc.get(b"Differences").and_then(|o| o.as_array()) {
+                    font.differences = read_differences(diffs);
                 }
             }
-            None => {}
         }
         font.base = Some(base);
     }
@@ -1370,8 +1432,18 @@ impl Shape {
                 match right - left < 4.0 || top - bottom > 2.5 {
                     true => Vec::new(),
                     false => vec![
-                        Rule { x0: left, x1: right, y: top, thickness },
-                        Rule { x0: left, x1: right, y: bottom, thickness },
+                        Rule {
+                            x0: left,
+                            x1: right,
+                            y: top,
+                            thickness,
+                        },
+                        Rule {
+                            x0: left,
+                            x1: right,
+                            y: bottom,
+                            thickness,
+                        },
                     ],
                 }
             }
@@ -1530,9 +1602,11 @@ fn filled_rule(shapes: &[Shape], ctm: [f64; 6]) -> Vec<Rule> {
     // rules in it: a frame's edges are not lines the reader is meant to see once
     // the text has reflowed out of it.
     let corners: Vec<(f64, f64)> = shapes.iter().flat_map(|s| s.corners(ctm)).collect();
-    let (lo, hi) = corners.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (_, y)| {
-        (lo.min(*y), hi.max(*y))
-    });
+    let (lo, hi) = corners
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (_, y)| {
+            (lo.min(*y), hi.max(*y))
+        });
     let framed = hi - lo > 2.5;
     shapes
         .iter()
@@ -1603,7 +1677,9 @@ fn underline_runs(runs: &mut [Run], rules: &[Rule]) {
 /// which numbers belong together, and the whole of what it had to say before
 /// this kept any of them.
 fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64, f64)> {
-    let mut out: Vec<(f64, f64, f64)> = Vec::new();
+    // How far the stack reaches, not where its middle is: top, bottom, left,
+    // right, and the heaviest single stroke in it.
+    let mut out: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
     for rule in rules {
         let width = rule.x1 - rule.x0;
         // A tenth of the column: shorter is a tick, a bullet's stroke, or the
@@ -1618,23 +1694,41 @@ fn separators(rules: &[Rule], lines: &[Line], page_width: f64) -> Vec<(f64, f64,
         if underlines {
             continue;
         }
-        // One rule, however many strokes drew it -- and as heavy as the STACK,
-        // not as the heaviest stroke in it. This is how the annual report draws
-        // a weight: a 0.48pt rule is four hairlines a tenth of a point apart and
-        // a 0.72pt rule is six, which is why every line in it was arriving at
-        // the same hairline and no two looked different. Measured against the
-        // ink: the rules on the income statement come out 0.48pt and 0.72pt,
-        // exactly where these say they are.
-        if let Some((y, _, thick)) = out.iter_mut().find(|(y, _, _)| (*y - rule.y).abs() < 2.0) {
-            let top = y.max(rule.y);
-            let bottom = y.min(rule.y);
-            *thick = thick.max(rule.thickness).max(top - bottom + rule.thickness);
-            *y = (top + bottom) / 2.0;
-            continue;
+        // One rule, however many strokes drew it -- and as heavy and as wide as
+        // the STACK, not as the heaviest or widest stroke in it. This is how the
+        // annual report draws a weight: every stroke in the file is 0.12pt, and
+        // a heavier line is more of them a tenth of a point apart. The bar over
+        // the masthead is sixteen of them and measures 1.92pt; the rules across
+        // the income statement are four and measure 0.48pt, drawn column by
+        // column so one rule arrives as eight strokes. Keeping the RUNNING
+        // MIDPOINT was what hid this: the middle of the stack slid down as the
+        // stack grew, so the span was always measured from the middle rather
+        // than from the top and every stack, sixteen strokes or four, converged
+        // on a third of a point. That is why no two lines in the document looked
+        // any different.
+        match out
+            .iter_mut()
+            .find(|(top, bottom, ..)| rule.y <= *top + 2.0 && rule.y >= *bottom - 2.0)
+        {
+            Some((top, bottom, left, right, stroke)) => {
+                *top = top.max(rule.y);
+                *bottom = bottom.min(rule.y);
+                *left = left.min(rule.x0);
+                *right = right.max(rule.x1);
+                *stroke = stroke.max(rule.thickness);
+            }
+            None => out.push((rule.y, rule.y, rule.x0, rule.x1, rule.thickness)),
         }
-        out.push((rule.y, (width / page_width).min(1.0), rule.thickness));
     }
-    out
+    out.into_iter()
+        .map(|(top, bottom, left, right, stroke)| {
+            (
+                (top + bottom) / 2.0,
+                ((right - left) / page_width).min(1.0),
+                top - bottom + stroke,
+            )
+        })
+        .collect()
 }
 
 /// Teach every line where the page's columns are, and re-split it there.
@@ -1903,9 +1997,9 @@ fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageL
     let mut drawn_rules: Vec<(f64, f64, f64, f64)> = Vec::new();
     for rule in &drawn.rules {
         let (x0, x1) = (rule.x0.min(rule.x1), rule.x0.max(rule.x1));
-        let same = drawn_rules.iter_mut().find(|(y, a, b, _)| {
-            (*y - rule.y).abs() < 1.0 && x0 <= *b + 1.0 && x1 >= *a - 1.0
-        });
+        let same = drawn_rules
+            .iter_mut()
+            .find(|(y, a, b, _)| (*y - rule.y).abs() < 1.0 && x0 <= *b + 1.0 && x1 >= *a - 1.0);
         match same {
             Some((y, a, b, thick)) => {
                 *a = a.min(x0);
@@ -2014,10 +2108,7 @@ fn table_rows(lines: &[Line], size: f64) -> Vec<Vec<Vec<Span>>> {
         if let Some(row) = rows.last_mut() {
             for tail in &line.cells {
                 // Into the column it sits in, with a space where the line broke.
-                if let Some(cell) = row
-                    .iter_mut()
-                    .find(|c| (c.left - tail.left).abs() <= slack)
-                {
+                if let Some(cell) = row.iter_mut().find(|c| (c.left - tail.left).abs() <= slack) {
                     if let Some(last) = cell.spans.last_mut() {
                         last.text.push(' ');
                     }
@@ -5209,17 +5300,28 @@ mod tests {
             natural_cells: 0,
         };
         let lines = vec![line(100.0, 50.0, 300.0)];
-        let rule = |x0: f64, x1: f64, y: f64| super::Rule { x0, x1, y, thickness: 0.5 };
+        let rule = |x0: f64, x1: f64, y: f64| super::Rule {
+            x0,
+            x1,
+            y,
+            thickness: 0.5,
+        };
 
         // Under the words on the line above: that is an underline, carried by
         // the run itself.
         let under = super::separators(&[rule(50.0, 300.0, 97.0)], &lines, 500.0);
-        assert!(under.is_empty(), "an underline is not a separator: {under:?}");
+        assert!(
+            under.is_empty(),
+            "an underline is not a separator: {under:?}"
+        );
 
         // Clear of any line: a separator, at the share of the width it spanned.
         let between = super::separators(&[rule(50.0, 300.0, 60.0)], &lines, 500.0);
         assert_eq!(between.len(), 1);
-        assert!((between[0].1 - 0.5).abs() < 0.01, "half the width: {between:?}");
+        assert!(
+            (between[0].1 - 0.5).abs() < 0.01,
+            "half the width: {between:?}"
+        );
 
         // Too short to be anything but a tick.
         assert!(super::separators(&[rule(50.0, 70.0, 60.0)], &lines, 500.0).is_empty());
@@ -5227,7 +5329,53 @@ mod tests {
         // One rule, however many strokes drew it: a table's cells each draw
         // their own edge along the same line.
         let doubled = vec![rule(50.0, 300.0, 60.0), rule(300.0, 450.0, 60.4)];
-        assert_eq!(super::separators(&doubled, &lines, 500.0).len(), 1);
+        let joined = super::separators(&doubled, &lines, 500.0);
+        assert_eq!(joined.len(), 1);
+        // And as wide as the two of them together, not as wide as the first.
+        assert!(
+            (joined[0].1 - 0.8).abs() < 0.01,
+            "the whole span: {joined:?}"
+        );
+    }
+
+    /// A stack of hairlines is as heavy as the stack.
+    ///
+    /// Every stroke in the 2024 annual report is 0.12pt; weight is drawn by
+    /// repeating one a tenth of a point lower. Sixteen of them make the bar over
+    /// the masthead and four make the rules on the income statement, a fourfold
+    /// difference that arrived as no difference at all while the collapse
+    /// measured each stroke against the running MIDDLE of the stack instead of
+    /// its top.
+    #[test]
+    fn a_stack_of_hairlines_weighs_what_the_stack_spans() {
+        let lines: Vec<super::Line> = Vec::new();
+        let stack = |n: usize, top: f64| -> Vec<super::Rule> {
+            (0..n)
+                .map(|i| super::Rule {
+                    x0: 113.0,
+                    x1: 552.0,
+                    y: top - i as f64 * 0.12,
+                    thickness: 0.12,
+                })
+                .collect()
+        };
+
+        let masthead = super::separators(&stack(16, 822.12), &lines, 440.0);
+        assert_eq!(masthead.len(), 1);
+        assert!(
+            (masthead[0].2 - 1.92).abs() < 0.01,
+            "sixteen strokes span 1.92pt: {masthead:?}"
+        );
+
+        let ordinary = super::separators(&stack(4, 784.20), &lines, 440.0);
+        assert!(
+            (ordinary[0].2 - 0.48).abs() < 0.01,
+            "four strokes span 0.48pt: {ordinary:?}"
+        );
+        assert!(
+            masthead[0].2 / ordinary[0].2 > 3.5,
+            "and the masthead is four times the weight of an ordinary rule"
+        );
     }
 
     /// Text at a right angle to the page is not part of the sentence.
@@ -5240,8 +5388,14 @@ mod tests {
     #[test]
     fn text_turned_on_its_side_is_not_in_the_sentence() {
         assert!(!super::turned([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]), "upright");
-        assert!(super::turned([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]), "up the page");
-        assert!(super::turned([0.0, -1.0, 1.0, 0.0, 0.0, 0.0]), "down the page");
+        assert!(
+            super::turned([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]),
+            "up the page"
+        );
+        assert!(
+            super::turned([0.0, -1.0, 1.0, 0.0, 0.0, 0.0]),
+            "down the page"
+        );
         // The songbook's faked italic: sheared, not turned, and still readable.
         assert!(!super::turned([50.0, 0.0, 16.99, 50.0, 0.0, 0.0]));
         assert!(super::slanted([50.0, 0.0, 16.99, 50.0, 0.0, 0.0]));
@@ -5271,7 +5425,11 @@ mod tests {
         let win = super::Base::WinAnsi;
         assert_eq!(win.char_for(0x8C), Some('Œ'));
         assert_eq!(win.char_for(0xBF), Some('¿'));
-        assert_eq!(win.char_for(0xE5), Some('å'), "WinAnsi has its own å elsewhere");
+        assert_eq!(
+            win.char_for(0xE5),
+            Some('å'),
+            "WinAnsi has its own å elsewhere"
+        );
     }
 
     /// A ligature is the letters it stands for, or nobody can search for them.
@@ -5283,7 +5441,9 @@ mod tests {
         assert_eq!(super::ligature_text('a'), "a");
         // The MacRoman code that made "flere" read as "ßere".
         assert_eq!(
-            super::Base::MacRoman.char_for(0xDF).map(super::ligature_text),
+            super::Base::MacRoman
+                .char_for(0xDF)
+                .map(super::ligature_text),
             Some("fl".to_string())
         );
     }
@@ -5305,7 +5465,11 @@ mod tests {
         assert_eq!(map.get(&200), Some(&'å'));
         assert_eq!(map.get(&201), Some(&'ø'), "the code advances by one");
         assert_eq!(map.get(&65), Some(&'ﬂ'), "a number resets it");
-        assert_eq!(map.get(&66), Some(&'æ'), "and uniXXXX is read as its code point");
+        assert_eq!(
+            map.get(&66),
+            Some(&'æ'),
+            "and uniXXXX is read as its code point"
+        );
         assert_eq!(super::glyph_char("notaglyphname"), None);
     }
 
@@ -5353,7 +5517,10 @@ mod tests {
                             item.x, item.y, item.width, item.height
                         );
                     }
-                    if let super::What::Text { text, size, family, .. } = &item.what {
+                    if let super::What::Text {
+                        text, size, family, ..
+                    } = &item.what
+                    {
                         println!(
                             "  x={:7.1} y={:7.1} w={:6.1} size={:4.1} {family:?} {text:?}",
                             item.x, item.y, item.width, size
@@ -5388,7 +5555,13 @@ mod tests {
                             )
                         })
                         .collect();
-                    println!("y={:.0} size={:.1} cells={} {}", line.y, line.size, line.cells.len(), cells.join(" "));
+                    println!(
+                        "y={:.0} size={:.1} cells={} {}",
+                        line.y,
+                        line.size,
+                        line.cells.len(),
+                        cells.join(" ")
+                    );
                 }
                 return;
             }
@@ -5396,21 +5569,42 @@ mod tests {
         }
         let out = super::extract(&bytes).expect("extracts");
         let text = |spans: &[super::Span]| spans.iter().map(|s| s.text.clone()).collect::<String>();
-        println!("PAGES {} (without text: {})", out.pages, out.pages_without_text);
-        let first: usize = std::env::var("FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let count: usize = std::env::var("COUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+        println!(
+            "PAGES {} (without text: {})",
+            out.pages, out.pages_without_text
+        );
+        let first: usize = std::env::var("FROM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let count: usize = std::env::var("COUNT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(40);
         for (i, b) in out.blocks.iter().enumerate().skip(first).take(count) {
             match b {
-                super::Block::Heading { level, spans, .. } => println!("{i:>4} H{level}  {}", text(spans)),
-                super::Block::Paragraph { spans, indent, .. } => println!("{i:>4} P{indent}   {}", text(spans)),
-                super::Block::ListItem { spans, indent, .. } => println!("{i:>4} LI{indent}  {}", text(spans)),
-                super::Block::IndexEntry { spans, page, .. } => println!("{i:>4} TOC  {} .... {page}", text(spans)),
+                super::Block::Heading { level, spans, .. } => {
+                    println!("{i:>4} H{level}  {}", text(spans))
+                }
+                super::Block::Paragraph { spans, indent, .. } => {
+                    println!("{i:>4} P{indent}   {}", text(spans))
+                }
+                super::Block::ListItem { spans, indent, .. } => {
+                    println!("{i:>4} LI{indent}  {}", text(spans))
+                }
+                super::Block::IndexEntry { spans, page, .. } => {
+                    println!("{i:>4} TOC  {} .... {page}", text(spans))
+                }
                 super::Block::Image(_) => println!("{i:>4} IMG"),
                 super::Block::Rule { width, thickness } => {
                     println!("{i:>4} ---- {:.0}% {thickness:.2}pt", width * 100.0)
                 }
                 super::Block::Table { rows } => {
-                    println!("{i:>4} TABLE {}x{}", rows.len(), rows.first().map_or(0, Vec::len));
+                    println!(
+                        "{i:>4} TABLE {}x{}",
+                        rows.len(),
+                        rows.first().map_or(0, Vec::len)
+                    );
                     for row in rows {
                         let cells: Vec<String> = row
                             .iter()
@@ -5419,7 +5613,10 @@ mod tests {
                         println!("        | {}", cells.join(" | "));
                     }
                 }
-                other => println!("{i:>4} {}", format!("{other:?}").chars().take(60).collect::<String>()),
+                other => println!(
+                    "{i:>4} {}",
+                    format!("{other:?}").chars().take(60).collect::<String>()
+                ),
             }
         }
     }
@@ -6102,13 +6299,31 @@ mod tests {
         // bar, at the weight each was drawn: taking the path as a whole makes a
         // box the height of the table and throws all of them away.
         let many = vec![
-            Shape::Box { x: 55.0, y: 700.0, w: 480.0, h: 1.2 },
-            Shape::Box { x: 55.0, y: 600.0, w: 480.0, h: 2.4 },
-            Shape::Box { x: 55.0, y: 500.0, w: 480.0, h: 1.2 },
+            Shape::Box {
+                x: 55.0,
+                y: 700.0,
+                w: 480.0,
+                h: 1.2,
+            },
+            Shape::Box {
+                x: 55.0,
+                y: 600.0,
+                w: 480.0,
+                h: 2.4,
+            },
+            Shape::Box {
+                x: 55.0,
+                y: 500.0,
+                w: 480.0,
+                h: 1.2,
+            },
         ];
         let bars = filled_rule(&many, IDENTITY);
         assert_eq!(bars.len(), 3, "one rule per bar");
-        let weights: Vec<f64> = bars.iter().map(|r| (r.thickness * 10.0).round() / 10.0).collect();
+        let weights: Vec<f64> = bars
+            .iter()
+            .map(|r| (r.thickness * 10.0).round() / 10.0)
+            .collect();
         assert_eq!(weights, vec![1.2, 2.4, 1.2]);
     }
 
@@ -6215,11 +6430,19 @@ mod tests {
         // The file may leave a space before the leader, or none before the
         // number, and both are the same row.
         assert_eq!(
-            index_entry("Radikal Ungdoms holdning til rigsfællesskabet .........19", 0.0, false),
+            index_entry(
+                "Radikal Ungdoms holdning til rigsfællesskabet .........19",
+                0.0,
+                false
+            ),
             Some(("Radikal Ungdoms holdning til rigsfællesskabet", "19"))
         );
         assert_eq!(
-            index_entry("Internationale................................9", 0.0, false),
+            index_entry(
+                "Internationale................................9",
+                0.0,
+                false
+            ),
             Some(("Internationale", "9"))
         );
     }
@@ -6234,7 +6457,11 @@ mod tests {
             "one ellipsis is not a leader"
         );
         assert_eq!(index_entry("1. maj 2025", 0.0, false), None);
-        assert_eq!(index_entry("Kampsange....", 0.0, false), None, "no page, no row");
+        assert_eq!(
+            index_entry("Kampsange....", 0.0, false),
+            None,
+            "no page, no row"
+        );
         assert_eq!(index_entry("....7", 0.0, false), None, "no title, no row");
     }
 

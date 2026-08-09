@@ -30,6 +30,10 @@ use wasm_bindgen::JsCast;
 /// The parser tags these with `type`, and the two that matter are paragraphs and
 /// tables. Anything else is skipped rather than guessed at — a block this does
 /// not understand is better absent than rendered wrong.
+// A paragraph is much the larger of the two, and boxing it would put a pointer
+// chase in front of every run of every line for a document that is deserialised
+// once and read from thereafter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type")]
 pub enum Block {
@@ -948,7 +952,10 @@ pub fn measured_style(p: &Paragraph) -> String {
         .filter(|f| !f.is_empty())
     {
         css.push_str(&format!("--p-face:{};", measuring_face(Some(named))));
-        css.push_str(&format!("--p-single:{};", Measured::of(Some(named)).single()));
+        css.push_str(&format!(
+            "--p-single:{};",
+            Measured::of(Some(named)).single()
+        ));
     }
     let line = match p.line_spacing.as_ref() {
         Some(ls) if ls.rule == "auto" && ls.value > 0.0 => ls.value,
@@ -1077,6 +1084,9 @@ pub fn DocxBody(
                         // it. Each run is its own list with the mark between,
                         // which is what HTML has room for: a page break is not
                         // a list item.
+                        // Where the run begins, if a page began with it, and the
+                        // items in it.
+                        #[allow(clippy::type_complexity)]
                         let mut runs: Vec<(Option<(usize, f64)>, Vec<Paragraph>)> =
                             vec![(None, Vec::new())];
                         for (j, item) in items.into_iter().enumerate() {
@@ -1144,6 +1154,8 @@ fn PageMark(begins: usize, #[props(default)] spare: f64) -> Element {
 }
 
 /// A run of blocks that render together.
+// One of these per block of the document, held only long enough to render it.
+#[allow(clippy::large_enum_variant)]
 enum Group {
     Single(Block),
     List {
@@ -1353,8 +1365,12 @@ fn DocxBlock(
             div { class: "docx-table-wrap",
                 table { class: "docx-table", style: "{table_width}",
                     for (r , row) in t.rows.into_iter().enumerate() {
+                        // One key on one node: a page mark and the row it
+                        // precedes are the same iteration, and a key is only
+                        // honoured on the first node of a block anyway.
+                        Fragment { key: "r{r}",
                         if let Some((_, begins, spare)) = rows_marked.iter().find(|(at, _, _)| *at == r) {
-                            tr { key: "pr{r}", class: "docx-page-row",
+                            tr { class: "docx-page-row",
                                 td { colspan: "{across}",
                                     div {
                                         class: "pdf-page-break",
@@ -1368,7 +1384,6 @@ fn DocxBlock(
                             }
                         }
                         tr {
-                            key: "r{r}",
                             "data-cant-split": "{row.cant_split}",
                             // The height the document asks for, for the copy
                             // that measures. Not the visible table: on a phone
@@ -1389,6 +1404,7 @@ fn DocxBlock(
                                     }
                                 }
                             }
+                        }
                         }
                     }
                 }
@@ -2487,7 +2503,11 @@ mod tests {
         assert_eq!(splits_between_lines(&[], 0.0, 500.0), None);
         // And it splits the same way part-way down a document.
         assert_eq!(
-            splits_between_lines(&(0..6).map(|i| 500.0 + i as f64 * 20.0).collect::<Vec<_>>(), 500.0, 95.0),
+            splits_between_lines(
+                &(0..6).map(|i| 500.0 + i as f64 * 20.0).collect::<Vec<_>>(),
+                500.0,
+                95.0
+            ),
             Some(580.0)
         );
     }
@@ -2499,7 +2519,10 @@ mod tests {
         // five list items too many on a page.
         assert_eq!(Measured::of(Some("Cambria")).family(), "Caladea");
         assert_eq!(Measured::of(Some("cambria")).family(), "Caladea");
-        assert_eq!(Measured::of(Some("Times New Roman")).family(), "Liberation Serif");
+        assert_eq!(
+            Measured::of(Some("Times New Roman")).family(),
+            "Liberation Serif"
+        );
         assert_eq!(Measured::of(Some("Georgia")).family(), "Liberation Serif");
         assert_eq!(Measured::of(Some("Calibri")).family(), "Carlito");
         // Arial is not Calibri: it is about a tenth wider, which is a line
@@ -2515,7 +2538,10 @@ mod tests {
         assert_eq!(Measured::of(None).family(), "Carlito");
         // Each reads its line box from its own property, since what SINGLE
         // spacing means belongs to the face.
-        assert_eq!(Measured::of(Some("Cambria")).single(), "var(--single-cambria)");
+        assert_eq!(
+            Measured::of(Some("Cambria")).single(),
+            "var(--single-cambria)"
+        );
         assert_ne!(
             Measured::of(Some("Cambria")).single(),
             Measured::of(Some("Times")).single()
@@ -3023,6 +3049,10 @@ pub fn PagedDocx(
 /// -- so the page count is the number of places a reader can actually be TAKEN
 /// to, plus the first. Counting the swallowed pages instead left a control that
 /// named a page and then would not go there.
+// Returns where each page begins, how many there are, and the two measurements
+// the caller needs to place the marks: a tuple because every part of it is read
+// once, at the one call site.
+#[allow(clippy::type_complexity)]
 fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize, f64)>, usize, f64, f64)> {
     if height <= 0.0 {
         return None;
@@ -3192,7 +3222,9 @@ fn measure_pages(height: f64) -> Option<(Vec<(usize, usize, usize, f64)>, usize,
                     None => floor,
                 },
             };
-            let already = marks.last().is_some_and(|m| (m.0, m.1) == (begin.group, begin.item));
+            let already = marks
+                .last()
+                .is_some_and(|m| (m.0, m.1) == (begin.group, begin.item));
             if !already {
                 marks.push((
                     begin.group,
@@ -3344,7 +3376,10 @@ fn set_single_spacing() {
     ] {
         // `var(--single-sans)` back to `--single-sans`: the property is named
         // once, where it is read.
-        let name = measured.single().trim_start_matches("var(").trim_end_matches(')');
+        let name = measured
+            .single()
+            .trim_start_matches("var(")
+            .trim_end_matches(')');
         let _ = style.set_property(name, &format!("{:.4}", single_spacing(measured.family())));
     }
 }

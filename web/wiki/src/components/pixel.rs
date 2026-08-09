@@ -379,8 +379,12 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         };
         let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&iso)).get_time();
         let now = js_sys::Date::now();
-        let deadline =
-            deadline_from_server(then, now, crate::session::server_clock_offset_ms(), cooldown);
+        let deadline = deadline_from_server(
+            then,
+            now,
+            crate::session::server_clock_offset_ms(),
+            cooldown,
+        );
         if deadline > now {
             ready_at.set(deadline);
         }
@@ -700,10 +704,9 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                         // loop.
                         None => match graphql::my_last_paint(token.as_deref(), &cv, &me).await {
                             Some(iso) => {
-                                let then = js_sys::Date::new(
-                                    &wasm_bindgen::JsValue::from_str(&iso),
-                                )
-                                .get_time();
+                                let then =
+                                    js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&iso))
+                                        .get_time();
                                 deadline_from_server(
                                     then,
                                     now,
@@ -1052,7 +1055,10 @@ mod tests {
     #[test]
     fn the_palette_is_well_formed() {
         for c in PALETTE {
-            assert!(c.len() == 7 && c.starts_with('#'), "{c} is not a hex colour");
+            assert!(
+                c.len() == 7 && c.starts_with('#'),
+                "{c} is not a hex colour"
+            );
             assert!(u32::from_str_radix(&c[1..], 16).is_ok(), "{c} is not hex");
         }
         let mut seen: Vec<&str> = PALETTE.to_vec();
@@ -1077,7 +1083,10 @@ mod tests {
         let now = 1_000_000.0;
         // The device is eleven minutes behind the database.
         let then = now + 660_000.0;
-        assert_eq!(seconds_left(deadline_from_server(then, now, 0.0, 10), now), 10);
+        assert_eq!(
+            seconds_left(deadline_from_server(then, now, 0.0, 10), now),
+            10
+        );
         // A device that agrees with the database is unaffected.
         assert_eq!(
             seconds_left(deadline_from_server(now - 4_000.0, now, 0.0, 10), now),
@@ -1149,7 +1158,11 @@ mod tests {
         cells.insert((3, 4), 13u8); // the blue of the flag under the finger
         cells.insert((3, 4), 8u8); // the optimistic placement
         undo_placement(&mut cells, (3, 4), Some(13));
-        assert_eq!(cells.get(&(3, 4)), Some(&13), "the cell is blue again, not gone");
+        assert_eq!(
+            cells.get(&(3, 4)),
+            Some(&13),
+            "the cell is blue again, not gone"
+        );
 
         // A cell nobody had painted goes, because white IS its state.
         let mut empty = HashMap::new();
@@ -1163,7 +1176,11 @@ mod tests {
     fn the_board_stays_a_sane_size() {
         assert_eq!(board_px(1), 240, "a tiny canvas is still worth looking at");
         assert_eq!(board_px(32), 512);
-        assert_eq!(board_px(DEFAULT_SIDE), 1024, "the default fills its ceiling");
+        assert_eq!(
+            board_px(DEFAULT_SIDE),
+            1024,
+            "the default fills its ceiling"
+        );
         assert_eq!(board_px(1000), 1024, "and never wider than a screen");
     }
 
@@ -1567,15 +1584,8 @@ fn AddCanvasButton(context_id: String) -> Element {
         let token = session.read().access_token.clone();
         busy.set(true);
         spawn(async move {
-            match graphql::create_canvas(
-                token.as_deref(),
-                &ctx,
-                &title,
-                w,
-                h,
-                DEFAULT_COOLDOWN,
-            )
-            .await
+            match graphql::create_canvas(token.as_deref(), &ctx, &title, w, h, DEFAULT_COOLDOWN)
+                .await
             {
                 Ok(_) => {
                     crate::session::bump_data_version();

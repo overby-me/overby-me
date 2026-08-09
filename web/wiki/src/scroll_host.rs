@@ -83,9 +83,6 @@ pub fn on_scroll(cb: &wasm_bindgen::closure::Closure<dyn FnMut()>) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    let _ = doc.add_event_listener_with_callback_and_bool(
-        "scroll",
-        cb.as_ref().unchecked_ref(),
-        true,
-    );
+    let _ =
+        doc.add_event_listener_with_callback_and_bool("scroll", cb.as_ref().unchecked_ref(), true);
 }

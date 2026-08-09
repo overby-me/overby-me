@@ -222,8 +222,8 @@ pub fn Layout() -> Element {
             // reports a zero the reader never chose. Reading it filed that zero
             // over the position of the page being left, which is what made
             // coming back to a context land at the top.
-            let leaving_at = crate::nav_memory::last_scroll(url)
-                .unwrap_or_else(crate::scroll_host::scroll_top);
+            let leaving_at =
+                crate::nav_memory::last_scroll(url).unwrap_or_else(crate::scroll_host::scroll_top);
             crate::nav_memory::stash_scroll(url, leaving_at);
         }
 

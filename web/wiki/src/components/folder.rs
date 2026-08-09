@@ -83,10 +83,7 @@ pub fn FolderApp(
     // Standing in the context's own root rather than in a folder inside it: a
     // context node is its own context. Only there does "the whole place" name
     // something the person is looking at.
-    let is_context_root = node
-        .context_id
-        .as_ref()
-        .is_some_and(|c| c.0 == node.id.0);
+    let is_context_root = node.context_id.as_ref().is_some_and(|c| c.0 == node.id.0);
     let place_id = node
         .context_id
         .clone()

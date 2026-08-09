@@ -246,9 +246,7 @@ fn display_mode_standalone() -> Option<bool> {
         .ok()?
         .dyn_into::<js_sys::Function>()
         .ok()?;
-    let list = ask
-        .call1(&w, &"(display-mode: standalone)".into())
-        .ok()?;
+    let list = ask.call1(&w, &"(display-mode: standalone)".into()).ok()?;
     Some(
         js_sys::Reflect::get(&list, &"matches".into())
             .ok()
@@ -314,15 +312,16 @@ fn ask_the_worker_which_build() {
         return;
     };
 
-    let heard = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
-        let build = js_sys::Reflect::get(&ev.data(), &"build".into())
-            .ok()
-            .and_then(|v| v.as_string())
-            .filter(|b| !b.is_empty() && b != "__WIKI_BUILD__");
-        if build.is_some() {
-            SW_BUILD.with(|b| *b.borrow_mut() = build);
-        }
-    });
+    let heard =
+        Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+            let build = js_sys::Reflect::get(&ev.data(), &"build".into())
+                .ok()
+                .and_then(|v| v.as_string())
+                .filter(|b| !b.is_empty() && b != "__WIKI_BUILD__");
+            if build.is_some() {
+                SW_BUILD.with(|b| *b.borrow_mut() = build);
+            }
+        });
     let _ = target.add_event_listener_with_callback("message", heard.as_ref().unchecked_ref());
     heard.forget();
     // And START the delivery. A container queues its messages until either an

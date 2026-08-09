@@ -144,9 +144,13 @@ fn cell_is_number(cell: &[Span]) -> bool {
     }
     let digits = text.chars().filter(char::is_ascii_digit).count();
     digits > 0
-        && text
-            .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '(' | ')' | '%' | ' ' | '\u{2013}' | '\u{2212}'))
+        && text.chars().all(|c| {
+            c.is_ascii_digit()
+                || matches!(
+                    c,
+                    '.' | ',' | '-' | '(' | ')' | '%' | ' ' | '\u{2013}' | '\u{2212}'
+                )
+        })
 }
 
 fn unlinked(spans: &[Span]) -> Vec<Span> {
@@ -572,13 +576,28 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                         // so a hairline and a bar came out identical -- which is
                         // what a reader saw. Against the document's ordinary
                         // rule, a bar is a multiple and shows as one.
-                        // Not rounded. A browser draws a fractional border as a
-                        // lighter or darker line rather than snapping it, so a
-                        // document whose weights differ by a fifth still reads
-                        // as two weights; rounding to whole pixels put every
-                        // rule in this report back on the same 1px line.
+                        // In STEPS of a whole pixel, decided by where this rule
+                        // stands among the document's own.
+                        //
+                        // Everything else was tried and none of it reached the
+                        // reader. Points do not survive a reflow: a page's rules
+                        // are mostly under a point, so converting them put every
+                        // one under the one-pixel floor. Fractions do not
+                        // survive the browser: a 0.85px border is snapped to the
+                        // same device pixel as a 1px one. What is left is the
+                        // only thing a reader can use anyway -- this line is
+                        // heavier than the ones around it -- so a rule at or
+                        // under the document's middle weight is a hairline, one
+                        // above it is twice that, and one at double is three
+                        // times.
+                        //
+                        // In proportion: an ordinary rule is a hairline, and one
+                        // the document drew four times as heavy is four times as
+                        // heavy here. Capped, because a reflow has no scale of
+                        // its own and a rule is a separator before it is a
+                        // measurement.
                         let heavy = match ordinary_rule > 0.0 {
-                            true => (thickness / ordinary_rule).clamp(0.7, 4.0),
+                            true => (thickness / ordinary_rule).clamp(1.0, 6.0),
                             false => 1.0,
                         };
                         rsx! {
