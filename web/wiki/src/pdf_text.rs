@@ -2371,10 +2371,14 @@ fn rows_in_grid(lines: &[Line], grid: &[(f64, f64)]) -> Vec<Vec<Vec<Span>>> {
             (Some(cell), Some(was)) => cell.left > was + line.size * 0.5,
             _ => false,
         };
+        let inside = columns.iter().all(|c| filled.contains(c));
+        // A header wrapped over its own column: one cell, in the same column,
+        // under a row that was only that cell too. "Ikke / revideret / budget"
+        // stands over the budget column three lines deep, and it is one heading.
+        let stacked = columns.len() == 1 && columns[0] > 0 && filled.len() == 1;
         let carries_on = !rows.is_empty()
-            && columns.iter().all(|c| filled.contains(c))
-            && columns.len() < filled.len()
-            && (columns[0] > 0 || hangs());
+            && inside
+            && (stacked || (columns.len() < filled.len() && (columns[0] > 0 || hangs())));
         if carries_on {
             if let Some(row) = rows.last_mut() {
                 for (cell, at) in line.cells.iter().zip(columns.iter()) {
