@@ -27,6 +27,7 @@ pub mod munch;
 pub mod pedal;
 pub mod rorschach;
 pub mod sierpinski;
+pub mod thornbird;
 pub mod vines;
 
 /// Every 2D saver ported so far.
@@ -50,6 +51,7 @@ pub static ALL: &[&Saver] = &[
     &pedal::SAVER,
     &rorschach::SAVER,
     &sierpinski::SAVER,
+    &thornbird::SAVER,
     &vines::SAVER,
 ];
 

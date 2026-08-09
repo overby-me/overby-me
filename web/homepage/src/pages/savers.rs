@@ -161,6 +161,12 @@ saver!(
     xscreensaver::hacks2d::sierpinski::start
 );
 saver!(
+    "thornbird",
+    thornbird_body,
+    thornbird_start,
+    xscreensaver::hacks2d::thornbird::start
+);
+saver!(
     "vines",
     vines_body,
     vines_start,
@@ -239,6 +245,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sierpinski",
         label: "Sierpinski",
         start: sierpinski_start,
+    },
+    Entry {
+        slug: "thornbird",
+        label: "Thornbird",
+        start: thornbird_start,
     },
     Entry {
         slug: "vines",
