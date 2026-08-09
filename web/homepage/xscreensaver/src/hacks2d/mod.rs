@@ -20,12 +20,14 @@ pub mod decayscreen;
 pub mod deco;
 pub mod discrete;
 pub mod fadeplot;
+pub mod flame;
 pub mod forest;
 pub mod grav;
 pub mod greynetic;
 pub mod halo;
 pub mod helix;
 pub mod hexadrop;
+pub mod imsmap;
 pub mod kaleidescope;
 pub mod laser;
 pub mod lcdscrub;
@@ -47,6 +49,7 @@ pub mod thornbird;
 pub mod triangle;
 pub mod vines;
 pub mod wander;
+pub mod worm;
 pub mod xspirograph;
 
 /// Every 2D saver ported so far.
@@ -64,11 +67,13 @@ pub static ALL: &[&Saver] = &[
     &discrete::SAVER,
     &greynetic::SAVER,
     &fadeplot::SAVER,
+    &flame::SAVER,
     &forest::SAVER,
     &grav::SAVER,
     &halo::SAVER,
     &helix::SAVER,
     &hexadrop::SAVER,
+    &imsmap::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
     &lcdscrub::SAVER,
@@ -90,6 +95,7 @@ pub static ALL: &[&Saver] = &[
     &triangle::SAVER,
     &vines::SAVER,
     &wander::SAVER,
+    &worm::SAVER,
     &xspirograph::SAVER,
 ];
 

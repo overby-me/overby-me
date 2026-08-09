@@ -124,6 +124,12 @@ saver!(
     xscreensaver::hacks2d::fadeplot::start
 );
 saver!(
+    "flame",
+    flame_body,
+    flame_start,
+    xscreensaver::hacks2d::flame::start
+);
+saver!(
     "forest",
     forest_body,
     forest_start,
@@ -152,6 +158,12 @@ saver!(
     hexadrop_body,
     hexadrop_start,
     xscreensaver::hacks2d::hexadrop::start
+);
+saver!(
+    "imsmap",
+    imsmap_body,
+    imsmap_start,
+    xscreensaver::hacks2d::imsmap::start
 );
 saver!(
     "kaleidescope",
@@ -281,6 +293,12 @@ saver!(
     xscreensaver::hacks2d::wander::start
 );
 saver!(
+    "worm",
+    worm_body,
+    worm_start,
+    xscreensaver::hacks2d::worm::start
+);
+saver!(
     "xspirograph",
     xspirograph_body,
     xspirograph_start,
@@ -331,6 +349,11 @@ pub static SAVERS: &[Entry] = &[
         start: fadeplot_start,
     },
     Entry {
+        slug: "flame",
+        label: "Flame",
+        start: flame_start,
+    },
+    Entry {
         slug: "forest",
         label: "Forest",
         start: forest_start,
@@ -354,6 +377,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hexadrop",
         label: "Hexadrop",
         start: hexadrop_start,
+    },
+    Entry {
+        slug: "imsmap",
+        label: "IMS Map",
+        start: imsmap_start,
     },
     Entry {
         slug: "kaleidescope",
@@ -459,6 +487,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "wander",
         label: "Wander",
         start: wander_start,
+    },
+    Entry {
+        slug: "worm",
+        label: "Worm",
+        start: worm_start,
     },
     Entry {
         slug: "xspirograph",
