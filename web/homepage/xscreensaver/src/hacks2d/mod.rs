@@ -15,9 +15,11 @@ use crate::runtime::Saver;
 
 pub mod coral;
 pub mod decayscreen;
+pub mod deco;
 pub mod greynetic;
 pub mod moire;
 pub mod munch;
+pub mod pedal;
 pub mod rorschach;
 pub mod sierpinski;
 pub mod vines;
@@ -30,10 +32,12 @@ pub mod vines;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
     &coral::SAVER,
+    &deco::SAVER,
     &decayscreen::SAVER,
     &greynetic::SAVER,
     &moire::SAVER,
     &munch::SAVER,
+    &pedal::SAVER,
     &rorschach::SAVER,
     &sierpinski::SAVER,
     &vines::SAVER,

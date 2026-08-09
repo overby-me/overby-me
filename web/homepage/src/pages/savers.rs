@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::coral::start
 );
 saver!(
+    "deco",
+    deco_body,
+    deco_start,
+    xscreensaver::hacks2d::deco::start
+);
+saver!(
     "decayscreen",
     decayscreen_body,
     decayscreen_start,
@@ -104,6 +110,12 @@ saver!(
     munch_body,
     munch_start,
     xscreensaver::hacks2d::munch::start
+);
+saver!(
+    "pedal",
+    pedal_body,
+    pedal_start,
+    xscreensaver::hacks2d::pedal::start
 );
 saver!(
     "rorschach",
@@ -134,6 +146,11 @@ pub static SAVERS: &[Entry] = &[
         start: coral_start,
     },
     Entry {
+        slug: "deco",
+        label: "Deco",
+        start: deco_start,
+    },
+    Entry {
         slug: "decayscreen",
         label: "Decay Screen",
         start: decayscreen_start,
@@ -152,6 +169,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "munch",
         label: "Munch",
         start: munch_start,
+    },
+    Entry {
+        slug: "pedal",
+        label: "Pedal",
+        start: pedal_start,
     },
     Entry {
         slug: "rorschach",
