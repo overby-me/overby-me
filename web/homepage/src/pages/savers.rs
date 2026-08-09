@@ -130,6 +130,12 @@ saver!(
     xscreensaver::hacks2d::decayscreen::start
 );
 saver!(
+    "deluxe",
+    deluxe_body,
+    deluxe_start,
+    xscreensaver::hacks2d::deluxe::start
+);
+saver!(
     "discrete",
     discrete_body,
     discrete_start,
@@ -200,6 +206,12 @@ saver!(
     hexadrop_body,
     hexadrop_start,
     xscreensaver::hacks2d::hexadrop::start
+);
+saver!(
+    "hypercube",
+    hypercube_body,
+    hypercube_start,
+    xscreensaver::hacks2d::hypercube::start
 );
 saver!(
     "imsmap",
@@ -408,6 +420,11 @@ pub static SAVERS: &[Entry] = &[
         start: decayscreen_start,
     },
     Entry {
+        slug: "deluxe",
+        label: "Deluxe",
+        start: deluxe_start,
+    },
+    Entry {
         slug: "discrete",
         label: "Discrete",
         start: discrete_start,
@@ -466,6 +483,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hexadrop",
         label: "Hexadrop",
         start: hexadrop_start,
+    },
+    Entry {
+        slug: "hypercube",
+        label: "Hypercube",
+        start: hypercube_start,
     },
     Entry {
         slug: "imsmap",

@@ -22,6 +22,7 @@ pub mod cwaves;
 pub mod cynosure;
 pub mod decayscreen;
 pub mod deco;
+pub mod deluxe;
 pub mod discrete;
 pub mod fadeplot;
 pub mod fiberlamp;
@@ -34,6 +35,7 @@ pub mod halftone;
 pub mod halo;
 pub mod helix;
 pub mod hexadrop;
+pub mod hypercube;
 pub mod imsmap;
 pub mod julia;
 pub mod kaleidescope;
@@ -77,6 +79,7 @@ pub static ALL: &[&Saver] = &[
     &deco::SAVER,
     &cynosure::SAVER,
     &decayscreen::SAVER,
+    &deluxe::SAVER,
     &discrete::SAVER,
     &galaxy::SAVER,
     &greynetic::SAVER,
@@ -89,6 +92,7 @@ pub static ALL: &[&Saver] = &[
     &halftone::SAVER,
     &helix::SAVER,
     &hexadrop::SAVER,
+    &hypercube::SAVER,
     &imsmap::SAVER,
     &julia::SAVER,
     &kaleidescope::SAVER,
