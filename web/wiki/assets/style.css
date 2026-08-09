@@ -8845,6 +8845,11 @@ a.list-item:hover {
 	border-collapse: collapse;
 	width: 100%;
 }
+/* Standing in the page's grid: the widths come from where the columns were, so
+   they must be kept rather than recomputed from what happens to be in them. */
+.pdf-table-grid {
+	table-layout: fixed;
+}
 .pdf-table td {
 	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3)
 		var(--md-sys-spacing-1) 0;

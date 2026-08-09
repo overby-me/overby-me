@@ -545,9 +545,24 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                     // name over its role, a figure under its year. Scrolls
                     // inside itself rather than pushing the reading column
                     // wider, which is the one thing a phone cannot give it.
-                    Some(Block::Table { rows }) => rsx! {
+                    Some(Block::Table { rows, widths }) => rsx! {
                         div { key: "{i}", class: "pdf-table-scroll",
-                            table { class: "pdf-table",
+                            table {
+                                // The page's own column widths, so the tables a
+                                // statement is cut into by its rules all stand
+                                // in the same places: a figure under 2024 ends
+                                // where every other figure under 2024 ends,
+                                // which is what a column is for. Without them
+                                // each piece sized itself to its own widest
+                                // number and no two agreed.
+                                class: if widths.is_empty() { "pdf-table" } else { "pdf-table pdf-table-grid" },
+                                if !widths.is_empty() {
+                                    colgroup {
+                                        for (c , w) in widths.iter().enumerate() {
+                                            col { key: "{c}", style: "width:{w * 100.0:.2}%;" }
+                                        }
+                                    }
+                                }
                                 tbody {
                                     for (r , row) in rows.iter().enumerate() {
                                         tr { key: "{r}",

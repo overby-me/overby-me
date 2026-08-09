@@ -73,7 +73,13 @@ pub enum Block {
     /// particular kind: the board page reads as three names, then three roles,
     /// and a statement reads as a label followed by every year's figure in a
     /// row, with nothing to say which is which.
-    Table { rows: Vec<Vec<Vec<Span>>> },
+    Table {
+        rows: Vec<Vec<Vec<Span>>>,
+        /// How wide each column stood on the page, as a share of the grid. Empty
+        /// when the page had no grid to measure, and then the columns are as
+        /// wide as what is in them.
+        widths: Vec<f64>,
+    },
     /// A flat line the page drew across itself: the rule over a total, the one
     /// under a table's headings, the one that separates two sections.
     ///
@@ -138,7 +144,7 @@ impl Block {
 
     /// The block's words, without their colours.
     pub fn text(&self) -> String {
-        if let Block::Table { rows } = self {
+        if let Block::Table { rows, .. } = self {
             // Cells apart, rows apart: the words of a table are still words, and
             // a reader searching the page for one of them must find it.
             return rows
@@ -1825,8 +1831,39 @@ fn align_to_column_stops(lines: &mut [Line], per_line: &[Vec<Run>]) {
         if line.cells.is_empty() {
             continue;
         }
-        line.cells = cells_at_stops(runs, &stops, line.size);
+        let cut = cells_at_stops(runs, &stops, line.size);
+        // The page's columns may CUT a line its own gaps could not, which is
+        // what this is for. Two things they must not do.
+        //
+        // They must not JOIN two cells the page itself set apart: the income
+        // statement sets its totals in bold, so the label runs wide and its
+        // figure starts at 357 where the ordinary rows start theirs at 374, and
+        // every total row was being folded back into one cell -- "Andre eksterne
+        // omkostninger i alt-3.351.370", not even a space in it.
+        //
+        // And they must not cut where there is nothing to cut. A justified
+        // paragraph's lines all break near the same places, so its own line
+        // breaks arrive as recurring "columns", and the declaration on page 4
+        // came apart into three cells three points from each other: "Vi har dags
+        // dato aflagt årsrapporten | for regnskabsåret 01.01.24 | - 31.12.24 for
+        // Radikal". A column is a gap a reader can see.
+        if cut.len() > line.cells.len() && separated(&cut, line.size) {
+            line.cells = cut;
+        }
     }
+}
+
+/// Whether every cell stands clear of the one before it by more than justified
+/// text ever spaces its words.
+///
+/// A fifth over the em. The widest gap this had to let through is the fourteen
+/// points between "Anton Munkholm Petersen" and the name beside it, which nearly
+/// fills its column; the widest it has to refuse is the eight points a justified
+/// line leaves between two words when the line is stretched to the margin.
+fn separated(cells: &[Cell], size: f64) -> bool {
+    cells
+        .windows(2)
+        .all(|w| w[1].left - w[0].right > size * 1.2)
 }
 
 /// Cut a line's runs at the page's column stops.
@@ -2093,6 +2130,276 @@ fn page_layout(doc: &Document, page_id: lopdf::ObjectId, drawn: &Drawn) -> PageL
 ///
 /// Rows must also be near each other: the same columns half a page apart are
 /// two different things that happen to share a margin.
+/// The columns a page's rows stand in, as the x-range of each.
+///
+/// A statement is not a table followed by another table. It is one grid with
+/// rules drawn across it, and the rules were breaking it into pieces that each
+/// laid themselves out: on the income statement the figures under "2024" ended
+/// in a different place in every group, because each group was sized to its own
+/// widest number. A reader reads a column down its last digit; that is the whole
+/// reason the page sets it as a column.
+///
+/// So the columns are the PAGE's, taken from the lines that fill them. The rows
+/// that fill the most cells are the ones that say where the columns are -- a row
+/// with fewer has nothing to say about the ones it left empty, and a label wide
+/// enough to cross two of them would merge them if it were counted.
+fn page_grid(lines: &[Line]) -> Vec<(f64, f64)> {
+    let mut most = 0usize;
+    for line in lines {
+        most = most.max(line.cells.len());
+    }
+    if most < 2 {
+        return Vec::new();
+    }
+    let full: Vec<&Line> = lines.iter().filter(|l| l.cells.len() == most).collect();
+    // One row is a sentence with gaps in it; two agreeing is a grid.
+    if full.len() < 2 {
+        return Vec::new();
+    }
+    let mut cols: Vec<(f64, f64)> = Vec::new();
+    for i in 0..most {
+        let mut left = f64::INFINITY;
+        let mut right = f64::NEG_INFINITY;
+        for line in &full {
+            if let Some(cell) = line.cells.get(i) {
+                left = left.min(cell.left);
+                right = right.max(cell.right);
+            }
+        }
+        if !left.is_finite() || !right.is_finite() || right <= left {
+            return Vec::new();
+        }
+        cols.push((left, right));
+    }
+    // Columns that run into each other are not columns: something crossed them.
+    if cols.windows(2).any(|w| w[1].0 < w[0].1) {
+        return Vec::new();
+    }
+    cols
+}
+
+/// Which column a cell stands in, if it stands in one at all.
+///
+/// The last column it reaches, and it has to stop before the next one begins.
+/// Not "inside the column's own extent", which is the reading that failed: a
+/// column of figures is set flush right, so its left edge is wherever that row's
+/// digits happened to start, and the bold label of a total is wider than every
+/// other label in the column it shares. What is stable is where the NEXT column
+/// begins, and a cell that runs past that is not in a column at all -- it is a
+/// sentence lying across the grid, which is what a paragraph on a page with a
+/// table looks like.
+fn column_of(grid: &[(f64, f64)], cell: &Cell, size: f64) -> Option<usize> {
+    let slack = (size * 0.75).max(3.0);
+    let at = grid
+        .iter()
+        .rposition(|(l, _)| cell.left + slack >= *l)
+        .or(Some(0))?;
+    let next = grid.get(at + 1).map_or(f64::INFINITY, |(l, _)| *l);
+    (cell.right <= next + slack).then_some(at)
+}
+
+/// The columns a line's cells stand in, one per cell, or nothing if any of them
+/// is not in a column of its own.
+fn stands_in_grid(line: &Line, grid: &[(f64, f64)]) -> Option<Vec<usize>> {
+    if grid.len() < 2 || line.cells.is_empty() || line.rule.is_some() || line.picture.is_some() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(line.cells.len());
+    for cell in &line.cells {
+        let at = column_of(grid, cell, line.size)?;
+        if out.contains(&at) {
+            return None;
+        }
+        out.push(at);
+    }
+    Some(out)
+}
+
+/// Whether a line belongs to the grid's table rather than to the prose around
+/// it.
+///
+/// Two cells or more, standing in columns, is a row. One cell is the question.
+/// In a column other than the first it is a header wrapped over the column it
+/// labels -- "Ikke / revideret / budget" stands over the budget column on the
+/// income statement, three lines of one word each. In the FIRST column it is
+/// either the label of the group below it, which belongs to the table, or a
+/// short line of prose, which does not; what tells them apart is that a label
+/// stands alone between rows while prose comes in runs of its own.
+fn belongs_to_grid(lines: &[Line], at: usize, grid: &[(f64, f64)]) -> bool {
+    let Some(columns) = stands_in_grid(&lines[at], grid) else {
+        return false;
+    };
+    // A contents row stands in two columns as surely as any table row does, and
+    // it is not one: it is a title, a landing place and a page number, and it
+    // has a rendering of its own that a table would take away. The whole of a
+    // contents list would otherwise arrive as one one-row table per line.
+    let line = &lines[at];
+    if index_entry(&line.text, line.tail_gap, line.natural_cells == 2).is_some() {
+        return false;
+    }
+    if columns.len() > 1 {
+        return true;
+    }
+    if columns[0] > 0 {
+        return true;
+    }
+    let rows_beside = |other: Option<&Line>| {
+        other
+            .and_then(|l| stands_in_grid(l, grid))
+            .is_some_and(|c| c.len() > 1)
+    };
+    let before = at.checked_sub(1).and_then(|p| lines.get(p));
+    let after = lines.get(at + 1);
+    let same_page = |other: Option<&Line>| other.is_some_and(|l| l.page == lines[at].page);
+    (same_page(before) && rows_beside(before)) || (same_page(after) && rows_beside(after))
+}
+
+/// Runs of lines that stand in the page's grid.
+///
+/// A run needs one line with cells in two columns to be a table at all: a column
+/// of labels with nothing beside it is a list, and reading it as a one-column
+/// table would only take away the wrapping.
+fn grid_ranges(lines: &[Line], grid: &[(f64, f64)]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0usize;
+    while i < lines.len() {
+        if !belongs_to_grid(lines, i, grid) {
+            i += 1;
+            continue;
+        }
+        let mut end = i + 1;
+        while end < lines.len() {
+            let close = (lines[end - 1].y - lines[end].y).abs() < lines[i].size * 3.0;
+            if lines[end].page != lines[i].page || !close || !belongs_to_grid(lines, end, grid) {
+                break;
+            }
+            end += 1;
+        }
+        let a_row = lines[i..end]
+            .iter()
+            .any(|l| stands_in_grid(l, grid).is_some_and(|c| c.len() > 1));
+        match a_row {
+            true => {
+                out.push((i, end));
+                i = end;
+            }
+            false => i += 1,
+        }
+    }
+    out
+}
+
+/// Where a table starts, where it ends, and the columns it stands in. Empty
+/// columns mean the page had no grid and the table found its own.
+type FoundTable = (usize, usize, Vec<(f64, f64)>);
+
+/// Every table on a page, with the grid it stands in.
+///
+/// A page whose rows do not agree on any columns has no grid, and its tables are
+/// found the way they were before: a run of lines that stand in the same places
+/// as each other, whatever the rest of the page does.
+fn tables_on_each_page(lines: &[Line]) -> Vec<FoundTable> {
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    while at < lines.len() {
+        let page = lines[at].page;
+        let end = lines[at..]
+            .iter()
+            .position(|l| l.page != page)
+            .map_or(lines.len(), |n| at + n);
+        let here = &lines[at..end];
+        let grid = page_grid(here);
+        match grid.is_empty() {
+            true => out.extend(
+                table_ranges(here)
+                    .into_iter()
+                    .map(|(s, e)| (s + at, e + at, Vec::new())),
+            ),
+            false => out.extend(
+                grid_ranges(here, &grid)
+                    .into_iter()
+                    .map(|(s, e)| (s + at, e + at, grid.clone())),
+            ),
+        }
+        at = end;
+    }
+    out
+}
+
+/// How wide each column of the grid is, as a share of the whole.
+///
+/// Split at the midpoints between one column and the next, so a cell's own
+/// width does not decide the boundary: the figures in a column are as wide as
+/// their digits and the label beside them is as wide as its words.
+fn column_widths(grid: &[(f64, f64)]) -> Vec<f64> {
+    if grid.len() < 2 {
+        return Vec::new();
+    }
+    let mut edges = vec![grid[0].0];
+    for pair in grid.windows(2) {
+        edges.push((pair[0].1 + pair[1].0) / 2.0);
+    }
+    edges.push(grid[grid.len() - 1].1);
+    let total = edges[edges.len() - 1] - edges[0];
+    if total <= 0.0 {
+        return Vec::new();
+    }
+    edges.windows(2).map(|w| (w[1] - w[0]) / total).collect()
+}
+
+/// The rows of a table that stands in a grid: every row as wide as the grid,
+/// with each cell in the column it stood in and nothing where the page left a
+/// gap.
+fn rows_in_grid(lines: &[Line], grid: &[(f64, f64)]) -> Vec<Vec<Vec<Span>>> {
+    let mut rows: Vec<Vec<Vec<Span>>> = Vec::new();
+    let mut filled: Vec<usize> = Vec::new();
+    let mut lefts: Vec<Option<f64>> = vec![None; grid.len()];
+    for line in lines {
+        let Some(columns) = stands_in_grid(line, grid) else {
+            continue;
+        };
+        // A cell whose words did not fit on one line carries on under the same
+        // row rather than starting a new one. What says so is the shape of it:
+        // it fills fewer columns than the row above, and it either hangs in from
+        // where that cell began -- "Af- og nedskrivninger af materielle
+        // anlægsakti- / ver", the tail set one indent in -- or it stands in a
+        // column other than the first, where a row cannot begin because a row
+        // begins with what it is called. Without the second, a label that fills
+        // a whole line was swallowed by the row above it and the figures of the
+        // row it named were left with somebody else's name on them.
+        let hangs = || match (line.cells.first(), columns.first().and_then(|c| lefts[*c])) {
+            (Some(cell), Some(was)) => cell.left > was + line.size * 0.5,
+            _ => false,
+        };
+        let carries_on = !rows.is_empty()
+            && columns.iter().all(|c| filled.contains(c))
+            && columns.len() < filled.len()
+            && (columns[0] > 0 || hangs());
+        if carries_on {
+            if let Some(row) = rows.last_mut() {
+                for (cell, at) in line.cells.iter().zip(columns.iter()) {
+                    let into = &mut row[*at];
+                    if let Some(last) = into.last_mut() {
+                        last.text.push(' ');
+                    }
+                    into.extend(cell.spans.iter().cloned());
+                    *into = tidy(std::mem::take(into));
+                }
+            }
+            continue;
+        }
+        let mut row: Vec<Vec<Span>> = vec![Vec::new(); grid.len()];
+        lefts = vec![None; grid.len()];
+        for (cell, at) in line.cells.iter().zip(columns.iter()) {
+            row[*at] = cell.spans.clone();
+            lefts[*at] = Some(cell.left);
+        }
+        rows.push(row);
+        filled = columns;
+    }
+    rows
+}
+
 fn table_ranges(lines: &[Line]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -2729,7 +3036,97 @@ fn lines_from(mut runs: Vec<Run>) -> Vec<Line> {
         per_line.push(current);
     }
     align_to_column_stops(&mut lines, &per_line);
+    resplit_at_grid(&mut lines, &per_line);
     lines
+}
+
+/// A row whose label ran into its figure is still a row.
+///
+/// "Andre eksterne omkostninger i alt-3.351.370": the income statement sets its
+/// totals in bold, and the bold label is wide enough that no gap was left before
+/// the figure, so the two arrived as one cell -- without even a space between
+/// them -- and the row fell out of the table it belonged to. Every total on the
+/// page did the same, which is exactly the rows a reader compares.
+///
+/// The page's own columns say where the break is. Only lines that already stand
+/// in more than one cell are cut again at them: a paragraph is one cell however
+/// far it runs, and cutting a sentence at a column would make a row of it.
+fn resplit_at_grid(lines: &mut [Line], per_line: &[Vec<Run>]) {
+    let grid = page_grid(lines);
+    if grid.len() < 2 {
+        return;
+    }
+    for (at, line) in lines.iter_mut().enumerate() {
+        if line.cells.len() < 2 || stands_in_grid(line, &grid).is_some() {
+            continue;
+        }
+        let Some(runs) = per_line.get(at) else {
+            continue;
+        };
+        let cut = cells_at_columns(runs, &grid, line.size);
+        // Only when the answer is a row. A line that still crosses a column
+        // after this was never a row, and the words are better left as the page
+        // set them.
+        let cut_line = Line {
+            cells: cut,
+            ..line.clone()
+        };
+        if stands_in_grid(&cut_line, &grid).is_some() {
+            line.cells = cut_line.cells;
+        }
+    }
+}
+
+/// Cut a line's runs at the page's columns, by which one each word stands in.
+///
+/// Not by where a column STARTS, which is what the stop-based cut does and what
+/// a right-aligned column of figures makes meaningless: the bold total on the
+/// income statement is a longer number, so it begins three points left of every
+/// other figure in its column and a cut at the column's start swept it back into
+/// the label. What a word overlaps is not ambiguous. A word that overlaps no
+/// column at all -- a label wider than the column it sits in -- stays with the
+/// word before it, which is where a reader sees it.
+fn cells_at_columns(runs: &[Run], grid: &[(f64, f64)], size: f64) -> Vec<Cell> {
+    let mut sorted: Vec<&Run> = runs.iter().collect();
+    sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let overlap = |run: &Run, (l, r): &(f64, f64)| (run.end_x.min(*r) - run.x.max(*l)).max(0.0);
+    let mut groups: Vec<Vec<Run>> = Vec::new();
+    let mut current: Option<usize> = None;
+    for run in sorted {
+        let mine = grid
+            .iter()
+            .enumerate()
+            .filter(|(_, col)| overlap(run, col) > 0.0)
+            .max_by(|a, b| {
+                overlap(run, a.1)
+                    .partial_cmp(&overlap(run, b.1))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)
+            .or(current);
+        if groups.is_empty() || mine != current {
+            groups.push(Vec::new());
+            current = mine;
+        }
+        if let Some(g) = groups.last_mut() {
+            g.push(run.clone());
+        }
+    }
+    groups
+        .into_iter()
+        .filter_map(|g| {
+            let left = g.first()?.x;
+            let right = g.iter().map(|r| r.end_x).fold(f64::MIN, f64::max);
+            let spans: Vec<Span> = cells_of(&g, size)
+                .into_iter()
+                .flat_map(|c| c.spans)
+                .collect();
+            match spans.iter().any(|s| !s.text.trim().is_empty()) {
+                true => Some(Cell { left, right, spans }),
+                false => None,
+            }
+        })
+        .collect()
 }
 
 /// How wide a gap between two runs has to be, as a fraction of the em, before it
@@ -3531,13 +3928,13 @@ fn blocks_from(
     // Which stretches of lines stood in columns. Worked out before the reading,
     // because the question is about a run of lines together and the loop below
     // decides one at a time.
-    let tables = table_ranges(&lines_ref);
+    let tables = tables_on_each_page(&lines_ref);
     let mut skip_to = 0usize;
     for (at, line) in lines_ref.iter().enumerate() {
         if at < skip_to {
             continue;
         }
-        if let Some((_, end)) = tables.iter().find(|(start, _)| *start == at) {
+        if let Some((_, end, grid)) = tables.iter().find(|(start, ..)| *start == at) {
             flush(
                 &mut para,
                 para_size,
@@ -3548,7 +3945,11 @@ fn blocks_from(
                 &mut blocks,
             );
             blocks.push(Block::Table {
-                rows: table_rows(&lines_ref[at..*end], line.size),
+                rows: match grid.is_empty() {
+                    true => table_rows(&lines_ref[at..*end], line.size),
+                    false => rows_in_grid(&lines_ref[at..*end], grid),
+                },
+                widths: column_widths(grid),
             });
             skip_to = *end;
             prev = None;
@@ -5241,7 +5642,7 @@ mod harness {
                             None => format!("li>{indent}"),
                         },
                         super::Block::Rule { width, .. } => format!("hr {:.0}%", width * 100.0),
-                        super::Block::Table { rows } => {
+                        super::Block::Table { rows, .. } => {
                             format!("table {}x{}", rows.len(), rows.first().map_or(0, Vec::len))
                         }
                         super::Block::Paragraph { indent, .. } => match indent {
@@ -5693,7 +6094,7 @@ mod tests {
                 super::Block::Rule { width, thickness } => {
                     println!("{i:>4} ---- {:.0}% {thickness:.2}pt", width * 100.0)
                 }
-                super::Block::Table { rows } => {
+                super::Block::Table { rows, .. } => {
                     println!(
                         "{i:>4} TABLE {}x{}",
                         rows.len(),
@@ -6258,6 +6659,126 @@ mod tests {
     fn a_long_lone_line_is_not_a_title() {
         let (l, r) = (72.0, 472.0);
         assert_eq!(alignment_of(&[(100.0, 444.0)], l, r, 11.0), Align::Left);
+    }
+
+    /// The columns are the page's, and every row stands in them.
+    ///
+    /// The income statement is one grid with rules drawn across it. Read as one
+    /// table per piece between two rules, each piece sized itself to its own
+    /// widest figure and no two columns lined up; a reader reads a column down
+    /// its last digit.
+    #[test]
+    fn a_page_lends_its_columns_to_every_row_on_it() {
+        let cell = |left: f64, right: f64, text: &str| super::Cell {
+            left,
+            right,
+            spans: vec![Span {
+                text: text.into(),
+                color: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                link: None,
+            }],
+        };
+        let row = |y: f64, cells: Vec<super::Cell>| Line {
+            y,
+            size: 11.0,
+            right: cells.last().map_or(0.0, |c| c.right),
+            left: cells.first().map_or(0.0, |c| c.left),
+            text: cells
+                .iter()
+                .map(|c| c.spans[0].text.clone())
+                .collect::<Vec<_>>()
+                .join(" "),
+            spans: Vec::new(),
+            page: 1,
+            bullet: None,
+            picture: None,
+            rule: None,
+            tail_gap: 0.0,
+            natural_cells: cells.len(),
+            cells,
+        };
+        let lines = vec![
+            row(
+                700.0,
+                vec![
+                    cell(113.0, 255.0, "Medlemskontingenter"),
+                    cell(374.0, 410.0, "160.000"),
+                    cell(439.0, 475.0, "135.839"),
+                ],
+            ),
+            row(
+                680.0,
+                vec![
+                    cell(113.0, 250.0, "Deltagerbetalinger"),
+                    cell(374.0, 410.0, "287.400"),
+                    cell(439.0, 475.0, "338.072"),
+                ],
+            ),
+            // The bold total: its label is wider and its figure begins earlier,
+            // and it stands alone between two rules.
+            row(
+                650.0,
+                vec![
+                    cell(113.0, 300.0, "Indtægter i alt"),
+                    cell(357.0, 410.0, "2.196.200"),
+                    cell(422.0, 475.0, "2.421.305"),
+                ],
+            ),
+        ];
+        let grid = super::page_grid(&lines);
+        assert_eq!(grid.len(), 3, "three columns: {grid:?}");
+        for line in &lines {
+            assert_eq!(
+                super::stands_in_grid(line, &grid).map(|c| c.len()),
+                Some(3),
+                "every row stands in all three: {}",
+                line.text
+            );
+        }
+        // A single row IS a table when it stands in the page's columns: the
+        // totals of a statement are one row each between two rules, and left out
+        // they were the only lines on the page not in a column.
+        let ranges = super::grid_ranges(&lines[2..], &grid);
+        assert_eq!(ranges, vec![(0, 1)], "the lone total is a row: {ranges:?}");
+
+        // And a sentence lying across the grid is not a row.
+        let prose = row(600.0, vec![cell(113.0, 540.0, "Vi har dags dato aflagt")]);
+        assert_eq!(super::stands_in_grid(&prose, &grid), None);
+
+        let widths = super::column_widths(&grid);
+        assert_eq!(widths.len(), 3);
+        assert!(
+            (widths.iter().sum::<f64>() - 1.0).abs() < 0.001,
+            "the columns fill the width: {widths:?}"
+        );
+    }
+
+    /// A column is a gap a reader can see.
+    ///
+    /// A justified paragraph breaks its lines near the same places, so its own
+    /// line breaks arrive as recurring "columns". Cutting there took the
+    /// declaration on page 4 of the annual report apart into three cells three
+    /// points from each other, and read the sentence in the wrong order.
+    #[test]
+    fn a_cut_needs_a_gap_to_cut_in() {
+        let at = |left: f64, right: f64| super::Cell {
+            left,
+            right,
+            spans: Vec::new(),
+        };
+        assert!(!super::separated(
+            &[at(113.0, 304.0), at(307.0, 441.0)],
+            11.0
+        ));
+        // Fourteen points, which is what separates the longest name on the
+        // board page from the one in the column beside it.
+        assert!(super::separated(
+            &[at(113.0, 245.0), at(259.0, 400.0)],
+            11.0
+        ));
     }
 
     /// A bullet a symbol font drew is a bullet, not a box.
