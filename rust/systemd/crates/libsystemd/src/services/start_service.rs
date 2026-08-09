@@ -1119,8 +1119,18 @@ fn start_service_with_filedescriptors(
         private_tmp: conf.exec_config.private_tmp,
         private_devices: conf.exec_config.private_devices,
         private_network: conf.exec_config.private_network,
-        private_users: conf.exec_config.private_users,
-        private_users_mode: conf.exec_config.private_users_mode.clone(),
+        // DelegateNamespaces= implies PrivateUsers=self when PrivateUsers= is not
+        // explicitly set (systemd exec_context_get_effective_private_users):
+        // delegating a namespace requires an owned user namespace.
+        private_users: conf.exec_config.private_users
+            || !conf.exec_config.delegate_namespaces.is_empty(),
+        private_users_mode: if !conf.exec_config.private_users
+            && !conf.exec_config.delegate_namespaces.is_empty()
+        {
+            "self".to_owned()
+        } else {
+            conf.exec_config.private_users_mode.clone()
+        },
         private_mounts: conf.exec_config.private_mounts,
         join_namespace_pid: srvc.join_namespace_pid,
         mount_flags: conf.exec_config.mount_flags.clone(),
