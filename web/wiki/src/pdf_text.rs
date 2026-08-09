@@ -1331,7 +1331,14 @@ impl Shape {
     /// under anything, so it draws none.
     fn stroked(&self, ctm: [f64; 6], pen: f64) -> Vec<Rule> {
         let scale = (ctm[2].powi(2) + ctm[3].powi(2)).sqrt();
-        let thickness = (pen * scale).max(0.2);
+        // The pen as it is, not floored. A floor of 0.2 was applied here and it
+        // was the reason no two lines looked different: this file draws with a
+        // pen of 1.2 in a space a tenth of the page, so a single stroke is
+        // 0.12pt and was read as 0.2 -- and a stack of sixteen of them, which is
+        // how it draws a heavy bar, was read as 0.2 as well. What separates a
+        // hairline from a bar is the true value; the floor is the renderer's
+        // business, and it applies one.
+        let thickness = (pen * scale).max(0.01);
         let [(x0, y0), (x1, y1)] = self.corners(ctm);
         match self {
             Shape::Line { .. } => {
@@ -5309,6 +5316,29 @@ mod tests {
     fn dump_a_pdf() {
         let path = std::env::var("PDF").expect("PDF=<path>");
         let bytes = std::fs::read(&path).expect("readable");
+        // RAWRULES=<page> dumps that page's rules as extracted, before any of
+        // them are collapsed: the stacks are visible here and nowhere else.
+        if let Ok(want) = std::env::var("RAWRULES") {
+            let want: usize = want.parse().unwrap_or(1);
+            let doc = lopdf::Document::load_mem(&bytes).expect("loads");
+            for (page_no, (_, page_id)) in doc.get_pages().into_iter().enumerate() {
+                if page_no != want.saturating_sub(1) {
+                    continue;
+                }
+                let mut budget = 0usize;
+                let drawn = super::page_runs(&doc, page_id, &mut budget, &[]);
+                let mut rules: Vec<&super::Rule> = drawn.rules.iter().collect();
+                rules.sort_by(|a, b| b.y.partial_cmp(&a.y).unwrap_or(std::cmp::Ordering::Equal));
+                for r in rules {
+                    println!(
+                        "  y={:8.2} x={:7.1}..{:7.1} thick={:.3}",
+                        r.y, r.x0, r.x1, r.thickness
+                    );
+                }
+                return;
+            }
+            return;
+        }
         // ITEMS=<page> dumps that page's placed items: what the fixed layout
         // draws, in the order it draws them.
         if let Ok(want) = std::env::var("ITEMS") {
