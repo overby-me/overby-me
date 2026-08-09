@@ -29,11 +29,29 @@ const RSX_BASELINE = 0
 # Raw colour literals outside comments. 31 at the time of writing; the honest
 # ones are scrim/shadow alphas, and everything else is a role waiting to be
 # used. Lower this as they go.
-const COLOR_BASELINE = 30
+#
+# Two of them are the sheet a PDF is drawn on in the "As printed" view: white
+# paper and black ink, which are the one thing here that must NOT follow the
+# theme. A page reproduced at its own proportions is a page, and a page is white
+# in the dark.
+const COLOR_BASELINE = 32
 
 # Custom properties that are deliberately undefined: a local API a rule sets on
-# itself and reads back through `var(--name, <default>)`.
-const LOCAL_PROPS = ["--state-color"]
+# itself and reads back through `var(--name, <default>)`, or one the Rust sets
+# inline on the element it belongs to. The measurement is the whole point of
+# these -- a rule's thickness and width, a table's stated width, how much of a
+# page was left blank, the board's aspect and zoom -- and it is not knowable
+# until the document is read, so the stylesheet carries the default and the
+# element carries the number.
+const LOCAL_PROPS = [
+    "--state-color"
+    "--board-aspect"
+    "--page-spare"
+    "--rule-thickness"
+    "--rule-width"
+    "--t-width"
+    "--zoom"
+]
 
 let root = ($env.FILE_PWD | path dirname)
 let assets = ($root | path join "assets")

@@ -675,6 +675,7 @@ fn align_style(align: Align) -> &'static str {
     match align {
         Align::Left => "",
         Align::Center => "text-align:center;",
+        Align::Right => "text-align:right;",
     }
 }
 

@@ -188,6 +188,7 @@ pub enum Align {
     #[default]
     Left,
     Center,
+    Right,
 }
 
 /// A stretch of one colour within a block.
@@ -3147,11 +3148,17 @@ fn column_left(lines: &[Line]) -> f64 {
 /// a title is a few words in the middle of the measure, an indented body line
 /// runs most of the way across it.
 ///
-/// There is no right-alignment here, and no variant for one. A table cell starts
-/// well inside the column and ends near its right edge, which is exactly what a
-/// right-aligned line looks like, and until the table itself is recognised the
-/// two cannot be told apart. Inferring it turned eleven rows of an activity plan
-/// into right-aligned paragraphs. When tables land they can bring it back.
+/// Right-alignment waited for the tables. A table cell starts well inside the
+/// column and ends near its right edge, which is exactly what a right-aligned
+/// line looks like, and while the rows still arrived as paragraphs the two could
+/// not be told apart: inferring it turned eleven rows of an activity plan into
+/// right-aligned paragraphs. Now a row is a row, and what is left standing flush
+/// against the right margin is there because the document put it there -- the
+/// annual report sets every statement's title that way. It is read the same way
+/// centring is, and refused for the same reason: several lines must each START
+/// somewhere different, or this is an indented block that happens to reach the
+/// margin, and one line must be short enough that reaching the margin means
+/// something.
 fn alignment_of(lines: &[(f64, f64)], col_left: f64, col_right: f64, size: f64) -> Align {
     if lines.is_empty() || col_right <= col_left {
         return Align::Left;
@@ -3164,6 +3171,37 @@ fn alignment_of(lines: &[(f64, f64)], col_left: f64, col_right: f64, size: f64) 
         .collect();
     if usable.is_empty() {
         return Align::Left;
+    }
+    // Flush against the right margin, and clear of the left one: the two edges
+    // together, since text that merely reaches the right margin is ordinary
+    // text that filled its line.
+    let varies = |edges: &dyn Fn(&(f64, f64)) -> f64| {
+        let lo = usable
+            .iter()
+            .map(|p| edges(p))
+            .fold(f64::INFINITY, f64::min);
+        let hi = usable
+            .iter()
+            .map(|p| edges(p))
+            .fold(f64::NEG_INFINITY, f64::max);
+        hi - lo > size
+    };
+    let flush_right = usable
+        .iter()
+        .all(|(l, r)| (col_right - r).abs() < size * 0.5 && l - col_left > size);
+    if flush_right {
+        let (l, r) = usable[0];
+        let convincing = match usable.len() {
+            // One line: short enough that ending at the margin is a choice
+            // rather than the width of the words.
+            1 => r - l < width * 0.6,
+            // Several: their left edges must vary, or this is an indented block
+            // whose lines happen to reach the margin.
+            _ => varies(&|(l, _)| *l),
+        };
+        if convincing {
+            return Align::Right;
+        }
     }
     // Every line has to sit about the middle, or this is not centred text.
     if !usable
@@ -5180,6 +5218,7 @@ mod harness {
                         .unwrap_or(90);
                     let a = match b.align() {
                         super::Align::Center => " [center]",
+                        super::Align::Right => " [right]",
                         super::Align::Left => "",
                     };
                     println!(
@@ -6164,6 +6203,32 @@ mod tests {
     fn a_long_lone_line_is_not_a_title() {
         let (l, r) = (72.0, 472.0);
         assert_eq!(alignment_of(&[(100.0, 444.0)], l, r, 11.0), Align::Left);
+    }
+
+    /// A title set against the right margin stays there.
+    ///
+    /// The annual report sets every statement's title that way: page 13's
+    /// "Resultatopgørelse" runs 429..553 in a column that runs 89..553.
+    #[test]
+    fn a_title_against_the_right_margin_is_right_aligned() {
+        let (l, r) = (89.0, 552.7);
+        assert_eq!(
+            alignment_of(&[(429.0, 552.6)], l, r, 14.0),
+            Align::Right,
+            "flush right, clear of the left margin, and short"
+        );
+        // Prose that filled its line reaches the margin too, and starts at the
+        // other one: ordinary text.
+        assert_eq!(alignment_of(&[(89.0, 552.6)], l, r, 11.0), Align::Left);
+        // A line that ends short of the margin is not against it.
+        assert_eq!(alignment_of(&[(429.0, 500.0)], l, r, 11.0), Align::Left);
+        // An indented block whose lines all reach the margin is indented: every
+        // line starts in the same place, which right-aligned lines do not.
+        let indented = [(122.0, 552.6), (122.0, 552.4), (122.0, 552.5)];
+        assert_eq!(alignment_of(&indented, l, r, 11.0), Align::Left);
+        // Several lines ending at the margin from different starts: right.
+        let ranged = [(300.0, 552.6), (380.0, 552.4), (250.0, 552.5)];
+        assert_eq!(alignment_of(&ranged, l, r, 11.0), Align::Right);
     }
 
     /// The page turning over ends whatever was being built, and leaves a mark

@@ -8585,7 +8585,7 @@ a.list-item:hover {
 	/* Empty space either side, because that is what a page break IS: the foot
 	   of one page and the head of the next. One measure, so a break inside a
 	   table and a break between paragraphs separate by the same amount. */
-	margin: var(--pdf-page-gap, var(--md-sys-spacing-10)) 0;
+	margin: var(--md-sys-spacing-10) 0;
 	/* And ABOVE that, the paper the page itself left empty. Word ends a page
 	   early whenever what came next would not fit on it and moved down whole --
 	   a table row, a heading with its paragraph, a bulleted line -- and on the
@@ -8618,7 +8618,7 @@ a.list-item:hover {
    it; the space is the other half, and without it the two halves of the table
    still read as one table with a line through it. */
 .docx-page-row .pdf-page-break {
-	margin: var(--pdf-page-gap, var(--md-sys-spacing-10)) 0;
+	margin: var(--md-sys-spacing-10) 0;
 }
 /* The rule at the foot of the LAST page. It marks an ending and nothing after
    it, so it keeps the hairline and the number and gives up the landing place:
@@ -8635,7 +8635,7 @@ a.list-item:hover {
 	   screenful of nothing between the document and its comments. No other page
 	   that ends early shows its unused space either -- this surface reflows, and
 	   the rules say where the pages END, not how tall they were. */
-	margin-bottom: var(--pdf-page-gap, var(--md-sys-spacing-10));
+	margin-bottom: var(--md-sys-spacing-10);
 }
 
 /* What a jump actually aims at: the first thing on the page being turned to. */
