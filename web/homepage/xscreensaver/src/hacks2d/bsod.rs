@@ -1989,6 +1989,352 @@ fn hppa_linux(d: &mut Dpy, f: &Fonts) -> Bst {
     bst
 }
 
+/// The QR code Windows 10 and systemd both put on their crash screens, as
+/// upstream ships it: 41 by 41, one bit a module, six bytes a row with the
+/// low bit of each byte leftmost. A set bit is a light module, so it is drawn
+/// in the foreground colour against the background.
+const QR_SIZE: i32 = 41;
+const QR_BITS: [u8; 246] = [
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x03, 0x9A, 0x70, 0xEE,
+    0x80, 0x01, 0xFB, 0x22, 0xAA, 0xA6, 0xBE, 0x01, 0x8B, 0x8E, 0x74, 0xE7, 0xA2, 0x01, 0x8B, 0xEE,
+    0x42, 0xC4, 0xA2, 0x01, 0x8B, 0x42, 0x6E, 0xED, 0xA2, 0x01, 0xFB, 0xDA, 0x63, 0xA6, 0xBE, 0x01,
+    0x03, 0xAA, 0xAA, 0xAA, 0x80, 0x01, 0xFF, 0x8B, 0xD8, 0x9D, 0xFF, 0x01, 0x63, 0x62, 0xDA, 0x1B,
+    0x98, 0x01, 0x6F, 0x67, 0x98, 0x9F, 0xBC, 0x01, 0x4F, 0xCC, 0x55, 0x81, 0x83, 0x01, 0xB7, 0x6D,
+    0xFF, 0x68, 0xB2, 0x01, 0xC3, 0x10, 0x87, 0x8B, 0x96, 0x01, 0x6F, 0xB1, 0x91, 0x58, 0x94, 0x01,
+    0xE3, 0x36, 0x88, 0x84, 0xB8, 0x01, 0x83, 0x9B, 0xFE, 0x59, 0xD7, 0x01, 0x3B, 0x74, 0x98, 0x5C,
+    0xB4, 0x01, 0x37, 0x75, 0xDC, 0x91, 0xA6, 0x01, 0x77, 0xDE, 0x01, 0x54, 0xBA, 0x01, 0xBB, 0x6D,
+    0x8B, 0xB9, 0xB5, 0x01, 0x1F, 0x06, 0xBD, 0x9B, 0xB4, 0x01, 0xD3, 0xBD, 0x91, 0x19, 0x84, 0x01,
+    0x0B, 0x20, 0xD8, 0x91, 0xB4, 0x01, 0x33, 0x95, 0xBC, 0x0A, 0xD5, 0x01, 0xB3, 0x60, 0xDC, 0xD9,
+    0xB6, 0x01, 0xEF, 0x77, 0x18, 0x09, 0xA4, 0x01, 0xA3, 0xC2, 0x95, 0x51, 0xB2, 0x01, 0xDF, 0x63,
+    0xDB, 0xBE, 0xB3, 0x01, 0x03, 0x08, 0xC9, 0x09, 0xF0, 0x01, 0xFF, 0xA3, 0x19, 0xBD, 0xFB, 0x01,
+    0x03, 0x2E, 0x84, 0xA5, 0xAA, 0x01, 0xFB, 0x9A, 0xFC, 0x9B, 0xBB, 0x01, 0x8B, 0x7E, 0x9C, 0x1D,
+    0xB0, 0x01, 0x8B, 0x6E, 0x58, 0xA1, 0xDB, 0x01, 0x8B, 0xDA, 0xD5, 0x65, 0xA2, 0x01, 0xFB, 0x72,
+    0xFB, 0xE9, 0xF0, 0x01, 0x03, 0x02, 0x99, 0x3B, 0xB3, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
+];
+
+/// The code as a drawable, at whatever size the window calls for.
+fn qr_pixmap(fg: Pixel, bg: Pixel, doublings: u32) -> (Fb, i32) {
+    let mut fb = Fb::new(QR_SIZE, QR_SIZE);
+    for y in 0..QR_SIZE {
+        for x in 0..QR_SIZE {
+            let byte = QR_BITS[(y * 6 + x / 8) as usize];
+            let on = (byte >> (x % 8)) & 1 != 0;
+            fb.put_pixel(x, y, if on { fg } else { bg });
+        }
+    }
+    let mut size = QR_SIZE;
+    for _ in 0..doublings {
+        fb = double_fb(&fb);
+        size *= 2;
+    }
+    (fb, size)
+}
+
+/// A Linux kernel panic obscured by systemd, 2024, which puts the penguin and
+/// a QR code up in place of the register dump.
+///
+/// <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/gpu/drm/drm_panic.c>
+fn systemd(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, color("#0000AA", BLACK), f);
+    let lh = bst.line_height();
+
+    let doublings = if bst.width > 2560 || bst.height > 2560 {
+        4 /* Retina displays */
+    } else {
+        3
+    };
+    let (qr, qs) = qr_pixmap(bst.fg, bst.bg, doublings);
+    bst.pixmap = Some(qr);
+
+    bst.moveto(0, lh);
+    bst.text(
+        Align::Left,
+        "     .--.        _\n\
+         \x20   |o_o |      | |\n\
+         \x20   |:_/ |      | |\n\
+         \x20  //   \\ \\     |_|\n\
+         \x20 (|     | )     _\n\
+         \x20/'\\_   _/`\\    (_)\n\
+         \x20\\___)=(___/\n",
+    );
+
+    let mut y = (bst.height - qs) / 2;
+    if y < lh * 8 {
+        y = lh * 8;
+    }
+    let x = (bst.width - qs) / 2;
+    bst.pixmap_at(0, 0, qs, qs, x, y);
+    y += qs + lh * 3;
+    bst.moveto(0, y);
+    bst.text(Align::Center, "KERNEL PANIC !\n\n");
+    bst.text(Align::Center, "Please reboot your computer.\n\n");
+    bst.text(Align::Center, "Fatal exception in interrupt");
+
+    bst.clear(d);
+    bst
+}
+
+/// `xft_word_wrap`: break a string at spaces so that no line is wider than
+/// `width` pixels, keeping the newlines it already has.
+fn word_wrap(font: &Font, s: &str, width: i32) -> String {
+    let cols = (width / font.char_width().max(1)).max(1) as usize;
+    let mut out = String::with_capacity(s.len() + 16);
+    for (i, para) in s.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let mut col = 0;
+        for word in para.split_inclusive(' ') {
+            let w = word.trim_end().chars().count();
+            if col > 0 && col + w > cols {
+                out.push('\n');
+                col = 0;
+            }
+            out.push_str(word);
+            col += word.chars().count();
+        }
+    }
+    out
+}
+
+/// Windows 10 taking an hour over an update it will not finish.
+fn windows_10_update(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, color("#1070AA", BLACK), f);
+    let line2 = "Don't turn off your PC. This will take a while.";
+    let line3 = "Your PC will restart several times.";
+    let line_height = bst.font_a.ascent() + bst.font_a.descent();
+    let y1 = bst.height / 2 - line_height * 4;
+    let y2 = bst.height - bst.yoff - line_height * 3;
+
+    // Upstream also spins a GIF above the text; there is no animation here.
+    for pct in 0..98 {
+        bst.moveto(0, y1);
+        bst.text(Align::Center, &format!("Working on updates  {pct}%"));
+        bst.moveto(0, y1 + line_height);
+        bst.text(Align::Center, line2);
+        bst.moveto(0, y2);
+        bst.text(Align::Center, line3);
+        bst.pause(200_000 + i64::from(random() % 3_000_000) + i64::from(random() % 3_000_000));
+    }
+
+    bst.clear(d);
+    bst
+}
+
+/// The recovery screen, with its two buttons.
+fn windows_10_recovery(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, color("#1070AA", BLACK), f);
+    let line1 = "Recovery";
+    let line2 = "It looks like Windows didn't load correctly";
+    let line3 = "If you'd like to restart and try again, choose \
+                 \"Restart my PC\" below. Otherwise, choose \
+                 \"See advanced repair options\" for troubleshooting \
+                 tools and advanced options. If you don't know which \
+                 option is right for you, contact someone you \
+                 trust to help with this.";
+    let line4 = "  See advanced repair options  ";
+    let line5 = "  Restart my PC  ";
+    let line_height = bst.font_a.ascent() + bst.font_a.descent();
+    let line_height_b = bst.font_b.ascent() + bst.font_b.descent();
+    let line_height_c = bst.font_c.ascent() + bst.font_c.descent();
+    let mut y = line_height_c * 2;
+
+    let x = (((bst.width as f64) - f64::from(bst.font_b.text_width(line2)) * 1.7) / 2.0) as i32;
+    let x = x.max(10);
+    bst.margins(x, x);
+
+    bst.word_wrap();
+    bst.set_font(2);
+    bst.moveto(0, y);
+    bst.text(Align::Left, line1);
+    bst.text(Align::Left, "\n");
+
+    bst.set_font(1);
+    bst.text(Align::Left, line2);
+    bst.text(Align::Left, "\n");
+
+    bst.set_font(0);
+    bst.text(Align::Left, line3);
+
+    let w5 = bst.font.text_width(line5);
+    let x2 = bst.width - x - w5;
+
+    if bst.width > bst.height {
+        y += line_height_b * 2 + line_height * 7;
+    } else {
+        y += line_height_b * 3 + line_height * 9;
+    }
+
+    let descent = bst.font_a.descent();
+    bst.truncate();
+    bst.moveto(x2, y);
+    bst.text(Align::Left, line5);
+    bst.rect(false, x2, y - line_height, w5, line_height + descent * 2);
+
+    let w4 = bst.font.text_width(line4);
+    let x3 = x2 - w4 - line_height;
+
+    bst.truncate();
+    bst.moveto(x3, y);
+    bst.text(Align::Left, line4);
+    bst.rect(false, x3, y - line_height, w4, line_height + descent * 2);
+
+    bst.clear(d);
+    bst
+}
+
+/// The sad face, the percentage that stops, and the QR code nobody scans.
+/// One time in ten it is the CrowdStrike outage instead, and one in two
+/// hundred it is the Waste Isolation Pilot Plant's warning to the future.
+fn windows_10(d: &mut Dpy, f: &Fonts) -> Bst {
+    const LINES1: &[&str] = &[
+        ":(",
+        "\nYour PC ran into a problem and needs to restart. We're just\
+         \x20collecting some error info, and then we'll restart for you.\n\n\n",
+        "\n\n",
+        // Split so that the link ends its line: an escape after it reads as
+        // part of the URL to the link checker.
+        concat!(
+            "For more information about this issue and possible fixes, visit\n",
+            "http://youtu.be/-RjmN9RZyr4",
+            "\n\nIf you call a support person, give them this info:\n",
+            "Stop code CRITICAL_PROCESS_DIED",
+        ),
+    ];
+    /* The font doesn't always contain the shrug's face. */
+    const LINES2: &[&str] = &[
+        "-\\_(:/)_/-",
+        "\nYour PC ran into a ClownStrike and needs to restart 15 or more \
+         times.\n\n\n",
+        "\n\n",
+        concat!(
+            "For more information about this issue and possible fixes, visit\n",
+            "http://youtu.be/-RjmN9RZyr4",
+            "\n\nIf you call a support person, give them this info:\n",
+            "Stop code COMPLIANCE_LINE_ITEM_OK",
+        ),
+    ];
+    const LINES3: &[&str] = &[
+        "x__x",
+        "\nThis place is a message... \
+         and part of a system of messages... \
+         pay attention to it! \
+         \n\n\
+         Sending this message was important to us. \
+         We considered ourselves to be a powerful culture.\n\n",
+        "\nThis place is not a place of honor... \
+         no highly esteemed deed is commemorated here... \
+         nothing valued is here. \
+         \n\n\
+         What is here was dangerous and repulsive to us. \
+         This message is a warning about danger. \n",
+        "The danger is in a particular location... \
+         it increases towards a center... \
+         the center of danger is here... \
+         of a particular size and shape, and below us. \
+         \n\n\
+         The danger is still present, in your time, as it was in ours. \
+         The danger is to the body, and it can kill. \
+         \n\n\
+         This place is best shunned and left uninhabited.",
+    ];
+
+    let clownp = random().is_multiple_of(10);
+    let honorp = !clownp && random().is_multiple_of(20);
+    let lines = if clownp {
+        LINES2
+    } else if honorp {
+        LINES3
+    } else {
+        LINES1
+    };
+    let stop = 60 + (random() % 39) as i32 + if clownp { 1300 } else { 0 };
+
+    if random().is_multiple_of(4) {
+        return windows_10_recovery(d, f);
+    }
+    if random().is_multiple_of(14) {
+        return windows_10_update(d, f);
+    }
+
+    let mut bst = Bst::new(d, WHITE, color("#1070AA", BLACK), f);
+    let top = if bst.height > 800 {
+        bst.font_b.ascent()
+    } else {
+        0
+    };
+
+    let mut left =
+        (((bst.width as f64) - f64::from(bst.font.text_width(LINES1[1])) * 0.55) / 2.0) as i32;
+    left = left.max(10);
+    let left0 = left;
+    let mut right = left;
+    bst.margins(left, right);
+
+    let doublings = if bst.width > 2560 || bst.height > 2560 {
+        3 /* Retina displays */
+    } else {
+        2
+    };
+    let (qr, qs) = qr_pixmap(bst.fg, bst.bg, doublings);
+    bst.pixmap = Some(qr);
+
+    let mut y = top;
+    let mut y1 = 0;
+    bst.set_font(1);
+    for (i, line) in lines.iter().enumerate() {
+        let oy = y;
+        let fid = if i == 0 {
+            1
+        } else if i >= 3 {
+            2
+        } else {
+            0
+        };
+        let font = match fid {
+            0 => bst.font,
+            1 => bst.font_b,
+            _ => bst.font_c,
+        };
+
+        let wrapped = word_wrap(&font, line, bst.width - left - right);
+        let height = wrapped.split('\n').count() as i32 * (font.ascent() + font.descent());
+
+        bst.moveto(left, y + font.ascent());
+        bst.set_font(fid);
+        bst.text(Align::Left, &wrapped);
+
+        y += height + font.descent();
+
+        if i == 0 {
+            bst.moveto(left, y);
+        } else if i == 1 {
+            y1 = y;
+        } else if i == 2 {
+            left += qs + font.ascent() / 2;
+            if bst.width > bst.height {
+                right += (f64::from(qs) * 1.8) as i32;
+            }
+            bst.margins(left, right);
+        } else if i == 3 {
+            bst.pixmap_at(0, 0, qs, qs, left0, oy);
+        }
+    }
+
+    bst.margins(left0, 0);
+    bst.set_font(0);
+    for i in 0..=stop {
+        bst.moveto(left0, y1);
+        bst.text(Align::Left, &format!("{i}% complete"));
+        bst.pause(85_000);
+    }
+    bst.pause(3_000_000);
+
+    bst.clear(d);
+    bst
+}
+
 /// A 2013 Android phone boot loader, by jwz. It redraws the whole screen for
 /// every line it adds, which is how the bootloader itself behaves.
 fn android(d: &mut Dpy, f: &Fonts) -> Bst {
@@ -5095,6 +5441,21 @@ const MODES: &[Mode] = &[
         fonts: NONE,
     },
     Mode {
+        name: "Systemd",
+        fun: systemd,
+        fonts: ["Classic Console 14", "Classic Console 14", "", ""],
+    },
+    Mode {
+        name: "Win10",
+        fun: windows_10,
+        fonts: [
+            "Arial 24, Helvetica 24",
+            "Arial 24, Helvetica 24",
+            "Arial 90, Helvetica 36",
+            "Arial 16, Helvetica 16",
+        ],
+    },
+    Mode {
         name: "Android",
         fun: android,
         fonts: ["Courier Bold 12", "Courier Bold 24", "", ""],
@@ -5450,6 +5811,14 @@ const ONLY: &[SelectItem] = &[
     SelectItem {
         value: "HPPALinux",
         label: "Linux (PA-RISC)",
+    },
+    SelectItem {
+        value: "Systemd",
+        label: "systemd",
+    },
+    SelectItem {
+        value: "Win10",
+        label: "Windows 10",
     },
     SelectItem {
         value: "Android",

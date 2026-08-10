@@ -21,8 +21,8 @@ that needed a runtime piece worth building.
 
 `bsod` is under way and is not counted above yet. It is thirty-nine computers
 crashing, each one a little program for the same command queue, so it arrives a
-few machines at a time. Thirty-four are in; the five still to come are the
-Apple ][ crashes, Encom, systemd, the ransomware and Windows 10. The
+few machines at a time. Thirty-six are in; the three still to come all borrow the Apple ][: its own
+crashes, Encom and the ransomware. The
 two left after it:
 
 | Blocked on | Savers |
