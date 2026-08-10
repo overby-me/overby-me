@@ -538,6 +538,119 @@ impl Fb {
         self.fill_arc(gc, x2 - r / 2, y2 - r / 2, r, r, 0, FULL_CIRCLE);
     }
 
+    /// Blend one pixel towards `color` by `a`, leaving alpha alone.
+    #[inline]
+    fn blend(&mut self, x: i32, y: i32, color: Pixel, a: f32) {
+        if !self.in_bounds(x, y) {
+            return;
+        }
+        // Capped above but not below: the endpoint weights genuinely go
+        // negative where a line starts above the top of the drawable, and
+        // letting that darken the pixel slightly is what upstream does.
+        let a = a.min(1.0);
+        let i = (y * self.width + x) as usize;
+        let (or, og, ob) = crate::runtime::color::unrgb(self.px[i]);
+        let (r, g, b) = crate::runtime::color::unrgb(color);
+        let mix = |o: u8, n: u8| (o as f32 + (n as f32 - o as f32) * a) as u8;
+        self.px[i] = crate::runtime::color::rgb(mix(or, r), mix(og, g), mix(ob, b));
+    }
+
+    /// Xiaolin Wu's antialiased line, blended into whatever is already there
+    /// at `alpha`.
+    ///
+    /// Not an Xlib call: X has no antialiasing at all. The hacks that want a
+    /// soft line carry their own copy of this routine, and it is here so that
+    /// two of them do not carry two copies. Hard-clipped rather than
+    /// scissored, as upstream does it, because the endpoint weights go wrong
+    /// on a partially visible line.
+    pub fn draw_line_antialias(
+        &mut self,
+        mut x1: i32,
+        mut y1: i32,
+        mut x2: i32,
+        mut y2: i32,
+        color: Pixel,
+        alpha: f32,
+    ) {
+        let dx = x2 as f32 - x1 as f32;
+        let dy = y2 as f32 - y1 as f32;
+
+        if x1 < 0
+            || x1 > self.width
+            || x2 < 0
+            || x2 > self.width
+            || y1 < 0
+            || y1 > self.height
+            || y2 < 0
+            || y2 > self.height
+        {
+            return;
+        }
+
+        let ipart = |v: f32| v as i32;
+        let round = |v: f32| (v + 0.5) as i32;
+        let fpart = |v: f32| v - (v as i32) as f32;
+        let rfpart = |v: f32| 1.0 - fpart(v);
+
+        if dx.abs() > dy.abs() {
+            if x2 < x1 {
+                std::mem::swap(&mut x1, &mut x2);
+                std::mem::swap(&mut y1, &mut y2);
+            }
+            let gradient = dy / dx;
+            let mut xend = round(x1 as f32) as f32;
+            let mut yend = y1 as f32 + gradient * (xend - x1 as f32);
+            let mut xgap = rfpart(x1 as f32 + 0.5);
+            let xpxl1 = xend as i32;
+            let ypxl1 = ipart(yend);
+            self.blend(xpxl1, ypxl1, color, rfpart(yend) * xgap * alpha);
+            self.blend(xpxl1, ypxl1 + 1, color, fpart(yend) * xgap * alpha);
+            let mut intery = yend + gradient;
+
+            xend = round(x2 as f32) as f32;
+            yend = y2 as f32 + gradient * (xend - x2 as f32);
+            xgap = fpart(x2 as f32 + 0.5);
+            let xpxl2 = xend as i32;
+            let ypxl2 = ipart(yend);
+            self.blend(xpxl2, ypxl2, color, rfpart(yend) * xgap * alpha);
+            self.blend(xpxl2, ypxl2 + 1, color, fpart(yend) * xgap * alpha);
+
+            for x in (xpxl1 + 1)..xpxl2 {
+                self.blend(x, ipart(intery), color, rfpart(intery) * alpha);
+                self.blend(x, ipart(intery) + 1, color, fpart(intery) * alpha);
+                intery += gradient;
+            }
+        } else {
+            if y2 < y1 {
+                std::mem::swap(&mut x1, &mut x2);
+                std::mem::swap(&mut y1, &mut y2);
+            }
+            let gradient = dx / dy;
+            let mut yend = round(y1 as f32) as f32;
+            let mut xend = x1 as f32 + gradient * (yend - y1 as f32);
+            let mut ygap = rfpart(y1 as f32 + 0.5);
+            let ypxl1 = yend as i32;
+            let xpxl1 = ipart(xend);
+            self.blend(xpxl1, ypxl1, color, rfpart(xend) * ygap * alpha);
+            self.blend(xpxl1, ypxl1 + 1, color, fpart(xend) * ygap * alpha);
+            let mut interx = xend + gradient;
+
+            yend = round(y2 as f32) as f32;
+            xend = x2 as f32 + gradient * (yend - y2 as f32);
+            ygap = fpart(y2 as f32 + 0.5);
+            let ypxl2 = yend as i32;
+            let xpxl2 = ipart(xend);
+            self.blend(xpxl2, ypxl2, color, rfpart(xend) * ygap * alpha);
+            self.blend(xpxl2, ypxl2 + 1, color, fpart(xend) * ygap * alpha);
+
+            for y in (ypxl1 + 1)..ypxl2 {
+                self.blend(ipart(interx), y, color, rfpart(interx) * alpha);
+                self.blend(ipart(interx) + 1, y, color, fpart(interx) * alpha);
+                interx += gradient;
+            }
+        }
+    }
+
     /// `XDrawLines` with `CoordModeOrigin`.
     pub fn draw_lines(&mut self, gc: &Gc, points: &[XPoint]) {
         for pair in points.windows(2) {
