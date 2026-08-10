@@ -30,6 +30,8 @@ extend-ignore-re = [
   "posibility",
   "algortim",
   "compilcated",
+  # vermiculate's built-in programs are strings of keystrokes, not prose.
+  "baMn[0-9]+",
   # t3d is written in German; its function names are kept as upstream has them.
   "projektion",
   # Federico Mena Quintero, credited in distort's vortex formula.

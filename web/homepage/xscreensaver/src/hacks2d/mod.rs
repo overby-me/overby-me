@@ -111,6 +111,7 @@ pub mod thornbird;
 pub mod triangle;
 pub mod truchet;
 pub mod twang;
+pub mod vermiculate;
 pub mod vines;
 pub mod wander;
 pub mod whirlwindwarp;
@@ -227,6 +228,7 @@ pub static ALL: &[&Saver] = &[
     &vines::SAVER,
     &truchet::SAVER,
     &twang::SAVER,
+    &vermiculate::SAVER,
     &wander::SAVER,
     &whirlwindwarp::SAVER,
     &whirlygig::SAVER,

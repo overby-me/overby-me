@@ -671,6 +671,12 @@ saver!(
     xscreensaver::hacks2d::truchet::start
 );
 saver!(
+    "vermiculate",
+    vermiculate_body,
+    vermiculate_start,
+    xscreensaver::hacks2d::vermiculate::start
+);
+saver!(
     "wander",
     wander_body,
     wander_start,
@@ -1216,6 +1222,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "truchet",
         label: "Truchet",
         start: truchet_start,
+    },
+    Entry {
+        slug: "vermiculate",
+        label: "Vermiculate",
+        start: vermiculate_start,
     },
     Entry {
         slug: "wander",
