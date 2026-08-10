@@ -18,6 +18,7 @@ pub mod anemotaxis;
 pub mod binaryhorizon;
 pub mod binaryring;
 pub mod blitspin;
+pub mod bouboule;
 pub mod boxfit;
 pub mod braid;
 pub mod bumps;
@@ -113,6 +114,7 @@ pub static ALL: &[&Saver] = &[
     &binaryhorizon::SAVER,
     &binaryring::SAVER,
     &blitspin::SAVER,
+    &bouboule::SAVER,
     &boxfit::SAVER,
     &braid::SAVER,
     &bumps::SAVER,

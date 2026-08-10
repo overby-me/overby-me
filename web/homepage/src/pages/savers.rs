@@ -106,6 +106,12 @@ saver!(
     xscreensaver::hacks2d::blitspin::start
 );
 saver!(
+    "bouboule",
+    bouboule_body,
+    bouboule_start,
+    xscreensaver::hacks2d::bouboule::start
+);
+saver!(
     "boxfit",
     boxfit_body,
     boxfit_start,
@@ -626,6 +632,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "blitspin",
         label: "Blit Spin",
         start: blitspin_start,
+    },
+    Entry {
+        slug: "bouboule",
+        label: "Bouboule",
+        start: bouboule_start,
     },
     Entry {
         slug: "boxfit",
