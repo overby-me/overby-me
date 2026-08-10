@@ -64,8 +64,14 @@ pub struct Dpy {
     /// Upstream's `mono_p` global. Always false here (a canvas is TrueColor),
     /// but hacks branch on it and a few assign to it.
     pub mono_p: bool,
+    /// What the local time was when the saver started, in seconds since
+    /// midnight. Zero unless the host said otherwise.
+    wall_clock_base: f64,
     images: image::ImageChannel,
 }
+
+/// Seconds in a day, which is the period [`Dpy::wall_clock`] wraps on.
+const DAY: f64 = 24.0 * 60.0 * 60.0;
 
 impl Dpy {
     pub fn new(width: i32, height: i32, res: Resources) -> Self {
@@ -77,8 +83,24 @@ impl Dpy {
             res,
             time: 0.0,
             mono_p: false,
+            wall_clock_base: 0.0,
             images: image::ImageChannel::default(),
         }
+    }
+
+    /// `localtime()`: the local time of day in seconds since midnight,
+    /// fractional part included.
+    ///
+    /// A handful of hacks are clocks and have to say what time it is. The base
+    /// comes from the host at startup and the rest is the saver's own elapsed
+    /// time, which keeps a run reproducible from its seed: with no host the
+    /// clock simply starts at midnight.
+    pub fn wall_clock(&self) -> f64 {
+        (self.wall_clock_base + self.time).rem_euclid(DAY)
+    }
+
+    fn set_wall_clock(&mut self, seconds_since_midnight: f64) {
+        self.wall_clock_base = seconds_since_midnight;
     }
 
     /// `load_image_async_simple`: ask for a picture to work on.
@@ -201,7 +223,7 @@ pub struct About {
 ///
 /// A struct rather than five parameters because it crosses the code-splitting
 /// boundary, and a `LazyLoader` entry point takes exactly one argument.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StartArgs {
     pub width: i32,
     pub height: i32,
@@ -216,6 +238,9 @@ pub struct StartArgs {
     /// ask for their image in `init`, and a request made before the host has
     /// spoken up is answered on the spot with colour bars.
     pub image_host: bool,
+    /// The local time of day when the saver starts, in seconds since midnight.
+    /// Only the clocks read it, and the tests leave it at midnight.
+    pub wall_clock: f64,
 }
 
 impl StartArgs {
@@ -226,12 +251,19 @@ impl StartArgs {
             query: query.to_string(),
             seed,
             image_host: false,
+            wall_clock: 0.0,
         }
     }
 
     /// Declare that the host will answer image requests.
     pub fn with_image_host(mut self, image_host: bool) -> Self {
         self.image_host = image_host;
+        self
+    }
+
+    /// Tell the clocks what time it is, in seconds since local midnight.
+    pub fn with_wall_clock(mut self, seconds_since_midnight: f64) -> Self {
+        self.wall_clock = seconds_since_midnight;
         self
     }
 }
@@ -297,6 +329,7 @@ impl Runner {
         let res = Resources::new(def.defaults, def.opts, &args.query);
         let mut dpy = Dpy::new(args.width, args.height, res);
         dpy.set_image_host(args.image_host);
+        dpy.set_wall_clock(args.wall_clock);
         let hack = new(&mut dpy);
         Self {
             dpy,

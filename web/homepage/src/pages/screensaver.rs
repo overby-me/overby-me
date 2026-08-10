@@ -89,6 +89,7 @@ impl Host {
             seed(),
         )
         .with_image_host(self.source != Source::None)
+        .with_wall_clock(wall_clock_seconds())
     }
 
     fn sync_size(&mut self) {
@@ -143,6 +144,16 @@ impl Host {
 
 fn seed() -> u32 {
     (js_sys::Math::random() * u32::MAX as f64) as u32
+}
+
+/// The local time of day in seconds since midnight, for the savers that are
+/// clocks.
+fn wall_clock_seconds() -> f64 {
+    let now = js_sys::Date::new_0();
+    now.get_hours() as f64 * 3600.0
+        + now.get_minutes() as f64 * 60.0
+        + now.get_seconds() as f64
+        + now.get_milliseconds() as f64 / 1000.0
 }
 
 fn now_seconds() -> f64 {
@@ -375,8 +386,9 @@ fn SaverStage(slug: String) -> Element {
                 let source = Source::from_query(&captured_query());
                 let query = to_query(&settings.peek());
                 // Fetches the saver's own wasm chunk the first time.
-                let args =
-                    StartArgs::new(w, h, &query, seed()).with_image_host(source != Source::None);
+                let args = StartArgs::new(w, h, &query, seed())
+                    .with_image_host(source != Source::None)
+                    .with_wall_clock(wall_clock_seconds());
                 let Some(runner) = (entry.start)(args).await else {
                     failed.set(true);
                     return;

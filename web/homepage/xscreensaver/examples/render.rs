@@ -12,9 +12,11 @@
 //! magick /tmp/munch.ppm /tmp/munch.png
 //! ```
 //!
-//! The seed is the last argument, and matters for the hacks that roll their
-//! shape once at startup: demon picks one of six lattices, distort one of
-//! twelve presets. Varying it is the only way to see the others.
+//! The seed matters for the hacks that roll their shape once at startup: demon
+//! picks one of six lattices, distort one of twelve presets. Varying it is the
+//! only way to see the others. The last argument is the time of day in seconds
+//! since midnight, which only the clocks read, and which defaults to midnight
+//! where every hand points the same way.
 //!
 //! PPM because it keeps this crate dependency-free; any image tool reads it.
 
@@ -24,7 +26,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 6 {
         eprintln!(
-            "usage: {} <slug> <width> <height> <frames> <out.ppm> [query] [seed]\n\navailable: {}",
+            "usage: {} <slug> <width> <height> <frames> <out.ppm> [query] [seed] [clock]\n\navailable: {}",
             args[0],
             xscreensaver::all()
                 .iter()
@@ -54,15 +56,16 @@ fn main() {
     // A fixed seed by default, so re-running after an edit shows what the edit
     // changed and nothing else.
     let seed: u32 = args.get(7).map_or(20260809, |s| number("seed", s));
+    let clock: f64 = args.get(8).map_or(0.0, |s| number("clock", s));
 
     let Some(saver) = xscreensaver::find(slug) else {
         eprintln!("no such saver: {slug}");
         std::process::exit(1);
     };
 
-    let mut runner = (saver.start)(xscreensaver::runtime::StartArgs::new(
-        width, height, &query, seed,
-    ));
+    let mut runner = (saver.start)(
+        xscreensaver::runtime::StartArgs::new(width, height, &query, seed).with_wall_clock(clock),
+    );
     for _ in 0..frames {
         runner.step();
     }

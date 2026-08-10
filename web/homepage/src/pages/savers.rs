@@ -587,6 +587,12 @@ saver!(
     xscreensaver::hacks2d::substrate::start
 );
 saver!(
+    "t3d",
+    t3d_body,
+    t3d_start,
+    xscreensaver::hacks2d::t3d::start
+);
+saver!(
     "thornbird",
     thornbird_body,
     thornbird_start,
@@ -1092,6 +1098,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "substrate",
         label: "Substrate",
         start: substrate_start,
+    },
+    Entry {
+        slug: "t3d",
+        label: "T3D",
+        start: t3d_start,
     },
     Entry {
         slug: "thornbird",
