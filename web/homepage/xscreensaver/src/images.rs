@@ -18,8 +18,11 @@ pub const BOB: &[u8] = include_bytes!("../images/bob.png");
 /// `analogtv_make_font` draws straight into a video signal.
 pub const FONT_6X10: &[u8] = include_bytes!("../images/6x10font.png");
 
-/// `logo-180.png`: the XScreenSaver logo at 180 square, with an alpha channel.
+/// The XScreenSaver logo, with an alpha channel, at the three sizes upstream
+/// ships. A hack picks one by how big the screen is.
+pub const LOGO_50: &[u8] = include_bytes!("../images/logo-50.png");
 pub const LOGO_180: &[u8] = include_bytes!("../images/logo-180.png");
+pub const LOGO_360: &[u8] = include_bytes!("../images/logo-360.png");
 
 /// The three test cards `xanalogtv` tunes between: the RCA Indian-head card,
 /// the Philips PM5544, and the BBC's Test Card F.

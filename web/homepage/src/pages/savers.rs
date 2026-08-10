@@ -526,6 +526,12 @@ saver!(
     xscreensaver::hacks2d::marbling::start
 );
 saver!(
+    "maze",
+    maze_body,
+    maze_start,
+    xscreensaver::hacks2d::maze::start
+);
+saver!(
     "memscroller",
     memscroller_body,
     memscroller_start,
@@ -1252,6 +1258,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "marbling",
         label: "Marbling",
         start: marbling_start,
+    },
+    Entry {
+        slug: "maze",
+        label: "Maze",
+        start: maze_start,
     },
     Entry {
         slug: "memscroller",

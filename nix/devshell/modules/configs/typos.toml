@@ -32,6 +32,7 @@ extend-ignore-re = [
   "compilcated",
   "resouces",
   "maintainance",
+  "knowlege",
   # vermiculate's built-in programs are strings of keystrokes, not prose.
   "baMn[0-9]+",
   # t3d is written in German; its function names are kept as upstream has them.
