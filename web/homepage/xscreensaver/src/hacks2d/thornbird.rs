@@ -27,12 +27,12 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
-use crate::runtime::xlockmore::{ColorScheme, ModeInfo, lrand};
+use crate::runtime::xlockmore::{ColorScheme, MAXRAND, ModeInfo, lrand};
 use crate::runtime::{About, Dpy, Opt, Runner, SaverDef, Screenhack, StartArgs, XRectangle};
 
 /// `balance_rand(v)`: random around zero.
 fn balance_rand(v: f64) -> f64 {
-    (lrand() as f64 / u32::MAX as f64 * v) - (v / 2.0)
+    (lrand() as f64 / MAXRAND * v) - (v / 2.0)
 }
 
 struct Thornbird {

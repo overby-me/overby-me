@@ -38,17 +38,17 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
-use crate::runtime::xlockmore::{ColorScheme, ModeInfo, lrand};
+use crate::runtime::xlockmore::{ColorScheme, MAXRAND, ModeInfo, lrand};
 use crate::runtime::{About, Dpy, Opt, Runner, SaverDef, Screenhack, StartArgs, XPoint};
 
 /// `LRAND() / MAXRAND`: a fraction of the way through the generator's range.
 fn unit() -> f64 {
-    lrand() as f64 / u32::MAX as f64
+    lrand() as f64 / MAXRAND
 }
 
 /// A coin flip, spelled the way upstream spells it.
 fn coin() -> bool {
-    lrand() < u32::MAX / 2
+    (lrand() as f64) < MAXRAND / 2.0
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

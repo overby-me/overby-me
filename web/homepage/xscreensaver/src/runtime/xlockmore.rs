@@ -153,9 +153,17 @@ pub fn nrand(n: i32) -> i32 {
     random_below(n)
 }
 
+/// `MAXRAND`: `1 << 31` as a float. The ceiling [`lrand`] runs up to, and
+/// the divisor every xlockmore hack uses to turn one into a fraction.
+pub const MAXRAND: f64 = 2147483648.0;
+
 /// `LRAND()`: the raw generator, as xlockmore spells it.
+///
+/// Masked to 31 bits, which is what upstream's macro does. It matters: hacks
+/// divide the result by [`MAXRAND`] to get a fraction, compare it against
+/// `MAXRAND / 2` for a coin flip, and shift it down for a cached half.
 pub fn lrand() -> u32 {
-    random()
+    random() & 0x7fff_ffff
 }
 
 #[cfg(test)]

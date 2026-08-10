@@ -55,12 +55,12 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
-use crate::runtime::xlockmore::{ColorScheme, ModeInfo, lrand, nrand};
+use crate::runtime::xlockmore::{ColorScheme, MAXRAND, ModeInfo, lrand, nrand};
 use crate::runtime::{About, Dpy, Opt, Runner, SaverDef, Screenhack, StartArgs, XRectangle};
 
 /// `LRAND() / MAXRAND`: a fraction of the way through the generator's range.
 fn unit() -> f64 {
-    lrand() as f64 / u32::MAX as f64
+    lrand() as f64 / MAXRAND
 }
 
 /// `LRAND() & 1`.
