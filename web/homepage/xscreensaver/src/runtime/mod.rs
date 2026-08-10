@@ -23,6 +23,7 @@ pub mod color;
 pub mod delaunay;
 pub mod erase;
 pub mod fb;
+pub mod font;
 pub mod image;
 pub mod opts;
 pub mod rand;

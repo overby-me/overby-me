@@ -791,6 +791,12 @@ saver!(
     xscreensaver::hacks2d::xflame::start
 );
 saver!(
+    "xjack",
+    xjack_body,
+    xjack_start,
+    xscreensaver::hacks2d::xjack::start
+);
+saver!(
     "xlyap",
     xlyap_body,
     xlyap_start,
@@ -1406,6 +1412,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xflame",
         label: "XFlame",
         start: xflame_start,
+    },
+    Entry {
+        slug: "xjack",
+        label: "XJack",
+        start: xjack_start,
     },
     Entry {
         slug: "xlyap",

@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (122) |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (123) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -16,19 +16,33 @@ different runtime:
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
-Every 2D hack that needs nothing but the runtime is now ported. What is left
-needs something built first, and each group unlocks together:
+Every 2D hack that needs nothing but the runtime is ported. What is left needs
+something built first, and each group unlocks together:
 
 | Blocked on | Savers |
 |-|-|
-| a font path | `barcode`, `bsod`, `flag`, `fontglide`, `memscroller`, `noseguy`, `penetrate`, `xjack`, `xmatrix` |
 | `analogtv.c`, the NTSC simulation | `apple2`, `filmleader`, `phosphor`, `pong`, `vfeedback`, `xanalogtv` |
 | bundled images | `bubbles` (44 sprites), `maze` (logos), `pacman` (a sprite sheet) |
+| bundled images, on top of text | `bsod`, `flag`, `noseguy`, `xmatrix` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
+| nothing: text-only, ready to port | `barcode`, `fontglide`, `memscroller`, `penetrate` |
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver.
+
+## Text
+
+`runtime::font` is one bitmap font compiled in, the `gallant12x22` that
+XScreenSaver already bundles for its own console-ish hacks, so it arrives with
+the same provenance as everything else here. A hack that asks for a font gets
+a whole magnification of it: nearest to the requested size, never below one.
+
+That is a real divergence and there is no way around it short of writing a
+glyph rasteriser. It is a smaller one than it sounds, because these hacks lay
+themselves out *from* the metrics they are handed rather than assuming a size.
+Ask for twenty-four point and get twenty-two pixels and the page simply has the
+columns that implies.
 
 ## How a port works
 
