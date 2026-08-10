@@ -4299,6 +4299,23 @@ fn blocks_from(
                     // written in the text does, and without this a whole list
                     // collapsed into a single item.
                     || line.bullet.is_some()
+                    // Or the line steps back OUT to the column, from something
+                    // that was set in from it. Nothing else here looks at where a
+                    // line begins, and without it the last item of every list
+                    // swallowed the text that followed: the item and the whole
+                    // programme under it became one block, and a block takes the
+                    // leftmost edge of its lines, so the item lost the indent its
+                    // siblings kept. The landsmøde agenda ended each of its five
+                    // lists one item short and out of line.
+                    //
+                    // Only a step out, and only after a line that ENDED early. A
+                    // centred title's lines each begin somewhere different and
+                    // must stay one block; a paragraph whose opening line is
+                    // indented has not moved as a block either, and its second
+                    // line reaches the margin because the first one wrapped.
+                    || (ended_early
+                        && indent_steps(p.left, col_left, p.size) > 0
+                        && indent_steps(line.left, col_left, line.size) == 0)
                     // A page break: y jumps back UP the page.
                     || gap < -1.0;
                 match (apart, ended_early || starts_new_entry(&line.text)) {
@@ -7878,5 +7895,90 @@ mod tests {
         let (to_w, to_h, small) = shrink_to_fit(2000, 1, 1, &stripes).expect("too wide to keep");
         assert_eq!((to_w, to_h), (1000, 1));
         assert!(small.iter().all(|&v| v == 127), "black and white pair off");
+    }
+
+    /// The last item of a list keeps the indent its siblings have.
+    ///
+    /// Nothing in the flow decision looked at where a line BEGAN, so the item and
+    /// the programme that followed it became one block. A block takes the leftmost
+    /// edge of its lines, so the item came out at the margin while every item above
+    /// it stayed a step in, and the lines after it were read as part of it. All five
+    /// lists in the landsmoede agenda ended one item short and out of line.
+    #[test]
+    fn a_list_does_not_swallow_what_follows_it() {
+        let line = |y: f64, left: f64, right: f64, text: &str| Line {
+            y,
+            size: 11.0,
+            right,
+            left,
+            page: 1,
+            text: text.into(),
+            spans: vec![span(text, None)],
+            bullet: None,
+            picture: None,
+            rule: None,
+            tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
+        };
+        // The agenda's own geometry: the programme at 72, its items one step in at
+        // 90, and a line every 14.55 points, which is UNDER the gap that used to be
+        // the only thing separating the list from what came after it.
+        let blocks = blocks_from(
+            vec![
+                line(
+                    700.00,
+                    72.0,
+                    500.0,
+                    "08:30 Fremlaeggelse af aarsregnskab samt beretning fra de kritiske revisorer",
+                ),
+                line(
+                    685.45,
+                    72.0,
+                    246.0,
+                    "10:50: Personvalg, forretningsudvalget",
+                ),
+                line(670.90, 90.0, 207.0, "- Valg af landsforperson"),
+                line(656.35, 90.0, 227.0, "- Valg af landsnaestforperson"),
+                line(641.80, 90.0, 201.0, "- Valg af landskasserer"),
+                line(627.25, 72.0, 195.0, "11:35: Behandling af politik"),
+                line(612.70, 72.0, 133.0, "12:00 Frokost"),
+            ],
+            &Running::default(),
+            &HashMap::new(),
+        );
+        let items: Vec<(u8, String)> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::ListItem { indent, spans, .. } => {
+                    Some((*indent, spans.iter().map(|s| s.text.as_str()).collect()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            items,
+            vec![
+                (1, "Valg af landsforperson".to_string()),
+                (1, "Valg af landsnaestforperson".to_string()),
+                (1, "Valg af landskasserer".to_string()),
+            ],
+            "three items, each one step in, the last holding only itself"
+        );
+        let paragraphs: Vec<(u8, String)> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph { indent, spans, .. } => {
+                    Some((*indent, spans.iter().map(|s| s.text.as_str()).collect()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            paragraphs
+                .iter()
+                .any(|(indent, text)| *indent == 0 && text.starts_with("11:35:")),
+            "the programme after the list is its own block, back at the margin"
+        );
     }
 }
