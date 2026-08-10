@@ -100,6 +100,7 @@ pub mod squiral;
 pub mod starfish;
 pub mod substrate;
 pub mod t3d;
+pub mod tessellimage;
 pub mod thornbird;
 pub mod triangle;
 pub mod truchet;
@@ -208,6 +209,7 @@ pub static ALL: &[&Saver] = &[
     &starfish::SAVER,
     &substrate::SAVER,
     &t3d::SAVER,
+    &tessellimage::SAVER,
     &thornbird::SAVER,
     &triangle::SAVER,
     &vines::SAVER,

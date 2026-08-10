@@ -16,7 +16,7 @@
 //! host, so every image-consuming saver runs against the test card.
 
 use super::color::{Pixel, rgb};
-use super::fb::{Fb, Gc, XImage};
+use super::fb::{Fb, Gc, XImage, XRectangle};
 
 /// A request for an image, held by the hack while it waits.
 ///
@@ -49,6 +49,13 @@ pub struct ImageChannel {
     pub(crate) ready: Option<XImage>,
     /// The most recent image's caption, if the host supplied one.
     pub(crate) title: Option<String>,
+    /// Where in the window the last picture actually landed.
+    ///
+    /// Upstream's `load_image_async_simple` takes this as an out-parameter,
+    /// because a photograph rarely has the window's aspect ratio and the hacks
+    /// that care want to know which part of the window is picture and which is
+    /// the black either side of it.
+    pub(crate) geometry: XRectangle,
 }
 
 impl ImageChannel {
@@ -61,6 +68,12 @@ impl ImageChannel {
         now: f64,
         pending: Option<ImageLoad>,
     ) -> Option<ImageLoad> {
+        let whole = XRectangle {
+            x: 0,
+            y: 0,
+            width: window.width(),
+            height: window.height(),
+        };
         let Some(load) = pending else {
             if self.host_supplies {
                 self.requested = true;
@@ -68,33 +81,41 @@ impl ImageChannel {
             }
             // Nobody to ask.
             draw_colorbars(window);
+            self.geometry = whole;
             return None;
         };
 
         if let Some(img) = self.ready.take() {
-            draw_centred(window, &img);
+            self.geometry = draw_centred(window, &img);
             return None;
         }
 
         if now - load.started >= PATIENCE {
             draw_colorbars(window);
+            self.geometry = whole;
             return None;
         }
         Some(load)
     }
 }
 
-/// Draw an image centred in the window, scaled down to fit if it is larger.
+/// Draw an image centred in the window, scaled down to fit if it is larger, and
+/// return the rectangle it landed in.
 ///
 /// Upstream's loader hands the hack an image already fitted to the window by
 /// `xscreensaver-getimage`; doing it here keeps that contract with a host that
 /// just decoded whatever size the source happened to be.
-fn draw_centred(window: &mut Fb, img: &XImage) {
+fn draw_centred(window: &mut Fb, img: &XImage) -> XRectangle {
     let (ww, wh) = (window.width(), window.height());
     let (iw, ih) = (img.width(), img.height());
     window.clear(0xFF00_0000);
     if iw <= 0 || ih <= 0 {
-        return;
+        return XRectangle {
+            x: 0,
+            y: 0,
+            width: ww,
+            height: wh,
+        };
     }
 
     // Fit inside the window, never enlarging: an upscaled phone photo looks
@@ -112,6 +133,13 @@ fn draw_centred(window: &mut Fb, img: &XImage) {
             let sx = (x as f64 / scale) as i32;
             window.put_pixel(ox + x, oy + y, img.get_pixel(sx, sy));
         }
+    }
+
+    XRectangle {
+        x: ox,
+        y: oy,
+        width: dw,
+        height: dh,
     }
 }
 

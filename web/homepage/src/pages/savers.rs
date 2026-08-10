@@ -599,6 +599,12 @@ saver!(
     xscreensaver::hacks2d::t3d::start
 );
 saver!(
+    "tessellimage",
+    tessellimage_body,
+    tessellimage_start,
+    xscreensaver::hacks2d::tessellimage::start
+);
+saver!(
     "thornbird",
     thornbird_body,
     thornbird_start,
@@ -1114,6 +1120,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "t3d",
         label: "T3D",
         start: t3d_start,
+    },
+    Entry {
+        slug: "tessellimage",
+        label: "Tessellimage",
+        start: tessellimage_start,
     },
     Entry {
         slug: "thornbird",

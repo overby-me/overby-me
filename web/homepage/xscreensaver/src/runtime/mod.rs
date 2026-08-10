@@ -20,6 +20,7 @@
 //! so a saver behaves identically in a `cargo test` and on the page.
 
 pub mod color;
+pub mod delaunay;
 pub mod erase;
 pub mod fb;
 pub mod image;
@@ -118,6 +119,13 @@ impl Dpy {
             ..
         } = self;
         images.poll(window, *time, pending)
+    }
+
+    /// Where in the window the last picture landed, which upstream's loader
+    /// returns through an out-parameter. Only meaningful once a load has
+    /// finished; before that it is the whole window.
+    pub fn image_geometry(&self) -> XRectangle {
+        self.images.geometry
     }
 
     /// Host side: tell the runtime that images can be fetched. Without this a
