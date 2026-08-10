@@ -31,6 +31,7 @@ pub mod cloudlife;
 pub mod compass;
 pub mod coral;
 pub mod critical;
+pub mod crystal;
 pub mod cwaves;
 pub mod cynosure;
 pub mod decayscreen;
@@ -148,6 +149,7 @@ pub static ALL: &[&Saver] = &[
     &compass::SAVER,
     &coral::SAVER,
     &critical::SAVER,
+    &crystal::SAVER,
     &cwaves::SAVER,
     &deco::SAVER,
     &cynosure::SAVER,

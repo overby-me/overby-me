@@ -184,6 +184,12 @@ saver!(
     xscreensaver::hacks2d::critical::start
 );
 saver!(
+    "crystal",
+    crystal_body,
+    crystal_start,
+    xscreensaver::hacks2d::crystal::start
+);
+saver!(
     "cwaves",
     cwaves_body,
     cwaves_start,
@@ -823,6 +829,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "critical",
         label: "Critical",
         start: critical_start,
+    },
+    Entry {
+        slug: "crystal",
+        label: "Crystal",
+        start: crystal_start,
     },
     Entry {
         slug: "cwaves",
