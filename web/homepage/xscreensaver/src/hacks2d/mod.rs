@@ -107,6 +107,7 @@ pub mod spiral;
 pub mod spotlight;
 pub mod squiral;
 pub mod starfish;
+pub mod strange;
 pub mod substrate;
 pub mod t3d;
 pub mod tessellimage;
@@ -227,6 +228,7 @@ pub static ALL: &[&Saver] = &[
     &spotlight::SAVER,
     &squiral::SAVER,
     &starfish::SAVER,
+    &strange::SAVER,
     &substrate::SAVER,
     &t3d::SAVER,
     &tessellimage::SAVER,
