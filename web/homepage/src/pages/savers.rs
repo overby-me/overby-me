@@ -112,6 +112,12 @@ saver!(
     xscreensaver::hacks2d::attraction::start
 );
 saver!(
+    "barcode",
+    barcode_body,
+    barcode_start,
+    xscreensaver::hacks2d::barcode::start
+);
+saver!(
     "binaryhorizon",
     binaryhorizon_body,
     binaryhorizon_start,
@@ -859,6 +865,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "attraction",
         label: "Attraction",
         start: attraction_start,
+    },
+    Entry {
+        slug: "barcode",
+        label: "Barcode",
+        start: barcode_start,
     },
     Entry {
         slug: "binaryhorizon",

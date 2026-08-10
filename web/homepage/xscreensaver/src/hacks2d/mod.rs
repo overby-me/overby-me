@@ -19,6 +19,7 @@ pub mod anemotaxis;
 pub mod ant;
 pub mod apollonian;
 pub mod attraction;
+pub mod barcode;
 pub mod binaryhorizon;
 pub mod binaryring;
 pub mod blaster;
@@ -152,6 +153,7 @@ pub static ALL: &[&Saver] = &[
     &anemotaxis::SAVER,
     &apollonian::SAVER,
     &attraction::SAVER,
+    &barcode::SAVER,
     &binaryhorizon::SAVER,
     &binaryring::SAVER,
     &blaster::SAVER,
