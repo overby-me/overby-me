@@ -592,6 +592,12 @@ saver!(
     xscreensaver::hacks2d::polyominoes::start
 );
 saver!(
+    "pong",
+    pong_body,
+    pong_start,
+    xscreensaver::hacks2d::pong::start
+);
+saver!(
     "popsquares",
     popsquares_body,
     popsquares_start,
@@ -1277,6 +1283,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "polyominoes",
         label: "Polyominoes",
         start: polyominoes_start,
+    },
+    Entry {
+        slug: "pong",
+        label: "Pong",
+        start: pong_start,
     },
     Entry {
         slug: "popsquares",

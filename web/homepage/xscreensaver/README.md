@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (128) |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (129) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -21,7 +21,8 @@ something built first, and each group unlocks together:
 
 | Blocked on | Savers |
 |-|-|
-| nothing: `analogtv.c` is built, ready to port | `apple2`, `phosphor`, `pong`, `vfeedback`, `xanalogtv` |
+| bundled images, on top of `analogtv.c` | `apple2`, `vfeedback`, `xanalogtv` (test cards) |
+| nothing: ready to port | `phosphor` |
 | bundled images | `bubbles` (44 sprites), `maze` (logos), `pacman` (a sprite sheet) |
 | bundled images, on top of text | `bsod`, `flag`, `noseguy`, `xmatrix` |
 | a JPEG decoder | `glitchpeg` |

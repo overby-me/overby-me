@@ -207,6 +207,85 @@ impl Input {
         let righti = (VIS_START as f64 + VIS_LEN as f64 * right) as i32;
         self.draw_solid(lefti, righti, topi, boti, lcp_to_ntsc(luma, chroma, phase));
     }
+
+    /// `analogtv_draw_char`. Only the set bits are drawn, so a glyph goes over
+    /// whatever is already on that part of the line.
+    pub fn draw_char(&mut self, f: &TvFont, c: u8, x: i32, y: i32, ntsc: [i32; 4]) {
+        for yc in 0..f.char_h {
+            for ys in y + yc * f.y_mult..y + (yc + 1) * f.y_mult {
+                if !(0..V as i32).contains(&ys) {
+                    continue;
+                }
+                for xc in 0..f.char_w {
+                    if !f.pixel(c, xc, yc) {
+                        continue;
+                    }
+                    for xs in x + xc * f.x_mult..x + (xc + 1) * f.x_mult {
+                        if !(0..H as i32).contains(&xs) {
+                            continue;
+                        }
+                        self.set(ys as usize, xs as usize, ntsc[(xs & 3) as usize] as i8);
+                    }
+                }
+            }
+        }
+    }
+
+    /// `analogtv_draw_string`.
+    pub fn draw_string(&mut self, f: &TvFont, s: &str, x: i32, y: i32, ntsc: [i32; 4]) {
+        let mut x = x;
+        for c in s.bytes() {
+            self.draw_char(f, c, x, y, ntsc);
+            x += f.char_w * f.x_mult;
+        }
+    }
+}
+
+/// A bitmap font for drawing straight into a signal.
+///
+/// 256 characters of `char_w` by `char_h`, each bit drawn as `x_mult` by
+/// `y_mult` samples. Upstream can also build one from a real font; the hacks
+/// that use this one fill in their own glyphs instead, which is the only path
+/// that means anything here.
+pub struct TvFont {
+    pub char_w: i32,
+    pub char_h: i32,
+    pub x_mult: i32,
+    pub y_mult: i32,
+    bits: Vec<bool>,
+}
+
+impl TvFont {
+    pub fn new(char_w: i32, char_h: i32) -> TvFont {
+        TvFont {
+            char_w,
+            char_h,
+            x_mult: 4,
+            y_mult: 2,
+            bits: vec![false; 256 * (char_w * char_h).max(1) as usize],
+        }
+    }
+
+    pub fn pixel(&self, c: u8, x: i32, y: i32) -> bool {
+        if !(0..self.char_w).contains(&x) || !(0..self.char_h).contains(&y) {
+            return false;
+        }
+        self.bits[(i32::from(c) * self.char_w * self.char_h + y * self.char_w + x) as usize]
+    }
+
+    /// `analogtv_font_set_char`: one glyph as rows of text, where a space is
+    /// off and anything else is on. A short string simply leaves the rest of
+    /// the glyph as it was.
+    pub fn set_char(&mut self, c: u8, s: &str) {
+        let mut it = s.bytes();
+        for y in 0..self.char_h {
+            for x in 0..self.char_w {
+                let Some(b) = it.next() else { return };
+                let i = (i32::from(c) * self.char_w * self.char_h + y * self.char_w + x) as usize;
+                self.bits[i] = b != b' ';
+            }
+        }
+    }
 }
 
 /// A colour, as the four samples of one subcarrier cycle that encode it.
