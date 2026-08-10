@@ -377,6 +377,12 @@ saver!(
     xscreensaver::hacks2d::sierpinski::start
 );
 saver!(
+    "slidescreen",
+    slidescreen_body,
+    slidescreen_start,
+    xscreensaver::hacks2d::slidescreen::start
+);
+saver!(
     "slip",
     slip_body,
     slip_start,
@@ -719,6 +725,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sierpinski",
         label: "Sierpinski",
         start: sierpinski_start,
+    },
+    Entry {
+        slug: "slidescreen",
+        label: "Slide Screen",
+        start: slidescreen_start,
     },
     Entry {
         slug: "slip",

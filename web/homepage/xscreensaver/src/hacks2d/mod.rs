@@ -63,6 +63,7 @@ pub mod rorschach;
 pub mod rotor;
 pub mod shadebobs;
 pub mod sierpinski;
+pub mod slidescreen;
 pub mod slip;
 pub mod sphere;
 pub mod spiral;
@@ -136,6 +137,7 @@ pub static ALL: &[&Saver] = &[
     &rotor::SAVER,
     &shadebobs::SAVER,
     &sierpinski::SAVER,
+    &slidescreen::SAVER,
     &slip::SAVER,
     &sphere::SAVER,
     &spiral::SAVER,
