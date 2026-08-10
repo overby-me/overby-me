@@ -49,6 +49,7 @@ pub mod kaleidescope;
 pub mod kumppa;
 pub mod laser;
 pub mod lcdscrub;
+pub mod lightning;
 pub mod lissie;
 pub mod lmorph;
 pub mod metaballs;
@@ -126,6 +127,7 @@ pub static ALL: &[&Saver] = &[
     &laser::SAVER,
     &kumppa::SAVER,
     &lcdscrub::SAVER,
+    &lightning::SAVER,
     &lissie::SAVER,
     &moire::SAVER,
     &lmorph::SAVER,
@@ -188,6 +190,12 @@ mod tests {
             .count()
     }
 
+    /// How long to keep looking for a saver's first picture. Lightning spends
+    /// well over a second of its cycle waiting for the strike, and a hack that
+    /// draws nothing at all for that long is still a bug, so the window is
+    /// generous and the loop leaves as soon as it has seen something.
+    const PATIENCE: usize = 400;
+
     /// Sampled as the run goes rather than measured at the end: pyro's shells
     /// fly off the top of the screen between launches, so its last frame can be
     /// nearly empty while the hack is drawing plenty.
@@ -197,10 +205,13 @@ mod tests {
             let def = saver.def;
             let mut r = (saver.start)(StartArgs::new(320, 240, "", 20260809));
             let mut best = 0;
-            for i in 0..FRAMES {
+            for i in 0..PATIENCE {
                 r.step();
                 if i % 10 == 0 {
                     best = best.max(lit(&r));
+                    if best > 100 {
+                        break;
+                    }
                 }
             }
             best = best.max(lit(&r));

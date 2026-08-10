@@ -292,6 +292,12 @@ saver!(
     xscreensaver::hacks2d::lcdscrub::start
 );
 saver!(
+    "lightning",
+    lightning_body,
+    lightning_start,
+    xscreensaver::hacks2d::lightning::start
+);
+saver!(
     "lissie",
     lissie_body,
     lissie_start,
@@ -673,6 +679,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "lcdscrub",
         label: "LCD Scrub",
         start: lcdscrub_start,
+    },
+    Entry {
+        slug: "lightning",
+        label: "Lightning",
+        start: lightning_start,
     },
     Entry {
         slug: "lissie",
