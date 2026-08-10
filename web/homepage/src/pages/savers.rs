@@ -262,6 +262,12 @@ saver!(
     xscreensaver::hacks2d::imsmap::start
 );
 saver!(
+    "intermomentary",
+    intermomentary_body,
+    intermomentary_start,
+    xscreensaver::hacks2d::intermomentary::start
+);
+saver!(
     "julia",
     julia_body,
     julia_start,
@@ -654,6 +660,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "imsmap",
         label: "IMS Map",
         start: imsmap_start,
+    },
+    Entry {
+        slug: "intermomentary",
+        label: "Intermomentary",
+        start: intermomentary_start,
     },
     Entry {
         slug: "julia",

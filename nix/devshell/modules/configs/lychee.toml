@@ -63,4 +63,5 @@ exclude = [
   'www\.organic\.com/staff/',
   'home\.sol\.no/',
   'cs\.cmu\.edu/~spot/',
+  'complexification\.net/gallery/machines/interMomentary/',
 ]

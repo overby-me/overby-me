@@ -44,6 +44,7 @@ pub mod hopalong;
 pub mod hypercube;
 pub mod ifs;
 pub mod imsmap;
+pub mod intermomentary;
 pub mod julia;
 pub mod kaleidescope;
 pub mod kumppa;
@@ -122,6 +123,7 @@ pub static ALL: &[&Saver] = &[
     &hypercube::SAVER,
     &ifs::SAVER,
     &imsmap::SAVER,
+    &intermomentary::SAVER,
     &julia::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,
