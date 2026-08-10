@@ -1046,6 +1046,14 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     let mut confirm_open = use_signal(|| false);
     // Deleting walks the file's comment subtree a request at a time.
     let mut deleting = use_signal(|| false);
+    // Still mutable means not yet submitted, which this file's row in the folder
+    // listing has always said with its `lock_open` mark. Now the page says it too,
+    // and offers the way out of it: a file was the one content view with no submit
+    // action, so an uploaded agenda stood marked unsubmitted with no Indsend
+    // anywhere on it. Submitting only flips `mutable`, exactly as on a document.
+    let is_mutable = node.mutable;
+    let can_submit = can_manage && is_mutable;
+    let mut confirm_submit = use_signal(|| false);
 
     let data = node.data.map(|d| d.0);
 
@@ -1173,7 +1181,11 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
         // get far more than a comment thread does.
         div { class: "card app-card file-card {accent}",
             div { class: "card-header",
-                div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
+                // The same not-submitted mark the file's row carries in a list, so
+                // its own page does not look finished when the listing says it is not.
+                super::loader::AvatarBadged { mutable: is_mutable,
+                    div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
+                }
                 div {
                     h3 { class: "title-medium", "{name}" }
                     div { class: "file-meta-chips",
@@ -1280,6 +1292,19 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 }
                             }
                         }
+                        // Submit: the file is uploaded already, and this only makes
+                        // it final. Gated on the node still being mutable, so the
+                        // row disappears once it has been submitted.
+                        if can_submit && !segments.is_empty() {
+                            super::widgets::SheetGroup { title: t("common.toolsManage"),
+                                button {
+                                    class: "sheet-action",
+                                    onclick: move |_| confirm_submit.set(true),
+                                    span { class: "material-icons", "publish" }
+                                    "{t(\"content.submit\")}"
+                                }
+                            }
+                        }
                         if can_manage && !segments.is_empty() {
                             super::widgets::SheetGroup { danger: true,
                                 button {
@@ -1290,6 +1315,59 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 }
                             }
                         }
+                    }
+                }
+                // Submit confirm, carrying the same warning ContentApp's does: after
+                // this the file can no longer be edited.
+                if can_submit && !segments.is_empty() {
+                    super::widgets::Dialog {
+                        open: confirm_submit(),
+                        on_dismiss: move |_| confirm_submit.set(false),
+                        headline: t("content.submit"),
+                        icon: "publish".to_string(),
+                        actions: rsx! {
+                            button {
+                                class: "btn btn-outlined",
+                                onclick: move |_| confirm_submit.set(false),
+                                "{t(\"common.cancel\")}"
+                            }
+                            button {
+                                class: "btn btn-primary",
+                                onclick: {
+                                    let node_id = node_id.clone();
+                                    move |_| {
+                                        confirm_submit.set(false);
+                                        let token = session.read().access_token.clone();
+                                        let node_id = node_id.clone();
+                                        spawn(async move {
+                                            match graphql::update_node(
+                                                token.as_deref(),
+                                                &node_id,
+                                                crate::model::NodesSetInput {
+                                                    mutable: Some(false),
+                                                    ..Default::default()
+                                                },
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => {
+                                                    crate::session::bump_data_version();
+                                                    crate::snackbar::show_snackbar(&t("content.submit"));
+                                                }
+                                                Err(e) => {
+                                                    crate::errors::log_handled("file submit failed", e);
+                                                    crate::snackbar::show_snackbar(&t(
+                                                        "error.somethingWentWrong",
+                                                    ));
+                                                }
+                                            }
+                                        });
+                                    }
+                                },
+                                "{t(\"content.submit\")}"
+                            }
+                        },
+                        p { class: "body-medium", "{t(\"content.submitWarning\")}" }
                     }
                 }
                 // Delete confirm dialog (owner-only).
