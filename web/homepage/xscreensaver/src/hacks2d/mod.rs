@@ -25,6 +25,7 @@ pub mod boxfit;
 pub mod braid;
 pub mod bumps;
 pub mod ccurve;
+pub mod celtic;
 pub mod cloudlife;
 pub mod compass;
 pub mod coral;
@@ -137,6 +138,7 @@ pub static ALL: &[&Saver] = &[
     &braid::SAVER,
     &bumps::SAVER,
     &ccurve::SAVER,
+    &celtic::SAVER,
     &cloudlife::SAVER,
     &compass::SAVER,
     &coral::SAVER,

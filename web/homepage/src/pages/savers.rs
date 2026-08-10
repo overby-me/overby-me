@@ -148,6 +148,12 @@ saver!(
     xscreensaver::hacks2d::ccurve::start
 );
 saver!(
+    "celtic",
+    celtic_body,
+    celtic_start,
+    xscreensaver::hacks2d::celtic::start
+);
+saver!(
     "cloudlife",
     cloudlife_body,
     cloudlife_start,
@@ -763,6 +769,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "ccurve",
         label: "C Curve",
         start: ccurve_start,
+    },
+    Entry {
+        slug: "celtic",
+        label: "Celtic",
+        start: celtic_start,
     },
     Entry {
         slug: "cloudlife",
