@@ -92,6 +92,7 @@ pub mod pedal;
 pub mod penrose;
 pub mod petri;
 pub mod piecewise;
+pub mod polyominoes;
 pub mod popsquares;
 pub mod pyro;
 pub mod qix;
@@ -220,6 +221,7 @@ pub static ALL: &[&Saver] = &[
     &penrose::SAVER,
     &petri::SAVER,
     &piecewise::SAVER,
+    &polyominoes::SAVER,
     &popsquares::SAVER,
     &pyro::SAVER,
     &qix::SAVER,

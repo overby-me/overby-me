@@ -550,6 +550,12 @@ saver!(
     xscreensaver::hacks2d::piecewise::start
 );
 saver!(
+    "polyominoes",
+    polyominoes_body,
+    polyominoes_start,
+    xscreensaver::hacks2d::polyominoes::start
+);
+saver!(
     "popsquares",
     popsquares_body,
     popsquares_start,
@@ -1194,6 +1200,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "piecewise",
         label: "Piecewise",
         start: piecewise_start,
+    },
+    Entry {
+        slug: "polyominoes",
+        label: "Polyominoes",
+        start: polyominoes_start,
     },
     Entry {
         slug: "popsquares",
