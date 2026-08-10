@@ -76,6 +76,7 @@ pub mod wander;
 pub mod whirlwindwarp;
 pub mod worm;
 pub mod xspirograph;
+pub mod zoom;
 
 /// Every 2D saver ported so far.
 ///
@@ -147,6 +148,7 @@ pub static ALL: &[&Saver] = &[
     &whirlwindwarp::SAVER,
     &worm::SAVER,
     &xspirograph::SAVER,
+    &zoom::SAVER,
 ];
 
 #[cfg(test)]
