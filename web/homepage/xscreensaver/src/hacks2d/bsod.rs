@@ -1745,6 +1745,264 @@ fn msdos(d: &mut Dpy, f: &Fonts) -> Bst {
     bst
 }
 
+/// A crash spotted on a cash machine circa 2006, by jwz. He didn't note what
+/// model it was; probably a Tranax Mini-Bank 1000 or similar vintage.
+fn atm(d: &mut Dpy, f: &Fonts) -> Bst {
+    let bst = Bst::new(d, BLACK, color("#FF6600", WHITE), f);
+    let scale = 0.48;
+
+    bst.clear(d);
+
+    let mut art = Art::load(crate::images::bsod::ATM);
+    let (mut pix_w, mut pix_h) = art.as_ref().map_or((64, 64), |a| (a.width(), a.height()));
+    let mut i = 0;
+    while f64::from(pix_w) <= f64::from(bst.width) * scale
+        && f64::from(pix_h) <= f64::from(bst.height) * scale
+    {
+        art = art.map(|a| a.doubled());
+        pix_w *= 2;
+        pix_h *= 2;
+        i += 1;
+    }
+
+    let x = (bst.width - pix_w) / 2;
+    let y = ((bst.height - pix_h) / 2).max(0);
+
+    if let Some(art) = &mut art {
+        if i > 0 {
+            // Rule the enlarged picture back into pixels, so it still looks
+            // like the low-resolution screen it came off.
+            let gc = Gc::new(bst.bg, bst.bg);
+            let mut j = -1;
+            while j < pix_w {
+                art.image.draw_line(&gc, j, 0, j, pix_h);
+                j += i + 1;
+            }
+            let mut j = -1;
+            while j < pix_h {
+                art.image.draw_line(&gc, 0, j, pix_w, j);
+                j += i + 1;
+            }
+        }
+        let mut gc = Gc::default();
+        art.draw(d, &mut gc, x, y);
+    }
+    bst
+}
+
+/// Gnome SOD. Truly 2020 will be the year of the Linux Desktop.
+fn gnome(d: &mut Dpy, f: &Fonts) -> Bst {
+    let which = random() & 1 != 0;
+    let (art, fg, bg) = if which {
+        (
+            Art::load(crate::images::bsod::GNOME2),
+            color("#2E3436", BLACK),
+            color("#F0F0F0", WHITE),
+        )
+    } else {
+        (
+            Art::load(crate::images::bsod::GNOME1),
+            color("#E2E2E2", WHITE),
+            BLACK,
+        )
+    };
+    let mut bst = Bst::new(d, fg, bg, f);
+    let lh = bst.line_height();
+
+    let (pix_w, pix_h) = art.as_ref().map_or((64, 64), |a| (a.width(), a.height()));
+    let x = (bst.width - pix_w) / 2;
+    let y = ((bst.height - pix_h) / 2).max(0);
+
+    bst.clear(d);
+    if let Some(art) = &art {
+        let mut gc = Gc::default();
+        art.draw(d, &mut gc, x, y);
+    }
+
+    bst.moveto(0, y + pix_h + lh * 2);
+    bst.color(fg, bg);
+    bst.set_font(0);
+    bst.text(Align::Center, "Oh no!  Something has gone wrong!\n\n");
+    bst.set_font(1);
+    bst.text(
+        Align::Center,
+        "A problem has occurred and the system can't recover.\n",
+    );
+    bst.text(Align::Center, "Please log out and try again.");
+    bst.pause(60 * 1_000_000);
+    bst
+}
+
+/// MacsBug, the debugger a Macintosh dropped into: the register window down
+/// the left, the disassembly along the bottom, and the call chain filling the
+/// rest, with a cursor that inverts the whole page rather than blinking.
+fn macsbug(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, BLACK, WHITE, f);
+
+    let left = "    SP     \n\
+                \x2004EB0A58  \n\
+                58 00010000\n\
+                5C 00010000\n\
+                \x20  ........\n\
+                60 00000000\n\
+                64 000004EB\n\
+                \x20  ........\n\
+                68 0000027F\n\
+                6C 2D980035\n\
+                \x20  ....-..5\n\
+                70 00000054\n\
+                74 0173003E\n\
+                \x20  ...T.s.>\n\
+                78 04EBDA76\n\
+                7C 04EBDA8E\n\
+                \x20  .S.L.a.U\n\
+                80 00000000\n\
+                84 000004EB\n\
+                \x20  ........\n\
+                88 00010000\n\
+                8C 00010000\n\
+                \x20  ...{3..S\n\
+                \n\
+                \n\
+                \x20CurApName \n\
+                \x20 Finder   \n\
+                \n\
+                \x2032-bit VM \n\
+                SR Smxnzvc0\n\
+                D0 04EC0062\n\
+                D1 00000053\n\
+                D2 FFFF0100\n\
+                D3 00010000\n\
+                D4 00010000\n\
+                D5 04EBDA76\n\
+                D6 04EBDA8E\n\
+                D7 00000001\n\
+                \n\
+                A0 04EBDA76\n\
+                A1 04EBDA8E\n\
+                A2 A0A00060\n\
+                A3 027F2D98\n\
+                A4 027F2E58\n\
+                A5 04EC04F0\n\
+                A6 04EB0A86\n\
+                A7 04EB0A58";
+    let bottom = "  _A09D\n\
+                  \x20    +00884    40843714     #$0700,SR         \
+                  \x20                 ; A973        | A973\n\
+                  \x20    +00886    40843765     *+$0400           \
+                  \x20                               | 4A1F\n\
+                  \x20    +00888    40843718     $0004(A7),([0,A7[)\
+                  \x20                 ; 04E8D0AE    | 66B8";
+    let body = "PowerPC unmapped memory exception at 003AFDAC \
+                BowelsOfTheMemoryMgr+04F9C\n\
+                \x20Calling chain using A6/R1 links\n\
+                \x20 Back chain  ISA  Caller\n\
+                \x20 00000000    PPC  28C5353C  __start+00054\n\
+                \x20 24DB03C0    PPC  28B9258C  main+0039C\n\
+                \x20 24DB0350    PPC  28B9210C  MainEvent+00494\n\
+                \x20 24DB02B0    PPC  28B91B40  HandleEvent+00278\n\
+                \x20 24DB0250    PPC  28B83DAC  DoAppleEvent+00020\n\
+                \x20 24DB0210    PPC  FFD3E5D0  AEProcessAppleEvent+00020\n\
+                \x20 24DB0132    68K  00589468\n\
+                \x20 24DAFF8C    68K  00589582\n\
+                \x20 24DAFF26    68K  00588F70\n\
+                \x20 24DAFEB3    PPC  00307098  EmToNatEndMoveParams+00014\n\
+                \x20 24DAFE40    PPC  28B9D0B0  DoScript+001C4\n\
+                \x20 24DAFDD0    PPC  28B9C35C  RunScript+00390\n\
+                \x20 24DAFC60    PPC  28BA36D4  run_perl+000E0\n\
+                \x20 24DAFC10    PPC  28BC2904  perl_run+002CC\n\
+                \x20 24DAFA80    PPC  28C18490  Perl_runops+00068\n\
+                \x20 24DAFA30    PPC  28BE6CC0  Perl_pp_backtick+000FC\n\
+                \x20 24DAF9D0    PPC  28BA48B8  Perl_my_popen+00158\n\
+                \x20 24DAF980    PPC  28C5395C  sfclose+00378\n\
+                \x20 24DAF930    PPC  28BA568C  free+0000C\n\
+                \x20 24DAF8F0    PPC  28BA6254  pool_free+001D0\n\
+                \x20 24DAF8A0    PPC  FFD48F14  DisposePtr+00028\n\
+                \x20 24DAF7C9    PPC  00307098  EmToNatEndMoveParams+00014\n\
+                \x20 24DAF780    PPC  003AA180  __DisposePtr+00010";
+
+    let body_lines = 1 + body.matches('\n').count() as i32;
+
+    let (fg, bg) = (bst.fg, bst.bg);
+    let bc = color("#AAAAAA", WHITE);
+
+    bst.xoff = 0;
+    bst.left_margin = 0;
+    bst.right_margin = 0;
+
+    let char_width = bst.font.char_width();
+    let line_height = bst.line_height();
+
+    let col_right = char_width * 12; /* number of columns in `left' */
+    let mut page_bottom = (line_height * 47).min(bst.height - bst.yoff); /* lines in `left' */
+
+    let row_bottom = page_bottom - line_height;
+    let row_top = row_bottom - line_height * 4;
+    let page_right = col_right + char_width * 88;
+    let mut body_top = row_top - line_height * body_lines;
+
+    page_bottom += 2;
+    let row_bottom = row_bottom + 2;
+    body_top -= 4;
+    body_top = body_top.min(4);
+
+    let xoff = ((bst.width - page_right) / 2).max(0);
+    let yoff = ((bst.height - page_bottom) / 2).max(0);
+
+    bst.margins(xoff, xoff);
+
+    bst.color(bc, bg);
+    let (w, h) = (bst.width, bst.height);
+    bst.rect(true, 0, 0, w, h);
+    bst.color(bg, bg);
+    bst.rect(true, xoff - 2, yoff, page_right + 4, page_bottom);
+    bst.color(fg, bg);
+
+    bst.moveto(xoff, yoff + line_height);
+    bst.text(Align::Left, left);
+    bst.moveto(xoff + col_right, yoff + row_top + line_height);
+    bst.text(Align::Left, bottom);
+
+    bst.rect(true, xoff + col_right, yoff, 2, page_bottom);
+    bst.rect(
+        true,
+        xoff + col_right,
+        yoff + row_top,
+        page_right - col_right,
+        1,
+    );
+    bst.rect(
+        true,
+        xoff + col_right,
+        yoff + row_bottom,
+        page_right - col_right,
+        1,
+    );
+    bst.rect(false, xoff - 2, yoff, page_right + 4, page_bottom);
+
+    bst.line_delay(500);
+    bst.moveto(xoff + col_right + char_width, yoff + body_top + line_height);
+    bst.margins(xoff + col_right + char_width, xoff + col_right + char_width);
+    bst.text(Align::Left, body);
+
+    bst.rect(false, xoff - 2, yoff, page_right + 4, page_bottom); /* again */
+
+    bst.rect(
+        false,
+        xoff + col_right + char_width / 2 + 2,
+        yoff + row_bottom + 2,
+        0,
+        page_bottom - row_bottom - 4,
+    );
+
+    bst.pause(666_666);
+    bst.invert();
+    bst.loop_back(-3);
+
+    bst.clear(d);
+    bst
+}
+
 /// The original Macintosh's bomb.
 fn mac1(d: &mut Dpy, f: &Fonts) -> Bst {
     let bst = Bst::new(d, BLACK, WHITE, f);
@@ -3235,6 +3493,16 @@ const MODES: &[Mode] = &[
         fonts: NONE,
     },
     Mode {
+        name: "MacsBug",
+        fun: macsbug,
+        fonts: [
+            "Monaco 8, Courier Bold 8",
+            "Monaco 14, Courier Bold 14",
+            "",
+            "",
+        ],
+    },
+    Mode {
         name: "Mac1",
         fun: mac1,
         fonts: NONE,
@@ -3243,6 +3511,16 @@ const MODES: &[Mode] = &[
         name: "MacX",
         fun: macx,
         fonts: ["Courier Bold 10", "Courier Bold 14", "", ""],
+    },
+    Mode {
+        name: "ATM",
+        fun: atm,
+        fonts: NONE,
+    },
+    Mode {
+        name: "Gnome",
+        fun: gnome,
+        fonts: ["Helvetica Bold 13", "Helvetica Bold 13", "Helvetica 13", ""],
     },
     Mode {
         name: "DVD",
@@ -3517,12 +3795,24 @@ const ONLY: &[SelectItem] = &[
         label: "Macintosh",
     },
     SelectItem {
+        value: "MacsBug",
+        label: "MacsBug",
+    },
+    SelectItem {
         value: "Mac1",
         label: "Macintosh bomb",
     },
     SelectItem {
         value: "MacX",
         label: "Mac OS X",
+    },
+    SelectItem {
+        value: "ATM",
+        label: "Cash machine",
+    },
+    SelectItem {
+        value: "Gnome",
+        label: "GNOME",
     },
     SelectItem {
         value: "DVD",

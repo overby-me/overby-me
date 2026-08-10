@@ -21,10 +21,10 @@ that needed a runtime piece worth building.
 
 `bsod` is under way and is not counted above yet. It is thirty-nine computers
 crashing, each one a little program for the same command queue, so it arrives a
-few machines at a time. Twenty-four are in; the fifteen still to come are
-MacsBug, Linux on PA-RISC, Solaris, the Linux fsck, VMS, OS/2, the nvidia text
-mode, the Apple ][ crashes, the cash machine, Android, Encom, GNOME, systemd,
-the ransomware and Windows 10. The two left after it:
+few machines at a time. Twenty-seven are in; the twelve still to come are Linux
+on PA-RISC, Solaris, the Linux fsck, VMS, OS/2, the nvidia text mode, the Apple
+][ crashes, Android, Encom, systemd, the ransomware and Windows 10. The two
+left after it:
 
 | Blocked on | Savers |
 |-|-|

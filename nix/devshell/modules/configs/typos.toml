@@ -53,6 +53,9 @@ extend-ignore-re = [
   # A register value in the HP-UX dump and a Windows build tag, not words.
   "4FD8EDE1",
   "x86fre",
+  # Hexadecimal addresses in the crash dumps bsod transcribes: 28BA568C and
+  # the like, where the checker reads BA as a misspelling.
+  "\\b[0-9A-F]{8}\\b",
 ]
 
 [default.extend-words]
