@@ -24,6 +24,9 @@ extend-ignore-re = [
   "Orignal",
   "10ths",
   "descrete",
+  "resoources",
+  "distrubtable",
+  "unneccessary",
 ]
 
 [default.extend-words]

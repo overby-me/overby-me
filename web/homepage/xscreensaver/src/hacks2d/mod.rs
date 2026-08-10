@@ -57,6 +57,7 @@ pub mod popsquares;
 pub mod pyro;
 pub mod rorschach;
 pub mod rotor;
+pub mod shadebobs;
 pub mod sierpinski;
 pub mod sphere;
 pub mod spiral;
@@ -67,6 +68,7 @@ pub mod triangle;
 pub mod truchet;
 pub mod vines;
 pub mod wander;
+pub mod whirlwindwarp;
 pub mod worm;
 pub mod xspirograph;
 
@@ -121,6 +123,7 @@ pub static ALL: &[&Saver] = &[
     &pyro::SAVER,
     &rorschach::SAVER,
     &rotor::SAVER,
+    &shadebobs::SAVER,
     &sierpinski::SAVER,
     &sphere::SAVER,
     &spiral::SAVER,
@@ -131,6 +134,7 @@ pub static ALL: &[&Saver] = &[
     &vines::SAVER,
     &truchet::SAVER,
     &wander::SAVER,
+    &whirlwindwarp::SAVER,
     &worm::SAVER,
     &xspirograph::SAVER,
 ];

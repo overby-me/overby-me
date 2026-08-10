@@ -341,6 +341,12 @@ saver!(
     xscreensaver::hacks2d::rotor::start
 );
 saver!(
+    "shadebobs",
+    shadebobs_body,
+    shadebobs_start,
+    xscreensaver::hacks2d::shadebobs::start
+);
+saver!(
     "sierpinski",
     sierpinski_body,
     sierpinski_start,
@@ -399,6 +405,12 @@ saver!(
     wander_body,
     wander_start,
     xscreensaver::hacks2d::wander::start
+);
+saver!(
+    "whirlwindwarp",
+    whirlwindwarp_body,
+    whirlwindwarp_start,
+    xscreensaver::hacks2d::whirlwindwarp::start
 );
 saver!(
     "worm",
@@ -637,6 +649,11 @@ pub static SAVERS: &[Entry] = &[
         start: rotor_start,
     },
     Entry {
+        slug: "shadebobs",
+        label: "Shade Bobs",
+        start: shadebobs_start,
+    },
+    Entry {
         slug: "sierpinski",
         label: "Sierpinski",
         start: sierpinski_start,
@@ -685,6 +702,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "wander",
         label: "Wander",
         start: wander_start,
+    },
+    Entry {
+        slug: "whirlwindwarp",
+        label: "Whirlwind Warp",
+        start: whirlwindwarp_start,
     },
     Entry {
         slug: "worm",
