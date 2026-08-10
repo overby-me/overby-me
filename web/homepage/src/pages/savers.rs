@@ -328,6 +328,12 @@ saver!(
     xscreensaver::hacks2d::lightning::start
 );
 saver!(
+    "lisa",
+    lisa_body,
+    lisa_start,
+    xscreensaver::hacks2d::lisa::start
+);
+saver!(
     "lissie",
     lissie_body,
     lissie_start,
@@ -757,6 +763,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "lightning",
         label: "Lightning",
         start: lightning_start,
+    },
+    Entry {
+        slug: "lisa",
+        label: "Lisa",
+        start: lisa_start,
     },
     Entry {
         slug: "lissie",
