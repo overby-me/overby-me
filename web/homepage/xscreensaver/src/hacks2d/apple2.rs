@@ -38,10 +38,9 @@
 //!   order the memory map imposes, so it appears in eight passes rather than
 //!   from the top down.
 //!
-//! Two of `apple2.c`'s entry points are missing here, `a2_poke` and
-//! `a2_init_memory_active`, which fill memory with plausible garbage: nothing
-//! in this saver calls them. Upstream's caller is `bsod`, which borrows the
-//! machine for one of its crashes, and they can come back with it.
+//! The machine itself is not private to this saver: `bsod` borrows it for
+//! three of its crashes, and drives it with a controller of its own, the way
+//! upstream's `apple2_start` takes one.
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
@@ -58,33 +57,33 @@ const SCREEN_COLS: usize = 40;
 const SCREEN_ROWS: usize = 24;
 
 /// Graphics is showing on the bottom four rows too, rather than text.
-const A2_GR_FULL: u32 = 1;
+pub(crate) const A2_GR_FULL: u32 = 1;
 /// 40x48 blocks of sixteen colours, sharing memory with the text screen.
-const A2_GR_LORES: u32 = 2;
+pub(crate) const A2_GR_LORES: u32 = 2;
 /// 280x192, one bit per pixel, whatever colour the television makes of it.
-const A2_GR_HIRES: u32 = 4;
+pub(crate) const A2_GR_HIRES: u32 = 4;
 
 /// The controller has finished; wind the machine up.
-const A2CONTROLLER_DONE: i32 = -1;
+pub(crate) const A2CONTROLLER_DONE: i32 = -1;
 /// Last call: let the controller put its things away.
-const A2CONTROLLER_FREE: i32 = -2;
+pub(crate) const A2CONTROLLER_FREE: i32 = -2;
 
 /// The character generator: 64 glyphs of 7x8, side by side in one row.
 const FONT_W: i32 = 64 * 7;
 const FONT_H: i32 = 8;
 
 /// The 6502's video memory, as far as anything here cares about it.
-struct A2State {
+pub(crate) struct A2State {
     hireslines: Box<[[u8; 40]; 192]>,
     textlines: [[u8; 40]; SCREEN_ROWS],
-    gr_mode: u32,
+    pub(crate) gr_mode: u32,
     cursx: i32,
     cursy: i32,
     blink: bool,
 }
 
 impl A2State {
-    fn new() -> A2State {
+    pub(crate) fn new() -> A2State {
         A2State {
             hireslines: Box::new([[0; 40]; 192]),
             textlines: [[0; 40]; SCREEN_ROWS],
@@ -163,21 +162,21 @@ impl A2State {
         *self.curs() &= 0x7f; /* turn on blink */
     }
 
-    fn printc(&mut self, c: u8) {
+    pub(crate) fn printc(&mut self, c: u8) {
         self.printc_1(c, true);
     }
 
-    fn printc_noscroll(&mut self, c: u8) {
+    pub(crate) fn printc_noscroll(&mut self, c: u8) {
         self.printc_1(c, false);
     }
 
-    fn prints(&mut self, s: &str) {
+    pub(crate) fn prints(&mut self, s: &str) {
         for c in s.bytes() {
             self.printc(c);
         }
     }
 
-    fn goto(&mut self, r: i32, c: i32) {
+    pub(crate) fn goto(&mut self, r: i32, c: i32) {
         let r = r.min(23);
         let c = c.min(39);
         *self.curs() |= 0xc0; /* turn off blink */
@@ -186,7 +185,7 @@ impl A2State {
         *self.curs() &= 0x7f; /* turn on blink */
     }
 
-    fn cls(&mut self) {
+    pub(crate) fn cls(&mut self) {
         self.textlines = [[0xe0; 40]; SCREEN_ROWS];
     }
 
@@ -196,6 +195,93 @@ impl A2State {
 
     fn clear_hgr(&mut self) {
         *self.hireslines = [[0; 40]; 192];
+    }
+
+    /// Write a byte to an address, as a program would, and let the video
+    /// circuitry make of it what it will. The row arithmetic is the machine's
+    /// famously scrambled screen memory map.
+    ///
+    /// Nothing in this saver pokes anything; `bsod` does, when it borrows the
+    /// machine to crash it.
+    pub(crate) fn poke(&mut self, addr: usize, val: u8) {
+        if (0x400..0x800).contains(&addr) {
+            /* text memory */
+            let row = ((addr & 0x380) / 0x80) + ((addr & 0x7f) / 0x28) * 8;
+            let col = (addr & 0x7f) % 0x28;
+            if row < 24 && col < 40 {
+                self.textlines[row][col] = val;
+            }
+        } else if (0x2000..0x4000).contains(&addr) {
+            let row = ((addr & 0x1c00) / 0x400)
+                + ((addr & 0x0380) / 0x80) * 8
+                + ((addr & 0x0078) / 0x28) * 64;
+            let col = (addr & 0x07f) % 0x28;
+            if row < 192 && col < 40 {
+                self.hireslines[row][col] = val;
+            }
+        }
+    }
+
+    /// Simulate plausible initial memory contents for running a program.
+    pub(crate) fn init_memory_active(&mut self, font: &A2Font) {
+        let mut addr = 0;
+        while addr < 0x4000 {
+            match random() % 4 {
+                0 | 1 => {
+                    let n = random() % 500;
+                    for _ in 0..n {
+                        if addr >= 0x4000 {
+                            break;
+                        }
+                        let lo = if random().is_multiple_of(6) {
+                            0
+                        } else {
+                            random() % 16
+                        };
+                        let hi = if random().is_multiple_of(5) {
+                            0
+                        } else {
+                            random() % 16
+                        };
+                        self.poke(addr, (lo | (hi << 4)) as u8);
+                        addr += 1;
+                    }
+                }
+
+                2 => {
+                    /* Simulate shapes stored in memory. We use the font since we
+                    have it. Unreadable, since rows of each character are stored
+                    in consecutive bytes. It was typical to store each of the 7
+                    possible shifts of bitmaps, for fastest blitting to the
+                    screen. */
+                    let mut x = (random() % FONT_W as u32) as i32;
+                    for _ in 0..100 {
+                        for y in 0..8 {
+                            let mut c = 0u8;
+                            for j in 0..8 {
+                                c |= u8::from(font.pixel((x + j) % FONT_W, y)) << j;
+                            }
+                            self.poke(addr, c);
+                            addr += 1;
+                        }
+                        x = (x + 1) % FONT_W;
+                    }
+                }
+
+                _ => {
+                    if addr > 0x2000 {
+                        let n = random() % 200;
+                        for _ in 0..n {
+                            if addr >= 0x4000 {
+                                break;
+                            }
+                            self.poke(addr, 0);
+                            addr += 1;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// `HPLOT`. Sets two adjacent bits, because one bit is half a colour.
@@ -300,14 +386,14 @@ impl A2State {
 }
 
 /// The character generator ROM, one bool per pixel.
-struct A2Font {
+pub(crate) struct A2Font {
     ink: Vec<bool>,
 }
 
 impl A2Font {
     /// jwz's dump of the machine's font, since MacOS has no "6x10" to tweak
     /// into one. Ink is where the sheet is both opaque and black.
-    fn load() -> A2Font {
+    pub(crate) fn load() -> A2Font {
         let mut ink = vec![false; (FONT_W * FONT_H) as usize];
         if let Some((im, mask)) = png::decode(crate::images::APPLE2FONT)
             && im.width() == FONT_W
@@ -335,17 +421,27 @@ impl A2Font {
 
 /// Which of the three programs is running.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Slideshow,
     Terminal,
     Basic,
 }
 
+/// What is driving the machine.
+///
+/// Upstream passes `apple2_start` a function pointer and a `void *` for its
+/// state, and calls it whenever the machine is ready to be told what to do
+/// next. That is this: one implementation per program, each owning whatever it
+/// needs to remember. `bsod` supplies three of its own.
+pub(crate) trait Controller {
+    fn run(&mut self, sim: &mut Sim, d: &mut Dpy);
+}
+
 /// One run of the machine: switched on, doing something for a while, switched
 /// off again.
-struct Sim {
-    st: A2State,
-    dec: AnalogTv,
+pub(crate) struct Sim {
+    pub(crate) st: A2State,
+    pub(crate) dec: AnalogTv,
     inp: Input,
     reception: Reception,
     font: Rc<A2Font>,
@@ -364,21 +460,26 @@ struct Sim {
     printing_active: bool,
 
     basetime: f64,
-    curtime: f64,
+    pub(crate) curtime: f64,
     /// How long this run lasts, in seconds.
-    delay: f64,
+    pub(crate) delay: f64,
 
-    stepno: i32,
-    next_actiontime: f64,
+    pub(crate) stepno: i32,
+    pub(crate) next_actiontime: f64,
 
-    mode: Mode,
-    slides: Option<Slideshow>,
-    term: Option<Box<Terminal>>,
-    basic: Option<Basic>,
+    /// Taken out while it runs, so it can be handed the machine.
+    controller: Option<Box<dyn Controller>>,
 }
 
 impl Sim {
-    fn start(d: &mut Dpy, delay: f64, mode: Mode, font: Rc<A2Font>, knobs: [f32; 4]) -> Sim {
+    /// `apple2_start`: switch the machine on with a program to run.
+    pub(crate) fn start(
+        d: &mut Dpy,
+        delay: f64,
+        controller: Box<dyn Controller>,
+        font: Rc<A2Font>,
+        knobs: [f32; 4],
+    ) -> Sim {
         let mut dec = AnalogTv::new(d.width(), d.height());
         let mut inp = Input::new();
 
@@ -423,23 +524,20 @@ impl Sim {
             delay,
             stepno: 0,
             next_actiontime: 0.0,
-            mode,
-            slides: None,
-            term: None,
-            basic: None,
+            controller: Some(controller),
         };
         sim.run_controller(d);
         sim
     }
 
-    fn type_str(&mut self, s: &str) {
+    pub(crate) fn type_str(&mut self, s: &str) {
         self.typing.clear();
         self.typing.extend_from_slice(s.as_bytes());
         self.typing_pos = 0;
         self.typing_active = true;
     }
 
-    fn print_str(&mut self, s: &str) {
+    pub(crate) fn print_str(&mut self, s: &str) {
         self.printing.clear();
         self.printing.extend_from_slice(s.as_bytes());
         self.printing_pos = 0;
@@ -447,10 +545,11 @@ impl Sim {
     }
 
     fn run_controller(&mut self, d: &mut Dpy) {
-        match self.mode {
-            Mode::Slideshow => slideshow_controller(self, d),
-            Mode::Terminal => terminal_controller(self, d),
-            Mode::Basic => basic_controller(self),
+        // Out and back, so the controller can be handed the machine it is
+        // driving.
+        if let Some(mut c) = self.controller.take() {
+            c.run(self, d);
+            self.controller = Some(c);
         }
     }
 
@@ -463,7 +562,7 @@ impl Sim {
     }
 
     /// Returns false when the machine has been switched off for good.
-    fn one_frame(&mut self, d: &mut Dpy) -> bool {
+    pub(crate) fn one_frame(&mut self, d: &mut Dpy) -> bool {
         if self.stepno == A2CONTROLLER_DONE {
             return self.finish(d);
         }
@@ -813,148 +912,148 @@ struct Basic {
 
 /// Upstream also carries two states for a program it no longer runs
 /// (`dumb_program`, which is `#if 0`ed out) and one, 420, that nothing reaches.
-fn basic_controller(sim: &mut Sim) {
-    let mut mine = sim.basic.take().unwrap_or_default();
+impl Controller for Basic {
+    fn run(&mut self, sim: &mut Sim, _d: &mut Dpy) {
+        let mine = self;
 
-    match sim.stepno {
-        0 => {
-            sim.st.gr_mode = 0;
-            sim.st.cls();
-            sim.st.goto(0, 16);
-            sim.st.prints("APPLE ][");
-            sim.st.goto(23, 0);
-            sim.st.printc(b']');
-            sim.typing_rate = 0.2;
-
-            let (progtext, progstep) = ALL_PROGRAMS[(random() as usize) % ALL_PROGRAMS.len()];
-            mine.progtext = progtext;
-            mine.progstep = progstep;
-            mine.prog_line = 0;
-
-            sim.next_actiontime += 1.0;
-            sim.stepno = 10;
-        }
-
-        10 => {
-            if sim.st.cursx == 0 {
+        match sim.stepno {
+            0 => {
+                sim.st.gr_mode = 0;
+                sim.st.cls();
+                sim.st.goto(0, 16);
+                sim.st.prints("APPLE ][");
+                sim.st.goto(23, 0);
                 sim.st.printc(b']');
+                sim.typing_rate = 0.2;
+
+                let (progtext, progstep) = ALL_PROGRAMS[(random() as usize) % ALL_PROGRAMS.len()];
+                mine.progtext = progtext;
+                mine.progstep = progstep;
+                mine.prog_line = 0;
+
+                sim.next_actiontime += 1.0;
+                sim.stepno = 10;
             }
-            if mine.prog_line < mine.progtext.len() {
-                if random().is_multiple_of(4) {
-                    let (typed, err) = make_typo(mine.progtext[mine.prog_line]);
-                    sim.typing.clear();
-                    sim.typing.extend_from_slice(&typed);
-                    sim.typing_pos = 0;
-                    sim.typing_active = true;
-                    if err.is_empty() {
-                        mine.prog_line += 1;
+
+            10 => {
+                if sim.st.cursx == 0 {
+                    sim.st.printc(b']');
+                }
+                if mine.prog_line < mine.progtext.len() {
+                    if random().is_multiple_of(4) {
+                        let (typed, err) = make_typo(mine.progtext[mine.prog_line]);
+                        sim.typing.clear();
+                        sim.typing.extend_from_slice(&typed);
+                        sim.typing_pos = 0;
+                        sim.typing_active = true;
+                        if err.is_empty() {
+                            mine.prog_line += 1;
+                        } else {
+                            mine.error_buf = err;
+                            sim.stepno = 11;
+                        }
                     } else {
-                        mine.error_buf = err;
-                        sim.stepno = 11;
+                        let line = mine.progtext[mine.prog_line];
+                        mine.prog_line += 1;
+                        sim.type_str(line);
                     }
                 } else {
-                    let line = mine.progtext[mine.prog_line];
-                    mine.prog_line += 1;
-                    sim.type_str(line);
+                    sim.stepno = 15;
                 }
-            } else {
-                sim.stepno = 15;
             }
-        }
 
-        11 => {
-            sim.print_str(mine.error_buf);
-            sim.stepno = 12;
-        }
-
-        12 => {
-            if sim.st.cursx == 0 {
-                sim.st.printc(b']');
+            11 => {
+                sim.print_str(mine.error_buf);
+                sim.stepno = 12;
             }
-            sim.next_actiontime += 1.0;
-            sim.stepno = 10;
-        }
 
-        15 => {
-            sim.type_str("RUN\n");
-            mine.y = 0;
-            mine.x = 0;
-            mine.k = 0;
-            mine.prog_start_time = sim.next_actiontime;
-            sim.stepno = mine.progstep;
-        }
-
-        /* moire_program */
-        100 => {
-            sim.st.gr_mode = A2_GR_HIRES | A2_GR_FULL;
-            for _ in 0..24 {
-                if mine.y >= 192 {
-                    break;
+            12 => {
+                if sim.st.cursx == 0 {
+                    sim.st.printc(b']');
                 }
-                sim.st.hline(4, 0, 191 - mine.y, 279, mine.y);
-                sim.st.hline(7, 0, 191 - mine.y - 1, 279, mine.y + 1);
-                mine.y += 2;
+                sim.next_actiontime += 1.0;
+                sim.stepno = 10;
             }
-            if mine.y >= 192 {
+
+            15 => {
+                sim.type_str("RUN\n");
+                mine.y = 0;
                 mine.x = 0;
-                sim.stepno = 110;
+                mine.k = 0;
+                mine.prog_start_time = sim.next_actiontime;
+                sim.stepno = mine.progstep;
             }
-        }
 
-        110 => {
-            for _ in 0..24 {
-                if mine.x >= 280 {
-                    break;
+            /* moire_program */
+            100 => {
+                sim.st.gr_mode = A2_GR_HIRES | A2_GR_FULL;
+                for _ in 0..24 {
+                    if mine.y >= 192 {
+                        break;
+                    }
+                    sim.st.hline(4, 0, 191 - mine.y, 279, mine.y);
+                    sim.st.hline(7, 0, 191 - mine.y - 1, 279, mine.y + 1);
+                    mine.y += 2;
                 }
-                sim.st.hline(4, 279 - mine.x, 0, mine.x, 192);
-                sim.st.hline(7, 279 - mine.x - 1, 0, mine.x + 1, 192);
-                mine.x += 3;
-            }
-            if mine.x >= 280 {
-                sim.stepno = 120;
-            }
-        }
-
-        120 if sim.next_actiontime > mine.prog_start_time + sim.delay => sim.stepno = 999,
-
-        /* sinewave_program */
-        400 => {
-            sim.st.gr_mode = A2_GR_HIRES;
-            sim.stepno = 410;
-        }
-
-        410 => {
-            for _ in 0..48 {
-                let y = 80 + (75.0 * (15.0 * f64::from(mine.x - mine.k) / 279.0).sin()) as i32;
-                sim.st.hline(0, mine.x, 0, mine.x, 159);
-                sim.st.hplot(3, mine.x, y);
-                mine.x += 1;
-                if mine.x >= 279 {
+                if mine.y >= 192 {
                     mine.x = 0;
-                    mine.k += 4;
+                    sim.stepno = 110;
                 }
             }
-            if sim.next_actiontime > mine.prog_start_time + sim.delay {
-                sim.stepno = 999;
+
+            110 => {
+                for _ in 0..24 {
+                    if mine.x >= 280 {
+                        break;
+                    }
+                    sim.st.hline(4, 279 - mine.x, 0, mine.x, 192);
+                    sim.st.hline(7, 279 - mine.x - 1, 0, mine.x + 1, 192);
+                    mine.x += 3;
+                }
+                if mine.x >= 280 {
+                    sim.stepno = 120;
+                }
             }
+
+            120 if sim.next_actiontime > mine.prog_start_time + sim.delay => sim.stepno = 999,
+
+            /* sinewave_program */
+            400 => {
+                sim.st.gr_mode = A2_GR_HIRES;
+                sim.stepno = 410;
+            }
+
+            410 => {
+                for _ in 0..48 {
+                    let y = 80 + (75.0 * (15.0 * f64::from(mine.x - mine.k) / 279.0).sin()) as i32;
+                    sim.st.hline(0, mine.x, 0, mine.x, 159);
+                    sim.st.hplot(3, mine.x, y);
+                    mine.x += 1;
+                    if mine.x >= 279 {
+                        mine.x = 0;
+                        mine.k += 4;
+                    }
+                }
+                if sim.next_actiontime > mine.prog_start_time + sim.delay {
+                    sim.stepno = 999;
+                }
+            }
+
+            /* random_lores_program */
+            500 => {
+                sim.st.gr_mode = A2_GR_LORES | A2_GR_FULL;
+                sim.st.clear_gr();
+                sim.stepno = 510;
+                basic_510(sim, mine); /* upstream falls through */
+            }
+
+            510 => basic_510(sim, mine),
+
+            999 => sim.stepno = 0,
+
+            _ => {}
         }
-
-        /* random_lores_program */
-        500 => {
-            sim.st.gr_mode = A2_GR_LORES | A2_GR_FULL;
-            sim.st.clear_gr();
-            sim.stepno = 510;
-            basic_510(sim, &mine); /* upstream falls through */
-        }
-
-        510 => basic_510(sim, &mine),
-
-        999 => sim.stepno = 0,
-
-        _ => {}
     }
-
-    sim.basic = Some(mine);
 }
 
 /// Ten random horizontal and vertical runs of lores blocks per frame, forever.
@@ -992,6 +1091,16 @@ struct Terminal {
     tty: Tty,
     last_emit_time: f64,
     fast_p: bool,
+}
+
+impl Terminal {
+    fn new() -> Terminal {
+        Terminal {
+            tty: Tty::new(SCREEN_COLS as i32, SCREEN_ROWS as i32),
+            last_emit_time: 0.0,
+            fast_p: false,
+        }
+    }
 }
 
 /// Print one character to the terminal, then copy its whole grid onto the
@@ -1098,69 +1207,63 @@ fn a2_ascii_printc(
     }
 }
 
-fn terminal_controller(sim: &mut Sim, d: &mut Dpy) {
-    let mut mine = sim.term.take().unwrap_or_else(|| {
-        Box::new(Terminal {
-            tty: Tty::new(SCREEN_COLS as i32, SCREEN_ROWS as i32),
-            last_emit_time: 0.0,
-            fast_p: false,
-        })
-    });
+impl Controller for Terminal {
+    fn run(&mut self, sim: &mut Sim, d: &mut Dpy) {
+        let mine = self;
 
-    match sim.stepno {
-        0 => {
-            if !random().is_multiple_of(2) {
-                /* Turn on color mode even though it's showing text */
-                sim.st.gr_mode |= A2_GR_FULL;
-            }
-            sim.st.cls();
-            sim.st.goto(0, 16);
-            sim.st.prints("APPLE ][");
-            sim.st.goto(2, 0);
+        match sim.stepno {
+            0 => {
+                if !random().is_multiple_of(2) {
+                    /* Turn on color mode even though it's showing text */
+                    sim.st.gr_mode |= A2_GR_FULL;
+                }
+                sim.st.cls();
+                sim.st.goto(0, 16);
+                sim.st.prints("APPLE ][");
+                sim.st.goto(2, 0);
 
-            d.text_reshape(SCREEN_COLS as i32, SCREEN_ROWS as i32);
+                d.text_reshape(SCREEN_COLS as i32, SCREEN_ROWS as i32);
 
-            if !mine.fast_p {
-                sim.next_actiontime += 4.0;
-            }
-            sim.stepno = 10;
+                if !mine.fast_p {
+                    sim.next_actiontime += 4.0;
+                }
+                sim.stepno = 10;
 
-            mine.last_emit_time = sim.curtime;
-        }
-
-        10 | 11 => {
-            let first_line_p = sim.stepno == 10;
-            let elapsed = sim.curtime - mine.last_emit_time;
-
-            let mut nwant = (elapsed * 25.0) as i32; /* characters per second */
-
-            if first_line_p {
-                sim.stepno = 11;
-                nwant = 1;
-            }
-
-            if nwant > 40 {
-                nwant = 40;
-            }
-
-            if mine.fast_p {
-                nwant = 1023;
-            }
-
-            if nwant > 0 {
                 mine.last_emit_time = sim.curtime;
+            }
 
-                for _ in 0..nwant {
-                    let Some(c) = d.text_getc() else { break };
-                    a2_vt100_printc(&mut sim.st, &mut mine.tty, c);
+            10 | 11 => {
+                let first_line_p = sim.stepno == 10;
+                let elapsed = sim.curtime - mine.last_emit_time;
+
+                let mut nwant = (elapsed * 25.0) as i32; /* characters per second */
+
+                if first_line_p {
+                    sim.stepno = 11;
+                    nwant = 1;
+                }
+
+                if nwant > 40 {
+                    nwant = 40;
+                }
+
+                if mine.fast_p {
+                    nwant = 1023;
+                }
+
+                if nwant > 0 {
+                    mine.last_emit_time = sim.curtime;
+
+                    for _ in 0..nwant {
+                        let Some(c) = d.text_getc() else { break };
+                        a2_vt100_printc(&mut sim.st, &mut mine.tty, c);
+                    }
                 }
             }
+
+            _ => {}
         }
-
-        _ => {}
     }
-
-    sim.term = Some(mine);
 }
 
 /* ------------------------------------------------------------ slideshow */
@@ -1473,148 +1576,148 @@ fn a2_basename(title: &str) -> String {
   TODO: this should load 10 images at startup time, then cycle through them
   to avoid the pause while it loads.
 */
-fn slideshow_controller(sim: &mut Sim, d: &mut Dpy) {
-    let mut mine = sim.slides.take().unwrap_or_default();
+impl Controller for Slideshow {
+    fn run(&mut self, sim: &mut Sim, d: &mut Dpy) {
+        let mine = self;
 
-    match sim.stepno {
-        0 => {
-            sim.st.clear_hgr();
-            sim.st.cls();
-            sim.typing_rate = 0.3;
-            sim.dec.powerup = 0.0;
+        match sim.stepno {
+            0 => {
+                sim.st.clear_hgr();
+                sim.st.cls();
+                sim.typing_rate = 0.3;
+                sim.dec.powerup = 0.0;
 
-            sim.st.goto(0, 16);
-            sim.st.prints("APPLE ][");
-            sim.st.goto(23, 0);
-            sim.st.printc(b']');
+                sim.st.goto(0, 16);
+                sim.st.prints("APPLE ][");
+                sim.st.goto(23, 0);
+                sim.st.printc(b']');
 
-            sim.stepno = 10;
-        }
+                sim.stepno = 10;
+            }
 
-        10 => {
-            let mut canvas = Fb::new(d.width().max(1), d.height().max(1));
-            mine.load = d.load_image_into(&mut canvas, None);
-            mine.canvas = Some(canvas);
-
-            /* pause with a blank screen for a bit, while the image loads in the
-            background. */
-            sim.next_actiontime += 2.0;
-            sim.stepno = 11;
-        }
-
-        11 => {
-            if mine.load.is_some()
-                && let Some(mut canvas) = mine.canvas.take()
-            {
-                mine.load = d.load_image_into(&mut canvas, mine.load.take());
+            10 => {
+                let mut canvas = Fb::new(d.width().max(1), d.height().max(1));
+                mine.load = d.load_image_into(&mut canvas, None);
                 mine.canvas = Some(canvas);
+
+                /* pause with a blank screen for a bit, while the image loads in the
+                background. */
+                sim.next_actiontime += 2.0;
+                sim.stepno = 11;
             }
 
-            if mine.load.is_none() {
-                /* image is finally loaded */
-                if let Some(canvas) = mine.canvas.take() {
-                    let (w, h) = (280usize, 192usize);
-                    let mut buf32 = vec![0u32; w * h];
-                    pick_a2_subimage(&canvas, &mut buf32, w as i32, h as i32);
-                    mine.render_img = a2_dither(&buf32, w, h);
-                    mine.img_filename = d.image_title().map(str::to_string);
+            11 => {
+                if mine.load.is_some()
+                    && let Some(mut canvas) = mine.canvas.take()
+                {
+                    mine.load = d.load_image_into(&mut canvas, mine.load.take());
+                    mine.canvas = Some(canvas);
                 }
 
-                sim.stepno = if sim.st.gr_mode != 0 { 30 } else { 20 };
-                sim.next_actiontime += 3.0;
-            }
-        }
-
-        20 => {
-            sim.type_str("HGR\n");
-            sim.stepno = 29;
-        }
-
-        29 => {
-            sim.print_str("]");
-            sim.stepno = 30;
-        }
-
-        30 => {
-            sim.st.gr_mode = A2_GR_HIRES;
-            match &mine.img_filename {
-                Some(name) => {
-                    let line = format!("BLOAD {}\n", a2_basename(name));
-                    sim.type_str(&line);
-                }
-                None => sim.type_str("BLOAD IMAGE\n"),
-            }
-            mine.render_img_lineno = 0;
-
-            sim.stepno = 35;
-        }
-
-        35 => {
-            sim.next_actiontime += 0.7;
-            sim.stepno = 40;
-        }
-
-        40 => {
-            if mine.render_img_lineno >= 192 {
-                sim.print_str("]");
-                sim.type_str("POKE 49234,0\n");
-                sim.stepno = 50;
-            } else {
-                for _ in 0..6 {
-                    if mine.render_img_lineno >= 192 {
-                        break;
+                if mine.load.is_none() {
+                    /* image is finally loaded */
+                    if let Some(canvas) = mine.canvas.take() {
+                        let (w, h) = (280usize, 192usize);
+                        let mut buf32 = vec![0u32; w * h];
+                        pick_a2_subimage(&canvas, &mut buf32, w as i32, h as i32);
+                        mine.render_img = a2_dither(&buf32, w, h);
+                        mine.img_filename = d.image_title().map(str::to_string);
                     }
-                    sim.st
-                        .display_image_loading(&mine.render_img, mine.render_img_lineno);
-                    mine.render_img_lineno += 1;
-                }
 
-                /* The disk would have to seek every 13 sectors == 78 lines.
-                (This ain't no newfangled 16-sector operating system) */
-                if mine.render_img_lineno.is_multiple_of(78) {
-                    sim.next_actiontime += 0.5;
-                } else {
-                    sim.next_actiontime += 0.08;
+                    sim.stepno = if sim.st.gr_mode != 0 { 30 } else { 20 };
+                    sim.next_actiontime += 3.0;
                 }
             }
+
+            20 => {
+                sim.type_str("HGR\n");
+                sim.stepno = 29;
+            }
+
+            29 => {
+                sim.print_str("]");
+                sim.stepno = 30;
+            }
+
+            30 => {
+                sim.st.gr_mode = A2_GR_HIRES;
+                match &mine.img_filename {
+                    Some(name) => {
+                        let line = format!("BLOAD {}\n", a2_basename(name));
+                        sim.type_str(&line);
+                    }
+                    None => sim.type_str("BLOAD IMAGE\n"),
+                }
+                mine.render_img_lineno = 0;
+
+                sim.stepno = 35;
+            }
+
+            35 => {
+                sim.next_actiontime += 0.7;
+                sim.stepno = 40;
+            }
+
+            40 => {
+                if mine.render_img_lineno >= 192 {
+                    sim.print_str("]");
+                    sim.type_str("POKE 49234,0\n");
+                    sim.stepno = 50;
+                } else {
+                    for _ in 0..6 {
+                        if mine.render_img_lineno >= 192 {
+                            break;
+                        }
+                        sim.st
+                            .display_image_loading(&mine.render_img, mine.render_img_lineno);
+                        mine.render_img_lineno += 1;
+                    }
+
+                    /* The disk would have to seek every 13 sectors == 78 lines.
+                    (This ain't no newfangled 16-sector operating system) */
+                    if mine.render_img_lineno.is_multiple_of(78) {
+                        sim.next_actiontime += 0.5;
+                    } else {
+                        sim.next_actiontime += 0.08;
+                    }
+                }
+            }
+
+            50 => {
+                sim.st.gr_mode |= A2_GR_FULL;
+                sim.stepno = 60;
+                /* Note that sim->delay is sometimes "infinite" in this controller.
+                These images are kinda dull anyway, so don't leave it on too long. */
+                sim.next_actiontime += 2.0;
+            }
+
+            60 => {
+                sim.print_str("]");
+                sim.type_str("POKE 49235,0\n");
+                sim.stepno = 70;
+            }
+
+            70 => {
+                sim.print_str("]");
+                sim.st.gr_mode &= !A2_GR_FULL;
+                mine.render_img = Vec::new();
+                mine.img_filename = None;
+                sim.stepno = 10;
+            }
+
+            80 => {
+                /* Do nothing, just wait */
+                sim.next_actiontime += 2.0;
+                sim.stepno = A2CONTROLLER_FREE;
+            }
+
+            /* It is possible that a still image is being loaded, in which case wait
+            rather than throwing away what it is loading into. */
+            A2CONTROLLER_FREE if mine.load.is_some() => sim.stepno = 80,
+
+            _ => {}
         }
-
-        50 => {
-            sim.st.gr_mode |= A2_GR_FULL;
-            sim.stepno = 60;
-            /* Note that sim->delay is sometimes "infinite" in this controller.
-            These images are kinda dull anyway, so don't leave it on too long. */
-            sim.next_actiontime += 2.0;
-        }
-
-        60 => {
-            sim.print_str("]");
-            sim.type_str("POKE 49235,0\n");
-            sim.stepno = 70;
-        }
-
-        70 => {
-            sim.print_str("]");
-            sim.st.gr_mode &= !A2_GR_FULL;
-            mine.render_img = Vec::new();
-            mine.img_filename = None;
-            sim.stepno = 10;
-        }
-
-        80 => {
-            /* Do nothing, just wait */
-            sim.next_actiontime += 2.0;
-            sim.stepno = A2CONTROLLER_FREE;
-        }
-
-        /* It is possible that a still image is being loaded, in which case wait
-        rather than throwing away what it is loading into. */
-        A2CONTROLLER_FREE if mine.load.is_some() => sim.stepno = 80,
-
-        _ => {}
     }
-
-    sim.slides = Some(mine);
 }
 
 /* ------------------------------------------------------------------ the hack */
@@ -1638,10 +1741,15 @@ impl Screenhack for Apple2 {
                     _ => Mode::Basic,
                 };
             }
+            let controller: Box<dyn Controller> = match self.mode {
+                Mode::Slideshow => Box::new(Slideshow::default()),
+                Mode::Terminal => Box::new(Terminal::new()),
+                Mode::Basic => Box::new(Basic::default()),
+            };
             self.sim = Some(Sim::start(
                 d,
                 self.duration,
-                self.mode,
+                controller,
                 self.font.clone(),
                 self.knobs,
             ));

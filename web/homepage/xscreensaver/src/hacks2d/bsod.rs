@@ -25,6 +25,7 @@
 //!
 //! A run lasts `delay` seconds, then another machine crashes.
 
+use super::apple2;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
 use crate::runtime::color::{Pixel, parse_color};
@@ -179,13 +180,52 @@ struct Bst {
 /// The modes that bypass the queue and draw a frame at a time.
 enum Custom {
     Nvidia(Box<NvState>),
+    /// An Apple ][, which is a whole machine of its own with its own
+    /// television: [`apple2`] runs it and this only says what to type.
+    Apple2(A2Machine),
 }
 
 impl Custom {
     fn draw(&mut self, bst: &mut Bst, d: &mut Dpy) -> i64 {
         match self {
             Custom::Nvidia(nv) => nv.draw(bst, d),
+            Custom::Apple2(a2) => a2.draw(d),
         }
+    }
+}
+
+/// The machine, and what to do when it needs switching on again.
+struct A2Machine {
+    sim: Option<Box<apple2::Sim>>,
+    new_controller: fn() -> Box<dyn apple2::Controller>,
+    font: std::rc::Rc<apple2::A2Font>,
+}
+
+impl A2Machine {
+    fn new(new_controller: fn() -> Box<dyn apple2::Controller>) -> A2Machine {
+        A2Machine {
+            sim: None,
+            new_controller,
+            font: std::rc::Rc::new(apple2::A2Font::load()),
+        }
+    }
+
+    fn draw(&mut self, d: &mut Dpy) -> i64 {
+        let sim = self.sim.get_or_insert_with(|| {
+            Box::new(apple2::Sim::start(
+                d,
+                9_999_999.0,
+                (self.new_controller)(),
+                self.font.clone(),
+                // The knob defaults from `analogtv.h`, which is what a hack
+                // that does not read the resources itself would get.
+                [70.0, 5.0, 2.0, 150.0],
+            ))
+        });
+        if !sim.one_frame(d) {
+            self.sim = None;
+        }
+        10000
     }
 }
 
@@ -2029,6 +2069,311 @@ fn qr_pixmap(fg: Pixel, bg: Pixel, doublings: u32) -> (Fb, i32) {
         size *= 2;
     }
     (fb, size)
+}
+
+/*
+ * Simulate various Apple ][ crashes. The memory map encouraged many programs
+ * to use the primary hi-res video page for various storage, and the secondary
+ * hi-res page for active display. When it crashed into Applesoft or the
+ * monitor, it would revert to the primary page and you'd see memory garbage on
+ * the screen. Also, it was common for copy-protected games to use the primary
+ * text page for important code, because that made it really hard to
+ * reverse-engineer them. The result often looked like what this generates.
+ *
+ * The Apple ][ logic and video hardware is in apple2.rs. The TV is emulated by
+ * runtime::analogtv for maximum realism.
+ *
+ * Trevor Blackwell <tlb@tlb.org>
+ */
+
+const A2_BASIC_ERRORS: &[&str] = &[
+    "BREAK",
+    "NEXT WITHOUT FOR",
+    "SYNTAX ERROR",
+    "RETURN WITHOUT GOSUB",
+    "ILLEGAL QUANTITY",
+    "OVERFLOW",
+    "OUT OF MEMORY",
+    "BAD SUBSCRIPT ERROR",
+    "DIVISION BY ZERO",
+    "STRING TOO LONG",
+    "FORMULA TOO COMPLEX",
+    "UNDEF'D FUNCTION",
+    "OUT OF DATA",
+];
+
+const A2_DOS_ERRORS: &[&str] = &[
+    "VOLUME MISMATCH",
+    "I/O ERROR",
+    "DISK FULL",
+    "NO BUFFERS AVAILABLE",
+    "PROGRAM TOO LARGE",
+];
+
+#[derive(Default)]
+struct A2Crash {
+    fillptr: usize,
+    fillbyte: u8,
+}
+
+impl apple2::Controller for A2Crash {
+    fn run(&mut self, sim: &mut apple2::Sim, _d: &mut Dpy) {
+        match sim.stepno {
+            0 => {
+                let font = apple2::A2Font::load();
+                sim.st.init_memory_active(&font);
+                sim.dec.powerup = 1000.0;
+
+                if random().is_multiple_of(3) {
+                    sim.st.gr_mode = 0;
+                    sim.next_actiontime += 0.4;
+                    sim.stepno = 100;
+                } else if random().is_multiple_of(4) {
+                    sim.st.gr_mode = apple2::A2_GR_LORES;
+                    if random().is_multiple_of(3) {
+                        sim.st.gr_mode |= apple2::A2_GR_FULL;
+                    }
+                    sim.next_actiontime += 0.4;
+                    sim.stepno = 100;
+                } else if random().is_multiple_of(2) {
+                    sim.st.gr_mode = apple2::A2_GR_HIRES;
+                    sim.stepno = 300;
+                } else {
+                    sim.st.gr_mode = apple2::A2_GR_HIRES;
+                    sim.next_actiontime += 0.4;
+                    sim.stepno = 100;
+                }
+            }
+
+            100 => {
+                /* An illegal instruction or a reset caused it to drop into the
+                assembly language monitor, where you could disassemble code &
+                view data in hex. */
+                if random().is_multiple_of(3) {
+                    let addr = 0xd000 + random() % 0x3000;
+                    let ibytes = format!("{:02X}", random() % 0xff);
+                    sim.print_str(&format!(
+                        "\n\n\
+                         {addr:04X}: {ibytes:<15} ???\n\
+                         \x20A={:02X} X={:02X} Y={:02X} S={:02X} F={:02X}\n\
+                         *",
+                        random() % 0xff,
+                        random() % 0xff,
+                        random() % 0xff,
+                        random() % 0xff,
+                        random() % 0xff
+                    ));
+                    sim.st.goto(23, 1);
+                    sim.stepno = if sim.st.gr_mode != 0 { 180 } else { 200 };
+                    sim.next_actiontime += 2.0 + f64::from(random() % 1000) * 0.0002;
+                } else {
+                    /* Lots of programs had at least their main functionality in
+                    Applesoft Basic, which had a lot of limits (memory, string
+                    length, etc) and would sometimes crash unexpectedly. */
+                    let line = 1000 * (random() % (random() % 59 + 1))
+                        + 100 * (random() % (random() % 9 + 1))
+                        + 5 * (random() % (random() % 199 + 1))
+                        + (random() % (random() % (random() % 2 + 1) + 1));
+                    sim.print_str(&format!(
+                        "\n\n\n?{} IN {line}\n\u{1}]",
+                        A2_BASIC_ERRORS[(random() as usize) % A2_BASIC_ERRORS.len()]
+                    ));
+                    sim.st.goto(23, 1);
+                    sim.stepno = 110;
+                    sim.next_actiontime += 2.0 + f64::from(random() % 1000) * 0.0002;
+                }
+            }
+
+            110 => {
+                if random().is_multiple_of(3) {
+                    /* This was how you reset the Basic interpreter. The sort of
+                    incantation you'd have on a little piece of paper taped to
+                    the side of your machine */
+                    sim.type_str("CALL -1370");
+                    sim.stepno = 120;
+                } else if random().is_multiple_of(2) {
+                    sim.type_str("CATALOG\n");
+                    sim.stepno = 170;
+                } else {
+                    sim.next_actiontime += 1.0;
+                    sim.stepno = 999;
+                }
+            }
+
+            120 => {
+                sim.stepno = 130;
+                sim.next_actiontime += 0.5;
+            }
+
+            130 => {
+                sim.st.gr_mode = 0;
+                sim.st.cls();
+                sim.st.goto(0, 16);
+                sim.st.prints("APPLE ][");
+                sim.st.goto(23, 0);
+                sim.st.printc(b']');
+                sim.next_actiontime += 1.0;
+                sim.stepno = 999;
+            }
+
+            170 => {
+                if random().is_multiple_of(50) {
+                    sim.print_str("\nDISK VOLUME 254\n\n A 002 HELLO\n\n]");
+                } else {
+                    sim.print_str(&format!(
+                        "\n?{}\n]",
+                        A2_DOS_ERRORS[(random() as usize) % A2_DOS_ERRORS.len()]
+                    ));
+                }
+                sim.stepno = 999;
+                sim.next_actiontime += 1.0;
+            }
+
+            180 => {
+                if random().is_multiple_of(2) {
+                    /* This was how you went back to text mode in the monitor */
+                    sim.type_str("FB4BG");
+                    sim.stepno = 190;
+                } else {
+                    sim.next_actiontime += 1.0;
+                    sim.stepno = 999;
+                }
+            }
+
+            190 => {
+                sim.st.gr_mode = 0;
+                sim.st.printc(b'\n');
+                sim.st.printc(b'*');
+                sim.stepno = 200;
+                sim.next_actiontime += 2.0;
+            }
+
+            200 => {
+                /* This reset things into Basic */
+                if random().is_multiple_of(2) {
+                    sim.type_str("FAA6G");
+                    sim.stepno = 120;
+                } else {
+                    sim.stepno = 999;
+                    sim.next_actiontime += sim.delay;
+                }
+            }
+
+            300 => {
+                for _ in 0..1500 {
+                    sim.st.poke(self.fillptr, self.fillbyte);
+                    self.fillptr += 1;
+                    self.fillbyte = self.fillbyte.wrapping_add(1);
+                }
+                sim.next_actiontime += 0.08;
+                /* When you hit c000, it changed video settings */
+                if self.fillptr >= 0xc000 {
+                    sim.st.gr_mode = 0;
+                }
+                /* And it seemed to reset around here, I dunno why */
+                if self.fillptr >= 0xcf00 {
+                    sim.stepno = 130;
+                }
+            }
+
+            _ => {}
+        }
+    }
+}
+
+/// The message ENCOM's Master Control Program leaves on Flynn's terminal, one
+/// character at a time.
+#[derive(Default)]
+struct A2Encom {
+    /// How far through the message, in bytes.
+    at: usize,
+    bold_p: bool,
+}
+
+const ENCOM_MESSAGE: &str = "\n\
+                             \r\n\
+                             \r\n\
+                             \r\n\
+                             \r\n\
+                             \r\n\
+                             \r\n\
+                             \r\n\
+                             \r\n\
+                             SEPT 22, 18:32:21 PM\n\
+                             \n\
+                             \x20        YOUR ACCESS SUSPENDED\n\
+                             \x20        PLEASE REPORT TO DILLINGER\n\
+                             \x20        IMMEDIATELY\n\
+                             \x20        AUTHORIZATION: MASTER CONTROL\n\
+                             \x20        PROGRAM\n\
+                             \n\
+                             \r\r\r\r\r\
+                             \x20        END OF LINE\n\
+                             \n\
+                             \n\
+                             \n\
+                             \n";
+
+impl apple2::Controller for A2Encom {
+    fn run(&mut self, sim: &mut apple2::Sim, _d: &mut Dpy) {
+        match sim.stepno {
+            0 => {
+                sim.st.gr_mode |= apple2::A2_GR_FULL;
+                sim.st.cls();
+                sim.st.goto(0, 35);
+                sim.st.prints("ENCOM");
+                sim.st.goto(23, 0);
+                sim.stepno = 10;
+                sim.next_actiontime += 6.0;
+            }
+
+            10 => {
+                sim.st.cls();
+                sim.st.goto(0, 0);
+                sim.stepno = 11;
+                sim.next_actiontime += 1.0;
+            }
+
+            11 => {
+                sim.st.goto(1, 0);
+                sim.stepno = 12;
+                self.at = 0;
+            }
+
+            12 => match ENCOM_MESSAGE.as_bytes().get(self.at) {
+                None => {
+                    sim.next_actiontime += 30.0;
+                    sim.stepno = 0;
+                }
+                Some(&c) => {
+                    self.at += 1;
+                    if c == b'\r' {
+                        sim.next_actiontime += 0.2;
+                    }
+                    let c = if self.bold_p { c | 0xC0 } else { c };
+                    sim.st.printc_noscroll(c);
+                }
+            },
+
+            _ => {}
+        }
+    }
+}
+
+fn encom(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+    bst.custom = Some(Custom::Apple2(A2Machine::new(|| {
+        Box::new(A2Encom::default())
+    })));
+    bst
+}
+
+fn apple2crash(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+    bst.custom = Some(Custom::Apple2(A2Machine::new(|| {
+        Box::new(A2Crash::default())
+    })));
+    bst
 }
 
 /// A Linux kernel panic obscured by systemd, 2024, which puts the penguin and
@@ -5441,6 +5786,16 @@ const MODES: &[Mode] = &[
         fonts: NONE,
     },
     Mode {
+        name: "Encom",
+        fun: encom,
+        fonts: NONE,
+    },
+    Mode {
+        name: "Apple2",
+        fun: apple2crash,
+        fonts: NONE,
+    },
+    Mode {
         name: "Systemd",
         fun: systemd,
         fonts: ["Classic Console 14", "Classic Console 14", "", ""],
@@ -5811,6 +6166,14 @@ const ONLY: &[SelectItem] = &[
     SelectItem {
         value: "HPPALinux",
         label: "Linux (PA-RISC)",
+    },
+    SelectItem {
+        value: "Encom",
+        label: "Encom",
+    },
+    SelectItem {
+        value: "Apple2",
+        label: "Apple ][",
     },
     SelectItem {
         value: "Systemd",

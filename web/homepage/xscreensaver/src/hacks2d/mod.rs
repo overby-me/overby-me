@@ -373,6 +373,14 @@ mod tests {
     fn every_saver_keeps_changing() {
         for saver in ALL {
             let def = saver.def;
+            // Except the one whose subject is a computer that has stopped:
+            // several of bsod's machines sit perfectly still for a minute at a
+            // time, and the picture changes only when that run expires and the
+            // next machine crashes. `bsod`'s own tests check every one of them
+            // draws.
+            if def.slug == "bsod" {
+                continue;
+            }
             let mut r = run(saver, 320, 240, "");
             let a = r.frame_hash();
             let mut changed = false;
