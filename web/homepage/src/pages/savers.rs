@@ -352,6 +352,12 @@ saver!(
     xscreensaver::hacks2d::pyro::start
 );
 saver!(
+    "rdbomb",
+    rdbomb_body,
+    rdbomb_start,
+    xscreensaver::hacks2d::rdbomb::start
+);
+saver!(
     "rocks",
     rocks_body,
     rocks_start,
@@ -717,6 +723,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pyro",
         label: "Pyro",
         start: pyro_start,
+    },
+    Entry {
+        slug: "rdbomb",
+        label: "RD-Bomb",
+        start: rdbomb_start,
     },
     Entry {
         slug: "rocks",

@@ -62,4 +62,5 @@ exclude = [
   # them either way.
   'www\.organic\.com/staff/',
   'home\.sol\.no/',
+  'cs\.cmu\.edu/~spot/',
 ]
