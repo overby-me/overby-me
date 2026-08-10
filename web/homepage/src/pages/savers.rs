@@ -94,6 +94,12 @@ saver!(
     xscreensaver::hacks2d::binaryring::start
 );
 saver!(
+    "blitspin",
+    blitspin_body,
+    blitspin_start,
+    xscreensaver::hacks2d::blitspin::start
+);
+saver!(
     "boxfit",
     boxfit_body,
     boxfit_start,
@@ -496,6 +502,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "binaryring",
         label: "Binary Ring",
         start: binaryring_start,
+    },
+    Entry {
+        slug: "blitspin",
+        label: "Blit Spin",
+        start: blitspin_start,
     },
     Entry {
         slug: "boxfit",
