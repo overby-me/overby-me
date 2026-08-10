@@ -30,6 +30,7 @@ pub mod deco;
 pub mod deluxe;
 pub mod discrete;
 pub mod drift;
+pub mod droste;
 pub mod eruption;
 pub mod fadeplot;
 pub mod fiberlamp;
@@ -88,6 +89,7 @@ pub mod truchet;
 pub mod vines;
 pub mod wander;
 pub mod whirlwindwarp;
+pub mod whirlygig;
 pub mod worm;
 pub mod wormhole;
 pub mod xspirograph;
@@ -120,6 +122,7 @@ pub static ALL: &[&Saver] = &[
     &galaxy::SAVER,
     &greynetic::SAVER,
     &drift::SAVER,
+    &droste::SAVER,
     &eruption::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,
@@ -175,6 +178,7 @@ pub static ALL: &[&Saver] = &[
     &truchet::SAVER,
     &wander::SAVER,
     &whirlwindwarp::SAVER,
+    &whirlygig::SAVER,
     &worm::SAVER,
     &wormhole::SAVER,
     &xspirograph::SAVER,

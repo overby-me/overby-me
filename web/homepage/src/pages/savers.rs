@@ -196,6 +196,12 @@ saver!(
     xscreensaver::hacks2d::drift::start
 );
 saver!(
+    "droste",
+    droste_body,
+    droste_start,
+    xscreensaver::hacks2d::droste::start
+);
+saver!(
     "eruption",
     eruption_body,
     eruption_start,
@@ -527,6 +533,12 @@ saver!(
     xscreensaver::hacks2d::whirlwindwarp::start
 );
 saver!(
+    "whirlygig",
+    whirlygig_body,
+    whirlygig_start,
+    xscreensaver::hacks2d::whirlygig::start
+);
+saver!(
     "worm",
     worm_body,
     worm_start,
@@ -653,6 +665,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "drift",
         label: "Drift",
         start: drift_start,
+    },
+    Entry {
+        slug: "droste",
+        label: "Droste",
+        start: droste_start,
     },
     Entry {
         slug: "eruption",
@@ -928,6 +945,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "whirlwindwarp",
         label: "Whirlwind Warp",
         start: whirlwindwarp_start,
+    },
+    Entry {
+        slug: "whirlygig",
+        label: "Whirlygig",
+        start: whirlygig_start,
     },
     Entry {
         slug: "worm",
