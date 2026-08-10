@@ -54,6 +54,7 @@ pub mod lcdscrub;
 pub mod lightning;
 pub mod lissie;
 pub mod lmorph;
+pub mod marbling;
 pub mod metaballs;
 pub mod moire;
 pub mod moire2;
@@ -136,6 +137,7 @@ pub static ALL: &[&Saver] = &[
     &lissie::SAVER,
     &moire::SAVER,
     &lmorph::SAVER,
+    &marbling::SAVER,
     &metaballs::SAVER,
     &moire2::SAVER,
     &mountain::SAVER,
@@ -174,10 +176,13 @@ mod tests {
     use super::*;
     use crate::runtime::{Runner, StartArgs, XEvent, color::ALPHA};
 
-    /// Frames to render per saver in the smoke tests. Enough for a hack with a
-    /// slow start (rorschach spends its first calls on a single chunk of the
-    /// walk) to have put something on screen.
-    const FRAMES: usize = 120;
+    /// Frames of warm-up before the robustness checks: enough that a hack with
+    /// a slow start (rorschach spends its first calls on a single chunk of the
+    /// walk) is properly under way. Whether a saver ever draws is checked
+    /// separately and patiently, so this does not have to be long, and the
+    /// expensive hacks (marbling computes Perlin noise per pixel) are paid for
+    /// once per frame here across every test that warms up.
+    const FRAMES: usize = 60;
 
     fn run(saver: &'static Saver, w: i32, h: i32, query: &str) -> Runner {
         let mut r = (saver.start)(StartArgs::new(w, h, query, 20260809));
@@ -289,12 +294,15 @@ mod tests {
         for saver in ALL {
             let def = saver.def;
             let mut r = run(saver, 320, 240, "");
+            // A resize either lands or it does not; twenty frames on the far
+            // side of each is enough to catch a stale width or a bad index,
+            // and the second size is four times the pixels of the first.
             r.resize(64, 480);
-            for _ in 0..60 {
+            for _ in 0..20 {
                 r.step();
             }
             r.resize(800, 600);
-            for _ in 0..60 {
+            for _ in 0..20 {
                 r.step();
             }
             assert_eq!(r.dpy.width(), 800, "{}", def.slug);

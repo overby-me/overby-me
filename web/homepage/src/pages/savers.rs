@@ -328,6 +328,12 @@ saver!(
     xscreensaver::hacks2d::lmorph::start
 );
 saver!(
+    "marbling",
+    marbling_body,
+    marbling_start,
+    xscreensaver::hacks2d::marbling::start
+);
+saver!(
     "metaballs",
     metaballs_body,
     metaballs_start,
@@ -727,6 +733,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "lmorph",
         label: "LMorph",
         start: lmorph_start,
+    },
+    Entry {
+        slug: "marbling",
+        label: "Marbling",
+        start: marbling_start,
     },
     Entry {
         slug: "metaballs",
