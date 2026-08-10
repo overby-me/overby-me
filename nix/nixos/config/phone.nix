@@ -94,6 +94,10 @@
       # ── Nix settings ────────────────────────────────────────────────
       nix.settings = {
         experimental-features = ["nix-command" "flakes"];
+        # As in nix/nixos/modules/core/nix.nix, which this host does not import:
+        # a .drv is a GC root for the whole build-time closure of what it built,
+        # and a phone has the least room to spare for one.
+        keep-derivations = false;
         # When on the device, prefer remote builders to avoid draining
         # battery and running out of memory during local rebuilds.
         trusted-users = ["root" "overby.me"];

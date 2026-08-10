@@ -8,6 +8,15 @@
     settings = {
       max-jobs = "auto";
       keep-going = true;
+      # A .drv is a GC root for the whole build-time closure of what it built,
+      # so keeping them holds on to the sources and compilers behind everything
+      # installed, which is most of what a store grows. Evaluating writes one
+      # back whenever it is actually needed again.
+      #
+      # Prompted by this machine running out of room in a way df cannot show:
+      # btrfs metadata at 99.7% of 172 GiB with no unallocated space left, which
+      # fails a rename with ENOSPC while still reporting 210 GiB free.
+      keep-derivations = false;
       connect-timeout = 10;
       stalled-download-timeout = 10;
       trusted-users = ["root" "overby.me"];
