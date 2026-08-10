@@ -19,6 +19,7 @@ pub mod binaryring;
 pub mod blitspin;
 pub mod boxfit;
 pub mod braid;
+pub mod bumps;
 pub mod cloudlife;
 pub mod coral;
 pub mod critical;
@@ -87,6 +88,7 @@ pub mod vines;
 pub mod wander;
 pub mod whirlwindwarp;
 pub mod worm;
+pub mod wormhole;
 pub mod xspirograph;
 pub mod zoom;
 
@@ -103,6 +105,7 @@ pub static ALL: &[&Saver] = &[
     &blitspin::SAVER,
     &boxfit::SAVER,
     &braid::SAVER,
+    &bumps::SAVER,
     &cloudlife::SAVER,
     &coral::SAVER,
     &critical::SAVER,
@@ -171,6 +174,7 @@ pub static ALL: &[&Saver] = &[
     &wander::SAVER,
     &whirlwindwarp::SAVER,
     &worm::SAVER,
+    &wormhole::SAVER,
     &xspirograph::SAVER,
     &zoom::SAVER,
 ];

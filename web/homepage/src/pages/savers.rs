@@ -112,6 +112,12 @@ saver!(
     xscreensaver::hacks2d::braid::start
 );
 saver!(
+    "bumps",
+    bumps_body,
+    bumps_start,
+    xscreensaver::hacks2d::bumps::start
+);
+saver!(
     "cloudlife",
     cloudlife_body,
     cloudlife_start,
@@ -521,6 +527,12 @@ saver!(
     xscreensaver::hacks2d::worm::start
 );
 saver!(
+    "wormhole",
+    wormhole_body,
+    wormhole_start,
+    xscreensaver::hacks2d::wormhole::start
+);
+saver!(
     "zoom",
     zoom_body,
     zoom_start,
@@ -565,6 +577,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "braid",
         label: "Braid",
         start: braid_start,
+    },
+    Entry {
+        slug: "bumps",
+        label: "Bumps",
+        start: bumps_start,
     },
     Entry {
         slug: "cloudlife",
@@ -905,6 +922,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "worm",
         label: "Worm",
         start: worm_start,
+    },
+    Entry {
+        slug: "wormhole",
+        label: "Wormhole",
+        start: wormhole_start,
     },
     Entry {
         slug: "zoom",
