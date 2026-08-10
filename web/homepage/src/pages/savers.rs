@@ -184,6 +184,12 @@ saver!(
     xscreensaver::hacks2d::greynetic::start
 );
 saver!(
+    "eruption",
+    eruption_body,
+    eruption_start,
+    xscreensaver::hacks2d::eruption::start
+);
+saver!(
     "fadeplot",
     fadeplot_body,
     fadeplot_start,
@@ -595,6 +601,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
+    },
+    Entry {
+        slug: "eruption",
+        label: "Eruption",
+        start: eruption_start,
     },
     Entry {
         slug: "fadeplot",
