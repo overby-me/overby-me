@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::ant::start
 );
 saver!(
+    "abstractile",
+    abstractile_body,
+    abstractile_start,
+    xscreensaver::hacks2d::abstractile::start
+);
+saver!(
     "anemone",
     anemone_body,
     anemone_start,
@@ -774,6 +780,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "ant",
         label: "Ant",
         start: ant_start,
+    },
+    Entry {
+        slug: "abstractile",
+        label: "Abstractile",
+        start: abstractile_start,
     },
     Entry {
         slug: "anemone",

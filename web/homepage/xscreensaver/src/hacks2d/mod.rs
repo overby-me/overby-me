@@ -13,6 +13,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver;
 
+pub mod abstractile;
 pub mod anemone;
 pub mod anemotaxis;
 pub mod ant;
@@ -137,6 +138,7 @@ pub mod zoom;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
     &ant::SAVER,
+    &abstractile::SAVER,
     &anemone::SAVER,
     &anemotaxis::SAVER,
     &apollonian::SAVER,
