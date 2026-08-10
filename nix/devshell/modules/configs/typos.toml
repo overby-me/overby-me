@@ -50,6 +50,10 @@ extend-ignore-re = [
   "refert",
   "nedia",
   "overlayed",
+  "Unrecongized",
+  # SCSI state DATA_DNE and the IDE device /dev/hda1, from the same dumps.
+  "DATA_DNE",
+  "hda[0-9]*",
   # A register value in the HP-UX dump and a Windows build tag, not words.
   "4FD8EDE1",
   "x86fre",

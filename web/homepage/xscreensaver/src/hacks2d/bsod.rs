@@ -169,8 +169,24 @@ struct Bst {
 
     macx_eol_kludge: bool,
 
+    /// Set by a mode that draws itself rather than running the queue.
+    custom: Option<Custom>,
+
     width: i32,
     height: i32,
+}
+
+/// The modes that bypass the queue and draw a frame at a time.
+enum Custom {
+    Nvidia(Box<NvState>),
+}
+
+impl Custom {
+    fn draw(&mut self, bst: &mut Bst, d: &mut Dpy) -> i64 {
+        match self {
+            Custom::Nvidia(nv) => nv.draw(bst, d),
+        }
+    }
 }
 
 impl Bst {
@@ -205,6 +221,7 @@ impl Bst {
             char_delay: 0,
             line_delay: 0,
             macx_eol_kludge: false,
+            custom: None,
             width: d.width(),
             height: d.height(),
         };
@@ -513,6 +530,14 @@ impl Bst {
     /// Run one instruction. Returns how long to wait afterwards, or `None`
     /// when the mode has finished.
     fn pop(&mut self, d: &mut Dpy) -> Option<i64> {
+        // A mode that draws itself instead of running a queue. Upstream calls
+        // this through a function pointer on the machine.
+        if let Some(mut c) = self.custom.take() {
+            let delay = c.draw(self, d);
+            self.custom = Some(c);
+            return Some(delay);
+        }
+
         let pos = self.pos?;
 
         // Take the event out of the queue so the machine can be handed to the
@@ -1741,6 +1766,1447 @@ fn msdos(d: &mut Dpy, f: &Fonts) -> Bst {
     bst.text(Align::Left, "\n\nC:\\WINDOWS>");
 
     bst.cursor(false, 200_000, 999_999);
+    bst.clear(d);
+    bst
+}
+
+/// A Linux kernel panic on PA-RISC, output courtesy of M. Grabert.
+///
+/// The banner names the machine and the compiler that built the kernel;
+/// upstream reads those from `uname` and from its own `__VERSION__`, and
+/// neither is available here, so these are the values it falls back to.
+fn hppa_linux(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+
+    /// Each line of the boot log, and how long to wait before it. A delay of
+    /// -1 means "the same as the line before".
+    const PANIC: &[(i64, &str)] = &[
+        (
+            0,
+            "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        ),
+        (0, "Linux version %s (root@%s) (gcc version %s) %s\n"),
+        (4000, "FP[0] enabled: Rev 1 Model 16\n"),
+        (10, "The 32-bit Kernel has started...\n"),
+        (-1, "Determining PDC firmware type: System Map.\n"),
+        (
+            -1,
+            "model 00005bb0 00000481 00000000 00000002 7778df9f 100000f0 00000008 000000b2 000000b2\n",
+        ),
+        (-1, "vers  00000203\n"),
+        (-1, "CPUID vers 17 rev 7 (0x00000227)\n"),
+        (-1, "capabilities 0x3\n"),
+        (-1, "model 9000/785/C3000\n"),
+        (-1, "Total Memory: 1024 Mb\n"),
+        (-1, "On node 0 totalpages: 262144\n"),
+        (-1, "  DMA zone: 262144 pages, LIFO batch:16\n"),
+        (-1, "  Normal zone: 0 pages, LIFO batch:1\n"),
+        (-1, "  HighMem zone: 0 pages, LIFO batch:1\n"),
+        (-1, "LCD display at f05d0008,f05d0000 registered\n"),
+        (-1, "Building zonelist for node : 0\n"),
+        (
+            -1,
+            "Kernel command line: ide=nodma root=/dev/sda3 HOME=/ ip=off console=ttyS0 TERM=vt102 palo_kernel=2/vmlinux-2.6\n",
+        ),
+        (-1, "ide_setup: ide=nodmaIDE: Prevented DMA\n"),
+        (-1, "PID hash table entries: 16 (order 4: 128 bytes)\n"),
+        (500, "Console: colour dummy device 160x64\n"),
+        (10, "Memory: 1034036k available\n"),
+        (-1, "Calibrating delay loop... 796.67 BogoMIPS\n"),
+        (
+            -1,
+            "Dentry cache hash table entries: 131072 (order: 7, 524288 bytes)\n",
+        ),
+        (
+            -1,
+            "Inode-cache hash table entries: 65536 (order: 6, 262144 bytes)\n",
+        ),
+        (
+            -1,
+            "Mount-cache hash table entries: 512 (order: 0, 4096 bytes)\n",
+        ),
+        (-1, "POSIX conformance testing by UNIFIX\n"),
+        (-1, "NET: Registered protocol family 16\n"),
+        (100, "Searching for devices...\n"),
+        (25, "Found devices:\n"),
+        (
+            10,
+            "1. Astro BC Runway Port at 0xfed00000 [10] { 12, 0x0, 0x582, 0x0000b }\n",
+        ),
+        (
+            -1,
+            "2. Elroy PCI Bridge at 0xfed30000 [10/0] { 13, 0x0, 0x782, 0x0000a }\n",
+        ),
+        (
+            -1,
+            "3. Elroy PCI Bridge at 0xfed32000 [10/1] { 13, 0x0, 0x782, 0x0000a }\n",
+        ),
+        (
+            -1,
+            "4. Elroy PCI Bridge at 0xfed38000 [10/4] { 13, 0x0, 0x782, 0x0000a }\n",
+        ),
+        (
+            -1,
+            "5. Elroy PCI Bridge at 0xfed3c000 [10/6] { 13, 0x0, 0x782, 0x0000a }\n",
+        ),
+        (
+            -1,
+            "6. AllegroHigh W at 0xfffa0000 [32] { 0, 0x0, 0x5bb, 0x00004 }\n",
+        ),
+        (
+            -1,
+            "7. Memory at 0xfed10200 [49] { 1, 0x0, 0x086, 0x00009 }\n",
+        ),
+        (-1, "CPU(s): 1 x PA8500 (PCX-W) at 400.000000 MHz\n"),
+        (-1, "SBA found Astro 2.1 at 0xfed00000\n"),
+        (-1, "lba version TR2.1 (0x2) found at 0xfed30000\n"),
+        (-1, "lba version TR2.1 (0x2) found at 0xfed32000\n"),
+        (-1, "lba version TR2.1 (0x2) found at 0xfed38000\n"),
+        (-1, "lba version TR2.1 (0x2) found at 0xfed3c000\n"),
+        (100, "SCSI subsystem initialized\n"),
+        (10, "drivers/usb/core/usb.c: registered new driver usbfs\n"),
+        (-1, "drivers/usb/core/usb.c: registered new driver hub\n"),
+        (-1, "ikconfig 0.7 with /proc/config*\n"),
+        (-1, "Initializing Cryptographic API\n"),
+        (250, "SuperIO: probe of 0000:00:0e.0 failed with error -1\n"),
+        (
+            20,
+            "SuperIO: Found NS87560 Legacy I/O device at 0000:00:0e.1 (IRQ 64)\n",
+        ),
+        (-1, "SuperIO: Serial port 1 at 0x3f8\n"),
+        (-1, "SuperIO: Serial port 2 at 0x2f8\n"),
+        (-1, "SuperIO: Parallel port at 0x378\n"),
+        (-1, "SuperIO: Floppy controller at 0x3f0\n"),
+        (-1, "SuperIO: ACPI at 0x7e0\n"),
+        (-1, "SuperIO: USB regulator enabled\n"),
+        (-1, "SuperIO: probe of 0000:00:0e.2 failed with error -1\n"),
+        (-1, "Soft power switch enabled, polling @ 0xf0400804.\n"),
+        (-1, "pty: 256 Unix98 ptys configured\n"),
+        (-1, "Generic RTC Driver v1.07\n"),
+        (
+            -1,
+            "Serial: 8250/16550 driver $Revision: 1.100 $ 13 ports, IRQ sharing disabled\n",
+        ),
+        (-1, "ttyS0 at I/O 0x3f8 (irq = 0) is a 16550A\n"),
+        (-1, "ttyS1 at I/O 0x2f8 (irq = 0) is a 16550A\n"),
+        (-1, "Linux Tulip driver version 1.1.13 (May 11, 2002)\n"),
+        (150, "tulip0: no phy info, aborting mtable build\n"),
+        (
+            10,
+            "tulip0:  MII transceiver #1 config 1000 status 782d advertising 01e1.\n",
+        ),
+        (
+            -1,
+            "eth0: Digital DS21143 Tulip rev 65 at 0xf4008000, 00:10:83:F9:B4:34, IRQ 66.\n",
+        ),
+        (
+            -1,
+            "Uniform Multi-Platform E-IDE driver Revision: 7.00alpha2\n",
+        ),
+        (
+            -1,
+            "ide: Assuming 33MHz system bus speed for PIO modes; override with idebus=xx\n",
+        ),
+        (100, "SiI680: IDE controller at PCI slot 0000:01:06.0\n"),
+        (10, "SiI680: chipset revision 2\n"),
+        (-1, "SiI680: BASE CLOCK == 133\n"),
+        (-1, "SiI680: 100% native mode on irq 128\n"),
+        (
+            -1,
+            "    ide0: MMIO-DMA at 0xf4800000-0xf4800007 -- Error, MMIO ports already in use.\n",
+        ),
+        (
+            -1,
+            "    ide1: MMIO-DMA at 0xf4800008-0xf480000f -- Error, MMIO ports already in use.\n",
+        ),
+        (5, "hda: TS130220A2, ATA DISK drive\n"),
+        (-1, "      _______________________________\n"),
+        (-1, "     < Your System ate a SPARC! Gah! >\n"),
+        (-1, "      -------------------------------\n"),
+        (-1, "             \\   ^__^\n"),
+        (-1, "              \\  (xx)\\_______\n"),
+        (-1, "                 (__)\\       )\\/\\\n"),
+        (-1, "                  U  ||----w |\n"),
+        (-1, "                     ||     ||\n"),
+        (-1, "swapper (pid 1): Breakpoint (code 0)\n"),
+        (-1, "\n"),
+        (-1, "     YZrvWESTHLNXBCVMcbcbcbcbOGFRQPDI\n"),
+        (-1, "PSW: 00000000000001001111111100001111 Not tainted\n"),
+        (-1, "r00-03  4d6f6f21 1032f010 10208f34 103fc2e0\n"),
+        (-1, "r04-07  103fc230 00000001 00000001 0000000f\n"),
+        (-1, "r08-11  103454f8 000f41fa 372d3980 103ee404\n"),
+        (-1, "r12-15  3ccbf700 10344810 103ee010 f0400004\n"),
+        (-1, "r16-19  f00008c4 f000017c f0000174 00000000\n"),
+        (-1, "r20-23  fed32840 fed32800 00000000 0000000a\n"),
+        (-1, "r24-27  0000ffa0 000000ff 103fc2e0 10326010\n"),
+        (-1, "r28-31  00000000 00061a80 4ff98340 10208f34\n"),
+        (-1, "sr0-3   00000000 00000000 00000000 00000000\n"),
+        (-1, "sr4-7   00000000 00000000 00000000 00000000\n"),
+        (-1, "\n"),
+        (-1, "IASQ: 00000000 00000000 IAOQ: 00000000 00000004\n"),
+        (-1, " IIR: 00000000    ISR: 00000000  IOR: 00000000\n"),
+        (-1, " CPU:        0   CR30: 4ff98000 CR31: 1037c000\n"),
+        (-1, " ORIG_R28: 55555555\n"),
+        (-1, " IAOQ[0]: 0x0\n"),
+        (-1, " IAOQ[1]: 0x4\n"),
+        (-1, " RP(r2): probe_hwif+0x218/0x44c\n"),
+        (-1, "Kernel panic: Attempted to kill init!\n"),
+    ];
+
+    bst.scroll_p = true;
+    bst.wrap_p = true;
+    bst.left_margin = 10;
+    bst.right_margin = 10;
+    bst.top_margin = 10;
+    bst.bottom_margin = 10;
+
+    let release = "2.6.0-test11-pa2";
+    let sysname = "hppa";
+    let version = "#2 Mon Dec 8 06:09:27 GMT 2003";
+    let gccversion = "3.3.2 (Debian)";
+
+    bst.pause(100_000);
+    let mut linedelay = 0;
+    for (delay, s) in PANIC {
+        if *delay != -1 {
+            linedelay = *delay * 1000;
+        }
+        bst.pause(linedelay);
+        // Insert current host name into banner on line 2.
+        if s.contains("%s") {
+            bst.text(
+                Align::Left,
+                &format!("Linux version {release} (root@{sysname}) (gcc version {gccversion}) {version}\n"),
+            );
+        } else {
+            bst.text(Align::Left, s);
+        }
+    }
+
+    bst.y = bst.height - bst.yoff - bst.line_height();
+
+    bst.clear(d);
+    bst
+}
+
+/// nvidia, by jwz.
+///
+/// This is what happens if an Nvidia card goes into some crazy text mode. Most
+/// often seen on the second screen of a dual-head system when the proper driver
+/// isn't loaded.
+#[derive(Clone, Copy, Default)]
+struct NvCell {
+    fg: usize,
+    bg: usize,
+    bit: usize,
+    blink: bool,
+}
+
+struct NvState {
+    /// Five corrupted character shapes, as depth-1 bitmaps.
+    bits: Vec<Fb>,
+    rows: i32,
+    cols: i32,
+    cellw: i32,
+    cellh: i32,
+    grid: Vec<NvCell>,
+    colors: Vec<Pixel>,
+    tick: u32,
+}
+
+impl NvState {
+    /// Splatter a run of the grid with one colour pair and one shape, or with
+    /// noise, or copy a diagonal band of it over itself.
+    fn spatter(&mut self, fill_p: bool) {
+        let max = (self.rows * self.cols) as usize;
+        let nbits = self.bits.len();
+        let ncolors = self.colors.len();
+
+        // Upstream divides by `max - 1`, which is zero when the window is
+        // small enough to hold a single cell.
+        let from = if fill_p {
+            0
+        } else {
+            (random() as usize) % (max - 1).max(1)
+        };
+        let len = if fill_p {
+            max
+        } else {
+            (random() as usize) % (self.cols as usize * 4)
+        };
+        let to = (from + len).min(max);
+        let noisy = random().is_multiple_of(4);
+        let diag = if noisy || fill_p {
+            false
+        } else {
+            random().is_multiple_of(4)
+        };
+
+        let mut fg = (random() as usize) % ncolors;
+        let mut bg = (random() as usize) % ncolors;
+        let mut blink = random().is_multiple_of(4);
+        let bit = (random() as usize) % nbits;
+
+        if diag {
+            let src = (random() as usize) % max;
+            // Signed, as upstream has it: on a narrow window this goes
+            // negative, and then every copy starts again from the source.
+            let len2 = i64::from(self.cols / 2) - i64::from(random() % 5);
+            let mut j = src;
+            for i in from..to {
+                if j as i64 > src as i64 + len2 || j >= max {
+                    j = src;
+                }
+                self.grid[j] = self.grid[i];
+                j += 1;
+            }
+        } else {
+            for cell in &mut self.grid[from..to] {
+                cell.fg = fg;
+                cell.bg = bg;
+                cell.bit = bit;
+                cell.blink = blink;
+
+                if noisy {
+                    fg = (random() as usize) % ncolors;
+                    bg = (random() as usize) % ncolors;
+                    blink = random().is_multiple_of(8);
+                }
+            }
+        }
+    }
+
+    fn draw(&mut self, bst: &mut Bst, d: &mut Dpy) -> i64 {
+        for y in 0..self.rows {
+            for x in 0..self.cols {
+                let cell = self.grid[(y * self.cols + x) as usize];
+                let fg = self.colors[cell.fg];
+                let bg = self.colors[cell.bg];
+                let flip = cell.blink && self.tick & 1 != 0;
+                bst.gc.set_foreground(if flip { fg } else { bg });
+                bst.gc.set_background(if flip { bg } else { fg });
+                d.win().copy_plane(
+                    &bst.gc,
+                    &self.bits[cell.bit],
+                    0,
+                    0,
+                    self.cellw,
+                    self.cellh,
+                    x * self.cellw,
+                    y * self.cellh,
+                );
+            }
+        }
+
+        self.tick += 1;
+        if random().is_multiple_of(5) {
+            /* change the display */
+            self.spatter(false);
+        }
+
+        250_000
+    }
+}
+
+fn nvidia(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+
+    let mut cols = 80;
+    let mut rows = 25;
+    let mut cellw = bst.width / cols;
+    let mut cellh = bst.height / rows;
+    if cellw < 8 || cellh < 18 {
+        cellw = 8;
+        cellh = 18;
+    }
+    cols = bst.width / cellw + 1;
+    rows = bst.height / cellh + 1;
+
+    /* Allocate colors */
+    let colors = (0..16)
+        .map(|_| {
+            crate::runtime::color::rgb(
+                (random() & 0xFF) as u8,
+                (random() & 0xFF) as u8,
+                (random() & 0xFF) as u8,
+            )
+        })
+        .collect();
+
+    /* Construct corrupted character bitmaps */
+    let bits = (0..5)
+        .map(|_| {
+            let mut p = Fb::new_bitmap(cellw, cellh);
+            let gc = Gc::new(1, 0);
+            if !random().is_multiple_of(40) {
+                for _ in 0..(cellw * cellh) / 16 {
+                    p.fill_rectangle(
+                        &gc,
+                        (random() % (cellw - 2).max(1) as u32) as i32 & !1,
+                        (random() % (cellh - 2).max(1) as u32) as i32 & !1,
+                        2,
+                        2,
+                    );
+                }
+            }
+            p
+        })
+        .collect();
+
+    let mut nv = NvState {
+        bits,
+        rows,
+        cols,
+        cellw,
+        cellh,
+        grid: vec![NvCell::default(); (rows * cols) as usize],
+        colors,
+        tick: 0,
+    };
+
+    /* Randomize the grid */
+    nv.spatter(true);
+    for _ in 0..20 {
+        nv.spatter(false);
+    }
+
+    bst.custom = Some(Custom::Nvidia(Box::new(nv)));
+    bst
+}
+
+/// Linux panic and fsck, by jwz.
+///
+/// The disk is failing, so how far the check gets is rolled at every step: it
+/// can restart from the beginning, or give up into a kernel oops at the end of
+/// any of the five passes.
+fn linux_fsck(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+
+    const PANIC: &[&str] = &[
+        " kernel: Unable to handle kernel paging request at virtual \
+         address 0000f0ad\n",
+        " kernel:  printing eip:\n",
+        " kernel: c01becd7\n",
+        " kernel: *pde = 00000000\n",
+        " kernel: Oops: 0000\n",
+        " kernel: CPU:    0\n",
+        " kernel: EIP:    0010:[<c01becd7>]    Tainted: P \n",
+        " kernel: EFLAGS: 00010286\n",
+        " kernel: eax: 0000ff00   ebx: ca6b7e00   ecx: ce1d7a60   edx: ce1d7a60\n",
+        " kernel: esi: ca6b7ebc   edi: 00030000   ebp: d3655ca0   esp: ca6b7e5c\n",
+        " kernel: ds: 0018   es: 0018   ss: 0018\n",
+        " kernel: Process crond (pid: 1189, stackpage=ca6b7000)\n",
+        " kernel: Stack: d3655ca0 ca6b7ebc 00030054 ca6b7e7c c01c1e5b \
+         00000287 00000020 c01c1fbf \n",
+        "",
+        " kernel:        00005a36 000000dc 000001f4 00000000 00000000 \
+         ce046d40 00000001 00000000 \n",
+        "",
+        "",
+        "",
+        " kernel:        ffffffff d3655ca0 d3655b80 00030054 c01bef93 \
+         d3655ca0 ca6b7ebc 00030054 \n",
+        "",
+        "",
+        "",
+        " kernel: Call Trace:    [<c01c1e5b>] [<c01c1fbf>] [<c01bef93>] \
+         [<c01bf02b>] [<c0134c4f>]\n",
+        "",
+        "",
+        "",
+        " kernel:   [<c0142562>] [<c0114f8c>] [<c0134de3>] [<c010891b>]\n",
+        " kernel: \n",
+        " kernel: Code: 2a 00 75 08 8b 44 24 2c 85 c0 74 0c 8b 44 24 58 83 48 18 \
+         08 \n",
+    ];
+
+    bst.scroll_p = true;
+    bst.wrap_p = true;
+    bst.left_margin = 10;
+    bst.right_margin = 10;
+    bst.top_margin = 10;
+    bst.bottom_margin = 10;
+
+    let sysname = "linux";
+
+    bst.text(Align::Left, "waiting for X server to shut down ");
+    bst.pause(100_000);
+    bst.text(
+        Align::Left,
+        "XIO:  fatal IO error 2 (broken pipe) on X server \":0.0\"\n\
+         \x20       after 339471 requests (339471 known processed) \
+         with 0 events remaining\n",
+    );
+    bst.char_delay(300_000);
+    bst.text(Align::Left, ".........\n");
+    bst.char_delay(0);
+    bst.text(
+        Align::Left,
+        "xinit:  X server slow to shut down, sending KILL signal.\n\
+         waiting for server to die ",
+    );
+    bst.char_delay(300_000);
+    bst.text(Align::Left, "...\n");
+    bst.char_delay(0);
+    bst.text(Align::Left, "xinit:  Can't kill server\n");
+    bst.pause(2_000_000);
+
+    bst.text(Align::Left, &format!("\n{sysname} Login: "));
+    bst.pause(1_000_000);
+    bst.text(
+        Align::Left,
+        "\n\n\
+         Parallelizing fsck version 1.22 (22-Jun-2001)\n\
+         e2fsck 1.22, 22-Jun-2001 for EXT2 FS 0.5b, 95/08/09\n\
+         Warning!  /dev/hda1 is mounted.\n\
+         /dev/hda1 contains a file system with errors, check forced.\n",
+    );
+    bst.pause(1_000_000);
+
+    if random().is_multiple_of(2) {
+        bst.text(
+            Align::Left,
+            "Couldn't find ext2 superblock, trying backup blocks...\n\
+             The filesystem size (according to the superblock) is 3644739 blocks\n\
+             The physical size of the device is 3636706 blocks\n\
+             Either the superblock or the partition table is likely to be corrupt!\n\
+             Abort<y>? no\n",
+        );
+    }
+    bst.pause(1_000_000);
+
+    'passes: {
+        loop {
+            bst.text(Align::Left, "Pass 1: Checking inodes, blocks, and sizes\n");
+            bst.pause(2_000_000);
+
+            let mut i = (random() % 60) as i32 - 20;
+            i -= 1;
+            while i > 0 {
+                let b = random() % 0xFFFF;
+                bst.text(
+                    Align::Left,
+                    &format!("Deleted inode {b} has zero dtime.  Fix<y>? yes\n\n"),
+                );
+                bst.pause(1000);
+                i -= 1;
+            }
+
+            let mut i = (random() % 40) as i32 - 10;
+            if i > 0 {
+                let g = random() % 0xFFFF;
+                let mut b = random() % 0xFFF_FFFF;
+
+                bst.pause(1_000_000);
+
+                bst.text(
+                    Align::Left,
+                    &format!(
+                        "Warning: Group {g}'s copy of the group descriptors \
+                         has a bad block ({b}).\n"
+                    ),
+                );
+
+                b = random() % 0x3F_FFFF;
+                i -= 1;
+                while i > 0 {
+                    b += random() % 0xFFFF;
+                    bst.text(
+                        Align::Left,
+                        &format!(
+                            "Error reading block {b} (Attempt to read block \
+                             from filesystem resulted in short read) while doing \
+                             inode scan.  Ignore error<y>?"
+                        ),
+                    );
+                    bst.pause(10_000);
+                    bst.text(Align::Left, " yes\n\n");
+                    i -= 1;
+                }
+            }
+
+            if random().is_multiple_of(10) {
+                bst.pause(1_000_000);
+
+                let mut i = 3 + (random() % 10) as i32 - 1;
+                while i > 0 {
+                    bst.text(
+                        Align::Left,
+                        "Could not allocate 256 block(s) for inode table: \
+                         No space left on device\n",
+                    );
+                    bst.pause(1000);
+                    i -= 1;
+                }
+                bst.text(Align::Left, "Restarting e2fsck from the beginning...\n");
+                bst.pause(2_000_000);
+                continue;
+            }
+
+            let mut i = (random() % 20) as i32 - 5;
+            if i > 0 {
+                bst.pause(1_000_000);
+            }
+            i -= 1;
+            while i > 0 {
+                let mut j = 5 + (random() % 10) as i32 - 1;
+                let w = random() % 4;
+
+                while j > 0 {
+                    let mut b = (random() % 0xF_FFFF) as i64;
+                    let g = random() % 0xFFF;
+
+                    if random().is_multiple_of(10) {
+                        b = 0;
+                    } else if random().is_multiple_of(10) {
+                        b = -1;
+                    }
+
+                    let msg = match w {
+                        0 => format!(
+                            "Inode table for group {g} not in group.  (block {b})\n\
+                             WARNING: SEVERE DATA LOSS POSSIBLE.\n\
+                             Relocate<y>?"
+                        ),
+                        1 => format!(
+                            "Block bitmap for group {g} not in group.  (block {b})\n\
+                             Relocate<y>?"
+                        ),
+                        2 => format!(
+                            "Inode bitmap {b} for group {g} not in group.\n\
+                             Continue<y>?"
+                        ),
+                        _ => format!(
+                            "Bad block {b} in group {g}'s inode table.\n\
+                             WARNING: SEVERE DATA LOSS POSSIBLE.\n\
+                             Relocate<y>?"
+                        ),
+                    };
+
+                    bst.text(Align::Left, &msg);
+                    bst.text(Align::Left, " yes\n\n");
+                    bst.pause(1000);
+                    j -= 1;
+                }
+                i -= 1;
+            }
+            break;
+        }
+
+        if random().is_multiple_of(10) {
+            break 'passes;
+        }
+        bst.text(Align::Left, "Pass 2: Checking directory structure\n");
+        bst.pause(2_000_000);
+
+        let mut i = (random() % 20) as i32 - 5 - 1;
+        while i > 0 {
+            let n = random() % 0xF_FFFF;
+            let o = random() % 0xFFF;
+            bst.text(
+                Align::Left,
+                &format!(
+                    "Directory inode {n}, block 0, offset {o}: directory corrupted\n\
+                     Salvage<y>? "
+                ),
+            );
+            bst.pause(1000);
+            bst.text(Align::Left, " yes\n\n");
+
+            if random().is_multiple_of(100) {
+                bst.text(
+                    Align::Left,
+                    &format!("Missing '.' in directory inode {n}.\nFix<y>?"),
+                );
+                bst.pause(1000);
+                bst.text(Align::Left, " yes\n\n");
+            }
+            i -= 1;
+        }
+
+        if random().is_multiple_of(10) {
+            break 'passes;
+        }
+
+        bst.text(
+            Align::Left,
+            "Pass 3: Checking directory connectivity\n\
+             /lost+found not found.  Create? yes\n",
+        );
+        bst.pause(2_000_000);
+
+        if random().is_multiple_of(10) {
+            break 'passes;
+        }
+        bst.text(Align::Left, "Pass 4: Checking reference counts\n");
+        bst.pause(2_000_000);
+
+        if random().is_multiple_of(10) {
+            break 'passes;
+        }
+        bst.text(Align::Left, "Pass 5: Checking group summary information\n");
+        bst.pause(2_000_000);
+
+        let mut i = (random() % 200) as i32 - 50;
+        if i > 0 {
+            bst.text(Align::Left, "Block bitmap differences: ");
+            i -= 1;
+            while i > 0 {
+                bst.text(Align::Left, &format!(" -{}", random() % 0xFFF));
+                bst.pause(1000);
+                i -= 1;
+            }
+            bst.text(Align::Left, "\nFix? yes\n\n");
+        }
+
+        let mut i = (random() % 100) as i32 - 50;
+        if i > 0 {
+            bst.text(Align::Left, "Inode bitmap differences: ");
+            i -= 1;
+            while i > 0 {
+                bst.text(Align::Left, &format!(" -{}", random() % 0xFFF));
+                bst.pause(1000);
+                i -= 1;
+            }
+            bst.text(Align::Left, "\nFix? yes\n\n");
+        }
+
+        let mut i = (random() % 20) as i32 - 5 - 1;
+        while i > 0 {
+            let g = random() % 0xFFFF;
+            let c = random() % 0xFFFF;
+            bst.text(
+                Align::Left,
+                &format!("Free blocks count wrong for group #0 ({g}, counted={c}).\nFix? "),
+            );
+            bst.pause(1000);
+            bst.text(Align::Left, " yes\n\n");
+            i -= 1;
+        }
+    }
+
+    // The oops itself, timestamped like the syslog it is coming out of. There
+    // is no date to be had here, only the time of day.
+    let t = d.wall_clock() as i64;
+    let stamp = format!(
+        "Jan 01 {:02}:{:02}:{:02} ",
+        t / 3600 % 24,
+        t / 60 % 60,
+        t % 60
+    );
+    bst.text(Align::Left, "\n\n");
+    for line in PANIC {
+        if line.is_empty() {
+            bst.pause(300_000);
+        } else {
+            bst.text(Align::Left, &stamp);
+            bst.text(Align::Left, sysname);
+            bst.text(Align::Left, line);
+            bst.pause(1000);
+        }
+    }
+    bst.pause(4_000_000);
+
+    bst.clear(d);
+    bst
+}
+
+/// SPARC Solaris panic, by Anton Solovyev. Should look pretty authentic on
+/// Solaris boxes: it panics, dumps, reboots into the PROM, fails to find a
+/// boot device, and gets talked through a rescue by hand.
+fn sparc_solaris(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, BLACK, WHITE, f);
+    let char_width = bst.font.char_width();
+
+    let mut art = Art::load(crate::images::bsod::SUN);
+    let (mut pix_w, mut pix_h) = art.as_ref().map_or((32, 32), |a| (a.width(), a.height()));
+    while art.is_some() && pix_w < char_width * 4 {
+        art = art.map(|a| a.doubled());
+        pix_w *= 2;
+        pix_h *= 2;
+    }
+    if let Some(a) = art {
+        bst.mask = a.mask.map(std::rc::Rc::new);
+        bst.pixmap = Some(a.image);
+    }
+
+    bst.scroll_p = true;
+    bst.wrap_p = true;
+    bst.left_margin = (f64::from(bst.width) * 0.07) as i32;
+    bst.right_margin = bst.left_margin;
+    bst.top_margin = (f64::from(bst.height) * 0.07) as i32;
+    bst.bottom_margin = bst.top_margin;
+    bst.y = bst.top_margin + bst.yoff + bst.font.ascent();
+
+    // Upstream also puts a photograph behind this, and leaves it out: it looks
+    // right over a desktop and wrong over a picture.
+
+    bst.line_delay(20_000);
+
+    let (lm, tm) = (bst.left_margin, bst.top_margin);
+    let (iw, ih) = (
+        bst.width - bst.left_margin - bst.right_margin,
+        bst.height - bst.top_margin - bst.bottom_margin,
+    );
+    bst.invert();
+    bst.rect(true, lm, tm, iw, ih);
+    bst.invert();
+
+    bst.text(
+        Align::Left,
+        "BAD TRAP: cpu=0 type=0x31 rp=0x2a10043b5e0 addr=0xf3880 mmu_fsr=0x0\n\
+         BAD TRAP occurred in module \"unix\" due to an illegal access to a\
+         \x20user address.\n\
+         adb: trap type = 0x31\n\
+         addr=0xf3880\n\
+         pid=307, pc=0x100306e4, sp=0x2a10043ae81, tstate=0x4480001602,\
+         \x20context=0x87f\n\
+         g1-g7: 1045b000, 32f, 10079440, 180, 300000ebde8, 0, 30000953a20\n\
+         Begin traceback... sp = 2a10043ae81\n\
+         Called from 100bd060, fp=2a10043af31, args=f3700 300008cc988 f3880 0\
+         \x201 300000ebde0.\n\
+         Called from 101fe1bc, fp=2a10043b011, args=3000045a240 104465a0\
+         \x20300008e47d0 300008e48fa 300008ae350 300008ae410\n\
+         Called from 1007c520, fp=2a10043b0c1, args=300008e4878 300003596e8 0\
+         \x203000045a320 0 3000045a220\n\
+         Called from 1007c498, fp=2a10043b171, args=1045a000 300007847f0 20\
+         \x203000045a240 1 0\n\
+         Called from 1007972c, fp=2a10043b221, args=1 300009517c0 30000951e58 1\
+         \x20300007847f0 0\n\
+         Called from 10031e10, fp=2a10043b2d1, args=3000095b0c8 0 300009396a8\
+         \x2030000953a20 0 1\n\
+         Called from 10000bdd8, fp=ffffffff7ffff1c1, args=0 57 100131480\
+         \x20100131480 10012a6e0 0\n\
+         End traceback...\n\
+         panic[cpu0]/thread=30000953a20: trap\n\
+         syncing file systems...\u{1b}",
+    );
+
+    bst.pause(3_000_000);
+
+    bst.text(Align::Left, "\u{8} 1 done\n");
+    bst.text(
+        Align::Left,
+        "dumping to /dev/dsk/c0t0d0s3, offset 26935296\n\u{1b}",
+    );
+    bst.pause(2_000_000);
+    bst.text(Align::Left, "\u{8}");
+
+    for i in 1..=100 {
+        bst.text(Align::Left, &format!("\r {i:3}% done\u{1b}"));
+        bst.pause(100_000);
+    }
+
+    bst.text(
+        Align::Left,
+        "\u{8}: 2803 pages dumped, compression ratio 2.88, dump succeeded\n\u{1b}",
+    );
+    bst.pause(2_000_000);
+
+    bst.text(Align::Left, "\u{8}rebooting...\nResetting ...\n\u{1b}");
+
+    bst.pause(3_000_000);
+
+    bst.invert();
+    bst.rect(true, lm, tm, iw, ih);
+    bst.invert();
+    let ascent = bst.font.ascent();
+    bst.moveto(lm, tm + ascent);
+    bst.pause(1_000_000);
+
+    bst.text(
+        Align::Left,
+        "Starting real time clock...\n\
+         Probing /sbus@1,f8000000 at 0,0  dma esp sd st le\n\
+         Probing /sbus@1,f8000000 at 1,0  Invalid FCode start byte at ffe70000\n\
+         Probing /sbus@1,f8000000 at 2,0  Invalid FCode start byte at ffe70000\n\
+         Probing /sbus@1,f8000000 at 3,0  bwtwo\n\
+         \n",
+    );
+
+    bst.pixmap_at(0, 0, pix_w, pix_h, HERE, HERE);
+    bst.margins(lm + pix_w + char_width * 2, lm + pix_w + char_width * 2);
+    bst.text(
+        Align::Left,
+        "SPARCstation IPC, Keyboard Present\n\
+         ROM Rev. 2.9, 16 MB memory installed, Serial #12648190.\n\
+         Ethernet address 8:0:20:37:1:87, Host ID: 52c0fefe.\n",
+    );
+    bst.margins(lm, lm);
+
+    bst.text(Align::Left, "\n\n\u{1b}");
+    bst.pause(3_000_000);
+    bst.text(Align::Left, "\r");
+
+    bst.text(
+        Align::Left,
+        "Testing 16 megs of memory. Still to go \u{1b} 16",
+    );
+
+    for i in (1..=16).rev() {
+        bst.text(Align::Left, &format!("\u{8}\u{8}{i:2}"));
+        bst.pause(100_000);
+    }
+    bst.text(
+        Align::Left,
+        "\u{8}\u{8}\u{8}\u{8}   0\n\
+         Initializing  16 megs of memory at addr         0\u{1b} 16",
+    );
+    for i in (0..=16).rev() {
+        bst.text(Align::Left, &format!("\u{8}\u{8}{i:2}"));
+        bst.pause(30_000);
+    }
+    bst.text(
+        Align::Left,
+        "\r                                                          \r\
+         Boot device: /sbus/le@0,c00000   File and args:\n\u{1b}",
+    );
+
+    let n = random() % 10;
+    for _ in 0..n {
+        bst.pause(3_000_000);
+        bst.text(Align::Left, "\rTimeout waiting for ARP/RARP packet\n\u{1b}");
+    }
+    bst.text(Align::Left, "\r");
+
+    bst.text(
+        Align::Left,
+        "Internal loopback test -- Wrong packet length;\
+         \x20expected 36, observed 1600\n\
+         Can't open boot device\n\
+         \n\
+         Type b (boot), c (continue), or n (new command mode)\n\
+         >",
+    );
+    bst.cursor(true, 500_000, 10);
+    bst.text(Align::Left, "n\n");
+    bst.pause(500_000);
+    bst.text(Align::Left, "Type  help  for more information\nok ");
+
+    bst.cursor(true, 500_000, 4);
+    bst.char_delay(80_000);
+    /* "test net" */
+    bst.text(
+        Align::Left,
+        "t\u{1b}\u{8}e\u{1b}\u{8}s\u{1b}\u{8}t\u{1b}\u{8} \u{1b}\u{8}\
+         n\u{1b}\u{8}e\u{1b}\u{8}t\u{1b}\u{8}",
+    );
+    bst.cursor(true, 500_000, 2);
+    bst.text(Align::Left, "\n\u{1b}");
+    bst.char_delay(0);
+
+    bst.pause(1_000_000);
+    bst.text(Align::Left, "\r Lance register test -- succeeded.\n\u{1b}");
+    bst.pause(1_000_000);
+    bst.text(
+        Align::Left,
+        "\r Internal loopback test -- succeeded.\n\u{1b}",
+    );
+    bst.pause(1_000_000);
+    bst.text(Align::Left, "\r External loopback test -- succeeded.\nok ");
+    bst.cursor(true, 500_000, 8);
+
+    bst.text(Align::Left, "\rok ");
+    bst.cursor(true, 500_000, 4);
+    bst.char_delay(80_000);
+    /* "boot cdrom" */
+    bst.text(
+        Align::Left,
+        "b\u{1b}\u{8}o\u{1b}\u{8}o\u{1b}\u{8}t\u{1b}\u{8} \u{1b}\u{8}\
+         c\u{1b}\u{8}d\u{1b}\u{8}r\u{1b}\u{8}o\u{1b}\u{8}m\u{1b}\u{8}",
+    );
+    bst.text(Align::Left, "  \n");
+    bst.char_delay(0);
+    bst.text(
+        Align::Left,
+        "\rBoot device: /sbus/esp@0,800000/sd@6,0:c    File and args:\n\u{1b}",
+    );
+    bst.pause(1_000_000);
+    bst.text(Align::Left, "\rroot on   fstype 4.3\nBoot: vmunix\n\u{1b}");
+
+    bst.text(Align::Left, "\rSize: 696320+");
+    bst.char_delay(5000);
+    bst.invert();
+    let spinner = "\u{8}-\u{8}\\\u{8}|\u{8}/".repeat(64);
+    bst.text(Align::Left, &spinner);
+    bst.invert();
+    bst.text(Align::Left, "\u{8}+");
+    bst.char_delay(0);
+    bst.text(Align::Left, "2218504+28056 bytes\n\u{1b}");
+    bst.pause(1_000_000);
+
+    match random() % 3 {
+        0 => {
+            bst.text(
+                Align::Left,
+                "\rSunOS Release 4.1.1 (MUNIX) #1: Thu Oct 11 11:22:48 PDT 1990\n\
+                 Copyright (c) 1983-1990, Sun Microsystems, Inc.\n\
+                 mem = 16384K (0x1000000)\n\
+                 avail mem = 12865536\n\
+                 Ethernet address = 8:0:20:37:1:87\n\
+                 No FPU in configuration\n\
+                 cpu = SUNW,Sun 4/40\n\
+                 zs0 at obio 0xf1000000 pri 12\n\
+                 zs1 at obio 0xf0000000 pri 12\n\
+                 sbus0 at SBus slot 0 0x0\n\
+                 dma0 at SBus slot 0 0x400000\n\
+                 esp0 at SBus slot 0 0x800000 pri 3\n\
+                 \u{1b}",
+            );
+        }
+        1 => {
+            bst.text(
+                Align::Left,
+                "\rSunOS Release 5.6 Version Generic [UNIX(R) System V Release 4.0]\n\
+                 Copyright (c) 1983-1997, Sun Microsystems, Inc.\n\
+                 No FPU in configuration\n\
+                 WARNING: kbd: Unknown keyboard type, Type 3 assumed.\n\
+                 WARNING: kbd: Unknown keyboard type, Type 3 assumed.\n\
+                 Configuring devices...\n\
+                 \u{1b}",
+            );
+            bst.pause(1_000_000);
+            bst.text(
+                Align::Left,
+                "\rWARNING: /sbus@1,f8000000/esp@0,800000/sd@6,0 (sd6):\n\
+                 \x20       incomplete read- retrying\n\
+                 \n\
+                 loadkeys: ioctl(KIOCLAYOUT): Invalid argument\n\
+                 \u{1b}",
+            );
+        }
+        _ => {
+            bst.text(
+                Align::Left,
+                "\rSunOS Release 5.3 Version Generic [UNIX(R) System V Release 4.0]\n\
+                 Copyright (c) 1983-1993, Sun Microsystems, Inc.\n\
+                 No FPU in configuration\n\
+                 WARNING: /sbus@1,f8000000/esp@0,800000/sd@3,0 (sd3):\n\
+                 \x20       corrupt label - wrong magic number\n\
+                 \n\
+                 \\       unexpected data phase\n\u{1b}",
+            );
+            for i in 0..3 {
+                bst.pause(3_000_000);
+                if i > 0 {
+                    bst.text(Align::Left, "\r        polled command timeout\n");
+                }
+                bst.text(
+                    Align::Left,
+                    "\resp:         State=DATA Last State=UNKNOWN\n\
+                     esp:         Latched stat=0x11<XZERO,IO> intr=0x10<BUS,FCMO>\
+                     \x20fifo 0x0\n\
+                     esp:         lst msg out: IDENTIFY; lst msg in: COMMAND COMPLETE\n\
+                     esp:         DMA csr=0x10<INTEN>\n\
+                     esp:         addr=fff0100f dmacnt=8000 last=fff01008 last_cnt=7\n\
+                     esp:         Cmd dump for Target 6 Lun 0:\n\
+                     esp:         cdblen=6, cdb=[ 0x0 0x0 0x0 0x0 0x1 0x0 ]\n\
+                     esp:         pkt_state 0x3<SEL,ARB> pkt_flags 0x10000\
+                     \x20pkt_statistics 0x0\n\
+                     esp:         cmd_flags=0x10022 cmd_timeout=120\n\
+                     \u{1b}",
+                );
+            }
+            bst.pause(3_000_000);
+            bst.text(
+                Align::Left,
+                "\rWARNING: /sbus@1,f8000000/esp@0,800000/sd@6,0 (sd6):\n\
+                 \x20       incomplete read- retrying\n\
+                 \n\
+                 loadkeys: ioctl(KIOCLAYOUT): Invalid argument\n\
+                 \u{1b}",
+            );
+        }
+    }
+
+    bst.pause(1_000_000);
+    bst.text(
+        Align::Left,
+        "\rsd1 at esp0 target 1 lun 0\n\
+         sd1:    corrupt label - wrong magic number\n\
+         sd1: Vendor ' SEAGAT', product ' ', 786432 512 byte blocks\n\
+         sr0: Unrecongized vendor 'Sony    ',\
+         \x20product 'CDU-76S        'sr0 at esp0 target 6 lun 0\n\
+         le0 at SBus slot 0 0xc00000 pri 5\n\
+         fd0 at obio 0xf7200000 pri 11\n\u{1b}",
+    );
+    bst.pause(1_000_000);
+    bst.text(
+        Align::Left,
+        "\rrd0: using preloaded munixfs\n\
+         WARNING: TOD clock not initialized -- CHECK AND RESET THE DATE!\n\
+         root on rd0a fstype 4.2\n\
+         swap on ns0b fstype spec size 12480K\n\
+         dump on ns0b fstype spec size 12468K\n\
+         \u{1b}",
+    );
+    bst.pause(4_000_000);
+
+    match random() % 3 {
+        0 => {
+            bst.text(
+                Align::Left,
+                "\rStarting OpenWindows...\n\
+                 \n\
+                 \n\
+                 waiting for X server to begin accepting connections \u{1b}",
+            );
+            bst.pause(2_500_000);
+            bst.text(Align::Left, "\u{8}.\u{1b}");
+            bst.pause(2_500_000);
+            bst.text(Align::Left, "\u{8} \n.\u{1b}");
+            for _ in 0..10 {
+                bst.pause(2_500_000);
+                bst.text(Align::Left, "\u{8}.\u{1b}");
+                bst.pause(2_500_000);
+                bst.text(Align::Left, "\u{8} \n.\u{1b}");
+            }
+        }
+        1 => {
+            bst.text(
+                Align::Left,
+                "\rCan't invoke /sbin/init, error 13\n\
+                 Can't invoke /etc/init, error 13\n\
+                 Can't invoke /bin/init, error 13\n\
+                 Can't invoke /usr/etc/init, error 13\n\
+                 Can't invoke /usr/bin/init, error 13\n\
+                 panic: icode\n\
+                 syncing file systems...\u{1b}",
+            );
+            bst.pause(2_000_000);
+            bst.text(Align::Left, "\u{8} done\n");
+            bst.text(
+                Align::Left,
+                "00000 low-memory static kernel pages\n\
+                 00888 additional static and sysmap kernel pages\n\
+                 00000 dynamic kernel data pages\n\
+                 00008 additional user structure pages\n\
+                 00000 segmap kernel pages\n\
+                 00000 segvn kernel pages\n\
+                 00000 current user process pages\n\
+                 00000 user stack pages\n\
+                 00896 total pages (896 chunks)\n\
+                 \n\
+                 dumping to vp ff007dd4, offset 17768\n\
+                 0 total pages, dump failed: error 19\n\
+                 rebooting...\n",
+            );
+        }
+        _ => {
+            bst.text(
+                Align::Left,
+                "\r  \n\
+                 What would you like to do?\n\
+                 \x20 1 - install SunOS mini-root\n\
+                 \x20 2 - exit to single user shell\n\
+                 Enter a 1 or 2: ",
+            );
+            bst.cursor(true, 500_000, 4);
+            bst.text(
+                Align::Left,
+                "2\nyou may restart this script by typing <cntl-D>\n# ",
+            );
+            bst.cursor(true, 500_000, 4);
+            bst.char_delay(80_000);
+            bst.text(Align::Left, "l\u{1b}\u{8}s\u{1b}\u{8}");
+            bst.text(Align::Left, "  \n");
+            bst.char_delay(0);
+            bst.text(
+                Align::Left,
+                ".MUNIXFS        bin             extract         stand\n\
+                 .profile        dev             lib             tmp\n\
+                 README          etc             sbin            usr\n\
+                 # ",
+            );
+            bst.cursor(true, 500_000, 4);
+            bst.char_delay(80_000);
+            /* ". extract" */
+            bst.text(
+                Align::Left,
+                ".\u{1b}\u{8} \u{1b}\u{8}e\u{1b}\u{8}x\u{1b}\u{8}t\u{1b}\u{8}\
+                 r\u{1b}\u{8}a\u{1b}\u{8}c\u{1b}\u{8}t\u{1b}\u{8}",
+            );
+            bst.text(Align::Left, "  \n");
+            bst.char_delay(0);
+            bst.text(
+                Align::Left,
+                "using cdrom partition number 2\n\
+                 esp0:    data transfer overrun\n\
+                 \x20        State=DATA Last State=DATA_DNE\n\
+                 \x20        Latched stat=0x11<XZERO,IO> intr=0x10<BUS> fifo 0x0\n\
+                 \x20        lst msg out: EXTENDED; lst msg in: COMMAND COMPLETE\n\
+                 \x20        DMA csr=0x10<INTEN>\n\
+                 \x20        addr=fff026d0 last=fff024d0 last_count=200\n\
+                 \x20        Cmd dump for Target 6 Lun 0:\n\
+                 \x20        cdb=[ 0x8 0x0 0x0 0x0 0x1 0x0 ]\n\
+                 \x20        pkt_state 0xf<XFER,CMD,SEL,ARB> pkt_flags 0x0\
+                 \x20pkt_statistics 0x0\n\
+                 \x20        Mapped Dma Space:\n\
+                 \x20                Base = 0x24d0 Count = 0x200\n\
+                 \x20        Transfer History:\n\
+                 \x20                Base = 0x24d0 Count = 0x200\n",
+            );
+        }
+    }
+
+    bst.cursor(true, 500_000, 8);
+
+    bst.clear(d);
+    bst
+}
+
+/// VMS by jwz, text sent by Roland Barmettler.
+///
+/// The node names are the machine's own, with three different digits on the
+/// end; a browser tab has no hostname, so this is the name upstream falls back
+/// to when `uname` fails, and the date is the one it has: no day, but the right
+/// time of day.
+fn vms(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+
+    let char_delay = 0;
+    let dot_delay = 40_000;
+    let chunk_delay = 500_000;
+
+    const LINES: &[&str] = &[
+        "%CNXMAN,  Lost connection to system #\n\
+         %SHADOW-I-VOLPROC, DSA0: shadow master has changed.  \
+         Dump file WILL be written if system crashes.\n\
+         \n",
+        "",
+        "%CNXMAN,  Quorum lost, blocking activity\n\
+         %CNXMAN,  Timed-out lost connection to system #\n\
+         %CNXMAN,  Timed-out lost connection to system #\n\
+         %CNXMAN,  Timed-out lost connection to system #\n\
+         %CNXMAN,  Proposing reconfiguration of the VMScluster\n",
+        "",
+        "%CNXMAN,  Removed from VMScluster system #\n\
+         %CNXMAN,  Removed from VMScluster system #\n\
+         %CNXMAN,  Removed from VMScluster system #\n\
+         %CNXMAN,  Completing VMScluster state transition\n",
+        "\n\
+         **** OpenVMS (TM) Alpha Operating system V7.3-1   - BUGCHECK ****\n\
+         \n\
+         ** Bugcheck code = 000005DC: CLUEXIT, Node voluntarily exiting \
+         VMScluster\n\
+         ** Crash CPU: 00    Primary CPU: 00    Active CPUs: 00000001\n\
+         ** Current Process = NULL\n\
+         ** Current PSB ID = 00000001\n\
+         ** Image Name =\n\
+         \n\
+         ** Dumping error log buffers to HBVS unit 0\n\
+         **** Unable to dump error log buffers to remaining shadow set members\n\
+         ** Error log buffers not dumped to HBVS unit 200\n\
+         \n\
+         ** Dumping memory to HBVS unit 0\n\
+         **** Starting compressed selective memory dump at #...\n",
+        "...",
+        "\n\
+         **** Memory dump complete - not all processes or global pages saved\n",
+        "\nhalted CPU 0\n",
+        "",
+        "\n\
+         halt code = 5\n\
+         HALT instruction executed\n\
+         PC = ffffffff800c3884\n",
+        "\nCPU 0 booting\n",
+        "\nresetting all I/O buses\n\n\n",
+    ];
+
+    bst.scroll_p = true;
+    bst.wrap_p = true;
+    bst.left_margin = 10;
+    bst.right_margin = 10;
+    bst.top_margin = 10;
+    bst.bottom_margin = 10;
+
+    /* Pick three numbers, 1-9, no overlaps. */
+    let mut ids = [0u32; 3];
+    ids[0] = 1 + random() % 9;
+    while ids[1] == 0 || ids[1] == ids[0] {
+        ids[1] = 1 + random() % 9;
+    }
+    while ids[2] == 0 || ids[2] == ids[0] || ids[2] == ids[1] {
+        ids[2] = 1 + random() % 9;
+    }
+
+    let node = |n: usize| format!("VMS00{}", ids[n]);
+    let t = d.wall_clock() as i64;
+    let args = [
+        node(0),
+        node(0),
+        node(1),
+        node(2),
+        node(0),
+        node(1),
+        node(2),
+        format!("01-JAN-2026 {:02}:{:02}", t / 3600 % 24, t / 60 % 60),
+    ];
+
+    let mut arg_count = 0;
+    for fmt in LINES {
+        if *fmt == "..." {
+            let steps = 180 + random() % 60;
+            for _ in 0..steps {
+                bst.text(Align::Left, ".");
+                bst.pause(dot_delay);
+            }
+        } else {
+            let mut out = String::with_capacity(fmt.len());
+            for c in fmt.chars() {
+                if c == '#' {
+                    out.push_str(&args[arg_count]);
+                    arg_count += 1;
+                } else {
+                    out.push(c);
+                }
+            }
+            bst.char_delay(char_delay);
+            bst.text(Align::Left, &out);
+            bst.char_delay(0);
+            bst.pause(chunk_delay);
+        }
+    }
+
+    bst.clear(d);
+    bst
+}
+
+/// OS/2 panics, by Knut St. Osmundsen.
+///
+/// All but one messages are real ones, some are from my test machines and
+/// system dumps, others are reconstructed from google results. Please, don't
+/// be to hard if the formatting of the earlier systems aren't 100% correct.
+fn os2(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+
+    const PANICS: &[&str] = &[
+        /* OS/2 2.0 trap - details are bogus (CR0++). */
+        "TRAP 0002       ERRCD=0000  ERACC=****  ERLIM=********\n\
+         EAX=7d240a58  EBX=ff202fdc  ECX=00064423  EDX=00003624\n\
+         ESI=fff3272c  EDI=7d240004  EBP=00004a44  FLG=00003202\n\
+         CS:EIP=0160:fff702a6  CSACC=c09d  CSLIM=ffffffff\n\
+         SS:ESP=0030:00004a38  SSACC=1097  SSLIM=00003fff\n\
+         DS=0158  DSACC=c0f3  DSLIM=ffffffff  CR0=fffffffb\n\
+         ES=0158  ESACC=c0f3  ESLIM=ffffffff  CR2=1a060014\n\
+         FS=0000  FSACC=****  FSLIM=********\n\
+         GS=0000  GSACC=****  GSLIM=********\n\
+         \n\
+         The system detected an internal processing error\n\
+         at location ##0160:fff6453f - 000d:a53f\n\
+         60000, 9084\n\
+         \n\
+         038600d1\n\
+         Internal revision 6.307, 92/03/01\n\
+         \n",
+        /* warp 3 (early) */
+        "TRAP 000e       ERRCD=0000  ERACC=****  ERLIM=********\n\
+         EAX=ff050c20  EBX=000000bb  ECX=ffff00c1  EDx=fff379b8\n\
+         ESI=ffe55a3c  EDI=00000000  EBP=00004eb8  FLG=00013282\n\
+         CS:EIP=0160:fff8dbb8  CSACC=c09b  CSLIM=ffffffff\n\
+         SS:EIP=0030:00004eb4  SSACC=1097  SSLIM=00003fff\n\
+         DS=0158  DSACC=c0f3  DSLIM=ffffffff  CR0=8001001b\n\
+         ES=0158  DSACC=c0f3  DSLIM=ffffffff  CR2=000000c7\n\
+         FS=0000  FSACC=****  FSLIM=********\n\
+         GS=0000  GSACC=****  GSLIM=********\n\
+         \n\
+         The system detected an internal processing error\n\
+         at location ##0160:fff66bf0 - 000d:9bf0.\n\
+         60000, 9084\n\
+         \n\
+         048600b4\n\
+         Internal revision 8.125, 94/02/16\n\
+         \n\
+         The system is stopped.  Record the location number of the error\n\
+         and contact your service representative.\n",
+        /* warp 3 */
+        "TRAP 000e       ERRCD=0002  ERACC=****  ERLIM=********\n\
+         EAX=00000000  EBX=fdef1e0c  ECX=00003824  EDX=0000edf9\n\
+         ESI=fdf30e80  EDI=fc8b0000  EBP=00005658  FLG=00012246\n\
+         CS:EIP=0160:fff8ada3  CSACC=c09b  CSLIM=ffffffff\n\
+         SS:ESP=0030:000055d4  SSACC=1097  SSLIM=0000480f\n\
+         DS=0158  DSACC=c093  DSLIM=ffffffff  CR0=8001001b\n\
+         ES=0158  ESACC=c093  ESLIM=ffffffff  CR2=fc8b0000\n\
+         FS=03b8  FSACC=0093  FSLIM=00000023\n\
+         GS=0000  GSACC=****  GSLIM=********\n\
+         \n\
+         The system detected an internal processing error\n\
+         at location ##0160:fff5c364 - 000d:a364.\n\
+         60000, 9084\n\
+         \n\
+         05860526\n\
+         Internal revision 8200,94/11/07\n\
+         \n\
+         The system is stopped. Record all of the above information and\n\
+         contact your service representative.\n",
+        /* warp 3 (late) */
+        "TRAP 000d       ERRCD=2200  ERACC=1092  ERLIM=00010fff\n\
+         EAX=0000802e  EBX=fff001c8  ECX=9bd80000  EDX=00000000\n\
+         ESI=fff09bd8  EDI=fdeb001b  EBP=00000000  FLG=00012012\n\
+         CS:EIP=0168:fff480a2  CSACC=c09b  CSLIM=ffffffff\n\
+         SS:ESP=00e8:00001f32  SSACC=0093  SSLIM=00001fff\n\
+         DS=0940  DSACC=0093  DSLIM=00000397  CR0=8001001b\n\
+         ES=00e8  ESACC=0093  ESLIM=00001fff  CR2=15760008\n\
+         FS=0000  FSACC=****  FSLIM=****\n\
+         GS=0000  GSACC=****  GSLIM=****\n\
+         \n\
+         The system detected an internal processing error\n\
+         at location ##0168:fff4b06e - 000e:c06e\n\
+         60000, 9084\n\
+         \n\
+         06860652\n\
+         Internal revision 8.259_uni,98/01/07\n\
+         \n\
+         The system is stopped. Record all of the above information and\n\
+         contact your service representative.\n",
+        /* Warp 4.52+ - the official r0trap.exe from the debugging classes */
+        "Exception in module: OS2KRNL\n\
+         TRAP 000e       ERRCD=0002  ERACC=****  ERLIM=********\n\
+         EAX=00000001  EBX=80010002  ECX=ffed4638  EDX=0003f17b\n\
+         ESI=00000001  EDI=00000002  EBP=00005408  FLG=00012202\n\
+         CS:EIP=0168:fff3cd2e  CSACC=c09b  CSLIM=ffffffff\n\
+         SS:ESP=0030:000053ec  SSACC=1097  SSLIM=000044ff\n\
+         DS=0160  DSACC=c093  DSLIM=ffffffff  CR0=8001001b\n\
+         ES=0160  ESACC=c093  ESLIM=ffffffff  CR2=00000001\n\
+         FS=0000  FSACC=****  FSLIM=********\n\
+         GS=0000  GSACC=****  GSLIM=********\n\
+         \n\
+         The system detected an internal processing error at\n\
+         location ##0168:fff1e3f3 - 000e:c3f3.\n\
+         60000, 9084\n\
+         \n\
+         068606a0\n\
+         Internal revision 14.097_UNI\n\
+         \n\
+         The system is stopped. Record all of the above information and\n\
+         contact your service representative.\n",
+        /* Warp 4.52+, typical JFS problem. */
+        "Exception in module: JFS\n\
+         TRAP 0003       ERRCD=0000  ERACC=****  ERLIM=********\n\
+         EAX=00000000  EBX=ffffff05  ECX=00000001  EDX=f5cd8010\n\
+         ESI=000000e6  EDI=000000e7  EBP=f9c7378e  FLG=00002296\n\
+         CS:EIP=0168:f8df3250  CSACC=c09b  CSLIM=ffffffff\n\
+         SS:ESP=1550:fdc73778  SSACC=c093  SSLIM=ffffffff\n\
+         DS=0160  DSACC=c093  DSLIM=ffffffff  CR0=80010016\n\
+         ES=0160  ESACC=c093  DSLIM=ffffffff  CR2=05318000\n\
+         FS=03c0  FSACC=0093  DSLIM=00000023\n\
+         GS=0160  GSACC=c093  DSLIM=ffffffff\n\
+         \n\
+         The system detected an internal processing error\n\
+         at location ##0168:fff1e2ab - 000e:c2ab.\n\
+         60000, 9084\n\
+         \n\
+         07860695\n\
+         \n\
+         Internal revision 14.100c_UNI\n\
+         \n\
+         The system is stopped. Record all of the above information and\n\
+         contact your service representative.\n",
+    ];
+
+    bst.text(Align::Left, PANICS[(random() as usize) % PANICS.len()]);
+    bst.cursor(false, 240_000, 999_999);
+
     bst.clear(d);
     bst
 }
@@ -3438,6 +4904,46 @@ const MODES: &[Mode] = &[
         fonts: NONE,
     },
     Mode {
+        name: "HPPALinux",
+        fun: hppa_linux,
+        fonts: NONE,
+    },
+    Mode {
+        name: "Nvidia",
+        fun: nvidia,
+        fonts: NONE,
+    },
+    Mode {
+        name: "Linux",
+        fun: linux_fsck,
+        fonts: [
+            "Luxi Mono 12, Gallant12x22 12, Courier Bold 12",
+            "Luxi Mono 24, Gallant12x22 24, Courier Bold 24",
+            "",
+            "",
+        ],
+    },
+    Mode {
+        name: "Solaris",
+        fun: sparc_solaris,
+        fonts: [
+            "Gallant12x22 12, Luxi Mono 12, Courier Bold 12",
+            "Gallant12x22 24, Luxi Mono 24, Courier Bold 24",
+            "",
+            "",
+        ],
+    },
+    Mode {
+        name: "VMS",
+        fun: vms,
+        fonts: NONE,
+    },
+    Mode {
+        name: "OS2",
+        fun: os2,
+        fonts: NONE,
+    },
+    Mode {
         name: "SparcLinux",
         fun: sparc_linux,
         fonts: NONE,
@@ -3749,6 +5255,30 @@ const ONLY: &[SelectItem] = &[
     SelectItem {
         value: "SCO",
         label: "SCO",
+    },
+    SelectItem {
+        value: "HPPALinux",
+        label: "Linux (PA-RISC)",
+    },
+    SelectItem {
+        value: "Nvidia",
+        label: "nVidia",
+    },
+    SelectItem {
+        value: "Linux",
+        label: "Linux (fsck)",
+    },
+    SelectItem {
+        value: "Solaris",
+        label: "Solaris",
+    },
+    SelectItem {
+        value: "VMS",
+        label: "VMS",
+    },
+    SelectItem {
+        value: "OS2",
+        label: "OS/2",
     },
     SelectItem {
         value: "SparcLinux",
