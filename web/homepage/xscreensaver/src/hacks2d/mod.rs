@@ -144,6 +144,7 @@ pub mod xanalogtv;
 pub mod xflame;
 pub mod xjack;
 pub mod xlyap;
+pub mod xmatrix;
 pub mod xrayswarm;
 pub mod xspirograph;
 pub mod zoom;
@@ -286,6 +287,7 @@ pub static ALL: &[&Saver] = &[
     &xflame::SAVER,
     &xjack::SAVER,
     &xlyap::SAVER,
+    &xmatrix::SAVER,
     &xrayswarm::SAVER,
     &xspirograph::SAVER,
     &zoom::SAVER,

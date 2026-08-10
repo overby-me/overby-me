@@ -869,6 +869,12 @@ saver!(
     xscreensaver::hacks2d::xlyap::start
 );
 saver!(
+    "xmatrix",
+    xmatrix_body,
+    xmatrix_start,
+    xscreensaver::hacks2d::xmatrix::start
+);
+saver!(
     "xrayswarm",
     xrayswarm_body,
     xrayswarm_start,
@@ -1543,6 +1549,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xlyap",
         label: "XLyap",
         start: xlyap_start,
+    },
+    Entry {
+        slug: "xmatrix",
+        label: "XMatrix",
+        start: xmatrix_start,
     },
     Entry {
         slug: "xrayswarm",

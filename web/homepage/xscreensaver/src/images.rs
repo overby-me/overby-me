@@ -24,6 +24,13 @@ pub const LOGO_50: &[u8] = include_bytes!("../images/logo-50.png");
 pub const LOGO_180: &[u8] = include_bytes!("../images/logo-180.png");
 pub const LOGO_360: &[u8] = include_bytes!("../images/logo-360.png");
 
+/// The Matrix glyph sheets: 16 by 13 characters each, plain and glowing, at
+/// the two sizes upstream ships. Mirror-image katakana, as the film had them.
+pub const MATRIX_PLAIN: &[u8] = include_bytes!("../images/matrix1.png");
+pub const MATRIX_GLOW: &[u8] = include_bytes!("../images/matrix2.png");
+pub const MATRIX_PLAIN_SMALL: &[u8] = include_bytes!("../images/matrix1b.png");
+pub const MATRIX_GLOW_SMALL: &[u8] = include_bytes!("../images/matrix2b.png");
+
 /// The three test cards `xanalogtv` tunes between: the RCA Indian-head card,
 /// the Philips PM5544, and the BBC's Test Card F.
 pub const TESTCARDS: [&[u8]; 3] = [
