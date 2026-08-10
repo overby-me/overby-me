@@ -24,6 +24,11 @@ pub const LOGO_50: &[u8] = include_bytes!("../images/logo-50.png");
 pub const LOGO_180: &[u8] = include_bytes!("../images/logo-180.png");
 pub const LOGO_360: &[u8] = include_bytes!("../images/logo-360.png");
 
+/// `pacman.png`: sixty 64x64 cells in one column. Four ghosts in four
+/// directions with two leg positions, then the scared ghost and its flash, the
+/// eyes on their way home, Pac-Man himself, and the eight frames of his death.
+pub const PACMAN: &[u8] = include_bytes!("../images/pacman.png");
+
 /// The bubbles, eleven sizes of each of four liquids, ray-traced by James
 /// Macnicol in 1996 (the POV-Ray scenes are still beside them upstream).
 pub const BUBBLES: [[&[u8]; 11]; 4] = [

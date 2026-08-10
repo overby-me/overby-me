@@ -97,6 +97,7 @@ pub mod mountain;
 pub mod munch;
 pub mod nerverot;
 pub mod noseguy;
+pub mod pacman;
 pub mod pedal;
 pub mod penetrate;
 pub mod penrose;
@@ -241,6 +242,7 @@ pub static ALL: &[&Saver] = &[
     &munch::SAVER,
     &nerverot::SAVER,
     &noseguy::SAVER,
+    &pacman::SAVER,
     &pedal::SAVER,
     &penetrate::SAVER,
     &penrose::SAVER,

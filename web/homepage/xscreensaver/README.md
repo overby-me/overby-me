@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (136) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (137) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -16,12 +16,12 @@ different runtime:
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
-Every 2D hack that needs nothing but the runtime is ported. What is left needs
-something built first, and each group unlocks together:
+Every 2D hack that needs nothing but the runtime is ported, and so is every one
+that needed a runtime piece worth building. The five left each need a whole
+program of their own first:
 
 | Blocked on | Savers |
 |-|-|
-| nothing: ready to port | `pacman` |
 | a terminal emulator (`ansi-tty.c`) | `apple2`, `phosphor` |
 | `apple2`, whose screen it borrows for one of its crashes | `bsod` |
 | a JPEG decoder | `glitchpeg` |

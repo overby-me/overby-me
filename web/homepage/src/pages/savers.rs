@@ -580,6 +580,12 @@ saver!(
     xscreensaver::hacks2d::noseguy::start
 );
 saver!(
+    "pacman",
+    pacman_body,
+    pacman_start,
+    xscreensaver::hacks2d::pacman::start
+);
+saver!(
     "pedal",
     pedal_body,
     pedal_start,
@@ -1315,6 +1321,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "noseguy",
         label: "Nose Guy",
         start: noseguy_start,
+    },
+    Entry {
+        slug: "pacman",
+        label: "Pac-Man",
+        start: pacman_start,
     },
     Entry {
         slug: "pedal",
