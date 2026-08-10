@@ -104,6 +104,7 @@ pub mod shadebobs;
 pub mod sierpinski;
 pub mod slidescreen;
 pub mod slip;
+pub mod speedmine;
 pub mod sphere;
 pub mod spiral;
 pub mod spotlight;
@@ -228,6 +229,7 @@ pub static ALL: &[&Saver] = &[
     &sierpinski::SAVER,
     &slidescreen::SAVER,
     &slip::SAVER,
+    &speedmine::SAVER,
     &sphere::SAVER,
     &spiral::SAVER,
     &spotlight::SAVER,

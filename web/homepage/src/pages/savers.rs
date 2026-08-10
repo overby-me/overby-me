@@ -623,6 +623,12 @@ saver!(
     xscreensaver::hacks2d::slip::start
 );
 saver!(
+    "speedmine",
+    speedmine_body,
+    speedmine_start,
+    xscreensaver::hacks2d::speedmine::start
+);
+saver!(
     "sphere",
     sphere_body,
     sphere_start,
@@ -1230,6 +1236,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "slip",
         label: "Slip",
         start: slip_start,
+    },
+    Entry {
+        slug: "speedmine",
+        label: "Speed Mine",
+        start: speedmine_start,
     },
     Entry {
         slug: "sphere",
