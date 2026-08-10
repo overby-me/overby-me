@@ -244,6 +244,12 @@ saver!(
     xscreensaver::hacks2d::fiberlamp::start
 );
 saver!(
+    "fireworkx",
+    fireworkx_body,
+    fireworkx_start,
+    xscreensaver::hacks2d::fireworkx::start
+);
+saver!(
     "flame",
     flame_body,
     flame_start,
@@ -759,6 +765,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "fiberlamp",
         label: "Fiber Lamp",
         start: fiberlamp_start,
+    },
+    Entry {
+        slug: "fireworkx",
+        label: "Fireworkx",
+        start: fireworkx_start,
     },
     Entry {
         slug: "flame",

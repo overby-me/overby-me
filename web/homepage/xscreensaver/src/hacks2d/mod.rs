@@ -38,6 +38,7 @@ pub mod epicycle;
 pub mod eruption;
 pub mod fadeplot;
 pub mod fiberlamp;
+pub mod fireworkx;
 pub mod flame;
 pub mod fluidballs;
 pub mod forest;
@@ -139,6 +140,7 @@ pub static ALL: &[&Saver] = &[
     &eruption::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,
+    &fireworkx::SAVER,
     &flame::SAVER,
     &fluidballs::SAVER,
     &forest::SAVER,
