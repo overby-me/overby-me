@@ -24,6 +24,63 @@ pub const LOGO_50: &[u8] = include_bytes!("../images/logo-50.png");
 pub const LOGO_180: &[u8] = include_bytes!("../images/logo-180.png");
 pub const LOGO_360: &[u8] = include_bytes!("../images/logo-360.png");
 
+/// The bubbles, eleven sizes of each of four liquids, ray-traced by James
+/// Macnicol in 1996 (the POV-Ray scenes are still beside them upstream).
+pub const BUBBLES: [[&[u8]; 11]; 4] = [
+    [
+        include_bytes!("../images/bubbles/blood1.png"),
+        include_bytes!("../images/bubbles/blood2.png"),
+        include_bytes!("../images/bubbles/blood3.png"),
+        include_bytes!("../images/bubbles/blood4.png"),
+        include_bytes!("../images/bubbles/blood5.png"),
+        include_bytes!("../images/bubbles/blood6.png"),
+        include_bytes!("../images/bubbles/blood7.png"),
+        include_bytes!("../images/bubbles/blood8.png"),
+        include_bytes!("../images/bubbles/blood9.png"),
+        include_bytes!("../images/bubbles/blood10.png"),
+        include_bytes!("../images/bubbles/blood11.png"),
+    ],
+    [
+        include_bytes!("../images/bubbles/blue1.png"),
+        include_bytes!("../images/bubbles/blue2.png"),
+        include_bytes!("../images/bubbles/blue3.png"),
+        include_bytes!("../images/bubbles/blue4.png"),
+        include_bytes!("../images/bubbles/blue5.png"),
+        include_bytes!("../images/bubbles/blue6.png"),
+        include_bytes!("../images/bubbles/blue7.png"),
+        include_bytes!("../images/bubbles/blue8.png"),
+        include_bytes!("../images/bubbles/blue9.png"),
+        include_bytes!("../images/bubbles/blue10.png"),
+        include_bytes!("../images/bubbles/blue11.png"),
+    ],
+    [
+        include_bytes!("../images/bubbles/glass1.png"),
+        include_bytes!("../images/bubbles/glass2.png"),
+        include_bytes!("../images/bubbles/glass3.png"),
+        include_bytes!("../images/bubbles/glass4.png"),
+        include_bytes!("../images/bubbles/glass5.png"),
+        include_bytes!("../images/bubbles/glass6.png"),
+        include_bytes!("../images/bubbles/glass7.png"),
+        include_bytes!("../images/bubbles/glass8.png"),
+        include_bytes!("../images/bubbles/glass9.png"),
+        include_bytes!("../images/bubbles/glass10.png"),
+        include_bytes!("../images/bubbles/glass11.png"),
+    ],
+    [
+        include_bytes!("../images/bubbles/jade1.png"),
+        include_bytes!("../images/bubbles/jade2.png"),
+        include_bytes!("../images/bubbles/jade3.png"),
+        include_bytes!("../images/bubbles/jade4.png"),
+        include_bytes!("../images/bubbles/jade5.png"),
+        include_bytes!("../images/bubbles/jade6.png"),
+        include_bytes!("../images/bubbles/jade7.png"),
+        include_bytes!("../images/bubbles/jade8.png"),
+        include_bytes!("../images/bubbles/jade9.png"),
+        include_bytes!("../images/bubbles/jade10.png"),
+        include_bytes!("../images/bubbles/jade11.png"),
+    ],
+];
+
 /// The Matrix glyph sheets: 16 by 13 characters each, plain and glowing, at
 /// the two sizes upstream ships. Mirror-image katakana, as the film had them.
 pub const MATRIX_PLAIN: &[u8] = include_bytes!("../images/matrix1.png");

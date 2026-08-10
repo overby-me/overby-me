@@ -27,6 +27,7 @@ pub mod blitspin;
 pub mod bouboule;
 pub mod boxfit;
 pub mod braid;
+pub mod bubbles;
 pub mod bumps;
 pub mod ccurve;
 pub mod celtic;
@@ -170,6 +171,7 @@ pub static ALL: &[&Saver] = &[
     &bouboule::SAVER,
     &boxfit::SAVER,
     &braid::SAVER,
+    &bubbles::SAVER,
     &bumps::SAVER,
     &ccurve::SAVER,
     &celtic::SAVER,

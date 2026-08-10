@@ -160,6 +160,12 @@ saver!(
     xscreensaver::hacks2d::braid::start
 );
 saver!(
+    "bubbles",
+    bubbles_body,
+    bubbles_start,
+    xscreensaver::hacks2d::bubbles::start
+);
+saver!(
     "bumps",
     bumps_body,
     bumps_start,
@@ -959,6 +965,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "braid",
         label: "Braid",
         start: braid_start,
+    },
+    Entry {
+        slug: "bubbles",
+        label: "Bubbles",
+        start: bubbles_start,
     },
     Entry {
         slug: "bumps",
