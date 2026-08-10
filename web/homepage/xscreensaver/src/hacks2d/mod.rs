@@ -80,6 +80,7 @@ pub mod mountain;
 pub mod munch;
 pub mod pedal;
 pub mod petri;
+pub mod piecewise;
 pub mod popsquares;
 pub mod pyro;
 pub mod qix;
@@ -189,6 +190,7 @@ pub static ALL: &[&Saver] = &[
     &munch::SAVER,
     &pedal::SAVER,
     &petri::SAVER,
+    &piecewise::SAVER,
     &popsquares::SAVER,
     &pyro::SAVER,
     &qix::SAVER,

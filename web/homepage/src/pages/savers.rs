@@ -478,6 +478,12 @@ saver!(
     xscreensaver::hacks2d::petri::start
 );
 saver!(
+    "piecewise",
+    piecewise_body,
+    piecewise_start,
+    xscreensaver::hacks2d::piecewise::start
+);
+saver!(
     "popsquares",
     popsquares_body,
     popsquares_start,
@@ -1020,6 +1026,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "petri",
         label: "Petri",
         start: petri_start,
+    },
+    Entry {
+        slug: "piecewise",
+        label: "Piecewise",
+        start: piecewise_start,
     },
     Entry {
         slug: "popsquares",
