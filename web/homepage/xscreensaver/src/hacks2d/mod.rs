@@ -48,6 +48,7 @@ pub mod fadeplot;
 pub mod fiberlamp;
 pub mod fireworkx;
 pub mod flame;
+pub mod flow;
 pub mod fluidballs;
 pub mod forest;
 pub mod fuzzyflakes;
@@ -165,6 +166,7 @@ pub static ALL: &[&Saver] = &[
     &fiberlamp::SAVER,
     &fireworkx::SAVER,
     &flame::SAVER,
+    &flow::SAVER,
     &fluidballs::SAVER,
     &forest::SAVER,
     &goop::SAVER,
