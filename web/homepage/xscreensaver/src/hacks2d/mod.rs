@@ -64,6 +64,7 @@ pub mod halo;
 pub mod helix;
 pub mod hexadrop;
 pub mod hopalong;
+pub mod hyperball;
 pub mod hypercube;
 pub mod ifs;
 pub mod imsmap;
@@ -191,6 +192,7 @@ pub static ALL: &[&Saver] = &[
     &helix::SAVER,
     &hexadrop::SAVER,
     &hopalong::SAVER,
+    &hyperball::SAVER,
     &hypercube::SAVER,
     &ifs::SAVER,
     &imsmap::SAVER,

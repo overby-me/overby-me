@@ -382,6 +382,12 @@ saver!(
     xscreensaver::hacks2d::hopalong::start
 );
 saver!(
+    "hyperball",
+    hyperball_body,
+    hyperball_start,
+    xscreensaver::hacks2d::hyperball::start
+);
+saver!(
     "hypercube",
     hypercube_body,
     hypercube_start,
@@ -1048,6 +1054,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hopalong",
         label: "Hopalong",
         start: hopalong_start,
+    },
+    Entry {
+        slug: "hyperball",
+        label: "Hyperball",
+        start: hyperball_start,
     },
     Entry {
         slug: "hypercube",
