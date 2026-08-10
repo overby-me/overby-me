@@ -328,6 +328,12 @@ saver!(
     xscreensaver::hacks2d::pyro::start
 );
 saver!(
+    "rocks",
+    rocks_body,
+    rocks_start,
+    xscreensaver::hacks2d::rocks::start
+);
+saver!(
     "rorschach",
     rorschach_body,
     rorschach_start,
@@ -637,6 +643,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pyro",
         label: "Pyro",
         start: pyro_start,
+    },
+    Entry {
+        slug: "rocks",
+        label: "Rocks",
+        start: rocks_start,
     },
     Entry {
         slug: "rorschach",
