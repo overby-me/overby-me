@@ -34,12 +34,17 @@
         "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
       ];
     };
-    # Collect on a schedule, a month back. This replaces the min-free/max-free
-    # pair that used to sit in extraOptions: those collected mid-build, once
-    # something had already run the free space down past 30 GiB, which is both
-    # late and in the middle of the work. A weekly sweep runs when nothing is
-    # waiting on it, at the cost of no longer catching a single build that fills
-    # the disk between two Sundays.
+    # Collect on a schedule rather than when the disk looks full, because on
+    # btrfs it never does.
+    #
+    # This replaces a min-free/max-free pair that used to sit in extraOptions.
+    # Those ask the filesystem how many bytes are free, and btrfs answers about
+    # DATA: this machine reported 210 GiB free while its metadata stood at 99.7%
+    # of 172 GiB with no unallocated space left to grow into. That is a
+    # filesystem which fails a rename with ENOSPC and a daemon which sees no
+    # reason to collect anything. Gone rather than tuned, since no threshold
+    # helps against a number that does not move. What actually reclaims the
+    # space metadata needs is `btrfs balance`, which is not nix's to run.
     gc = {
       automatic = true;
       dates = "weekly";
