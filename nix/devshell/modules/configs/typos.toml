@@ -92,6 +92,11 @@ controllen = "controllen"
 # CAF = Apple Core Audio Format (libsndfile container, rust/pipewire pw-cat)
 caf = "caf"
 CAF = "CAF"
+# Alan W. Paeth, whose predictor is one of the five PNG scanline filters
+paeth = "paeth"
+Paeth = "Paeth"
+# iy = the second image coordinate, paired with ix (xscreensaver ports)
+iy = "iy"
 
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.

@@ -52,6 +52,7 @@ pub mod fadeplot;
 pub mod fiberlamp;
 pub mod filmleader;
 pub mod fireworkx;
+pub mod flag;
 pub mod flame;
 pub mod flow;
 pub mod fluidballs;
@@ -130,6 +131,7 @@ pub mod triangle;
 pub mod truchet;
 pub mod twang;
 pub mod vermiculate;
+pub mod vfeedback;
 pub mod vines;
 pub mod wander;
 pub mod whirlwindwarp;
@@ -192,6 +194,7 @@ pub static ALL: &[&Saver] = &[
     &fiberlamp::SAVER,
     &filmleader::SAVER,
     &fireworkx::SAVER,
+    &flag::SAVER,
     &flame::SAVER,
     &flow::SAVER,
     &fluidballs::SAVER,
@@ -268,6 +271,7 @@ pub static ALL: &[&Saver] = &[
     &truchet::SAVER,
     &twang::SAVER,
     &vermiculate::SAVER,
+    &vfeedback::SAVER,
     &wander::SAVER,
     &whirlwindwarp::SAVER,
     &whirlygig::SAVER,

@@ -27,6 +27,7 @@ pub mod fb;
 pub mod font;
 pub mod image;
 pub mod opts;
+pub mod png;
 pub mod rand;
 pub mod spline;
 pub mod text;

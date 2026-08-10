@@ -328,6 +328,12 @@ saver!(
     xscreensaver::hacks2d::fireworkx::start
 );
 saver!(
+    "flag",
+    flag_body,
+    flag_start,
+    xscreensaver::hacks2d::flag::start
+);
+saver!(
     "flame",
     flame_body,
     flame_start,
@@ -785,6 +791,12 @@ saver!(
     xscreensaver::hacks2d::vermiculate::start
 );
 saver!(
+    "vfeedback",
+    vfeedback_body,
+    vfeedback_start,
+    xscreensaver::hacks2d::vfeedback::start
+);
+saver!(
     "wander",
     wander_body,
     wander_start,
@@ -1063,6 +1075,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "fireworkx",
         label: "Fireworkx",
         start: fireworkx_start,
+    },
+    Entry {
+        slug: "flag",
+        label: "Flag",
+        start: flag_start,
     },
     Entry {
         slug: "flame",
@@ -1443,6 +1460,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "vermiculate",
         label: "Vermiculate",
         start: vermiculate_start,
+    },
+    Entry {
+        slug: "vfeedback",
+        label: "VFeedback",
+        start: vfeedback_start,
     },
     Entry {
         slug: "wander",

@@ -8,9 +8,9 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (129) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (131) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
-| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -21,15 +21,15 @@ something built first, and each group unlocks together:
 
 | Blocked on | Savers |
 |-|-|
-| bundled images, on top of `analogtv.c` | `apple2`, `vfeedback`, `xanalogtv` (test cards) |
-| nothing: ready to port | `phosphor` |
-| bundled images | `bubbles` (44 sprites), `maze` (logos), `pacman` (a sprite sheet) |
-| bundled images, on top of text | `bsod`, `flag`, `noseguy`, `xmatrix` |
+| nothing: ready to port | `bubbles`, `maze`, `noseguy`, `pacman`, `xanalogtv`, `xmatrix` |
+| a terminal emulator (`ansi-tty.c`) | `apple2`, `phosphor` |
+| `apple2`, whose screen it borrows for one of its crashes | `bsod` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
-harness for the Xlib layer rather than a screen saver.
+harness for the Xlib layer rather than a screen saver, so it is not counted
+above.
 
 ## Television
 
@@ -149,6 +149,21 @@ come off the Jetstream firehose rather than a search endpoint.
 One thing to know when porting an image-consuming saver: hacks ask for their
 picture in `init`, so whether a host is available has to arrive with
 `StartArgs::with_image_host`, not be set afterwards.
+
+A separate thing with a confusingly similar name: about a dozen hacks carry
+pictures of their own, which are program data rather than something the viewer
+supplies. The Matrix glyph sheet, the face on the flag, the test cards a
+television tunes between. Upstream turns each into a C array at build time
+(`images/gen/NAME_png.h`); here the files sit in `images/` exactly as upstream
+ships them, arrive through `include_bytes!`, and are decoded by
+`runtime::png`, which is a small PNG reader plus the DEFLATE underneath it.
+
+That decoder only covers what upstream's own files are stored in, which turns
+out to be every colour type at bit depths 1 through 8, no interlacing and no
+sixteen-bit samples. It returns the colour and, separately, a depth-1 bitmap of
+where the picture is opaque, because `Fb` has no alpha channel to put it in and
+neither does X: a hack draws a sprite by clipping the colour through the
+bitmap, which is what `image_data_to_pixmap` hands it upstream.
 
 ## Code splitting
 
