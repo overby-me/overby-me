@@ -84,6 +84,7 @@ pub mod moire;
 pub mod moire2;
 pub mod mountain;
 pub mod munch;
+pub mod nerverot;
 pub mod pedal;
 pub mod penrose;
 pub mod petri;
@@ -205,6 +206,7 @@ pub static ALL: &[&Saver] = &[
     &moire2::SAVER,
     &mountain::SAVER,
     &munch::SAVER,
+    &nerverot::SAVER,
     &pedal::SAVER,
     &penrose::SAVER,
     &petri::SAVER,

@@ -502,6 +502,12 @@ saver!(
     xscreensaver::hacks2d::munch::start
 );
 saver!(
+    "nerverot",
+    nerverot_body,
+    nerverot_start,
+    xscreensaver::hacks2d::nerverot::start
+);
+saver!(
     "pedal",
     pedal_body,
     pedal_start,
@@ -1112,6 +1118,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "munch",
         label: "Munch",
         start: munch_start,
+    },
+    Entry {
+        slug: "nerverot",
+        label: "Nerve Rot",
+        start: nerverot_start,
     },
     Entry {
         slug: "pedal",
