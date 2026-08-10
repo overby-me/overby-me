@@ -35,6 +35,8 @@ pub struct TextChannel {
     pub(crate) pending: VecDeque<u8>,
     /// How far through the compiled-in passage the fallback has read.
     at: usize,
+    /// The passage folded to `columns`, empty until a hack asks for a width.
+    wrapped: String,
     /// What the hack last said about its layout. Upstream passes this down the
     /// pipe so `xscreensaver-text` can wrap to the right width.
     pub(crate) columns: i32,
@@ -54,16 +56,56 @@ impl TextChannel {
             self.requested = true;
             return None;
         }
-        let c = FALLBACK.as_bytes()[self.at];
-        self.at = (self.at + 1) % FALLBACK.len();
+        let text = if self.wrapped.is_empty() {
+            FALLBACK
+        } else {
+            &self.wrapped
+        };
+        let c = text.as_bytes()[self.at % text.len()];
+        self.at = (self.at + 1) % text.len();
         Some(c)
     }
 
     /// `textclient_reshape`: tell the source how wide the page is now.
+    ///
+    /// Upstream this goes down the pipe and `xscreensaver-text` folds its output
+    /// to that width, which several hacks depend on: they lay the words out
+    /// exactly as they arrive and would otherwise draw one line off the edge of
+    /// the screen. The fallback has to do the same.
     pub(crate) fn reshape(&mut self, columns: i32, max_lines: i32) {
+        if columns != self.columns {
+            self.wrapped = if columns > 0 {
+                wrap(FALLBACK, columns as usize)
+            } else {
+                String::new()
+            };
+            self.at = 0;
+        }
         self.columns = columns;
         self.max_lines = max_lines;
     }
+}
+
+/// Fold a passage to a column width, breaking between words and keeping the
+/// paragraph breaks that are already there.
+fn wrap(text: &str, columns: usize) -> String {
+    let mut out = String::with_capacity(text.len() + text.len() / columns.max(1));
+    for line in text.split('\n') {
+        let mut width = 0;
+        for word in line.split_whitespace() {
+            if width > 0 && width + 1 + word.chars().count() > columns {
+                out.push('\n');
+                width = 0;
+            } else if width > 0 {
+                out.push(' ');
+                width += 1;
+            }
+            out.push_str(word);
+            width += word.chars().count();
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// The words a saver gets when nothing else is going to supply any.
@@ -108,6 +150,28 @@ mod tests {
         assert_eq!(first[0], b'A');
         // And it wraps rather than running dry.
         assert_eq!(c.getc(), Some(b'A'));
+    }
+
+    /// A hack that says how wide its page is gets lines that fit it, because
+    /// upstream's text source folds to that width and the hacks trust it.
+    #[test]
+    fn asking_for_a_width_gets_lines_that_fit() {
+        let mut c = TextChannel::default();
+        c.reshape(40, 15);
+        let text: String = (0..2000).filter_map(|_| c.getc()).map(char::from).collect();
+        assert!(text.starts_with("Alice was beginning"));
+        let lines: Vec<&str> = text.lines().collect();
+        let widest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        assert!(widest <= 40, "too wide: {widest} columns");
+        assert!(
+            lines.iter().filter(|l| !l.is_empty()).count() > 20,
+            "should have been folded into many lines"
+        );
+
+        // And with no width asked for, the passage arrives as it is written.
+        let mut c = TextChannel::default();
+        let text: String = (0..300).filter_map(|_| c.getc()).map(char::from).collect();
+        assert!(text.lines().next().is_some_and(|l| l.chars().count() > 40));
     }
 
     /// A host that has said it will supply text but has not yet gets nothing,

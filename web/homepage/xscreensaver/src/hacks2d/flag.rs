@@ -303,7 +303,7 @@ fn bob_bits() -> Option<Pixmap> {
             let red = if clear {
                 0xFF
             } else {
-                (img.get_pixel(x, sy) >> 16) & 0xFF
+                img.get_pixel(x, sy) & 0xFF
             };
             bitmap.put_pixel(x, y, u32::from(red <= 0x7F));
         }

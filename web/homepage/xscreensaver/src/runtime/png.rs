@@ -13,7 +13,7 @@
 //! type at bit depths 1 through 8, no interlacing and no 16-bit samples. Meeting
 //! anything else returns `None` rather than guessing.
 
-use super::color::{ALPHA, Pixel};
+use super::color::{Pixel, RGB_MASK, rgb};
 use super::fb::{Fb, XImage};
 
 /// Decode a PNG into a colour image and a bitmap of where it is opaque.
@@ -48,7 +48,7 @@ pub fn decode(bytes: &[u8]) -> Option<(XImage, Option<Fb>)> {
             b"PLTE" => {
                 palette = data
                     .chunks_exact(3)
-                    .map(|c| ALPHA | (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32)
+                    .map(|c| rgb(c[0], c[1], c[2]))
                     .collect();
             }
             b"tRNS" => transparent = Some(data),
@@ -132,21 +132,20 @@ impl Header {
                 let px = match self.colour {
                     0 => {
                         let g = sample(row, self.depth, x)? * scale;
-                        ALPHA | (g as u32) << 16 | (g as u32) << 8 | g as u32
+                        rgb(g, g, g)
                     }
                     2 => {
                         let p = row.get(x * 3..x * 3 + 3)?;
-                        ALPHA | (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32
+                        rgb(p[0], p[1], p[2])
                     }
                     3 => *palette.get(sample(row, self.depth, x)? as usize)?,
                     4 => {
                         let p = row.get(x * 2..x * 2 + 2)?;
-                        let (g, a) = (p[0] as u32, p[1] as u32);
-                        a << 24 | g << 16 | g << 8 | g
+                        (rgb(p[0], p[0], p[0]) & RGB_MASK) | u32::from(p[1]) << 24
                     }
                     6 => {
                         let p = row.get(x * 4..x * 4 + 4)?;
-                        (p[3] as u32) << 24 | (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32
+                        (rgb(p[0], p[1], p[2]) & RGB_MASK) | u32::from(p[3]) << 24
                     }
                     _ => return None,
                 };
@@ -193,7 +192,7 @@ fn apply_trns(header: &Header, palette: &mut [Pixel], alpha: &[u8]) {
         return;
     }
     for (entry, a) in palette.iter_mut().zip(alpha) {
-        *entry = (*entry & 0x00FF_FFFF) | (*a as u32) << 24;
+        *entry = (*entry & RGB_MASK) | u32::from(*a) << 24;
     }
 }
 
@@ -591,14 +590,11 @@ mod tests {
                 for x in 0..4 {
                     let v = sample_value(depth, x, y);
                     let want = if colour == 0 {
-                        let g = u32::from(v) * 255 / ((1 << depth) - 1);
-                        ALPHA | g << 16 | g << 8 | g
+                        let g = (u32::from(v) * 255 / ((1 << depth) - 1)) as u8;
+                        rgb(g, g, g)
                     } else {
                         let i = v as usize * 3;
-                        ALPHA
-                            | u32::from(palette[i]) << 16
-                            | u32::from(palette[i + 1]) << 8
-                            | u32::from(palette[i + 2])
+                        rgb(palette[i], palette[i + 1], palette[i + 2])
                     };
                     assert_eq!(img.get_pixel(x, y), want, "depth {depth} type {colour}");
                 }
@@ -616,21 +612,33 @@ mod tests {
                     assert_eq!(p >> 24, 0xFF, "the image itself is always opaque");
                     // Alpha is 0, 60, 120, 180, so only the last clears the half.
                     assert_eq!(mask.get_pixel(x, y), u32::from(x > 2), "mask at {x},{y}");
-                    let want_r = if colour == 4 { y * 60 } else { x * 40 };
-                    assert_eq!((p >> 16) & 0xFF, want_r as u32 & 0xFF, "red at {x},{y}");
+                    let want = if colour == 4 {
+                        let g = (y * 60) as u8;
+                        rgb(g, g, g)
+                    } else {
+                        truecolour(x, y)
+                    };
+                    assert_eq!(p & RGB_MASK, want & RGB_MASK, "colour at {x},{y}");
                 }
             }
         }
     }
 
-    /// The colour of a truecolour test pixel.
+    /// The colour of a truecolour test pixel. Distinct in all three channels,
+    /// because a decoder that puts red where blue goes is right about the size
+    /// and the shape and wrong about everything the viewer sees.
     fn truecolour(x: i32, y: i32) -> Pixel {
-        ALPHA | ((x * 40) as u32) << 16 | ((y * 40) as u32) << 8 | (x * y * 5) as u32
+        rgb((x * 40) as u8, (y * 40) as u8, (x * y * 5) as u8)
     }
 
     /// The value of a single-sample test pixel, which has to fit the bit depth.
     fn sample_value(depth: u8, x: i32, y: i32) -> u8 {
         ((x + y) as u32 & ((1u32 << depth) - 1)) as u8
+    }
+
+    /// The same colour as `truecolour`, but in the order a PNG stores it.
+    fn channels_of(x: i32, y: i32) -> [u8; 3] {
+        [(x * 40) as u8, (y * 40) as u8, (x * y * 5) as u8]
     }
 
     /// Build a 4x4 PNG in the given format, filtering each scanline differently.
@@ -661,22 +669,16 @@ mod tests {
                         }
                     }
                     2 => {
-                        let p = truecolour(x, y);
                         let at = x as usize * 3;
-                        line[at] = (p >> 16) as u8;
-                        line[at + 1] = (p >> 8) as u8;
-                        line[at + 2] = p as u8;
+                        line[at..at + 3].copy_from_slice(&channels_of(x, y));
                     }
                     4 => {
                         line[x as usize * 2] = (y * 60) as u8;
                         line[x as usize * 2 + 1] = (x * 60) as u8;
                     }
                     _ => {
-                        let p = truecolour(x, y);
                         let at = x as usize * 4;
-                        line[at] = (p >> 16) as u8;
-                        line[at + 1] = (p >> 8) as u8;
-                        line[at + 2] = p as u8;
+                        line[at..at + 3].copy_from_slice(&channels_of(x, y));
                         line[at + 3] = (x * 60) as u8;
                     }
                 }

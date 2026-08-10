@@ -13,3 +13,17 @@
 /// `bob.png`: the face flag waves when it is not waving words. From xlockmore
 /// by way of XScreenSaver, 64x64, four bits of palette.
 pub const BOB: &[u8] = include_bytes!("../images/bob.png");
+
+/// The noseguy's eight poses, 64x64 each: two frames walking left, two walking
+/// right, two three-quarter views, one facing forward and one looking down.
+/// Drawn by Dan Heller for xnlock, which is where the whole saver comes from.
+pub const NOSE: [&[u8]; 8] = [
+    include_bytes!("../images/noseguy/nose-l1.png"),
+    include_bytes!("../images/noseguy/nose-l2.png"),
+    include_bytes!("../images/noseguy/nose-r1.png"),
+    include_bytes!("../images/noseguy/nose-r2.png"),
+    include_bytes!("../images/noseguy/nose-f2.png"),
+    include_bytes!("../images/noseguy/nose-f3.png"),
+    include_bytes!("../images/noseguy/nose-f1.png"),
+    include_bytes!("../images/noseguy/nose-f4.png"),
+];

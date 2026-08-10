@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (131) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (132) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -21,7 +21,7 @@ something built first, and each group unlocks together:
 
 | Blocked on | Savers |
 |-|-|
-| nothing: ready to port | `bubbles`, `maze`, `noseguy`, `pacman`, `xanalogtv`, `xmatrix` |
+| nothing: ready to port | `bubbles`, `maze`, `pacman`, `xanalogtv`, `xmatrix` |
 | a terminal emulator (`ansi-tty.c`) | `apple2`, `phosphor` |
 | `apple2`, whose screen it borrows for one of its crashes | `bsod` |
 | a JPEG decoder | `glitchpeg` |
@@ -63,6 +63,11 @@ The words themselves come from `runtime::text`, which is the same channel
 has some, and with no host the compiled-in passage is served instead. Upstream
 reads bytes from a pipe to `xscreensaver-text` and copes with there being none
 ready yet, so this yields nothing rather than blocking, the same way.
+
+A hack also tells the source how wide its page is (`textclient_reshape`), and
+upstream's folds its output to that. So does the fallback: several hacks lay the
+words out exactly as they arrive and would otherwise run a paragraph off the
+side of the screen.
 
 ## How a port works
 

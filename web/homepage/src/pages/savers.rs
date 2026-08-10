@@ -562,6 +562,12 @@ saver!(
     xscreensaver::hacks2d::nerverot::start
 );
 saver!(
+    "noseguy",
+    noseguy_body,
+    noseguy_start,
+    xscreensaver::hacks2d::noseguy::start
+);
+saver!(
     "pedal",
     pedal_body,
     pedal_start,
@@ -1270,6 +1276,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "nerverot",
         label: "Nerve Rot",
         start: nerverot_start,
+    },
+    Entry {
+        slug: "noseguy",
+        label: "Nose Guy",
+        start: noseguy_start,
     },
     Entry {
         slug: "pedal",

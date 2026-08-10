@@ -8,6 +8,8 @@
 //! Coordinates are `i32` and everything clips, so a hack that computes an
 //! off-screen point (many do, deliberately) draws nothing rather than panicking.
 
+use std::rc::Rc;
+
 use super::color::{ALPHA, Pixel, RGB_MASK, WHITE};
 
 /// A `Pixmap`. Same representation as the window.
@@ -141,11 +143,18 @@ pub struct Gc {
     /// erasing each other gives each one its own planes, which is how qix
     /// gets its translucent look on a screen with no alpha.
     pub plane_mask: Pixel,
-    /// `XSetClipMask` / `XSetClipRectangles`, reduced to a single rectangle.
-    /// Arbitrary bitmap clip masks are not supported yet; no ported hack needs
-    /// one so far, and the ones that will (`blitspin`, `slidescreen`) can grow
-    /// it when they land.
+    /// `XSetClipRectangles`, reduced to a single rectangle.
     pub clip: Option<XRectangle>,
+    /// `XSetClipMask`: a depth-1 drawable, and a draw only lands where its bit
+    /// is set. This is how the hacks draw sprites, since X has no alpha: a
+    /// picture and a bitmap of its silhouette, copied through each other.
+    ///
+    /// Shared rather than owned because a GC is cloned freely here (it is a
+    /// plain struct rather than a server-side object) and a sprite's mask is
+    /// set and unset around every blit.
+    pub clip_mask: Option<Rc<Fb>>,
+    /// `XSetClipOrigin`: where the mask's top left sits on the drawable.
+    pub clip_origin: XPoint,
 }
 
 impl Default for Gc {
@@ -158,6 +167,8 @@ impl Default for Gc {
             fill_rule: FillRule::EvenOdd,
             plane_mask: !0,
             clip: None,
+            clip_mask: None,
+            clip_origin: XPoint { x: 0, y: 0 },
         }
     }
 }
@@ -202,15 +213,28 @@ impl Gc {
         self
     }
 
-    /// `XSetClipMask (.., None)`.
+    /// `XSetClipMask (.., None)`: clip to the drawable and nothing else.
     pub fn set_clip_none(&mut self) -> &mut Self {
         self.clip = None;
+        self.clip_mask = None;
         self
     }
 
     /// `XSetClipRectangles` with a single rectangle.
     pub fn set_clip_rect(&mut self, r: XRectangle) -> &mut Self {
         self.clip = Some(r);
+        self
+    }
+
+    /// `XSetClipMask` with a bitmap.
+    pub fn set_clip_mask(&mut self, mask: Rc<Fb>) -> &mut Self {
+        self.clip_mask = Some(mask);
+        self
+    }
+
+    /// `XSetClipOrigin`.
+    pub fn set_clip_origin(&mut self, x: i32, y: i32) -> &mut Self {
+        self.clip_origin = XPoint { x, y };
         self
     }
 }
@@ -342,10 +366,20 @@ impl Fb {
 
     #[inline]
     fn clipped_out(gc: &Gc, x: i32, y: i32) -> bool {
-        match gc.clip {
-            None => false,
-            Some(r) => x < r.x || y < r.y || x >= r.x + r.width || y >= r.y + r.height,
+        if let Some(r) = gc.clip
+            && (x < r.x || y < r.y || x >= r.x + r.width || y >= r.y + r.height)
+        {
+            return true;
         }
+        if let Some(m) = &gc.clip_mask {
+            let (mx, my) = (x - gc.clip_origin.x, y - gc.clip_origin.y);
+            // Outside the mask is outside the clip, which is what X does and
+            // what stops a sprite from smearing past the edge of its bitmap.
+            if !m.in_bounds(mx, my) || m.get_pixel(mx, my) == 0 {
+                return true;
+            }
+        }
+        false
     }
 
     /// `XGetPixel`. Out of bounds reads as opaque black, matching what an X
@@ -396,6 +430,14 @@ impl Fb {
         x0 = x0.max(0);
         x1 = x1.min(self.width - 1);
         if x0 > x1 {
+            return;
+        }
+        if gc.clip_mask.is_some() {
+            // A bitmap mask has no run structure to exploit, so the fast paths
+            // below do not apply and the span goes through the per-pixel test.
+            for x in x0..=x1 {
+                self.plot(gc, x, y);
+            }
             return;
         }
         let row = (y * self.width) as usize;
@@ -939,6 +981,7 @@ impl Fb {
         // rather than a pixel at a time.
         if gc.function == GXFunc::Copy
             && gc.clip.is_none()
+            && gc.clip_mask.is_none()
             && gc.plane_mask == !0
             && self.depth() == src.depth()
         {
@@ -1151,6 +1194,42 @@ mod tests {
         fb.draw_line(&gc, 0, 6, 15, 6);
         assert_eq!(fb.get_pixel(0, 6), ALPHA);
         assert_eq!(fb.get_pixel(5, 6), WHITE);
+    }
+
+    /// The sprite case: a picture and a bitmap of its silhouette, copied
+    /// through each other, which is how a hack draws a shape that is not a
+    /// rectangle on a framebuffer with no alpha.
+    #[test]
+    fn a_clip_mask_shapes_what_lands() {
+        let mut mask = Fb::new_bitmap(4, 4);
+        for y in 0..4 {
+            for x in 0..4 {
+                // A diagonal half.
+                mask.put_pixel(x, y, u32::from(x <= y));
+            }
+        }
+        let mut sprite = Fb::new(4, 4);
+        sprite.clear(WHITE);
+
+        let mut fb = Fb::new(16, 16);
+        let mut gc = white_gc();
+        gc.set_clip_mask(Rc::new(mask)).set_clip_origin(5, 5);
+        fb.copy_area(&gc, &sprite, 0, 0, 4, 4, 5, 5);
+        assert_eq!(fb.get_pixel(5, 5), WHITE, "on the diagonal");
+        assert_eq!(fb.get_pixel(5, 8), WHITE, "below it");
+        assert_eq!(fb.get_pixel(8, 5), ALPHA, "above it, masked out");
+
+        // Filled shapes take the mask too, and nothing lands outside it.
+        let mut fb = Fb::new(16, 16);
+        fb.fill_rectangle(&gc, 0, 0, 16, 16);
+        assert_eq!(fb.get_pixel(5, 8), WHITE);
+        assert_eq!(fb.get_pixel(0, 0), ALPHA, "outside the mask entirely");
+        assert_eq!(fb.get_pixel(15, 15), ALPHA);
+
+        // And clearing the mask puts the fast path back.
+        gc.set_clip_none();
+        fb.fill_rectangle(&gc, 0, 0, 16, 16);
+        assert_eq!(fb.get_pixel(0, 0), WHITE);
     }
 
     #[test]
