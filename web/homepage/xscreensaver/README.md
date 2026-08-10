@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (137) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (138) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -17,12 +17,11 @@ web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
 Every 2D hack that needs nothing but the runtime is ported, and so is every one
-that needed a runtime piece worth building. The five left each need a whole
-program of their own first:
+that needed a runtime piece worth building. The four left:
 
 | Blocked on | Savers |
 |-|-|
-| a terminal emulator (`ansi-tty.c`) | `apple2`, `phosphor` |
+| nothing, but it is a whole Apple II | `apple2` |
 | `apple2`, whose screen it borrows for one of its crashes | `bsod` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
@@ -68,6 +67,22 @@ A hack also tells the source how wide its page is (`textclient_reshape`), and
 upstream's folds its output to that. So does the fallback: several hacks lay the
 words out exactly as they arrive and would otherwise run a paragraph off the
 side of the screen.
+
+## Terminals
+
+`runtime::tty` is upstream's `ansi-tty.c`: a VT100 that renders to a character
+grid rather than to a screen. Bytes go in, and a hack reads the grid off and
+draws it however it draws things, which is how one emulator serves both a
+phosphor tube and an Apple II. It knows the sequences a real one does,
+including the scrolling region, the line-drawing character set, and the Last
+Column Flag, which is the rule that a character printed in the last column
+leaves the cursor sitting on top of it and only the character *after* that
+wraps.
+
+Upstream carries a great deal of logging behind a debug level, naming every
+sequence it recognises and every one it does not. There is nowhere to log to
+here, so that is left out; the commands themselves are all present, including
+the ones whose implementation upstream is to do nothing.
 
 ## How a port works
 

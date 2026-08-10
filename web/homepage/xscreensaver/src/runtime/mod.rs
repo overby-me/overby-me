@@ -31,6 +31,7 @@ pub mod png;
 pub mod rand;
 pub mod spline;
 pub mod text;
+pub mod tty;
 pub mod xlockmore;
 
 pub use color::{Pixel, XColor};

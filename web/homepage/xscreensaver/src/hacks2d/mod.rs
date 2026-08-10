@@ -102,6 +102,7 @@ pub mod pedal;
 pub mod penetrate;
 pub mod penrose;
 pub mod petri;
+pub mod phosphor;
 pub mod piecewise;
 pub mod polyominoes;
 pub mod pong;
@@ -247,6 +248,7 @@ pub static ALL: &[&Saver] = &[
     &penetrate::SAVER,
     &penrose::SAVER,
     &petri::SAVER,
+    &phosphor::SAVER,
     &piecewise::SAVER,
     &polyominoes::SAVER,
     &pong::SAVER,
