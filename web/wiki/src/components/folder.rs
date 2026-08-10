@@ -829,7 +829,13 @@ pub fn FolderApp(
                 // Create a document or subfolder here — the add action lives in this
                 // section's header (only when the folder accepts children; the
                 // backend permissions gate which mimes). Never on the projector.
-                if is_auth && attachable && !projector {
+                //
+                // The lock is the owner's, and it holds members rather than them:
+                // the insert rule exempts a context owner (`migrations/0015`), so a
+                // chair who has closed the place can still put the agenda in it
+                // without unlocking first. This gate did not, so locking a landsmøde
+                // took the way in from the only people it was never meant to hold.
+                if is_auth && (attachable || is_context_owner) && !projector {
                     FolderAdd {
                         parent_id: node.id.0.clone(),
                         context_id: node.context_id.clone().map(|c| c.0),

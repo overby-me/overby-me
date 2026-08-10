@@ -99,8 +99,11 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     });
     // ...and only while candidature is open: `attachable` is the owner's lock on
     // adding children, which ContentApp's tools sheet toggles for a position the
-    // same way FolderApp's does for a folder's motions.
-    let can_add_candidate = (*can_add_candidate_res.read()).unwrap_or(false) && node.attachable;
+    // same way FolderApp's does for a folder's motions. Not for the chair who set
+    // it: the insert rule exempts a context owner (`migrations/0015`) precisely so
+    // a late candidature can be entered by hand without reopening the position.
+    let can_add_candidate =
+        (*can_add_candidate_res.read()).unwrap_or(false) && (node.attachable || is_ctx_owner);
 
     // The candidate gallery (photos from `data.image`), rendered INSIDE the
     // position's own card rather than as a second one below it. A position rarely
@@ -389,8 +392,9 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
     // Proposing an amendment is a member action; the backend enforces who may.
     // `attachable` is the owner's lock on adding children, which ContentApp's
     // tools sheet toggles for a motion the same way FolderApp does for a folder:
-    // once amendments are closed, the affordance goes with them.
-    if !is_auth || !node.attachable {
+    // once amendments are closed, the affordance goes with them. For members. A
+    // context owner keeps it, the way the insert rule does (`migrations/0015`).
+    if !is_auth || (!node.attachable && !node.is_context_owner.unwrap_or(false)) {
         return rsx! {};
     }
 
