@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::anemone::start
 );
 saver!(
+    "boxfit",
+    boxfit_body,
+    boxfit_start,
+    xscreensaver::hacks2d::boxfit::start
+);
+saver!(
     "braid",
     braid_body,
     braid_start,
@@ -140,6 +146,12 @@ saver!(
     discrete_body,
     discrete_start,
     xscreensaver::hacks2d::discrete::start
+);
+saver!(
+    "fuzzyflakes",
+    fuzzyflakes_body,
+    fuzzyflakes_start,
+    xscreensaver::hacks2d::fuzzyflakes::start
 );
 saver!(
     "galaxy",
@@ -410,6 +422,11 @@ pub static SAVERS: &[Entry] = &[
         start: anemone_start,
     },
     Entry {
+        slug: "boxfit",
+        label: "Box Fit",
+        start: boxfit_start,
+    },
+    Entry {
         slug: "braid",
         label: "Braid",
         start: braid_start,
@@ -458,6 +475,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "discrete",
         label: "Discrete",
         start: discrete_start,
+    },
+    Entry {
+        slug: "fuzzyflakes",
+        label: "Fuzzy Flakes",
+        start: fuzzyflakes_start,
     },
     Entry {
         slug: "galaxy",
