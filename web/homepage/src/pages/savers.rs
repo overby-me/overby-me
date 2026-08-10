@@ -184,6 +184,12 @@ saver!(
     xscreensaver::hacks2d::greynetic::start
 );
 saver!(
+    "drift",
+    drift_body,
+    drift_start,
+    xscreensaver::hacks2d::drift::start
+);
+saver!(
     "eruption",
     eruption_body,
     eruption_start,
@@ -619,6 +625,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
+    },
+    Entry {
+        slug: "drift",
+        label: "Drift",
+        start: drift_start,
     },
     Entry {
         slug: "eruption",

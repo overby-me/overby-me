@@ -28,6 +28,7 @@ pub mod decayscreen;
 pub mod deco;
 pub mod deluxe;
 pub mod discrete;
+pub mod drift;
 pub mod eruption;
 pub mod fadeplot;
 pub mod fiberlamp;
@@ -114,6 +115,7 @@ pub static ALL: &[&Saver] = &[
     &fuzzyflakes::SAVER,
     &galaxy::SAVER,
     &greynetic::SAVER,
+    &drift::SAVER,
     &eruption::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,
