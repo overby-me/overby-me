@@ -19,6 +19,7 @@
 //! [`Runner`] is the driver. The browser host and the tests both go through it,
 //! so a saver behaves identically in a `cargo test` and on the page.
 
+pub mod analogtv;
 pub mod color;
 pub mod delaunay;
 pub mod erase;

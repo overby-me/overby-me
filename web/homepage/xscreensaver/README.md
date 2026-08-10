@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (127) |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (128) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -21,7 +21,7 @@ something built first, and each group unlocks together:
 
 | Blocked on | Savers |
 |-|-|
-| `analogtv.c`, the NTSC simulation | `apple2`, `filmleader`, `phosphor`, `pong`, `vfeedback`, `xanalogtv` |
+| nothing: `analogtv.c` is built, ready to port | `apple2`, `phosphor`, `pong`, `vfeedback`, `xanalogtv` |
 | bundled images | `bubbles` (44 sprites), `maze` (logos), `pacman` (a sprite sheet) |
 | bundled images, on top of text | `bsod`, `flag`, `noseguy`, `xmatrix` |
 | a JPEG decoder | `glitchpeg` |
@@ -29,6 +29,20 @@ something built first, and each group unlocks together:
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver.
+
+## Television
+
+`runtime::analogtv` is upstream's `analogtv.c`, and it is not a filter. A hack
+that uses it draws its picture, and the module *modulates that into a composite
+video signal and demodulates it again*: 912 samples a line at four times the
+colour subcarrier, with sync, burst, picture and porches where the standard
+puts them. Everything that makes it look like television falls out of doing
+that honestly, including the colour fringes, the softness, the bloom, and a
+picture that bends when the signal is weak.
+
+Upstream splits the work over a thread pool and carries a whole path for
+eight-bit colormapped displays. Neither applies here, so this is one loop over
+TrueColor.
 
 ## Text
 

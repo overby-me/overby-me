@@ -50,6 +50,7 @@ pub mod eruption;
 pub mod euler2d;
 pub mod fadeplot;
 pub mod fiberlamp;
+pub mod filmleader;
 pub mod fireworkx;
 pub mod flame;
 pub mod flow;
@@ -188,6 +189,7 @@ pub static ALL: &[&Saver] = &[
     &eruption::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,
+    &filmleader::SAVER,
     &fireworkx::SAVER,
     &flame::SAVER,
     &flow::SAVER,
