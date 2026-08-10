@@ -544,6 +544,12 @@ saver!(
     xscreensaver::hacks2d::pedal::start
 );
 saver!(
+    "penetrate",
+    penetrate_body,
+    penetrate_start,
+    xscreensaver::hacks2d::penetrate::start
+);
+saver!(
     "penrose",
     penrose_body,
     penrose_start,
@@ -1213,6 +1219,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pedal",
         label: "Pedal",
         start: pedal_start,
+    },
+    Entry {
+        slug: "penetrate",
+        label: "Penetrate",
+        start: penetrate_start,
     },
     Entry {
         slug: "penrose",
