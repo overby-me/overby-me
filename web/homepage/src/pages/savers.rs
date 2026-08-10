@@ -250,6 +250,12 @@ saver!(
     xscreensaver::hacks2d::flame::start
 );
 saver!(
+    "fluidballs",
+    fluidballs_body,
+    fluidballs_start,
+    xscreensaver::hacks2d::fluidballs::start
+);
+saver!(
     "forest",
     forest_body,
     forest_start,
@@ -758,6 +764,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "flame",
         label: "Flame",
         start: flame_start,
+    },
+    Entry {
+        slug: "fluidballs",
+        label: "Fluid Balls",
+        start: fluidballs_start,
     },
     Entry {
         slug: "forest",
