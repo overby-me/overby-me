@@ -94,6 +94,12 @@ saver!(
     xscreensaver::hacks2d::apollonian::start
 );
 saver!(
+    "attraction",
+    attraction_body,
+    attraction_start,
+    xscreensaver::hacks2d::attraction::start
+);
+saver!(
     "binaryhorizon",
     binaryhorizon_body,
     binaryhorizon_start,
@@ -706,6 +712,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "apollonian",
         label: "Apollonian",
         start: apollonian_start,
+    },
+    Entry {
+        slug: "attraction",
+        label: "Attraction",
+        start: attraction_start,
     },
     Entry {
         slug: "binaryhorizon",

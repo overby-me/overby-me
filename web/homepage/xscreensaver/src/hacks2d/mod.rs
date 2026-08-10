@@ -16,6 +16,7 @@ use crate::runtime::Saver;
 pub mod anemone;
 pub mod anemotaxis;
 pub mod apollonian;
+pub mod attraction;
 pub mod binaryhorizon;
 pub mod binaryring;
 pub mod blitspin;
@@ -126,6 +127,7 @@ pub static ALL: &[&Saver] = &[
     &anemone::SAVER,
     &anemotaxis::SAVER,
     &apollonian::SAVER,
+    &attraction::SAVER,
     &binaryhorizon::SAVER,
     &binaryring::SAVER,
     &blitspin::SAVER,
