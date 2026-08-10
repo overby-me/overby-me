@@ -71,6 +71,7 @@ pub mod imsmap;
 pub mod interaggregate;
 pub mod interference;
 pub mod intermomentary;
+pub mod juggle;
 pub mod julia;
 pub mod kaleidescope;
 pub mod kumppa;
@@ -200,6 +201,7 @@ pub static ALL: &[&Saver] = &[
     &interaggregate::SAVER,
     &interference::SAVER,
     &intermomentary::SAVER,
+    &juggle::SAVER,
     &julia::SAVER,
     &kaleidescope::SAVER,
     &laser::SAVER,

@@ -424,6 +424,12 @@ saver!(
     xscreensaver::hacks2d::intermomentary::start
 );
 saver!(
+    "juggle",
+    juggle_body,
+    juggle_start,
+    xscreensaver::hacks2d::juggle::start
+);
+saver!(
     "julia",
     julia_body,
     julia_start,
@@ -1095,6 +1101,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "intermomentary",
         label: "Intermomentary",
         start: intermomentary_start,
+    },
+    Entry {
+        slug: "juggle",
+        label: "Juggle",
+        start: juggle_start,
     },
     Entry {
         slug: "julia",
