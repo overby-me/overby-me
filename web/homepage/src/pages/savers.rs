@@ -214,6 +214,12 @@ saver!(
     xscreensaver::hacks2d::greynetic::start
 );
 saver!(
+    "distort",
+    distort_body,
+    distort_start,
+    xscreensaver::hacks2d::distort::start
+);
+saver!(
     "drift",
     drift_body,
     drift_start,
@@ -746,6 +752,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "greynetic",
         label: "Greynetic",
         start: greynetic_start,
+    },
+    Entry {
+        slug: "distort",
+        label: "Distort",
+        start: distort_start,
     },
     Entry {
         slug: "drift",

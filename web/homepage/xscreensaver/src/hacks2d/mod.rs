@@ -33,6 +33,7 @@ pub mod decayscreen;
 pub mod deco;
 pub mod deluxe;
 pub mod discrete;
+pub mod distort;
 pub mod drift;
 pub mod droste;
 pub mod epicycle;
@@ -136,6 +137,7 @@ pub static ALL: &[&Saver] = &[
     &fuzzyflakes::SAVER,
     &galaxy::SAVER,
     &greynetic::SAVER,
+    &distort::SAVER,
     &drift::SAVER,
     &droste::SAVER,
     &epicycle::SAVER,

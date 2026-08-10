@@ -28,6 +28,9 @@ extend-ignore-re = [
   "distrubtable",
   "unneccessary",
   "posibility",
+  "algortim",
+  # Federico Mena Quintero, credited in distort's vortex formula.
+  "Mena",
 ]
 
 [default.extend-words]
