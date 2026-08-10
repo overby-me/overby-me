@@ -370,6 +370,12 @@ saver!(
     xscreensaver::hacks2d::pyro::start
 );
 saver!(
+    "qix",
+    qix_body,
+    qix_start,
+    xscreensaver::hacks2d::qix::start
+);
+saver!(
     "rdbomb",
     rdbomb_body,
     rdbomb_start,
@@ -756,6 +762,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pyro",
         label: "Pyro",
         start: pyro_start,
+    },
+    Entry {
+        slug: "qix",
+        label: "Qix",
+        start: qix_start,
     },
     Entry {
         slug: "rdbomb",

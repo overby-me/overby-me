@@ -136,6 +136,11 @@ pub struct Gc {
     pub function: GXFunc,
     pub line_width: i32,
     pub fill_rule: FillRule,
+    /// `GCPlaneMask`: which bits of the destination a draw may touch. All of
+    /// them, normally. A hack that wants several drawings to overlap without
+    /// erasing each other gives each one its own planes, which is how qix
+    /// gets its translucent look on a screen with no alpha.
+    pub plane_mask: Pixel,
     /// `XSetClipMask` / `XSetClipRectangles`, reduced to a single rectangle.
     /// Arbitrary bitmap clip masks are not supported yet; no ported hack needs
     /// one so far, and the ones that will (`blitspin`, `slidescreen`) can grow
@@ -151,6 +156,7 @@ impl Default for Gc {
             function: GXFunc::Copy,
             line_width: 0,
             fill_rule: FillRule::EvenOdd,
+            plane_mask: !0,
             clip: None,
         }
     }
@@ -180,6 +186,12 @@ impl Gc {
     /// `XSetFunction`.
     pub fn set_function(&mut self, f: GXFunc) -> &mut Self {
         self.function = f;
+        self
+    }
+
+    /// `XSetPlaneMask`.
+    pub fn set_plane_mask(&mut self, m: Pixel) -> &mut Self {
+        self.plane_mask = m;
         self
     }
 
@@ -258,13 +270,19 @@ impl Fb {
         }
     }
 
-    /// Apply a raster operation in this drawable's depth.
+    /// Apply a raster operation in this drawable's depth, through the GC's
+    /// plane mask: bits outside the mask keep whatever was there.
     #[inline]
-    fn combine(&self, dst: Pixel, src: Pixel, func: GXFunc) -> Pixel {
-        if self.depth == 1 {
-            func.apply_bit(dst, src)
+    fn combine(&self, dst: Pixel, src: Pixel, gc: &Gc) -> Pixel {
+        let v = if self.depth == 1 {
+            gc.function.apply_bit(dst, src)
         } else {
-            func.apply(dst, src)
+            gc.function.apply(dst, src)
+        };
+        if gc.plane_mask == !0 {
+            v
+        } else {
+            (dst & !gc.plane_mask) | (v & gc.plane_mask)
         }
     }
 
@@ -356,7 +374,7 @@ impl Fb {
             return;
         }
         let i = (y * self.width + x) as usize;
-        self.px[i] = self.combine(self.px[i], gc.foreground, gc.function);
+        self.px[i] = self.combine(self.px[i], gc.foreground, gc);
     }
 
     /// A horizontal span, the workhorse for every filled shape.
@@ -382,12 +400,12 @@ impl Fb {
         }
         let row = (y * self.width) as usize;
         let fg = gc.foreground;
-        if gc.function == GXFunc::Copy {
+        if gc.function == GXFunc::Copy && gc.plane_mask == !0 {
             let fg = self.store(fg);
             self.px[row + x0 as usize..=row + x1 as usize].fill(fg);
         } else {
             for i in row + x0 as usize..=row + x1 as usize {
-                self.px[i] = self.combine(self.px[i], fg, gc.function);
+                self.px[i] = self.combine(self.px[i], fg, gc);
             }
         }
     }
@@ -919,7 +937,11 @@ impl Fb {
         // no clip and no raster op. Every hack that double-buffers does this
         // once a frame over the whole window, so it is worth a row at a time
         // rather than a pixel at a time.
-        if gc.function == GXFunc::Copy && gc.clip.is_none() && self.depth() == src.depth() {
+        if gc.function == GXFunc::Copy
+            && gc.clip.is_none()
+            && gc.plane_mask == !0
+            && self.depth() == src.depth()
+        {
             let i0 = 0.max(-src_x).max(-dst_x);
             let i1 = w.min(src.width - src_x).min(self.width - dst_x);
             if i0 < i1 {
@@ -954,7 +976,7 @@ impl Fb {
                     continue;
                 }
                 let idx = (dy * self.width + dx) as usize;
-                self.px[idx] = self.combine(self.px[idx], p, gc.function);
+                self.px[idx] = self.combine(self.px[idx], p, gc);
             }
         }
     }
@@ -1017,7 +1039,7 @@ impl Fb {
                     gc.background
                 };
                 let idx = (dy * self.width + dx) as usize;
-                self.px[idx] = self.combine(self.px[idx], color, gc.function);
+                self.px[idx] = self.combine(self.px[idx], color, gc);
             }
         }
     }
