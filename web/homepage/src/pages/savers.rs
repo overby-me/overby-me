@@ -208,6 +208,12 @@ saver!(
     xscreensaver::hacks2d::droste::start
 );
 saver!(
+    "epicycle",
+    epicycle_body,
+    epicycle_start,
+    xscreensaver::hacks2d::epicycle::start
+);
+saver!(
     "eruption",
     eruption_body,
     eruption_start,
@@ -699,6 +705,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "droste",
         label: "Droste",
         start: droste_start,
+    },
+    Entry {
+        slug: "epicycle",
+        label: "Epicycle",
+        start: epicycle_start,
     },
     Entry {
         slug: "eruption",

@@ -32,6 +32,7 @@ pub mod deluxe;
 pub mod discrete;
 pub mod drift;
 pub mod droste;
+pub mod epicycle;
 pub mod eruption;
 pub mod fadeplot;
 pub mod fiberlamp;
@@ -128,6 +129,7 @@ pub static ALL: &[&Saver] = &[
     &greynetic::SAVER,
     &drift::SAVER,
     &droste::SAVER,
+    &epicycle::SAVER,
     &eruption::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,
