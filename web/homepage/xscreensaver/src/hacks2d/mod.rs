@@ -14,6 +14,7 @@
 use crate::runtime::Saver;
 
 pub mod anemone;
+pub mod anemotaxis;
 pub mod binaryhorizon;
 pub mod binaryring;
 pub mod blitspin;
@@ -103,6 +104,7 @@ pub mod zoom;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
     &anemone::SAVER,
+    &anemotaxis::SAVER,
     &binaryhorizon::SAVER,
     &binaryring::SAVER,
     &blitspin::SAVER,

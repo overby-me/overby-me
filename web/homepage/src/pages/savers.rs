@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::anemone::start
 );
 saver!(
+    "anemotaxis",
+    anemotaxis_body,
+    anemotaxis_start,
+    xscreensaver::hacks2d::anemotaxis::start
+);
+saver!(
     "binaryhorizon",
     binaryhorizon_body,
     binaryhorizon_start,
@@ -570,6 +576,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "anemone",
         label: "Anemone",
         start: anemone_start,
+    },
+    Entry {
+        slug: "anemotaxis",
+        label: "Anemotaxis",
+        start: anemotaxis_start,
     },
     Entry {
         slug: "binaryhorizon",
