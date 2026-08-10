@@ -691,8 +691,51 @@ impl Fb {
         if w <= 0 || h <= 0 {
             return;
         }
+        if gc.line_width > 1 {
+            self.thick_arc(gc, x, y, w, h, angle1, angle2);
+            return;
+        }
         let pts = Self::arc_points(x, y, w, h, angle1, angle2);
         self.draw_lines(gc, &pts);
+    }
+
+    /// A wide arc, drawn the way X draws one: as the band between an ellipse
+    /// grown by half the line width and one shrunk by the same, rather than as
+    /// a chain of separately capped segments. One polygon instead of hundreds
+    /// of quads and circles, and no scalloped edge where the segments meet.
+    fn thick_arc(&mut self, gc: &Gc, x: i32, y: i32, w: i32, h: i32, angle1: i32, angle2: i32) {
+        let half = gc.line_width as f64 / 2.0;
+        let (rx, ry) = (w as f64 / 2.0, h as f64 / 2.0);
+        let (cx, cy) = (x as f64 + rx, y as f64 + ry);
+        let steps = ((rx.max(ry) * 4.0) as usize).clamp(8, 720);
+        let a1 = angle1 as f64 * std::f64::consts::PI / (180.0 * 64.0);
+        let a2 = angle2 as f64 * std::f64::consts::PI / (180.0 * 64.0);
+        let (irx, iry) = ((rx - half).max(0.0), (ry - half).max(0.0));
+        let (orx, ory) = (rx + half, ry + half);
+
+        let at = |a: f64, ex: f64, ey: f64| XPoint {
+            x: (cx + ex * a.cos()).round() as i32,
+            y: (cy - ey * a.sin()).round() as i32,
+        };
+        let mut pts = Vec::with_capacity(2 * (steps + 1));
+        for i in 0..=steps {
+            pts.push(at(a1 + a2 * (i as f64 / steps as f64), orx, ory));
+        }
+        // Back along the inner edge, so the hole is wound the other way and
+        // either fill rule leaves it empty.
+        for i in (0..=steps).rev() {
+            pts.push(at(a1 + a2 * (i as f64 / steps as f64), irx, iry));
+        }
+        self.fill_polygon(gc, &pts);
+
+        if angle2.abs() < FULL_CIRCLE {
+            // CapRound, which is what the hacks that draw wide arcs ask for.
+            let r = gc.line_width;
+            for a in [a1, a1 + a2] {
+                let p = at(a, rx, ry);
+                self.fill_arc(gc, p.x - r / 2, p.y - r / 2, r, r, 0, FULL_CIRCLE);
+            }
+        }
     }
 
     /// `XFillArc` with the default `ArcPieSlice` mode: a full ellipse when the
@@ -757,6 +800,28 @@ impl Fb {
         dst_y: i32,
     ) {
         if w <= 0 || h <= 0 {
+            return;
+        }
+        // The common case by far: a plain blit of one drawable onto another,
+        // no clip and no raster op. Every hack that double-buffers does this
+        // once a frame over the whole window, so it is worth a row at a time
+        // rather than a pixel at a time.
+        if gc.function == GXFunc::Copy && gc.clip.is_none() && self.depth() == src.depth() {
+            let i0 = 0.max(-src_x).max(-dst_x);
+            let i1 = w.min(src.width - src_x).min(self.width - dst_x);
+            if i0 < i1 {
+                let run = (i1 - i0) as usize;
+                for j in 0..h {
+                    let sy = src_y + j;
+                    let dy = dst_y + j;
+                    if dy < 0 || dy >= self.height || sy < 0 || sy >= src.height {
+                        continue;
+                    }
+                    let s = (sy * src.width + src_x + i0) as usize;
+                    let dst = (dy * self.width + dst_x + i0) as usize;
+                    self.px[dst..dst + run].copy_from_slice(&src.px[s..s + run]);
+                }
+            }
             return;
         }
         for j in 0..h {

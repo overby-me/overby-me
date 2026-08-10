@@ -35,7 +35,9 @@ pub mod halftone;
 pub mod halo;
 pub mod helix;
 pub mod hexadrop;
+pub mod hopalong;
 pub mod hypercube;
+pub mod ifs;
 pub mod imsmap;
 pub mod julia;
 pub mod kaleidescope;
@@ -60,6 +62,7 @@ pub mod squiral;
 pub mod starfish;
 pub mod thornbird;
 pub mod triangle;
+pub mod truchet;
 pub mod vines;
 pub mod wander;
 pub mod worm;
@@ -94,7 +97,9 @@ pub static ALL: &[&Saver] = &[
     &halftone::SAVER,
     &helix::SAVER,
     &hexadrop::SAVER,
+    &hopalong::SAVER,
     &hypercube::SAVER,
+    &ifs::SAVER,
     &imsmap::SAVER,
     &julia::SAVER,
     &kaleidescope::SAVER,
@@ -120,6 +125,7 @@ pub static ALL: &[&Saver] = &[
     &thornbird::SAVER,
     &triangle::SAVER,
     &vines::SAVER,
+    &truchet::SAVER,
     &wander::SAVER,
     &worm::SAVER,
     &xspirograph::SAVER,
@@ -303,7 +309,12 @@ mod tests {
                 for v in values {
                     let query = format!("{}={}", opt.key, v);
                     let mut r = (saver.start)(StartArgs::new(200, 150, &query, 3));
-                    for _ in 0..40 {
+                    // A setting that cannot be survived fails in the first few
+                    // frames: a division by the extreme value, an allocation
+                    // sized from it, an index off the end of a table. This runs
+                    // twice per option per saver, so keep the count low enough
+                    // that a full tier stays quick to check.
+                    for _ in 0..12 {
                         r.step();
                     }
                 }

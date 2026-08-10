@@ -208,10 +208,22 @@ saver!(
     xscreensaver::hacks2d::hexadrop::start
 );
 saver!(
+    "hopalong",
+    hopalong_body,
+    hopalong_start,
+    xscreensaver::hacks2d::hopalong::start
+);
+saver!(
     "hypercube",
     hypercube_body,
     hypercube_start,
     xscreensaver::hacks2d::hypercube::start
+);
+saver!(
+    "ifs",
+    ifs_body,
+    ifs_start,
+    xscreensaver::hacks2d::ifs::start
 );
 saver!(
     "imsmap",
@@ -365,6 +377,12 @@ saver!(
     xscreensaver::hacks2d::vines::start
 );
 saver!(
+    "truchet",
+    truchet_body,
+    truchet_start,
+    xscreensaver::hacks2d::truchet::start
+);
+saver!(
     "wander",
     wander_body,
     wander_start,
@@ -497,9 +515,19 @@ pub static SAVERS: &[Entry] = &[
         start: hexadrop_start,
     },
     Entry {
+        slug: "hopalong",
+        label: "Hopalong",
+        start: hopalong_start,
+    },
+    Entry {
         slug: "hypercube",
         label: "Hypercube",
         start: hypercube_start,
+    },
+    Entry {
+        slug: "ifs",
+        label: "IFS",
+        start: ifs_start,
     },
     Entry {
         slug: "imsmap",
@@ -625,6 +653,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "vines",
         label: "Vines",
         start: vines_start,
+    },
+    Entry {
+        slug: "truchet",
+        label: "Truchet",
+        start: truchet_start,
     },
     Entry {
         slug: "wander",
