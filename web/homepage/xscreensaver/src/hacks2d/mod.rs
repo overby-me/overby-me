@@ -89,6 +89,7 @@ pub mod substrate;
 pub mod thornbird;
 pub mod triangle;
 pub mod truchet;
+pub mod twang;
 pub mod vines;
 pub mod wander;
 pub mod whirlwindwarp;
@@ -182,6 +183,7 @@ pub static ALL: &[&Saver] = &[
     &triangle::SAVER,
     &vines::SAVER,
     &truchet::SAVER,
+    &twang::SAVER,
     &wander::SAVER,
     &whirlwindwarp::SAVER,
     &whirlygig::SAVER,

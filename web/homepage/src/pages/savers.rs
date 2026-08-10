@@ -527,6 +527,12 @@ saver!(
     xscreensaver::hacks2d::triangle::start
 );
 saver!(
+    "twang",
+    twang_body,
+    twang_start,
+    xscreensaver::hacks2d::twang::start
+);
+saver!(
     "vines",
     vines_body,
     vines_start,
@@ -958,6 +964,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "triangle",
         label: "Triangle",
         start: triangle_start,
+    },
+    Entry {
+        slug: "twang",
+        label: "Twang",
+        start: twang_start,
     },
     Entry {
         slug: "vines",
