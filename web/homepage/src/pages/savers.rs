@@ -659,6 +659,12 @@ saver!(
     xscreensaver::hacks2d::substrate::start
 );
 saver!(
+    "swirl",
+    swirl_body,
+    swirl_start,
+    xscreensaver::hacks2d::swirl::start
+);
+saver!(
     "t3d",
     t3d_body,
     t3d_start,
@@ -1248,6 +1254,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "substrate",
         label: "Substrate",
         start: substrate_start,
+    },
+    Entry {
+        slug: "swirl",
+        label: "Swirl",
+        start: swirl_start,
     },
     Entry {
         slug: "t3d",
