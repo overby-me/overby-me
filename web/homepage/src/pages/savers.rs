@@ -503,6 +503,12 @@ saver!(
     xscreensaver::hacks2d::starfish::start
 );
 saver!(
+    "substrate",
+    substrate_body,
+    substrate_start,
+    xscreensaver::hacks2d::substrate::start
+);
+saver!(
     "thornbird",
     thornbird_body,
     thornbird_start,
@@ -926,6 +932,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "starfish",
         label: "Starfish",
         start: starfish_start,
+    },
+    Entry {
+        slug: "substrate",
+        label: "Substrate",
+        start: substrate_start,
     },
     Entry {
         slug: "thornbird",

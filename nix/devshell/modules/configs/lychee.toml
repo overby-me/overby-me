@@ -64,4 +64,5 @@ exclude = [
   'home\.sol\.no/',
   'cs\.cmu\.edu/~spot/',
   'complexification\.net/gallery/machines/interMomentary/',
+  'complexification\.net/gallery/machines/substrate/',
 ]
