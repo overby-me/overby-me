@@ -22,6 +22,7 @@ pub mod bouboule;
 pub mod boxfit;
 pub mod braid;
 pub mod bumps;
+pub mod ccurve;
 pub mod cloudlife;
 pub mod coral;
 pub mod critical;
@@ -118,6 +119,7 @@ pub static ALL: &[&Saver] = &[
     &boxfit::SAVER,
     &braid::SAVER,
     &bumps::SAVER,
+    &ccurve::SAVER,
     &cloudlife::SAVER,
     &coral::SAVER,
     &critical::SAVER,
