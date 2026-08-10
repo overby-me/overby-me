@@ -19,6 +19,9 @@ pub mod anemotaxis;
 pub mod ant;
 pub mod apollonian;
 pub mod apple2;
+/// Not a saver: the processor and assembler [`m6502`] runs its programs on,
+/// kept in its own file the way upstream keeps `hacks/asm6502.c`.
+mod asm6502;
 pub mod attraction;
 pub mod barcode;
 pub mod binaryhorizon;
@@ -90,6 +93,7 @@ pub mod lisa;
 pub mod lissie;
 pub mod lmorph;
 pub mod r#loop;
+pub mod m6502;
 pub mod marbling;
 pub mod maze;
 pub mod memscroller;
@@ -240,6 +244,7 @@ pub static ALL: &[&Saver] = &[
     &moire::SAVER,
     &lmorph::SAVER,
     &r#loop::SAVER,
+    &m6502::SAVER,
     &marbling::SAVER,
     &maze::SAVER,
     &memscroller::SAVER,

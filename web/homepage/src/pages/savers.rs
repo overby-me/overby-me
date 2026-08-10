@@ -544,6 +544,12 @@ saver!(
     xscreensaver::hacks2d::r#loop::start
 );
 saver!(
+    "m6502",
+    m6502_body,
+    m6502_start,
+    xscreensaver::hacks2d::m6502::start
+);
+saver!(
     "marbling",
     marbling_body,
     marbling_start,
@@ -1315,6 +1321,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "loop",
         label: "Loop",
         start: loop_start,
+    },
+    Entry {
+        slug: "m6502",
+        label: "m6502",
+        start: m6502_start,
     },
     Entry {
         slug: "marbling",

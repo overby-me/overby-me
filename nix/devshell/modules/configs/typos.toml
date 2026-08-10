@@ -21,8 +21,9 @@ extend-ignore-re = [
   "extrac\\*",
   # XScreenSaver copyright headers and revision histories, transcribed verbatim
   # into the Rust ports in web/homepage/xscreensaver.
-  "Orignal",
+  "[Oo]rignal",
   "10ths",
+  "chuncks",
   "descrete",
   "resoources",
   "distrubtable",
@@ -66,6 +67,13 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# 6502 mnemonics and addressing modes, in the m6502 demo programs and in the
+# opcode table of the assembler that reads them: CPY compares the Y register,
+# INDX and INDY are indexed indirect addressing.
+cpy = "cpy"
+CPY = "CPY"
+indx = "indx"
+INDX = "INDX"
 # ODF = OpenDocument Format (file-format abbreviation, Euro-Office core libs)
 odf = "odf"
 ODF = "ODF"

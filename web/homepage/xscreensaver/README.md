@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (141) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -16,15 +16,9 @@ different runtime:
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
-Every 2D hack that needs nothing but the runtime is ported, and so is every one
-that needed a runtime piece worth building.
-
-`bsod` is all thirty-nine of its computers, each one a little program for the
-same command queue. One saver is left:
-
-| Blocked on | Savers |
-|-|-|
-| a 6502 emulator | `m6502` |
+The 2D tier is finished. `bsod` is all thirty-nine of its computers, each one a
+little program for the same command queue, and `m6502` is a 6502 with an
+assembler.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -105,6 +99,25 @@ Upstream carries a great deal of logging behind a debug level, naming every
 sequence it recognises and every one it does not. There is nowhere to log to
 here, so that is left out; the commands themselves are all present, including
 the ones whose implementation upstream is to do nothing.
+
+## A processor
+
+`hacks2d::asm6502` is upstream's `asm6502.c`: a 6502 interpreter and a
+two-pass assembler, both ports of the JavaScript behind 6502asm.com. It lives
+next to `hacks2d::m6502`, the saver, because it is the only thing that uses it
+and the whole point of the split chunks is that nobody else pays for it.
+
+The programs it runs are the `.asm` files in `images/m6502/`, unchanged, and
+they are assembled from that text every time one starts, exactly as upstream
+does. Nothing is precompiled to bytes: the assembler is part of the saver and
+takes about a millisecond, once every thirty seconds.
+
+Several of its instructions are wrong. `RTI` pops one byte of return address
+instead of two, `TXS` pushes X rather than setting the stack pointer, `CMP`
+sets carry from `A + M > 0xff` instead of `A >= M`. They are kept exactly as
+they are, because the thirty-three programs were written on that web page
+against that interpreter, and an instruction repaired here is a program broken
+there.
 
 ## How a port works
 

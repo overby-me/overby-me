@@ -65,4 +65,8 @@ exclude = [
   'cs\.cmu\.edu/~spot/',
   'complexification\.net/gallery/machines/interMomentary/',
   'complexification\.net/gallery/machines/substrate/',
+  # A citation in life.asm, one of the m6502 demo programs vendored verbatim
+  # from upstream. Its author wrote the path with a stray slash in it, so it
+  # has never resolved; the listing stays as it was written.
+  "rosettacode\\.org/wiki/Conway/",
 ]
