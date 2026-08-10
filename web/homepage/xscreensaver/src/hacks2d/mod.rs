@@ -19,6 +19,7 @@ pub mod apollonian;
 pub mod attraction;
 pub mod binaryhorizon;
 pub mod binaryring;
+pub mod blaster;
 pub mod blitspin;
 pub mod bouboule;
 pub mod boxfit;
@@ -132,6 +133,7 @@ pub static ALL: &[&Saver] = &[
     &attraction::SAVER,
     &binaryhorizon::SAVER,
     &binaryring::SAVER,
+    &blaster::SAVER,
     &blitspin::SAVER,
     &bouboule::SAVER,
     &boxfit::SAVER,
