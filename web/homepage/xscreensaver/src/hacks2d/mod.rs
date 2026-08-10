@@ -15,6 +15,7 @@ use crate::runtime::Saver;
 
 pub mod anemone;
 pub mod anemotaxis;
+pub mod ant;
 pub mod apollonian;
 pub mod attraction;
 pub mod binaryhorizon;
@@ -132,6 +133,7 @@ pub mod zoom;
 /// the main module. See [`crate::all`].
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
+    &ant::SAVER,
     &anemone::SAVER,
     &anemotaxis::SAVER,
     &apollonian::SAVER,

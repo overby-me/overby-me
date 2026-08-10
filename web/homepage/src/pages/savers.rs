@@ -76,6 +76,12 @@ macro_rules! saver {
 }
 
 saver!(
+    "ant",
+    ant_body,
+    ant_start,
+    xscreensaver::hacks2d::ant::start
+);
+saver!(
     "anemone",
     anemone_body,
     anemone_start,
@@ -746,6 +752,11 @@ saver!(
 /// Every saver, by slug. Only the slug, the label and a function pointer live
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
+    Entry {
+        slug: "ant",
+        label: "Ant",
+        start: ant_start,
+    },
     Entry {
         slug: "anemone",
         label: "Anemone",
