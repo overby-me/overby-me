@@ -238,6 +238,12 @@ saver!(
     xscreensaver::hacks2d::epicycle::start
 );
 saver!(
+    "euler2d",
+    euler2d_body,
+    euler2d_start,
+    xscreensaver::hacks2d::euler2d::start
+);
+saver!(
     "eruption",
     eruption_body,
     eruption_start,
@@ -772,6 +778,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "epicycle",
         label: "Epicycle",
         start: epicycle_start,
+    },
+    Entry {
+        slug: "euler2d",
+        label: "Euler 2D",
+        start: euler2d_start,
     },
     Entry {
         slug: "eruption",

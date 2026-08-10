@@ -29,6 +29,7 @@ extend-ignore-re = [
   "unneccessary",
   "posibility",
   "algortim",
+  "compilcated",
   # Federico Mena Quintero, credited in distort's vortex formula.
   "Mena",
 ]

@@ -38,6 +38,7 @@ pub mod drift;
 pub mod droste;
 pub mod epicycle;
 pub mod eruption;
+pub mod euler2d;
 pub mod fadeplot;
 pub mod fiberlamp;
 pub mod fireworkx;
@@ -141,6 +142,7 @@ pub static ALL: &[&Saver] = &[
     &drift::SAVER,
     &droste::SAVER,
     &epicycle::SAVER,
+    &euler2d::SAVER,
     &eruption::SAVER,
     &fadeplot::SAVER,
     &fiberlamp::SAVER,
