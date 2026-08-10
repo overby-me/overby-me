@@ -40,7 +40,7 @@
 //! path for eight-bit colormapped displays, which a canvas is not. And it packs
 //! pixels according to the visual's masks, where here they are always RGBA.
 
-use super::color::{Pixel, rgb};
+use super::color::{Pixel, RGB_MASK, rgb};
 use super::fb::{Fb, XImage};
 use super::rand::{frand, random};
 
@@ -239,14 +239,41 @@ impl Input {
             x += f.char_w * f.x_mult;
         }
     }
+
+    /// `analogtv_draw_string_centered`: `x` is the middle of the line rather
+    /// than its left end.
+    pub fn draw_string_centered(&mut self, f: &TvFont, s: &str, x: i32, y: i32, ntsc: [i32; 4]) {
+        let width = s.len() as i32 * f.char_w * f.x_mult;
+        self.draw_string(f, s, x - width / 2, y, ntsc);
+    }
+
+    /// `analogtv_setup_teletext`: the burst of data in the vertical interval.
+    ///
+    /// Nobody watching sees this, because it is above the picture. It is here
+    /// because a receiver with the vertical hold slipping shows the interval,
+    /// and a real one has this in it.
+    pub fn setup_teletext(&mut self) {
+        let mut teletext = BLACK_LEVEL;
+        for y in 19..22 {
+            for x in PIC_START..PIC_END {
+                if x & 7 == 0 {
+                    teletext = if random() & 1 != 0 {
+                        WHITE_LEVEL
+                    } else {
+                        BLACK_LEVEL
+                    };
+                }
+                self.set(y, x, teletext as i8);
+            }
+        }
+    }
 }
 
 /// A bitmap font for drawing straight into a signal.
 ///
 /// 256 characters of `char_w` by `char_h`, each bit drawn as `x_mult` by
-/// `y_mult` samples. Upstream can also build one from a real font; the hacks
-/// that use this one fill in their own glyphs instead, which is the only path
-/// that means anything here.
+/// `y_mult` samples. A hack either fills in its own glyphs, as pong does, or
+/// takes the sheet upstream bundles for exactly this ([`TvFont::sheet_6x10`]).
 pub struct TvFont {
     pub char_w: i32,
     pub char_h: i32,
@@ -271,6 +298,31 @@ impl TvFont {
             return false;
         }
         self.bits[(i32::from(c) * self.char_w * self.char_h + y * self.char_w + x) as usize]
+    }
+
+    /// `analogtv_make_font (.., 7, 10, "6x10")`: the glyph sheet upstream ships
+    /// for this, 256 characters of 7 by 10 laid out in one row.
+    ///
+    /// A pixel counts as ink where the sheet is both opaque and dark, which is
+    /// how upstream reads it: the drawing is black on a transparent ground.
+    pub fn sheet_6x10() -> Option<TvFont> {
+        let (im, mask) = super::png::decode(crate::images::FONT_6X10)?;
+        let (w, h) = (7, 10);
+        if im.width() != 256 * w || im.height() != h {
+            return None;
+        }
+        let mut f = TvFont::new(w, h);
+        for c in 0..256usize {
+            for y in 0..h {
+                for x in 0..w {
+                    let sx = c as i32 * w + x;
+                    let opaque = mask.as_ref().is_none_or(|m| m.get_pixel(sx, y) != 0);
+                    let dark = im.get_pixel(sx, y) & RGB_MASK == 0;
+                    f.bits[(c as i32 * w * h + y * w + x) as usize] = opaque && dark;
+                }
+            }
+        }
+        Some(f)
     }
 
     /// `analogtv_font_set_char`: one glyph as rows of text, where a space is
@@ -424,7 +476,9 @@ pub struct AnalogTv {
     cb_phase: [f32; 4],
     line_cb_phase: Vec<[f32; 4]>,
 
-    channel_change_cycles: usize,
+    /// How much longer the burst of noise from turning the dial lasts, in
+    /// samples. Set by a hack when it changes channel.
+    pub channel_change_cycles: usize,
     rx_signal_level: f64,
     /// The aerial: noise plus every channel that is being received, summed.
     /// Two lines longer than a frame so a line can be read past the end.
@@ -1271,8 +1325,11 @@ impl AnalogTv {
 
             for x in 0..x_length {
                 let picx = x * img_w / x_length;
+                // The mask is a depth-1 bitmap, so a clear bit is a zero, not a
+                // black pixel. Where it is clear the picture underneath is left
+                // as it was, which is how the logo is laid over the bars.
                 if let Some(m) = mask
-                    && m.get_pixel(picx, picy1) == rgb(0, 0, 0)
+                    && m.get_pixel(picx, picy1) == 0
                 {
                     continue;
                 }

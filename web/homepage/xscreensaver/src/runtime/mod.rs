@@ -127,6 +127,21 @@ impl Dpy {
         images.poll(window, *time, pending)
     }
 
+    /// `load_image_async`: the same, into a drawable of your own rather than
+    /// the window.
+    ///
+    /// Upstream's takes a `Drawable` too. A hack that wants several pictures at
+    /// once, or wants to do something to one before it is seen, loads into a
+    /// pixmap; the window is only the common case.
+    pub fn load_image_into(
+        &mut self,
+        target: &mut Fb,
+        pending: Option<ImageLoad>,
+    ) -> Option<ImageLoad> {
+        let Dpy { images, time, .. } = self;
+        images.poll(target, *time, pending)
+    }
+
     /// Where in the window the last picture landed, which upstream's loader
     /// returns through an out-parameter. Only meaningful once a load has
     /// finished; before that it is the whole window.

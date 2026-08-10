@@ -139,6 +139,7 @@ pub mod whirlwindwarp;
 pub mod whirlygig;
 pub mod worm;
 pub mod wormhole;
+pub mod xanalogtv;
 pub mod xflame;
 pub mod xjack;
 pub mod xlyap;
@@ -279,6 +280,7 @@ pub static ALL: &[&Saver] = &[
     &whirlygig::SAVER,
     &worm::SAVER,
     &wormhole::SAVER,
+    &xanalogtv::SAVER,
     &xflame::SAVER,
     &xjack::SAVER,
     &xlyap::SAVER,

@@ -839,6 +839,12 @@ saver!(
     xscreensaver::hacks2d::zoom::start
 );
 saver!(
+    "xanalogtv",
+    xanalogtv_body,
+    xanalogtv_start,
+    xscreensaver::hacks2d::xanalogtv::start
+);
+saver!(
     "xflame",
     xflame_body,
     xflame_start,
@@ -1506,6 +1512,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "zoom",
         label: "Zoom",
         start: zoom_start,
+    },
+    Entry {
+        slug: "xanalogtv",
+        label: "XAnalogTV",
+        start: xanalogtv_start,
     },
     Entry {
         slug: "xflame",

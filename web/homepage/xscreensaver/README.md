@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (132) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (133) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -21,7 +21,7 @@ something built first, and each group unlocks together:
 
 | Blocked on | Savers |
 |-|-|
-| nothing: ready to port | `bubbles`, `maze`, `pacman`, `xanalogtv`, `xmatrix` |
+| nothing: ready to port | `bubbles`, `maze`, `pacman`, `xmatrix` |
 | a terminal emulator (`ansi-tty.c`) | `apple2`, `phosphor` |
 | `apple2`, whose screen it borrows for one of its crashes | `bsod` |
 | a JPEG decoder | `glitchpeg` |

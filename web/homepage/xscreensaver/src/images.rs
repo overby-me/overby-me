@@ -14,6 +14,21 @@
 /// by way of XScreenSaver, 64x64, four bits of palette.
 pub const BOB: &[u8] = include_bytes!("../images/bob.png");
 
+/// `6x10font.png`: 256 glyphs of 7x10 in one row, black on transparent. What
+/// `analogtv_make_font` draws straight into a video signal.
+pub const FONT_6X10: &[u8] = include_bytes!("../images/6x10font.png");
+
+/// `logo-180.png`: the XScreenSaver logo at 180 square, with an alpha channel.
+pub const LOGO_180: &[u8] = include_bytes!("../images/logo-180.png");
+
+/// The three test cards `xanalogtv` tunes between: the RCA Indian-head card,
+/// the Philips PM5544, and the BBC's Test Card F.
+pub const TESTCARDS: [&[u8]; 3] = [
+    include_bytes!("../images/testcard_rca.png"),
+    include_bytes!("../images/testcard_pm5544.png"),
+    include_bytes!("../images/testcard_bbcf.png"),
+];
+
 /// The noseguy's eight poses, 64x64 each: two frames walking left, two walking
 /// right, two three-quarter views, one facing forward and one looking down.
 /// Drawn by Dan Heller for xnlock, which is where the whole saver comes from.
