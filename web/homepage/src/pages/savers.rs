@@ -478,6 +478,12 @@ saver!(
     xscreensaver::hacks2d::lmorph::start
 );
 saver!(
+    "loop",
+    loop_body,
+    loop_start,
+    xscreensaver::hacks2d::r#loop::start
+);
+saver!(
     "marbling",
     marbling_body,
     marbling_start,
@@ -1116,6 +1122,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "lmorph",
         label: "LMorph",
         start: lmorph_start,
+    },
+    Entry {
+        slug: "loop",
+        label: "Loop",
+        start: loop_start,
     },
     Entry {
         slug: "marbling",

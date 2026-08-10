@@ -79,6 +79,7 @@ pub mod lightning;
 pub mod lisa;
 pub mod lissie;
 pub mod lmorph;
+pub mod r#loop;
 pub mod marbling;
 pub mod metaballs;
 pub mod moire;
@@ -205,6 +206,7 @@ pub static ALL: &[&Saver] = &[
     &lissie::SAVER,
     &moire::SAVER,
     &lmorph::SAVER,
+    &r#loop::SAVER,
     &marbling::SAVER,
     &metaballs::SAVER,
     &moire2::SAVER,
