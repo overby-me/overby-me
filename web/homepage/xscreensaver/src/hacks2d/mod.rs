@@ -83,6 +83,7 @@ pub mod lissie;
 pub mod lmorph;
 pub mod r#loop;
 pub mod marbling;
+pub mod memscroller;
 pub mod metaballs;
 pub mod moire;
 pub mod moire2;
@@ -215,6 +216,7 @@ pub static ALL: &[&Saver] = &[
     &lmorph::SAVER,
     &r#loop::SAVER,
     &marbling::SAVER,
+    &memscroller::SAVER,
     &metaballs::SAVER,
     &moire2::SAVER,
     &mountain::SAVER,

@@ -73,11 +73,14 @@ impl Font {
     /// `XLoadQueryFont` / `XftFontOpenName`, as far as it goes: pull a size out
     /// of the name and ignore everything else about it.
     ///
-    /// Handles both spellings the hacks use, an XLFD
-    /// (`-*-courier-medium-r-*-*-*-240-*`, where sizes past the seventh field
-    /// are in tenths of a point) and an Xft name (`Courier Bold 24`), and takes
-    /// the first of a comma-separated list of alternatives the way
-    /// `load_xft_font_retry` does.
+    /// Handles both spellings the hacks use, and takes the first of a
+    /// comma-separated list of alternatives the way `load_xft_font_retry` does.
+    ///
+    /// Which spelling it is decides what the number means, and the two overlap:
+    /// an XLFD (`-*-helvetica-bold-r-normal-*-180-*`) gives its size in tenths
+    /// of a point, while an Xft name (`OCR A 192`) gives whole ones, so the
+    /// same three digits mean eighteen in the first and a hundred and
+    /// ninety-two in the second. A leading dash is what tells them apart.
     pub fn load(spec: &str) -> Font {
         let first = spec.split(',').next().unwrap_or(spec);
         let mut size = 0;
@@ -95,8 +98,7 @@ impl Font {
         if cur > 0 {
             size = cur;
         }
-        // A three-digit size is decipoints, which is how an XLFD spells it.
-        if size >= 100 {
+        if first.starts_with('-') && size >= 100 {
             size /= 10;
         }
         Font::at_size(size)
@@ -143,6 +145,18 @@ impl Font {
         }
         GALLANT[(c as i32 * CELL_H + y) as usize]
     }
+}
+
+/// The compiled-in glyph table, as bytes.
+///
+/// This is here for `memscroller`, which scrolls a dump of the program's own
+/// memory. A browser tab cannot read its heap the way upstream reads its own
+/// `sbrk`, and this is the largest block of the program's own data that a safe
+/// Rust program can hand out. It is about eleven kilobytes, which is the same
+/// order as the sixty-four upstream clamps itself to when the addresses it gets
+/// back look implausible.
+pub fn program_bytes() -> Vec<u8> {
+    GALLANT.iter().flat_map(|w| w.to_be_bytes()).collect()
 }
 
 impl Fb {
@@ -687,11 +701,15 @@ mod tests {
         // Xft names, which is what the modern hacks use.
         assert_eq!(Font::load("Special Elite 24, Courier 24").char_width(), 12);
         assert_eq!(Font::load("Courier Bold 48").char_width(), 24);
-        // An XLFD, where the size is in tenths of a point.
+        // An XLFD, where the size is in tenths of a point, so this is 18 and
+        // not 180.
         assert_eq!(
             Font::load("-*-helvetica-bold-r-normal-*-180-*").char_width(),
             12
         );
+        // The same three digits in an Xft name are whole points, and a hack
+        // that asks for a display-sized face has to get one.
+        assert_eq!(Font::load("OCR A 192, Courier 192").char_width(), 108);
         // Nothing recognisable still has to give a usable font.
         assert_eq!(Font::load("fixed").char_width(), 12);
         assert_eq!(Font::load("").ascent(), 17);

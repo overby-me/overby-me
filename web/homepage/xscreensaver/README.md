@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (123) |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (124) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -26,7 +26,7 @@ something built first, and each group unlocks together:
 | bundled images, on top of text | `bsod`, `flag`, `noseguy`, `xmatrix` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
-| nothing: text-only, ready to port | `barcode`, `fontglide`, `memscroller`, `penetrate` |
+| nothing: text-only, ready to port | `barcode`, `fontglide`, `penetrate` |
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver.
