@@ -7,6 +7,12 @@
 //! Dioxus runtime), so widths are bridged through a `use_coroutine`: the listener
 //! `send`s widths into the channel and the coroutine — which runs inside the
 //! runtime — is the only writer of [`WINDOW_SIZE`].
+//!
+//! The bridge is installed once, by the root layout. Anywhere else, read the
+//! class straight off [`WINDOW_SIZE`]: see [`use_window_size`] for why a second
+//! installation is not a waste but a crash.
+
+use std::cell::Cell;
 
 use dioxus::prelude::*;
 use futures_util::StreamExt;
@@ -84,8 +90,29 @@ fn current_width() -> f64 {
 pub static WINDOW_SIZE: GlobalSignal<WindowSizeClass> =
     Signal::global(|| WindowSizeClass::from_width(current_width()));
 
+thread_local! {
+    /// Whether the `resize` bridge has been installed already.
+    ///
+    /// The listener is leaked on purpose, so it lives as long as the page does.
+    /// The `Coroutine` it sends through does not: the channel behind it is a
+    /// `CopyValue` owned by the scope that called the hook. Installing from a
+    /// second component therefore leaves a permanent listener holding a handle
+    /// that dies when that component unmounts, and the next resize panics inside
+    /// `Coroutine::send` with "called `Result::unwrap()` on an `Err` value:
+    /// Dropped". That is a whole-app crash, from nothing more than opening the
+    /// console once and then resizing the window.
+    ///
+    /// One install is the only arrangement where the two lifetimes agree. It
+    /// belongs to the root layout, which mounts before anything else and never
+    /// unmounts; this flag holds later callers to that.
+    static BRIDGED: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Install the window `resize` -> [`WINDOW_SIZE`] bridge and return the current
-/// class (reactively). Call once from the root layout.
+/// class (reactively). Call once, from the root layout.
+///
+/// Everything else wants [`WINDOW_SIZE`] directly, which is the same reactive
+/// read without the installation.
 pub fn use_window_size() -> WindowSizeClass {
     // The coroutine runs in the runtime and is the ONLY writer of WINDOW_SIZE.
     let feed = use_coroutine(|mut rx: UnboundedReceiver<f64>| async move {
@@ -98,7 +125,11 @@ pub fn use_window_size() -> WindowSizeClass {
     });
 
     // Install the listener once; leak it (it lives for the app's lifetime).
+    // Once, for the whole page rather than once per caller: see BRIDGED.
     use_hook(move || {
+        if BRIDGED.with(|installed| installed.replace(true)) {
+            return;
+        }
         if let Some(win) = web_sys::window() {
             feed.send(current_width());
             let cb = Closure::<dyn FnMut()>::new(move || {

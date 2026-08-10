@@ -165,7 +165,10 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     // working in. Running a meeting is reading the agenda WHILE giving someone
     // the floor or opening a poll, and a tab bar makes those alternatives — the
     // chair kept flicking back to see where they were.
-    let wide = crate::window_size::use_window_size().is_expanded_rail();
+    // Read the class rather than install the bridge: `use_window_size` leaks a
+    // resize listener holding a handle owned by the calling scope, and the console
+    // is a page that comes and goes (see `window_size::BRIDGED`).
+    let wide = crate::window_size::WINDOW_SIZE().is_expanded_rail();
     let sel = console_tab(tab(), wide);
 
     let agenda_pane = rsx! {
