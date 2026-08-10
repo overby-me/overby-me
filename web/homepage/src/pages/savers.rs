@@ -358,6 +358,12 @@ saver!(
     xscreensaver::hacks2d::imsmap::start
 );
 saver!(
+    "interaggregate",
+    interaggregate_body,
+    interaggregate_start,
+    xscreensaver::hacks2d::interaggregate::start
+);
+saver!(
     "intermomentary",
     intermomentary_body,
     intermomentary_start,
@@ -896,6 +902,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "imsmap",
         label: "IMS Map",
         start: imsmap_start,
+    },
+    Entry {
+        slug: "interaggregate",
+        label: "Interaggregate",
+        start: interaggregate_start,
     },
     Entry {
         slug: "intermomentary",

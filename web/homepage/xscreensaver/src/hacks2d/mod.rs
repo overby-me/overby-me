@@ -60,6 +60,7 @@ pub mod hopalong;
 pub mod hypercube;
 pub mod ifs;
 pub mod imsmap;
+pub mod interaggregate;
 pub mod intermomentary;
 pub mod julia;
 pub mod kaleidescope;
@@ -165,6 +166,7 @@ pub static ALL: &[&Saver] = &[
     &hypercube::SAVER,
     &ifs::SAVER,
     &imsmap::SAVER,
+    &interaggregate::SAVER,
     &intermomentary::SAVER,
     &julia::SAVER,
     &kaleidescope::SAVER,
