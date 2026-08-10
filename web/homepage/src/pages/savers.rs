@@ -148,6 +148,12 @@ saver!(
     xscreensaver::hacks2d::blitspin::start
 );
 saver!(
+    "bsod",
+    bsod_body,
+    bsod_start,
+    xscreensaver::hacks2d::bsod::start
+);
+saver!(
     "bouboule",
     bouboule_body,
     bouboule_start,
@@ -978,6 +984,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "bouboule",
         label: "Bouboule",
         start: bouboule_start,
+    },
+    Entry {
+        slug: "bsod",
+        label: "BSOD",
+        start: bsod_start,
     },
     Entry {
         slug: "boxfit",

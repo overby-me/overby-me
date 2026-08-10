@@ -41,6 +41,18 @@ extend-ignore-re = [
   "projektion",
   # Federico Mena Quintero, credited in distort's vortex formula.
   "Mena",
+  # Tru64, Compaq's Unix for the Alpha, one of the machines bsod crashes.
+  "Tru64",
+  "tru64",
+  # bsod transcribes each machine's message exactly, misspellings and all.
+  "Chcek",
+  "exectuion",
+  "refert",
+  "nedia",
+  "overlayed",
+  # A register value in the HP-UX dump and a Windows build tag, not words.
+  "4FD8EDE1",
+  "x86fre",
 ]
 
 [default.extend-words]

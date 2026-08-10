@@ -18,6 +18,28 @@ pub const BOB: &[u8] = include_bytes!("../images/bob.png");
 /// `analogtv_make_font` draws straight into a video signal.
 pub const FONT_6X10: &[u8] = include_bytes!("../images/6x10font.png");
 
+/// The machines `bsod` imitates, in the pictures each of them showed while it
+/// was failing: the Guru Meditation, the Atari bomb, the sad Mac and its
+/// successors, the Sun and Apple logos, the ATM, the DVD player, the Android,
+/// the ransom note, and the two GNOME crash dialogs.
+pub mod bsod {
+    pub const AMIGA: &[u8] = include_bytes!("../images/bsod/amiga.png");
+    pub const ANDROID: &[u8] = include_bytes!("../images/bsod/android.png");
+    pub const APPLE: &[u8] = include_bytes!("../images/bsod/apple.png");
+    pub const ATARI: &[u8] = include_bytes!("../images/bsod/atari.png");
+    pub const ATM: &[u8] = include_bytes!("../images/bsod/atm.png");
+    pub const DVD: &[u8] = include_bytes!("../images/bsod/dvd.png");
+    pub const GNOME1: &[u8] = include_bytes!("../images/bsod/gnome1.png");
+    pub const GNOME2: &[u8] = include_bytes!("../images/bsod/gnome2.png");
+    pub const HMAC: &[u8] = include_bytes!("../images/bsod/hmac.png");
+    pub const MAC: &[u8] = include_bytes!("../images/bsod/mac.png");
+    pub const MACBOMB: &[u8] = include_bytes!("../images/bsod/macbomb.png");
+    pub const OSX_10_2: &[u8] = include_bytes!("../images/bsod/osx_10_2.png");
+    pub const OSX_10_3: &[u8] = include_bytes!("../images/bsod/osx_10_3.png");
+    pub const RANSOMWARE: &[u8] = include_bytes!("../images/bsod/ransomware.png");
+    pub const SUN: &[u8] = include_bytes!("../images/bsod/sun.png");
+}
+
 /// `apple2font.png`: the Apple ][ character generator, 64 glyphs of 7x8 in one
 /// row. jwz dumped it out of X's 6x10 with the machine's own tweaks already
 /// applied, a slash through the zero among them, because MacOS has no "6x10".

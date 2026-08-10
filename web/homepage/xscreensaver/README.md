@@ -17,11 +17,17 @@ web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
 Every 2D hack that needs nothing but the runtime is ported, and so is every one
-that needed a runtime piece worth building. The three left:
+that needed a runtime piece worth building.
+
+`bsod` is under way and is not counted above yet. It is thirty-nine computers
+crashing, each one a little program for the same command queue, so it arrives a
+few machines at a time. Twenty-four are in; the fifteen still to come are
+MacsBug, Linux on PA-RISC, Solaris, the Linux fsck, VMS, OS/2, the nvidia text
+mode, the Apple ][ crashes, the cash machine, Android, Encom, GNOME, systemd,
+the ransomware and Windows 10. The two left after it:
 
 | Blocked on | Savers |
 |-|-|
-| the fifteen pictures and the dozen machines it imitates | `bsod` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
 

@@ -28,6 +28,7 @@ pub mod blitspin;
 pub mod bouboule;
 pub mod boxfit;
 pub mod braid;
+pub mod bsod;
 pub mod bubbles;
 pub mod bumps;
 pub mod ccurve;
@@ -173,6 +174,7 @@ pub static ALL: &[&Saver] = &[
     &blaster::SAVER,
     &blitspin::SAVER,
     &bouboule::SAVER,
+    &bsod::SAVER,
     &boxfit::SAVER,
     &braid::SAVER,
     &bubbles::SAVER,
