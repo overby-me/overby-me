@@ -111,6 +111,8 @@ enum Ev {
     Pause(i64),
     CharDelay(i64),
     LineDelay(i64),
+    /// Whether to stop drawing at the bottom margin rather than scrolling.
+    Crop(bool),
     /// Jump this far in the queue, which is how a mode repeats itself.
     Loop(i32),
     /// Start again from the top, with every string rewound.
@@ -388,6 +390,10 @@ impl Bst {
 
     fn loop_back(&mut self, off: i32) {
         self.queue.push(Ev::Loop(off));
+    }
+
+    fn crop(&mut self, state: bool) {
+        self.queue.push(Ev::Crop(state));
     }
 
     fn reset(&mut self) {
@@ -822,6 +828,12 @@ impl Bst {
                     return None;
                 }
                 self.pos = Some(next as usize);
+                Some(0)
+            }
+
+            Ev::Crop(state) => {
+                self.crop_p = *state;
+                self.pos = Some(pos + 1);
                 Some(0)
             }
 
@@ -2364,6 +2376,556 @@ fn encom(d: &mut Dpy, f: &Fonts) -> Bst {
     let mut bst = Bst::new(d, WHITE, BLACK, f);
     bst.custom = Some(Custom::Apple2(A2Machine::new(|| {
         Box::new(A2Encom::default())
+    })));
+    bst
+}
+
+/// Windows ransomware, which wants paying in something silly by a deadline
+/// that is already counting down.
+///
+/// The layout is a left column with the logo and the two timers, a right
+/// column with the note, and a footer of buttons; the note is cropped rather
+/// than scrolled, so on a small screen it simply runs out of room.
+///
+/// Upstream stamps the deadlines with the date. There is no date here, so they
+/// are dated from the same fixed day the rest of these use, with the time of
+/// day the host supplies.
+fn windows_ransomware(d: &mut Dpy, f: &Fonts) -> Bst {
+    const CURRENCIES: &[&str] = &[
+        "Blitcoin",
+        "Bitcorn",
+        "Buttcorn",
+        "clicks",
+        "clicks",
+        "Ass Pennies",
+        "Ass Pennies",
+        "Dollary-doos",
+        "Dunning-Krugerrands",
+        "Dunning-Krugerrands",
+        "Dunning-Krugerrands",
+        "Dunning-Krugerrands",
+        "Dunning-Krugerrands",
+        "Dunning-Krugerrands",
+        "gift certificates",
+        "Creepto-Currency",
+        "secret sauce",
+        "Tribbles",
+    ];
+
+    const HEADER_QUIPS: &[&str] = &[
+        "Oops, your screens have been encrypted!",
+        "Oops, your screens have been encrypted!",
+        "Oops, your screens have been encrypted!",
+        "Oops, your screens have been encrypted!",
+        "Oops, your screen have encrypted!",
+        "Oops, you're screens have been encrypted!",
+        "Oops, your screens have been encrupted!",
+        "Oops, your screens have been encrumpet!",
+        "Oops, your screens have been encrusted!",
+        "If you don't pay this ransom, then you are a theif!",
+        "Your screen was subject to the laws of mathomatics!",
+        "Oops, your screen was shaved by Occam's Razor!",
+        "Oops, your screen was perturbated by Langford's Basilisk!",
+        "Your screen is now stored as Snapchat messages!",
+        "Oops, your screen is now stored on Betamax!",
+        "Oops, your screen is now in the clown!",
+        "Oops, your screen has been deprecated!",
+        "Oops, you're screen was seized by the FBI!",
+        "All your screen was shared with your coworkers!",
+        "All your screen are belong to us.",
+        "Well actually, your screen isn't needed anymore.",
+        "u just got popped with some 0day shit!!",
+        "M'lady,",
+        "ALL UR APES ARE GONE!!1",
+        "Oops, all your apes are gone!",
+        "Oops, all your apes are gone!!",
+        "Oops, all ur tokens have been funged!",
+        "Oops, all your turkens have been funged!",
+        "Oops, all your tokens have been funged!",
+        "YOUR TOKENS ARE FUNGED. PRAY I DO NOT FUNGE THEM FURTHER.",
+    ];
+
+    /* You got this because... */
+    const EXCUSE_QUIPS: &[&str] = &[
+        "all human actions are equivalent and all are on principle doomed to failure",
+        "you hold a diverse portfolio of cryptocurrencies",
+        "you need to get in on ransomware futures at the ground floor",
+        "your flight was overbooked",
+        "you did not apply the security update for bugs NSA keys secret from \
+         Microsoft in your Windows(R) operating system",
+        "you are bad and you should feel bad",
+        "you used the wifi at defcon",
+        "you lack official Clown Strike[TM] threaty threat technology",
+        "Capitalism is a death cult",
+        "Web3 is in full effect",
+        "paperclip maximizers gonna paperclip maximize",
+        "the line is pleased",
+        "line goes up",
+        "you didn't HODL",
+        "you didn't click hard enough and now Tinkerbelle is dead",
+        "of your tesla stonks",
+        "MAMMON HUNGERS",
+    ];
+
+    /* WELL ACTUALLY, screensavers aren't really necessary anymore because... */
+    const SCREENSAVER_QUIPS: &[&str] = &[
+        "I read it on hacker news",
+        "that's official Debian policy now",
+        "that is the official policy of United Airlines",
+        "they cause global warming",
+        "they lack an eternal struggle",
+        "they lack a vapid dichotomy",
+        "those electrons could be used for gold farming instead",
+        "you can make more money in art exhibitions",
+    ];
+
+    const LINES: &[&str] = &[
+        "*What Happened To My Computer?\n",
+        "Your important pixels are paintcrypted. All of your documents, photos, ",
+        "videos, databases, icons, dick pics are not accessible because they ",
+        "have been bitblted. Maybe you are looking for a way to get them back, ",
+        "but don't waste your time. Nobody can recover your pixels without our ",
+        "pointer motion clicker services.\n",
+        "\n",
+        "*Can I Recover My Important Dick Pix?\n",
+        "Yes. We guarantee that you can recover them safely and easily. But you ",
+        "not have much time.\n",
+        "You can expose some files for free. Try it now by pressing <The Any ",
+        "Key>.\n",
+        "But if you want to unsave all your screens, then you need to pay. ",
+        "You have only 3 days to click. After that the clicks will double. ",
+        "After 7 days your pixels will be gone forever.\n",
+        "We will have free events for cheapskates who can't pay in 6 months, ",
+        "long after all the pixels are xored.\n",
+        "\n",
+        "*How do I pay?\n",
+        "Payment is accepted in ",
+        "[C]",
+        " only. For more information, press <About ",
+        "[C]",
+        ">.",
+        " Please check the current price of ",
+        "[C]",
+        " and buy some ",
+        "[C]",
+        ". For more information, press <How to buy ",
+        "[C]",
+        ">.\n",
+        "And send the correct amount to the address specified below. After your ",
+        "payment, press <Check Payment>. Best time to check: 4-6am, Mon-Fri.\n",
+        "\n",
+        "*Why Did I Get This?\n",
+        "You got this because ",
+        "[Q]",
+        ". Also ",
+        "[Q2]",
+        ".\n",
+        "\n",
+        "*But Aren't Screensavers Are Necessary?\n",
+        "WELL ACTUALLY, screensavers aren't really necessary anymore because ",
+        "[S]",
+        ".\n",
+        "\n",
+        "Please file complaints to @POTUS on Twitter.\n",
+        "\n\n\n\n",
+        "*GREETZ TO CRASH OVERRIDE AND ALSO JOEY\n",
+    ];
+
+    let currency = CURRENCIES[(random() as usize) % CURRENCIES.len()];
+    let header_quip = HEADER_QUIPS[(random() as usize) % HEADER_QUIPS.len()];
+    let excuse_quip = EXCUSE_QUIPS[(random() as usize) % EXCUSE_QUIPS.len()];
+    let mut excuse_quip_2 = EXCUSE_QUIPS[(random() as usize) % EXCUSE_QUIPS.len()];
+    let screensaver_quip = SCREENSAVER_QUIPS[(random() as usize) % SCREENSAVER_QUIPS.len()];
+
+    /* Don't start the countdown from the start, advance the deadline by 3 - 30
+    hours */
+    let advance_deadline = i64::from(random() % 97_200) + 10_800;
+    let now = d.wall_clock() as i64;
+    let stage1_deadline = now + 259_200 - advance_deadline; /* 3 days */
+    let stage2_deadline = now + 604_800 - advance_deadline; /* 7 days */
+
+    let fg = WHITE;
+    let bg = color("#841212", BLACK);
+    /* ransom note */
+    let fg2 = BLACK;
+    let bg2 = WHITE;
+    /* buttons */
+    let fg3 = BLACK;
+    let bg3 = color("#AAAAAA", WHITE);
+    let link = color("#7BF9F6", WHITE);
+    let theader = color("#BDBE02", WHITE);
+
+    let mut bst = Bst::new(d, fg, bg, f);
+    let line_height = bst.line_height();
+    let line_height1 = bst.font_a.ascent() + bst.font_a.descent();
+
+    while excuse_quip == excuse_quip_2 {
+        excuse_quip_2 = EXCUSE_QUIPS[(random() as usize) % EXCUSE_QUIPS.len()];
+    }
+
+    let mut art = Art::load(crate::images::bsod::RANSOMWARE);
+    if bst.width > 2560 || bst.height > 2560 {
+        art = art.map(|a| a.doubled()); /* Retina displays */
+    }
+    let (pix_w, pix_h) = art.as_ref().map_or((64, 64), |a| (a.width(), a.height()));
+
+    let margin = line_height;
+    // Upstream sizes this column as eight line heights, which is a good proxy
+    // for the width of its labels in a proportional font and not in this one,
+    // where a character is half as wide as the line is tall. Measure instead,
+    // or the timers run out from under the column and behind the note.
+    let left_column_width = pix_w
+        .max(line_height1 * 8)
+        .max(bst.font_a.text_width("Your pixels will be lost on"));
+    let right_column_width =
+        (line_height * 40).min((line_height * 8).max(bst.width - left_column_width - margin * 2));
+    let top_height = line_height * 5 / 2;
+    let bottom_height = line_height * 6;
+    let mut right_column_height =
+        (line_height * 36).min(bst.height - bottom_height - top_height - line_height);
+
+    if (bst.width / 4) * 3 > bst.height {
+        /* Wide screen: keep the big text box at 4:3, centered. */
+        right_column_height = right_column_height.min(right_column_width * 4 / 3);
+    } else if right_column_width < line_height * 30 {
+        /* Tall but narrow screen: make the text box be full height. */
+        right_column_height = bst.height - bottom_height - top_height - line_height;
+    }
+
+    let x = (bst.width - left_column_width - right_column_width - margin) / 2;
+    let y = (bst.height - right_column_height - bottom_height) / 2;
+
+    bst.xoff = 0;
+    bst.left_margin = 0;
+    bst.right_margin = 0;
+
+    if random().is_multiple_of(8) {
+        return apple2ransomware(d, f);
+    }
+
+    /* Draw the main red window */
+    bst.invert();
+    let (w, h) = (bst.width, bst.height);
+    bst.rect(true, 0, 0, w, h);
+
+    if let Some(a) = art {
+        bst.mask = a.mask.map(std::rc::Rc::new);
+        bst.pixmap = Some(a.image);
+        bst.pixmap_at(0, 0, pix_w, pix_h, x + (left_column_width - pix_w) / 2, y);
+    }
+
+    /* Setup deadlines */
+    let stamp = |t: i64| {
+        format!(
+            "01/{:02}/2026 {:02}:{:02}:{:02}",
+            1 + (t / 86400) % 28,
+            t / 3600 % 24,
+            t / 60 % 60,
+            t % 60
+        )
+    };
+
+    bst.invert();
+    /* Draw header pane */
+    bst.set_font(0);
+
+    bst.margins(
+        x + left_column_width + margin,
+        bst.width - (x + left_column_width + margin + right_column_width),
+    );
+    let ascent = bst.font_a.ascent();
+    bst.moveto(x + left_column_width + margin, y + ascent);
+    bst.color(fg, bg);
+    bst.word_wrap();
+    bst.text(Align::Center, header_quip);
+    bst.truncate();
+
+    /* Draw left-side timers */
+    let lw = bst.width - (x + left_column_width);
+    bst.margins(x, lw);
+    bst.moveto(x, y + pix_h + line_height);
+    bst.set_font(1);
+
+    bst.color(theader, bg);
+    bst.text(Align::Center, "Payment will be raised on\n");
+    bst.color(fg, bg);
+    bst.text(Align::Center, &stamp(stage1_deadline));
+
+    let stage1_countdown_y = y + pix_h + line_height + line_height1 * 3;
+    bst.moveto(x, stage1_countdown_y - line_height);
+    bst.text(Align::Center, "Time Left");
+
+    bst.color(theader, bg);
+    bst.word_wrap();
+    bst.text(Align::Center, "\n\n\n\nYour pixels will be lost on\n");
+    bst.truncate();
+    bst.color(fg, bg);
+    bst.text(Align::Center, &stamp(stage2_deadline));
+
+    // Upstream leaves five of the main font's line heights between the two
+    // timers, which is room for the eight lines of the smaller font it draws
+    // them in. There is no smaller font here, so it takes eight.
+    let stage2_countdown_y = stage1_countdown_y + line_height1 * 8;
+    bst.moveto(x, stage2_countdown_y - line_height);
+    bst.text(Align::Center, "Time Left");
+
+    bst.set_font(1);
+
+    /* Draw links, but skip on small screens */
+    if right_column_height > 425 {
+        bst.moveto(
+            x,
+            y + right_column_height + top_height + bottom_height - line_height1 * 5,
+        );
+        bst.color(link, bg);
+        bst.text(Align::Left, "\n");
+        bst.text(Align::Left, "About ");
+        bst.text(Align::Left, currency);
+        bst.text(Align::Left, "\n\nHow to buy ");
+        bst.text(Align::Left, currency);
+        bst.text(Align::Left, "\n\nContact us\n");
+    }
+
+    /* Ransom note text area */
+    bst.color(bg2, fg2);
+    bst.rect(
+        true,
+        x + left_column_width + margin,
+        y + top_height,
+        right_column_width,
+        right_column_height,
+    );
+    bst.moveto(
+        x + left_column_width + margin + line_height / 2,
+        y + top_height + line_height + line_height / 2,
+    );
+    bst.margins(
+        x + left_column_width + margin + line_height / 2,
+        bst.width - (x + left_column_width + margin + right_column_width),
+    );
+    bst.vert_margins(
+        y + top_height + line_height / 2,
+        bottom_height - line_height,
+    );
+    bst.invert();
+
+    /* Write out the ransom note itself */
+    bst.crop(true);
+    bst.word_wrap();
+    for line in LINES {
+        let s = match *line {
+            "[C]" => currency,
+            "[Q]" => excuse_quip,
+            "[Q2]" => excuse_quip_2,
+            "[S]" => screensaver_quip,
+            other => other,
+        };
+
+        if let Some(rest) = s.strip_prefix('*') {
+            bst.set_font(2);
+            bst.text(Align::Left, rest);
+        } else {
+            bst.set_font(0);
+            bst.text(Align::Left, s);
+        }
+    }
+    bst.truncate();
+    bst.crop(false);
+    bst.set_font(0);
+
+    /* Draw over any overflowing ransom text. */
+    bst.color(bg, fg);
+    bst.rect(
+        true,
+        x + left_column_width + margin,
+        y + top_height + right_column_height,
+        w,
+        h,
+    );
+    bst.rect(
+        true,
+        x + left_column_width + margin + right_column_width,
+        y + top_height,
+        w,
+        h,
+    );
+
+    /* Draw the footer */
+    bst.color(theader, bg);
+    bst.moveto(
+        x + left_column_width + margin,
+        y + top_height + right_column_height + line_height * 2,
+    );
+
+    bst.text(
+        Align::Left,
+        &format!(
+            "Send ${:.2} of {currency} to this address:\n",
+            101.0 + frand(888.0)
+        ),
+    );
+    bst.color(fg2, bg2);
+
+    /* address, has some extra slashes in there because it's a fake address */
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123459789";
+    let mut addr: Vec<u8> = (0..40)
+        .map(|_| alphabet.as_bytes()[(random() as usize) % alphabet.len()])
+        .collect();
+    addr[0..3].copy_from_slice(b" //");
+    addr[10] = b'/';
+    addr[17] = b'/';
+    addr[24] = b'/';
+    addr.truncate(33);
+    addr.push(b' ');
+    bst.text(Align::Left, &String::from_utf8_lossy(&addr));
+
+    bst.color(fg, bg);
+    bst.text(Align::Left, "   ");
+    bst.color(fg3, bg3);
+    bst.text(Align::Left, "  Copy  ");
+    bst.color(fg, bg);
+    bst.text(Align::Left, "\n\n");
+
+    bst.color(fg3, bg3);
+    bst.text(Align::Left, "  Demogrify Screen  ");
+    bst.color(fg, bg);
+    bst.text(Align::Left, "            ");
+    bst.color(fg3, bg3);
+    bst.text(Align::Left, "  Check Payment  ");
+
+    /* Draw countdown timers */
+    bst.color(fg, bg);
+    bst.set_font(0);
+    let mut now = now;
+    loop {
+        let countdown = |r: i64| {
+            format!(
+                "{:02}:{:02}:{:02}:{:02}\n",
+                r / 86400,
+                (r / 3600) % 24,
+                (r / 60) % 60,
+                r % 60
+            )
+        };
+
+        /* First timer */
+        bst.moveto(x, stage1_countdown_y);
+        bst.margins(x, lw);
+        bst.text(Align::Center, &countdown(stage1_deadline - now));
+
+        /* Second timer */
+        bst.moveto(x, stage2_countdown_y);
+        bst.text(Align::Center, &countdown(stage2_deadline - now));
+
+        bst.pause(1_000_000);
+        now += 1;
+
+        /* While the "correct" thing to do is create enough of a script to fill
+        the stage2_deadline, this would be 7 days of "frames", which is quite a
+        bit of memory. Instead, only fill the buffer with 1 hour of frames,
+        which is enough to make the point before xscreensaver cycles us. */
+        if stage1_deadline - now <= 3600 {
+            break;
+        }
+    }
+
+    bst.clear(d);
+    bst
+}
+
+/// The same demand, on a machine that has no idea what a blockchain is.
+#[derive(Default)]
+struct A2Ransomware {
+    at: usize,
+    bold: i32,
+}
+
+const A2_RANSOM_NOTE: &str = "\n\
+     \x20_____________________________________\n\
+     /                                     \\\n\
+     ! OOPS YOUR FILES HAVE BEEN ENCRYPTED !\n\
+     !          ________________________   !\n\
+     !         !                        !  !\n\
+     !  [/--\\]   !  [ WHAT HAPPENED TO MY ] !  !\n\
+     !  [!]  [!]   !  [ COMPUTER? ]           !  !\n\
+     !  [!]  [!]   !                        !  !\n\
+     ! [######]  !  [ CAN I RECOVER MY ]    !  !\n\
+     ! [######]  !  [ FILES? ]              !  !\n\
+     ! [######]  !                        !  !\n\
+     ! [######]  !  [ HOW DO I PAY? ]       !  !\n\
+     !         !                        !  !\n\
+     !         !________________________!  !\n\
+     !                                     !\n\
+     !         BITCOIN ACCEPTED HERE       !\n\
+     \\_____________________________________/\n\
+     \n\
+     \n\
+     WAITING FOR BLOCKCHAIN..@\n\
+     \n\
+     PLEASE INSERT NEXT FLOPPY: ";
+
+impl apple2::Controller for A2Ransomware {
+    fn run(&mut self, sim: &mut apple2::Sim, _d: &mut Dpy) {
+        match sim.stepno {
+            0 => {
+                sim.st.gr_mode |= apple2::A2_GR_FULL;
+                sim.st.cls();
+                sim.st.goto(0, 16);
+                sim.st.prints("APPLE ][");
+                sim.st.goto(2, 0);
+                sim.stepno = 10;
+                sim.next_actiontime += 2.0;
+            }
+
+            10 => {
+                sim.st.prints("READY\n\n");
+                sim.stepno = 11;
+                sim.next_actiontime += 1.0;
+            }
+
+            11 => {
+                sim.st.goto(1, 0);
+                sim.stepno = 12;
+                self.at = 0;
+            }
+
+            12 => match A2_RANSOM_NOTE.as_bytes().get(self.at) {
+                None => {
+                    sim.next_actiontime += 30.0;
+                    sim.stepno = 0;
+                }
+                Some(&c) => {
+                    self.at += 1;
+                    if c == b'[' {
+                        self.bold += 1;
+                    } else if c == b']' {
+                        self.bold -= 1;
+                    } else {
+                        let mut c = c;
+                        if c == b'@' {
+                            c = b'.';
+                            sim.next_actiontime += 2.0;
+                        }
+                        if self.bold != 0 {
+                            c |= 0xC0;
+                        }
+                        sim.st.printc_noscroll(c);
+                        if c == b'.' {
+                            sim.next_actiontime += 1.0;
+                        }
+                    }
+                }
+            },
+
+            _ => {}
+        }
+    }
+}
+
+fn apple2ransomware(d: &mut Dpy, f: &Fonts) -> Bst {
+    let mut bst = Bst::new(d, WHITE, BLACK, f);
+    bst.custom = Some(Custom::Apple2(A2Machine::new(|| {
+        Box::new(A2Ransomware::default())
     })));
     bst
 }
@@ -5786,6 +6348,16 @@ const MODES: &[Mode] = &[
         fonts: NONE,
     },
     Mode {
+        name: "Ransomware",
+        fun: windows_ransomware,
+        fonts: [
+            "Arial 12, Helvetica 12",
+            "Arial 12, Helvetica 12",
+            "Arial 8, Helvetica 8",
+            "Arial Bold 16, Arial-BoldMT 16, Helvetica Bold 16",
+        ],
+    },
+    Mode {
         name: "Encom",
         fun: encom,
         fonts: NONE,
@@ -6166,6 +6738,10 @@ const ONLY: &[SelectItem] = &[
     SelectItem {
         value: "HPPALinux",
         label: "Linux (PA-RISC)",
+    },
+    SelectItem {
+        value: "Ransomware",
+        label: "Ransomware",
     },
     SelectItem {
         value: "Encom",

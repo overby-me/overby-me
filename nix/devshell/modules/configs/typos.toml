@@ -51,6 +51,9 @@ extend-ignore-re = [
   "nedia",
   "overlayed",
   "Unrecongized",
+  # The ransomware's misspellings are the joke: it cannot spell either.
+  "encrupted",
+  "theif",
   # SCSI state DATA_DNE and the IDE device /dev/hda1, from the same dumps.
   "DATA_DNE",
   "hda[0-9]*",

@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (139) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (140) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -19,10 +19,8 @@ savers.
 Every 2D hack that needs nothing but the runtime is ported, and so is every one
 that needed a runtime piece worth building.
 
-`bsod` is under way and is not counted above yet. It is thirty-nine computers
-crashing, each one a little program for the same command queue, so it arrives a
-few machines at a time. Thirty-eight are in; the one still to come is the ransomware. The
-two left after it:
+`bsod` is all thirty-nine of its computers, each one a little program for the
+same command queue. Two savers are left:
 
 | Blocked on | Savers |
 |-|-|
