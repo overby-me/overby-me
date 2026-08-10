@@ -340,6 +340,12 @@ saver!(
     xscreensaver::hacks2d::fluidballs::start
 );
 saver!(
+    "fontglide",
+    fontglide_body,
+    fontglide_start,
+    xscreensaver::hacks2d::fontglide::start
+);
+saver!(
     "forest",
     forest_body,
     forest_start,
@@ -1055,6 +1061,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "fluidballs",
         label: "Fluid Balls",
         start: fluidballs_start,
+    },
+    Entry {
+        slug: "fontglide",
+        label: "Font Glide",
+        start: fontglide_start,
     },
     Entry {
         slug: "forest",

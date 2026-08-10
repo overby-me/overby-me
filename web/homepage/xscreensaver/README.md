@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (126) |
+| 2D | 141 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (127) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -26,7 +26,6 @@ something built first, and each group unlocks together:
 | bundled images, on top of text | `bsod`, `flag`, `noseguy`, `xmatrix` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
-| nothing: text-only, ready to port | `fontglide` |
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver.
@@ -43,6 +42,12 @@ glyph rasteriser. It is a smaller one than it sounds, because these hacks lay
 themselves out *from* the metrics they are handed rather than assuming a size.
 Ask for twenty-four point and get twenty-two pixels and the page simply has the
 columns that implies.
+
+The words themselves come from `runtime::text`, which is the same channel
+`runtime::image` is: a hack reads characters, the host pushes text in when it
+has some, and with no host the compiled-in passage is served instead. Upstream
+reads bytes from a pipe to `xscreensaver-text` and copes with there being none
+ready yet, so this yields nothing rather than blocking, the same way.
 
 ## How a port works
 

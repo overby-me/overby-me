@@ -54,6 +54,7 @@ pub mod fireworkx;
 pub mod flame;
 pub mod flow;
 pub mod fluidballs;
+pub mod fontglide;
 pub mod forest;
 pub mod fuzzyflakes;
 pub mod galaxy;
@@ -191,6 +192,7 @@ pub static ALL: &[&Saver] = &[
     &flame::SAVER,
     &flow::SAVER,
     &fluidballs::SAVER,
+    &fontglide::SAVER,
     &forest::SAVER,
     &goop::SAVER,
     &grav::SAVER,

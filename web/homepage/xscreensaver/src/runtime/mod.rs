@@ -28,6 +28,7 @@ pub mod image;
 pub mod opts;
 pub mod rand;
 pub mod spline;
+pub mod text;
 pub mod xlockmore;
 
 pub use color::{Pixel, XColor};
@@ -70,6 +71,7 @@ pub struct Dpy {
     /// midnight. Zero unless the host said otherwise.
     wall_clock_base: f64,
     images: image::ImageChannel,
+    words: text::TextChannel,
 }
 
 /// Seconds in a day, which is the period [`Dpy::wall_clock`] wraps on.
@@ -87,6 +89,7 @@ impl Dpy {
             mono_p: false,
             wall_clock_base: 0.0,
             images: image::ImageChannel::default(),
+            words: text::TextChannel::default(),
         }
     }
 
@@ -151,6 +154,35 @@ impl Dpy {
     /// shows it, so you can tell whose picture you are looking at.
     pub fn image_title(&self) -> Option<&str> {
         self.images.title.as_deref()
+    }
+
+    /// `textclient_getc`: the next character of the text this saver is
+    /// reading, or `None` if there is none to be had this instant.
+    pub fn text_getc(&mut self) -> Option<u8> {
+        self.words.getc()
+    }
+
+    /// `textclient_reshape`: how wide the page is now, so the source can wrap
+    /// to it.
+    pub fn text_reshape(&mut self, columns: i32, max_lines: i32) {
+        self.words.reshape(columns, max_lines);
+    }
+
+    /// Host side: tell the runtime that text can be fetched. Without this the
+    /// compiled-in passage is served, which is what makes the native tests
+    /// work with no host at all.
+    pub fn set_text_host(&mut self, supplies: bool) {
+        self.words.host_supplies = supplies;
+    }
+
+    /// Host side: has a hack asked for text since the last check?
+    pub fn take_text_request(&mut self) -> bool {
+        std::mem::take(&mut self.words.requested)
+    }
+
+    /// Host side: hand over some more text to read.
+    pub fn deliver_text(&mut self, s: &str) {
+        self.words.pending.extend(s.as_bytes());
     }
 
     /// The window, as a drawable.
