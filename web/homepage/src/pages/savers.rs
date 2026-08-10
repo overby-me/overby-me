@@ -371,6 +371,12 @@ saver!(
     xscreensaver::hacks2d::shadebobs::start
 );
 saver!(
+    "rotzoomer",
+    rotzoomer_body,
+    rotzoomer_start,
+    xscreensaver::hacks2d::rotzoomer::start
+);
+saver!(
     "sierpinski",
     sierpinski_body,
     sierpinski_start,
@@ -720,6 +726,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "shadebobs",
         label: "Shade Bobs",
         start: shadebobs_start,
+    },
+    Entry {
+        slug: "rotzoomer",
+        label: "Rot Zoomer",
+        start: rotzoomer_start,
     },
     Entry {
         slug: "sierpinski",
