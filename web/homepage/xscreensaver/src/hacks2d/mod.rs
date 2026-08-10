@@ -84,6 +84,7 @@ pub mod moire2;
 pub mod mountain;
 pub mod munch;
 pub mod pedal;
+pub mod penrose;
 pub mod petri;
 pub mod piecewise;
 pub mod popsquares;
@@ -202,6 +203,7 @@ pub static ALL: &[&Saver] = &[
     &mountain::SAVER,
     &munch::SAVER,
     &pedal::SAVER,
+    &penrose::SAVER,
     &petri::SAVER,
     &piecewise::SAVER,
     &popsquares::SAVER,
