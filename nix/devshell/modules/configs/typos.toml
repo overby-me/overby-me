@@ -34,6 +34,7 @@ extend-ignore-re = [
   "maintainance",
   "knowlege",
   "splitted",
+  "seperate",
   # vermiculate's built-in programs are strings of keystrokes, not prose.
   "baMn[0-9]+",
   # t3d is written in German; its function names are kept as upstream has them.
@@ -99,6 +100,9 @@ paeth = "paeth"
 Paeth = "Paeth"
 # iy = the second image coordinate, paired with ix (xscreensaver ports)
 iy = "iy"
+# BLOAD = Apple DOS 3.3 command (Binary LOAD), typed by the apple2 saver
+bload = "bload"
+BLOAD = "BLOAD"
 
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.

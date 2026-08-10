@@ -106,6 +106,12 @@ saver!(
     xscreensaver::hacks2d::apollonian::start
 );
 saver!(
+    "apple2",
+    apple2_body,
+    apple2_start,
+    xscreensaver::hacks2d::apple2::start
+);
+saver!(
     "attraction",
     attraction_body,
     attraction_start,
@@ -932,6 +938,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "apollonian",
         label: "Apollonian",
         start: apollonian_start,
+    },
+    Entry {
+        slug: "apple2",
+        label: "Apple ][",
+        start: apple2_start,
     },
     Entry {
         slug: "attraction",

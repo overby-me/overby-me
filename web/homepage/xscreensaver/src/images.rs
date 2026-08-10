@@ -18,6 +18,11 @@ pub const BOB: &[u8] = include_bytes!("../images/bob.png");
 /// `analogtv_make_font` draws straight into a video signal.
 pub const FONT_6X10: &[u8] = include_bytes!("../images/6x10font.png");
 
+/// `apple2font.png`: the Apple ][ character generator, 64 glyphs of 7x8 in one
+/// row. jwz dumped it out of X's 6x10 with the machine's own tweaks already
+/// applied, a slash through the zero among them, because MacOS has no "6x10".
+pub const APPLE2FONT: &[u8] = include_bytes!("../images/apple2font.png");
+
 /// The XScreenSaver logo, with an alpha channel, at the three sizes upstream
 /// ships. A hack picks one by how big the screen is.
 pub const LOGO_50: &[u8] = include_bytes!("../images/logo-50.png");

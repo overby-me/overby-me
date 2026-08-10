@@ -19,6 +19,14 @@
 //! rather than blocking, because the program at the other end of the pipe may
 //! be slow. Both of those are kept: a host that has not answered yet simply
 //! yields nothing this frame.
+//!
+//! The pipe is a pty, so what comes out of it is a terminal's idea of a line
+//! ending: every line feed has a carriage return in front of it. That is not a
+//! detail the hacks are insulated from. Two of them feed these bytes to a
+//! terminal emulator, which moves down a line on a line feed and back to the
+//! left margin only on a carriage return, and the rest are written expecting to
+//! see the pair. So the channel puts the return in, as the line discipline it
+//! stands in for would.
 
 use std::collections::VecDeque;
 
@@ -37,6 +45,8 @@ pub struct TextChannel {
     at: usize,
     /// The passage folded to `columns`, empty until a hack asks for a width.
     wrapped: String,
+    /// A line feed owed, after the carriage return sent in front of it.
+    lf_owed: bool,
     /// What the hack last said about its layout. Upstream passes this down the
     /// pipe so `xscreensaver-text` can wrap to the right width.
     pub(crate) columns: i32,
@@ -47,6 +57,20 @@ impl TextChannel {
     /// `textclient_getc`: the next character, or `None` if there is none to be
     /// had this instant.
     pub(crate) fn getc(&mut self) -> Option<u8> {
+        if self.lf_owed {
+            self.lf_owed = false;
+            return Some(b'\n');
+        }
+        match self.next_byte() {
+            Some(b'\n') => {
+                self.lf_owed = true;
+                Some(b'\r')
+            }
+            other => other,
+        }
+    }
+
+    fn next_byte(&mut self) -> Option<u8> {
         if let Some(c) = self.pending.pop_front() {
             return Some(c);
         }
@@ -145,11 +169,35 @@ mod tests {
     #[test]
     fn with_no_host_the_passage_repeats_forever() {
         let mut c = TextChannel::default();
-        let first: Vec<u8> = (0..FALLBACK.len()).filter_map(|_| c.getc()).collect();
-        assert_eq!(first.len(), FALLBACK.len(), "every character came back");
+        let n = FALLBACK.len() + FALLBACK.matches('\n').count();
+        let first: Vec<u8> = (0..n).filter_map(|_| c.getc()).collect();
+        assert_eq!(first.len(), n, "every character came back");
         assert_eq!(first[0], b'A');
         // And it wraps rather than running dry.
         assert_eq!(c.getc(), Some(b'A'));
+    }
+
+    /// Every line ends the way it would coming out of a terminal, because the
+    /// hacks reading it are written for a terminal: one of them moves the
+    /// cursor down but not back, and would walk off the right edge without
+    /// the return.
+    #[test]
+    fn a_line_ends_with_a_return_and_then_a_feed() {
+        let mut c = TextChannel::default();
+        c.reshape(40, 15);
+        let text: String = (0..500).filter_map(|_| c.getc()).map(char::from).collect();
+        assert!(text.contains("\r\n"));
+        assert!(!text.contains('\n') || !text.replace("\r\n", "").contains('\n'));
+
+        // Including text the host pushes, which upstream would also have been
+        // read back through the terminal.
+        let mut c = TextChannel {
+            host_supplies: true,
+            ..TextChannel::default()
+        };
+        c.pending.extend(b"one\ntwo\n");
+        let text: String = (0..8).filter_map(|_| c.getc()).map(char::from).collect();
+        assert_eq!(text, "one\r\ntwo");
     }
 
     /// A hack that says how wide its page is gets lines that fit it, because

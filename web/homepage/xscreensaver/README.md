@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (138) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (139) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -17,12 +17,11 @@ web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
 Every 2D hack that needs nothing but the runtime is ported, and so is every one
-that needed a runtime piece worth building. The four left:
+that needed a runtime piece worth building. The three left:
 
 | Blocked on | Savers |
 |-|-|
-| nothing, but it is a whole Apple II | `apple2` |
-| `apple2`, whose screen it borrows for one of its crashes | `bsod` |
+| the fifteen pictures and the dozen machines it imitates | `bsod` |
 | a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
 
@@ -67,6 +66,13 @@ A hack also tells the source how wide its page is (`textclient_reshape`), and
 upstream's folds its output to that. So does the fallback: several hacks lay the
 words out exactly as they arrive and would otherwise run a paragraph off the
 side of the screen.
+
+Upstream's pipe is a pty, so its line endings are a terminal's: a carriage
+return in front of every line feed. The channel puts that in, because the hacks
+are written for it. Two of them feed these bytes to a terminal emulator, where a
+line feed moves down a line and only a carriage return goes back to the left
+margin, so without it the text walks off the right-hand side one line at a time;
+the others already have code that expects to see the pair.
 
 ## Terminals
 
