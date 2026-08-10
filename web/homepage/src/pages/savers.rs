@@ -148,6 +148,12 @@ saver!(
     xscreensaver::hacks2d::cloudlife::start
 );
 saver!(
+    "compass",
+    compass_body,
+    compass_start,
+    xscreensaver::hacks2d::compass::start
+);
+saver!(
     "coral",
     coral_body,
     coral_start,
@@ -503,6 +509,12 @@ saver!(
     xscreensaver::hacks2d::rotor::start
 );
 saver!(
+    "scooter",
+    scooter_body,
+    scooter_start,
+    xscreensaver::hacks2d::scooter::start
+);
+saver!(
     "shadebobs",
     shadebobs_body,
     shadebobs_start,
@@ -709,6 +721,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cloudlife",
         label: "Cloud Life",
         start: cloudlife_start,
+    },
+    Entry {
+        slug: "compass",
+        label: "Compass",
+        start: compass_start,
     },
     Entry {
         slug: "coral",
@@ -1004,6 +1021,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "rotor",
         label: "Rotor",
         start: rotor_start,
+    },
+    Entry {
+        slug: "scooter",
+        label: "Scooter",
+        start: scooter_start,
     },
     Entry {
         slug: "shadebobs",

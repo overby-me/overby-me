@@ -25,6 +25,7 @@ pub mod braid;
 pub mod bumps;
 pub mod ccurve;
 pub mod cloudlife;
+pub mod compass;
 pub mod coral;
 pub mod critical;
 pub mod cwaves;
@@ -85,6 +86,7 @@ pub mod rocks;
 pub mod rorschach;
 pub mod rotor;
 pub mod rotzoomer;
+pub mod scooter;
 pub mod shadebobs;
 pub mod sierpinski;
 pub mod slidescreen;
@@ -128,6 +130,7 @@ pub static ALL: &[&Saver] = &[
     &bumps::SAVER,
     &ccurve::SAVER,
     &cloudlife::SAVER,
+    &compass::SAVER,
     &coral::SAVER,
     &critical::SAVER,
     &cwaves::SAVER,
@@ -187,6 +190,7 @@ pub static ALL: &[&Saver] = &[
     &rocks::SAVER,
     &rorschach::SAVER,
     &rotor::SAVER,
+    &scooter::SAVER,
     &shadebobs::SAVER,
     &rotzoomer::SAVER,
     &sierpinski::SAVER,
