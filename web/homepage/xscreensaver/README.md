@@ -275,6 +275,49 @@ chunk.
 `--debug-symbols false` applies either way: DWARF is ~90 KB gzipped and needs a
 browser extension to read.
 
+## The Shadertoy tier, next
+
+Thirty savers, and between them they are one C program: `hacks/glx/xshadertoy.c`
+plus a `.glsl` file each. Everything below was read out of upstream and is
+written down so the port does not have to re-derive it.
+
+Upstream builds each saver as a `bash` script (`xshadertoy-compile.pl`) that
+runs `xshadertoy` with the GLSL on stdin, so a saver *is* its shader plus a
+handful of knobs. Here that becomes a `ShadertoyDef`: the sources as
+`include_str!`, and the same knobs the XML declares, which are the same five
+everywhere: `delay`, `speed`, `scale`, `showfps`, and `duration` for the one
+saver that has variants.
+
+What the runner does, in full:
+
+- Up to five passes (BufferA to D, then Image), each a fragment shader drawn
+  over two triangles into its own texture at `size * scale`, plus an optional
+  `Common` source textually prepended to all of them. The assembled source is
+  the version line, a fixed preamble of the `iTime`/`iMouse`/`iChannelN`
+  uniforms, the common source, `#line 0`, the saver's own source, and a `main`
+  that calls its `mainImage`. Under GLSL ES 3.00 (which is what WebGL2 is) the
+  preamble's compatibility half compiles out, so only the uniforms and the
+  `#line` remain.
+- Pass *i* binds every pass's texture to `iChannel0..3`, so a later pass reads
+  an earlier one's output. Upstream's loop runs over five channels into a
+  four-element array and reads past it; four is all a shader can declare.
+- A saver may carry several variants, which are whole alternative programs, and
+  it steps to the next every `duration` seconds and recompiles. Only `bestill`
+  has them, six of them.
+- Time is warped by `speed`, and `iDate` is recomputed once a second.
+- `iMouse` is a four-value state machine, not a position: `xy` is where the
+  pointer is now, `zw` is where the drag began, negated once the button comes
+  up, and a saver that is not being dragged sees where the last drag ended.
+- `iChannelResolution`, `iChannelTime` and `iSampleRate` are declared and never
+  set, so they are zero. Keyboard input is not supported upstream either; it
+  wants a texture with a bit per key.
+
+The one structural thing to decide when building it: a canvas has one context,
+2D or WebGL2, never both, so the page picks its host from the saver's tier
+rather than sharing one. The per-saver wasm chunk holds only its shader text,
+which means the rule above about a chunk having to *run* code does not bite:
+there is no per-saver code to strand in the main module.
+
 ## Licence
 
 The hacks carry a permissive MIT-style notice ("Permission to use, copy, modify,
