@@ -587,6 +587,12 @@ saver!(
     xscreensaver::hacks2d::zoom::start
 );
 saver!(
+    "xflame",
+    xflame_body,
+    xflame_start,
+    xscreensaver::hacks2d::xflame::start
+);
+saver!(
     "xspirograph",
     xspirograph_body,
     xspirograph_start,
@@ -1020,6 +1026,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "zoom",
         label: "Zoom",
         start: zoom_start,
+    },
+    Entry {
+        slug: "xflame",
+        label: "XFlame",
+        start: xflame_start,
     },
     Entry {
         slug: "xspirograph",
