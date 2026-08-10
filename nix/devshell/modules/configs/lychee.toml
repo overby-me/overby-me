@@ -61,4 +61,5 @@ exclude = [
   # the nineties and no longer resolve; the headers stay as upstream wrote
   # them either way.
   'www\.organic\.com/staff/',
+  'home\.sol\.no/',
 ]

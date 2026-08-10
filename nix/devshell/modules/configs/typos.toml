@@ -27,6 +27,7 @@ extend-ignore-re = [
   "resoources",
   "distrubtable",
   "unneccessary",
+  "posibility",
 ]
 
 [default.extend-words]

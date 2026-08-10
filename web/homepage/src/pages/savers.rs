@@ -298,6 +298,12 @@ saver!(
     xscreensaver::hacks2d::moire::start
 );
 saver!(
+    "lmorph",
+    lmorph_body,
+    lmorph_start,
+    xscreensaver::hacks2d::lmorph::start
+);
+saver!(
     "metaballs",
     metaballs_body,
     metaballs_start,
@@ -630,6 +636,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "moire",
         label: "Moiré",
         start: moire_start,
+    },
+    Entry {
+        slug: "lmorph",
+        label: "LMorph",
+        start: lmorph_start,
     },
     Entry {
         slug: "metaballs",

@@ -49,6 +49,7 @@ pub mod kumppa;
 pub mod laser;
 pub mod lcdscrub;
 pub mod lissie;
+pub mod lmorph;
 pub mod metaballs;
 pub mod moire;
 pub mod moire2;
@@ -119,6 +120,7 @@ pub static ALL: &[&Saver] = &[
     &lcdscrub::SAVER,
     &lissie::SAVER,
     &moire::SAVER,
+    &lmorph::SAVER,
     &metaballs::SAVER,
     &moire2::SAVER,
     &mountain::SAVER,
