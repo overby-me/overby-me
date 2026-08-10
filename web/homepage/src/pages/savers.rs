@@ -389,6 +389,12 @@ saver!(
     xscreensaver::hacks2d::spiral::start
 );
 saver!(
+    "spotlight",
+    spotlight_body,
+    spotlight_start,
+    xscreensaver::hacks2d::spotlight::start
+);
+saver!(
     "squiral",
     squiral_body,
     squiral_start,
@@ -711,6 +717,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "spiral",
         label: "Spiral",
         start: spiral_start,
+    },
+    Entry {
+        slug: "spotlight",
+        label: "Spotlight",
+        start: spotlight_start,
     },
     Entry {
         slug: "squiral",

@@ -65,6 +65,7 @@ pub mod shadebobs;
 pub mod sierpinski;
 pub mod sphere;
 pub mod spiral;
+pub mod spotlight;
 pub mod squiral;
 pub mod starfish;
 pub mod thornbird;
@@ -135,6 +136,7 @@ pub static ALL: &[&Saver] = &[
     &sierpinski::SAVER,
     &sphere::SAVER,
     &spiral::SAVER,
+    &spotlight::SAVER,
     &squiral::SAVER,
     &starfish::SAVER,
     &thornbird::SAVER,
