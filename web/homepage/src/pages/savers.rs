@@ -364,6 +364,12 @@ saver!(
     xscreensaver::hacks2d::interaggregate::start
 );
 saver!(
+    "interference",
+    interference_body,
+    interference_start,
+    xscreensaver::hacks2d::interference::start
+);
+saver!(
     "intermomentary",
     intermomentary_body,
     intermomentary_start,
@@ -913,6 +919,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "interaggregate",
         label: "Interaggregate",
         start: interaggregate_start,
+    },
+    Entry {
+        slug: "interference",
+        label: "Interference",
+        start: interference_start,
     },
     Entry {
         slug: "intermomentary",
