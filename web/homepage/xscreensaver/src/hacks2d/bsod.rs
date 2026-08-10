@@ -1989,6 +1989,192 @@ fn hppa_linux(d: &mut Dpy, f: &Fonts) -> Bst {
     bst
 }
 
+/// A 2013 Android phone boot loader, by jwz. It redraws the whole screen for
+/// every line it adds, which is how the bootloader itself behaves.
+fn android(d: &mut Dpy, f: &Fonts) -> Bst {
+    let bg = WHITE;
+    let fg = BLACK;
+    let c1 = color("#AA00AA", BLACK); /* violet */
+    let c2 = color("#336633", BLACK); /* green1 */
+    let c3 = color("#0000FF", BLACK); /* blue */
+    let c4 = color("#CC7744", BLACK); /* orange */
+    let c5 = color("#99AA55", BLACK); /* green2 */
+    let c6 = color("#66AA33", BLACK); /* green3 */
+    let c7 = color("#FF0000", BLACK); /* red */
+    let mut bst = Bst::new(d, fg, bg, f);
+
+    const LINES0: &[&str] = &[
+        "Calculating... please wait\n",
+        "osbl:     0x499DF907\n",
+        "amss:     0x73162409\n",
+        "hboot:    0xE46C3327\n",
+        "boot:     0xBA570E7A\n",
+        "recovery: 0xC8BBA213\n",
+        "system:   0x87C3B1F0\n",
+        "\n",
+        "Press power key to go back.\n",
+    ];
+
+    const LINES1: &[&str] = &[
+        "Checking SD card update...\n",
+        "",
+        "  SD Checking...\n",
+        "  Failed to open zipfile\n",
+        "  loading preload_content...\n",
+        "  [Caution] Preload Content Not Found\n",
+        "  loading HTCUpdateZipName image...\n",
+        "",
+        "  Checking...[PG46IMG.zip]\n",
+        "Please plug off USB\n",
+    ];
+
+    const LINES2: &[&str] = &[
+        "  SD Checking...\n",
+        "  Loading...[PK76DIAG.zip]\n",
+        "  No image!\n",
+        "  Loading...[PK76DIAG.nbh]\n",
+        "  No image or wrong image!\n",
+        "  Loading...[PK76IMG.zip]\n",
+        "  No image!\n",
+        "  Loading...[PK76IMG.nbh]\n",
+        "  No image or wrong image!\n",
+        "  Loading...[PK76IMG.tar]\n",
+        "  No image!\n",
+        "  Loading...[PK76IMG.aes]\n",
+        "  No image!\n",
+        "  Loading...[PK76IMG.enc]\n",
+        "  No image!\n",
+    ];
+
+    let line_height = bst.line_height();
+    let cw = bst.font.char_width();
+
+    let mut art = Art::load(crate::images::bsod::ANDROID);
+    if bst.width > 2560 || bst.height > 2560 {
+        art = art.map(|a| a.doubled()); /* Retina displays */
+    }
+    let (pix_w, pix_h) = art.as_ref().map_or((64, 64), |a| (a.width(), a.height()));
+    let has_art = art.is_some();
+    if let Some(a) = art {
+        bst.mask = a.mask.map(std::rc::Rc::new);
+        bst.pixmap = Some(a.image);
+    }
+
+    bst.left_margin = ((bst.width - cw * 40) / 2).max(0);
+
+    let (n0, n1, n2) = (LINES0.len(), LINES1.len(), LINES2.len());
+    let mut state = 0;
+    loop {
+        let delay =
+            i64::from(state == 0 || state == n0 || state == n0 + n1 || state == n0 + n1 + n2)
+                * 10_000;
+        bst.line_delay(delay);
+
+        if state <= n0 + n1 + n2 {
+            bst.color(bg, bg);
+            let (w, h) = (bst.width, bst.height);
+            bst.rect(true, 0, 0, w, h);
+            bst.color(bg, c1);
+            let (x, y) = (
+                bst.left_margin + bst.xoff,
+                bst.top_margin + bst.yoff + line_height,
+            );
+            bst.moveto(x, y);
+            bst.text(Align::Left, "*** UNLOCKED ***\n");
+            bst.color(c2, bg);
+            bst.text(
+                Align::Left,
+                "PRIMOU PVT SHIP S-OFF RL\n\
+                 HBOOT-1.17.0000\n\
+                 CPLD-None\n\
+                 MICROP-None\n\
+                 RADIO-3831.17.00.23_2\n\
+                 eMMC-bootmode: disabled\n\
+                 CPU-bootmode : disabled\n\
+                 HW Secure boot: enabled\n\
+                 MODEM PATH : OFF\n\
+                 May 15 2012, 10:28:15\n\
+                 \n",
+            );
+            bst.color(bg, c3);
+
+            if has_art {
+                let x = (bst.width - pix_w) / 2;
+                let y = bst.height - bst.yoff - pix_h;
+                bst.pixmap_at(0, 0, pix_w, pix_h, x, y);
+            }
+        }
+
+        if state == n0 || state == n0 + n1 || state == n0 + n1 + n2 {
+            bst.text(Align::Left, "HBOOT USB\n");
+            bst.color(c4, bg);
+            bst.text(
+                Align::Left,
+                "\n\
+                 <VOL UP> to previous item\n\
+                 <VOL DOWN> to next item\n\
+                 <POWER> to select item\n\
+                 \n",
+            );
+            bst.color(c5, bg);
+            bst.text(Align::Left, "FASTBOOT\n");
+            bst.color(c6, bg);
+            bst.text(Align::Left, "RECOVERY\n");
+            bst.color(c7, bg);
+            bst.text(Align::Left, "FACTORY RESET\n");
+            bst.color(c3, bg);
+            bst.text(Align::Left, "SIMLOCK\n");
+            bst.color(bg, c3);
+            bst.text(Align::Left, "HBOOT USB\n");
+            bst.color(fg, bg);
+            bst.text(Align::Left, "IMAGE CRC\n");
+            bst.color(c3, bg);
+            bst.text(Align::Left, "SHOW BARCODE\n");
+            bst.pause(3_000_000);
+        } else if state < n0 {
+            bst.text(Align::Left, "IMAGE CRC\n\n");
+            bst.color(c5, bg);
+            for s in LINES0.iter().take(state + 1) {
+                bst.color(if s.contains(':') { c7 } else { c3 }, bg);
+                bst.text(Align::Left, s);
+            }
+            bst.pause(500_000);
+            if state == n0 - 1 {
+                bst.pause(2_000_000);
+            }
+        } else if state < n0 + n1 {
+            bst.text(Align::Left, "HBOOT\n\n");
+            bst.color(c5, bg);
+            for s in LINES1.iter().take(state + 1 - n0) {
+                bst.color(if s.starts_with(' ') { c6 } else { c3 }, bg);
+                bst.text(Align::Left, s);
+            }
+            bst.pause(500_000);
+            if state == n0 + n1 - 1 {
+                bst.pause(2_000_000);
+            }
+        } else if state < n0 + n1 + n2 {
+            bst.text(Align::Left, "HBOOT USB\n\n");
+            bst.color(c5, bg);
+            for s in LINES2.iter().take(state + 1 - n0 - n1) {
+                bst.color(if s.starts_with(' ') { c6 } else { c3 }, bg);
+                bst.text(Align::Left, s);
+            }
+            bst.pause(500_000);
+            if state == n0 + n1 + n2 - 1 {
+                bst.pause(2_000_000);
+            }
+        } else {
+            break;
+        }
+
+        state += 1;
+    }
+
+    bst.clear(d);
+    bst
+}
+
 /// nvidia, by jwz.
 ///
 /// This is what happens if an Nvidia card goes into some crazy text mode. Most
@@ -4909,6 +5095,11 @@ const MODES: &[Mode] = &[
         fonts: NONE,
     },
     Mode {
+        name: "Android",
+        fun: android,
+        fonts: ["Courier Bold 12", "Courier Bold 24", "", ""],
+    },
+    Mode {
         name: "Nvidia",
         fun: nvidia,
         fonts: NONE,
@@ -5259,6 +5450,10 @@ const ONLY: &[SelectItem] = &[
     SelectItem {
         value: "HPPALinux",
         label: "Linux (PA-RISC)",
+    },
+    SelectItem {
+        value: "Android",
+        label: "Android",
     },
     SelectItem {
         value: "Nvidia",
