@@ -34,12 +34,19 @@
         "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
       ];
     };
+    # Collect on a schedule, a month back. This replaces the min-free/max-free
+    # pair that used to sit in extraOptions: those collected mid-build, once
+    # something had already run the free space down past 30 GiB, which is both
+    # late and in the middle of the work. A weekly sweep runs when nothing is
+    # waiting on it, at the cost of no longer catching a single build that fills
+    # the disk between two Sundays.
+    gc = {
+      automatic = true;
+      dates = "weekly";
+      options = "--delete-older-than 30d";
+    };
     daemonCPUSchedPolicy = "idle";
     daemonIOSchedClass = "idle";
-    extraOptions = ''
-      min-free = ${toString (30 * 1024 * 1024 * 1024)}
-      max-free = ${toString (40 * 1024 * 1024 * 1024)}
-    '';
   };
 
   # Enforce Niceness
