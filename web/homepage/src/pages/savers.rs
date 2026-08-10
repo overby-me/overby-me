@@ -514,6 +514,12 @@ saver!(
     xscreensaver::hacks2d::rdbomb::start
 );
 saver!(
+    "ripples",
+    ripples_body,
+    ripples_start,
+    xscreensaver::hacks2d::ripples::start
+);
+saver!(
     "rocks",
     rocks_body,
     rocks_start,
@@ -1062,6 +1068,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "rdbomb",
         label: "RD-Bomb",
         start: rdbomb_start,
+    },
+    Entry {
+        slug: "ripples",
+        label: "Ripples",
+        start: ripples_start,
     },
     Entry {
         slug: "rocks",

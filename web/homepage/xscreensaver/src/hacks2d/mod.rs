@@ -86,6 +86,7 @@ pub mod popsquares;
 pub mod pyro;
 pub mod qix;
 pub mod rdbomb;
+pub mod ripples;
 pub mod rocks;
 pub mod rorschach;
 pub mod rotor;
@@ -197,6 +198,7 @@ pub static ALL: &[&Saver] = &[
     &pyro::SAVER,
     &qix::SAVER,
     &rdbomb::SAVER,
+    &ripples::SAVER,
     &rocks::SAVER,
     &rorschach::SAVER,
     &rotor::SAVER,
