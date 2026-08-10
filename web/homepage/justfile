@@ -31,9 +31,9 @@ serve:
 
 # Render a screensaver to a PPM to eyeball a port against the original.
 # Example: just shot munch 640 480 500
-shot slug width="640" height="480" frames="300" query="":
+shot slug width="640" height="480" frames="300" query="" seed="20260809":
     cargo run --manifest-path xscreensaver/Cargo.toml --release --example render -- \
-        {{slug}} {{width}} {{height}} {{frames}} /tmp/{{slug}}.ppm {{query}}
+        {{slug}} {{width}} {{height}} {{frames}} /tmp/{{slug}}.ppm "{{query}}" {{seed}}
 
 test:
     cargo test --manifest-path xscreensaver/Cargo.toml

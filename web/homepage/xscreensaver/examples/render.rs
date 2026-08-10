@@ -8,8 +8,13 @@
 //! ```sh
 //! cargo run --example render -- munch 640 480 400 /tmp/munch.ppm
 //! cargo run --example render -- rorschach 640 480 900 /tmp/r.ppm ysymmetry=true
+//! cargo run --example render -- demon 640 480 400 /tmp/demon.ppm "" 7
 //! magick /tmp/munch.ppm /tmp/munch.png
 //! ```
+//!
+//! The seed is the last argument, and matters for the hacks that roll their
+//! shape once at startup: demon picks one of six lattices, distort one of
+//! twelve presets. Varying it is the only way to see the others.
 //!
 //! PPM because it keeps this crate dependency-free; any image tool reads it.
 
@@ -19,7 +24,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 6 {
         eprintln!(
-            "usage: {} <slug> <width> <height> <frames> <out.ppm> [query]\n\navailable: {}",
+            "usage: {} <slug> <width> <height> <frames> <out.ppm> [query] [seed]\n\navailable: {}",
             args[0],
             xscreensaver::all()
                 .iter()
@@ -46,16 +51,17 @@ fn main() {
     let frames: usize = number("frames", &args[4]);
     let out = &args[5];
     let query = args.get(6).cloned().unwrap_or_default();
+    // A fixed seed by default, so re-running after an edit shows what the edit
+    // changed and nothing else.
+    let seed: u32 = args.get(7).map_or(20260809, |s| number("seed", s));
 
     let Some(saver) = xscreensaver::find(slug) else {
         eprintln!("no such saver: {slug}");
         std::process::exit(1);
     };
 
-    // A fixed seed, so re-running after an edit shows what the edit changed and
-    // nothing else.
     let mut runner = (saver.start)(xscreensaver::runtime::StartArgs::new(
-        width, height, &query, 20260809,
+        width, height, &query, seed,
     ));
     for _ in 0..frames {
         runner.step();

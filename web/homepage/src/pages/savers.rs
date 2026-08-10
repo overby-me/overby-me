@@ -190,6 +190,12 @@ saver!(
     xscreensaver::hacks2d::deluxe::start
 );
 saver!(
+    "demon",
+    demon_body,
+    demon_start,
+    xscreensaver::hacks2d::demon::start
+);
+saver!(
     "discrete",
     discrete_body,
     discrete_start,
@@ -738,6 +744,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "deluxe",
         label: "Deluxe",
         start: deluxe_start,
+    },
+    Entry {
+        slug: "demon",
+        label: "Demon",
+        start: demon_start,
     },
     Entry {
         slug: "discrete",

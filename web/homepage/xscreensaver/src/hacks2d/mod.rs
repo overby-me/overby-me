@@ -32,6 +32,7 @@ pub mod cynosure;
 pub mod decayscreen;
 pub mod deco;
 pub mod deluxe;
+pub mod demon;
 pub mod discrete;
 pub mod distort;
 pub mod drift;
@@ -134,6 +135,7 @@ pub static ALL: &[&Saver] = &[
     &cynosure::SAVER,
     &decayscreen::SAVER,
     &deluxe::SAVER,
+    &demon::SAVER,
     &discrete::SAVER,
     &fuzzyflakes::SAVER,
     &galaxy::SAVER,
