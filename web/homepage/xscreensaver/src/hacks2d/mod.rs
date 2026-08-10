@@ -63,6 +63,7 @@ pub mod fontglide;
 pub mod forest;
 pub mod fuzzyflakes;
 pub mod galaxy;
+pub mod glitchpeg;
 pub mod goop;
 pub mod grav;
 pub mod greynetic;
@@ -212,6 +213,7 @@ pub static ALL: &[&Saver] = &[
     &fluidballs::SAVER,
     &fontglide::SAVER,
     &forest::SAVER,
+    &glitchpeg::SAVER,
     &goop::SAVER,
     &grav::SAVER,
     &halo::SAVER,

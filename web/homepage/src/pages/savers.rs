@@ -382,6 +382,12 @@ saver!(
     xscreensaver::hacks2d::forest::start
 );
 saver!(
+    "glitchpeg",
+    glitchpeg_body,
+    glitchpeg_start,
+    xscreensaver::hacks2d::glitchpeg::start
+);
+saver!(
     "goop",
     goop_body,
     goop_start,
@@ -1174,6 +1180,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "forest",
         label: "Forest",
         start: forest_start,
+    },
+    Entry {
+        slug: "glitchpeg",
+        label: "GlitchPEG",
+        start: glitchpeg_start,
     },
     Entry {
         slug: "goop",

@@ -26,6 +26,7 @@ pub mod erase;
 pub mod fb;
 pub mod font;
 pub mod image;
+pub mod jpeg;
 pub mod opts;
 pub mod png;
 pub mod rand;

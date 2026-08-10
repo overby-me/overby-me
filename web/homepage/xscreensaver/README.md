@@ -8,7 +8,7 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (140) |
+| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | in progress (141) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
@@ -20,11 +20,10 @@ Every 2D hack that needs nothing but the runtime is ported, and so is every one
 that needed a runtime piece worth building.
 
 `bsod` is all thirty-nine of its computers, each one a little program for the
-same command queue. Two savers are left:
+same command queue. One saver is left:
 
 | Blocked on | Savers |
 |-|-|
-| a JPEG decoder | `glitchpeg` |
 | a 6502 emulator | `m6502` |
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
@@ -75,6 +74,21 @@ are written for it. Two of them feed these bytes to a terminal emulator, where a
 line feed moves down a line and only a carriage return goes back to the left
 margin, so without it the text walks off the right-hand side one line at a time;
 the others already have code that expects to see the pair.
+
+## Pictures that are meant to break
+
+`runtime::jpeg` is a baseline JPEG encoder and decoder, for the one saver whose
+subject is a damaged file. Upstream's `glitchpeg` corrupts the bytes of the
+photograph on disk and shows what the system decoder makes of them; a picture
+arrives here already decoded, with no file behind it, so one is made.
+
+The decoder is written to survive what it is given. A Huffman code that is not
+in the table decodes as a zero, a coefficient index that runs off the end of
+its block is dropped, and a marker where a restart should be is stepped over,
+which is what libjpeg does when it resynchronises. The restart markers are the
+reason the effect works at all: they are byte-aligned and unmistakable, so a
+decoder whose bits have gone out of step can find the next one and be right
+again from there. Damage shows as a band, not as the end of the picture.
 
 ## Terminals
 
