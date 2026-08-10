@@ -35,6 +35,7 @@ pub mod flame;
 pub mod forest;
 pub mod fuzzyflakes;
 pub mod galaxy;
+pub mod goop;
 pub mod grav;
 pub mod greynetic;
 pub mod halftone;
@@ -118,6 +119,7 @@ pub static ALL: &[&Saver] = &[
     &fiberlamp::SAVER,
     &flame::SAVER,
     &forest::SAVER,
+    &goop::SAVER,
     &grav::SAVER,
     &halo::SAVER,
     &halftone::SAVER,

@@ -214,6 +214,12 @@ saver!(
     xscreensaver::hacks2d::forest::start
 );
 saver!(
+    "goop",
+    goop_body,
+    goop_start,
+    xscreensaver::hacks2d::goop::start
+);
+saver!(
     "grav",
     grav_body,
     grav_start,
@@ -638,6 +644,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "forest",
         label: "Forest",
         start: forest_start,
+    },
+    Entry {
+        slug: "goop",
+        label: "Goop",
+        start: goop_start,
     },
     Entry {
         slug: "grav",
