@@ -14,6 +14,7 @@
 use crate::runtime::Saver;
 
 pub mod anemone;
+pub mod binaryring;
 pub mod boxfit;
 pub mod braid;
 pub mod cloudlife;
@@ -81,6 +82,7 @@ pub mod xspirograph;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver] = &[
     &anemone::SAVER,
+    &binaryring::SAVER,
     &boxfit::SAVER,
     &braid::SAVER,
     &cloudlife::SAVER,

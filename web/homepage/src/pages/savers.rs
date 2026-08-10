@@ -82,6 +82,12 @@ saver!(
     xscreensaver::hacks2d::anemone::start
 );
 saver!(
+    "binaryring",
+    binaryring_body,
+    binaryring_start,
+    xscreensaver::hacks2d::binaryring::start
+);
+saver!(
     "boxfit",
     boxfit_body,
     boxfit_start,
@@ -438,6 +444,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "anemone",
         label: "Anemone",
         start: anemone_start,
+    },
+    Entry {
+        slug: "binaryring",
+        label: "Binary Ring",
+        start: binaryring_start,
     },
     Entry {
         slug: "boxfit",
