@@ -25,6 +25,7 @@ pub mod cube21;
 pub mod cubenetic;
 pub mod cubestack;
 pub mod cubestorm;
+pub mod cubetwist;
 pub mod cubicgrid;
 pub mod dangerball;
 pub mod discoball;
@@ -50,6 +51,7 @@ pub static ALL: &[&Saver3d] = &[
     &blinkbox::SAVER,
     &boing::SAVER,
     &cubestorm::SAVER,
+    &cubetwist::SAVER,
     &cubicgrid::SAVER,
     &beats::SAVER,
     &cityflow::SAVER,
