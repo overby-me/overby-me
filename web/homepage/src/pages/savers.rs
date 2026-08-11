@@ -1041,6 +1041,12 @@ gl3d_saver!(
     cubestack_start,
     xscreensaver::hacks3d::cubestack::start
 );
+gl3d_saver!(
+    "cubestorm",
+    cubestorm_body,
+    cubestorm_start,
+    xscreensaver::hacks3d::cubestorm::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1939,6 +1945,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cubestack",
         label: "Cube Stack",
         start: Start::Gl3d(cubestack_start),
+    },
+    Entry {
+        slug: "cubestorm",
+        label: "Cube Storm",
+        start: Start::Gl3d(cubestorm_start),
     },
     Entry {
         slug: "cubicgrid",

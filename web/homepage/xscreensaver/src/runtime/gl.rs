@@ -304,12 +304,34 @@ pub struct Batch {
     pub material: Material,
     /// `glEnable(GL_CULL_FACE)`: throw away the back of every face.
     pub cull_face: bool,
+    /// Which winding is the front of a face, `glFrontFace`.
+    pub front_face_cw: bool,
     pub blend: Blend,
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
     /// and want it in the order they drew it.
     pub depth_test: bool,
+}
+
+impl Batch {
+    /// Would these two draw identically but for their vertices? Everything on
+    /// a batch except where its vertices are.
+    fn same_state(&self, other: &Batch) -> bool {
+        self.primitive == other.primitive
+            && self.mvp == other.mvp
+            && self.modelview == other.modelview
+            && self.point_size == other.point_size
+            && self.line_width == other.line_width
+            && self.depth_test == other.depth_test
+            && self.lighting == other.lighting
+            && self.lights == other.lights
+            && self.light_enabled == other.light_enabled
+            && self.material == other.material
+            && self.cull_face == other.cull_face
+            && self.front_face_cw == other.front_face_cw
+            && self.blend == other.blend
+    }
 }
 
 /// Everything a frame draws.
@@ -367,6 +389,7 @@ pub struct Glx {
     light_enabled: [bool; MAX_LIGHTS],
     material: Material,
     cull_face: bool,
+    front_face_cw: bool,
     blend: Blend,
     line_width: f32,
 
@@ -406,6 +429,7 @@ impl Glx {
             light_enabled: [false; MAX_LIGHTS],
             material: Material::default(),
             cull_face: false,
+            front_face_cw: false,
             blend: Blend::Off,
             line_width: 1.0,
             shape: None,
@@ -585,6 +609,13 @@ impl Glx {
         self.blend = blend;
     }
 
+    /// `glFrontFace`: true for `GL_CW`, false for `GL_CCW`, which is the
+    /// default. A saver whose faces are wound clockwise says so rather than
+    /// having its outsides culled.
+    pub fn front_face_cw(&mut self, cw: bool) {
+        self.front_face_cw = cw;
+    }
+
     /// `glEnable(GL_CULL_FACE)`.
     pub fn cull_face(&mut self, on: bool) {
         self.cull_face = on;
@@ -737,7 +768,7 @@ impl Glx {
             return;
         }
         let mvp = self.projection().mul(&self.modelview());
-        self.frame.batches.push(Batch {
+        let batch = Batch {
             primitive,
             first,
             count,
@@ -750,9 +781,33 @@ impl Glx {
             light_enabled: self.light_enabled,
             material: self.material,
             cull_face: self.cull_face,
+            front_face_cw: self.front_face_cw,
             blend: self.blend,
             line_width: self.line_width,
-        });
+        };
+
+        // Run of blocks with nothing between them but more vertices: fold them
+        // into one. A saver drawing a cube as forty-eight separate quads is
+        // forty-eight `glBegin` blocks and, without this, forty-eight draw
+        // calls; `cubestorm` draws eight hundred such cubes a frame.
+        //
+        // Only for the primitives where concatenation means what it looks
+        // like. Two triangle strips joined end to end are not one longer
+        // strip: the join would grow a pair of triangles that nobody asked
+        // for. Points, lines and triangles have no such seam.
+        let mergeable = matches!(
+            primitive,
+            Primitive::Points | Primitive::Lines | Primitive::Triangles
+        );
+        if mergeable
+            && let Some(last) = self.frame.batches.last_mut()
+            && last.first + last.count == batch.first
+            && last.same_state(&batch)
+        {
+            last.count += batch.count;
+            return;
+        }
+        self.frame.batches.push(batch);
     }
 
     fn projection(&self) -> Mat4 {
@@ -1055,6 +1110,59 @@ mod tests {
         assert!((z + 1.0).abs() < 1e-5, "{z}");
         let z = g.projection().transform([0.0, 0.0, -100.0])[2];
         assert!((z - 1.0).abs() < 1e-4, "{z}");
+    }
+
+    /// Consecutive blocks of the same thing under the same state are one draw
+    /// call, which is what makes a saver that draws a cube as forty-eight
+    /// separate quads affordable.
+    #[test]
+    fn adjacent_blocks_of_triangles_are_folded_together() {
+        let mut g = Glx::new();
+        g.start_frame(100, 100);
+        for i in 0..10 {
+            g.begin(Shape::Quads);
+            for (x, y) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+                g.vertex3f(x + i as f32, y, 0.0);
+            }
+            g.end();
+        }
+        let f = g.frame();
+        assert_eq!(f.batches.len(), 1, "ten quads should be one batch");
+        assert_eq!(f.batches[0].count, 60);
+        assert_eq!(f.vertices.len(), 60);
+    }
+
+    /// But not across a state change, or the second lot would be drawn with
+    /// the first lot's colours.
+    #[test]
+    fn a_state_change_breaks_the_run() {
+        let mut g = Glx::new();
+        g.start_frame(100, 100);
+        for i in 0..3 {
+            g.material_ambient_diffuse([i as f32 / 3.0, 0.0, 0.0, 1.0]);
+            g.begin(Shape::Triangles);
+            for k in 0..3 {
+                g.vertex3f(k as f32, 0.0, 0.0);
+            }
+            g.end();
+        }
+        assert_eq!(g.frame().batches.len(), 3);
+    }
+
+    /// And never for a strip or a fan: joining two of those end to end would
+    /// invent triangles across the seam.
+    #[test]
+    fn strips_are_never_folded_together() {
+        let mut g = Glx::new();
+        g.start_frame(100, 100);
+        for i in 0..4 {
+            g.begin(Shape::TriangleStrip);
+            for k in 0..3 {
+                g.vertex3f(k as f32, i as f32, 0.0);
+            }
+            g.end();
+        }
+        assert_eq!(g.frame().batches.len(), 4);
     }
 
     #[test]

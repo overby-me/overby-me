@@ -18,6 +18,7 @@
 use crate::runtime::Saver3d;
 
 pub mod cubestack;
+pub mod cubestorm;
 pub mod cubicgrid;
 pub mod hexstrut;
 pub mod hypnowheel;
@@ -28,6 +29,7 @@ pub mod sierpinski3d;
 /// the reason [`crate::all`] gives.
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
+    &cubestorm::SAVER,
     &cubicgrid::SAVER,
     &cubestack::SAVER,
     &hexstrut::SAVER,

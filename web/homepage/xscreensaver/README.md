@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (6) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (7) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -424,7 +424,15 @@ rule rather than a shortcut.
 
 State that can differ between one `glBegin` block and the next rides on the
 batch rather than on the frame, which is what lets a saver turn the depth test
-off for one thing and leave it on for another. `hexstrut` needs exactly that:
+off for one thing and leave it on for another.
+
+Runs of blocks with nothing between them but more vertices are folded into one
+batch, which matters more than it sounds: a saver drawing a cube as forty-eight
+separate quads is forty-eight `glBegin` blocks, and `cubestorm` draws eight
+hundred such cubes a frame. Folding turns thirty-eight thousand draw calls into
+eight hundred. It is only done for points, lines and triangles, because joining
+two triangle strips end to end is not one longer strip: the seam would grow a
+pair of triangles nobody asked for. `hexstrut` needs exactly that:
 its sheet is flat and its struts overlap, so upstream turns depth testing off
 and lets them stack in the order they were drawn.
 

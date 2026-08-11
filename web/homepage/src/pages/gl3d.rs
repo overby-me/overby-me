@@ -290,6 +290,7 @@ impl Gl3dEngine {
             } else {
                 gl.disable(Gl::CULL_FACE);
             }
+            gl.front_face(if batch.front_face_cw { Gl::CW } else { Gl::CCW });
             match batch.blend {
                 Blend::Off => gl.disable(Gl::BLEND),
                 Blend::Add => {
