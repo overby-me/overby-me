@@ -1018,6 +1018,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::hexstrut::start
 );
 gl3d_saver!(
+    "sballs",
+    sballs_body,
+    sballs_start,
+    xscreensaver::hacks3d::sballs::start
+);
+gl3d_saver!(
     "sierpinski3d",
     sierpinski3d_body,
     sierpinski3d_start,
@@ -2474,6 +2480,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "rubikblocks",
         label: "Rubik Blocks",
         start: Start::Gl3d(rubikblocks_start),
+    },
+    Entry {
+        slug: "sballs",
+        label: "Sballs",
+        start: Start::Gl3d(sballs_start),
     },
     Entry {
         slug: "sierpinski3d",

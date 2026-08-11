@@ -163,3 +163,7 @@ pub const NOSE: [&[u8]; 8] = [
 /// surface to show its orientation. 64 square, one byte a pixel, converted
 /// from upstream's header by `web/homepage/gen-curlicue.nu`.
 pub const CURLICUE: &[u8] = include_bytes!("../images/curlicue.gray");
+
+/// The two pictures `sballs` maps onto its balls and its backdrop.
+pub const SBALL: &[u8] = include_bytes!("../images/sball.png");
+pub const SBALL_BG: &[u8] = include_bytes!("../images/sball-bg.png");

@@ -66,6 +66,7 @@ pub mod raverhoop;
 pub mod razzledazzle;
 pub mod romanboy;
 pub mod rubikblocks;
+pub mod sballs;
 pub mod sierpinski3d;
 pub mod spheremonics;
 pub mod splodesic;
@@ -131,6 +132,7 @@ pub static ALL: &[&Saver3d] = &[
     &romanboy::SAVER,
     &razzledazzle::SAVER,
     &rubikblocks::SAVER,
+    &sballs::SAVER,
     &sierpinski3d::SAVER,
     &spheremonics::SAVER,
     &splodesic::SAVER,
