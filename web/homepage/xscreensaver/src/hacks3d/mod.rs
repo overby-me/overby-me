@@ -60,6 +60,7 @@ pub mod projectiveplane;
 pub mod pulsar;
 pub mod quasicrystal;
 pub mod raverhoop;
+pub mod romanboy;
 pub mod rubikblocks;
 pub mod sierpinski3d;
 pub mod spheremonics;
@@ -120,6 +121,7 @@ pub static ALL: &[&Saver3d] = &[
     &pulsar::SAVER,
     &quasicrystal::SAVER,
     &raverhoop::SAVER,
+    &romanboy::SAVER,
     &rubikblocks::SAVER,
     &sierpinski3d::SAVER,
     &spheremonics::SAVER,

@@ -1108,6 +1108,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::raverhoop::start
 );
 gl3d_saver!(
+    "romanboy",
+    romanboy_body,
+    romanboy_start,
+    xscreensaver::hacks3d::romanboy::start
+);
+gl3d_saver!(
     "rubikblocks",
     rubikblocks_body,
     rubikblocks_start,
@@ -2419,6 +2425,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "raverhoop",
         label: "Raver Hoop",
         start: Start::Gl3d(raverhoop_start),
+    },
+    Entry {
+        slug: "romanboy",
+        label: "Roman Boy",
+        start: Start::Gl3d(romanboy_start),
     },
     Entry {
         slug: "rubikblocks",
