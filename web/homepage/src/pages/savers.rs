@@ -1390,6 +1390,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::gears::start
 );
 gl3d_saver!(
+    "gibson",
+    gibson_body,
+    gibson_start,
+    xscreensaver::hacks3d::gibson::start
+);
+gl3d_saver!(
     "glblur",
     glblur_body,
     glblur_start,
@@ -2405,6 +2411,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "gears",
         label: "Gears",
         start: Start::Gl3d(gears_start),
+    },
+    Entry {
+        slug: "gibson",
+        label: "Gibson",
+        start: Start::Gl3d(gibson_start),
     },
     Entry {
         slug: "glblur",

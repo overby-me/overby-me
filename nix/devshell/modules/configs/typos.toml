@@ -76,6 +76,10 @@ extend-ignore-re = [
 # In the copyright header of hacks/glx/flyingtoasters.c, which is kept
 # verbatim: "the wide wonderful workd of OpenGL".
 workd = "workd"
+# The fictional menu of the Gibson, transcribed verbatim from
+# hacks/glx/gibson.c, spelling and all.
+QUANTATIVE = "QUANTATIVE"
+FORCASTS = "FORCASTS"
 # lod = level of detail, the mip level argument of GLSL's texelFetch. In the
 # Shadertoy preamble transcribed from hacks/glx/xshadertoy.c.
 lod = "lod"

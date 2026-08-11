@@ -159,6 +159,59 @@ impl TexFont {
         self.iterate(s, |_, _, _| {})
     }
 
+    /// `string_to_texture`: rasterise a whole string into a texture of its
+    /// own, rather than drawing it a quad at a time out of the atlas.
+    ///
+    /// A saver wants this when the text is not what it is drawing but what it
+    /// is drawing *with*: `gibson` maps sub-rectangles of one long string over
+    /// the faces of its towers, so it needs the string to be a picture it can
+    /// sample rather than a run of glyphs.
+    ///
+    /// Upstream pads the texture out to a power of two and returns the padding
+    /// in the size, which is why it also returns the metrics: the caller works
+    /// out what fraction of the texture the ink covers. This one is exactly
+    /// the size of the ink, so that fraction is one, and the metrics are
+    /// returned anyway because the caller still needs the line height.
+    ///
+    /// Row zero is the top of the string, so a texture coordinate of zero is
+    /// its top.
+    pub fn string_to_texture(&self, g: &mut Glx, s: &str) -> (u32, i32, i32, Metrics) {
+        let m = self.metrics(s);
+        let (w, h) = (m.width.max(1), (m.ascent + m.descent).max(1));
+        let mut px = vec![0u8; (w * h * 4) as usize];
+
+        let scale = (self.cell_h / super::font::CELL_H).max(1);
+        let mut glyphs: Vec<(char, i32, i32)> = Vec::new();
+        self.iterate(s, |c, x, y| glyphs.push((c, x, y)));
+        for (ch, gx, gy) in glyphs {
+            for row in 0..self.cell_h {
+                let bits = glyph_row(ch, row / scale);
+                for col in 0..self.cell_w {
+                    // The glyph's twelve bits sit in the top of the word.
+                    let bit = 15 - (col / scale);
+                    if bits >> bit & 1 == 0 {
+                        continue;
+                    }
+                    let (x, y) = (gx + col, gy + row);
+                    if x < 0 || y < 0 || x >= w || y >= h {
+                        continue;
+                    }
+                    let at = ((y * w + x) * 4) as usize;
+                    px[at..at + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
+            }
+        }
+
+        let texture = g.gen_texture();
+        g.bind_texture(texture);
+        g.tex_image_2d(w, h, px);
+        g.tex_nearest(true);
+        // Repeat rather than clamp: a caller may deliberately sample past the
+        // end to land on a different part of the string.
+        g.tex_clamp(false);
+        (texture, w, h, m)
+    }
+
     /// `print_texture_string`: draw the string in the scene, its first
     /// baseline at the origin of the current matrix, one unit per pixel.
     pub fn print_string(&self, g: &mut Glx, s: &str) {
@@ -411,5 +464,42 @@ mod tests {
         g.end();
         let after = g.frame().batches.last().unwrap().mvp.0;
         assert_eq!(before, after, "the label left the matrices changed");
+    }
+}
+
+#[cfg(test)]
+mod string_texture_tests {
+    use super::*;
+
+    /// A string rasterised into its own texture is exactly the size of its
+    /// ink, and the ink is in it.
+    #[test]
+    fn a_string_becomes_a_picture_of_itself() {
+        let mut g = Glx::new();
+        let f = TexFont::load(&mut g, "-*-helvetica-medium-r-normal-*-220-*");
+        let (id, w, h, m) = f.string_to_texture(&mut g, "HELLO");
+        assert_eq!(w, m.width, "the texture is not the width of the string");
+        assert_eq!(h, m.ascent + m.descent, "nor its height");
+
+        let tex = g.texture(id).expect("no texture");
+        let lit = tex.data.chunks_exact(4).filter(|p| p[3] > 0).count();
+        assert!(lit > 20, "only ($lit) texels are lit");
+        assert!(
+            lit < (w * h) as usize / 2,
+            "the whole texture is lit, so it is not text"
+        );
+    }
+
+    /// A second line makes it taller but no wider than its longest line.
+    #[test]
+    fn a_second_line_makes_it_taller() {
+        let mut g = Glx::new();
+        let f = TexFont::load(&mut g, "-*-helvetica-medium-r-normal-*-220-*");
+        let (_, w1, h1, _) = f.string_to_texture(&mut g, "AB");
+        let (_, w2, h2, _) = f.string_to_texture(&mut g, "AB\nAB");
+        assert_eq!(w1, w2, "a second line made it wider");
+        assert!(h2 > h1, "a second line did not make it taller");
+        let (_, w3, _, _) = f.string_to_texture(&mut g, "AB\nABCD");
+        assert!(w3 > w1, "the longer line did not set the width");
     }
 }
