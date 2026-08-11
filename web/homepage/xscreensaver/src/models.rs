@@ -176,3 +176,13 @@ pub const S1_4: &str = include_str!("../models/s1_4.gllist");
 pub const S1_5: &str = include_str!("../models/s1_5.gllist");
 pub const S1_6: &str = include_str!("../models/s1_6.gllist");
 pub const S1_B: &str = include_str!("../models/s1_b.gllist");
+
+/// The jaws `chompytower` grows out of its trunk.
+pub const TEETH_MODEL_JAW_LOWER_HALF: &str =
+    include_str!("../models/teeth_model_jaw_lower_half.gllist");
+pub const TEETH_MODEL_JAW_UPPER_HALF: &str =
+    include_str!("../models/teeth_model_jaw_upper_half.gllist");
+pub const TEETH_MODEL_TEETH_LOWER_HALF: &str =
+    include_str!("../models/teeth_model_teeth_lower_half.gllist");
+pub const TEETH_MODEL_TEETH_UPPER_HALF: &str =
+    include_str!("../models/teeth_model_teeth_upper_half.gllist");

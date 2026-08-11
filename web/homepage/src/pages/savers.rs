@@ -1036,6 +1036,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::sproingies::start
 );
 gl3d_saver!(
+    "chompytower",
+    chompytower_body,
+    chompytower_start,
+    xscreensaver::hacks3d::chompytower::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2508,6 +2514,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sproingies",
         label: "Sproingies",
         start: Start::Gl3d(sproingies_start),
+    },
+    Entry {
+        slug: "chompytower",
+        label: "Chompy Tower",
+        start: Start::Gl3d(chompytower_start),
     },
     Entry {
         slug: "hexstrut",

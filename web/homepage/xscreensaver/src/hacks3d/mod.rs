@@ -26,6 +26,7 @@ pub mod boing;
 pub mod bouncingcow;
 pub mod bubble3d;
 pub mod cage;
+pub mod chompytower;
 pub mod cityflow;
 pub mod cube21;
 pub mod cubenetic;
@@ -130,6 +131,7 @@ pub static ALL: &[&Saver3d] = &[
     &glschool::SAVER,
     &headroom::SAVER,
     &highvoltage::SAVER,
+    &chompytower::SAVER,
     &hexstrut::SAVER,
     &sproingies::SAVER,
     &winduprobot::SAVER,
