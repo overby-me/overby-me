@@ -1240,6 +1240,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::hypertorus::start
 );
 gl3d_saver!(
+    "tangram",
+    tangram_body,
+    tangram_start,
+    xscreensaver::hacks3d::tangram::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2439,6 +2445,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "morph3d",
         label: "Morph 3D",
         start: Start::Gl3d(morph3d_start),
+    },
+    Entry {
+        slug: "tangram",
+        label: "Tangram",
+        start: Start::Gl3d(tangram_start),
     },
     Entry {
         slug: "topblock",

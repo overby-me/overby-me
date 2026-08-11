@@ -64,6 +64,7 @@ pub mod stairs;
 pub mod stonerview;
 pub mod superquadrics;
 pub mod surfaces;
+pub mod tangram;
 pub mod topblock;
 pub mod tronbit;
 pub mod unknownpleasures;
@@ -119,6 +120,7 @@ pub static ALL: &[&Saver3d] = &[
     &stonerview::SAVER,
     &superquadrics::SAVER,
     &surfaces::SAVER,
+    &tangram::SAVER,
     &topblock::SAVER,
     &tronbit::SAVER,
     &unknownpleasures::SAVER,

@@ -621,7 +621,9 @@ fn SaverStage(slug: String) -> Element {
             if !panel_open() {
                 button {
                     id: "screensaver-panel-toggle",
-                    style: "position:absolute;top:16px;left:16px;padding:8px 14px;border:1px solid #555;\
+                    // Top right, not top left: several savers print a label in
+                    // the top left corner and this would sit on top of it.
+                    style: "position:absolute;top:16px;right:16px;padding:8px 14px;border:1px solid #555;\
                             border-radius:10px;background:rgba(20,20,20,.6);backdrop-filter:blur(4px);\
                             box-shadow:0 4px 24px rgba(0,0,0,.5);color:#eee;cursor:pointer;\
                             font:inherit;font-size:14px;",
