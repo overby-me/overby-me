@@ -9,7 +9,7 @@
 //! A frame does not go anywhere on its own. The hack draws into the `Glx`, and
 //! the host asks for [`Runner3d::frame`] afterwards and hands it to WebGL2.
 
-use super::gl::{Frame, Glx};
+use super::gl::{Frame, Glx, Texture};
 use super::{Resources, SaverDef, StartArgs, XEvent, ya_rand_init};
 
 /// The display a GL saver draws into: the GL context, the resources it was
@@ -159,6 +159,13 @@ impl Runner3d {
     /// What the last frame drew.
     pub fn frame(&self) -> &Frame {
         self.gl.glx.frame()
+    }
+
+    /// A texture the saver built, for the host to upload. Textures are made
+    /// once and referred to by name from then on, so the host keeps its own
+    /// uploaded copy and only asks for a name it has not seen.
+    pub fn texture(&self, id: u32) -> Option<&Texture> {
+        self.gl.glx.texture(id)
     }
 
     pub fn width(&self) -> i32 {

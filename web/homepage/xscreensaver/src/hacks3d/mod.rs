@@ -33,6 +33,7 @@ pub mod hypnowheel;
 pub mod kaleidocycle;
 pub mod lockward;
 pub mod menger;
+pub mod quasicrystal;
 pub mod sierpinski3d;
 pub mod splodesic;
 pub mod voronoi;
@@ -56,6 +57,7 @@ pub static ALL: &[&Saver3d] = &[
     &kaleidocycle::SAVER,
     &lockward::SAVER,
     &menger::SAVER,
+    &quasicrystal::SAVER,
     &sierpinski3d::SAVER,
     &splodesic::SAVER,
     &voronoi::SAVER,
@@ -108,7 +110,28 @@ mod tests {
                     }
                 }
             }
-            assert!(seen > 10, "{} drew {seen} visible vertices", saver.def.slug);
+            if seen > 10 {
+                continue;
+            }
+            // Or geometry drawn bigger than the screen, which has every corner
+            // off it and covers it anyway: `quasicrystal`'s planes are three
+            // times the size of the view. Look for a batch whose bounding box
+            // has the middle of the screen inside it.
+            let covers = f.batches.iter().any(|b| {
+                let ps: Vec<[f32; 3]> = f.vertices[b.first..b.first + b.count]
+                    .iter()
+                    .map(|v| b.mvp.transform(v.pos))
+                    .collect();
+                (0..3).all(|k| {
+                    ps.iter().map(|p| p[k]).fold(f32::MAX, f32::min) <= 0.0
+                        && ps.iter().map(|p| p[k]).fold(f32::MIN, f32::max) >= 0.0
+                })
+            });
+            assert!(
+                covers,
+                "{} drew {seen} visible vertices and covered nothing",
+                saver.def.slug
+            );
         }
     }
 

@@ -11,10 +11,12 @@
 //! fixed-function state, so both end up as branches in here, driven by what the
 //! saver asked for.
 
+use std::collections::HashMap;
+
 use wasm_bindgen::JsCast;
 use web_sys::{
     HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlContextAttributes,
-    WebGlProgram, WebGlUniformLocation, WebGlVertexArrayObject,
+    WebGlProgram, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
@@ -22,19 +24,22 @@ use xscreensaver::runtime::XEvent;
 use xscreensaver::runtime::gl::{Blend, Frame, MAX_LIGHTS, Primitive};
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
-const FLOATS_PER_VERTEX: usize = 10;
+const FLOATS_PER_VERTEX: usize = 12;
 
 const VERTEX_SHADER: &str = r"#version 300 es
 in vec3 a_pos;
 in vec4 a_color;
 in vec3 a_normal;
+in vec2 a_uv;
 uniform mat4 u_mvp;
 uniform mat4 u_modelview;
 uniform float u_point_size;
 out vec4 v_color;
 out vec3 v_normal;
 out vec3 v_eye;
+out vec2 v_uv;
 void main() {
+  v_uv = a_uv;
   gl_Position = u_mvp * vec4 (a_pos, 1.0);
   gl_PointSize = u_point_size;
   v_color = a_color;
@@ -56,6 +61,7 @@ precision highp float;
 in vec4 v_color;
 in vec3 v_normal;
 in vec3 v_eye;
+in vec2 v_uv;
 #define LIGHTS 2
 uniform bool u_lighting;
 uniform bool u_light_on[LIGHTS];
@@ -68,10 +74,18 @@ uniform vec4 u_material_diffuse_back;
 uniform vec4 u_material_specular;
 uniform float u_shininess;
 uniform vec4 u_scene_ambient;
+uniform bool u_textured;
+uniform sampler2D u_tex;
 uniform bool u_fog;
 uniform float u_fog_density;
 uniform vec4 u_fog_color;
 out vec4 frag_color;
+
+// GL_MODULATE, the default texture environment and the only one any of these
+// asks for: the texture multiplies whatever colour came out of the lighting.
+vec4 textured (vec4 c) {
+  return u_textured ? c * texture (u_tex, v_uv) : c;
+}
 
 // GL_EXP2, the one fog mode these savers ask for: what survives at a distance
 // is exp(-(density * distance)^2).
@@ -83,7 +97,7 @@ vec4 fogged (vec4 c) {
 
 void main() {
   if (! u_lighting) {
-    frag_color = fogged (v_color);
+    frag_color = fogged (textured (v_color));
     return;
   }
   vec3 n = normalize (v_normal);
@@ -112,7 +126,7 @@ void main() {
          * pow (max (dot (n, h), 0.0), u_shininess);
     }
   }
-  frag_color = fogged (vec4 (c, diffuse.a));
+  frag_color = fogged (textured (vec4 (c, diffuse.a)));
 }
 ";
 
@@ -133,6 +147,8 @@ struct Uniforms {
     material_specular: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
+    textured: Option<WebGlUniformLocation>,
+    tex: Option<WebGlUniformLocation>,
     fog: Option<WebGlUniformLocation>,
     fog_density: Option<WebGlUniformLocation>,
     fog_color: Option<WebGlUniformLocation>,
@@ -166,6 +182,8 @@ impl Uniforms {
             material_specular: at("u_material_specular"),
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
+            textured: at("u_textured"),
+            tex: at("u_tex"),
             fog: at("u_fog"),
             fog_density: at("u_fog_density"),
             fog_color: at("u_fog_color"),
@@ -184,6 +202,9 @@ pub struct Gl3dEngine {
     /// one is a sub-upload rather than a reallocation.
     capacity: usize,
     scratch: Vec<f32>,
+    /// Textures the saver has built, uploaded once and kept. A saver makes
+    /// them when it starts and refers to them by name from then on.
+    textures: HashMap<u32, WebGlTexture>,
 }
 
 impl Gl3dEngine {
@@ -204,7 +225,8 @@ impl Gl3dEngine {
         let position = gl.get_attrib_location(&program, "a_pos");
         let color = gl.get_attrib_location(&program, "a_color");
         let normal = gl.get_attrib_location(&program, "a_normal");
-        if position < 0 || color < 0 || normal < 0 {
+        let uv = gl.get_attrib_location(&program, "a_uv");
+        if position < 0 || color < 0 || normal < 0 || uv < 0 {
             log::error!("gl3d: the shader is missing an attribute");
             return None;
         }
@@ -214,7 +236,12 @@ impl Gl3dEngine {
         let stride = (FLOATS_PER_VERTEX * 4) as i32;
         gl.bind_vertex_array(Some(&vao));
         gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&vbo));
-        for (location, size, offset) in [(position, 3, 0), (color, 4, 12), (normal, 3, 28)] {
+        for (location, size, offset) in [
+            (position, 3, 0),
+            (color, 4, 12),
+            (normal, 3, 28),
+            (uv, 2, 40),
+        ] {
             gl.vertex_attrib_pointer_with_i32(
                 location as u32,
                 size,
@@ -236,6 +263,7 @@ impl Gl3dEngine {
             vbo,
             capacity: 0,
             scratch: Vec::new(),
+            textures: HashMap::new(),
         })
     }
 
@@ -263,7 +291,10 @@ impl Gl3dEngine {
         // Split the borrow: uploading reads the frame while `self.scratch` is
         // written, and both live on `self`.
         let Gl3dEngine {
-            runner, scratch, ..
+            runner,
+            scratch,
+            textures,
+            ..
         } = self;
         let frame: &Frame = runner.frame();
 
@@ -284,6 +315,7 @@ impl Gl3dEngine {
             scratch.extend_from_slice(&v.pos);
             scratch.extend_from_slice(&v.color);
             scratch.extend_from_slice(&v.normal);
+            scratch.extend_from_slice(&v.uv);
         }
 
         gl.bind_vertex_array(Some(&self.vao));
@@ -298,6 +330,49 @@ impl Gl3dEngine {
             } else {
                 gl.buffer_sub_data_with_i32_and_array_buffer_view(Gl::ARRAY_BUFFER, 0, &view);
             }
+        }
+
+        // Upload any texture this frame refers to that we have not seen. A
+        // saver builds them when it starts and refers to them by name after
+        // that, so this happens once per texture and never again.
+        for batch in &frame.batches {
+            let Some(id) = batch.texture else { continue };
+            if textures.contains_key(&id) {
+                continue;
+            }
+            let Some(t) = runner.texture(id) else {
+                continue;
+            };
+            let Some(handle) = gl.create_texture() else {
+                continue;
+            };
+            gl.bind_texture(Gl::TEXTURE_2D, Some(&handle));
+            let ok = gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+                Gl::TEXTURE_2D,
+                0,
+                Gl::RGBA as i32,
+                t.width,
+                t.height,
+                0,
+                Gl::RGBA,
+                Gl::UNSIGNED_BYTE,
+                Some(&t.data),
+            );
+            if ok.is_err() {
+                log::error!("gl3d: texture {id} would not upload");
+                continue;
+            }
+            // Repeat and linear, which is what every saver that makes a
+            // texture asks for; none of them asks for anything else.
+            for (p, v) in [
+                (Gl::TEXTURE_WRAP_S, Gl::REPEAT),
+                (Gl::TEXTURE_WRAP_T, Gl::REPEAT),
+                (Gl::TEXTURE_MIN_FILTER, Gl::LINEAR),
+                (Gl::TEXTURE_MAG_FILTER, Gl::LINEAR),
+            ] {
+                gl.tex_parameteri(Gl::TEXTURE_2D, p, v as i32);
+            }
+            textures.insert(id, handle);
         }
 
         gl.use_program(Some(&self.program));
@@ -337,9 +412,26 @@ impl Gl3dEngine {
                     gl.enable(Gl::BLEND);
                     gl.blend_func(Gl::DST_COLOR, Gl::SRC_ALPHA);
                 }
+                Blend::DstColorSrcColor => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_func(Gl::DST_COLOR, Gl::SRC_COLOR);
+                }
+                Blend::InverseDst => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_func(Gl::ONE_MINUS_DST_COLOR, Gl::ZERO);
+                }
             }
             gl.uniform_matrix4fv_with_f32_array(u.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);
+            match batch.texture.and_then(|id| textures.get(&id)) {
+                Some(t) => {
+                    gl.uniform1i(u.textured.as_ref(), 1);
+                    gl.active_texture(Gl::TEXTURE0);
+                    gl.bind_texture(Gl::TEXTURE_2D, Some(t));
+                    gl.uniform1i(u.tex.as_ref(), 0);
+                }
+                None => gl.uniform1i(u.textured.as_ref(), 0),
+            }
             gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
             if let Some(fog) = batch.fog {
                 gl.uniform1f(u.fog_density.as_ref(), fog.density);

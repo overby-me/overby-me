@@ -214,6 +214,18 @@ pub struct Vertex {
     pub pos: [f32; 3],
     pub color: [f32; 4],
     pub normal: [f32; 3],
+    pub uv: [f32; 2],
+}
+
+/// A texture, as the savers build them: a block of RGBA bytes and nothing
+/// else. Every one of them asks for `GL_REPEAT` and `GL_LINEAR`, so those are
+/// not stored; if one ever wants something else, this is where it goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Texture {
+    pub width: i32,
+    pub height: i32,
+    /// `width * height * 4` bytes.
+    pub data: Vec<u8>,
 }
 
 /// `glBlendFunc`, as the two pairs the savers actually pass it. More become
@@ -236,6 +248,13 @@ pub enum Blend {
     /// brighten. `lockward` flashes its blades with it, which is why a flash
     /// shows up on the spinner and not on the black around it.
     DstColorAlpha,
+    /// `GL_DST_COLOR, GL_SRC_COLOR`: twice the product of the two, which is
+    /// how `quasicrystal` tints a grey interference pattern without washing
+    /// it out.
+    DstColorSrcColor,
+    /// `GL_ONE_MINUS_DST_COLOR, GL_ZERO`: replaces what is there with the
+    /// source times its inverse, so it both inverts and darkens.
+    InverseDst,
 }
 
 /// `GL_FOG`, in the one mode the savers ask for: `GL_EXP2`, where what
@@ -342,6 +361,8 @@ pub struct Batch {
     pub depth_test: bool,
     /// `glEnable(GL_FOG)`, and what it fades to.
     pub fog: Option<Fog>,
+    /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
+    pub texture: Option<u32>,
 }
 
 impl Batch {
@@ -363,6 +384,7 @@ impl Batch {
             && !other.clear_depth_first
             && self.blend == other.blend
             && self.fog == other.fog
+            && self.texture == other.texture
     }
 }
 
@@ -398,6 +420,9 @@ enum Cmd {
     Scale([f32; 3]),
     LoadIdentity,
     CallList(u32),
+    TexCoord([f32; 2]),
+    BindTexture(u32),
+    Texturing(bool),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -424,6 +449,10 @@ pub struct Glx {
     front_face_cw: bool,
     clear_color: [f32; 4],
     fog: Option<Fog>,
+    textures: Vec<Option<Texture>>,
+    bound_texture: Option<u32>,
+    texturing: bool,
+    uv: [f32; 2],
     clear_depth_pending: bool,
     blend: Blend,
     line_width: f32,
@@ -467,6 +496,10 @@ impl Glx {
             front_face_cw: false,
             clear_color: [0.0, 0.0, 0.0, 1.0],
             fog: None,
+            textures: Vec::new(),
+            bound_texture: None,
+            texturing: false,
+            uv: [0.0, 0.0],
             clear_depth_pending: false,
             blend: Blend::Off,
             line_width: 1.0,
@@ -798,6 +831,52 @@ impl Glx {
         self.record_or(Cmd::Color([r, g, b, a]), |gl| gl.color = [r, g, b, a]);
     }
 
+    /// `glTexCoord2f`. Like the colour and the normal, it rides on the next
+    /// vertex rather than on the block.
+    pub fn tex_coord2f(&mut self, s: f32, t: f32) {
+        self.record_or(Cmd::TexCoord([s, t]), |g| g.uv = [s, t]);
+    }
+
+    /* Textures */
+
+    /// `glGenTextures(1, ..)`.
+    pub fn gen_texture(&mut self) -> u32 {
+        self.textures.push(None);
+        self.textures.len() as u32
+    }
+
+    /// `glBindTexture(GL_TEXTURE_2D, ..)`.
+    pub fn bind_texture(&mut self, id: u32) {
+        self.record_or(Cmd::BindTexture(id), |g| g.bound_texture = Some(id));
+    }
+
+    /// `glTexImage2D`, into whichever texture is bound. RGBA bytes, and
+    /// nothing else: no mipmaps, no other formats, because no saver here asks
+    /// for either.
+    pub fn tex_image_2d(&mut self, width: i32, height: i32, data: Vec<u8>) {
+        let Some(id) = self.bound_texture else { return };
+        let Some(slot) = self.textures.get_mut(id as usize - 1) else {
+            return;
+        };
+        *slot = Some(Texture {
+            width,
+            height,
+            data,
+        });
+    }
+
+    /// `glEnable`/`glDisable` of `GL_TEXTURE_2D`.
+    pub fn texturing(&mut self, on: bool) {
+        self.record_or(Cmd::Texturing(on), |g| g.texturing = on);
+    }
+
+    /// What a texture holds, for the host to upload. Returns `None` for a
+    /// name that was generated but never given an image.
+    #[must_use]
+    pub fn texture(&self, id: u32) -> Option<&Texture> {
+        self.textures.get(id as usize - 1)?.as_ref()
+    }
+
     pub fn normal3f(&mut self, x: f32, y: f32, z: f32) {
         self.record_or(Cmd::Normal([x, y, z]), |g| g.normal = [x, y, z]);
     }
@@ -815,6 +894,7 @@ impl Glx {
                 pos: [x, y, z],
                 color: g.color,
                 normal: g.normal,
+                uv: g.uv,
             };
             g.pending.push(v);
         });
@@ -891,6 +971,11 @@ impl Glx {
             blend: self.blend,
             line_width: self.line_width,
             fog: self.fog,
+            texture: if self.texturing {
+                self.bound_texture
+            } else {
+                None
+            },
         };
 
         // Run of blocks with nothing between them but more vertices: fold them
@@ -1044,6 +1129,9 @@ impl Glx {
             Cmd::Scale([x, y, z]) => self.mult(Mat4::scale(x, y, z)),
             Cmd::LoadIdentity => *self.top() = Mat4::IDENTITY,
             Cmd::CallList(l) => self.call_list(l),
+            Cmd::TexCoord(uv) => self.uv = uv,
+            Cmd::BindTexture(id) => self.bound_texture = Some(id),
+            Cmd::Texturing(on) => self.texturing = on,
         }
     }
 }

@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "quasicrystal",
+    quasicrystal_body,
+    quasicrystal_start,
+    xscreensaver::hacks3d::quasicrystal::start
+);
+gl3d_saver!(
     "lockward",
     lockward_body,
     lockward_start,
@@ -2092,6 +2098,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "menger",
         label: "Menger",
         start: Start::Gl3d(menger_start),
+    },
+    Entry {
+        slug: "quasicrystal",
+        label: "Quasi-Crystal",
+        start: Start::Gl3d(quasicrystal_start),
     },
     Entry {
         slug: "sierpinski3d",

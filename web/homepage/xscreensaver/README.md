@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (19) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (20) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -393,14 +393,30 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 (quads and polygons are cut into triangles as the block closes, since ES has no
 such thing), per-vertex colour and normals, point size, the depth test and a
 mid-frame clear of it, face culling and winding, blending, display lists, two
-lights, and fog. Texturing is not there yet, and it is the next thing worth
-building: it is the only thing standing between this and a dozen more savers.
+lights, fog and texturing.
+
+Textures are RGBA bytes and nothing else: no mipmaps, no other formats, and
+always `GL_REPEAT` with `GL_LINEAR`, because that is what every saver that
+makes one asks for. They are built once when a saver starts and referred to by
+name after that, so the host uploads each one the first time it sees the name
+and keeps it. There is no `GL_TEXTURE_1D` in WebGL, so a saver that wants one
+gets a 2D texture a single row high, which samples the same way.
+`quasicrystal`, whose entire picture is one row of sine repeated a few hundred
+times across seventeen quads, is the reason it exists.
 
 Blending is an enum of the source and destination pairs the savers actually
-pass, rather than the full cross product, because they pass four of them
-between the lot of them. `lockward` is the reason for the odd one out,
+pass, rather than the full cross product, because they pass six of them between
+the lot of them. `lockward` is the reason for one of the odd ones out,
 `GL_DST_COLOR, GL_SRC_ALPHA`: it multiplies what is already on the screen, so a
 flash lights up the spinner and leaves the black around it alone.
+
+One thing cannot be expressed at all: the logic ops, `glLogicOp`, which do
+bitwise arithmetic on the framebuffer. WebGL has no equivalent, and the only
+saver here that reaches for one, `quasicrystal`, wants `GL_AND_REVERSE` to
+raise its contrast. What that does arithmetically is invert what is there and
+scale it, and that *is* expressible as a blend, so the port uses one and says
+so. If a saver ever wants a logic op that has no arithmetic reading, it will
+need a render target and a second pass.
 
 Fog is `GL_EXP2` only, which is the only mode any of these asks for: what
 survives at a distance is `exp(-(density * distance)^2)`. It matters more than
