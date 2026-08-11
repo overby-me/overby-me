@@ -19,3 +19,14 @@ pub const TRONBIT_YES: &str = include_str!("../models/tronbit_yes.gllist");
 
 /// Every bundled model, so a test can check that all of them still parse.
 pub const ALL: &[&str] = &[TRONBIT_IDLE1, TRONBIT_IDLE2, TRONBIT_NO, TRONBIT_YES];
+
+/// The eight dazzle-camouflaged ships of `razzledazzle`, from upstream's
+/// `ships.c`. Only ever one on screen at a time.
+pub const SHIPS_SHIP1: &str = include_str!("../models/ships_ship1.gllist");
+pub const SHIPS_SHIP2: &str = include_str!("../models/ships_ship2.gllist");
+pub const SHIPS_SHIP3: &str = include_str!("../models/ships_ship3.gllist");
+pub const SHIPS_SHIP4: &str = include_str!("../models/ships_ship4.gllist");
+pub const SHIPS_SHIP5: &str = include_str!("../models/ships_ship5.gllist");
+pub const SHIPS_SHIP6: &str = include_str!("../models/ships_ship6.gllist");
+pub const SHIPS_SHIP7: &str = include_str!("../models/ships_ship7.gllist");
+pub const SHIPS_SHIP8: &str = include_str!("../models/ships_ship8.gllist");
