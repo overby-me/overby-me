@@ -80,6 +80,7 @@ pub mod rubikblocks;
 pub mod sballs;
 pub mod sierpinski3d;
 pub mod skulloop;
+pub mod skytentacles;
 pub mod spheremonics;
 pub mod splodesic;
 pub mod sproingies;
@@ -133,6 +134,7 @@ pub static ALL: &[&Saver3d] = &[
     &highvoltage::SAVER,
     &chompytower::SAVER,
     &hexstrut::SAVER,
+    &skytentacles::SAVER,
     &sproingies::SAVER,
     &winduprobot::SAVER,
     &glsnake::SAVER,

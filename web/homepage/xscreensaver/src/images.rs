@@ -171,4 +171,6 @@ pub const SBALL_BG: &[u8] = include_bytes!("../images/sball-bg.png");
 /// The mirrored ball `flyingtoasters` wraps onto its chrome, and the picture
 /// of toast it lays on its toast.
 pub const CHROMESPHERE: &[u8] = include_bytes!("../images/chromesphere.png");
+/// The skin of the thing in `skytentacles`.
+pub const SCALES: &[u8] = include_bytes!("../images/scales.png");
 pub const TOAST_PNG: &[u8] = include_bytes!("../images/toast.png");

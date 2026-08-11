@@ -1042,6 +1042,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::chompytower::start
 );
 gl3d_saver!(
+    "skytentacles",
+    skytentacles_body,
+    skytentacles_start,
+    xscreensaver::hacks3d::skytentacles::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2519,6 +2525,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "chompytower",
         label: "Chompy Tower",
         start: Start::Gl3d(chompytower_start),
+    },
+    Entry {
+        slug: "skytentacles",
+        label: "Sky Tentacles",
+        start: Start::Gl3d(skytentacles_start),
     },
     Entry {
         slug: "hexstrut",
