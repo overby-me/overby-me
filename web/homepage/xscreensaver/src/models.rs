@@ -96,3 +96,62 @@ pub const HEADROOM_MODEL_SUIT_CAP_HALF: &str =
 pub const HEADROOM_MODEL_SUIT_HALF: &str =
     include_str!("../models/headroom_model_suit_half.gllist");
 pub const HEADROOM_MODEL_TIE_HALF: &str = include_str!("../models/headroom_model_tie_half.gllist");
+
+/// The ten transmission towers `highvoltage` flies past. Each is a set of
+/// bare lines that the saver thickens into square tubes.
+pub const HIGHVOLTAGE_MODEL_TOWER_A_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_a_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_A_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_a_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_A_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_a_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_B_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_b_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_B_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_b_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_B_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_b_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_C_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_c_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_C_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_c_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_C_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_c_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_D_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_d_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_D_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_d_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_E_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_e_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_E_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_e_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_E_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_e_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_F_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_f_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_F_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_f_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_F_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_f_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_G_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_g_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_G_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_g_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_G_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_g_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_H_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_h_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_H_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_h_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_H_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_h_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_I_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_i_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_I_CROSS: &str =
+    include_str!("../models/highvoltage_model_tower_i_cross.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_J_BODY: &str =
+    include_str!("../models/highvoltage_model_tower_j_body.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_J_CABLES: &str =
+    include_str!("../models/highvoltage_model_tower_j_cables.gllist");
+pub const HIGHVOLTAGE_MODEL_TOWER_J_CONNECTIONS: &str =
+    include_str!("../models/highvoltage_model_tower_j_connections.gllist");

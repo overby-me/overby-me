@@ -219,6 +219,149 @@ pub fn cone(
     )
 }
 
+/// A tube's geometry, built once and then transformed into place.
+///
+/// [`tube`] puts each cylinder where it goes by pushing a matrix, which is what
+/// the C does and is the right thing for the savers that draw a few dozen of
+/// them. It is the wrong thing for one that draws thousands: a matrix change
+/// starts a new batch, and `highvoltage` traces each of its towers out of some
+/// six hundred tubes, which at a draw call apiece is more than the whole frame
+/// can afford. So keep the unit cylinder as a flat list of triangles and
+/// transform it on the way out instead. Every tube drawn between two matrix
+/// changes then lands in a single draw call.
+///
+/// Two things are lost by not going through the matrix stack, neither of which
+/// has yet mattered: the winding is whatever the caller set rather than being
+/// forced counter-clockwise, and a caller reading the matrix back would not see
+/// the tube's own transform.
+pub struct TubeMesh {
+    /// Position and normal, in the order they are drawn.
+    verts: Vec<([f32; 3], [f32; 3])>,
+    shape: Shape,
+    polys: i32,
+}
+
+impl TubeMesh {
+    /// The unit tube, recorded once and flattened into a list that can be
+    /// concatenated: a strip or a fan cannot be joined to the next one without
+    /// growing triangles nobody asked for, so they are cut up here.
+    pub fn tube(faces: i32, smooth: bool, caps: bool, wire: bool) -> Self {
+        Self::build(|g| unit_tube(g, faces, smooth, caps, wire), wire)
+    }
+
+    /// The same for a cone.
+    pub fn cone(faces: i32, smooth: bool, cap: bool, wire: bool) -> Self {
+        Self::build(|g| unit_cone(g, faces, smooth, cap, wire), wire)
+    }
+
+    fn build(f: impl FnOnce(&mut Glx) -> i32, wire: bool) -> Self {
+        use super::gl::Primitive;
+        let mut g = Glx::new();
+        g.start_frame(1, 1);
+        let polys = f(&mut g);
+        let frame = g.frame();
+        let mut verts = Vec::new();
+        let mut push = |v: &super::gl::Vertex| verts.push((v.pos, v.normal));
+        for b in &frame.batches {
+            let vs = &frame.vertices[b.first..b.first + b.count];
+            match b.primitive {
+                Primitive::Triangles | Primitive::Lines => vs.iter().for_each(&mut push),
+                Primitive::TriangleStrip => {
+                    for (i, w) in vs.windows(3).enumerate() {
+                        // Every other triangle in a strip is wound the other
+                        // way round, so swap two of its corners back.
+                        let o = if i % 2 == 0 { [0, 1, 2] } else { [0, 2, 1] };
+                        o.iter().for_each(|&k| push(&w[k]));
+                    }
+                }
+                Primitive::TriangleFan => {
+                    for w in vs[1..].windows(2) {
+                        push(&vs[0]);
+                        w.iter().for_each(&mut push);
+                    }
+                }
+                Primitive::LineStrip | Primitive::LineLoop => {
+                    for w in vs.windows(2) {
+                        w.iter().for_each(&mut push);
+                    }
+                    if b.primitive == Primitive::LineLoop && vs.len() > 2 {
+                        push(&vs[vs.len() - 1]);
+                        push(&vs[0]);
+                    }
+                }
+                Primitive::Points => vs.iter().for_each(&mut push),
+            }
+        }
+        TubeMesh {
+            verts,
+            shape: if wire { Shape::Lines } else { Shape::Triangles },
+            polys,
+        }
+    }
+
+    /// Draw the tube from one point to another, with the same arguments
+    /// [`tube`] takes and the same result.
+    pub fn draw(
+        &self,
+        g: &mut Glx,
+        from: [f32; 3],
+        to: [f32; 3],
+        diameter: f32,
+        cap_size: f32,
+    ) -> i32 {
+        if diameter <= 0.0 {
+            return 0;
+        }
+        let (x, y, z) = (to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+        if x == 0.0 && y == 0.0 && z == 0.0 {
+            return 0;
+        }
+        let length = (x * x + y * y + z * z).sqrt();
+        let h = (x * x + y * y).sqrt();
+
+        // The two turns [`tube`] makes with the matrix stack, written out: one
+        // about z to bring the tube's y axis into the plane of the target, then
+        // one about x to lay it along it.
+        let (sa, ca) = if h == 0.0 {
+            (0.0, 1.0)
+        } else {
+            (-x / h, y / h)
+        };
+        let (sb, cb) = (z / length, h / length);
+        let rot = |p: [f32; 3]| {
+            [
+                ca * p[0] - sa * cb * p[1] + sa * sb * p[2],
+                sa * p[0] + ca * cb * p[1] - ca * sb * p[2],
+                sb * p[1] + cb * p[2],
+            ]
+        };
+
+        // And the same extension of both ends by the cap size.
+        let c = if cap_size != 0.0 {
+            cap_size / length
+        } else {
+            0.0
+        };
+        let (sx, sy) = (diameter, length * (1.0 + c + c));
+
+        g.begin(self.shape);
+        for (p, n) in &self.verts {
+            let q = rot([p[0] * sx, (p[1] * (1.0 + c + c) - c) * length, p[2] * sx]);
+            let m = rot([n[0] / sx, n[1] / sy, n[2] / sx]);
+            let len = (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt();
+            let m = if len > 0.0 {
+                [m[0] / len, m[1] / len, m[2] / len]
+            } else {
+                m
+            };
+            g.normal3f(m[0], m[1], m[2]);
+            g.vertex3f(q[0] + from[0], q[1] + from[1], q[2] + from[2]);
+        }
+        g.end();
+        self.polys
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn tube_1(
     g: &mut Glx,
@@ -269,6 +412,59 @@ fn tube_1(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The baked tube is the same tube: the same points, in the same places,
+    /// only with the transform in the vertices rather than in the matrix.
+    #[test]
+    fn a_baked_tube_lands_where_the_matrix_would_put_it() {
+        let round = |p: [f32; 3]| {
+            let mut v: Vec<i32> = p.iter().map(|c| (c * 1000.0).round() as i32).collect();
+            v.push(0);
+            v
+        };
+        for (smooth, caps, cap_size) in [(false, false, 0.0), (true, true, 0.25)] {
+            let from = [1.0, -2.0, 0.5];
+            let to = [-3.0, 4.0, 2.0];
+
+            let mut a = Glx::new();
+            a.start_frame(100, 100);
+            let pa = tube(&mut a, from, to, 0.5, cap_size, 6, smooth, caps, false);
+            let fa = a.frame();
+            let mut va: Vec<Vec<i32>> = fa
+                .batches
+                .iter()
+                .flat_map(|b| {
+                    fa.vertices[b.first..b.first + b.count]
+                        .iter()
+                        .map(|v| round(b.modelview.transform(v.pos)))
+                })
+                .collect();
+
+            let mut b = Glx::new();
+            b.start_frame(100, 100);
+            let mesh = TubeMesh::tube(6, smooth, caps, false);
+            let pb = mesh.draw(&mut b, from, to, 0.5, cap_size);
+            let fb = b.frame();
+            let mut vb: Vec<Vec<i32>> = fb
+                .batches
+                .iter()
+                .flat_map(|b2| {
+                    fb.vertices[b2.first..b2.first + b2.count]
+                        .iter()
+                        .map(|v| round(b2.modelview.transform(v.pos)))
+                })
+                .collect();
+
+            assert_eq!(pa, pb, "different polygon counts");
+            va.sort();
+            va.dedup();
+            vb.sort();
+            vb.dedup();
+            assert_eq!(va, vb, "the baked tube is somewhere else");
+            // And it is one block rather than three, which is the point.
+            assert_eq!(fb.batches.len(), 1, "the baked tube is not one draw");
+        }
+    }
 
     /// A unit tube is a unit tube: everything one from the axis, between the
     /// two ends.

@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (72) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (73) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -496,6 +496,14 @@ standing square to the camera at the sprite's transformed position, so
 transforming the positions in the port and emitting the lot against an identity
 modelview draws the same pixels in one batch. `dumpsterfire` does this with ten
 thousand of them.
+
+The same reasoning covers the savers built out of `tube`, which puts each
+cylinder where it goes by pushing a matrix. `runtime::tube::TubeMesh` builds the
+unit cylinder once, flattens it into a triangle list a strip or a fan could not
+be concatenated into, and transforms it into place on the way out, so every tube
+drawn between two matrix changes lands in one draw call. It took `highvoltage`,
+which traces each of its towers out of some six hundred tubes, from 6269 batches
+a frame to 20.
 
 A depth clear partway through a frame is an ordering, not a state, so it rides
 on the batch it precedes rather than on the frame. `voronoi` is the reason:

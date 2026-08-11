@@ -52,6 +52,7 @@ pub mod gravitywell;
 pub mod headroom;
 pub mod hexstrut;
 pub mod hextrail;
+pub mod highvoltage;
 pub mod hydrostat;
 pub mod hypertorus;
 pub mod hypnowheel;
@@ -125,6 +126,7 @@ pub static ALL: &[&Saver3d] = &[
     &glknots::SAVER,
     &glschool::SAVER,
     &headroom::SAVER,
+    &highvoltage::SAVER,
     &hexstrut::SAVER,
     &glsnake::SAVER,
     &gravitywell::SAVER,
