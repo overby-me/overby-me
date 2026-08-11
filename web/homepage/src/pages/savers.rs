@@ -1222,6 +1222,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::hydrostat::start
 );
 gl3d_saver!(
+    "topblock",
+    topblock_body,
+    topblock_start,
+    xscreensaver::hacks3d::topblock::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2411,6 +2417,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "morph3d",
         label: "Morph 3D",
         start: Start::Gl3d(morph3d_start),
+    },
+    Entry {
+        slug: "topblock",
+        label: "Top Block",
+        start: Start::Gl3d(topblock_start),
     },
     Entry {
         slug: "tronbit",
