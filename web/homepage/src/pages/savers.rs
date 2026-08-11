@@ -1192,6 +1192,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::lockward::start
 );
 gl3d_saver!(
+    "glsnake",
+    glsnake_body,
+    glsnake_start,
+    xscreensaver::hacks3d::glsnake::start
+);
+gl3d_saver!(
     "gravitywell",
     gravitywell_body,
     gravitywell_start,
@@ -2397,6 +2403,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "glschool",
         label: "GL School",
         start: Start::Gl3d(glschool_start),
+    },
+    Entry {
+        slug: "glsnake",
+        label: "GL Snake",
+        start: Start::Gl3d(glsnake_start),
     },
     Entry {
         slug: "gravitywell",
