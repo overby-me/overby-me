@@ -54,12 +54,22 @@ pub enum Size {
 /// needs.
 #[derive(Clone, Debug)]
 pub struct Gear {
+    /// Where the gear sits, which the savers place and the drawing ignores.
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
     /// Radius at the middle of the teeth.
     pub r: f64,
     /// Rotation, in degrees.
     pub th: f64,
     pub nteeth: i32,
+    /// Size of the teeth. Only the height matters to the drawing; the width is
+    /// how the savers decide the radius, and has to match between meshed gears.
+    pub tooth_w: f64,
     pub tooth_h: f64,
+    /// Gearing ratio against the gears before it in the train, which is how
+    /// fast this one turns.
+    pub ratio: f64,
     /// 0 for a normal right-angled gear, 1 for forty-five degrees.
     pub tooth_slope: f64,
 
@@ -95,10 +105,15 @@ pub struct Gear {
 impl Default for Gear {
     fn default() -> Self {
         Gear {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
             r: 1.0,
             th: 0.0,
             nteeth: 10,
+            tooth_w: 0.1,
             tooth_h: 0.1,
+            ratio: 1.0,
             tooth_slope: 0.0,
             inner_r: 0.0,
             inner_r2: 0.0,

@@ -1210,6 +1210,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::glschool::start
 );
 gl3d_saver!(
+    "gears",
+    gears_body,
+    gears_start,
+    xscreensaver::hacks3d::gears::start
+);
+gl3d_saver!(
     "glknots",
     glknots_body,
     glknots_start,
@@ -2199,6 +2205,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "energystream",
         label: "Energy Stream",
         start: Start::Gl3d(energystream_start),
+    },
+    Entry {
+        slug: "gears",
+        label: "Gears",
+        start: Start::Gl3d(gears_start),
     },
     Entry {
         slug: "glknots",
