@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (18) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (19) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -393,7 +393,14 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 (quads and polygons are cut into triangles as the block closes, since ES has no
 such thing), per-vertex colour and normals, point size, the depth test and a
 mid-frame clear of it, face culling and winding, blending, display lists, two
-lights, and fog. Texturing is not there yet.
+lights, and fog. Texturing is not there yet, and it is the next thing worth
+building: it is the only thing standing between this and a dozen more savers.
+
+Blending is an enum of the source and destination pairs the savers actually
+pass, rather than the full cross product, because they pass four of them
+between the lot of them. `lockward` is the reason for the odd one out,
+`GL_DST_COLOR, GL_SRC_ALPHA`: it multiplies what is already on the screen, so a
+flash lights up the spinner and leaves the black around it alone.
 
 Fog is `GL_EXP2` only, which is the only mode any of these asks for: what
 survives at a distance is `exp(-(density * distance)^2)`. It matters more than

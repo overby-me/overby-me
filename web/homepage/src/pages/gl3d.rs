@@ -333,6 +333,10 @@ impl Gl3dEngine {
                     gl.enable(Gl::BLEND);
                     gl.blend_func(Gl::SRC_ALPHA, Gl::ONE_MINUS_SRC_ALPHA);
                 }
+                Blend::DstColorAlpha => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_func(Gl::DST_COLOR, Gl::SRC_ALPHA);
+                }
             }
             gl.uniform_matrix4fv_with_f32_array(u.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);

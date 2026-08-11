@@ -231,6 +231,11 @@ pub enum Blend {
     AlphaAdd,
     /// `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`: ordinary transparency.
     Alpha,
+    /// `GL_DST_COLOR, GL_SRC_ALPHA`: the source is multiplied by what is
+    /// already there, so it can only brighten where there is something to
+    /// brighten. `lockward` flashes its blades with it, which is why a flash
+    /// shows up on the spinner and not on the black around it.
+    DstColorAlpha,
 }
 
 /// `GL_FOG`, in the one mode the savers ask for: `GL_EXP2`, where what

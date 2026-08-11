@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "lockward",
+    lockward_body,
+    lockward_start,
+    xscreensaver::hacks3d::lockward::start
+);
+gl3d_saver!(
     "gravitywell",
     gravitywell_body,
     gravitywell_start,
@@ -2076,6 +2082,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "kaleidocycle",
         label: "Kaleidocycle",
         start: Start::Gl3d(kaleidocycle_start),
+    },
+    Entry {
+        slug: "lockward",
+        label: "Lockward",
+        start: Start::Gl3d(lockward_start),
     },
     Entry {
         slug: "menger",

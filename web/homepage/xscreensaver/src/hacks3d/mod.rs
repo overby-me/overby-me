@@ -31,6 +31,7 @@ pub mod hexstrut;
 pub mod hextrail;
 pub mod hypnowheel;
 pub mod kaleidocycle;
+pub mod lockward;
 pub mod menger;
 pub mod sierpinski3d;
 pub mod splodesic;
@@ -53,6 +54,7 @@ pub static ALL: &[&Saver3d] = &[
     &gravitywell::SAVER,
     &hextrail::SAVER,
     &kaleidocycle::SAVER,
+    &lockward::SAVER,
     &menger::SAVER,
     &sierpinski3d::SAVER,
     &splodesic::SAVER,
