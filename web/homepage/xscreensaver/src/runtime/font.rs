@@ -56,7 +56,7 @@ use super::fb::{Fb, Gc};
 
 /// Cell size of the compiled-in font, and where its baseline sits.
 const CELL_W: i32 = 12;
-const CELL_H: i32 = 22;
+pub(crate) const CELL_H: i32 = 22;
 const ASCENT: i32 = 17;
 const DESCENT: i32 = CELL_H - ASCENT;
 
@@ -135,16 +135,22 @@ impl Font {
         s.chars().count() as i32 * self.char_width()
     }
 
-    /// One row of one glyph, twelve bits in the top of the returned value.
-    /// Anything outside the font's 256 cells draws as blank, which is what an X
-    /// server does with a character a font has no glyph for.
     fn row(ch: char, y: i32) -> u16 {
-        let c = ch as u32;
-        if c > 255 || !(0..CELL_H).contains(&y) {
-            return 0;
-        }
-        GALLANT[(c as i32 * CELL_H + y) as usize]
+        glyph_row(ch, y)
     }
+}
+
+/// One row of one glyph, twelve bits in the top of the returned value.
+///
+/// Anything outside the font's 256 cells draws as blank, which is what an X
+/// server does with a character a font has no glyph for. Public to the crate
+/// because [`super::texfont`] bakes the same glyphs into a texture.
+pub(crate) fn glyph_row(ch: char, y: i32) -> u16 {
+    let c = ch as u32;
+    if c > 255 || !(0..CELL_H).contains(&y) {
+        return 0;
+    }
+    GALLANT[(c as i32 * CELL_H + y) as usize]
 }
 
 /// The compiled-in glyph table, as bytes.

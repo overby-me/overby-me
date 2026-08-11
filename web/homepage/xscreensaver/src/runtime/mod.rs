@@ -37,6 +37,7 @@ pub mod rand;
 pub mod rotator;
 pub mod shapes;
 pub mod spline;
+pub mod texfont;
 pub mod text;
 pub mod tty;
 pub mod tube;

@@ -963,6 +963,20 @@ impl Glx {
         self.tex_gen_sphere = on;
     }
 
+    /// Whether the depth test, lighting and fog are on, so that something
+    /// drawing an overlay can put them back the way it found them.
+    pub fn depth_test_enabled(&self) -> bool {
+        self.depth_test
+    }
+
+    pub fn lighting_enabled(&self) -> bool {
+        self.lighting
+    }
+
+    pub fn fog_set(&self) -> Option<Fog> {
+        self.fog
+    }
+
     /// `glEnable (GL_COLOR_MATERIAL)`: see [`Batch::color_material`].
     pub fn color_material(&mut self, on: bool) {
         self.color_material = on;

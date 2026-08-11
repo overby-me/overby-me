@@ -14,6 +14,7 @@
 #   nu test-browser.nu starnest --wait 8 --size 1280x720
 #   nu test-browser.nu --all          # every Shadertoy saver, into a montage
 #   nu test-browser.nu skyline --console --query "scale=0.25"
+#   nu test-browser.nu pinion --mouse 400,240   # for the savers with a hover
 #
 # Exit codes: 0 the canvas has a picture on it · 1 it does not · 2 setup failed.
 #
@@ -59,7 +60,7 @@ def find-chromium [] {
 # preserveDrawingBuffer is blank to toDataURL outside the frame that drew it,
 # and turning that on for the sake of a test would slow down the real thing.
 const DRIVER = '
-const [root, port, cdp, wait, out, ...slugs] = Deno.args;
+const [root, port, cdp, wait, out, mouse, ...slugs] = Deno.args;
 const types = {
   ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm",
   ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml",
@@ -129,6 +130,13 @@ for (const path of slugs) {
     await pause(250);
   }
   await pause(Number(wait) * 1000);
+  // Some savers only show something under the pointer, so put it somewhere.
+  if (mouse !== "-") {
+    const [mx, my] = mouse.split(",").map(Number);
+    await send("Input.dispatchMouseEvent",
+               { type: "mouseMoved", x: mx, y: my, buttons: 0 });
+    await pause(250);
+  }
   const shot = await send("Page.captureScreenshot", { format: "png" });
   await Deno.writeFile(`${out}/screensaver-${slug}.png`, Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0)));
   for (const line of console_lines) console.error(`  ${slug}: ${line}`);
@@ -176,6 +184,7 @@ def main [
     --wait: int = 5       # seconds to let each one run before looking
     --size: string = "800x600"
     --query: string = ""  # settings to start the saver with, as a URL query
+    --mouse: string = ""  # put the pointer here first, as "x,y"
     --console             # print the browser console, for when a shader will not compile
     --dir: string = "target/dx/homepage/release/web/public"
 ] {
@@ -223,7 +232,8 @@ def main [
     }
 
     $slugs | each {|s| rm -f $"/tmp/screensaver-($s).png" } | ignore
-    let run = (^deno eval $DRIVER $root $"($PORT)" $"($CDP_PORT)" $"($wait)" "/tmp" ...$paths | complete)
+    let mouse = (if ($query | is-empty) and ($mouse | is-empty) { "-" } else if ($mouse | is-empty) { "-" } else { $mouse })
+    let run = (^deno eval $DRIVER $root $"($PORT)" $"($CDP_PORT)" $"($wait)" "/tmp" $mouse ...$paths | complete)
     try { job kill $browser }
     if $console { $run.stderr | lines | each {|l| print -e $l } | ignore }
 

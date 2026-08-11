@@ -28,14 +28,17 @@
 //! blurred gears in a row and the train is abandoned: the next gear starts a
 //! new one from rest.
 //!
-//! Upstream also labels whichever gear the pointer is over with its tooth count
-//! and RPM. That needs a texture font, which this runtime does not have yet, so
-//! the label and the GL-selection hit test that finds the gear under the mouse
-//! are both left out. Nothing else depends on them.
+//! Hovering over a gear labels it with its tooth count and speed. Upstream
+//! finds the gear under the pointer by drawing the whole scene again into an
+//! OpenGL selection buffer, which OpenGL ES has not got: its own mobile build
+//! gives up and shows no label at all. There is no selection buffer here
+//! either, so the question is answered by projecting each gear's middle and rim
+//! and seeing which disc the pointer landed in, which needs no second pass.
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver3d;
 use crate::runtime::involute::{Gear, Size, biggest_ring, draw_gear};
+use crate::runtime::texfont::TexFont;
 use crate::runtime::{
     About, Gl, Hack3d, Opt, Runner3d, SaverDef, StartArgs, Trackball, XEvent, frand, random,
 };
@@ -75,6 +78,33 @@ struct Pinion {
     wireframe: bool,
     height: i32,
     delay: i32,
+
+    /// Where the pointer is, and which gear it is over.
+    mouse: Option<(i32, i32)>,
+    mouse_gear: Option<usize>,
+    font: Option<TexFont>,
+}
+
+/// `rpm_string`: the speed, with as many decimals as it takes to say something,
+/// and no trailing zeroes.
+fn rpm_string(rpm: f64) -> String {
+    let mut buf = if rpm >= 0.1 {
+        format!("{rpm:.2}")
+    } else if rpm >= 0.001 {
+        format!("{rpm:.4}")
+    } else if rpm >= 0.00001 {
+        format!("{rpm:.8}")
+    } else {
+        format!("{rpm:.16}")
+    };
+    while buf.ends_with(0x30 as char) {
+        buf.pop();
+    }
+    if buf.ends_with(0x2e as char) {
+        buf.pop();
+    }
+    buf.push_str(" RPM");
+    buf
 }
 
 impl Pinion {
@@ -581,6 +611,7 @@ impl Hack3d for Pinion {
 
         g.glx.color4f(1.0, 1.0, 0.8, 1.0);
 
+        let mut drawn: Vec<(usize, usize)> = Vec::new();
         for i in 0..self.gears.len() {
             let gear = self.gears[i].clone();
             let visible = gear.x + gear.r + gear.tooth_h >= self.render_left
@@ -604,11 +635,48 @@ impl Hack3d for Pinion {
             g.glx.push_matrix();
             g.glx.translate(gear.x as f32, gear.y as f32, gear.z as f32);
             g.glx.rotate(th as f32, 0.0, 0.0, 1.0);
+            let first_batch = g.glx.frame().batches.len();
             draw_gear(&mut g.glx, &gear, self.wireframe);
+            drawn.push((i, first_batch));
             g.glx.pop_matrix();
         }
 
         g.glx.pop_matrix();
+
+        // Which gear is the pointer over? Upstream asks OpenGL, by drawing the
+        // scene again into a selection buffer; it also gives up and shows
+        // nothing at all on OpenGL ES, where there is no such buffer. There is
+        // none here either, so the same question is answered by projecting each
+        // gear's middle and rim and seeing which disc the pointer landed in.
+        // The last one drawn wins, since that is the one on top.
+        self.mouse_gear = None;
+        if let Some((mx, my)) = self.mouse {
+            let ndc = [
+                2.0 * mx as f32 / g.width().max(1) as f32 - 1.0,
+                1.0 - 2.0 * my as f32 / g.height().max(1) as f32,
+            ];
+            for (i, b) in drawn {
+                let Some(batch) = g.glx.frame().batches.get(b) else {
+                    continue;
+                };
+                let centre = batch.mvp.transform([0.0, 0.0, 0.0]);
+                let rim = batch.mvp.transform([self.gears[i].r as f32, 0.0, 0.0]);
+                let r = ((rim[0] - centre[0]).powi(2) + (rim[1] - centre[1]).powi(2)).sqrt();
+                let d = ((ndc[0] - centre[0]).powi(2) + (ndc[1] - centre[1]).powi(2)).sqrt();
+                if d <= r {
+                    self.mouse_gear = Some(i);
+                }
+            }
+        }
+
+        if let Some(i) = self.mouse_gear
+            && let Some(font) = &self.font
+        {
+            let gear = &self.gears[i];
+            let label = format!("{} teeth\n{}", gear.nteeth, rpm_string(gear.rpm));
+            let (w, h) = (g.width(), g.height());
+            font.print_label(&mut g.glx, &label, w, h, 1, [0.8, 0.8, 0.0, 1.0]);
+        }
 
         g.res.int("delay").max(0) as u32
     }
@@ -653,6 +721,11 @@ impl Hack3d for Pinion {
     }
 
     fn event(&mut self, g: &mut Gl, event: &XEvent) -> bool {
+        match event {
+            XEvent::MotionNotify { x, y } => self.mouse = Some((*x, *y)),
+            XEvent::ButtonPress { x, y, .. } => self.mouse = Some((*x, *y)),
+            _ => {}
+        }
         self.trackball.event(event, g.width(), g.height())
     }
 }
@@ -681,6 +754,11 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
         wireframe: g.res.bool("wireframe"),
         height: g.height(),
         delay: g.res.int("delay"),
+        mouse: None,
+        mouse_gear: None,
+        // Upstream picks one of three sizes by window size. This font comes in
+        // whole multiples of one cell, and all three land on the same one.
+        font: Some(TexFont::load(&mut g.glx, "titleFont 18")),
     };
 
     let (w, h) = (g.width(), g.height());
@@ -859,6 +937,9 @@ mod tests {
             wireframe: false,
             height: 480,
             delay: 15000,
+            mouse: None,
+            mouse_gear: None,
+            font: None,
         }
     }
 
@@ -910,6 +991,58 @@ mod tests {
         };
         st.compute_rpm(&mut fast);
         assert!((fast.rpm - g.rpm * 10.0).abs() < 1e-9);
+    }
+
+    /// The speed is written out with as many decimals as it takes and no
+    /// trailing zeroes, so a slow gear still says something.
+    #[test]
+    fn the_speed_reads_as_a_number() {
+        assert_eq!(rpm_string(12.5), "12.5 RPM");
+        assert_eq!(rpm_string(12.0), "12 RPM");
+        assert_eq!(rpm_string(0.05), "0.05 RPM");
+        assert_eq!(rpm_string(0.0005), "0.0005 RPM");
+        // Far too slow for two decimals to say anything at all.
+        assert!(rpm_string(0.000_000_5).starts_with("0.0000005"));
+    }
+
+    /// Hovering over a gear labels it; hovering over the background does not.
+    #[test]
+    fn the_pointer_labels_the_gear_under_it() {
+        let mut r = start(StartArgs::new(640, 480, "", 20260811));
+        r.step();
+
+        let text_batches = |r: &Runner3d| {
+            // The label is the only unlit, textured thing in the frame.
+            r.frame()
+                .batches
+                .iter()
+                .filter(|b| !b.lighting && b.texture.is_some())
+                .count()
+        };
+        assert_eq!(text_batches(&r), 0, "a label with no pointer");
+
+        // Find a pixel that is over a gear by trying the middle of the screen
+        // and walking outwards.
+        let mut labelled = false;
+        for x in (20..620).step_by(20) {
+            for y in (20..460).step_by(20) {
+                r.event(XEvent::MotionNotify { x, y });
+                r.step();
+                if text_batches(&r) > 0 {
+                    labelled = true;
+                    break;
+                }
+            }
+            if labelled {
+                break;
+            }
+        }
+        assert!(labelled, "the pointer never found a gear anywhere");
+
+        // And off the edge of the world, nothing.
+        r.event(XEvent::MotionNotify { x: -100, y: -100 });
+        r.step();
+        assert_eq!(text_batches(&r), 0, "a label with the pointer outside");
     }
 
     /// The fast-forward runs the train on until it is about to come into view,
