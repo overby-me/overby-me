@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::voronoi::start
 );
 gl3d_saver!(
+    "antinspect",
+    antinspect_body,
+    antinspect_start,
+    xscreensaver::hacks3d::antinspect::start
+);
+gl3d_saver!(
     "beats",
     beats_body,
     beats_start,
@@ -2078,6 +2084,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "antinspect",
+        label: "Ant Inspect",
+        start: Start::Gl3d(antinspect_start),
     },
     Entry {
         slug: "beats",

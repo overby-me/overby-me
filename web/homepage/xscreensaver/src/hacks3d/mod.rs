@@ -17,6 +17,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver3d;
 
+pub mod antinspect;
 pub mod beats;
 pub mod blinkbox;
 pub mod boing;
@@ -52,6 +53,7 @@ pub mod voronoi;
 /// the reason [`crate::all`] gives.
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
+    &antinspect::SAVER,
     &blinkbox::SAVER,
     &boing::SAVER,
     &cubestorm::SAVER,
