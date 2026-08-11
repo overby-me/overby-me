@@ -57,3 +57,11 @@ pub const TOASTER_JET: &str = include_str!("../models/toaster_jet.gllist");
 pub const TOASTER_KNOB: &str = include_str!("../models/toaster_knob.gllist");
 pub const TOASTER_SLOTS: &str = include_str!("../models/toaster_slots.gllist");
 pub const TOASTER_WING: &str = include_str!("../models/toaster_wing.gllist");
+
+/// The five parts of a security camera in `vigilance`. Four of them are half
+/// the camera, drawn again mirrored.
+pub const SECCAM_BODY: &str = include_str!("../models/seccam_body.gllist");
+pub const SECCAM_CAP: &str = include_str!("../models/seccam_cap.gllist");
+pub const SECCAM_HINGE: &str = include_str!("../models/seccam_hinge.gllist");
+pub const SECCAM_LENS: &str = include_str!("../models/seccam_lens.gllist");
+pub const SECCAM_PIPE: &str = include_str!("../models/seccam_pipe.gllist");

@@ -83,6 +83,7 @@ pub mod tangram;
 pub mod topblock;
 pub mod tronbit;
 pub mod unknownpleasures;
+pub mod vigilance;
 pub mod voronoi;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
@@ -153,6 +154,7 @@ pub static ALL: &[&Saver3d] = &[
     &topblock::SAVER,
     &tronbit::SAVER,
     &unknownpleasures::SAVER,
+    &vigilance::SAVER,
     &voronoi::SAVER,
 ];
 

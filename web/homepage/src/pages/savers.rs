@@ -1072,6 +1072,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cubestorm::start
 );
 gl3d_saver!(
+    "vigilance",
+    vigilance_body,
+    vigilance_start,
+    xscreensaver::hacks3d::vigilance::start
+);
+gl3d_saver!(
     "voronoi",
     voronoi_body,
     voronoi_start,
@@ -2619,6 +2625,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "unknownpleasures",
         label: "Unknown Pleasures",
         start: Start::Gl3d(unknownpleasures_start),
+    },
+    Entry {
+        slug: "vigilance",
+        label: "Vigilance",
+        start: Start::Gl3d(vigilance_start),
     },
     Entry {
         slug: "voronoi",
