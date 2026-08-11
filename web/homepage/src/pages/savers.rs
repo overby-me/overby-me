@@ -1264,6 +1264,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::engine::start
 );
 gl3d_saver!(
+    "etruscanvenus",
+    etruscanvenus_body,
+    etruscanvenus_start,
+    xscreensaver::hacks3d::etruscanvenus::start
+);
+gl3d_saver!(
     "molecule",
     molecule_body,
     molecule_start,
@@ -2475,6 +2481,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "engine",
         label: "Engine",
         start: Start::Gl3d(engine_start),
+    },
+    Entry {
+        slug: "etruscanvenus",
+        label: "Etruscan Venus",
+        start: Start::Gl3d(etruscanvenus_start),
     },
     Entry {
         slug: "geodesic",

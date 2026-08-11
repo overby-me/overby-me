@@ -1,10 +1,12 @@
-//! Port of `hacks/glx/romanboy.c`.
+//! Port of `hacks/glx/etruscanvenus.c`.
 //!
 //! ```text
-//! romanboy --- Shows a 3d immersion of the real projective plane
-//!   that smoothly deforms between the Roman surface and the Boy surface.
+//! etruscanvenus --- Shows a 3d immersion of a Klein bottle that
+//!   rotates in 3d or on which you can walk and that can deform smoothly
+//!   between the Etruscan Venus surface, the Roman surface, the Boy
+//!   surface surface, and the Ida surface.
 //!
-//! Copyright (c) 2013-2026 Carsten Steger <carsten@mirsanmir.org>.
+//! Copyright (c) 2019-2026 Carsten Steger <carsten@mirsanmir.org>.
 //!
 //! Permission to use, copy, modify, and distribute this software and its
 //! documentation for any purpose and without fee is hereby granted,
@@ -19,16 +21,20 @@
 //! other special, indirect and consequential damages.
 //! ```
 //!
-//! The same surface as [`super::projectiveplane`], but immersed in three
-//! dimensions rather than embedded in four, which means it has to pass through
-//! itself. There are two well known ways to do that and this deforms between
-//! them: at deformation 0 it is Werner Boy's surface, with one triple point,
-//! and at 1 it is Jakob Steiner's Roman surface, with three double lines
-//! meeting at a triple point in the middle. One parameter runs between them.
+//! A Klein bottle immersed in three dimensions, deforming around a loop
+//! through four named surfaces: the Etruscan Venus, the Roman surface, Boy's
+//! surface and the Ida surface. The deformation between them was constructed
+//! by George Francis; the Etruscan Venus takes its name from a video by Donna
+//! Cox, George Francis and Ray Idaszak shown at SIGGRAPH in 1989.
 //!
-//! The order of the surface generalises Boy's: order 3 is the usual one, and
-//! higher orders wrap the same construction round more times, giving a flower
-//! with that many petals. Order 2 degenerates to a sphere traversed twice.
+//! All four are the same bottle, which is why the loop closes. Two of them,
+//! Roman and Boy, are doubly covered, so they look like an immersed projective
+//! plane instead: they are exactly what [`super::romanboy`] draws, with the
+//! parameter square wrapped round twice.
+//!
+//! Two numbers control the whole family. One bends the surface and the other
+//! pinches it, and the deformation just walks a square loop around the two of
+//! them, which is what puts four surfaces on the tour rather than two.
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver3d;
@@ -38,10 +44,12 @@ use crate::runtime::{
     About, Gl, Hack3d, Opt, Runner3d, SaverDef, StartArgs, Trackball, XEvent, frand, random,
 };
 
-const NUMU: usize = 64;
+const NUMU: usize = 192;
 const NUMV: usize = 128;
-/// The period of the bands, in mesh lines.
-const NUMB: usize = 8;
+/// The period of the bands, in mesh lines. Direction and distance bands are
+/// counted differently because the mesh is not square in the two directions.
+const NUMBDIR: usize = 8;
+const NUMBDIST: usize = 4;
 
 /// How far below the walker's feet the camera sits.
 const DELTAY: f32 = 0.01;
@@ -50,6 +58,21 @@ const DSIGMA: f32 = 1.1;
 const DTAU: f32 = 1.7;
 
 const TEX_DIMENSION: usize = 64;
+
+/// Fitted constants for the centre of the surface in z. Upstream computed
+/// them once, offline, so that the deforming surface stays in the middle of
+/// the screen.
+const Z1: f32 = 0.814_117_9;
+const Z2: f32 = 0.135_927_69;
+const Z3: f32 = 1.158_109_7;
+const Z4: f32 = 0.718_654_9;
+const Z5: f32 = 2.539_340_2;
+
+/// The same, for its radius.
+const R1: f32 = 1.308_007;
+const R2: f32 = 4.005_206;
+const R3: f32 = -2.893_994_6;
+const R4: f32 = -1.266_709_5;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Display {
@@ -73,14 +96,7 @@ enum Colors {
     Direction,
 }
 
-/// The three basis vectors of the walker's frame, and the surface point it
-/// stands on.
-struct Frame {
-    mat: [[f32; 3]; 3],
-    offset3d: [f32; 3],
-}
-
-struct RomanBoy {
+struct EtruscanVenus {
     alpha: f32,
     beta: f32,
     delta: f32,
@@ -97,24 +113,17 @@ struct RomanBoy {
     dumove: f32,
     dvmove: f32,
     side: f32,
-    dir: f32,
     walk_direction: f32,
     walk_speed: f32,
 
-    /// How far along the deformation we are, and which way it is going.
+    /// Where we are on the four-stage loop, and which way round it is going.
     dd: f32,
     defdir: f32,
     deform_speed: f32,
-    /// The order of the surface: how many times the construction wraps.
-    g: usize,
 
     offset3d: [f32; 3],
-    /// The colour and texture coordinate of every mesh point, which do not
-    /// change unless the colours are set to change.
     col: Vec<[f32; 4]>,
     tex: Vec<[f32; 2]>,
-    /// The surface and its normals, rebuilt every frame because the
-    /// deformation moves them.
     pos: Vec<[f32; 3]>,
     pnorm: Vec<[f32; 3]>,
 
@@ -177,97 +186,102 @@ fn scale_to(v: &mut [f32; 3], len: f32) {
     }
 }
 
-/// The numerators and the denominator of the surface at one point, and their
-/// two derivatives. Split out because the degenerate-pole case recomputes them
-/// at a nudged v.
+/// The surface written as a scale `f` times a direction, and the derivatives
+/// of both. Split out because the degenerate case recomputes it at a nudged
+/// parameter.
 struct Terms {
-    nom: [f32; 2],
-    nomu: [f32; 2],
-    nomv: [f32; 2],
-    den: f32,
-    den2: f32,
-    denu: f32,
-    denv: f32,
-    cv2: f32,
-    s2v: f32,
+    f: f32,
+    fdir: [f32; 3],
+    fu: f32,
+    fv: f32,
+    fdiru: [f32; 3],
+    fdirv: [f32; 3],
 }
 
-fn terms(u: f32, v: f32, d: f32, g: usize) -> Terms {
-    let sqrt2og = std::f32::consts::SQRT_2 / g as f32;
-    let h1m1og = 0.5 * (1.0 - 1.0 / g as f32);
-    let gm1 = g as f32 - 1.0;
+fn terms(u: f32, v: f32, db: f32, dl: f32) -> Terms {
+    let bosqrt2 = db / std::f32::consts::SQRT_2;
     let (su, cu) = (u.sin(), u.cos());
-    let (sgu, cgu) = ((g as f32 * u).sin(), (g as f32 * u).cos());
-    let (sgm1u, cgm1u) = ((gm1 * u).sin(), (gm1 * u).cos());
-    let cv = v.cos();
-    let c2v = (2.0 * v).cos();
-    let s2v = (2.0 * v).sin();
-    let cv2 = cv * cv;
-    let den = 1.0 / (1.0 - 0.5 * std::f32::consts::SQRT_2 * d * s2v * sgu);
+    let (s2u, c2u) = ((2.0 * u).sin(), (2.0 * u).cos());
+    let (s3u, c3u) = ((3.0 * u).sin(), (3.0 * u).cos());
+    let (sv, cv) = (v.sin(), v.cos());
+    let (s2v, c2v) = ((2.0 * v).sin(), (2.0 * v).cos());
+    let nom = 1.0 - dl + dl * cv;
+    let den = 1.0 - bosqrt2 * s3u * s2v;
+    let den2 = 1.0 / (den * den);
+    let nomv = -dl * sv;
+    let denu = -3.0 * bosqrt2 * c3u * s2v;
+    let denv = -2.0 * bosqrt2 * s3u * c2v;
     Terms {
-        nom: [
-            sqrt2og * cv2 * cgm1u + h1m1og * s2v * cu,
-            sqrt2og * cv2 * sgm1u - h1m1og * s2v * su,
+        f: nom / den,
+        fdir: [
+            c2u * cv + cu * sv,
+            s2u * cv - su * sv,
+            std::f32::consts::SQRT_2 * cv,
         ],
-        nomu: [
-            -sqrt2og * cv2 * gm1 * sgm1u - h1m1og * s2v * su,
-            sqrt2og * cv2 * gm1 * cgm1u - h1m1og * s2v * cu,
+        fu: -nom * denu * den2,
+        fv: (den * nomv - nom * denv) * den2,
+        fdiru: [-su * sv - 2.0 * s2u * cv, 2.0 * c2u * cv - cu * sv, 0.0],
+        fdirv: [
+            cu * cv - c2u * sv,
+            -s2u * sv - su * cv,
+            -std::f32::consts::SQRT_2 * sv,
         ],
-        nomv: [
-            -sqrt2og * s2v * cgm1u + 2.0 * h1m1og * c2v * cu,
-            -sqrt2og * s2v * sgm1u - 2.0 * h1m1og * c2v * su,
-        ],
-        den,
-        den2: den * den,
-        denu: 0.5 * std::f32::consts::SQRT_2 * d * g as f32 * cgu * s2v,
-        denv: std::f32::consts::SQRT_2 * d * sgu * c2v,
-        cv2,
-        s2v,
     }
+}
+
+fn derivatives(t: &Terms) -> ([f32; 3], [f32; 3]) {
+    (
+        std::array::from_fn(|l| t.fu * t.fdir[l] + t.f * t.fdiru[l]),
+        std::array::from_fn(|l| t.fv * t.fdir[l] + t.f * t.fdirv[l]),
+    )
 }
 
 /// The surface and its two tangents at one point of the parameter square.
-fn surface(u: f32, v: f32, d: f32, g: usize, oz: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
-    let half_pi = 0.5 * std::f32::consts::PI;
-    let v = if g & 1 == 1 {
-        half_pi - 0.25 * v
-    } else {
-        half_pi - 0.5 * v
-    };
-    let t = terms(u, v, d, g);
-    let x = [t.nom[0] * t.den, t.nom[1] * t.den, t.cv2 * t.den - oz];
+/// `db` bends it and `dl` pinches it; the four named surfaces are the four
+/// corners of that unit square.
+fn surface(u: f32, v: f32, db: f32, dl: f32, oz: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    // The parameter square is twice as long in u as the surface needs, which
+    // is what doubly covers the Roman and Boy surfaces.
+    let u = 0.5 * u;
+    let t = terms(u, v, db, dl);
+    let x = [t.f * t.fdir[0], t.f * t.fdir[1], t.f * t.fdir[2] - oz];
+    let (du, dv) = derivatives(&t);
 
-    // Avoid degenerate tangential plane basis vectors: at the poles the two
-    // tangents fall on top of each other and their cross product is nothing.
-    let eps = 10.0 * f32::EPSILON;
-    let t = if half_pi - v.abs() < eps {
-        let v = if half_pi - v < eps {
-            half_pi - eps
-        } else {
-            -half_pi + eps
-        };
-        terms(u, v, d, g)
-    } else {
-        t
-    };
-    let xu = [
-        t.nomu[0] * t.den + t.nom[0] * t.denu * t.den2,
-        t.nomu[1] * t.den + t.nom[1] * t.denu * t.den2,
-        t.cv2 * t.denu * t.den2,
-    ];
-    let xv = [
-        t.nomv[0] * t.den + t.nom[0] * t.denv * t.den2,
-        t.nomv[1] * t.den + t.nom[1] * t.denv * t.den2,
-        -t.s2v * t.den + t.cv2 * t.denv * t.den2,
-    ];
-    (x, xu, xv)
+    // Avoid degenerate tangential plane basis vectors as much as possible: at
+    // the pinch points the two tangents are parallel and there is no normal to
+    // be had, so take the one a little way off instead.
+    let n = cross(du, dv);
+    if n[0] * n[0] + n[1] * n[1] + n[2] * n[2] < 10.0 * f32::EPSILON {
+        let (du, dv) = derivatives(&terms(u + 0.01, v + 0.01, db, dl));
+        return (x, du, dv);
+    }
+    (x, du, dv)
 }
 
-impl RomanBoy {
-    fn numu(&self) -> usize {
-        self.g * NUMU
-    }
+/// The two deformation parameters, and the centre and scale that keep the
+/// result on screen, for a position `dd` on the four-stage loop.
+fn deformation(dd: f32) -> (f32, f32, f32, f32) {
+    let (bb, ll) = if dd < 1.0 {
+        (0.0, dd)
+    } else if dd < 2.0 {
+        (dd - 1.0, 1.0)
+    } else if dd < 3.0 {
+        (1.0, 3.0 - dd)
+    } else {
+        (4.0 - dd, 0.0)
+    };
+    // A quintic, so the deformation eases in and out at each corner.
+    let db = ((6.0 * bb - 15.0) * bb + 10.0) * bb * bb * bb;
+    let dl = ((6.0 * ll - 15.0) * ll + 10.0) * ll * ll * ll;
+    let oz = Z1
+        * ((0.5 * std::f32::consts::PI * dl.powf(Z3)).sin()
+            + Z2 * (1.5 * std::f32::consts::PI * dl.powf(Z3)).sin())
+        * (Z4 * db.powf(Z5)).exp();
+    let r = R1 + (db - 0.5) * (dl - 0.5) + R2 * (R3 * (1.0 - db)).exp() * (R4 * dl).exp();
+    (db, dl, oz, 0.8 / r)
+}
 
+impl EtruscanVenus {
     /// `color`. A fully saturated wheel by angle, or that wheel run through a
     /// rotating basis when the colours are changing.
     fn color(&self, angle: f32, m: &[[f32; 3]; 3]) -> [f32; 4] {
@@ -318,35 +332,46 @@ impl RomanBoy {
         col
     }
 
-    /// The angle the colour wheel is read at, for a point of the mesh.
+    /// The angle the colour wheel is read at, for a point of the mesh. The
+    /// distance colours run up and back down again so that they meet where the
+    /// parameter square wraps.
     fn angle_at(&self, u: f32, v: f32) -> f32 {
-        let two_pi = 2.0 * std::f32::consts::PI;
-        if self.colors == Colors::Direction {
-            two_pi - (2.0 * u) % two_pi
-        } else {
-            v * (5.0 / 6.0)
+        if self.colors != Colors::Distance {
+            return u;
         }
+        let two_pi = 2.0 * std::f32::consts::PI;
+        let mut vc = if self.appearance == Appearance::DistanceBands {
+            -4.0 * v
+        } else {
+            4.0 * v
+        };
+        if vc >= 2.0 * two_pi {
+            vc -= 2.0 * two_pi;
+        }
+        if vc >= two_pi {
+            vc = 2.0 * two_pi - vc;
+        }
+        vc
     }
 
-    /// `setup_roman_boy_color_texture`: the parts of the mesh the deformation
-    /// does not touch.
+    /// `setup_etruscan_venus_color_texture`: the parts of the mesh the
+    /// deformation does not touch.
     fn setup(&mut self) {
         let two_pi = 2.0 * std::f32::consts::PI;
-        let numu = self.numu();
         for i in 0..=NUMV {
-            for j in 0..=numu {
-                let k = i * (numu + 1) + j;
-                let u = if self.appearance != Appearance::DirectionBands {
-                    -two_pi * j as f32 / numu as f32
+            for j in 0..=NUMU {
+                let k = i * (NUMU + 1) + j;
+                let u = two_pi * j as f32 / NUMU as f32;
+                let v = if self.appearance == Appearance::DistanceBands {
+                    -two_pi * i as f32 / NUMV as f32
                 } else {
-                    two_pi * j as f32 / numu as f32
+                    two_pi * i as f32 / NUMV as f32
                 };
-                let v = two_pi * i as f32 / NUMV as f32;
                 if !self.change_colors {
                     self.col[k] = self.color(self.angle_at(u, v), &rotateall(0.0, 0.0, 0.0));
                 }
-                self.tex[k][0] = -16.0 * self.g as f32 * u / two_pi;
-                self.tex[k][1] = 32.0 * v / two_pi
+                self.tex[k][0] = 48.0 * u / two_pi;
+                self.tex[k][1] = 64.0 * v / two_pi
                     - if self.appearance == Appearance::DistanceBands {
                         0.5
                     } else {
@@ -359,8 +384,8 @@ impl RomanBoy {
     /// `compute_walk_frame`. The camera is built from the surface's own
     /// tangent plane at the walker's position, so it stays upright on a
     /// surface that has no consistent notion of up.
-    fn compute_walk_frame(&mut self, d: f32, radius: f32, oz: f32) -> Frame {
-        let (xx, xxu, xxv) = surface(self.umove, self.vmove, d, self.g, oz);
+    fn compute_walk_frame(&mut self, db: f32, dl: f32, radius: f32, oz: f32) -> [[f32; 3]; 3] {
+        let (xx, xxu, xxv) = surface(self.umove, self.vmove, db, dl, oz);
         let mut pu = xxu;
         let mut pv = xxv;
         for l in 0..3 {
@@ -370,9 +395,9 @@ impl RomanBoy {
 
         let mut n = cross(pu, pv);
         scale_to(&mut n, 1.0 / (self.side * 4.0));
-        // The quarter on dvmove is the chain rule for v, which the surface
-        // halves or quarters before using it.
-        let mut pm = std::array::from_fn(|l| pu[l] * self.dumove - pv[l] * 0.25 * self.dvmove);
+        // The half on dumove is the chain rule for u, which the surface halves
+        // before using it.
+        let mut pm = std::array::from_fn(|l| 0.5 * pu[l] * self.dumove + pv[l] * self.dvmove);
         scale_to(&mut pm, 0.25);
         let mut b = cross(n, pm);
         scale_to(&mut b, 0.25);
@@ -386,10 +411,8 @@ impl RomanBoy {
 
         let mat = rotateall(self.alpha, self.beta, self.delta);
         let p = apply(&mat, xx);
-        Frame {
-            mat,
-            offset3d: [-p[0] * radius, -p[1] * radius - DELTAY, -p[2] * radius],
-        }
+        self.offset3d = [-p[0] * radius, -p[1] * radius - DELTAY, -p[2] * radius];
+        mat
     }
 }
 
@@ -455,12 +478,12 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
         _ => walking || random().is_multiple_of(2),
     };
 
-    let order = g.res.int("surfaceOrder").clamp(2, 9) as usize;
-    let n = (order * NUMU + 1) * (NUMV + 1);
+    let n = (NUMU + 1) * (NUMV + 1);
     let walk_direction = g.res.float("walkDirection") as f32;
     let turning = !walking;
+    let init_deform = g.res.float("initDeform") as f32;
 
-    let mut this = RomanBoy {
+    let mut this = EtruscanVenus {
         alpha: if turning { frand(360.0) as f32 } else { 0.0 },
         beta: if turning { frand(360.0) as f32 } else { 0.0 },
         delta: if turning { frand(360.0) as f32 } else { 0.0 },
@@ -478,18 +501,16 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
         dumove: 0.0,
         dvmove: 0.0,
         side: 1.0,
-        dir: if (walk_direction * std::f32::consts::PI / 180.0).sin() >= 0.0 {
-            1.0
-        } else {
-            -1.0
-        },
         walk_direction,
         walk_speed: g.res.float("walkSpeed") as f32,
-        dd: g.res.float("initDeform").clamp(0.0, 1000.0) as f32 * 0.001,
-        defdir: -1.0,
+        dd: if (0.0..4000.0).contains(&init_deform) {
+            init_deform * 0.001
+        } else {
+            0.0
+        },
+        defdir: 1.0,
         deform_speed: g.res.float("deformSpeed") as f32,
-        g: order,
-        offset3d: [0.0, 0.0, -1.8],
+        offset3d: [0.0, 0.0, -2.0],
         col: vec![[1.0; 4]; n],
         tex: vec![[0.0; 2]; n],
         pos: vec![[0.0; 3]; n],
@@ -501,7 +522,6 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
         appearance,
         colors,
         walking,
-        // Orientation marks do not make sense in wireframe mode.
         marks: g.res.bool("marks") && display != Display::Wireframe,
         change_colors: g.res.bool("changeColors"),
         deform: g.res.bool("deform"),
@@ -523,7 +543,7 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
     Box::new(this)
 }
 
-impl Hack3d for RomanBoy {
+impl Hack3d for EtruscanVenus {
     fn reshape(&mut self, g: &mut Gl, width: i32, height: i32) {
         g.glx.viewport(0, 0, width, height);
         self.aspect = width as f32 / height as f32;
@@ -538,11 +558,17 @@ impl Hack3d for RomanBoy {
             if self.deform {
                 self.dd += self.defdir * self.deform_speed * 0.001;
                 if self.dd < 0.0 {
-                    self.dd = -self.dd;
-                    self.defdir = -self.defdir;
+                    self.dd += 4.0;
                 }
-                if self.dd > 1.0 {
-                    self.dd = 2.0 - self.dd;
+                if self.dd >= 4.0 {
+                    self.dd -= 4.0;
+                }
+                // Randomly change the deformation direction at one of the four
+                // surfaces in a tenth of the cases, so the tour is not always
+                // the same way round.
+                if (self.dd.round() - self.dd).abs() <= self.deform_speed * 0.0005
+                    && random().is_multiple_of(10)
+                {
                     self.defdir = -self.defdir;
                 }
             }
@@ -554,37 +580,27 @@ impl Hack3d for RomanBoy {
             } else {
                 let two_pi = 2.0 * std::f32::consts::PI;
                 let rad = self.walk_direction * std::f32::consts::PI / 180.0;
-                self.dvmove =
-                    self.dir * rad.sin() * self.walk_speed * std::f32::consts::PI / 4096.0;
-                self.vmove += self.dvmove;
-                // Walking off one edge of the parameter square comes back on
-                // the other, half a turn round in u and on the other side.
-                if self.vmove > two_pi {
-                    self.vmove = 2.0 * two_pi - self.vmove;
-                    self.umove -= std::f32::consts::PI;
-                    if self.umove < 0.0 {
-                        self.umove += two_pi;
-                    }
-                    self.side = -self.side;
-                    self.dir = -self.dir;
-                    self.dvmove = -self.dvmove;
-                }
-                if self.vmove < 0.0 {
-                    self.vmove = -self.vmove;
-                    self.umove -= std::f32::consts::PI;
-                    if self.umove < 0.0 {
-                        self.umove += two_pi;
-                    }
-                    self.dir = -self.dir;
-                    self.dvmove = -self.dvmove;
-                }
                 self.dumove = rad.cos() * self.walk_speed * std::f32::consts::PI / 4096.0;
+                self.dvmove = rad.sin() * self.walk_speed * std::f32::consts::PI / 4096.0;
                 self.umove += self.dumove;
+                // A full turn in u comes back mirrored in v and on the other
+                // side of the surface, which is what makes it a Klein bottle.
                 if self.umove >= two_pi {
                     self.umove -= two_pi;
+                    self.vmove = two_pi - self.vmove;
+                    self.side = -self.side;
                 }
                 if self.umove < 0.0 {
                     self.umove += two_pi;
+                    self.vmove = two_pi - self.vmove;
+                    self.side = -self.side;
+                }
+                self.vmove += self.dvmove;
+                if self.vmove >= two_pi {
+                    self.vmove -= two_pi;
+                }
+                if self.vmove < 0.0 {
+                    self.vmove += two_pi;
                 }
             }
             if self.change_colors {
@@ -632,23 +648,16 @@ impl Hack3d for RomanBoy {
             g.glx.bind_texture(self.texture);
         }
 
-        // The deformation runs through a quintic so that it eases in and out
-        // at the two ends, and the surface is scaled back down as it grows.
-        let dd = self.dd;
-        let d = ((6.0 * dd - 15.0) * dd + 10.0) * dd * dd * dd;
-        let r = 1.0 + d * d * (1.0 / 2.0 + d * d * (1.0 / 6.0 + d * d * (1.0 / 3.0)));
-        let radius = 1.0 / r;
-        let oz = 0.5 * r;
-
+        let (db, dl, oz, radius) = deformation(self.dd);
         let color_mat = rotateall(self.rho, self.sigma, self.tau);
 
-        let (mat, offset3d) = if self.walking {
-            let frame = self.compute_walk_frame(d, radius, oz);
-            (frame.mat, frame.offset3d)
+        let mat = if self.walking {
+            self.compute_walk_frame(db, dl, radius, oz)
         } else {
             g.glx.mult_matrix(self.trackball.matrix());
-            (rotateall(self.alpha, self.beta, self.delta), self.offset3d)
+            rotateall(self.alpha, self.beta, self.delta)
         };
+        let offset3d = self.offset3d;
 
         let per_vertex = self.colors != Colors::OneSided && self.colors != Colors::TwoSided;
         g.glx.color_material(per_vertex || wire);
@@ -684,24 +693,23 @@ impl Hack3d for RomanBoy {
         }
 
         let two_pi = 2.0 * std::f32::consts::PI;
-        let numu = self.numu();
-        let bands = self.appearance;
+        let distance_bands = self.appearance == Appearance::DistanceBands;
 
-        // Rebuild the surface. The deformation moves every point, so unlike
-        // the four-dimensional embedding there is nothing to precompute.
+        // Rebuild the surface. The deformation moves every point, so there is
+        // nothing here to precompute.
         let point = |this: &mut Self, i: usize, j: usize| {
-            let o = i * (numu + 1) + j;
-            let u = if bands != Appearance::DirectionBands {
-                two_pi * j as f32 / numu as f32
+            let o = i * (NUMU + 1) + j;
+            let u = two_pi * j as f32 / NUMU as f32;
+            let v = if distance_bands {
+                -two_pi * i as f32 / NUMV as f32
             } else {
-                -two_pi * j as f32 / numu as f32
+                two_pi * i as f32 / NUMV as f32
             };
-            let v = two_pi * i as f32 / NUMV as f32;
             if this.change_colors && per_vertex {
                 let c = this.color(this.angle_at(u, v), &color_mat);
                 this.col[o] = c;
             }
-            let (xx, xxu, xxv) = surface(u, v, d, this.g, oz);
+            let (xx, xxu, xxv) = surface(u, v, db, dl, oz);
             let p = apply(&mat, xx);
             let pu = apply(&mat, xxu);
             let pv = apply(&mat, xxv);
@@ -711,21 +719,20 @@ impl Hack3d for RomanBoy {
             this.pnorm[o] = n;
         };
 
-        if self.appearance != Appearance::DirectionBands {
+        if distance_bands {
             for i in 0..=NUMV {
-                if self.appearance == Appearance::DistanceBands
-                    && (i & (NUMB - 1)) > NUMB / 4
-                    && (i & (NUMB - 1)) < 3 * NUMB / 4
-                {
+                if (i & (NUMBDIST - 1)) > NUMBDIST / 4 && (i & (NUMBDIST - 1)) < 3 * NUMBDIST / 4 {
                     continue;
                 }
-                for j in 0..=numu {
+                for j in 0..=NUMU {
                     point(self, i, j);
                 }
             }
         } else {
-            for j in 0..=numu {
-                if (j & (NUMB - 1)) > NUMB / 2 {
+            for j in 0..=NUMU {
+                if self.appearance == Appearance::DirectionBands
+                    && (j & (NUMBDIR - 1)) > NUMBDIR / 2
+                {
                     continue;
                 }
                 for i in 0..=NUMV {
@@ -770,32 +777,31 @@ impl Hack3d for RomanBoy {
             g.glx.end();
         };
 
-        let mut strip: Vec<usize> = Vec::with_capacity(2 * (numu + 1));
-        if self.appearance != Appearance::DirectionBands {
+        let mut strip: Vec<usize> = Vec::with_capacity(2 * (NUMU + 1));
+        if distance_bands {
             for i in 0..NUMV {
-                if self.appearance == Appearance::DistanceBands
-                    && (i & (NUMB - 1)) >= NUMB / 4
-                    && (i & (NUMB - 1)) < 3 * NUMB / 4
-                {
+                if (i & (NUMBDIST - 1)) >= NUMBDIST / 4 && (i & (NUMBDIST - 1)) < 3 * NUMBDIST / 4 {
                     continue;
                 }
                 strip.clear();
-                for j in 0..=numu {
+                for j in 0..=NUMU {
                     for k in 0..=1 {
-                        strip.push((i + k) * (numu + 1) + j);
+                        strip.push((i + k) * (NUMU + 1) + j);
                     }
                 }
                 emit(g, &strip);
             }
         } else {
-            for j in 0..numu {
-                if (j & (NUMB - 1)) >= NUMB / 2 {
+            for j in 0..NUMU {
+                if self.appearance == Appearance::DirectionBands
+                    && (j & (NUMBDIR - 1)) >= NUMBDIR / 2
+                {
                     continue;
                 }
                 strip.clear();
                 for i in 0..=NUMV {
                     for k in 0..=1 {
-                        strip.push(i * (numu + 1) + j + k);
+                        strip.push(i * (NUMU + 1) + j + k);
                     }
                 }
                 emit(g, &strip);
@@ -814,7 +820,7 @@ const DEFAULTS: &[&str] = &[
     "*colors:        random",
     "*viewMode:      random",
     "*marks:         False",
-    "*changeColors:  False",
+    "*changeColors:  True",
     "*deform:        True",
     "*projection:    random",
     "*speedx:        1.1",
@@ -823,8 +829,7 @@ const DEFAULTS: &[&str] = &[
     "*walkDirection: 83.0",
     "*walkSpeed:     20.0",
     "*deformSpeed:   10.0",
-    "*initDeform:    1000.0",
-    "*surfaceOrder:  3",
+    "*initDeform:    0.0",
 ];
 
 const MODES: &[SelectItem] = &[
@@ -921,17 +926,8 @@ const PROJ: &[SelectItem] = &[
 const OPTS: &[Opt] = &[
     Opt::slider("delay", "Frame rate", 0.0, 100_000.0, 1000.0, 0, "25000").inverted(),
     Opt::select("viewMode", "View mode", VIEW_MODES, "random"),
-    Opt::slider(
-        "surfaceOrder",
-        "Order of the surface",
-        2.0,
-        9.0,
-        1.0,
-        0,
-        "3",
-    ),
     Opt::boolean("marks", "Show orientation marks", "false"),
-    Opt::boolean("deform", "Deform the projective plane", "true"),
+    Opt::boolean("deform", "Deform the Klein bottle", "true"),
     Opt::slider(
         "deformSpeed",
         "Deformation speed",
@@ -945,16 +941,16 @@ const OPTS: &[Opt] = &[
         "initDeform",
         "Initial deformation",
         0.0,
-        1000.0,
+        4000.0,
         1.0,
         0,
-        "1000.0",
+        "0.0",
     ),
     Opt::select("mode", "Display mode", MODES, "random"),
     Opt::select("appearance", "Appearance", APPEARANCES, "random"),
     Opt::select("colors", "Colors", COLOR_MODES, "random"),
     Opt::select("projection", "Projection", PROJ, "random"),
-    Opt::boolean("changeColors", "Change colors", "false"),
+    Opt::boolean("changeColors", "Change colors", "true"),
     Opt::slider("speedx", "X rotation speed", -4.0, 4.0, 0.1, 1, "1.1"),
     Opt::slider("speedy", "Y rotation speed", -4.0, 4.0, 0.1, 1, "1.3"),
     Opt::slider("speedz", "Z rotation speed", -4.0, 4.0, 0.1, 1, "1.5"),
@@ -971,16 +967,16 @@ const OPTS: &[Opt] = &[
 ];
 
 pub static DEF: SaverDef = SaverDef {
-    slug: "romanboy",
-    label: "Roman Boy",
+    slug: "etruscanvenus",
+    label: "Etruscan Venus",
     defaults: DEFAULTS,
     opts: OPTS,
     about: About {
         author: "Carsten Steger",
-        year: "2013",
-        video: Some("https://www.youtube.com/watch?v=KEW5TuPbWyg"),
-        blurb: "A 3d immersion of the real projective plane that deforms \
-                between the Roman surface and the Boy surface.",
+        year: "2020",
+        video: Some("https://www.youtube.com/watch?v=p3MgGyie6-I"),
+        blurb: "A 3d immersion of a Klein bottle that deforms between the \
+                Etruscan Venus, Roman, Boy and Ida surfaces.",
     },
 };
 
@@ -996,93 +992,113 @@ pub static SAVER: Saver3d = Saver3d { def: &DEF, start };
 mod tests {
     use super::*;
 
-    /// At deformation zero the surface is Steiner's Roman surface, whose
-    /// three double lines meet at the origin: the point at v = 0 and the point
-    /// half a turn away in u land on top of each other.
+    /// The four corners of the deformation square are the four named
+    /// surfaces, and the tour visits each of them exactly once.
     #[test]
-    fn the_roman_surface_crosses_itself() {
-        let g = 3;
-        let oz = 0.5;
-        let (a, _, _) = surface(0.0, 0.0, 0.0, g, oz);
-        let (b, _, _) = surface(std::f32::consts::PI, 0.0, 0.0, g, oz);
-        let dist: f32 = (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt();
-        assert!(dist < 1e-5, "the two sheets are {dist} apart, not touching");
+    fn the_loop_passes_through_four_surfaces_and_closes() {
+        let corners: Vec<(f32, f32)> = (0..4)
+            .map(|k| {
+                let (db, dl, _, _) = deformation(k as f32);
+                (db, dl)
+            })
+            .collect();
+        assert_eq!(
+            corners,
+            vec![(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)],
+            "the tour is not the square"
+        );
+        let (a, b, _, _) = deformation(0.0);
+        let (c, d, _, _) = deformation(4.0 - 1e-6);
+        assert!(
+            (a - c).abs() < 1e-3 && (b - d).abs() < 1e-3,
+            "the loop does not close"
+        );
     }
 
     #[test]
-    fn the_deformation_stays_within_the_view() {
-        // The surface is scaled by 1/r as it deforms, so it should not grow
-        // out of the frustum on the way from Boy to Roman.
-        for step in 0..=10 {
+    fn the_surface_is_a_klein_bottle() {
+        // Going a full turn round u comes back to the same points, but
+        // traversed the other way in v, which is the Klein bottle's gluing.
+        let two_pi = 2.0 * std::f32::consts::PI;
+        let (db, dl, oz, _) = deformation(1.5);
+        for v in [0.4f32, 2.0, 5.1] {
+            let (a, _, _) = surface(0.0, v, db, dl, oz);
+            let (b, _, _) = surface(two_pi, two_pi - v, db, dl, oz);
+            let dist: f32 = (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt();
+            assert!(dist < 1e-4, "at v={v} the ends are {dist} apart");
+        }
+    }
+
+    #[test]
+    fn the_fitted_scale_keeps_it_on_screen() {
+        // The whole point of the fitted radius and centre is that no stage of
+        // the deformation grows out of the frustum.
+        for step in 0..40 {
             let dd = step as f32 / 10.0;
-            let d = ((6.0 * dd - 15.0) * dd + 10.0) * dd * dd * dd;
-            let r = 1.0 + d * d * (1.0 / 2.0 + d * d * (1.0 / 6.0 + d * d * (1.0 / 3.0)));
-            let (radius, oz) = (1.0 / r, 0.5 * r);
+            let (db, dl, oz, radius) = deformation(dd);
             let mut max = 0.0f32;
-            for i in 0..=32 {
-                for j in 0..=32 {
+            for i in 0..=24 {
+                for j in 0..=24 {
                     let two_pi = 2.0 * std::f32::consts::PI;
-                    let u = two_pi * j as f32 / 32.0;
-                    let v = two_pi * i as f32 / 32.0;
-                    let (x, _, _) = surface(u, v, d, 3, oz);
+                    let (u, v) = (two_pi * j as f32 / 24.0, two_pi * i as f32 / 24.0);
+                    let (x, _, _) = surface(u, v, db, dl, oz);
                     for c in x {
                         max = max.max((c * radius).abs());
                     }
                 }
             }
-            assert!(max < 1.0, "at deformation {dd} the surface reaches {max}");
+            assert!(max < 1.2, "at {dd} the surface reaches {max}");
         }
     }
 
     #[test]
-    fn the_order_of_the_surface_sets_how_many_petals_it_has() {
-        // Order g repeats every 2pi/g turn in u, up to the fold in v.
-        for g in [3usize, 5, 7] {
-            let two_pi = 2.0 * std::f32::consts::PI;
-            let (a, _, _) = surface(0.7, 1.3, 1.0, g, 0.5);
-            let (b, _, _) = surface(0.7 + two_pi / g as f32, 1.3, 1.0, g, 0.5);
-            let dist: f32 = (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt();
-            assert!(dist > 0.05, "order {g} repeats too soon: {dist}");
-        }
-    }
-
-    #[test]
-    fn every_mesh_point_gets_a_normal() {
-        let mut r = start(StartArgs::new(
-            640,
-            480,
-            "mode=surface&viewMode=turn&colors=distance&appearance=solid",
-            20260811,
-        ));
-        for _ in 0..60 {
+    fn the_bands_leave_out_the_parts_they_should() {
+        let strips = |query: &str| {
+            let mut r = start(StartArgs::new(640, 480, query, 20260811));
             r.step();
-        }
-        let f = r.frame();
-        assert!(
-            f.vertices
+            r.frame()
+                .batches
                 .iter()
-                .all(|v| v.normal.iter().all(|c| c.is_finite())),
-            "a normal went to NaN at the poles"
+                .filter(|b| b.primitive == crate::runtime::gl::Primitive::TriangleStrip)
+                .count()
+        };
+        assert_eq!(
+            strips("mode=surface&viewMode=turn&appearance=solid&deform=false"),
+            NUMU,
+            "the solid surface is one strip per column"
         );
-        assert_eq!(f.batches.len(), NUMV, "one strip per row of the mesh");
+        // Direction bands keep half of every group of eight columns.
+        assert_eq!(
+            strips("mode=surface&viewMode=turn&appearance=direction-bands&deform=false"),
+            NUMU / 2
+        );
+        // Distance bands run the other way and keep half of every four rows.
+        assert_eq!(
+            strips("mode=surface&viewMode=turn&appearance=distance-bands&deform=false"),
+            NUMV / 2
+        );
     }
 
     #[test]
-    fn walking_stays_on_the_surface() {
+    fn walking_survives_the_pinch_points() {
+        // The Roman and Boy stages have points where the normal is undefined;
+        // the walker has to cross them without producing a NaN.
         let mut r = start(StartArgs::new(
             640,
             480,
-            "mode=surface&viewMode=walk&colors=direction&appearance=solid&deform=false",
+            "mode=surface&viewMode=walk&colors=direction&appearance=solid&deformSpeed=100",
             20260811,
         ));
         for _ in 0..200 {
             r.step();
+            let f = r.frame();
             assert!(
-                r.frame()
-                    .vertices
+                f.vertices.iter().all(|v| v
+                    .pos
                     .iter()
-                    .all(|v| v.pos.iter().all(|c| c.is_finite())),
-                "a vertex went to NaN"
+                    .chain(v.normal.iter())
+                    .all(|c| c.is_finite())),
+                "a vertex or normal went to NaN"
             );
         }
     }

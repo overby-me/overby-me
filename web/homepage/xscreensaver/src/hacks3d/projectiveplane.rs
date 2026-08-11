@@ -558,7 +558,7 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
     this.texture = g.glx.gen_texture();
     g.glx.bind_texture(this.texture);
     let gray = crate::images::CURLICUE;
-    let rgba: Vec<u8> = gray.iter().flat_map(|&v| [255, 255, 255, v]).collect();
+    let rgba: Vec<u8> = gray.iter().flat_map(|&v| [v, v, v, 255]).collect();
     g.glx
         .tex_image_2d(TEX_DIMENSION as i32, TEX_DIMENSION as i32, rgba);
 

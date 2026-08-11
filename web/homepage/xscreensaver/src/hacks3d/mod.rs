@@ -36,6 +36,7 @@ pub mod dangerball;
 pub mod discoball;
 pub mod energystream;
 pub mod engine;
+pub mod etruscanvenus;
 pub mod gears;
 pub mod geodesic;
 pub mod glblur;
@@ -98,6 +99,7 @@ pub static ALL: &[&Saver3d] = &[
     &discoball::SAVER,
     &energystream::SAVER,
     &engine::SAVER,
+    &etruscanvenus::SAVER,
     &gears::SAVER,
     &geodesic::SAVER,
     &glblur::SAVER,
