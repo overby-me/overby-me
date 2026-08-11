@@ -25,11 +25,14 @@ pub mod delaunay;
 pub mod erase;
 pub mod fb;
 pub mod font;
+pub mod gl;
+pub mod hack3d;
 pub mod image;
 pub mod jpeg;
 pub mod opts;
 pub mod png;
 pub mod rand;
+pub mod rotator;
 pub mod spline;
 pub mod text;
 pub mod tty;
@@ -37,9 +40,11 @@ pub mod xlockmore;
 
 pub use color::{Pixel, XColor};
 pub use fb::{Fb, GXFunc, Gc, Pixmap, XArc, XImage, XPoint, XRectangle, XSegment};
+pub use hack3d::{Gl, Hack3d, Runner3d};
 pub use image::ImageLoad;
 pub use opts::{Opt, OptKind, Resources, SelectItem};
 pub use rand::{frand, random, random_below, ya_rand_init};
+pub use rotator::{Rotator, Trackball};
 
 /// An input event, reduced to what the hacks actually look at.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -350,6 +355,14 @@ pub struct SaverDef {
 pub struct Saver {
     pub def: &'static SaverDef,
     pub start: fn(StartArgs) -> Runner,
+}
+
+/// The same, for a saver that draws with OpenGL rather than into a
+/// framebuffer.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct Saver3d {
+    pub def: &'static SaverDef,
+    pub start: fn(StartArgs) -> Runner3d,
 }
 
 /// The most frames [`Runner::tick`] will draw for one call, however far behind

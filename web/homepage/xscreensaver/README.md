@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (1) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -18,7 +18,7 @@ savers.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
-a 6502 with an assembler.
+a 6502 with an assembler. The OpenGL tier has started; see below.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -367,6 +367,48 @@ white, and that is indistinguishable from a saver that drew nothing. The
 earlier approach, `chromium --screenshot` with `--virtual-time-budget`, is worse
 than useless here — it starves the animation loop, so it reports a black canvas
 for shaders that render fine, and a *different* set of them each run.
+
+## The OpenGL tier
+
+The 136 remaining savers are written against OpenGL 1.3: a matrix stack, a
+fixed-function pipeline, and `glBegin`/`glVertex`/`glEnd`. None of that survived
+into OpenGL ES 2, so none of it is in WebGL. Upstream hit this first, porting to
+iOS and Android, and answered it with `jwzgles.c`, which implements the old
+calls in terms of the new. `runtime::gl` is the same answer with one change:
+`jwzgles.c` *is* a GL binding and makes GL calls as it goes, and this records
+instead. A frame comes out as a `Frame` of vertices plus the batches that say
+what to draw and under which matrix, and `../src/pages/gl3d.rs` hands that to
+WebGL2.
+
+The indirection buys two things. The savers stay testable with no browser and
+no GPU, which is what the whole 2D tier is built on: `hacks3d`'s tests check
+that a saver emits geometry, that the geometry lands inside the clip volume,
+that it moves, and that it is the same for the same seed. And the batching is
+free, because `glBegin`/`glEnd` around three vertices is an append to a `Vec`
+here rather than the driver round trip it used to be.
+
+What is implemented so far is what the ported savers need, and it grows with
+them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum` and
+`gluPerspective`, `glBegin` through `glEnd` for every primitive (quads and
+polygons are cut into triangles as the block closes, since ES has no such
+thing), per-vertex colour and normals, point size, and display lists. Lighting
+and texturing are not there yet; both are fixed-function state, so both will
+land as a uniform and a branch in the one shader pair.
+
+Two helpers came with the tier because nearly every saver in it uses them, and
+they are in `runtime::rotator`: the `rotator`, which is what turns an object
+over on its own without ever quite repeating, and the `gltrackball`, which is
+the SGI virtual trackball from 1993, deforming from a sphere into a hyperbolic
+sheet away from the centre so that a drag near the edge spins rather than
+tumbles.
+
+A display list records commands rather than results, which matters: `glCallList`
+runs it under whatever matrix is current at the time, so a saver that compiles
+one lattice and draws it from a new angle every frame, which is exactly what
+`cubicgrid` does, gets a new picture out of the same list.
+
+These cannot be rendered with `just shot` either. Use `test-browser.nu`, as for
+the Shadertoy tier.
 
 ## Licence
 

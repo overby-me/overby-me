@@ -27,11 +27,13 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::{Runner, StartArgs};
 use xscreensaver::shadertoy::Shadertoy;
 
 type RunnerFuture = Pin<Box<dyn Future<Output = Option<Runner>>>>;
 type ShadertoyFuture = Pin<Box<dyn Future<Output = Option<Shadertoy>>>>;
+type Runner3dFuture = Pin<Box<dyn Future<Output = Option<Runner3d>>>>;
 
 /// Which engine a saver needs, and how to start it.
 ///
@@ -40,12 +42,16 @@ type ShadertoyFuture = Pin<Box<dyn Future<Output = Option<Shadertoy>>>>;
 /// after a settings change costs nothing extra. `None` if the chunk could not
 /// be fetched.
 ///
-/// The two arms cannot be collapsed: a canvas has one context for its lifetime,
-/// so the stage has to know before it mounts whether it is going to be
-/// rasterising into a 2D context or handing fragments to WebGL2.
+/// The arms cannot be collapsed: a canvas has one context for its lifetime, so
+/// the stage has to know before it mounts whether it is going to be rasterising
+/// into a 2D context or handing geometry or fragments to WebGL2. The two GL
+/// arms are separate for a smaller reason, that they want different context
+/// options and a different shader.
 pub enum Start {
     /// A 2D hack, drawing into a software framebuffer.
     Fb(fn(StartArgs) -> RunnerFuture),
+    /// An OpenGL saver, drawing vertex batches.
+    Gl3d(fn(StartArgs) -> Runner3dFuture),
     /// A Shadertoy program, drawing as a fragment shader.
     Gl(fn(StartArgs) -> ShadertoyFuture),
 }
@@ -85,6 +91,33 @@ macro_rules! saver {
 
         #[cfg(not(feature = "split"))]
         fn $load(args: StartArgs) -> RunnerFuture {
+            Box::pin(async { Some($body(args)) })
+        }
+    };
+}
+
+/// The same, for an OpenGL saver.
+macro_rules! gl3d_saver {
+    ($slug:literal, $body:ident, $load:ident, $path:path) => {
+        fn $body(args: StartArgs) -> Runner3d {
+            $path(args)
+        }
+
+        #[cfg(feature = "split")]
+        fn $load(args: StartArgs) -> Runner3dFuture {
+            Box::pin(async {
+                static MODULE: wasm_split::LazyLoader<StartArgs, Runner3d> =
+            wasm_split::lazy_loader!(extern $slug fn $body(props: StartArgs) -> Runner3d);
+                if MODULE.load().await {
+                    MODULE.call(args).ok()
+                } else {
+                    None
+                }
+            })
+        }
+
+        #[cfg(not(feature = "split"))]
+        fn $load(args: StartArgs) -> Runner3dFuture {
             Box::pin(async { Some($body(args)) })
         }
     };
@@ -972,6 +1005,12 @@ saver!(
     xscreensaver::hacks2d::xspirograph::start
 );
 
+gl3d_saver!(
+    "cubicgrid",
+    cubicgrid_body,
+    cubicgrid_start,
+    xscreensaver::hacks3d::cubicgrid::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1865,6 +1904,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "cubicgrid",
+        label: "Cubic Grid",
+        start: Start::Gl3d(cubicgrid_start),
     },
     Entry {
         slug: "alienbeacon",

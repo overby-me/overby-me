@@ -24,6 +24,9 @@ extend-ignore-re = [
   "[Oo]rignal",
   "10ths",
   "chuncks",
+  # rotator.c's own name for its wander function.
+  "SINOID",
+  "sinoid",
   "descrete",
   "resoources",
   "distrubtable",

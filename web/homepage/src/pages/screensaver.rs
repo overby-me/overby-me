@@ -27,6 +27,7 @@ use xscreensaver::runtime::{OptKind, Runner, StartArgs, XEvent, XImage};
 use crate::Route;
 use crate::images::{self, Source};
 use crate::pages::gl::GlEngine;
+use crate::pages::gl3d::Gl3dEngine;
 use crate::pages::savers::{self, Start};
 use crate::pages::ui::{Choice, Details, Slider, Toggle};
 use crate::url::{captured_query, replace_query};
@@ -61,6 +62,8 @@ struct FbEngine {
 enum Engine {
     /// A 2D hack: a software framebuffer, blitted with `putImageData`.
     Fb(Box<FbEngine>),
+    /// An OpenGL saver: vertex batches, drawn by WebGL2.
+    Gl3d(Box<Gl3dEngine>),
     /// A Shadertoy program, drawn by WebGL2.
     Gl(Box<GlEngine>),
 }
@@ -94,6 +97,7 @@ impl Host {
     fn def(&self) -> &'static SaverDef {
         match &self.engine {
             Engine::Fb(fb) => fb.runner.def(),
+            Engine::Gl3d(gl) => gl.def(),
             Engine::Gl(gl) => gl.def(),
         }
     }
@@ -132,6 +136,7 @@ impl Host {
         self.canvas.set_height(h as u32);
         match &mut self.engine {
             Engine::Fb(fb) => fb.runner.resize(w, h),
+            Engine::Gl3d(gl) => gl.resize(w, h),
             Engine::Gl(gl) => gl.resize(w, h),
         }
     }
@@ -145,8 +150,13 @@ impl Host {
                 }
                 self.blit();
             }
-            // Nothing to blit: the shader wrote to the canvas itself. A paused
-            // one simply is not drawn, and the last frame stays up.
+            // Nothing to blit: GL wrote to the canvas itself. A paused one
+            // simply is not drawn, and the last frame stays up.
+            Engine::Gl3d(gl) => {
+                if !self.paused {
+                    gl.draw(now);
+                }
+            }
             Engine::Gl(gl) => {
                 if !self.paused {
                     gl.draw(now);
@@ -160,6 +170,9 @@ impl Host {
             Engine::Fb(fb) => {
                 fb.runner.event(event);
             }
+            Engine::Gl3d(gl) => {
+                gl.event(&event);
+            }
             Engine::Gl(gl) => {
                 gl.event(&event);
             }
@@ -171,6 +184,7 @@ impl Host {
     fn wants_image(&mut self) -> bool {
         match &mut self.engine {
             Engine::Fb(fb) => fb.runner.dpy.take_image_request(),
+            Engine::Gl3d(_) => false,
             Engine::Gl(_) => false,
         }
     }
@@ -184,6 +198,7 @@ impl Host {
     fn image_title(&self) -> Option<String> {
         match &self.engine {
             Engine::Fb(fb) => fb.runner.dpy.image_title().map(str::to_string),
+            Engine::Gl3d(_) => None,
             Engine::Gl(_) => None,
         }
     }
@@ -436,6 +451,15 @@ fn SaverStage(slug: String) -> Element {
                         fb.runner = runner;
                     }
                 }
+                Start::Gl3d(start) => {
+                    let Some(runner) = start(args).await else {
+                        return;
+                    };
+                    let mut h = h.borrow_mut();
+                    if let Engine::Gl3d(gl) = &mut h.engine {
+                        gl.restart(runner);
+                    }
+                }
                 Start::Gl(start) => {
                     let Some(st) = start(args).await else { return };
                     let mut h = h.borrow_mut();
@@ -486,6 +510,10 @@ fn SaverStage(slug: String) -> Element {
                             _ => None,
                         }
                     }
+                    Start::Gl3d(start) => start(args)
+                        .await
+                        .and_then(|runner| Gl3dEngine::new(&canvas, runner))
+                        .map(|gl| Engine::Gl3d(Box::new(gl))),
                     Start::Gl(start) => start(args)
                         .await
                         .and_then(|st| GlEngine::new(&canvas, st))

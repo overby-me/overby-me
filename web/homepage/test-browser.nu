@@ -194,7 +194,8 @@ def main [
          hexplasma logarithmiccircles neongravity neontriangulator noxfire
          prococean protophore rigrekt selfreflect skyline stardome starnest
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
-         universeball]
+         universeball
+         cubicgrid]
     } else if $slug != null {
         [$slug]
     } else {

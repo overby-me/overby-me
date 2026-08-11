@@ -1,6 +1,7 @@
 mod atproto;
 mod cardioid;
 mod gl;
+mod gl3d;
 mod index;
 pub mod savers;
 mod screensaver;
