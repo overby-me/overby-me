@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (73) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (74) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -488,6 +488,12 @@ around forty thousand batches a frame. `deepstars` makes its star trails by
 redrawing the whole sky up to four hundred times a frame at descending alpha,
 which is free when the stars live on the card and is eight million points when
 they do not. Measure before starting one of the crowded ones.
+
+A saver whose crowd is a *setting* can keep its code and lower the setting
+instead. `winduprobot` draws twenty-five robots of sixty-three thousand
+vertices each, which is 1.6 million a frame; its default here is five, which
+comes to the same 334k `beats` draws, and its slider still goes to a hundred.
+Say so in the saver's own comment when you do this, with the measurement.
 
 One shape of expensive frame has a way out. A saver that billboards sprites
 takes the modelview matrix, forces its rotation to the identity and loads that

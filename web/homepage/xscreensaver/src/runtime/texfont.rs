@@ -219,6 +219,13 @@ impl TexFont {
         let (cw, ch) = (self.cell_w as f32, self.cell_h as f32);
         let (asc, desc) = (self.ascent() as f32, self.descent() as f32);
 
+        // The glyph quads are wound counter-clockwise, and upstream says so
+        // rather than assuming it: a caller that has just drawn something of
+        // its own the other way round would otherwise have every letter
+        // culled. `winduprobot` draws its word bubble clockwise and then the
+        // words inside it.
+        let front = g.front_face_cw_set();
+        g.front_face_cw(false);
         g.texturing(true);
         g.bind_texture(self.texture);
         g.begin(Shape::Quads);
@@ -251,6 +258,7 @@ impl TexFont {
         }
         g.end();
         g.texturing(false);
+        g.front_face_cw(front);
     }
 
     /// `print_texture_label`: draw the string over the window at a fixed place,

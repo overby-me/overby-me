@@ -91,6 +91,8 @@ pub mod tronbit;
 pub mod unknownpleasures;
 pub mod vigilance;
 pub mod voronoi;
+pub mod winduprobot;
+mod winduprobot_wobble;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
 /// the reason [`crate::all`] gives.
@@ -128,6 +130,7 @@ pub static ALL: &[&Saver3d] = &[
     &headroom::SAVER,
     &highvoltage::SAVER,
     &hexstrut::SAVER,
+    &winduprobot::SAVER,
     &glsnake::SAVER,
     &gravitywell::SAVER,
     &hextrail::SAVER,

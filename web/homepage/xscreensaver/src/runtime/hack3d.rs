@@ -27,6 +27,10 @@ pub struct Gl {
     /// What the local time was when the saver started, in seconds since
     /// midnight. Zero unless the host said otherwise.
     wall_clock_base: f64,
+    /// The words a saver reads, the same channel [`crate::runtime::Dpy`]
+    /// carries: `winduprobot` puts them in a word bubble over a robot. With no
+    /// host pushing text in, the compiled-in passage is served.
+    words: super::text::TextChannel,
 }
 
 /// Seconds in a day, which is the period [`Gl::wall_clock`] wraps on.
@@ -47,6 +51,18 @@ impl Gl {
     /// from its seed and a run with no host simply starts at midnight.
     pub fn wall_clock(&self) -> f64 {
         (self.wall_clock_base + self.time).rem_euclid(DAY)
+    }
+
+    /// `textclient_getc`: the next character of the text this saver is
+    /// reading, or `None` if there is none to be had this instant.
+    pub fn text_getc(&mut self) -> Option<u8> {
+        self.words.getc()
+    }
+
+    /// `textclient_reshape`: how wide the page is now, so the source can wrap
+    /// to it.
+    pub fn text_reshape(&mut self, columns: i32, max_lines: i32) {
+        self.words.reshape(columns, max_lines);
     }
 }
 
@@ -95,6 +111,7 @@ impl Runner3d {
             height: args.height.max(1),
             mono_p: false,
             wall_clock_base: args.wall_clock,
+            words: super::text::TextChannel::default(),
         };
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);

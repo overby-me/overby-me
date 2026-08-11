@@ -155,3 +155,15 @@ pub const HIGHVOLTAGE_MODEL_TOWER_J_CABLES: &str =
     include_str!("../models/highvoltage_model_tower_j_cables.gllist");
 pub const HIGHVOLTAGE_MODEL_TOWER_J_CONNECTIONS: &str =
     include_str!("../models/highvoltage_model_tower_j_connections.gllist");
+
+/// The wind-up robot `winduprobot` draws, modelled in Maya from the toy jwz
+/// has had since he was six.
+pub const ROBOT_ARM_HALF: &str = include_str!("../models/robot_arm_half.gllist");
+pub const ROBOT_BODY_HALF_INSIDE: &str = include_str!("../models/robot_body_half_inside.gllist");
+pub const ROBOT_BODY_HALF_OUTSIDE: &str = include_str!("../models/robot_body_half_outside.gllist");
+pub const ROBOT_CRANK_FULL: &str = include_str!("../models/robot_crank_full.gllist");
+pub const ROBOT_GEARBOX_HALF: &str = include_str!("../models/robot_gearbox_half.gllist");
+pub const ROBOT_HAND_HALF: &str = include_str!("../models/robot_hand_half.gllist");
+pub const ROBOT_LEG_HALF: &str = include_str!("../models/robot_leg_half.gllist");
+pub const ROBOT_ROTATOR_HALF: &str = include_str!("../models/robot_rotator_half.gllist");
+pub const ROBOT_WIREFRAME: &str = include_str!("../models/robot_wireframe.gllist");

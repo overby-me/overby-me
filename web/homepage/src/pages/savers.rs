@@ -1024,6 +1024,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::highvoltage::start
 );
 gl3d_saver!(
+    "winduprobot",
+    winduprobot_body,
+    winduprobot_start,
+    xscreensaver::hacks3d::winduprobot::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2486,6 +2492,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "highvoltage",
         label: "High Voltage",
         start: Start::Gl3d(highvoltage_start),
+    },
+    Entry {
+        slug: "winduprobot",
+        label: "Windup Robot",
+        start: Start::Gl3d(winduprobot_start),
     },
     Entry {
         slug: "hexstrut",

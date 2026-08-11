@@ -854,6 +854,12 @@ impl Glx {
         self.front_face_cw = cw;
     }
 
+    /// `glGetIntegerv (GL_FRONT_FACE, ..)`, for code that has to set the
+    /// winding for its own geometry and put the caller's back afterwards.
+    pub fn front_face_cw_set(&self) -> bool {
+        self.front_face_cw
+    }
+
     /// `glEnable(GL_CULL_FACE)`.
     pub fn cull_face(&mut self, on: bool) {
         self.cull_face = on;
@@ -1283,6 +1289,13 @@ impl Glx {
 
     fn projection(&self) -> Mat4 {
         self.projection.last().copied().unwrap_or(Mat4::IDENTITY)
+    }
+
+    /// `glGetFloatv (GL_PROJECTION_MATRIX, ..)`. With the modelview, this is
+    /// what a saver needs to work out `gluProject` for itself: `winduprobot`
+    /// depth sorts its robots that way.
+    pub fn projection_matrix(&self) -> Mat4 {
+        self.projection()
     }
 
     /* Display lists */
