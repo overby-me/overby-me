@@ -931,6 +931,16 @@ impl Glx {
         self.material.back_ambient_diffuse = rgba;
     }
 
+    /// `glMaterialfv (GL_FRONT_AND_BACK, GL_AMBIENT, ..)`, and only the
+    /// ambient: the diffuse stays where it was. `kallisti` is the saver that
+    /// wants the two to be different colours, because gold is dark where the
+    /// light does not reach it and bright where it does.
+    pub fn material_ambient(&mut self, rgba: [f32; 4]) {
+        self.split_block();
+        self.material.ambient = rgba;
+        self.material.back_ambient = rgba;
+    }
+
     /// `glMaterialfv (GL_BACK, GL_AMBIENT_AND_DIFFUSE, ..)`: the inside of a
     /// surface, for a saver that wants it a different colour from the outside.
     /// Set it after the front, which sets both.

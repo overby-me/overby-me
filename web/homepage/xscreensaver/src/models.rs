@@ -74,3 +74,6 @@ pub const COW_HOOFS: &str = include_str!("../models/cow_hoofs.gllist");
 pub const COW_HORNS: &str = include_str!("../models/cow_horns.gllist");
 pub const COW_TAIL: &str = include_str!("../models/cow_tail.gllist");
 pub const COW_UDDER: &str = include_str!("../models/cow_udder.gllist");
+
+/// The golden apple of `kallisti`, twenty-eight thousand vertices of it.
+pub const KALLISTI_MODEL: &str = include_str!("../models/kallisti_model.gllist");

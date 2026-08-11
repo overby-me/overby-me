@@ -55,6 +55,7 @@ pub mod hydrostat;
 pub mod hypertorus;
 pub mod hypnowheel;
 pub mod kaleidocycle;
+pub mod kallisti;
 pub mod klein;
 pub mod lockward;
 pub mod menger;
@@ -128,6 +129,7 @@ pub static ALL: &[&Saver3d] = &[
     &hydrostat::SAVER,
     &hypertorus::SAVER,
     &kaleidocycle::SAVER,
+    &kallisti::SAVER,
     &klein::SAVER,
     &lockward::SAVER,
     &menger::SAVER,

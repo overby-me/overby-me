@@ -1186,6 +1186,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::quasicrystal::start
 );
 gl3d_saver!(
+    "kallisti",
+    kallisti_body,
+    kallisti_start,
+    xscreensaver::hacks3d::kallisti::start
+);
+gl3d_saver!(
     "klein",
     klein_body,
     klein_start,
@@ -2472,6 +2478,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "kaleidocycle",
         label: "Kaleidocycle",
         start: Start::Gl3d(kaleidocycle_start),
+    },
+    Entry {
+        slug: "kallisti",
+        label: "Kallisti",
+        start: Start::Gl3d(kallisti_start),
     },
     Entry {
         slug: "klein",
