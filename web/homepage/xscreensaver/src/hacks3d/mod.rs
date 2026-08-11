@@ -24,6 +24,7 @@ pub mod hexstrut;
 pub mod hypnowheel;
 pub mod menger;
 pub mod sierpinski3d;
+pub mod voronoi;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
 /// the reason [`crate::all`] gives.
@@ -35,6 +36,7 @@ pub static ALL: &[&Saver3d] = &[
     &hexstrut::SAVER,
     &menger::SAVER,
     &sierpinski3d::SAVER,
+    &voronoi::SAVER,
 ];
 
 #[cfg(test)]

@@ -291,6 +291,9 @@ impl Gl3dEngine {
                 gl.disable(Gl::CULL_FACE);
             }
             gl.front_face(if batch.front_face_cw { Gl::CW } else { Gl::CCW });
+            if batch.clear_depth_first {
+                gl.clear(Gl::DEPTH_BUFFER_BIT);
+            }
             match batch.blend {
                 Blend::Off => gl.disable(Gl::BLEND),
                 Blend::Add => {

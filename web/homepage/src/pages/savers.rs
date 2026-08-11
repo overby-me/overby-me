@@ -1047,6 +1047,12 @@ gl3d_saver!(
     cubestorm_start,
     xscreensaver::hacks3d::cubestorm::start
 );
+gl3d_saver!(
+    "voronoi",
+    voronoi_body,
+    voronoi_start,
+    xscreensaver::hacks3d::voronoi::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1975,6 +1981,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sierpinski3d",
         label: "Sierpinski 3D",
         start: Start::Gl3d(sierpinski3d_start),
+    },
+    Entry {
+        slug: "voronoi",
+        label: "Voronoi",
+        start: Start::Gl3d(voronoi_start),
     },
     Entry {
         slug: "alienbeacon",

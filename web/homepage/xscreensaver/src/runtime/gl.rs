@@ -306,6 +306,10 @@ pub struct Batch {
     pub cull_face: bool,
     /// Which winding is the front of a face, `glFrontFace`.
     pub front_face_cw: bool,
+    /// Clear the depth buffer before drawing this batch, which is what a
+    /// mid-frame `glClear(GL_DEPTH_BUFFER_BIT)` means: everything after it
+    /// draws over everything before it, whatever the distances say.
+    pub clear_depth_first: bool,
     pub blend: Blend,
     pub point_size: f32,
     pub line_width: f32,
@@ -330,6 +334,7 @@ impl Batch {
             && self.material == other.material
             && self.cull_face == other.cull_face
             && self.front_face_cw == other.front_face_cw
+            && !other.clear_depth_first
             && self.blend == other.blend
     }
 }
@@ -390,6 +395,7 @@ pub struct Glx {
     material: Material,
     cull_face: bool,
     front_face_cw: bool,
+    clear_depth_pending: bool,
     blend: Blend,
     line_width: f32,
 
@@ -430,6 +436,7 @@ impl Glx {
             material: Material::default(),
             cull_face: false,
             front_face_cw: false,
+            clear_depth_pending: false,
             blend: Blend::Off,
             line_width: 1.0,
             shape: None,
@@ -587,6 +594,14 @@ impl Glx {
         if self.frame.clear.is_none() {
             self.frame.clear = Some([0.0, 0.0, 0.0, 1.0]);
         }
+    }
+
+    /// `glClear (GL_DEPTH_BUFFER_BIT)` partway through a frame, which is how a
+    /// saver says "whatever I draw next goes on top of all of that". It
+    /// attaches to the next block rather than happening now, because the
+    /// ordering is the whole point of it.
+    pub fn clear_depth(&mut self) {
+        self.clear_depth_pending = true;
     }
 
     pub fn point_size(&mut self, size: f32) {
@@ -782,6 +797,7 @@ impl Glx {
             material: self.material,
             cull_face: self.cull_face,
             front_face_cw: self.front_face_cw,
+            clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
             blend: self.blend,
             line_width: self.line_width,
         };
