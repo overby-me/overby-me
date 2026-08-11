@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (1) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (2) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -388,12 +388,18 @@ free, because `glBegin`/`glEnd` around three vertices is an append to a `Vec`
 here rather than the driver round trip it used to be.
 
 What is implemented so far is what the ported savers need, and it grows with
-them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum` and
-`gluPerspective`, `glBegin` through `glEnd` for every primitive (quads and
-polygons are cut into triangles as the block closes, since ES has no such
-thing), per-vertex colour and normals, point size, and display lists. Lighting
-and texturing are not there yet; both are fixed-function state, so both will
-land as a uniform and a branch in the one shader pair.
+them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
+`gluPerspective` and `gluLookAt`, `glBegin` through `glEnd` for every primitive
+(quads and polygons are cut into triangles as the block closes, since ES has no
+such thing), per-vertex colour and normals, point size, and the depth test.
+Lighting and texturing are not there yet; both are fixed-function state, so both
+will land as a uniform and a branch in the one shader pair.
+
+State that can differ between one `glBegin` block and the next rides on the
+batch rather than on the frame, which is what lets a saver turn the depth test
+off for one thing and leave it on for another. `hexstrut` needs exactly that:
+its sheet is flat and its struts overlap, so upstream turns depth testing off
+and lets them stack in the order they were drawn.
 
 Two helpers came with the tier because nearly every saver in it uses them, and
 they are in `runtime::rotator`: the `rotator`, which is what turns an object
