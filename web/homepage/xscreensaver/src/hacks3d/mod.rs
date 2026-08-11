@@ -34,6 +34,7 @@ pub mod cubetwist;
 pub mod cubicgrid;
 pub mod dangerball;
 pub mod discoball;
+pub mod dumpsterfire;
 pub mod energystream;
 pub mod engine;
 pub mod etruscanvenus;
@@ -102,6 +103,7 @@ pub static ALL: &[&Saver3d] = &[
     &cubestack::SAVER,
     &dangerball::SAVER,
     &discoball::SAVER,
+    &dumpsterfire::SAVER,
     &energystream::SAVER,
     &engine::SAVER,
     &etruscanvenus::SAVER,

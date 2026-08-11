@@ -30,3 +30,18 @@ pub const SHIPS_SHIP5: &str = include_str!("../models/ships_ship5.gllist");
 pub const SHIPS_SHIP6: &str = include_str!("../models/ships_ship6.gllist");
 pub const SHIPS_SHIP7: &str = include_str!("../models/ships_ship7.gllist");
 pub const SHIPS_SHIP8: &str = include_str!("../models/ships_ship8.gllist");
+
+/// The seven parts of `dumpsterfire`'s dumpster. Four of them are half the
+/// box, drawn again mirrored.
+pub const DUMPSTER_MODEL_AXLE: &str = include_str!("../models/dumpster_model_axle.gllist");
+pub const DUMPSTER_MODEL_FRAME_HALF: &str =
+    include_str!("../models/dumpster_model_frame_half.gllist");
+pub const DUMPSTER_MODEL_HINGES_HALF: &str =
+    include_str!("../models/dumpster_model_hinges_half.gllist");
+pub const DUMPSTER_MODEL_INSIDE_HALF: &str =
+    include_str!("../models/dumpster_model_inside_half.gllist");
+pub const DUMPSTER_MODEL_LID: &str = include_str!("../models/dumpster_model_lid.gllist");
+pub const DUMPSTER_MODEL_LID_PANELS: &str =
+    include_str!("../models/dumpster_model_lid_panels.gllist");
+pub const DUMPSTER_MODEL_PANELS_HALF: &str =
+    include_str!("../models/dumpster_model_panels_half.gllist");
