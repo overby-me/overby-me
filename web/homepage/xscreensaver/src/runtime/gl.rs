@@ -217,10 +217,9 @@ pub struct Vertex {
     pub uv: [f32; 2],
 }
 
-/// A texture, as the savers build them: a block of RGBA bytes and nothing
-/// else. Every one of them asks for `GL_LINEAR`, so that is not stored; if one
-/// ever wants something else, this is where it goes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A texture, as the savers build them: a block of RGBA bytes and the two
+/// parameters they disagree on.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Texture {
     pub width: i32,
     pub height: i32,
@@ -229,6 +228,12 @@ pub struct Texture {
     /// `GL_CLAMP_TO_EDGE` rather than `GL_REPEAT`, for a texture that is one
     /// picture rather than a tile.
     pub clamp: bool,
+    /// `GL_NEAREST` rather than `GL_LINEAR`, for one that wants its pixels.
+    pub nearest: bool,
+    /// Bumped every time the image is replaced. Most savers upload once and
+    /// never again; `cubenetic` rebuilds its texture every frame, and the host
+    /// uses this to know which is which.
+    pub generation: u32,
 }
 
 /// `glBlendFunc`, as the two pairs the savers actually pass it. More become
@@ -476,7 +481,7 @@ pub struct Glx {
     clear_color: [f32; 4],
     scene_ambient: [f32; 4],
     fog: Option<Fog>,
-    textures: Vec<Option<Texture>>,
+    textures: Vec<Texture>,
     bound_texture: Option<u32>,
     texturing: bool,
     tex_env: TexEnv,
@@ -869,9 +874,10 @@ impl Glx {
 
     /* Textures */
 
-    /// `glGenTextures(1, ..)`.
+    /// `glGenTextures(1, ..)`. The name exists at once; it has no image
+    /// until `tex_image_2d`, which is also OpenGL's rule.
     pub fn gen_texture(&mut self) -> u32 {
-        self.textures.push(None);
+        self.textures.push(Texture::default());
         self.textures.len() as u32
     }
 
@@ -884,26 +890,34 @@ impl Glx {
     /// nothing else: no mipmaps, no other formats, because no saver here asks
     /// for either.
     pub fn tex_image_2d(&mut self, width: i32, height: i32, data: Vec<u8>) {
-        self.tex_image_2d_wrapped(width, height, data, false);
-    }
-
-    /// The same, for a texture that should be clamped at its edges rather than
-    /// repeated.
-    pub fn tex_image_2d_clamped(&mut self, width: i32, height: i32, data: Vec<u8>) {
-        self.tex_image_2d_wrapped(width, height, data, true);
-    }
-
-    fn tex_image_2d_wrapped(&mut self, width: i32, height: i32, data: Vec<u8>, clamp: bool) {
-        let Some(id) = self.bound_texture else { return };
-        let Some(slot) = self.textures.get_mut(id as usize - 1) else {
+        let Some(t) = self.bound_texture_mut() else {
             return;
         };
-        *slot = Some(Texture {
-            width,
-            height,
-            data,
-            clamp,
-        });
+        t.width = width;
+        t.height = height;
+        t.data = data;
+        t.generation += 1;
+    }
+
+    /// `glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S/T, ..)`: clamp at
+    /// the edges rather than repeat.
+    pub fn tex_clamp(&mut self, clamp: bool) {
+        if let Some(t) = self.bound_texture_mut() {
+            t.clamp = clamp;
+        }
+    }
+
+    /// `glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN/MAG_FILTER, ..)`: take
+    /// the nearest texel rather than blending the four around the point.
+    pub fn tex_nearest(&mut self, nearest: bool) {
+        if let Some(t) = self.bound_texture_mut() {
+            t.nearest = nearest;
+        }
+    }
+
+    fn bound_texture_mut(&mut self) -> Option<&mut Texture> {
+        let id = self.bound_texture?;
+        self.textures.get_mut(id as usize - 1)
     }
 
     /// `glLightModelfv (GL_LIGHT_MODEL_AMBIENT, ..)`. OpenGL defaults it to a
@@ -926,7 +940,8 @@ impl Glx {
     /// name that was generated but never given an image.
     #[must_use]
     pub fn texture(&self, id: u32) -> Option<&Texture> {
-        self.textures.get(id as usize - 1)?.as_ref()
+        let t = self.textures.get(id as usize - 1)?;
+        (t.width > 0 && t.height > 0).then_some(t)
     }
 
     pub fn normal3f(&mut self, x: f32, y: f32, z: f32) {

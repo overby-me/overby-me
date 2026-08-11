@@ -228,7 +228,7 @@ pub struct Gl3dEngine {
     scratch: Vec<f32>,
     /// Textures the saver has built, uploaded once and kept. A saver makes
     /// them when it starts and refers to them by name from then on.
-    textures: HashMap<u32, WebGlTexture>,
+    textures: HashMap<u32, (WebGlTexture, u32)>,
 }
 
 impl Gl3dEngine {
@@ -356,19 +356,24 @@ impl Gl3dEngine {
             }
         }
 
-        // Upload any texture this frame refers to that we have not seen. A
-        // saver builds them when it starts and refers to them by name after
-        // that, so this happens once per texture and never again.
+        // Upload any texture this frame refers to that we have not seen, or
+        // that the saver has redrawn. Most build theirs once at startup and
+        // never touch it again; `cubenetic` rebuilds its every frame, which is
+        // what the generation counter is for.
         for batch in &frame.batches {
             let Some(id) = batch.texture else { continue };
-            if textures.contains_key(&id) {
-                continue;
-            }
             let Some(t) = runner.texture(id) else {
                 continue;
             };
-            let Some(handle) = gl.create_texture() else {
+            if textures.get(&id).is_some_and(|(_, g)| *g == t.generation) {
                 continue;
+            }
+            let handle = match textures.get(&id) {
+                Some((h, _)) => h.clone(),
+                None => match gl.create_texture() {
+                    Some(h) => h,
+                    None => continue,
+                },
             };
             gl.bind_texture(Gl::TEXTURE_2D, Some(&handle));
             let ok = gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
@@ -386,22 +391,23 @@ impl Gl3dEngine {
                 log::error!("gl3d: texture {id} would not upload");
                 continue;
             }
-            // Linear, which is what every saver that makes a texture asks
-            // for; the wrap is the only thing they disagree on.
+            // The two parameters the savers disagree on. Everything else is
+            // left at the default.
             let wrap = if t.clamp {
                 Gl::CLAMP_TO_EDGE
             } else {
                 Gl::REPEAT
             };
+            let filter = if t.nearest { Gl::NEAREST } else { Gl::LINEAR };
             for (p, v) in [
                 (Gl::TEXTURE_WRAP_S, wrap),
                 (Gl::TEXTURE_WRAP_T, wrap),
-                (Gl::TEXTURE_MIN_FILTER, Gl::LINEAR),
-                (Gl::TEXTURE_MAG_FILTER, Gl::LINEAR),
+                (Gl::TEXTURE_MIN_FILTER, filter),
+                (Gl::TEXTURE_MAG_FILTER, filter),
             ] {
                 gl.tex_parameteri(Gl::TEXTURE_2D, p, v as i32);
             }
-            textures.insert(id, handle);
+            textures.insert(id, (handle, t.generation));
         }
 
         gl.use_program(Some(&self.program));
@@ -452,7 +458,7 @@ impl Gl3dEngine {
             gl.uniform_matrix4fv_with_f32_array(u.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);
             match batch.texture.and_then(|id| textures.get(&id)) {
-                Some(t) => {
+                Some((t, _)) => {
                     gl.uniform1i(u.textured.as_ref(), 1);
                     gl.active_texture(Gl::TEXTURE0);
                     gl.bind_texture(Gl::TEXTURE_2D, Some(t));

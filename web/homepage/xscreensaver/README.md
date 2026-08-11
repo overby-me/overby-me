@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (23) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (24) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -402,10 +402,13 @@ picture rather than a tile clamps, and `rubikblocks`, whose faces each carry a
 dark outline, is the one that cares. They are built once when a saver starts
 and referred to by
 name after that, so the host uploads each one the first time it sees the name
-and keeps it. There is no `GL_TEXTURE_1D` in WebGL, so a saver that wants one
-gets a 2D texture a single row high, which samples the same way.
-`quasicrystal`, whose entire picture is one row of sine repeated a few hundred
-times across seventeen quads, is the reason it exists.
+and keeps it. A texture carries a generation number for the savers that do not
+work that way: `cubenetic` rebuilds sixty-five thousand pixels of interference
+pattern every frame, and the counter is how the host knows to upload it again.
+There is no `GL_TEXTURE_1D` in WebGL, so a saver that wants one gets a 2D
+texture a single row high, which samples the same way. `quasicrystal`, whose
+entire picture is one row of sine repeated a few hundred times across seventeen
+quads, is the reason it exists.
 
 Blending is an enum of the source and destination pairs the savers actually
 pass, rather than the full cross product, because they pass six of them between

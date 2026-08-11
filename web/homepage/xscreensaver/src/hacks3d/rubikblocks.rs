@@ -275,7 +275,8 @@ fn make_texture(g: &mut Gl) -> u32 {
     let data: Vec<u8> = tex.iter().flat_map(|&l| [l, l, l, 255]).collect();
     let id = g.glx.gen_texture();
     g.glx.bind_texture(id);
-    g.glx.tex_image_2d_clamped(TEX_WIDTH, TEX_HEIGHT, data);
+    g.glx.tex_clamp(true);
+    g.glx.tex_image_2d(TEX_WIDTH, TEX_HEIGHT, data);
     id
 }
 

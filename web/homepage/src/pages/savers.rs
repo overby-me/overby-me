@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "cubenetic",
+    cubenetic_body,
+    cubenetic_start,
+    xscreensaver::hacks3d::cubenetic::start
+);
+gl3d_saver!(
     "rubikblocks",
     rubikblocks_body,
     rubikblocks_start,
@@ -2056,6 +2062,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cityflow",
         label: "City Flow",
         start: Start::Gl3d(cityflow_start),
+    },
+    Entry {
+        slug: "cubenetic",
+        label: "Cubenetic",
+        start: Start::Gl3d(cubenetic_start),
     },
     Entry {
         slug: "cubestack",
