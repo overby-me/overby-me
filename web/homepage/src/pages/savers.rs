@@ -1053,6 +1053,12 @@ gl3d_saver!(
     voronoi_start,
     xscreensaver::hacks3d::voronoi::start
 );
+gl3d_saver!(
+    "beats",
+    beats_body,
+    beats_start,
+    xscreensaver::hacks3d::beats::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1946,6 +1952,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "beats",
+        label: "Beats",
+        start: Start::Gl3d(beats_start),
     },
     Entry {
         slug: "cubestack",

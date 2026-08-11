@@ -34,6 +34,7 @@ pub mod opts;
 pub mod png;
 pub mod rand;
 pub mod rotator;
+pub mod shapes;
 pub mod spline;
 pub mod text;
 pub mod tty;
@@ -47,6 +48,7 @@ pub use image::ImageLoad;
 pub use opts::{Opt, OptKind, Resources, SelectItem};
 pub use rand::{frand, random, random_below, ya_rand_init};
 pub use rotator::{Rotator, Trackball};
+pub use shapes::{do_normal, unit_dome, unit_sphere};
 
 /// An input event, reduced to what the hacks actually look at.
 #[derive(Clone, Copy, Debug, PartialEq)]

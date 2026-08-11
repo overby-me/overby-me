@@ -17,6 +17,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver3d;
 
+pub mod beats;
 pub mod cubestack;
 pub mod cubestorm;
 pub mod cubicgrid;
@@ -32,6 +33,7 @@ pub mod voronoi;
 pub static ALL: &[&Saver3d] = &[
     &cubestorm::SAVER,
     &cubicgrid::SAVER,
+    &beats::SAVER,
     &cubestack::SAVER,
     &hexstrut::SAVER,
     &menger::SAVER,

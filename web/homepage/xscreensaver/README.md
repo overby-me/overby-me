@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (8) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (9) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -443,8 +443,15 @@ pair of triangles nobody asked for. `hexstrut` needs exactly that:
 its sheet is flat and its struts overlap, so upstream turns depth testing off
 and lets them stack in the order they were drawn.
 
-Two helpers came with the tier because nearly every saver in it uses them, and
-they are in `runtime::rotator`: the `rotator`, which is what turns an object
+`runtime::shapes` is upstream's `sphere.c` and `normals.c`: a unit sphere,
+which twenty-seven of the savers draw, and the normal of a triangle, which
+thirty-one of them compute. The sphere is one long triangle strip rather than a
+strip per band, which is upstream's shape and worth keeping: the join between
+two bands is a pair of degenerate triangles that cover no pixels and turn the
+whole thing into a single run.
+
+Two more helpers came with the tier because nearly every saver in it uses them,
+and they are in `runtime::rotator`: the `rotator`, which is what turns an object
 over on its own without ever quite repeating, and the `gltrackball`, which is
 the SGI virtual trackball from 1993, deforming from a sphere into a hyperbolic
 sheet away from the centre so that a drag near the edge spins rather than

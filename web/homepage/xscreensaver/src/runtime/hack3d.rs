@@ -24,7 +24,13 @@ pub struct Gl {
     height: i32,
     /// Upstream's `MI_IS_MONO`. Always false here, but hacks branch on it.
     pub mono_p: bool,
+    /// What the local time was when the saver started, in seconds since
+    /// midnight. Zero unless the host said otherwise.
+    wall_clock_base: f64,
 }
+
+/// Seconds in a day, which is the period [`Gl::wall_clock`] wraps on.
+const DAY: f64 = 24.0 * 60.0 * 60.0;
 
 impl Gl {
     pub fn width(&self) -> i32 {
@@ -33,6 +39,14 @@ impl Gl {
 
     pub fn height(&self) -> i32 {
         self.height
+    }
+
+    /// The local time of day in seconds since midnight, as
+    /// [`crate::runtime::Dpy::wall_clock`] gives it: the host's clock at
+    /// startup plus the saver's own elapsed time, so a run stays reproducible
+    /// from its seed and a run with no host simply starts at midnight.
+    pub fn wall_clock(&self) -> f64 {
+        (self.wall_clock_base + self.time).rem_euclid(DAY)
     }
 }
 
@@ -80,6 +94,7 @@ impl Runner3d {
             width: args.width.max(1),
             height: args.height.max(1),
             mono_p: false,
+            wall_clock_base: args.wall_clock,
         };
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);
