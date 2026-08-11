@@ -77,3 +77,11 @@ pub const COW_UDDER: &str = include_str!("../models/cow_udder.gllist");
 
 /// The golden apple of `kallisti`, twenty-eight thousand vertices of it.
 pub const KALLISTI_MODEL: &str = include_str!("../models/kallisti_model.gllist");
+
+/// The four parts of the skull in `skulloop`, each half of one.
+pub const SKULL_MODEL_JAW_HALF: &str = include_str!("../models/skull_model_jaw_half.gllist");
+pub const SKULL_MODEL_SKULL_HALF: &str = include_str!("../models/skull_model_skull_half.gllist");
+pub const SKULL_MODEL_TEETH_LOWER_HALF: &str =
+    include_str!("../models/skull_model_teeth_lower_half.gllist");
+pub const SKULL_MODEL_TEETH_UPPER_HALF: &str =
+    include_str!("../models/skull_model_teeth_upper_half.gllist");
