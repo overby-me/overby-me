@@ -487,6 +487,13 @@ impl Gl3dEngine {
                 gl.disable(Gl::CULL_FACE);
             }
             gl.front_face(if batch.front_face_cw { Gl::CW } else { Gl::CCW });
+            match batch.polygon_offset {
+                Some((factor, units)) => {
+                    gl.enable(Gl::POLYGON_OFFSET_FILL);
+                    gl.polygon_offset(factor, units);
+                }
+                None => gl.disable(Gl::POLYGON_OFFSET_FILL),
+            }
             let [bx, by, bw, bh] = batch.viewport;
             gl.viewport(bx, by, bw.max(1), bh.max(1));
             if batch.clear_color_first {

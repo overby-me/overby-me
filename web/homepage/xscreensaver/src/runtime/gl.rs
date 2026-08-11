@@ -404,6 +404,11 @@ pub struct Batch {
     /// viewport it started with, for the clear.
     pub viewport: [i32; 4],
     pub blend: Blend,
+    /// `glPolygonOffset`, and whether `GL_POLYGON_OFFSET_FILL` is on. A saver
+    /// reaches for it when it draws two surfaces in the same place and needs
+    /// one of them to win: the coplanar one is pushed back by a slope-scaled
+    /// amount so it stops fighting for the depth buffer.
+    pub polygon_offset: Option<(f32, f32)>,
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
@@ -455,6 +460,7 @@ impl Batch {
             && !other.clear_color_first
             && self.viewport == other.viewport
             && self.blend == other.blend
+            && self.polygon_offset == other.polygon_offset
             && self.fog == other.fog
             && self.texture == other.texture
             && self.tex_env == other.tex_env
@@ -540,6 +546,7 @@ pub struct Glx {
     clear_depth_pending: bool,
     clear_color_pending: bool,
     blend: Blend,
+    polygon_offset: Option<(f32, f32)>,
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -592,6 +599,7 @@ impl Glx {
             clear_depth_pending: false,
             clear_color_pending: false,
             blend: Blend::Off,
+            polygon_offset: None,
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -786,6 +794,11 @@ impl Glx {
     /// implemented, which is the only mode any of these savers uses.
     pub fn fog(&mut self, fog: Option<Fog>) {
         self.fog = fog;
+    }
+
+    /// `glPolygonOffset`, with `None` for `glDisable(GL_POLYGON_OFFSET_FILL)`.
+    pub fn polygon_offset(&mut self, offset: Option<(f32, f32)>) {
+        self.polygon_offset = offset;
     }
 
     pub fn blend(&mut self, blend: Blend) {
@@ -1191,6 +1204,7 @@ impl Glx {
             clear_color_first: std::mem::take(&mut self.clear_color_pending),
             viewport: self.frame.viewport,
             blend: self.blend,
+            polygon_offset: self.polygon_offset,
             line_width: self.line_width,
             scene_ambient: self.scene_ambient,
             fog: self.fog,

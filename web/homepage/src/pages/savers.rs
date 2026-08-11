@@ -1222,6 +1222,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::hydrostat::start
 );
 gl3d_saver!(
+    "geodesic",
+    geodesic_body,
+    geodesic_start,
+    xscreensaver::hacks3d::geodesic::start
+);
+gl3d_saver!(
     "superquadrics",
     superquadrics_body,
     superquadrics_start,
@@ -2390,6 +2396,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "surfaces",
         label: "Surfaces",
         start: Start::Gl3d(surfaces_start),
+    },
+    Entry {
+        slug: "geodesic",
+        label: "Geodesic",
+        start: Start::Gl3d(geodesic_start),
     },
     Entry {
         slug: "hydrostat",
