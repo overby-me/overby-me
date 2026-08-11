@@ -25,8 +25,10 @@ pub mod dangerball;
 pub mod glknots;
 pub mod hexstrut;
 pub mod hypnowheel;
+pub mod kaleidocycle;
 pub mod menger;
 pub mod sierpinski3d;
+pub mod splodesic;
 pub mod voronoi;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
@@ -40,8 +42,10 @@ pub static ALL: &[&Saver3d] = &[
     &dangerball::SAVER,
     &glknots::SAVER,
     &hexstrut::SAVER,
+    &kaleidocycle::SAVER,
     &menger::SAVER,
     &sierpinski3d::SAVER,
+    &splodesic::SAVER,
     &voronoi::SAVER,
 ];
 

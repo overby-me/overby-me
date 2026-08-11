@@ -1060,6 +1060,18 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "splodesic",
+    splodesic_body,
+    splodesic_start,
+    xscreensaver::hacks3d::splodesic::start
+);
+gl3d_saver!(
+    "kaleidocycle",
+    kaleidocycle_body,
+    kaleidocycle_start,
+    xscreensaver::hacks3d::kaleidocycle::start
+);
+gl3d_saver!(
     "glknots",
     glknots_body,
     glknots_start,
@@ -2006,6 +2018,11 @@ pub static SAVERS: &[Entry] = &[
         start: Start::Gl3d(hypnowheel_start),
     },
     Entry {
+        slug: "kaleidocycle",
+        label: "Kaleidocycle",
+        start: Start::Gl3d(kaleidocycle_start),
+    },
+    Entry {
         slug: "menger",
         label: "Menger",
         start: Start::Gl3d(menger_start),
@@ -2014,6 +2031,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sierpinski3d",
         label: "Sierpinski 3D",
         start: Start::Gl3d(sierpinski3d_start),
+    },
+    Entry {
+        slug: "splodesic",
+        label: "Splodesic",
+        start: Start::Gl3d(splodesic_start),
     },
     Entry {
         slug: "voronoi",

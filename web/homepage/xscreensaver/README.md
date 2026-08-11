@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (11) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (13) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -427,7 +427,12 @@ that leave culling off can see the inside of a thing as well as the outside.
 
 Materials are `GL_AMBIENT_AND_DIFFUSE` in one field, because that is what the
 savers set; with lighting on, vertex colours are ignored, which is OpenGL's own
-rule rather than a shortcut.
+rule rather than a shortcut. The one thing a material carries twice is that
+colour, once for each face, since a few savers turn culling off and paint the
+inside of a surface differently from the outside: `splodesic`'s sphere is one
+colour outside and the opposite colour in, which is most of what it looks like
+once it starts coming apart. Setting the front colour sets both, so a saver only
+has to say anything if it wants them to differ.
 
 State that can differ between one `glBegin` block and the next rides on the
 batch rather than on the frame, which is what lets a saver turn the depth test

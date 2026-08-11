@@ -64,6 +64,7 @@ uniform vec4 u_light_ambient[LIGHTS];
 uniform vec4 u_light_diffuse[LIGHTS];
 uniform vec4 u_light_specular[LIGHTS];
 uniform vec4 u_material_diffuse;
+uniform vec4 u_material_diffuse_back;
 uniform vec4 u_material_specular;
 uniform float u_shininess;
 uniform vec4 u_scene_ambient;
@@ -78,8 +79,12 @@ void main() {
   // Two-sided: a back face is lit by its own side. OpenGL would cull or shade
   // it separately, and the savers that leave culling off want to see both.
   if (dot (n, eye) < 0.0) n = -n;
+  // Which side of the surface this is, by winding rather than by normal, since
+  // that is what GL_FRONT and GL_BACK mean. The two are the same colour unless
+  // the saver asked for a different one inside.
+  vec4 diffuse = gl_FrontFacing ? u_material_diffuse : u_material_diffuse_back;
 
-  vec3 c = u_material_diffuse.rgb * u_scene_ambient.rgb;
+  vec3 c = diffuse.rgb * u_scene_ambient.rgb;
   for (int i = 0; i < LIGHTS; i++) {
     if (! u_light_on[i]) continue;
     vec4 p = u_light_position[i];
@@ -87,15 +92,15 @@ void main() {
     // direction. Otherwise it is a homogeneous point, and w has to be divided
     // out before the direction to it means anything.
     vec3 l = normalize (p.w == 0.0 ? p.xyz : p.xyz / p.w - v_eye);
-    c += u_material_diffuse.rgb * u_light_ambient[i].rgb;
-    c += u_material_diffuse.rgb * u_light_diffuse[i].rgb * max (dot (n, l), 0.0);
+    c += diffuse.rgb * u_light_ambient[i].rgb;
+    c += diffuse.rgb * u_light_diffuse[i].rgb * max (dot (n, l), 0.0);
     if (u_shininess > 0.0) {
       vec3 h = normalize (l + eye);
       c += u_material_specular.rgb * u_light_specular[i].rgb
          * pow (max (dot (n, h), 0.0), u_shininess);
     }
   }
-  frag_color = vec4 (c, u_material_diffuse.a);
+  frag_color = vec4 (c, diffuse.a);
 }
 ";
 
@@ -112,6 +117,7 @@ struct Uniforms {
     light_diffuse: Vec<Option<WebGlUniformLocation>>,
     light_specular: Vec<Option<WebGlUniformLocation>>,
     material_diffuse: Option<WebGlUniformLocation>,
+    material_diffuse_back: Option<WebGlUniformLocation>,
     material_specular: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
@@ -141,6 +147,7 @@ impl Uniforms {
                 .map(|i| at(&format!("u_light_specular[{i}]")))
                 .collect(),
             material_diffuse: at("u_material_diffuse"),
+            material_diffuse_back: at("u_material_diffuse_back"),
             material_specular: at("u_material_specular"),
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
@@ -327,6 +334,10 @@ impl Gl3dEngine {
                     gl.uniform4fv_with_f32_array(u.light_specular[i].as_ref(), &l.specular);
                 }
                 gl.uniform4fv_with_f32_array(u.material_diffuse.as_ref(), &m.ambient_diffuse);
+                gl.uniform4fv_with_f32_array(
+                    u.material_diffuse_back.as_ref(),
+                    &m.back_ambient_diffuse,
+                );
                 gl.uniform4fv_with_f32_array(u.material_specular.as_ref(), &m.specular);
                 gl.uniform1f(u.shininess.as_ref(), m.shininess);
             }

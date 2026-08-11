@@ -64,6 +64,7 @@ exclude = [
   'home\.sol\.no/',
   'cs\.cmu\.edu/~spot/',
   'astronomy\.swin\.edu\.au/~pbourke/',
+  'kaleidocycles\.de/pdf/',
   'complexification\.net/gallery/machines/interMomentary/',
   'complexification\.net/gallery/machines/substrate/',
   # A citation in life.asm, one of the m6502 demo programs vendored verbatim

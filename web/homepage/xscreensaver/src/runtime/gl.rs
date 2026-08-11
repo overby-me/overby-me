@@ -266,9 +266,15 @@ impl Default for Light {
 
 /// `glMaterialfv (GL_FRONT, ..)`. Ambient and diffuse are one field because
 /// `GL_AMBIENT_AND_DIFFUSE` is what the savers set, nearly without exception.
+///
+/// The back colour is separate because a handful of savers turn culling off and
+/// paint the inside of a surface a different colour from the outside, which is
+/// the whole of what they look like. Everything else follows the front, since
+/// setting one sets both unless a saver asks otherwise.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
     pub ambient_diffuse: [f32; 4],
+    pub back_ambient_diffuse: [f32; 4],
     pub specular: [f32; 4],
     pub shininess: f32,
 }
@@ -278,6 +284,7 @@ impl Default for Material {
     fn default() -> Self {
         Material {
             ambient_diffuse: [0.8, 0.8, 0.8, 1.0],
+            back_ambient_diffuse: [0.8, 0.8, 0.8, 1.0],
             specular: [0.0, 0.0, 0.0, 1.0],
             shininess: 0.0,
         }
@@ -685,9 +692,22 @@ impl Glx {
         }
     }
 
-    /// `glMaterialfv (GL_FRONT, GL_AMBIENT_AND_DIFFUSE, ..)`.
+    /// `glMaterialfv (GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, ..)`.
+    ///
+    /// Upstream usually writes `GL_FRONT` here, which is the same thing in
+    /// practice: those savers are drawing with culling on, so there is no back
+    /// face to have a colour. Setting both is what makes the ones that leave
+    /// culling off look right without each of them saying so.
     pub fn material_ambient_diffuse(&mut self, rgba: [f32; 4]) {
         self.material.ambient_diffuse = rgba;
+        self.material.back_ambient_diffuse = rgba;
+    }
+
+    /// `glMaterialfv (GL_BACK, GL_AMBIENT_AND_DIFFUSE, ..)`: the inside of a
+    /// surface, for a saver that wants it a different colour from the outside.
+    /// Set it after the front, which sets both.
+    pub fn material_back_ambient_diffuse(&mut self, rgba: [f32; 4]) {
+        self.material.back_ambient_diffuse = rgba;
     }
 
     pub fn material_specular(&mut self, rgba: [f32; 4]) {

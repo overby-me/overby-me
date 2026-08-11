@@ -195,8 +195,8 @@ def main [
          prococean protophore rigrekt selfreflect skyline stardome starnest
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
          universeball
-         beats cubestack cubestorm cubicgrid dangerball glknots hexstrut hypnowheel menger sierpinski3d
-         voronoi]
+         beats cubestack cubestorm cubicgrid dangerball glknots hexstrut hypnowheel
+         kaleidocycle menger sierpinski3d splodesic voronoi]
     } else if $slug != null {
         [$slug]
     } else {
