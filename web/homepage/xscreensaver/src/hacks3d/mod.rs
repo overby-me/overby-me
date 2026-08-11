@@ -43,6 +43,7 @@ pub mod hypnowheel;
 pub mod kaleidocycle;
 pub mod lockward;
 pub mod menger;
+pub mod moebiusgears;
 pub mod noof;
 pub mod pulsar;
 pub mod quasicrystal;
@@ -82,6 +83,7 @@ pub static ALL: &[&Saver3d] = &[
     &kaleidocycle::SAVER,
     &lockward::SAVER,
     &menger::SAVER,
+    &moebiusgears::SAVER,
     &noof::SAVER,
     &pulsar::SAVER,
     &quasicrystal::SAVER,

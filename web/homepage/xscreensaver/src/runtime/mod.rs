@@ -29,6 +29,7 @@ pub mod font;
 pub mod gl;
 pub mod hack3d;
 pub mod image;
+pub mod involute;
 pub mod jpeg;
 pub mod opts;
 pub mod png;
