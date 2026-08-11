@@ -54,5 +54,13 @@ let out = ($names | enumerate | each {|it|
     },"
 } | str join "\n")
 
-"const SOLUTIONS: &[Solution] = &[\n" + $out + "\n];\n" | save -f xscreensaver/src/hacks3d/tangram_solutions.rs
+const HEADER = "// The forty-five figures, as the finished position of each of the seven
+// pieces. Extracted from upstream `tangram.c`'s `solved[]` table by
+// `web/homepage/gen-tangram.nu`; the fields that are the same constant in every
+// row of it are left out.
+
+"
+
+$HEADER + "const SOLUTIONS: &[Solution] = &[\n" + $out + "\n];\n"
+| save -f xscreensaver/src/hacks3d/tangram_solutions.rs
 print "wrote xscreensaver/src/hacks3d/tangram_solutions.rs"

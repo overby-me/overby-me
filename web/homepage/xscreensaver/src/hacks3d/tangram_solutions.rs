@@ -1,7 +1,8 @@
 // The forty-five figures, as the finished position of each of the seven
 // pieces. Extracted from upstream `tangram.c`'s `solved[]` table by
-// `scratchpad/gen-tangram.nu`; the fields that are the same constant in every
+// `web/homepage/gen-tangram.nu`; the fields that are the same constant in every
 // row of it are left out.
+
 const SOLUTIONS: &[Solution] = &[
     Solution {
         name: "Teapot",
