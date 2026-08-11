@@ -44,6 +44,7 @@ pub mod fliptext;
 pub mod flyingtoasters;
 pub mod gears;
 pub mod geodesic;
+pub mod gflux;
 pub mod gibson;
 pub mod glblur;
 pub mod glknots;
@@ -138,6 +139,7 @@ pub static ALL: &[&Saver3d] = &[
     &chompytower::SAVER,
     &glmatrix::SAVER,
     &fliptext::SAVER,
+    &gflux::SAVER,
     &hexstrut::SAVER,
     &starwars::SAVER,
     &skytentacles::SAVER,

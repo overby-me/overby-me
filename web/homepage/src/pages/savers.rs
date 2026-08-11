@@ -1066,6 +1066,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::fliptext::start
 );
 gl3d_saver!(
+    "gflux",
+    gflux_body,
+    gflux_start,
+    xscreensaver::hacks3d::gflux::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2563,6 +2569,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "fliptext",
         label: "Flip Text",
         start: Start::Gl3d(fliptext_start),
+    },
+    Entry {
+        slug: "gflux",
+        label: "GFlux",
+        start: Start::Gl3d(gflux_start),
     },
     Entry {
         slug: "hexstrut",

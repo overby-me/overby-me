@@ -80,6 +80,8 @@ workd = "workd"
 # hacks/glx/gibson.c, spelling and all.
 QUANTATIVE = "QUANTATIVE"
 FORCASTS = "FORCASTS"
+# The author of hacks/glx/gflux.c is Josiah Pease.
+Pease = "Pease"
 # lod = level of detail, the mip level argument of GLSL's texelFetch. In the
 # Shadertoy preamble transcribed from hacks/glx/xshadertoy.c.
 lod = "lod"

@@ -31,6 +31,26 @@ pub struct Gl {
     /// carries: `winduprobot` puts them in a word bubble over a robot. With no
     /// host pushing text in, the compiled-in passage is served.
     words: super::text::TextChannel,
+    /// The pictures a saver puts on things, the same channel `Dpy` carries.
+    /// With no host pushing pictures in, colour bars are served, which is what
+    /// upstream shows when it cannot grab a screen or find a file.
+    images: super::image::ImageChannel,
+    /// The load in flight, if any. One at a time is all any saver asks for.
+    image_pending: Option<super::image::ImageLoad>,
+}
+
+/// A picture for a saver to make a texture out of: `grab-ximage.c`'s
+/// `load_texture_async` hands over an `XImage` and the rectangle of it the
+/// picture actually landed in, and so does this.
+pub struct GlImage {
+    pub width: i32,
+    pub height: i32,
+    /// RGBA bytes, the first row at the top, ready for `tex_image_2d`.
+    pub pixels: Vec<u8>,
+    /// Where in that the picture is. The rest is the black it was centred on.
+    pub geometry: super::XRectangle,
+    /// What to call it, if the host said.
+    pub title: Option<String>,
 }
 
 /// Seconds in a day, which is the period [`Gl::wall_clock`] wraps on.
@@ -63,6 +83,34 @@ impl Gl {
     /// to it.
     pub fn text_reshape(&mut self, columns: i32, max_lines: i32) {
         self.words.reshape(columns, max_lines);
+    }
+
+    /// `load_texture_async`: ask for a picture of about this size to put on
+    /// something.
+    ///
+    /// `None` means it is still being fetched, so ask again next frame.
+    /// Without a host to ask there is nothing to wait for and the first call
+    /// answers, with colour bars.
+    pub fn load_image(&mut self, width: i32, height: i32) -> Option<GlImage> {
+        let pending = self.image_pending.take();
+        let mut fb = super::Fb::new(width, height);
+        self.image_pending = self.images.poll(&mut fb, self.time, pending);
+        if self.image_pending.is_some() {
+            return None;
+        }
+
+        let mut pixels = Vec::with_capacity((fb.width() * fb.height() * 4) as usize);
+        for p in fb.pixels() {
+            let (r, g, b) = super::color::unrgb(*p);
+            pixels.extend_from_slice(&[r, g, b, 255]);
+        }
+        Some(GlImage {
+            width: fb.width(),
+            height: fb.height(),
+            pixels,
+            geometry: self.images.geometry,
+            title: self.images.title.clone(),
+        })
     }
 }
 
@@ -112,6 +160,8 @@ impl Runner3d {
             mono_p: false,
             wall_clock_base: args.wall_clock,
             words: super::text::TextChannel::default(),
+            images: super::image::ImageChannel::default(),
+            image_pending: None,
         };
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);
