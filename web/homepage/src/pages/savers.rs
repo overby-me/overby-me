@@ -1192,6 +1192,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::surfaces::start
 );
 gl3d_saver!(
+    "stairs",
+    stairs_body,
+    stairs_start,
+    xscreensaver::hacks3d::stairs::start
+);
+gl3d_saver!(
     "stonerview",
     stonerview_body,
     stonerview_start,
@@ -2301,6 +2307,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "splodesic",
         label: "Splodesic",
         start: Start::Gl3d(splodesic_start),
+    },
+    Entry {
+        slug: "stairs",
+        label: "Stairs",
+        start: Start::Gl3d(stairs_start),
     },
     Entry {
         slug: "stonerview",
