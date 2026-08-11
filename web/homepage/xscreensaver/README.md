@@ -9,16 +9,16 @@ different runtime:
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
-| Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | not started |
+| Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
 | OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | not started |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
 savers.
 
-The 2D tier is finished. `bsod` is all thirty-nine of its computers, each one a
-little program for the same command queue, and `m6502` is a 6502 with an
-assembler.
+The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
+computers, each one a little program for the same command queue, and `m6502` is
+a 6502 with an assembler.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -272,51 +272,101 @@ Per visit the split build is therefore about break-even at three savers. The
 property that matters is the other one: a new saver now grows only its own
 chunk.
 
+The Shadertoy savers were the open question: their chunks hold shader *text*
+rather than code, and the splitter moves code. It moves the text too. Measured
+on the full bundle, `starnest` (1.8 KB of GLSL) is a 9.8 KB chunk and `skyline`
+(34.7 KB of GLSL) is a 43.4 KB one, so the thirty programs are not sitting in
+the main module.
+
 `--debug-symbols false` applies either way: DWARF is ~90 KB gzipped and needs a
 browser extension to read.
 
-## The Shadertoy tier, next
+## The Shadertoy tier
 
 Thirty savers, and between them they are one C program: `hacks/glx/xshadertoy.c`
-plus a `.glsl` file each. Everything below was read out of upstream and is
-written down so the port does not have to re-derive it.
+plus a `.glsl` file each. Upstream builds each one as a shell script
+(`xshadertoy-compile.pl`) that runs `xshadertoy` with the GLSL on stdin, so a
+saver *is* its shader plus a handful of knobs, and here it is a `ShadertoyDef`:
+the sources as `include_str!`, and the knobs the XML declares, which are the
+same five everywhere (`delay`, `speed`, `scale`, `showfps`, and `duration` for
+the one saver with variants).
 
-Upstream builds each saver as a `bash` script (`xshadertoy-compile.pl`) that
-runs `xshadertoy` with the GLSL on stdin, so a saver *is* its shader plus a
-handful of knobs. Here that becomes a `ShadertoyDef`: the sources as
-`include_str!`, and the same knobs the XML declares, which are the same five
-everywhere: `delay`, `speed`, `scale`, `showfps`, and `duration` for the one
-saver that has variants.
+The tier is split across two crates, which is not how the 2D tier works and is
+worth understanding. `xscreensaver::shadertoy` decides *what* to draw: which
+variant is running, what the uniforms are this frame, and how to assemble a
+pass's source. `../src/pages/gl.rs` owns the WebGL2 context and draws it. So the
+half that has the logic in it is testable with no browser, the same bargain the
+software framebuffer makes for the 2D savers, and the half that cannot be is
+about a hundred lines of API calls.
 
-What the runner does, in full:
+What the runner does:
 
 - Up to five passes (BufferA to D, then Image), each a fragment shader drawn
   over two triangles into its own texture at `size * scale`, plus an optional
   `Common` source textually prepended to all of them. The assembled source is
   the version line, a fixed preamble of the `iTime`/`iMouse`/`iChannelN`
   uniforms, the common source, `#line 0`, the saver's own source, and a `main`
-  that calls its `mainImage`. Under GLSL ES 3.00 (which is what WebGL2 is) the
-  preamble's compatibility half compiles out, so only the uniforms and the
-  `#line` remain.
-- Pass *i* binds every pass's texture to `iChannel0..3`, so a later pass reads
-  an earlier one's output. Upstream's loop runs over five channels into a
+  that calls its `mainImage`. Under GLSL ES 3.00, which is what WebGL2 is, the
+  preamble's GLSL-1.20 compatibility half compiles out.
+- Pass *i* binds every pass's latest texture to `iChannel0..3`, so a later pass
+  reads an earlier one's output. Upstream's loop runs over five channels into a
   four-element array and reads past it; four is all a shader can declare.
-- A saver may carry several variants, which are whole alternative programs, and
-  it steps to the next every `duration` seconds and recompiles. Only `bestill`
-  has them, six of them.
-- Time is warped by `speed`, and `iDate` is recomputed once a second.
-- `iMouse` is a four-value state machine, not a position: `xy` is where the
-  pointer is now, `zw` is where the drag began, negated once the button comes
-  up, and a saver that is not being dragged sees where the last drag ended.
+- A saver may carry several variants, which are whole alternative programs; it
+  steps to the next every `duration` seconds, recompiles, and starts its clock
+  again. Only `bestill` has them, six of them.
+- Time is warped by `speed`. `iMouse` is a four-value state machine rather than
+  a position: `xy` is where the pointer is, `zw` is where the drag began and
+  goes negative when the button comes up, so a program can tell a click from a
+  drag from a release from never having been touched.
 - `iChannelResolution`, `iChannelTime` and `iSampleRate` are declared and never
-  set, so they are zero. Keyboard input is not supported upstream either; it
-  wants a texture with a bit per key.
+  set, exactly as upstream leaves them, and `iDate` gets a time of day but a
+  zero date. Nothing in the collection reads any of them. Keyboard input is not
+  supported upstream either; it wants a texture with a bit per key.
 
-The one structural thing to decide when building it: a canvas has one context,
-2D or WebGL2, never both, so the page picks its host from the saver's tier
-rather than sharing one. The per-saver wasm chunk holds only its shader text,
-which means the rule above about a chunk having to *run* code does not bite:
-there is no per-saver code to strand in the main module.
+Three things had to be different, and each of them is the difference between a
+picture and a black screen:
+
+- **Every pass has two textures, not one.** Upstream binds a pass's own output
+  to its own `iChannel0` while drawing into it, which is a feedback loop and
+  undefined in OpenGL; what it does in practice is read the previous frame, and
+  four of the programs are written expecting exactly that. WebGL2 refuses the
+  draw instead. So a pass renders into its back texture and then makes it the
+  front, which gives a pass the finished output of everything before it in the
+  chain and last frame's output of itself. That is also what shadertoy.com does.
+- **The canvas has to ask for `antialias: false`.** The frame ends by blitting
+  the last pass onto the canvas, and blitting into a multisampled framebuffer is
+  an error. A canvas is antialiased by default. Upstream has the same
+  requirement and meets it with `*forceSingleSample: True`.
+- **A texture has to be bound before it can be attached.** `createTexture`
+  returns an object with no target, and attaching one fails with "no texture is
+  bound to the specified target", so each is given a pixel at creation and its
+  real size later.
+
+A canvas has one context for its lifetime, 2D or WebGL2 and never both, so the
+stage picks its engine from the saver's tier before it mounts. The per-saver
+wasm chunk holds only its shader text, so the rule about a chunk having to *run*
+code does not bite here: there is no per-saver code to strand in the main
+module.
+
+### Looking at one
+
+`just shot` cannot render these: it runs the crate's software framebuffer, and a
+fragment shader needs a GL driver. `test-browser.nu` serves the built bundle,
+drives headless chromium at it over the DevTools protocol, and saves a PNG each:
+
+```sh
+just build-whole
+nu test-browser.nu starnest
+nu test-browser.nu --all                     # all thirty, plus a montage
+nu test-browser.nu skyline --console --query "scale=0.25"
+```
+
+It waits for the stage to mount before it starts timing, which matters: a
+screenshot taken while the wasm is still arriving is the browser's default
+white, and that is indistinguishable from a saver that drew nothing. The
+earlier approach, `chromium --screenshot` with `--virtual-time-budget`, is worse
+than useless here — it starves the animation loop, so it reports a black canvas
+for shaders that render fine, and a *different* set of them each run.
 
 ## Licence
 

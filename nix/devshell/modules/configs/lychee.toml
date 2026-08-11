@@ -69,4 +69,11 @@ exclude = [
   # from upstream. Its author wrote the path with a stray slash in it, so it
   # has never resolved; the listing stays as it was written.
   "rosettacode\\.org/wiki/Conway/",
+  # The Shadertoy programs cite where their maths came from, and half of those
+  # citations are Inigo Quilez articles under the /www/ path he has since
+  # dropped. The programs are vendored verbatim, comments and all.
+  'iquilezles\.org/www/',
+  # Another of those citations: a graph plotted by putting the formula in the
+  # URL, which the site no longer answers to.
+  'thetamath\.com/',
 ]

@@ -28,18 +28,33 @@ use std::future::Future;
 use std::pin::Pin;
 
 use xscreensaver::runtime::{Runner, StartArgs};
+use xscreensaver::shadertoy::Shadertoy;
 
 type RunnerFuture = Pin<Box<dyn Future<Output = Option<Runner>>>>;
+type ShadertoyFuture = Pin<Box<dyn Future<Output = Option<Shadertoy>>>>;
+
+/// Which engine a saver needs, and how to start it.
+///
+/// Downloads the saver's chunk if it is not already resident, then starts it.
+/// Resolves immediately once the chunk is in memory, so restarting a saver
+/// after a settings change costs nothing extra. `None` if the chunk could not
+/// be fetched.
+///
+/// The two arms cannot be collapsed: a canvas has one context for its lifetime,
+/// so the stage has to know before it mounts whether it is going to be
+/// rasterising into a 2D context or handing fragments to WebGL2.
+pub enum Start {
+    /// A 2D hack, drawing into a software framebuffer.
+    Fb(fn(StartArgs) -> RunnerFuture),
+    /// A Shadertoy program, drawing as a fragment shader.
+    Gl(fn(StartArgs) -> ShadertoyFuture),
+}
 
 /// One saver, as the router sees it before its code is loaded.
 pub struct Entry {
     pub slug: &'static str,
     pub label: &'static str,
-    /// Downloads the saver's chunk if it is not already resident, then starts
-    /// it. Resolves immediately once the chunk is in memory, so restarting a
-    /// saver after a settings change costs nothing extra. `None` if the chunk
-    /// could not be fetched.
-    pub start: fn(StartArgs) -> RunnerFuture,
+    pub start: Start,
 }
 
 /// Declare a saver: the entry point its chunk exports, and the loader that
@@ -70,6 +85,34 @@ macro_rules! saver {
 
         #[cfg(not(feature = "split"))]
         fn $load(args: StartArgs) -> RunnerFuture {
+            Box::pin(async { Some($body(args)) })
+        }
+    };
+}
+
+/// The same, for a Shadertoy saver. Its chunk holds the program text rather
+/// than code, since the runner is shared and lives in the main module.
+macro_rules! gl_saver {
+    ($slug:literal, $body:ident, $load:ident, $path:path) => {
+        fn $body(args: StartArgs) -> Shadertoy {
+            $path(args)
+        }
+
+        #[cfg(feature = "split")]
+        fn $load(args: StartArgs) -> ShadertoyFuture {
+            Box::pin(async {
+                static MODULE: wasm_split::LazyLoader<StartArgs, Shadertoy> =
+            wasm_split::lazy_loader!(extern $slug fn $body(props: StartArgs) -> Shadertoy);
+                if MODULE.load().await {
+                    MODULE.call(args).ok()
+                } else {
+                    None
+                }
+            })
+        }
+
+        #[cfg(not(feature = "split"))]
+        fn $load(args: StartArgs) -> ShadertoyFuture {
             Box::pin(async { Some($body(args)) })
         }
     };
@@ -929,718 +972,1049 @@ saver!(
     xscreensaver::hacks2d::xspirograph::start
 );
 
+gl_saver!(
+    "alienbeacon",
+    alienbeacon_body,
+    alienbeacon_start,
+    xscreensaver::shadertoy::alienbeacon::start
+);
+gl_saver!(
+    "batteredplanet",
+    batteredplanet_body,
+    batteredplanet_start,
+    xscreensaver::shadertoy::batteredplanet::start
+);
+gl_saver!(
+    "bestill",
+    bestill_body,
+    bestill_start,
+    xscreensaver::shadertoy::bestill::start
+);
+gl_saver!(
+    "bubblecolors",
+    bubblecolors_body,
+    bubblecolors_start,
+    xscreensaver::shadertoy::bubblecolors::start
+);
+gl_saver!(
+    "darktransit",
+    darktransit_body,
+    darktransit_start,
+    xscreensaver::shadertoy::darktransit::start
+);
+gl_saver!(
+    "downfall",
+    downfall_body,
+    downfall_start,
+    xscreensaver::shadertoy::downfall::start
+);
+gl_saver!(
+    "driftclouds",
+    driftclouds_body,
+    driftclouds_start,
+    xscreensaver::shadertoy::driftclouds::start
+);
+gl_saver!(
+    "elementalring",
+    elementalring_body,
+    elementalring_start,
+    xscreensaver::shadertoy::elementalring::start
+);
+gl_saver!(
+    "fluxcore",
+    fluxcore_body,
+    fluxcore_start,
+    xscreensaver::shadertoy::fluxcore::start
+);
+gl_saver!(
+    "gimbalharmonics",
+    gimbalharmonics_body,
+    gimbalharmonics_start,
+    xscreensaver::shadertoy::gimbalharmonics::start
+);
+gl_saver!(
+    "goldenapollian",
+    goldenapollian_body,
+    goldenapollian_start,
+    xscreensaver::shadertoy::goldenapollian::start
+);
+gl_saver!(
+    "hexplasma",
+    hexplasma_body,
+    hexplasma_start,
+    xscreensaver::shadertoy::hexplasma::start
+);
+gl_saver!(
+    "logarithmiccircles",
+    logarithmiccircles_body,
+    logarithmiccircles_start,
+    xscreensaver::shadertoy::logarithmiccircles::start
+);
+gl_saver!(
+    "neongravity",
+    neongravity_body,
+    neongravity_start,
+    xscreensaver::shadertoy::neongravity::start
+);
+gl_saver!(
+    "neontriangulator",
+    neontriangulator_body,
+    neontriangulator_start,
+    xscreensaver::shadertoy::neontriangulator::start
+);
+gl_saver!(
+    "noxfire",
+    noxfire_body,
+    noxfire_start,
+    xscreensaver::shadertoy::noxfire::start
+);
+gl_saver!(
+    "prococean",
+    prococean_body,
+    prococean_start,
+    xscreensaver::shadertoy::prococean::start
+);
+gl_saver!(
+    "protophore",
+    protophore_body,
+    protophore_start,
+    xscreensaver::shadertoy::protophore::start
+);
+gl_saver!(
+    "rigrekt",
+    rigrekt_body,
+    rigrekt_start,
+    xscreensaver::shadertoy::rigrekt::start
+);
+gl_saver!(
+    "selfreflect",
+    selfreflect_body,
+    selfreflect_start,
+    xscreensaver::shadertoy::selfreflect::start
+);
+gl_saver!(
+    "skyline",
+    skyline_body,
+    skyline_start,
+    xscreensaver::shadertoy::skyline::start
+);
+gl_saver!(
+    "stardome",
+    stardome_body,
+    stardome_start,
+    xscreensaver::shadertoy::stardome::start
+);
+gl_saver!(
+    "starnest",
+    starnest_body,
+    starnest_start,
+    xscreensaver::shadertoy::starnest::start
+);
+gl_saver!(
+    "stripeytorus",
+    stripeytorus_body,
+    stripeytorus_start,
+    xscreensaver::shadertoy::stripeytorus::start
+);
+gl_saver!(
+    "synthwavecity",
+    synthwavecity_body,
+    synthwavecity_start,
+    xscreensaver::shadertoy::synthwavecity::start
+);
+gl_saver!(
+    "topologica",
+    topologica_body,
+    topologica_start,
+    xscreensaver::shadertoy::topologica::start
+);
+gl_saver!(
+    "trainmandala",
+    trainmandala_body,
+    trainmandala_start,
+    xscreensaver::shadertoy::trainmandala::start
+);
+gl_saver!(
+    "trizm",
+    trizm_body,
+    trizm_start,
+    xscreensaver::shadertoy::trizm::start
+);
+gl_saver!(
+    "truchetzoom",
+    truchetzoom_body,
+    truchetzoom_start,
+    xscreensaver::shadertoy::truchetzoom::start
+);
+gl_saver!(
+    "universeball",
+    universeball_body,
+    universeball_start,
+    xscreensaver::shadertoy::universeball::start
+);
+
 /// Every saver, by slug. Only the slug, the label and a function pointer live
 /// here; the code behind each one arrives on demand.
 pub static SAVERS: &[Entry] = &[
     Entry {
         slug: "ant",
         label: "Ant",
-        start: ant_start,
+        start: Start::Fb(ant_start),
     },
     Entry {
         slug: "abstractile",
         label: "Abstractile",
-        start: abstractile_start,
+        start: Start::Fb(abstractile_start),
     },
     Entry {
         slug: "anemone",
         label: "Anemone",
-        start: anemone_start,
+        start: Start::Fb(anemone_start),
     },
     Entry {
         slug: "anemotaxis",
         label: "Anemotaxis",
-        start: anemotaxis_start,
+        start: Start::Fb(anemotaxis_start),
     },
     Entry {
         slug: "apollonian",
         label: "Apollonian",
-        start: apollonian_start,
+        start: Start::Fb(apollonian_start),
     },
     Entry {
         slug: "apple2",
         label: "Apple ][",
-        start: apple2_start,
+        start: Start::Fb(apple2_start),
     },
     Entry {
         slug: "attraction",
         label: "Attraction",
-        start: attraction_start,
+        start: Start::Fb(attraction_start),
     },
     Entry {
         slug: "barcode",
         label: "Barcode",
-        start: barcode_start,
+        start: Start::Fb(barcode_start),
     },
     Entry {
         slug: "binaryhorizon",
         label: "Binary Horizon",
-        start: binaryhorizon_start,
+        start: Start::Fb(binaryhorizon_start),
     },
     Entry {
         slug: "binaryring",
         label: "Binary Ring",
-        start: binaryring_start,
+        start: Start::Fb(binaryring_start),
     },
     Entry {
         slug: "blaster",
         label: "Blaster",
-        start: blaster_start,
+        start: Start::Fb(blaster_start),
     },
     Entry {
         slug: "blitspin",
         label: "Blit Spin",
-        start: blitspin_start,
+        start: Start::Fb(blitspin_start),
     },
     Entry {
         slug: "bouboule",
         label: "Bouboule",
-        start: bouboule_start,
+        start: Start::Fb(bouboule_start),
     },
     Entry {
         slug: "bsod",
         label: "BSOD",
-        start: bsod_start,
+        start: Start::Fb(bsod_start),
     },
     Entry {
         slug: "boxfit",
         label: "Box Fit",
-        start: boxfit_start,
+        start: Start::Fb(boxfit_start),
     },
     Entry {
         slug: "braid",
         label: "Braid",
-        start: braid_start,
+        start: Start::Fb(braid_start),
     },
     Entry {
         slug: "bubbles",
         label: "Bubbles",
-        start: bubbles_start,
+        start: Start::Fb(bubbles_start),
     },
     Entry {
         slug: "bumps",
         label: "Bumps",
-        start: bumps_start,
+        start: Start::Fb(bumps_start),
     },
     Entry {
         slug: "ccurve",
         label: "C Curve",
-        start: ccurve_start,
+        start: Start::Fb(ccurve_start),
     },
     Entry {
         slug: "celtic",
         label: "Celtic",
-        start: celtic_start,
+        start: Start::Fb(celtic_start),
     },
     Entry {
         slug: "cloudlife",
         label: "Cloud Life",
-        start: cloudlife_start,
+        start: Start::Fb(cloudlife_start),
     },
     Entry {
         slug: "compass",
         label: "Compass",
-        start: compass_start,
+        start: Start::Fb(compass_start),
     },
     Entry {
         slug: "coral",
         label: "Coral",
-        start: coral_start,
+        start: Start::Fb(coral_start),
     },
     Entry {
         slug: "critical",
         label: "Critical",
-        start: critical_start,
+        start: Start::Fb(critical_start),
     },
     Entry {
         slug: "crystal",
         label: "Crystal",
-        start: crystal_start,
+        start: Start::Fb(crystal_start),
     },
     Entry {
         slug: "cwaves",
         label: "C Waves",
-        start: cwaves_start,
+        start: Start::Fb(cwaves_start),
     },
     Entry {
         slug: "deco",
         label: "Deco",
-        start: deco_start,
+        start: Start::Fb(deco_start),
     },
     Entry {
         slug: "cynosure",
         label: "Cynosure",
-        start: cynosure_start,
+        start: Start::Fb(cynosure_start),
     },
     Entry {
         slug: "decayscreen",
         label: "Decay Screen",
-        start: decayscreen_start,
+        start: Start::Fb(decayscreen_start),
     },
     Entry {
         slug: "deluxe",
         label: "Deluxe",
-        start: deluxe_start,
+        start: Start::Fb(deluxe_start),
     },
     Entry {
         slug: "demon",
         label: "Demon",
-        start: demon_start,
+        start: Start::Fb(demon_start),
     },
     Entry {
         slug: "discrete",
         label: "Discrete",
-        start: discrete_start,
+        start: Start::Fb(discrete_start),
     },
     Entry {
         slug: "fuzzyflakes",
         label: "Fuzzy Flakes",
-        start: fuzzyflakes_start,
+        start: Start::Fb(fuzzyflakes_start),
     },
     Entry {
         slug: "galaxy",
         label: "Galaxy",
-        start: galaxy_start,
+        start: Start::Fb(galaxy_start),
     },
     Entry {
         slug: "greynetic",
         label: "Greynetic",
-        start: greynetic_start,
+        start: Start::Fb(greynetic_start),
     },
     Entry {
         slug: "distort",
         label: "Distort",
-        start: distort_start,
+        start: Start::Fb(distort_start),
     },
     Entry {
         slug: "drift",
         label: "Drift",
-        start: drift_start,
+        start: Start::Fb(drift_start),
     },
     Entry {
         slug: "droste",
         label: "Droste",
-        start: droste_start,
+        start: Start::Fb(droste_start),
     },
     Entry {
         slug: "epicycle",
         label: "Epicycle",
-        start: epicycle_start,
+        start: Start::Fb(epicycle_start),
     },
     Entry {
         slug: "euler2d",
         label: "Euler 2D",
-        start: euler2d_start,
+        start: Start::Fb(euler2d_start),
     },
     Entry {
         slug: "eruption",
         label: "Eruption",
-        start: eruption_start,
+        start: Start::Fb(eruption_start),
     },
     Entry {
         slug: "fadeplot",
         label: "Fade Plot",
-        start: fadeplot_start,
+        start: Start::Fb(fadeplot_start),
     },
     Entry {
         slug: "fiberlamp",
         label: "Fiber Lamp",
-        start: fiberlamp_start,
+        start: Start::Fb(fiberlamp_start),
     },
     Entry {
         slug: "filmleader",
         label: "Film Leader",
-        start: filmleader_start,
+        start: Start::Fb(filmleader_start),
     },
     Entry {
         slug: "fireworkx",
         label: "Fireworkx",
-        start: fireworkx_start,
+        start: Start::Fb(fireworkx_start),
     },
     Entry {
         slug: "flag",
         label: "Flag",
-        start: flag_start,
+        start: Start::Fb(flag_start),
     },
     Entry {
         slug: "flame",
         label: "Flame",
-        start: flame_start,
+        start: Start::Fb(flame_start),
     },
     Entry {
         slug: "flow",
         label: "Flow",
-        start: flow_start,
+        start: Start::Fb(flow_start),
     },
     Entry {
         slug: "fluidballs",
         label: "Fluid Balls",
-        start: fluidballs_start,
+        start: Start::Fb(fluidballs_start),
     },
     Entry {
         slug: "fontglide",
         label: "Font Glide",
-        start: fontglide_start,
+        start: Start::Fb(fontglide_start),
     },
     Entry {
         slug: "forest",
         label: "Forest",
-        start: forest_start,
+        start: Start::Fb(forest_start),
     },
     Entry {
         slug: "glitchpeg",
         label: "GlitchPEG",
-        start: glitchpeg_start,
+        start: Start::Fb(glitchpeg_start),
     },
     Entry {
         slug: "goop",
         label: "Goop",
-        start: goop_start,
+        start: Start::Fb(goop_start),
     },
     Entry {
         slug: "grav",
         label: "Grav",
-        start: grav_start,
+        start: Start::Fb(grav_start),
     },
     Entry {
         slug: "halo",
         label: "Halo",
-        start: halo_start,
+        start: Start::Fb(halo_start),
     },
     Entry {
         slug: "halftone",
         label: "Halftone",
-        start: halftone_start,
+        start: Start::Fb(halftone_start),
     },
     Entry {
         slug: "helix",
         label: "Helix",
-        start: helix_start,
+        start: Start::Fb(helix_start),
     },
     Entry {
         slug: "hexadrop",
         label: "Hexadrop",
-        start: hexadrop_start,
+        start: Start::Fb(hexadrop_start),
     },
     Entry {
         slug: "hopalong",
         label: "Hopalong",
-        start: hopalong_start,
+        start: Start::Fb(hopalong_start),
     },
     Entry {
         slug: "hyperball",
         label: "Hyperball",
-        start: hyperball_start,
+        start: Start::Fb(hyperball_start),
     },
     Entry {
         slug: "hypercube",
         label: "Hypercube",
-        start: hypercube_start,
+        start: Start::Fb(hypercube_start),
     },
     Entry {
         slug: "ifs",
         label: "IFS",
-        start: ifs_start,
+        start: Start::Fb(ifs_start),
     },
     Entry {
         slug: "imsmap",
         label: "IMS Map",
-        start: imsmap_start,
+        start: Start::Fb(imsmap_start),
     },
     Entry {
         slug: "interaggregate",
         label: "Interaggregate",
-        start: interaggregate_start,
+        start: Start::Fb(interaggregate_start),
     },
     Entry {
         slug: "interference",
         label: "Interference",
-        start: interference_start,
+        start: Start::Fb(interference_start),
     },
     Entry {
         slug: "intermomentary",
         label: "Intermomentary",
-        start: intermomentary_start,
+        start: Start::Fb(intermomentary_start),
     },
     Entry {
         slug: "juggle",
         label: "Juggle",
-        start: juggle_start,
+        start: Start::Fb(juggle_start),
     },
     Entry {
         slug: "julia",
         label: "Julia",
-        start: julia_start,
+        start: Start::Fb(julia_start),
     },
     Entry {
         slug: "kaleidescope",
         label: "Kaleidescope",
-        start: kaleidescope_start,
+        start: Start::Fb(kaleidescope_start),
     },
     Entry {
         slug: "laser",
         label: "Laser",
-        start: laser_start,
+        start: Start::Fb(laser_start),
     },
     Entry {
         slug: "kumppa",
         label: "Kumppa",
-        start: kumppa_start,
+        start: Start::Fb(kumppa_start),
     },
     Entry {
         slug: "lcdscrub",
         label: "LCD Scrub",
-        start: lcdscrub_start,
+        start: Start::Fb(lcdscrub_start),
     },
     Entry {
         slug: "lightning",
         label: "Lightning",
-        start: lightning_start,
+        start: Start::Fb(lightning_start),
     },
     Entry {
         slug: "lisa",
         label: "Lisa",
-        start: lisa_start,
+        start: Start::Fb(lisa_start),
     },
     Entry {
         slug: "lissie",
         label: "Lissie",
-        start: lissie_start,
+        start: Start::Fb(lissie_start),
     },
     Entry {
         slug: "moire",
         label: "Moiré",
-        start: moire_start,
+        start: Start::Fb(moire_start),
     },
     Entry {
         slug: "lmorph",
         label: "LMorph",
-        start: lmorph_start,
+        start: Start::Fb(lmorph_start),
     },
     Entry {
         slug: "loop",
         label: "Loop",
-        start: loop_start,
+        start: Start::Fb(loop_start),
     },
     Entry {
         slug: "m6502",
         label: "m6502",
-        start: m6502_start,
+        start: Start::Fb(m6502_start),
     },
     Entry {
         slug: "marbling",
         label: "Marbling",
-        start: marbling_start,
+        start: Start::Fb(marbling_start),
     },
     Entry {
         slug: "maze",
         label: "Maze",
-        start: maze_start,
+        start: Start::Fb(maze_start),
     },
     Entry {
         slug: "memscroller",
         label: "Mem Scroller",
-        start: memscroller_start,
+        start: Start::Fb(memscroller_start),
     },
     Entry {
         slug: "metaballs",
         label: "Meta Balls",
-        start: metaballs_start,
+        start: Start::Fb(metaballs_start),
     },
     Entry {
         slug: "moire2",
         label: "Moiré 2",
-        start: moire2_start,
+        start: Start::Fb(moire2_start),
     },
     Entry {
         slug: "mountain",
         label: "Mountain",
-        start: mountain_start,
+        start: Start::Fb(mountain_start),
     },
     Entry {
         slug: "munch",
         label: "Munch",
-        start: munch_start,
+        start: Start::Fb(munch_start),
     },
     Entry {
         slug: "nerverot",
         label: "Nerve Rot",
-        start: nerverot_start,
+        start: Start::Fb(nerverot_start),
     },
     Entry {
         slug: "noseguy",
         label: "Nose Guy",
-        start: noseguy_start,
+        start: Start::Fb(noseguy_start),
     },
     Entry {
         slug: "pacman",
         label: "Pac-Man",
-        start: pacman_start,
+        start: Start::Fb(pacman_start),
     },
     Entry {
         slug: "pedal",
         label: "Pedal",
-        start: pedal_start,
+        start: Start::Fb(pedal_start),
     },
     Entry {
         slug: "penetrate",
         label: "Penetrate",
-        start: penetrate_start,
+        start: Start::Fb(penetrate_start),
     },
     Entry {
         slug: "penrose",
         label: "Penrose",
-        start: penrose_start,
+        start: Start::Fb(penrose_start),
     },
     Entry {
         slug: "petri",
         label: "Petri",
-        start: petri_start,
+        start: Start::Fb(petri_start),
     },
     Entry {
         slug: "phosphor",
         label: "Phosphor",
-        start: phosphor_start,
+        start: Start::Fb(phosphor_start),
     },
     Entry {
         slug: "piecewise",
         label: "Piecewise",
-        start: piecewise_start,
+        start: Start::Fb(piecewise_start),
     },
     Entry {
         slug: "polyominoes",
         label: "Polyominoes",
-        start: polyominoes_start,
+        start: Start::Fb(polyominoes_start),
     },
     Entry {
         slug: "pong",
         label: "Pong",
-        start: pong_start,
+        start: Start::Fb(pong_start),
     },
     Entry {
         slug: "popsquares",
         label: "Pop Squares",
-        start: popsquares_start,
+        start: Start::Fb(popsquares_start),
     },
     Entry {
         slug: "pyro",
         label: "Pyro",
-        start: pyro_start,
+        start: Start::Fb(pyro_start),
     },
     Entry {
         slug: "qix",
         label: "Qix",
-        start: qix_start,
+        start: Start::Fb(qix_start),
     },
     Entry {
         slug: "rdbomb",
         label: "RD-Bomb",
-        start: rdbomb_start,
+        start: Start::Fb(rdbomb_start),
     },
     Entry {
         slug: "ripples",
         label: "Ripples",
-        start: ripples_start,
+        start: Start::Fb(ripples_start),
     },
     Entry {
         slug: "rocks",
         label: "Rocks",
-        start: rocks_start,
+        start: Start::Fb(rocks_start),
     },
     Entry {
         slug: "rorschach",
         label: "Rorschach",
-        start: rorschach_start,
+        start: Start::Fb(rorschach_start),
     },
     Entry {
         slug: "rotor",
         label: "Rotor",
-        start: rotor_start,
+        start: Start::Fb(rotor_start),
     },
     Entry {
         slug: "scooter",
         label: "Scooter",
-        start: scooter_start,
+        start: Start::Fb(scooter_start),
     },
     Entry {
         slug: "shadebobs",
         label: "Shade Bobs",
-        start: shadebobs_start,
+        start: Start::Fb(shadebobs_start),
     },
     Entry {
         slug: "rotzoomer",
         label: "Rot Zoomer",
-        start: rotzoomer_start,
+        start: Start::Fb(rotzoomer_start),
     },
     Entry {
         slug: "sierpinski",
         label: "Sierpinski",
-        start: sierpinski_start,
+        start: Start::Fb(sierpinski_start),
     },
     Entry {
         slug: "slidescreen",
         label: "Slide Screen",
-        start: slidescreen_start,
+        start: Start::Fb(slidescreen_start),
     },
     Entry {
         slug: "slip",
         label: "Slip",
-        start: slip_start,
+        start: Start::Fb(slip_start),
     },
     Entry {
         slug: "speedmine",
         label: "Speed Mine",
-        start: speedmine_start,
+        start: Start::Fb(speedmine_start),
     },
     Entry {
         slug: "sphere",
         label: "Sphere",
-        start: sphere_start,
+        start: Start::Fb(sphere_start),
     },
     Entry {
         slug: "spiral",
         label: "Spiral",
-        start: spiral_start,
+        start: Start::Fb(spiral_start),
     },
     Entry {
         slug: "spotlight",
         label: "Spotlight",
-        start: spotlight_start,
+        start: Start::Fb(spotlight_start),
     },
     Entry {
         slug: "squiral",
         label: "Squiral",
-        start: squiral_start,
+        start: Start::Fb(squiral_start),
     },
     Entry {
         slug: "starfish",
         label: "Starfish",
-        start: starfish_start,
+        start: Start::Fb(starfish_start),
     },
     Entry {
         slug: "strange",
         label: "Strange",
-        start: strange_start,
+        start: Start::Fb(strange_start),
     },
     Entry {
         slug: "substrate",
         label: "Substrate",
-        start: substrate_start,
+        start: Start::Fb(substrate_start),
     },
     Entry {
         slug: "swirl",
         label: "Swirl",
-        start: swirl_start,
+        start: Start::Fb(swirl_start),
     },
     Entry {
         slug: "t3d",
         label: "T3D",
-        start: t3d_start,
+        start: Start::Fb(t3d_start),
     },
     Entry {
         slug: "tessellimage",
         label: "Tessellimage",
-        start: tessellimage_start,
+        start: Start::Fb(tessellimage_start),
     },
     Entry {
         slug: "thornbird",
         label: "Thornbird",
-        start: thornbird_start,
+        start: Start::Fb(thornbird_start),
     },
     Entry {
         slug: "triangle",
         label: "Triangle",
-        start: triangle_start,
+        start: Start::Fb(triangle_start),
     },
     Entry {
         slug: "twang",
         label: "Twang",
-        start: twang_start,
+        start: Start::Fb(twang_start),
     },
     Entry {
         slug: "vines",
         label: "Vines",
-        start: vines_start,
+        start: Start::Fb(vines_start),
     },
     Entry {
         slug: "truchet",
         label: "Truchet",
-        start: truchet_start,
+        start: Start::Fb(truchet_start),
     },
     Entry {
         slug: "vermiculate",
         label: "Vermiculate",
-        start: vermiculate_start,
+        start: Start::Fb(vermiculate_start),
     },
     Entry {
         slug: "vfeedback",
         label: "VFeedback",
-        start: vfeedback_start,
+        start: Start::Fb(vfeedback_start),
     },
     Entry {
         slug: "wander",
         label: "Wander",
-        start: wander_start,
+        start: Start::Fb(wander_start),
     },
     Entry {
         slug: "whirlwindwarp",
         label: "Whirlwind Warp",
-        start: whirlwindwarp_start,
+        start: Start::Fb(whirlwindwarp_start),
     },
     Entry {
         slug: "whirlygig",
         label: "Whirlygig",
-        start: whirlygig_start,
+        start: Start::Fb(whirlygig_start),
     },
     Entry {
         slug: "worm",
         label: "Worm",
-        start: worm_start,
+        start: Start::Fb(worm_start),
     },
     Entry {
         slug: "wormhole",
         label: "Wormhole",
-        start: wormhole_start,
+        start: Start::Fb(wormhole_start),
     },
     Entry {
         slug: "zoom",
         label: "Zoom",
-        start: zoom_start,
+        start: Start::Fb(zoom_start),
     },
     Entry {
         slug: "xanalogtv",
         label: "XAnalogTV",
-        start: xanalogtv_start,
+        start: Start::Fb(xanalogtv_start),
     },
     Entry {
         slug: "xflame",
         label: "XFlame",
-        start: xflame_start,
+        start: Start::Fb(xflame_start),
     },
     Entry {
         slug: "xjack",
         label: "XJack",
-        start: xjack_start,
+        start: Start::Fb(xjack_start),
     },
     Entry {
         slug: "xlyap",
         label: "XLyap",
-        start: xlyap_start,
+        start: Start::Fb(xlyap_start),
     },
     Entry {
         slug: "xmatrix",
         label: "XMatrix",
-        start: xmatrix_start,
+        start: Start::Fb(xmatrix_start),
     },
     Entry {
         slug: "xrayswarm",
         label: "XRaySwarm",
-        start: xrayswarm_start,
+        start: Start::Fb(xrayswarm_start),
     },
     Entry {
         slug: "xspirograph",
         label: "XSpirograph",
-        start: xspirograph_start,
+        start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "alienbeacon",
+        label: "Alien Beacon",
+        start: Start::Gl(alienbeacon_start),
+    },
+    Entry {
+        slug: "batteredplanet",
+        label: "Battered Planet",
+        start: Start::Gl(batteredplanet_start),
+    },
+    Entry {
+        slug: "bestill",
+        label: "Be Still",
+        start: Start::Gl(bestill_start),
+    },
+    Entry {
+        slug: "bubblecolors",
+        label: "Bubble Colors",
+        start: Start::Gl(bubblecolors_start),
+    },
+    Entry {
+        slug: "darktransit",
+        label: "Dark Transit",
+        start: Start::Gl(darktransit_start),
+    },
+    Entry {
+        slug: "downfall",
+        label: "Downfall",
+        start: Start::Gl(downfall_start),
+    },
+    Entry {
+        slug: "driftclouds",
+        label: "Drift Clouds",
+        start: Start::Gl(driftclouds_start),
+    },
+    Entry {
+        slug: "elementalring",
+        label: "Elemental Ring",
+        start: Start::Gl(elementalring_start),
+    },
+    Entry {
+        slug: "fluxcore",
+        label: "Flux Core",
+        start: Start::Gl(fluxcore_start),
+    },
+    Entry {
+        slug: "gimbalharmonics",
+        label: "Gimbal Harmonics",
+        start: Start::Gl(gimbalharmonics_start),
+    },
+    Entry {
+        slug: "goldenapollian",
+        label: "Golden Apollian",
+        start: Start::Gl(goldenapollian_start),
+    },
+    Entry {
+        slug: "hexplasma",
+        label: "Hex Plasma",
+        start: Start::Gl(hexplasma_start),
+    },
+    Entry {
+        slug: "logarithmiccircles",
+        label: "Logarithmic Circles",
+        start: Start::Gl(logarithmiccircles_start),
+    },
+    Entry {
+        slug: "neongravity",
+        label: "Neon Gravity",
+        start: Start::Gl(neongravity_start),
+    },
+    Entry {
+        slug: "neontriangulator",
+        label: "Neon Triangulator",
+        start: Start::Gl(neontriangulator_start),
+    },
+    Entry {
+        slug: "noxfire",
+        label: "Nox Fire",
+        start: Start::Gl(noxfire_start),
+    },
+    Entry {
+        slug: "prococean",
+        label: "Proc Ocean",
+        start: Start::Gl(prococean_start),
+    },
+    Entry {
+        slug: "protophore",
+        label: "Protophore",
+        start: Start::Gl(protophore_start),
+    },
+    Entry {
+        slug: "rigrekt",
+        label: "Rig Rekt",
+        start: Start::Gl(rigrekt_start),
+    },
+    Entry {
+        slug: "selfreflect",
+        label: "Self Reflect",
+        start: Start::Gl(selfreflect_start),
+    },
+    Entry {
+        slug: "skyline",
+        label: "Skyline",
+        start: Start::Gl(skyline_start),
+    },
+    Entry {
+        slug: "stardome",
+        label: "Star Dome",
+        start: Start::Gl(stardome_start),
+    },
+    Entry {
+        slug: "starnest",
+        label: "Star Nest",
+        start: Start::Gl(starnest_start),
+    },
+    Entry {
+        slug: "stripeytorus",
+        label: "Stripey Torus",
+        start: Start::Gl(stripeytorus_start),
+    },
+    Entry {
+        slug: "synthwavecity",
+        label: "Synthwave City",
+        start: Start::Gl(synthwavecity_start),
+    },
+    Entry {
+        slug: "topologica",
+        label: "Topologica",
+        start: Start::Gl(topologica_start),
+    },
+    Entry {
+        slug: "trainmandala",
+        label: "Train Mandala",
+        start: Start::Gl(trainmandala_start),
+    },
+    Entry {
+        slug: "trizm",
+        label: "Trizm",
+        start: Start::Gl(trizm_start),
+    },
+    Entry {
+        slug: "truchetzoom",
+        label: "Truchet Zoom",
+        start: Start::Gl(truchetzoom_start),
+    },
+    Entry {
+        slug: "universeball",
+        label: "Universe Ball",
+        start: Start::Gl(universeball_start),
     },
 ];
 

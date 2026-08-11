@@ -38,5 +38,10 @@ shot slug width="640" height="480" frames="300" query="" seed="20260809":
 test:
     cargo test --manifest-path xscreensaver/Cargo.toml
 
+# Render a Shadertoy saver in headless chromium, which is the only thing that
+# can run one. Needs a build first. Example: just browser starnest
+browser slug="--all":
+    nu test-browser.nu {{slug}}
+
 clean:
     {{dx}} clean

@@ -5,8 +5,12 @@
 //! lazily loaded; only the savers themselves are (see [`crate::pages::savers`]),
 //! so the shared runtime is downloaded once however many you look at.
 //!
-//! The saver draws into a software framebuffer, which this blits to the canvas
-//! with `putImageData` once per animation frame.
+//! A 2D saver draws into a software framebuffer, which this blits to the canvas
+//! with `putImageData` once per animation frame. A Shadertoy saver is a
+//! fragment shader instead, and [`crate::pages::gl`] runs it. Everything around
+//! them, the canvas, the frame loop, the panel and the URL, is shared: only the
+//! engine differs, and it has to be chosen before the canvas is mounted because
+//! a canvas has one context for its lifetime.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -18,11 +22,12 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 use xscreensaver::SaverDef;
-use xscreensaver::runtime::{OptKind, Runner, StartArgs, XEvent};
+use xscreensaver::runtime::{OptKind, Runner, StartArgs, XEvent, XImage};
 
 use crate::Route;
 use crate::images::{self, Source};
-use crate::pages::savers;
+use crate::pages::gl::GlEngine;
+use crate::pages::savers::{self, Start};
 use crate::pages::ui::{Choice, Details, Slider, Toggle};
 use crate::url::{captured_query, replace_query};
 
@@ -45,15 +50,33 @@ fn buffer_size(css_w: i32, css_h: i32) -> (i32, i32, i32) {
     ((css_w / scale).max(1), (css_h / scale).max(1), scale)
 }
 
-struct Host {
-    canvas: HtmlCanvasElement,
+/// A 2D hack and the context it blits through.
+struct FbEngine {
     ctx: CanvasRenderingContext2d,
     runner: Runner,
+}
+
+/// The two ways a saver can reach the canvas. Both boxed: there is one of these
+/// per page and the arms are nothing like the same size.
+enum Engine {
+    /// A 2D hack: a software framebuffer, blitted with `putImageData`.
+    Fb(Box<FbEngine>),
+    /// A Shadertoy program, drawn by WebGL2.
+    Gl(Box<GlEngine>),
+}
+
+struct Host {
+    canvas: HtmlCanvasElement,
+    engine: Engine,
     paused: bool,
     /// CSS pixels per framebuffer pixel, for mapping pointer coordinates back.
     scale: i32,
     css_w: i32,
     css_h: i32,
+    /// The drawing buffer's size in pixels, which is the canvas attribute
+    /// rather than its CSS size.
+    buf_w: i32,
+    buf_h: i32,
     /// The query the running hack was started with, so that the settings effect
     /// firing for an unrelated reason does not restart it.
     query: String,
@@ -69,7 +92,10 @@ struct Host {
 
 impl Host {
     fn def(&self) -> &'static SaverDef {
-        self.runner.def()
+        match &self.engine {
+            Engine::Fb(fb) => fb.runner.def(),
+            Engine::Gl(gl) => gl.def(),
+        }
     }
 
     /// Reset the picture bookkeeping after a restart. The saver itself was
@@ -82,14 +108,9 @@ impl Host {
     }
 
     fn start_args(&self, query: &str) -> StartArgs {
-        StartArgs::new(
-            self.runner.dpy.width(),
-            self.runner.dpy.height(),
-            query,
-            seed(),
-        )
-        .with_image_host(self.source != Source::None)
-        .with_wall_clock(wall_clock_seconds())
+        StartArgs::new(self.buf_w, self.buf_h, query, seed())
+            .with_image_host(self.source != Source::None)
+            .with_wall_clock(wall_clock_seconds())
     }
 
     fn sync_size(&mut self) {
@@ -105,15 +126,75 @@ impl Host {
         self.css_w = css_w;
         self.css_h = css_h;
         self.scale = scale;
+        self.buf_w = w;
+        self.buf_h = h;
         self.canvas.set_width(w as u32);
         self.canvas.set_height(h as u32);
-        self.runner.resize(w, h);
+        match &mut self.engine {
+            Engine::Fb(fb) => fb.runner.resize(w, h),
+            Engine::Gl(gl) => gl.resize(w, h),
+        }
+    }
+
+    /// Advance the saver and put the result on the canvas.
+    fn draw(&mut self, now: f64) {
+        match &mut self.engine {
+            Engine::Fb(fb) => {
+                if !self.paused {
+                    fb.runner.tick(now);
+                }
+                self.blit();
+            }
+            // Nothing to blit: the shader wrote to the canvas itself. A paused
+            // one simply is not drawn, and the last frame stays up.
+            Engine::Gl(gl) => {
+                if !self.paused {
+                    gl.draw(now);
+                }
+            }
+        }
+    }
+
+    fn event(&mut self, event: XEvent) {
+        match &mut self.engine {
+            Engine::Fb(fb) => {
+                fb.runner.event(event);
+            }
+            Engine::Gl(gl) => {
+                gl.event(&event);
+            }
+        }
+    }
+
+    /// Has the hack asked for a picture? Only the 2D ones ever do; a Shadertoy
+    /// program is self-contained by definition.
+    fn wants_image(&mut self) -> bool {
+        match &mut self.engine {
+            Engine::Fb(fb) => fb.runner.dpy.take_image_request(),
+            Engine::Gl(_) => false,
+        }
+    }
+
+    fn deliver_image(&mut self, image: XImage, title: Option<String>) {
+        if let Engine::Fb(fb) = &mut self.engine {
+            fb.runner.dpy.deliver_image(image, title);
+        }
+    }
+
+    fn image_title(&self) -> Option<String> {
+        match &self.engine {
+            Engine::Fb(fb) => fb.runner.dpy.image_title().map(str::to_string),
+            Engine::Gl(_) => None,
+        }
     }
 
     fn blit(&self) {
-        let w = self.runner.dpy.width() as u32;
-        let h = self.runner.dpy.height() as u32;
-        let bytes = self.runner.frame_bytes();
+        let Engine::Fb(fb) = &self.engine else {
+            return;
+        };
+        let w = fb.runner.dpy.width() as u32;
+        let h = fb.runner.dpy.height() as u32;
+        let bytes = fb.runner.frame_bytes();
         // The copying constructor, not the zero-copy
         // `Uint8ClampedArray::view` one: constructing an `ImageData` from a
         // view into the wasm heap throws here, and throwing is indistinguishable
@@ -127,7 +208,7 @@ impl Host {
                 return;
             }
         };
-        if let Err(e) = self.ctx.put_image_data(&img, 0.0, 0.0) {
+        if let Err(e) = fb.ctx.put_image_data(&img, 0.0, 0.0) {
             log::error!("screensaver: putImageData failed: {e:?}");
         }
     }
@@ -176,24 +257,16 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
             let mut h = host.borrow_mut();
             if h.canvas.is_connected() {
                 h.sync_size();
-                if !h.paused {
-                    let now = now_seconds();
-                    h.runner.tick(now);
-                }
-                h.blit();
+                let now = now_seconds();
+                h.draw(now);
 
-                if h.runner.dpy.take_image_request() {
+                if h.wants_image() {
                     h.image_wanted = true;
                     h.image_retry_at = 0.0;
                 }
-                let now = now_seconds();
                 if h.image_wanted && !h.image_fetching && now >= h.image_retry_at {
                     h.image_fetching = true;
-                    fetch = Some((
-                        h.source.clone(),
-                        h.runner.dpy.width(),
-                        h.runner.dpy.height(),
-                    ));
+                    fetch = Some((h.source.clone(), h.buf_w, h.buf_h));
                 }
                 true
             } else {
@@ -212,7 +285,7 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                 match picture {
                     Some(p) => {
                         h.image_wanted = false;
-                        h.runner.dpy.deliver_image(p.image, p.title);
+                        h.deliver_image(p.image, p.title);
                     }
                     // Nothing to show yet: a hashtag nobody has posted under
                     // since we started listening. Ask again shortly.
@@ -353,12 +426,27 @@ fn SaverStage(slug: String) -> Element {
         spawn(async move {
             let args = h.borrow().start_args(&query);
             // Already resident by now, so this resolves without another fetch.
-            if let Some(runner) = (entry.start)(args).await {
-                let mut h = h.borrow_mut();
-                h.runner = runner;
-                h.query = query;
-                h.announce_image_source();
+            match &entry.start {
+                Start::Fb(start) => {
+                    let Some(runner) = start(args).await else {
+                        return;
+                    };
+                    let mut h = h.borrow_mut();
+                    if let Engine::Fb(fb) = &mut h.engine {
+                        fb.runner = runner;
+                    }
+                }
+                Start::Gl(start) => {
+                    let Some(st) = start(args).await else { return };
+                    let mut h = h.borrow_mut();
+                    if let Engine::Gl(gl) = &mut h.engine {
+                        gl.restart(st);
+                    }
+                }
             }
+            let mut h = h.borrow_mut();
+            h.query = query;
+            h.announce_image_source();
         });
     });
 
@@ -368,14 +456,6 @@ fn SaverStage(slug: String) -> Element {
             spawn(async move {
                 let element: web_sys::Element = evt.data().try_as_web_event().unwrap();
                 let canvas: HtmlCanvasElement = element.dyn_into().unwrap();
-                let Some(ctx) = canvas
-                    .get_context("2d")
-                    .ok()
-                    .flatten()
-                    .and_then(|c| c.dyn_into::<CanvasRenderingContext2d>().ok())
-                else {
-                    return;
-                };
 
                 let css_w = canvas.client_width().max(1);
                 let css_h = canvas.client_height().max(1);
@@ -389,18 +469,41 @@ fn SaverStage(slug: String) -> Element {
                 let args = StartArgs::new(w, h, &query, seed())
                     .with_image_host(source != Source::None)
                     .with_wall_clock(wall_clock_seconds());
-                let Some(runner) = (entry.start)(args).await else {
+                // The context has to match the saver: asking a canvas for "2d"
+                // after it has given out a "webgl2" (or the other way round)
+                // returns null for the rest of its life.
+                let engine = match &entry.start {
+                    Start::Fb(start) => {
+                        let ctx = canvas
+                            .get_context("2d")
+                            .ok()
+                            .flatten()
+                            .and_then(|c| c.dyn_into::<CanvasRenderingContext2d>().ok());
+                        match (ctx, start(args).await) {
+                            (Some(ctx), Some(runner)) => {
+                                Some(Engine::Fb(Box::new(FbEngine { ctx, runner })))
+                            }
+                            _ => None,
+                        }
+                    }
+                    Start::Gl(start) => start(args)
+                        .await
+                        .and_then(|st| GlEngine::new(&canvas, st))
+                        .map(|gl| Engine::Gl(Box::new(gl))),
+                };
+                let Some(engine) = engine else {
                     failed.set(true);
                     return;
                 };
                 let mut built = Host {
                     canvas,
-                    ctx,
-                    runner,
+                    engine,
                     paused: false,
                     scale,
                     css_w,
                     css_h,
+                    buf_w: w,
+                    buf_h: h,
                     query,
                     source,
                     image_wanted: false,
@@ -417,7 +520,7 @@ fn SaverStage(slug: String) -> Element {
 
     let send = move |event: XEvent| {
         if let Some(h) = host.read().clone() {
-            h.borrow_mut().runner.event(event);
+            h.borrow_mut().event(event);
         }
     };
 
@@ -433,9 +536,7 @@ fn SaverStage(slug: String) -> Element {
     // Where the pictures come from, and what the one on screen is called.
     let pictures = host.read().as_ref().and_then(|h| {
         let h = h.borrow();
-        h.source
-            .describe()
-            .map(|from| (from, h.runner.dpy.image_title().map(str::to_string)))
+        h.source.describe().map(|from| (from, h.image_title()))
     });
 
     rsx! {
@@ -461,21 +562,21 @@ fn SaverStage(slug: String) -> Element {
                     let c = e.data().client_coordinates();
                     if let Some(h) = host.read().clone() {
                         let (x, y) = h.borrow().to_buffer(c.x, c.y);
-                        h.borrow_mut().runner.event(XEvent::ButtonPress { x, y, button: 1 });
+                        h.borrow_mut().event(XEvent::ButtonPress { x, y, button: 1 });
                     }
                 },
                 onpointerup: move |e| {
                     let c = e.data().client_coordinates();
                     if let Some(h) = host.read().clone() {
                         let (x, y) = h.borrow().to_buffer(c.x, c.y);
-                        h.borrow_mut().runner.event(XEvent::ButtonRelease { x, y, button: 1 });
+                        h.borrow_mut().event(XEvent::ButtonRelease { x, y, button: 1 });
                     }
                 },
                 onpointermove: move |e| {
                     let c = e.data().client_coordinates();
                     if let Some(h) = host.read().clone() {
                         let (x, y) = h.borrow().to_buffer(c.x, c.y);
-                        h.borrow_mut().runner.event(XEvent::MotionNotify { x, y });
+                        h.borrow_mut().event(XEvent::MotionNotify { x, y });
                     }
                 },
             }

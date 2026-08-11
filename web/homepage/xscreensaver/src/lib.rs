@@ -19,6 +19,7 @@
 pub mod hacks2d;
 pub mod images;
 pub mod runtime;
+pub mod shadertoy;
 
 pub use runtime::{Dpy, SaverDef, Screenhack};
 

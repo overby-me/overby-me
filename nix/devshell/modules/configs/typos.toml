@@ -67,6 +67,9 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# lod = level of detail, the mip level argument of GLSL's texelFetch. In the
+# Shadertoy preamble transcribed from hacks/glx/xshadertoy.c.
+lod = "lod"
 # 6502 mnemonics and addressing modes, in the m6502 demo programs and in the
 # opcode table of the assembler that reads them: CPY compares the Y register,
 # INDX and INDY are indexed indirect addressing.
@@ -178,5 +181,11 @@ extend-exclude = [
   # contains target names like target_os = "nto" that look like typos
   "nix/lib/cargo/index/",
   "nix/lib/cargo/tests/fixtures/index/",
+  # The Shadertoy programs, vendored verbatim from XScreenSaver. They are
+  # shader source, and their local names are short and mathematical (ba, pa,
+  # fre, lod, aas), so nearly every one reads as a misspelling.
+  "web/homepage/xscreensaver/glsl/",
+  # Likewise the 6502 demo programs, which are assembly listings.
+  "web/homepage/xscreensaver/images/m6502/",
 ]
 ignore-hidden = false
