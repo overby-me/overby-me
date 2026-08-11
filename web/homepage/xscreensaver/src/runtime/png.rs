@@ -13,7 +13,7 @@
 //! type at bit depths 1 through 8, no interlacing and no 16-bit samples. Meeting
 //! anything else returns `None` rather than guessing.
 
-use super::color::{Pixel, RGB_MASK, rgb};
+use super::color::{Pixel, RGB_MASK, rgb, unrgb};
 use super::fb::{Fb, XImage};
 
 /// Decode a PNG into a colour image and a bitmap of where it is opaque.
@@ -521,14 +521,12 @@ pub fn decode_rgba(bytes: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
     let mut out = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
-            let p = image.get_pixel(x, y);
+            // A Pixel keeps red in the low byte, so unpack rather than shift.
+            let (r, g, b) = unrgb(image.get_pixel(x, y));
             let opaque = mask
                 .as_ref()
                 .is_none_or(|m| m.get_pixel(x, y) & RGB_MASK != 0);
-            out.push((p >> 16) as u8);
-            out.push((p >> 8) as u8);
-            out.push(p as u8);
-            out.push(if opaque { 0xFF } else { 0 });
+            out.extend_from_slice(&[r, g, b, if opaque { 0xFF } else { 0 }]);
         }
     }
     Some((w, h, out))

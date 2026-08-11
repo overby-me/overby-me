@@ -10,6 +10,10 @@
 //! They are upstream's files byte for byte, under the same notice as the code
 //! that draws them.
 
+/// `wood.png`: 128x32 of woodgrain, palettised. The planks of `cage` are
+/// each one of these stretched over a face.
+pub const WOOD: &[u8] = include_bytes!("../images/wood.png");
+
 /// `blocktube.png`: a 256x256 greyscale photograph of a lit room, used as a
 /// sphere map so that the slabs look like polished metal.
 pub const BLOCKTUBE: &[u8] = include_bytes!("../images/blocktube.png");

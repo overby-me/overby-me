@@ -22,6 +22,7 @@ pub mod beats;
 pub mod blinkbox;
 pub mod blocktube;
 pub mod boing;
+pub mod cage;
 pub mod cityflow;
 pub mod cube21;
 pub mod cubenetic;
@@ -62,6 +63,7 @@ pub static ALL: &[&Saver3d] = &[
     &cubetwist::SAVER,
     &cubicgrid::SAVER,
     &beats::SAVER,
+    &cage::SAVER,
     &cityflow::SAVER,
     &cube21::SAVER,
     &cubenetic::SAVER,
