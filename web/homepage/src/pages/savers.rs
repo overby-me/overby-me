@@ -1234,6 +1234,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::spheremonics::start
 );
 gl3d_saver!(
+    "hypertorus",
+    hypertorus_body,
+    hypertorus_start,
+    xscreensaver::hacks3d::hypertorus::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2423,6 +2429,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hydrostat",
         label: "Hydrostat",
         start: Start::Gl3d(hydrostat_start),
+    },
+    Entry {
+        slug: "hypertorus",
+        label: "Hypertorus",
+        start: Start::Gl3d(hypertorus_start),
     },
     Entry {
         slug: "morph3d",
