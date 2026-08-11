@@ -1144,6 +1144,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::blinkbox::start
 );
 gl3d_saver!(
+    "surfaces",
+    surfaces_body,
+    surfaces_start,
+    xscreensaver::hacks3d::surfaces::start
+);
+gl3d_saver!(
     "stonerview",
     stonerview_body,
     stonerview_start,
@@ -2212,6 +2218,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "stonerview",
         label: "Stoner View",
         start: Start::Gl3d(stonerview_start),
+    },
+    Entry {
+        slug: "surfaces",
+        label: "Surfaces",
+        start: Start::Gl3d(surfaces_start),
     },
     Entry {
         slug: "voronoi",

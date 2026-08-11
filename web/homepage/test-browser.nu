@@ -111,9 +111,12 @@ await send("Runtime.enable");
 
 const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
-for (const slug of slugs) {
+for (const path of slugs) {
+  // The path carries any --query settings; the file is named after the saver
+  // alone, which is where the caller goes looking for it.
+  const slug = path.split("?")[0];
   console_lines.length = 0;
-  await send("Page.navigate", { url: `http://127.0.0.1:${port}/screensaver/${slug}` });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/screensaver/${path}` });
   // Wait for the stage to mount before starting the clock. Fetching and
   // instantiating the wasm takes a while, and a screenshot taken before that is
   // the browser default white rather than anything the saver did.
@@ -196,7 +199,7 @@ def main [
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
          universeball
          beats blinkbox boing cityflow cube21 cubenetic cubestack cubestorm cubetwist cubicgrid dangerball discoball energystream glknots glschool gravitywell hexstrut hextrail hypnowheel
-         kaleidocycle lockward menger noof quasicrystal rubikblocks sierpinski3d splodesic stonerview voronoi]
+         kaleidocycle lockward menger noof quasicrystal rubikblocks sierpinski3d splodesic stonerview surfaces voronoi]
     } else if $slug != null {
         [$slug]
     } else {

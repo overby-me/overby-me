@@ -45,6 +45,7 @@ pub mod rubikblocks;
 pub mod sierpinski3d;
 pub mod splodesic;
 pub mod stonerview;
+pub mod surfaces;
 pub mod voronoi;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
@@ -78,6 +79,7 @@ pub static ALL: &[&Saver3d] = &[
     &sierpinski3d::SAVER,
     &splodesic::SAVER,
     &stonerview::SAVER,
+    &surfaces::SAVER,
     &voronoi::SAVER,
 ];
 
