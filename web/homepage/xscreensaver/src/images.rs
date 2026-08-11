@@ -158,3 +158,8 @@ pub const NOSE: [&[u8]; 8] = [
     include_bytes!("../images/noseguy/nose-f1.png"),
     include_bytes!("../images/noseguy/nose-f4.png"),
 ];
+
+/// `curlicue.h`: the curling arrow the four topology savers draw over their
+/// surface to show its orientation. 64 square, one byte a pixel, converted
+/// from upstream's header by `web/homepage/gen-curlicue.nu`.
+pub const CURLICUE: &[u8] = include_bytes!("../images/curlicue.gray");

@@ -1264,6 +1264,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::molecule::start
 );
 gl3d_saver!(
+    "projectiveplane",
+    projectiveplane_body,
+    projectiveplane_start,
+    xscreensaver::hacks3d::projectiveplane::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2393,6 +2399,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pinion",
         label: "Pinion",
         start: Start::Gl3d(pinion_start),
+    },
+    Entry {
+        slug: "projectiveplane",
+        label: "Projective Plane",
+        start: Start::Gl3d(projectiveplane_start),
     },
     Entry {
         slug: "pulsar",
