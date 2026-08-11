@@ -57,6 +57,7 @@ pub mod quasicrystal;
 pub mod raverhoop;
 pub mod rubikblocks;
 pub mod sierpinski3d;
+pub mod spheremonics;
 pub mod splodesic;
 pub mod stairs;
 pub mod stonerview;
@@ -110,6 +111,7 @@ pub static ALL: &[&Saver3d] = &[
     &raverhoop::SAVER,
     &rubikblocks::SAVER,
     &sierpinski3d::SAVER,
+    &spheremonics::SAVER,
     &splodesic::SAVER,
     &stairs::SAVER,
     &stonerview::SAVER,

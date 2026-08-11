@@ -1228,6 +1228,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::topblock::start
 );
 gl3d_saver!(
+    "spheremonics",
+    spheremonics_body,
+    spheremonics_start,
+    xscreensaver::hacks3d::spheremonics::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2392,6 +2398,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "stonerview",
         label: "Stoner View",
         start: Start::Gl3d(stonerview_start),
+    },
+    Entry {
+        slug: "spheremonics",
+        label: "Spheremonics",
+        start: Start::Gl3d(spheremonics_start),
     },
     Entry {
         slug: "superquadrics",
