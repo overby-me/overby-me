@@ -36,6 +36,7 @@ pub mod kaleidocycle;
 pub mod lockward;
 pub mod menger;
 pub mod quasicrystal;
+pub mod rubikblocks;
 pub mod sierpinski3d;
 pub mod splodesic;
 pub mod voronoi;
@@ -62,6 +63,7 @@ pub static ALL: &[&Saver3d] = &[
     &lockward::SAVER,
     &menger::SAVER,
     &quasicrystal::SAVER,
+    &rubikblocks::SAVER,
     &sierpinski3d::SAVER,
     &splodesic::SAVER,
     &voronoi::SAVER,

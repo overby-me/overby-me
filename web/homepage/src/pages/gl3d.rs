@@ -386,11 +386,16 @@ impl Gl3dEngine {
                 log::error!("gl3d: texture {id} would not upload");
                 continue;
             }
-            // Repeat and linear, which is what every saver that makes a
-            // texture asks for; none of them asks for anything else.
+            // Linear, which is what every saver that makes a texture asks
+            // for; the wrap is the only thing they disagree on.
+            let wrap = if t.clamp {
+                Gl::CLAMP_TO_EDGE
+            } else {
+                Gl::REPEAT
+            };
             for (p, v) in [
-                (Gl::TEXTURE_WRAP_S, Gl::REPEAT),
-                (Gl::TEXTURE_WRAP_T, Gl::REPEAT),
+                (Gl::TEXTURE_WRAP_S, wrap),
+                (Gl::TEXTURE_WRAP_T, wrap),
                 (Gl::TEXTURE_MIN_FILTER, Gl::LINEAR),
                 (Gl::TEXTURE_MAG_FILTER, Gl::LINEAR),
             ] {
@@ -401,8 +406,7 @@ impl Gl3dEngine {
 
         gl.use_program(Some(&self.program));
         let u = &self.uniforms;
-        // OpenGL's own default scene ambient, which no saver here changes.
-        gl.uniform4f(u.scene_ambient.as_ref(), 0.2, 0.2, 0.2, 1.0);
+
         for batch in &frame.batches {
             if batch.depth_test {
                 gl.enable(Gl::DEPTH_TEST);
@@ -472,6 +476,7 @@ impl Gl3dEngine {
                 }
                 None => {}
             }
+            gl.uniform4fv_with_f32_array(u.scene_ambient.as_ref(), &batch.scene_ambient);
             gl.uniform1i(u.lighting.as_ref(), i32::from(batch.lighting));
             if batch.lighting {
                 let m = &batch.material;

@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (22) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (23) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -396,8 +396,11 @@ mid-frame clear of it, face culling and winding, blending, display lists, two
 lights, fog and texturing.
 
 Textures are RGBA bytes and nothing else: no mipmaps, no other formats, and
-always `GL_REPEAT` with `GL_LINEAR`, because that is what every saver that
-makes one asks for. They are built once when a saver starts and referred to by
+always `GL_LINEAR`, with a choice of repeating or clamping at the edges,
+because that is what every saver that makes one asks for. A texture that is one
+picture rather than a tile clamps, and `rubikblocks`, whose faces each carry a
+dark outline, is the one that cares. They are built once when a saver starts
+and referred to by
 name after that, so the host uploads each one the first time it sees the name
 and keeps it. There is no `GL_TEXTURE_1D` in WebGL, so a saver that wants one
 gets a 2D texture a single row high, which samples the same way.

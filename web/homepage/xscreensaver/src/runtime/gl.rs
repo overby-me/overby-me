@@ -218,14 +218,17 @@ pub struct Vertex {
 }
 
 /// A texture, as the savers build them: a block of RGBA bytes and nothing
-/// else. Every one of them asks for `GL_REPEAT` and `GL_LINEAR`, so those are
-/// not stored; if one ever wants something else, this is where it goes.
+/// else. Every one of them asks for `GL_LINEAR`, so that is not stored; if one
+/// ever wants something else, this is where it goes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Texture {
     pub width: i32,
     pub height: i32,
     /// `width * height * 4` bytes.
     pub data: Vec<u8>,
+    /// `GL_CLAMP_TO_EDGE` rather than `GL_REPEAT`, for a texture that is one
+    /// picture rather than a tile.
+    pub clamp: bool,
 }
 
 /// `glBlendFunc`, as the two pairs the savers actually pass it. More become
@@ -376,6 +379,9 @@ pub struct Batch {
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
     /// and want it in the order they drew it.
     pub depth_test: bool,
+    /// `glLightModelfv (GL_LIGHT_MODEL_AMBIENT, ..)`: the light every surface
+    /// gets whatever the lamps are doing.
+    pub scene_ambient: [f32; 4],
     /// `glEnable(GL_FOG)`, and what it fades to.
     pub fog: Option<Fog>,
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
@@ -404,6 +410,7 @@ impl Batch {
             && self.fog == other.fog
             && self.texture == other.texture
             && self.tex_env == other.tex_env
+            && self.scene_ambient == other.scene_ambient
     }
 }
 
@@ -467,6 +474,7 @@ pub struct Glx {
     cull_face: bool,
     front_face_cw: bool,
     clear_color: [f32; 4],
+    scene_ambient: [f32; 4],
     fog: Option<Fog>,
     textures: Vec<Option<Texture>>,
     bound_texture: Option<u32>,
@@ -515,6 +523,7 @@ impl Glx {
             cull_face: false,
             front_face_cw: false,
             clear_color: [0.0, 0.0, 0.0, 1.0],
+            scene_ambient: [0.2, 0.2, 0.2, 1.0],
             fog: None,
             textures: Vec::new(),
             bound_texture: None,
@@ -875,6 +884,16 @@ impl Glx {
     /// nothing else: no mipmaps, no other formats, because no saver here asks
     /// for either.
     pub fn tex_image_2d(&mut self, width: i32, height: i32, data: Vec<u8>) {
+        self.tex_image_2d_wrapped(width, height, data, false);
+    }
+
+    /// The same, for a texture that should be clamped at its edges rather than
+    /// repeated.
+    pub fn tex_image_2d_clamped(&mut self, width: i32, height: i32, data: Vec<u8>) {
+        self.tex_image_2d_wrapped(width, height, data, true);
+    }
+
+    fn tex_image_2d_wrapped(&mut self, width: i32, height: i32, data: Vec<u8>, clamp: bool) {
         let Some(id) = self.bound_texture else { return };
         let Some(slot) = self.textures.get_mut(id as usize - 1) else {
             return;
@@ -883,7 +902,14 @@ impl Glx {
             width,
             height,
             data,
+            clamp,
         });
+    }
+
+    /// `glLightModelfv (GL_LIGHT_MODEL_AMBIENT, ..)`. OpenGL defaults it to a
+    /// fifth, which is what a saver that never mentions it gets.
+    pub fn light_model_ambient(&mut self, rgba: [f32; 4]) {
+        self.scene_ambient = rgba;
     }
 
     /// `glTexEnvi (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, ..)`.
@@ -996,6 +1022,7 @@ impl Glx {
             clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
             blend: self.blend,
             line_width: self.line_width,
+            scene_ambient: self.scene_ambient,
             fog: self.fog,
             texture: if self.texturing {
                 self.bound_texture
