@@ -1012,6 +1012,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cubicgrid::start
 );
 gl3d_saver!(
+    "handsy",
+    handsy_body,
+    handsy_start,
+    xscreensaver::hacks3d::handsy::start
+);
+gl3d_saver!(
     "headroom",
     headroom_body,
     headroom_start,
@@ -2554,6 +2560,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "gravitywell",
         label: "Gravity Well",
         start: Start::Gl3d(gravitywell_start),
+    },
+    Entry {
+        slug: "handsy",
+        label: "Handsy",
+        start: Start::Gl3d(handsy_start),
     },
     Entry {
         slug: "headroom",

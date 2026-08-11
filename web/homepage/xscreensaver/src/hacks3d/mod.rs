@@ -57,6 +57,12 @@ pub mod glsnake;
 mod glsnake_models;
 pub mod gltext;
 pub mod gravitywell;
+pub mod handsy;
+// Public because it is converted upstream data rather than a private helper:
+// the header defines three animations that its own table never lists, a whole
+// round of rock-paper-scissors among them, and they are kept because this is
+// that header converted and not a selection from it.
+pub mod handsy_anim;
 pub mod headroom;
 pub mod hexstrut;
 pub mod hextrail;
@@ -140,6 +146,7 @@ pub static ALL: &[&Saver3d] = &[
     &glknots::SAVER,
     &glschool::SAVER,
     &headroom::SAVER,
+    &handsy::SAVER,
     &highvoltage::SAVER,
     &carousel::SAVER,
     &chompytower::SAVER,

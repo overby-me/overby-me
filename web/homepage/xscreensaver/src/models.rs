@@ -186,3 +186,20 @@ pub const TEETH_MODEL_TEETH_LOWER_HALF: &str =
     include_str!("../models/teeth_model_teeth_lower_half.gllist");
 pub const TEETH_MODEL_TEETH_UPPER_HALF: &str =
     include_str!("../models/teeth_model_teeth_upper_half.gllist");
+
+/// The bones of a hand, for `handsy`.
+pub const HANDSY_MODEL_FINGER_DISTAL: &str =
+    include_str!("../models/handsy_model_finger_distal.gllist");
+pub const HANDSY_MODEL_FINGER_INTERMEDIATE: &str =
+    include_str!("../models/handsy_model_finger_intermediate.gllist");
+pub const HANDSY_MODEL_FINGER_PROXIMAL: &str =
+    include_str!("../models/handsy_model_finger_proximal.gllist");
+pub const HANDSY_MODEL_FINGER_METACARPAL: &str =
+    include_str!("../models/handsy_model_finger_metacarpal.gllist");
+pub const HANDSY_MODEL_THUMB_DISTAL: &str =
+    include_str!("../models/handsy_model_thumb_distal.gllist");
+pub const HANDSY_MODEL_THUMB_PROXIMAL: &str =
+    include_str!("../models/handsy_model_thumb_proximal.gllist");
+pub const HANDSY_MODEL_THUMB_METACARPAL: &str =
+    include_str!("../models/handsy_model_thumb_metacarpal.gllist");
+pub const HANDSY_MODEL_PALM: &str = include_str!("../models/handsy_model_palm.gllist");
