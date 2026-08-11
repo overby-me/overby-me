@@ -84,6 +84,8 @@ uniform vec4 u_light_diffuse[LIGHTS];
 uniform vec4 u_light_specular[LIGHTS];
 uniform vec4 u_material_diffuse;
 uniform vec4 u_material_diffuse_back;
+uniform vec4 u_material_ambient;
+uniform vec4 u_material_ambient_back;
 uniform vec4 u_material_specular;
 uniform float u_shininess;
 uniform vec4 u_scene_ambient;
@@ -147,7 +149,14 @@ void main() {
                ? v_color
                : (gl_FrontFacing ? u_material_diffuse : u_material_diffuse_back);
 
-  vec3 c = diffuse.rgb * u_scene_ambient.rgb;
+  // What the ambient light lands on is its own material colour in GL. It is
+  // the same as the diffuse for nearly every saver, and deliberately is not
+  // for the few that set only GL_DIFFUSE under a strong scene ambient.
+  vec3 ambient = u_color_material
+               ? v_color.rgb
+               : (gl_FrontFacing ? u_material_ambient.rgb : u_material_ambient_back.rgb);
+
+  vec3 c = ambient * u_scene_ambient.rgb;
   for (int i = 0; i < LIGHTS; i++) {
     if (! u_light_on[i]) continue;
     vec4 p = u_light_position[i];
@@ -155,7 +164,7 @@ void main() {
     // direction. Otherwise it is a homogeneous point, and w has to be divided
     // out before the direction to it means anything.
     vec3 l = normalize (p.w == 0.0 ? p.xyz : p.xyz / p.w - v_eye);
-    c += diffuse.rgb * u_light_ambient[i].rgb;
+    c += ambient * u_light_ambient[i].rgb;
     c += diffuse.rgb * u_light_diffuse[i].rgb * max (dot (n, l), 0.0);
     if (u_shininess > 0.0) {
       vec3 h = normalize (l + eye);
@@ -181,6 +190,8 @@ struct Uniforms {
     light_specular: Vec<Option<WebGlUniformLocation>>,
     material_diffuse: Option<WebGlUniformLocation>,
     material_diffuse_back: Option<WebGlUniformLocation>,
+    material_ambient: Option<WebGlUniformLocation>,
+    material_ambient_back: Option<WebGlUniformLocation>,
     material_specular: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
@@ -222,6 +233,8 @@ impl Uniforms {
                 .collect(),
             material_diffuse: at("u_material_diffuse"),
             material_diffuse_back: at("u_material_diffuse_back"),
+            material_ambient: at("u_material_ambient"),
+            material_ambient_back: at("u_material_ambient_back"),
             material_specular: at("u_material_specular"),
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
@@ -563,6 +576,8 @@ impl Gl3dEngine {
                     u.material_diffuse_back.as_ref(),
                     &m.back_ambient_diffuse,
                 );
+                gl.uniform4fv_with_f32_array(u.material_ambient.as_ref(), &m.ambient);
+                gl.uniform4fv_with_f32_array(u.material_ambient_back.as_ref(), &m.back_ambient);
                 gl.uniform4fv_with_f32_array(u.material_specular.as_ref(), &m.specular);
                 gl.uniform1f(u.shininess.as_ref(), m.shininess);
             }

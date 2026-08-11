@@ -342,6 +342,14 @@ impl Default for Light {
 pub struct Material {
     pub ambient_diffuse: [f32; 4],
     pub back_ambient_diffuse: [f32; 4],
+    /// What the ambient light lands on, which is a separate colour in GL and
+    /// almost never a separate colour in a saver: nearly all of them set
+    /// `GL_AMBIENT_AND_DIFFUSE` and never think about it again. It matters for
+    /// the few that set only `GL_DIFFUSE` and leave this at GL's dim grey, so
+    /// that a strong scene ambient lifts their faces towards grey rather than
+    /// towards their own colour.
+    pub ambient: [f32; 4],
+    pub back_ambient: [f32; 4],
     pub specular: [f32; 4],
     pub shininess: f32,
 }
@@ -352,6 +360,8 @@ impl Default for Material {
         Material {
             ambient_diffuse: [0.8, 0.8, 0.8, 1.0],
             back_ambient_diffuse: [0.8, 0.8, 0.8, 1.0],
+            ambient: [0.2, 0.2, 0.2, 1.0],
+            back_ambient: [0.2, 0.2, 0.2, 1.0],
             specular: [0.0, 0.0, 0.0, 1.0],
             shininess: 0.0,
         }
@@ -853,6 +863,17 @@ impl Glx {
         self.split_block();
         self.material.ambient_diffuse = rgba;
         self.material.back_ambient_diffuse = rgba;
+        self.material.ambient = rgba;
+        self.material.back_ambient = rgba;
+    }
+
+    /// `glMaterialfv (GL_FRONT_AND_BACK, GL_DIFFUSE, ..)`, and only the
+    /// diffuse: the ambient colour stays where it was, which for a saver that
+    /// never sets it is GL's dim grey.
+    pub fn material_diffuse(&mut self, rgba: [f32; 4]) {
+        self.split_block();
+        self.material.ambient_diffuse = rgba;
+        self.material.back_ambient_diffuse = rgba;
     }
 
     /// `glMaterialfv (GL_BACK, GL_AMBIENT_AND_DIFFUSE, ..)`: the inside of a
@@ -861,6 +882,7 @@ impl Glx {
     pub fn material_back_ambient_diffuse(&mut self, rgba: [f32; 4]) {
         self.split_block();
         self.material.back_ambient_diffuse = rgba;
+        self.material.back_ambient = rgba;
     }
 
     pub fn material_specular(&mut self, rgba: [f32; 4]) {

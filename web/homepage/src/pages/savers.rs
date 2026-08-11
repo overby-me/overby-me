@@ -1210,6 +1210,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::tronbit::start
 );
 gl3d_saver!(
+    "morph3d",
+    morph3d_body,
+    morph3d_start,
+    xscreensaver::hacks3d::morph3d::start
+);
+gl3d_saver!(
     "unknownpleasures",
     unknownpleasures_body,
     unknownpleasures_start,
@@ -2367,6 +2373,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "surfaces",
         label: "Surfaces",
         start: Start::Gl3d(surfaces_start),
+    },
+    Entry {
+        slug: "morph3d",
+        label: "Morph 3D",
+        start: Start::Gl3d(morph3d_start),
     },
     Entry {
         slug: "tronbit",
