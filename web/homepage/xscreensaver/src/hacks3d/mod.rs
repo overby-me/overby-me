@@ -20,12 +20,14 @@ use crate::runtime::Saver3d;
 pub mod beats;
 pub mod blinkbox;
 pub mod boing;
+pub mod cityflow;
 pub mod cubestack;
 pub mod cubestorm;
 pub mod cubicgrid;
 pub mod dangerball;
 pub mod glknots;
 pub mod hexstrut;
+pub mod hextrail;
 pub mod hypnowheel;
 pub mod kaleidocycle;
 pub mod menger;
@@ -42,10 +44,12 @@ pub static ALL: &[&Saver3d] = &[
     &cubestorm::SAVER,
     &cubicgrid::SAVER,
     &beats::SAVER,
+    &cityflow::SAVER,
     &cubestack::SAVER,
     &dangerball::SAVER,
     &glknots::SAVER,
     &hexstrut::SAVER,
+    &hextrail::SAVER,
     &kaleidocycle::SAVER,
     &menger::SAVER,
     &sierpinski3d::SAVER,

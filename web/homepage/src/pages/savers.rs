@@ -1060,6 +1060,18 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "hextrail",
+    hextrail_body,
+    hextrail_start,
+    xscreensaver::hacks3d::hextrail::start
+);
+gl3d_saver!(
+    "cityflow",
+    cityflow_body,
+    cityflow_start,
+    xscreensaver::hacks3d::cityflow::start
+);
+gl3d_saver!(
     "boing",
     boing_body,
     boing_start,
@@ -2005,6 +2017,11 @@ pub static SAVERS: &[Entry] = &[
         start: Start::Gl3d(boing_start),
     },
     Entry {
+        slug: "cityflow",
+        label: "City Flow",
+        start: Start::Gl3d(cityflow_start),
+    },
+    Entry {
         slug: "cubestack",
         label: "Cube Stack",
         start: Start::Gl3d(cubestack_start),
@@ -2033,6 +2050,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hexstrut",
         label: "Hex Strut",
         start: Start::Gl3d(hexstrut_start),
+    },
+    Entry {
+        slug: "hextrail",
+        label: "Hex Trail",
+        start: Start::Gl3d(hextrail_start),
     },
     Entry {
         slug: "hypnowheel",

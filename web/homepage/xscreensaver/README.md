@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (15) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (17) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -444,6 +444,13 @@ has to say anything if it wants them to differ.
 State that can differ between one `glBegin` block and the next rides on the
 batch rather than on the frame, which is what lets a saver turn the depth test
 off for one thing and leave it on for another.
+
+`glMaterial` is one of the few calls OpenGL allows *inside* a block, and savers
+use it: `cityflow` draws eight hundred boxes as one long run of quads and
+changes the colour between each of them. A batch carries one material, so
+setting one cuts the run in two and carries on. Only where the vertices are
+independent primitives and only on a primitive boundary, since cutting a strip
+or a fan in half would lose the triangles that straddle the cut.
 
 Runs of blocks with nothing between them but more vertices are folded into one
 batch, which matters more than it sounds: a saver drawing a cube as forty-eight

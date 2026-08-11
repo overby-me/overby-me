@@ -703,6 +703,7 @@ impl Glx {
     /// face to have a colour. Setting both is what makes the ones that leave
     /// culling off look right without each of them saying so.
     pub fn material_ambient_diffuse(&mut self, rgba: [f32; 4]) {
+        self.split_block();
         self.material.ambient_diffuse = rgba;
         self.material.back_ambient_diffuse = rgba;
     }
@@ -711,15 +712,51 @@ impl Glx {
     /// surface, for a saver that wants it a different colour from the outside.
     /// Set it after the front, which sets both.
     pub fn material_back_ambient_diffuse(&mut self, rgba: [f32; 4]) {
+        self.split_block();
         self.material.back_ambient_diffuse = rgba;
     }
 
     pub fn material_specular(&mut self, rgba: [f32; 4]) {
+        self.split_block();
         self.material.specular = rgba;
     }
 
     pub fn material_shininess(&mut self, shininess: f32) {
+        self.split_block();
         self.material.shininess = shininess;
+    }
+
+    /// Close the run of vertices so far into a batch and carry on with the
+    /// same block.
+    ///
+    /// `glMaterial` is one of the few calls OpenGL allows between `glBegin`
+    /// and `glEnd`, and savers use it: `cityflow` draws eight hundred boxes as
+    /// one long run of quads, changing the material between each. A batch
+    /// carries one material, so the run has to be cut where the material
+    /// changes.
+    ///
+    /// Only where the vertices are independent primitives, and only on a
+    /// primitive boundary: cutting a strip or a fan in half would lose the
+    /// triangles that straddle the cut. Everywhere else the state is simply
+    /// updated, which is what it did before, and is right for the savers that
+    /// set a material before opening a block rather than inside one.
+    fn split_block(&mut self) {
+        let Some(shape) = self.shape else { return };
+        if self.pending.is_empty() {
+            return;
+        }
+        let n = match shape {
+            Shape::Points => 1,
+            Shape::Lines => 2,
+            Shape::Triangles => 3,
+            Shape::Quads => 4,
+            _ => return,
+        };
+        if !self.pending.len().is_multiple_of(n) {
+            return;
+        }
+        self.flush();
+        self.shape = Some(shape);
     }
 
     /* Vertices */
