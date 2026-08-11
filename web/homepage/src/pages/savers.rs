@@ -1120,6 +1120,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::energystream::start
 );
 gl3d_saver!(
+    "pinion",
+    pinion_body,
+    pinion_start,
+    xscreensaver::hacks3d::pinion::start
+);
+gl3d_saver!(
     "pulsar",
     pulsar_body,
     pulsar_start,
@@ -2265,6 +2271,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "noof",
         label: "Noof",
         start: Start::Gl3d(noof_start),
+    },
+    Entry {
+        slug: "pinion",
+        label: "Pinion",
+        start: Start::Gl3d(pinion_start),
     },
     Entry {
         slug: "pulsar",

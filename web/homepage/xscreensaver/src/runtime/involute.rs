@@ -89,6 +89,12 @@ pub struct Gear {
     pub spoke_thickness: f64,
     /// Factory defect.
     pub wobble: f64,
+    /// Roughly how fast this gear turns, which `pinion` uses to decide when a
+    /// train has run away with itself.
+    pub rpm: f64,
+    /// Non-zero when the gear is spinning too fast to draw honestly, and is
+    /// instead turned half a tooth every frame so that it flickers.
+    pub motion_blur_p: i32,
 
     /// Teeth on the inside rather than the outside.
     pub inverted_p: bool,
@@ -125,6 +131,8 @@ impl Default for Gear {
             nubs: 0,
             spoke_thickness: 1.0,
             wobble: 0.0,
+            rpm: 0.0,
+            motion_blur_p: 0,
             inverted_p: false,
             coax_p: 0,
             coax_displacement: 0.0,
