@@ -73,6 +73,9 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# In the copyright header of hacks/glx/flyingtoasters.c, which is kept
+# verbatim: "the wide wonderful workd of OpenGL".
+workd = "workd"
 # lod = level of detail, the mip level argument of GLSL's texelFetch. In the
 # Shadertoy preamble transcribed from hacks/glx/xshadertoy.c.
 lod = "lod"

@@ -38,6 +38,7 @@ pub mod dumpsterfire;
 pub mod energystream;
 pub mod engine;
 pub mod etruscanvenus;
+pub mod flyingtoasters;
 pub mod gears;
 pub mod geodesic;
 pub mod glblur;
@@ -109,6 +110,7 @@ pub static ALL: &[&Saver3d] = &[
     &energystream::SAVER,
     &engine::SAVER,
     &etruscanvenus::SAVER,
+    &flyingtoasters::SAVER,
     &gears::SAVER,
     &geodesic::SAVER,
     &glblur::SAVER,
@@ -182,45 +184,57 @@ mod tests {
         }
     }
 
+    /// Whether anything a saver drew can be seen: geometry inside the clip
+    /// volume, or geometry drawn bigger than the screen, which has every
+    /// corner off it and covers it anyway. `quasicrystal`'s planes are three
+    /// times the size of the view, so the second case is checked by looking
+    /// for a batch whose bounding box has the middle of the screen inside it.
+    fn anything_visible(f: &crate::runtime::gl::Frame) -> bool {
+        let mut seen = 0;
+        for b in &f.batches {
+            for v in &f.vertices[b.first..b.first + b.count] {
+                let p = b.mvp.transform(v.pos);
+                if (-1.0..=1.0).contains(&p[0])
+                    && (-1.0..=1.0).contains(&p[1])
+                    && (-1.0..=1.0).contains(&p[2])
+                {
+                    seen += 1;
+                }
+            }
+        }
+        if seen > 10 {
+            return true;
+        }
+        f.batches.iter().any(|b| {
+            let ps: Vec<[f32; 3]> = f.vertices[b.first..b.first + b.count]
+                .iter()
+                .map(|v| b.mvp.transform(v.pos))
+                .collect();
+            (0..3).all(|k| {
+                ps.iter().map(|p| p[k]).fold(f32::MAX, f32::min) <= 0.0
+                    && ps.iter().map(|p| p[k]).fold(f32::MIN, f32::max) >= 0.0
+            })
+        })
+    }
+
     /// And its geometry has to land somewhere a camera can see: all of it
     /// behind the eye, or all of it off the side, is the same black screen.
     #[test]
     fn every_saver_puts_something_on_screen() {
         for saver in ALL {
-            let r = run(saver, 640, 480, "");
-            let f = r.frame();
-            let mut seen = 0;
-            for b in &f.batches {
-                for v in &f.vertices[b.first..b.first + b.count] {
-                    let p = b.mvp.transform(v.pos);
-                    if (-1.0..=1.0).contains(&p[0])
-                        && (-1.0..=1.0).contains(&p[1])
-                        && (-1.0..=1.0).contains(&p[2])
-                    {
-                        seen += 1;
-                    }
-                }
-            }
-            if seen > 10 {
+            if anything_visible(run(saver, 640, 480, "").frame()) {
                 continue;
             }
-            // Or geometry drawn bigger than the screen, which has every corner
-            // off it and covers it anyway: `quasicrystal`'s planes are three
-            // times the size of the view. Look for a batch whose bounding box
-            // has the middle of the screen inside it.
-            let covers = f.batches.iter().any(|b| {
-                let ps: Vec<[f32; 3]> = f.vertices[b.first..b.first + b.count]
-                    .iter()
-                    .map(|v| b.mvp.transform(v.pos))
-                    .collect();
-                (0..3).all(|k| {
-                    ps.iter().map(|p| p[k]).fold(f32::MAX, f32::min) <= 0.0
-                        && ps.iter().map(|p| p[k]).fold(f32::MIN, f32::max) >= 0.0
-                })
-            });
+            // A saver is allowed to open on an empty view and swing round to
+            // its subject: `flyingtoasters` starts with the camera pointed
+            // away from the flock and takes a hundred frames to come about.
+            let mut r = (saver.start)(StartArgs::new(640, 480, "", 20260811));
+            for _ in 0..300 {
+                r.step();
+            }
             assert!(
-                covers,
-                "{} drew {seen} visible vertices and covered nothing",
+                anything_visible(r.frame()),
+                "{} never put anything on screen",
                 saver.def.slug
             );
         }

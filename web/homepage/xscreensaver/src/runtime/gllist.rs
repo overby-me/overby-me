@@ -37,7 +37,7 @@ pub enum Format {
 
 impl Format {
     /// Floats per vertex.
-    fn stride(self) -> usize {
+    pub fn stride(self) -> usize {
         match self {
             Format::V3f => 3,
             _ => 6,

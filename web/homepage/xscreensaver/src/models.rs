@@ -45,3 +45,15 @@ pub const DUMPSTER_MODEL_LID_PANELS: &str =
     include_str!("../models/dumpster_model_lid_panels.gllist");
 pub const DUMPSTER_MODEL_PANELS_HALF: &str =
     include_str!("../models/dumpster_model_panels_half.gllist");
+
+/// The nine parts of a flying toaster, and the two slices of toast.
+pub const TOAST: &str = include_str!("../models/toast.gllist");
+pub const TOAST2: &str = include_str!("../models/toast2.gllist");
+pub const TOASTER: &str = include_str!("../models/toaster.gllist");
+pub const TOASTER_BASE: &str = include_str!("../models/toaster_base.gllist");
+pub const TOASTER_HANDLE: &str = include_str!("../models/toaster_handle.gllist");
+pub const TOASTER_HANDLE2: &str = include_str!("../models/toaster_handle2.gllist");
+pub const TOASTER_JET: &str = include_str!("../models/toaster_jet.gllist");
+pub const TOASTER_KNOB: &str = include_str!("../models/toaster_knob.gllist");
+pub const TOASTER_SLOTS: &str = include_str!("../models/toaster_slots.gllist");
+pub const TOASTER_WING: &str = include_str!("../models/toaster_wing.gllist");

@@ -1372,6 +1372,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::glschool::start
 );
 gl3d_saver!(
+    "flyingtoasters",
+    flyingtoasters_body,
+    flyingtoasters_start,
+    xscreensaver::hacks3d::flyingtoasters::start
+);
+gl3d_saver!(
     "gears",
     gears_body,
     gears_start,
@@ -2383,6 +2389,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "energystream",
         label: "Energy Stream",
         start: Start::Gl3d(energystream_start),
+    },
+    Entry {
+        slug: "flyingtoasters",
+        label: "Flying Toasters",
+        start: Start::Gl3d(flyingtoasters_start),
     },
     Entry {
         slug: "gears",
