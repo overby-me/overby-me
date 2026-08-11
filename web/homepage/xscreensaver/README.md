@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (4) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (5) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -392,7 +392,12 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 `gluPerspective` and `gluLookAt`, `glBegin` through `glEnd` for every primitive
 (quads and polygons are cut into triangles as the block closes, since ES has no
 such thing), per-vertex colour and normals, point size, the depth test, face
-culling, display lists, and one light. Texturing is not there yet.
+culling, blending, display lists, and two lights. Texturing is not there yet.
+
+Blending is the two `glBlendFunc` pairs the savers pass rather than the full
+matrix of factors, and more become variants when one of them needs a third.
+`hypnowheel` is entirely `GL_ONE, GL_ONE`: it is a stack of translucent
+spirals whose overlaps add up towards white, and that adding is the picture.
 
 There are two lights, because two is the most any saver here turns on, and the
 limit grows when one wants more. A light's position goes through the modelview

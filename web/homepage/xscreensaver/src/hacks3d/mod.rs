@@ -19,6 +19,7 @@ use crate::runtime::Saver3d;
 
 pub mod cubicgrid;
 pub mod hexstrut;
+pub mod hypnowheel;
 pub mod menger;
 pub mod sierpinski3d;
 

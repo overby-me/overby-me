@@ -1029,6 +1029,12 @@ gl3d_saver!(
     menger_start,
     xscreensaver::hacks3d::menger::start
 );
+gl3d_saver!(
+    "hypnowheel",
+    hypnowheel_body,
+    hypnowheel_start,
+    xscreensaver::hacks3d::hypnowheel::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1932,6 +1938,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hexstrut",
         label: "Hex Strut",
         start: Start::Gl3d(hexstrut_start),
+    },
+    Entry {
+        slug: "hypnowheel",
+        label: "Hypnowheel",
+        start: Start::Gl3d(hypnowheel_start),
     },
     Entry {
         slug: "menger",

@@ -216,6 +216,20 @@ pub struct Vertex {
     pub normal: [f32; 3],
 }
 
+/// `glBlendFunc`, as the two pairs the savers actually pass it. More become
+/// variants when one of them needs a third.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blend {
+    /// `glDisable (GL_BLEND)`.
+    Off,
+    /// `GL_ONE, GL_ONE`: everything adds up, so where things overlap they get
+    /// brighter and eventually white. What makes overlapping translucent
+    /// shapes glow.
+    Add,
+    /// `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`: ordinary transparency.
+    Alpha,
+}
+
 /// How many lights a saver can turn on. OpenGL guarantees eight; the savers
 /// here use one or two, and this grows when one wants more.
 pub const MAX_LIGHTS: usize = 2;
@@ -287,6 +301,7 @@ pub struct Batch {
     pub material: Material,
     /// `glEnable(GL_CULL_FACE)`: throw away the back of every face.
     pub cull_face: bool,
+    pub blend: Blend,
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
@@ -349,6 +364,7 @@ pub struct Glx {
     light_enabled: [bool; MAX_LIGHTS],
     material: Material,
     cull_face: bool,
+    blend: Blend,
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -387,6 +403,7 @@ impl Glx {
             light_enabled: [false; MAX_LIGHTS],
             material: Material::default(),
             cull_face: false,
+            blend: Blend::Off,
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -560,6 +577,11 @@ impl Glx {
         self.depth_test = on;
     }
 
+    /// `glBlendFunc`, and the enable that goes with it.
+    pub fn blend(&mut self, blend: Blend) {
+        self.blend = blend;
+    }
+
     /// `glEnable(GL_CULL_FACE)`.
     pub fn cull_face(&mut self, on: bool) {
         self.cull_face = on;
@@ -725,6 +747,7 @@ impl Glx {
             light_enabled: self.light_enabled,
             material: self.material,
             cull_face: self.cull_face,
+            blend: self.blend,
             line_width: self.line_width,
         });
     }

@@ -19,7 +19,7 @@ use web_sys::{
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
-use xscreensaver::runtime::gl::{Frame, MAX_LIGHTS, Primitive};
+use xscreensaver::runtime::gl::{Blend, Frame, MAX_LIGHTS, Primitive};
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
 const FLOATS_PER_VERTEX: usize = 10;
@@ -289,6 +289,17 @@ impl Gl3dEngine {
                 gl.enable(Gl::CULL_FACE);
             } else {
                 gl.disable(Gl::CULL_FACE);
+            }
+            match batch.blend {
+                Blend::Off => gl.disable(Gl::BLEND),
+                Blend::Add => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_func(Gl::ONE, Gl::ONE);
+                }
+                Blend::Alpha => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_func(Gl::SRC_ALPHA, Gl::ONE_MINUS_SRC_ALPHA);
+                }
             }
             gl.uniform_matrix4fv_with_f32_array(u.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);
