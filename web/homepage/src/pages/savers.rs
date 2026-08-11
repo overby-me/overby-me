@@ -1102,6 +1102,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cubenetic::start
 );
 gl3d_saver!(
+    "raverhoop",
+    raverhoop_body,
+    raverhoop_start,
+    xscreensaver::hacks3d::raverhoop::start
+);
+gl3d_saver!(
     "rubikblocks",
     rubikblocks_body,
     rubikblocks_start,
@@ -2292,6 +2298,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "quasicrystal",
         label: "Quasi-Crystal",
         start: Start::Gl3d(quasicrystal_start),
+    },
+    Entry {
+        slug: "raverhoop",
+        label: "Raver Hoop",
+        start: Start::Gl3d(raverhoop_start),
     },
     Entry {
         slug: "rubikblocks",

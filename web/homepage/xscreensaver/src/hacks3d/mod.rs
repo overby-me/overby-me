@@ -49,6 +49,7 @@ pub mod noof;
 pub mod pinion;
 pub mod pulsar;
 pub mod quasicrystal;
+pub mod raverhoop;
 pub mod rubikblocks;
 pub mod sierpinski3d;
 pub mod splodesic;
@@ -92,6 +93,7 @@ pub static ALL: &[&Saver3d] = &[
     &pinion::SAVER,
     &pulsar::SAVER,
     &quasicrystal::SAVER,
+    &raverhoop::SAVER,
     &rubikblocks::SAVER,
     &sierpinski3d::SAVER,
     &splodesic::SAVER,

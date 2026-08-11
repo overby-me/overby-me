@@ -1163,6 +1163,12 @@ impl Glx {
         }
     }
 
+    /// `glGetFloatv (GL_MODELVIEW_MATRIX, ..)`. A few savers read the matrix
+    /// back to find out where something they have just positioned ended up.
+    pub fn modelview_matrix(&self) -> Mat4 {
+        self.modelview()
+    }
+
     fn projection(&self) -> Mat4 {
         self.projection.last().copied().unwrap_or(Mat4::IDENTITY)
     }
