@@ -1258,6 +1258,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::engine::start
 );
 gl3d_saver!(
+    "molecule",
+    molecule_body,
+    molecule_start,
+    xscreensaver::hacks3d::molecule::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2462,6 +2468,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hypertorus",
         label: "Hypertorus",
         start: Start::Gl3d(hypertorus_start),
+    },
+    Entry {
+        slug: "molecule",
+        label: "Molecule",
+        start: Start::Gl3d(molecule_start),
     },
     Entry {
         slug: "morph3d",

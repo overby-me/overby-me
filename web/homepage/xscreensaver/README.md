@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (54) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (55) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -496,7 +496,10 @@ a translucent object blend with itself rather than have its nearest face hide
 the rest, which is how `engine` shows its machinery through the block; the
 second is for two surfaces drawn in the same place where one has to win, which
 is how `geodesic` overlaps two frequencies of the same sphere while one fades
-into the other.
+into the other. `glColorMask` and the three `glDepthFunc` modes the savers ask
+for are there too: `molecule` draws its electron shells once with the colour
+mask off, purely to fill the depth buffer, and again where the depth is exactly
+equal, which is what stops a translucent shell piling up on itself.
 
 `runtime::easing` is upstream's `utils/easing.c`, all thirty-one curves, which
 nineteen of the savers use. They are CSS's semantics and CSS's constants, so

@@ -368,6 +368,17 @@ impl Default for Material {
     }
 }
 
+/// `glDepthFunc`. Only the three the savers ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DepthFunc {
+    #[default]
+    Less,
+    LessEqual,
+    /// Draw only where something is already at exactly this depth, which is
+    /// how `molecule` shades its electron shells without them piling up.
+    Equal,
+}
+
 /// One `glBegin`/`glEnd` block: what to draw, where its vertices are, and the
 /// state that was current when the block opened.
 #[derive(Clone, Debug, PartialEq)]
@@ -412,6 +423,10 @@ pub struct Batch {
     /// `glDepthMask`. Off for a translucent surface, so that its own faces
     /// blend with each other instead of the nearest one hiding the rest.
     pub depth_mask: bool,
+    pub depth_func: DepthFunc,
+    /// `glColorMask`. False for a pass that is only there to fill the depth
+    /// buffer, which is how a saver marks out where a later pass may draw.
+    pub color_mask: bool,
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
@@ -465,6 +480,8 @@ impl Batch {
             && self.blend == other.blend
             && self.polygon_offset == other.polygon_offset
             && self.depth_mask == other.depth_mask
+            && self.depth_func == other.depth_func
+            && self.color_mask == other.color_mask
             && self.fog == other.fog
             && self.texture == other.texture
             && self.tex_env == other.tex_env
@@ -552,6 +569,8 @@ pub struct Glx {
     blend: Blend,
     polygon_offset: Option<(f32, f32)>,
     depth_mask: bool,
+    depth_func: DepthFunc,
+    color_mask: bool,
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -606,6 +625,8 @@ impl Glx {
             blend: Blend::Off,
             polygon_offset: None,
             depth_mask: true,
+            depth_func: DepthFunc::Less,
+            color_mask: true,
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -810,6 +831,16 @@ impl Glx {
     /// `glDepthMask`: whether what is drawn writes depth as well as reading it.
     pub fn depth_mask(&mut self, on: bool) {
         self.depth_mask = on;
+    }
+
+    pub fn depth_func(&mut self, f: DepthFunc) {
+        self.depth_func = f;
+    }
+
+    /// `glColorMask`, all four channels at once, which is the only way the
+    /// savers use it.
+    pub fn color_mask(&mut self, on: bool) {
+        self.color_mask = on;
     }
 
     pub fn blend(&mut self, blend: Blend) {
@@ -1217,6 +1248,8 @@ impl Glx {
             blend: self.blend,
             polygon_offset: self.polygon_offset,
             depth_mask: self.depth_mask,
+            depth_func: self.depth_func,
+            color_mask: self.color_mask,
             line_width: self.line_width,
             scene_ambient: self.scene_ambient,
             fog: self.fog,

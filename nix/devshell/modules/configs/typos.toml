@@ -24,6 +24,9 @@ extend-ignore-re = [
   "[Oo]rignal",
   "10ths",
   "chuncks",
+  # The PDB file format really does spell its bond record CONECT; molecule.rs
+  # names it in its doc comment and its parser.
+  "CONECT",
   # rotator.c's own name for its wander function.
   "SINOID",
   "sinoid",
@@ -190,5 +193,8 @@ extend-exclude = [
   "web/homepage/xscreensaver/glsl/",
   # Likewise the 6502 demo programs, which are assembly listings.
   "web/homepage/xscreensaver/images/m6502/",
+  # And the molecules, which are published crystallography files: the format
+  # spells its bond records CONECT, and the chemistry is full of abbreviations.
+  "web/homepage/xscreensaver/molecules/",
 ]
 ignore-hidden = false

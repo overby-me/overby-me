@@ -21,7 +21,7 @@ use web_sys::{
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
-use xscreensaver::runtime::gl::{Blend, Fog, Frame, MAX_LIGHTS, Primitive, TexEnv};
+use xscreensaver::runtime::gl::{Blend, DepthFunc, Fog, Frame, MAX_LIGHTS, Primitive, TexEnv};
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
 const FLOATS_PER_VERTEX: usize = 12;
@@ -488,6 +488,13 @@ impl Gl3dEngine {
             }
             gl.front_face(if batch.front_face_cw { Gl::CW } else { Gl::CCW });
             gl.depth_mask(batch.depth_mask);
+            gl.depth_func(match batch.depth_func {
+                DepthFunc::Less => Gl::LESS,
+                DepthFunc::LessEqual => Gl::LEQUAL,
+                DepthFunc::Equal => Gl::EQUAL,
+            });
+            let m = batch.color_mask;
+            gl.color_mask(m, m, m, m);
             match batch.polygon_offset {
                 Some((factor, units)) => {
                     gl.enable(Gl::POLYGON_OFFSET_FILL);
