@@ -1060,6 +1060,18 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "boing",
+    boing_body,
+    boing_start,
+    xscreensaver::hacks3d::boing::start
+);
+gl3d_saver!(
+    "blinkbox",
+    blinkbox_body,
+    blinkbox_start,
+    xscreensaver::hacks3d::blinkbox::start
+);
+gl3d_saver!(
     "splodesic",
     splodesic_body,
     splodesic_start,
@@ -1981,6 +1993,16 @@ pub static SAVERS: &[Entry] = &[
         slug: "beats",
         label: "Beats",
         start: Start::Gl3d(beats_start),
+    },
+    Entry {
+        slug: "blinkbox",
+        label: "Blink Box",
+        start: Start::Gl3d(blinkbox_start),
+    },
+    Entry {
+        slug: "boing",
+        label: "Boing",
+        start: Start::Gl3d(boing_start),
     },
     Entry {
         slug: "cubestack",

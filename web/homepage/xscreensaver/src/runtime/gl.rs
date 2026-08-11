@@ -402,6 +402,7 @@ pub struct Glx {
     material: Material,
     cull_face: bool,
     front_face_cw: bool,
+    clear_color: [f32; 4],
     clear_depth_pending: bool,
     blend: Blend,
     line_width: f32,
@@ -443,6 +444,7 @@ impl Glx {
             material: Material::default(),
             cull_face: false,
             front_face_cw: false,
+            clear_color: [0.0, 0.0, 0.0, 1.0],
             clear_depth_pending: false,
             blend: Blend::Off,
             line_width: 1.0,
@@ -591,15 +593,17 @@ impl Glx {
         self.frame.viewport = [x, y, w, h];
     }
 
+    /// `glClearColor`. Context state, not something that happens: a saver sets
+    /// it once when it starts and clears with it every frame after that.
     pub fn clear_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.frame.clear = Some([r, g, b, a]);
+        self.clear_color = [r, g, b, a];
     }
 
     /// `glClear`. The colour is whatever `glClearColor` last set, defaulting to
     /// black, which is what a screen saver wants anyway.
     pub fn clear(&mut self) {
         if self.frame.clear.is_none() {
-            self.frame.clear = Some([0.0, 0.0, 0.0, 1.0]);
+            self.frame.clear = Some(self.clear_color);
         }
     }
 
@@ -980,6 +984,27 @@ impl Glx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The clear colour is state, and state outlives the frame it was set in.
+    /// A saver sets it once when it starts and clears with it for ever after;
+    /// forgetting that is a black background on the one saver that has one.
+    #[test]
+    fn the_clear_colour_survives_the_frame_it_was_set_in() {
+        let mut g = Glx::new();
+        g.start_frame(100, 100);
+        g.clear_color(0.5, 0.6, 0.7, 1.0);
+        // Setting it is not clearing with it.
+        assert_eq!(g.frame().clear, None);
+        g.clear();
+        assert_eq!(g.frame().clear, Some([0.5, 0.6, 0.7, 1.0]));
+
+        for _ in 0..3 {
+            g.start_frame(100, 100);
+            assert_eq!(g.frame().clear, None, "a new frame starts uncleared");
+            g.clear();
+            assert_eq!(g.frame().clear, Some([0.5, 0.6, 0.7, 1.0]));
+        }
+    }
 
     #[test]
     fn a_matrix_times_the_identity_is_itself() {

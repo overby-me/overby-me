@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (13) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (15) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -394,6 +394,13 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 such thing), per-vertex colour and normals, point size, the depth test and a
 mid-frame clear of it, face culling and winding, blending, display lists, and
 two lights. Texturing is not there yet.
+
+One thing is recorded and then thrown away: line width. WebGL draws every line
+one pixel wide whatever it is asked for, on every implementation that matters,
+so a saver that wants a four-pixel line gets a one-pixel one. `boing` is the
+one where it shows, in its grid and its scanlines. Widening lines properly means
+expanding each segment into a quad in the host, which is a change worth making
+when a saver depends on it more than these do.
 
 A depth clear partway through a frame is an ordering, not a state, so it rides
 on the batch it precedes rather than on the frame. `voronoi` is the reason:
