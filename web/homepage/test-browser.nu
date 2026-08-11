@@ -198,7 +198,7 @@ def main [
          prococean protophore rigrekt selfreflect skyline stardome starnest
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
          universeball
-         antinspect beats blinkbox blocktube boing cage cityflow cube21 cubenetic cubestack cubestorm cubetwist cubicgrid dangerball discoball energystream glknots glschool gravitywell hexstrut hextrail hypnowheel
+         antinspect atunnel beats blinkbox blocktube boing cage cityflow cube21 cubenetic cubestack cubestorm cubetwist cubicgrid dangerball discoball energystream glknots glschool gravitywell hexstrut hextrail hypnowheel
          kaleidocycle lockward menger noof pulsar quasicrystal rubikblocks sierpinski3d splodesic stonerview surfaces voronoi]
     } else if $slug != null {
         [$slug]

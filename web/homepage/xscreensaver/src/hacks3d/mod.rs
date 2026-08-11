@@ -18,6 +18,7 @@
 use crate::runtime::Saver3d;
 
 pub mod antinspect;
+pub mod atunnel;
 pub mod beats;
 pub mod blinkbox;
 pub mod blocktube;
@@ -57,6 +58,7 @@ pub mod voronoi;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
     &antinspect::SAVER,
+    &atunnel::SAVER,
     &blinkbox::SAVER,
     &blocktube::SAVER,
     &boing::SAVER,

@@ -275,6 +275,8 @@ pub enum Blend {
 /// piles into an unreadable band. `gravitywell`'s grid is the case in point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Fog {
+    /// `GL_EXP`: what survives at a distance is `exp(-density * d)`.
+    Exp { density: f32, color: [f32; 4] },
     /// `GL_EXP2`: what survives at a distance is `exp(-(density * d)^2)`.
     Exp2 { density: f32, color: [f32; 4] },
     /// `GL_LINEAR`: untouched up to `start`, gone by `end`.

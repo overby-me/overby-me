@@ -92,7 +92,8 @@ uniform bool u_textured;
 uniform sampler2D u_tex;
 uniform bool u_tex_add;
 uniform bool u_fog;
-uniform bool u_fog_linear;
+// 0 is GL_EXP2, 1 is GL_LINEAR, 2 is GL_EXP.
+uniform int u_fog_mode;
 uniform float u_fog_density;
 uniform float u_fog_start;
 uniform float u_fog_end;
@@ -116,8 +117,10 @@ vec4 fogged (vec4 c) {
   if (! u_fog) return c;
   float z = length (v_eye);
   float f;
-  if (u_fog_linear) {
+  if (u_fog_mode == 1) {
     f = (u_fog_end - z) / (u_fog_end - u_fog_start);
+  } else if (u_fog_mode == 2) {
+    f = exp (-u_fog_density * z);
   } else {
     float d = u_fog_density * z;
     f = exp (-d * d);
@@ -186,7 +189,7 @@ struct Uniforms {
     texgen_sphere: Option<WebGlUniformLocation>,
     tex: Option<WebGlUniformLocation>,
     tex_add: Option<WebGlUniformLocation>,
-    fog_linear: Option<WebGlUniformLocation>,
+    fog_mode: Option<WebGlUniformLocation>,
     fog_start: Option<WebGlUniformLocation>,
     fog_end: Option<WebGlUniformLocation>,
     fog: Option<WebGlUniformLocation>,
@@ -227,7 +230,7 @@ impl Uniforms {
             texgen_sphere: at("u_texgen_sphere"),
             tex: at("u_tex"),
             tex_add: at("u_tex_add"),
-            fog_linear: at("u_fog_linear"),
+            fog_mode: at("u_fog_mode"),
             fog_start: at("u_fog_start"),
             fog_end: at("u_fog_end"),
             fog: at("u_fog"),
@@ -510,12 +513,17 @@ impl Gl3dEngine {
             gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
             match batch.fog {
                 Some(Fog::Exp2 { density, color }) => {
-                    gl.uniform1i(u.fog_linear.as_ref(), 0);
+                    gl.uniform1i(u.fog_mode.as_ref(), 0);
+                    gl.uniform1f(u.fog_density.as_ref(), density);
+                    gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &color);
+                }
+                Some(Fog::Exp { density, color }) => {
+                    gl.uniform1i(u.fog_mode.as_ref(), 2);
                     gl.uniform1f(u.fog_density.as_ref(), density);
                     gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &color);
                 }
                 Some(Fog::Linear { start, end, color }) => {
-                    gl.uniform1i(u.fog_linear.as_ref(), 1);
+                    gl.uniform1i(u.fog_mode.as_ref(), 1);
                     gl.uniform1f(u.fog_start.as_ref(), start);
                     gl.uniform1f(u.fog_end.as_ref(), end);
                     gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &color);

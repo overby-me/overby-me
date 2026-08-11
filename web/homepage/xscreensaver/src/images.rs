@@ -10,6 +10,15 @@
 //! They are upstream's files byte for byte, under the same notice as the code
 //! that draws them.
 
+/// `tunnel0.png` to `tunnel5.png`: the six walls `atunnel` flies through,
+/// 64 or 128 square, greyscale or palettised.
+pub const TUNNEL0: &[u8] = include_bytes!("../images/tunnel0.png");
+pub const TUNNEL1: &[u8] = include_bytes!("../images/tunnel1.png");
+pub const TUNNEL2: &[u8] = include_bytes!("../images/tunnel2.png");
+pub const TUNNEL3: &[u8] = include_bytes!("../images/tunnel3.png");
+pub const TUNNEL4: &[u8] = include_bytes!("../images/tunnel4.png");
+pub const TUNNEL5: &[u8] = include_bytes!("../images/tunnel5.png");
+
 /// `wood.png`: 128x32 of woodgrain, palettised. The planks of `cage` are
 /// each one of these stretched over a face.
 pub const WOOD: &[u8] = include_bytes!("../images/wood.png");

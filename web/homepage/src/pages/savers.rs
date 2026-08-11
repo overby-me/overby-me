@@ -1066,6 +1066,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::antinspect::start
 );
 gl3d_saver!(
+    "atunnel",
+    atunnel_body,
+    atunnel_start,
+    xscreensaver::hacks3d::atunnel::start
+);
+gl3d_saver!(
     "beats",
     beats_body,
     beats_start,
@@ -2107,6 +2113,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "antinspect",
         label: "Ant Inspect",
         start: Start::Gl3d(antinspect_start),
+    },
+    Entry {
+        slug: "atunnel",
+        label: "Atunnel",
+        start: Start::Gl3d(atunnel_start),
     },
     Entry {
         slug: "beats",
