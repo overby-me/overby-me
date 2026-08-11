@@ -299,9 +299,10 @@ pub enum TexEnv {
     Add,
 }
 
-/// How many lights a saver can turn on. OpenGL guarantees eight; the savers
-/// here use one or two, and this grows when one wants more.
-pub const MAX_LIGHTS: usize = 2;
+/// How many lights a saver can turn on. OpenGL guarantees eight; most of the
+/// savers here use one or two and `bubble3d` uses three, and this grows when
+/// one wants more. Every batch carries this many, so it is not free.
+pub const MAX_LIGHTS: usize = 3;
 
 /// One of `GL_LIGHT0` and friends.
 ///

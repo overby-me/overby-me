@@ -75,7 +75,7 @@ in vec4 v_color;
 in vec3 v_normal;
 in vec3 v_eye;
 in vec2 v_uv;
-#define LIGHTS 2
+#define LIGHTS 3
 uniform bool u_lighting;
 uniform bool u_light_on[LIGHTS];
 uniform vec4 u_light_position[LIGHTS];

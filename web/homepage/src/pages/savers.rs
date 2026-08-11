@@ -1162,6 +1162,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::hextrail::start
 );
 gl3d_saver!(
+    "bubble3d",
+    bubble3d_body,
+    bubble3d_start,
+    xscreensaver::hacks3d::bubble3d::start
+);
+gl3d_saver!(
     "cage",
     cage_body,
     cage_start,
@@ -2168,6 +2174,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "boing",
         label: "Boing",
         start: Start::Gl3d(boing_start),
+    },
+    Entry {
+        slug: "bubble3d",
+        label: "Bubble 3D",
+        start: Start::Gl3d(bubble3d_start),
     },
     Entry {
         slug: "cage",
