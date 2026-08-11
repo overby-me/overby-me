@@ -1066,6 +1066,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::fliptext::start
 );
 gl3d_saver!(
+    "flipflop",
+    flipflop_body,
+    flipflop_start,
+    xscreensaver::hacks3d::flipflop::start
+);
+gl3d_saver!(
     "flipscreen3d",
     flipscreen3d_body,
     flipscreen3d_start,
@@ -2575,6 +2581,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "fliptext",
         label: "Flip Text",
         start: Start::Gl3d(fliptext_start),
+    },
+    Entry {
+        slug: "flipflop",
+        label: "Flip Flop",
+        start: Start::Gl3d(flipflop_start),
     },
     Entry {
         slug: "flipscreen3d",
