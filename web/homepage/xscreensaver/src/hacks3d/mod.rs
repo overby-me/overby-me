@@ -73,6 +73,7 @@ pub mod molecule;
 pub mod morph3d;
 pub mod noof;
 pub mod papercube;
+pub mod photopile;
 pub mod pinion;
 pub mod projectiveplane;
 pub mod providence;
@@ -144,6 +145,7 @@ pub static ALL: &[&Saver3d] = &[
     &flipflop::SAVER,
     &flipscreen3d::SAVER,
     &gflux::SAVER,
+    &photopile::SAVER,
     &hexstrut::SAVER,
     &starwars::SAVER,
     &skytentacles::SAVER,

@@ -22,6 +22,7 @@
 pub mod analogtv;
 pub mod color;
 pub mod delaunay;
+pub mod dropshadow;
 pub mod easing;
 pub mod erase;
 pub mod fb;
