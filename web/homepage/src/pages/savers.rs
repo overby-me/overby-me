@@ -1036,6 +1036,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::sproingies::start
 );
 gl3d_saver!(
+    "carousel",
+    carousel_body,
+    carousel_start,
+    xscreensaver::hacks3d::carousel::start
+);
+gl3d_saver!(
     "chompytower",
     chompytower_body,
     chompytower_start,
@@ -2562,6 +2568,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sproingies",
         label: "Sproingies",
         start: Start::Gl3d(sproingies_start),
+    },
+    Entry {
+        slug: "carousel",
+        label: "Carousel",
+        start: Start::Gl3d(carousel_start),
     },
     Entry {
         slug: "chompytower",
