@@ -395,6 +395,10 @@ pub struct Batch {
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
     pub texture: Option<u32>,
     pub tex_env: TexEnv,
+    /// `glEnable (GL_TEXTURE_GEN_S/T)` with `GL_SPHERE_MAP`: work the texture
+    /// coordinates out from which way the surface faces rather than taking the
+    /// ones the saver gave, so a texture of a room reflects off it.
+    pub tex_gen_sphere: bool,
     /// `glCopyTexSubImage2D`: once this batch has been drawn, copy the screen
     /// into this texture. A batch carrying one usually has no vertices of its
     /// own and exists only to say where in the frame the copy happens.
@@ -422,6 +426,7 @@ impl Batch {
             && self.fog == other.fog
             && self.texture == other.texture
             && self.tex_env == other.tex_env
+            && self.tex_gen_sphere == other.tex_gen_sphere
             && self.scene_ambient == other.scene_ambient
             // A copy has to happen where it was asked for, so a batch carrying
             // one never merges with its neighbours.
@@ -495,6 +500,7 @@ pub struct Glx {
     textures: Vec<Texture>,
     bound_texture: Option<u32>,
     texturing: bool,
+    tex_gen_sphere: bool,
     tex_env: TexEnv,
     uv: [f32; 2],
     clear_depth_pending: bool,
@@ -544,6 +550,7 @@ impl Glx {
             textures: Vec::new(),
             bound_texture: None,
             texturing: false,
+            tex_gen_sphere: false,
             tex_env: TexEnv::Modulate,
             uv: [0.0, 0.0],
             clear_depth_pending: false,
@@ -932,6 +939,17 @@ impl Glx {
         self.frame.batches.push(b);
     }
 
+    /// `glEnable (GL_TEXTURE_GEN_S)` and `GL_TEXTURE_GEN_T` with a mode of
+    /// `GL_SPHERE_MAP`, which is the only one any saver here asks for.
+    ///
+    /// The texture coordinates stop coming from `glTexCoord` and are worked out
+    /// per vertex from which way the surface faces, as though the texture were
+    /// a photograph of the room taken in a mirrored ball. It is the cheap way
+    /// to make something look shiny, and six of these savers use it.
+    pub fn tex_gen_sphere(&mut self, on: bool) {
+        self.tex_gen_sphere = on;
+    }
+
     /// `glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S/T, ..)`: clamp at
     /// the edges rather than repeat.
     pub fn tex_clamp(&mut self, clamp: bool) {
@@ -1107,6 +1125,7 @@ impl Glx {
                 None
             },
             tex_env: self.tex_env,
+            tex_gen_sphere: self.tex_gen_sphere,
             copy_to_texture: None,
         }
     }

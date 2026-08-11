@@ -20,6 +20,7 @@ use crate::runtime::Saver3d;
 pub mod antinspect;
 pub mod beats;
 pub mod blinkbox;
+pub mod blocktube;
 pub mod boing;
 pub mod cityflow;
 pub mod cube21;
@@ -55,6 +56,7 @@ pub mod voronoi;
 pub static ALL: &[&Saver3d] = &[
     &antinspect::SAVER,
     &blinkbox::SAVER,
+    &blocktube::SAVER,
     &boing::SAVER,
     &cubestorm::SAVER,
     &cubetwist::SAVER,

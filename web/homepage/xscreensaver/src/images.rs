@@ -10,6 +10,10 @@
 //! They are upstream's files byte for byte, under the same notice as the code
 //! that draws them.
 
+/// `blocktube.png`: a 256x256 greyscale photograph of a lit room, used as a
+/// sphere map so that the slabs look like polished metal.
+pub const BLOCKTUBE: &[u8] = include_bytes!("../images/blocktube.png");
+
 /// `bob.png`: the face flag waves when it is not waving words. From xlockmore
 /// by way of XScreenSaver, 64x64, four bits of palette.
 pub const BOB: &[u8] = include_bytes!("../images/bob.png");

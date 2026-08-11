@@ -1138,6 +1138,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cityflow::start
 );
 gl3d_saver!(
+    "blocktube",
+    blocktube_body,
+    blocktube_start,
+    xscreensaver::hacks3d::blocktube::start
+);
+gl3d_saver!(
     "boing",
     boing_body,
     boing_start,
@@ -2099,6 +2105,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "blinkbox",
         label: "Blink Box",
         start: Start::Gl3d(blinkbox_start),
+    },
+    Entry {
+        slug: "blocktube",
+        label: "Block Tube",
+        start: Start::Gl3d(blocktube_start),
     },
     Entry {
         slug: "boing",

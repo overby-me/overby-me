@@ -34,12 +34,12 @@ in vec2 a_uv;
 uniform mat4 u_mvp;
 uniform mat4 u_modelview;
 uniform float u_point_size;
+uniform bool u_texgen_sphere;
 out vec4 v_color;
 out vec3 v_normal;
 out vec3 v_eye;
 out vec2 v_uv;
 void main() {
-  v_uv = a_uv;
   gl_Position = u_mvp * vec4 (a_pos, 1.0);
   gl_PointSize = u_point_size;
   v_color = a_color;
@@ -49,6 +49,19 @@ void main() {
   // scaling is uniform. Every saver here scales uniformly, and OpenGL's own
   // GL_NORMALIZE, which they all enable, is the normalize below.
   v_normal = mat3 (u_modelview) * a_normal;
+
+  // GL_SPHERE_MAP: the texture is treated as a photograph taken in a mirrored
+  // ball, and where a vertex reads from it is where the view reflects off the
+  // surface. Fixed-function GL works this out per vertex, so this does too.
+  if (u_texgen_sphere) {
+    vec3 u = normalize (v_eye);
+    vec3 n = normalize (v_normal);
+    vec3 r = u - 2.0 * n * dot (n, u);
+    float m = 2.0 * sqrt (r.x*r.x + r.y*r.y + (r.z + 1.0)*(r.z + 1.0));
+    v_uv = vec2 (r.x / m + 0.5, r.y / m + 0.5);
+  } else {
+    v_uv = a_uv;
+  }
 }
 ";
 
@@ -164,6 +177,7 @@ struct Uniforms {
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
     textured: Option<WebGlUniformLocation>,
+    texgen_sphere: Option<WebGlUniformLocation>,
     tex: Option<WebGlUniformLocation>,
     tex_add: Option<WebGlUniformLocation>,
     fog_linear: Option<WebGlUniformLocation>,
@@ -203,6 +217,7 @@ impl Uniforms {
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
             textured: at("u_textured"),
+            texgen_sphere: at("u_texgen_sphere"),
             tex: at("u_tex"),
             tex_add: at("u_tex_add"),
             fog_linear: at("u_fog_linear"),
@@ -483,6 +498,7 @@ impl Gl3dEngine {
                 }
                 None => gl.uniform1i(u.textured.as_ref(), 0),
             }
+            gl.uniform1i(u.texgen_sphere.as_ref(), i32::from(batch.tex_gen_sphere));
             gl.uniform1i(u.tex_add.as_ref(), i32::from(batch.tex_env == TexEnv::Add));
             gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
             match batch.fog {

@@ -508,6 +508,32 @@ impl BitReader<'_> {
     }
 }
 
+/// The same PNG, but as the bytes a GL texture wants: RGBA, row zero at the
+/// top, ready for `glTexImage2D`.
+///
+/// [`decode`] hands back what a 2D hack needs, a colour image and a separate
+/// bitmap saying where it is opaque, because a framebuffer has nowhere to put
+/// an alpha channel. A texture does, so the two are put back together here and
+/// the transparent pixels come out with an alpha of zero.
+pub fn decode_rgba(bytes: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
+    let (image, mask) = decode(bytes)?;
+    let (w, h) = (image.width(), image.height());
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let p = image.get_pixel(x, y);
+            let opaque = mask
+                .as_ref()
+                .is_none_or(|m| m.get_pixel(x, y) & RGB_MASK != 0);
+            out.push((p >> 16) as u8);
+            out.push((p >> 8) as u8);
+            out.push(p as u8);
+            out.push(if opaque { 0xFF } else { 0 });
+        }
+    }
+    Some((w, h, out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
