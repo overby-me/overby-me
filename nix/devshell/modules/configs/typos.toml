@@ -151,6 +151,9 @@ iy = "iy"
 # BLOAD = Apple DOS 3.3 command (Binary LOAD), typed by the apple2 saver
 bload = "bload"
 BLOAD = "BLOAD"
+# rubik's -sizex/-sizey/-sizez options, which give the three edge lengths of
+# an LxMxN cube; the resource name has to stay as upstream spells it.
+sizez = "sizez"
 
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.

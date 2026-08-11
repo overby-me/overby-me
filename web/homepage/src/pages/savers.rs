@@ -1240,6 +1240,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::razzledazzle::start
 );
 gl3d_saver!(
+    "rubik",
+    rubik_body,
+    rubik_start,
+    xscreensaver::hacks3d::rubik::start
+);
+gl3d_saver!(
     "rubikblocks",
     rubikblocks_body,
     rubikblocks_start,
@@ -2762,6 +2768,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "razzledazzle",
         label: "Razzle Dazzle",
         start: Start::Gl3d(razzledazzle_start),
+    },
+    Entry {
+        slug: "rubik",
+        label: "Rubik",
+        start: Start::Gl3d(rubik_start),
     },
     Entry {
         slug: "rubikblocks",
