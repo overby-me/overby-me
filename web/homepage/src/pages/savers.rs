@@ -1246,6 +1246,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::tangram::start
 );
 gl3d_saver!(
+    "papercube",
+    papercube_body,
+    papercube_start,
+    xscreensaver::hacks3d::papercube::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2365,6 +2371,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "noof",
         label: "Noof",
         start: Start::Gl3d(noof_start),
+    },
+    Entry {
+        slug: "papercube",
+        label: "Paper Cube",
+        start: Start::Gl3d(papercube_start),
     },
     Entry {
         slug: "pinion",

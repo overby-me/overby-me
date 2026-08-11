@@ -52,6 +52,7 @@ pub mod menger;
 pub mod moebiusgears;
 pub mod morph3d;
 pub mod noof;
+pub mod papercube;
 pub mod pinion;
 pub mod pulsar;
 pub mod quasicrystal;
@@ -108,6 +109,7 @@ pub static ALL: &[&Saver3d] = &[
     &moebiusgears::SAVER,
     &morph3d::SAVER,
     &noof::SAVER,
+    &papercube::SAVER,
     &pinion::SAVER,
     &pulsar::SAVER,
     &quasicrystal::SAVER,
