@@ -85,3 +85,14 @@ pub const SKULL_MODEL_TEETH_LOWER_HALF: &str =
     include_str!("../models/skull_model_teeth_lower_half.gllist");
 pub const SKULL_MODEL_TEETH_UPPER_HALF: &str =
     include_str!("../models/skull_model_teeth_upper_half.gllist");
+
+/// The suit `headroom` wears. Its head is the same model `skulloop` uses.
+pub const HEADROOM_MODEL_MASK_HALF: &str =
+    include_str!("../models/headroom_model_mask_half.gllist");
+pub const HEADROOM_MODEL_SHIRT_HALF: &str =
+    include_str!("../models/headroom_model_shirt_half.gllist");
+pub const HEADROOM_MODEL_SUIT_CAP_HALF: &str =
+    include_str!("../models/headroom_model_suit_cap_half.gllist");
+pub const HEADROOM_MODEL_SUIT_HALF: &str =
+    include_str!("../models/headroom_model_suit_half.gllist");
+pub const HEADROOM_MODEL_TIE_HALF: &str = include_str!("../models/headroom_model_tie_half.gllist");

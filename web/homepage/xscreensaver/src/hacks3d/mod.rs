@@ -49,6 +49,7 @@ pub mod glschool;
 pub mod glsnake;
 mod glsnake_models;
 pub mod gravitywell;
+pub mod headroom;
 pub mod hexstrut;
 pub mod hextrail;
 pub mod hydrostat;
@@ -123,6 +124,7 @@ pub static ALL: &[&Saver3d] = &[
     &glblur::SAVER,
     &glknots::SAVER,
     &glschool::SAVER,
+    &headroom::SAVER,
     &hexstrut::SAVER,
     &glsnake::SAVER,
     &gravitywell::SAVER,

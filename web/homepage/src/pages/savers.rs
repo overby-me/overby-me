@@ -1012,6 +1012,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cubicgrid::start
 );
 gl3d_saver!(
+    "headroom",
+    headroom_body,
+    headroom_start,
+    xscreensaver::hacks3d::headroom::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2464,6 +2470,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "gravitywell",
         label: "Gravity Well",
         start: Start::Gl3d(gravitywell_start),
+    },
+    Entry {
+        slug: "headroom",
+        label: "Headroom",
+        start: Start::Gl3d(headroom_start),
     },
     Entry {
         slug: "hexstrut",
