@@ -257,16 +257,33 @@ pub enum Blend {
     InverseDst,
 }
 
-/// `GL_FOG`, in the one mode the savers ask for: `GL_EXP2`, where what
-/// survives at a distance is `exp(-(density * distance)^2)`.
+/// `GL_FOG`, in the two modes the savers ask for.
 ///
 /// A saver reaches for fog when its scene runs off towards a horizon: without
 /// it the far end of the geometry is drawn as brightly as the near end and
 /// piles into an unreadable band. `gravitywell`'s grid is the case in point.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Fog {
-    pub density: f32,
-    pub color: [f32; 4],
+pub enum Fog {
+    /// `GL_EXP2`: what survives at a distance is `exp(-(density * d)^2)`.
+    Exp2 { density: f32, color: [f32; 4] },
+    /// `GL_LINEAR`: untouched up to `start`, gone by `end`.
+    Linear {
+        start: f32,
+        end: f32,
+        color: [f32; 4],
+    },
+}
+
+/// `glTexEnvi (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, ..)`: how a texel is
+/// combined with the colour underneath it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TexEnv {
+    /// `GL_MODULATE`, the default: the texture multiplies the colour.
+    #[default]
+    Modulate,
+    /// `GL_ADD`: the colours add and the alphas multiply. `energystream` wants
+    /// it so its flares pile up into white where they overlap.
+    Add,
 }
 
 /// How many lights a saver can turn on. OpenGL guarantees eight; the savers
@@ -363,6 +380,7 @@ pub struct Batch {
     pub fog: Option<Fog>,
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
     pub texture: Option<u32>,
+    pub tex_env: TexEnv,
 }
 
 impl Batch {
@@ -385,6 +403,7 @@ impl Batch {
             && self.blend == other.blend
             && self.fog == other.fog
             && self.texture == other.texture
+            && self.tex_env == other.tex_env
     }
 }
 
@@ -452,6 +471,7 @@ pub struct Glx {
     textures: Vec<Option<Texture>>,
     bound_texture: Option<u32>,
     texturing: bool,
+    tex_env: TexEnv,
     uv: [f32; 2],
     clear_depth_pending: bool,
     blend: Blend,
@@ -499,6 +519,7 @@ impl Glx {
             textures: Vec::new(),
             bound_texture: None,
             texturing: false,
+            tex_env: TexEnv::Modulate,
             uv: [0.0, 0.0],
             clear_depth_pending: false,
             blend: Blend::Off,
@@ -865,6 +886,11 @@ impl Glx {
         });
     }
 
+    /// `glTexEnvi (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, ..)`.
+    pub fn tex_env(&mut self, env: TexEnv) {
+        self.tex_env = env;
+    }
+
     /// `glEnable`/`glDisable` of `GL_TEXTURE_2D`.
     pub fn texturing(&mut self, on: bool) {
         self.record_or(Cmd::Texturing(on), |g| g.texturing = on);
@@ -976,6 +1002,7 @@ impl Glx {
             } else {
                 None
             },
+            tex_env: self.tex_env,
         };
 
         // Run of blocks with nothing between them but more vertices: fold them

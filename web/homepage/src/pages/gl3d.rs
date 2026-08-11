@@ -21,7 +21,7 @@ use web_sys::{
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
-use xscreensaver::runtime::gl::{Blend, Frame, MAX_LIGHTS, Primitive};
+use xscreensaver::runtime::gl::{Blend, Fog, Frame, MAX_LIGHTS, Primitive, TexEnv};
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
 const FLOATS_PER_VERTEX: usize = 12;
@@ -76,23 +76,39 @@ uniform float u_shininess;
 uniform vec4 u_scene_ambient;
 uniform bool u_textured;
 uniform sampler2D u_tex;
+uniform bool u_tex_add;
 uniform bool u_fog;
+uniform bool u_fog_linear;
 uniform float u_fog_density;
+uniform float u_fog_start;
+uniform float u_fog_end;
 uniform vec4 u_fog_color;
 out vec4 frag_color;
 
 // GL_MODULATE, the default texture environment and the only one any of these
 // asks for: the texture multiplies whatever colour came out of the lighting.
 vec4 textured (vec4 c) {
-  return u_textured ? c * texture (u_tex, v_uv) : c;
+  if (! u_textured) return c;
+  vec4 t = texture (u_tex, v_uv);
+  // GL_ADD sums the colours and multiplies the alphas; GL_MODULATE, the
+  // default, multiplies both.
+  return u_tex_add ? vec4 (c.rgb + t.rgb, c.a * t.a) : c * t;
 }
 
-// GL_EXP2, the one fog mode these savers ask for: what survives at a distance
-// is exp(-(density * distance)^2).
+// The two fog modes these savers ask for. GL_EXP2 leaves exp(-(density*d)^2)
+// of the colour at a distance; GL_LINEAR ramps from all of it to none of it
+// between two distances.
 vec4 fogged (vec4 c) {
   if (! u_fog) return c;
-  float d = u_fog_density * length (v_eye);
-  return vec4 (mix (u_fog_color.rgb, c.rgb, clamp (exp (-d * d), 0.0, 1.0)), c.a);
+  float z = length (v_eye);
+  float f;
+  if (u_fog_linear) {
+    f = (u_fog_end - z) / (u_fog_end - u_fog_start);
+  } else {
+    float d = u_fog_density * z;
+    f = exp (-d * d);
+  }
+  return vec4 (mix (u_fog_color.rgb, c.rgb, clamp (f, 0.0, 1.0)), c.a);
 }
 
 void main() {
@@ -149,6 +165,10 @@ struct Uniforms {
     scene_ambient: Option<WebGlUniformLocation>,
     textured: Option<WebGlUniformLocation>,
     tex: Option<WebGlUniformLocation>,
+    tex_add: Option<WebGlUniformLocation>,
+    fog_linear: Option<WebGlUniformLocation>,
+    fog_start: Option<WebGlUniformLocation>,
+    fog_end: Option<WebGlUniformLocation>,
     fog: Option<WebGlUniformLocation>,
     fog_density: Option<WebGlUniformLocation>,
     fog_color: Option<WebGlUniformLocation>,
@@ -184,6 +204,10 @@ impl Uniforms {
             scene_ambient: at("u_scene_ambient"),
             textured: at("u_textured"),
             tex: at("u_tex"),
+            tex_add: at("u_tex_add"),
+            fog_linear: at("u_fog_linear"),
+            fog_start: at("u_fog_start"),
+            fog_end: at("u_fog_end"),
             fog: at("u_fog"),
             fog_density: at("u_fog_density"),
             fog_color: at("u_fog_color"),
@@ -432,10 +456,21 @@ impl Gl3dEngine {
                 }
                 None => gl.uniform1i(u.textured.as_ref(), 0),
             }
+            gl.uniform1i(u.tex_add.as_ref(), i32::from(batch.tex_env == TexEnv::Add));
             gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
-            if let Some(fog) = batch.fog {
-                gl.uniform1f(u.fog_density.as_ref(), fog.density);
-                gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &fog.color);
+            match batch.fog {
+                Some(Fog::Exp2 { density, color }) => {
+                    gl.uniform1i(u.fog_linear.as_ref(), 0);
+                    gl.uniform1f(u.fog_density.as_ref(), density);
+                    gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &color);
+                }
+                Some(Fog::Linear { start, end, color }) => {
+                    gl.uniform1i(u.fog_linear.as_ref(), 1);
+                    gl.uniform1f(u.fog_start.as_ref(), start);
+                    gl.uniform1f(u.fog_end.as_ref(), end);
+                    gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &color);
+                }
+                None => {}
             }
             gl.uniform1i(u.lighting.as_ref(), i32::from(batch.lighting));
             if batch.lighting {

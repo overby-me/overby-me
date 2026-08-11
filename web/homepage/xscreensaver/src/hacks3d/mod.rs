@@ -25,6 +25,7 @@ pub mod cubestack;
 pub mod cubestorm;
 pub mod cubicgrid;
 pub mod dangerball;
+pub mod energystream;
 pub mod glknots;
 pub mod gravitywell;
 pub mod hexstrut;
@@ -50,6 +51,7 @@ pub static ALL: &[&Saver3d] = &[
     &cityflow::SAVER,
     &cubestack::SAVER,
     &dangerball::SAVER,
+    &energystream::SAVER,
     &glknots::SAVER,
     &hexstrut::SAVER,
     &gravitywell::SAVER,

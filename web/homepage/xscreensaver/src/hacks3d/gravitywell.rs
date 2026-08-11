@@ -347,7 +347,7 @@ impl Hack3d for GravityWell {
 
         g.glx.line_width(2.0);
         g.glx.blend(Blend::Alpha);
-        g.glx.fog(Some(Fog {
+        g.glx.fog(Some(Fog::Exp2 {
             density: 0.005,
             color: [0.0, 0.0, 0.0, 1.0],
         }));

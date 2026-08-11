@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "energystream",
+    energystream_body,
+    energystream_start,
+    xscreensaver::hacks3d::energystream::start
+);
+gl3d_saver!(
     "quasicrystal",
     quasicrystal_body,
     quasicrystal_start,
@@ -2058,6 +2064,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "dangerball",
         label: "Danger Ball",
         start: Start::Gl3d(dangerball_start),
+    },
+    Entry {
+        slug: "energystream",
+        label: "Energy Stream",
+        start: Start::Gl3d(energystream_start),
     },
     Entry {
         slug: "glknots",

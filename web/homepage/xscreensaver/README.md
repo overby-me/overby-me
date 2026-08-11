@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (20) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (21) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -418,11 +418,17 @@ scale it, and that *is* expressible as a blend, so the port uses one and says
 so. If a saver ever wants a logic op that has no arithmetic reading, it will
 need a render target and a second pass.
 
-Fog is `GL_EXP2` only, which is the only mode any of these asks for: what
-survives at a distance is `exp(-(density * distance)^2)`. It matters more than
-it sounds for the savers that run off towards a horizon. `gravitywell`'s grid is
-five hundred units across, and without fog every line at the far end is drawn as
-brightly as the ones in front and the back half is a solid band.
+Fog comes in the two modes the savers ask for: `GL_EXP2`, where what survives
+at a distance is `exp(-(density * distance)^2)`, and `GL_LINEAR`, which ramps
+between two distances. It matters more than it sounds for anything running off
+towards a horizon. `gravitywell`'s grid is five hundred units across, and
+without fog every line at the far end is drawn as brightly as the ones in front
+and the back half is a solid band.
+
+The texture environment has both modes too. `GL_MODULATE` is the default and
+means the texture multiplies the colour under it; `GL_ADD` means the colours add
+and only the alphas multiply, and `energystream` wants it so its flares pile up
+into white where they overlap rather than darkening each other.
 
 One thing is recorded and then thrown away: line width. WebGL draws every line
 one pixel wide whatever it is asked for, on every implementation that matters,
