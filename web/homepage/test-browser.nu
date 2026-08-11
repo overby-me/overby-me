@@ -199,7 +199,7 @@ def main [
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
          universeball
          antinspect beats blinkbox blocktube boing cage cityflow cube21 cubenetic cubestack cubestorm cubetwist cubicgrid dangerball discoball energystream glknots glschool gravitywell hexstrut hextrail hypnowheel
-         kaleidocycle lockward menger noof quasicrystal rubikblocks sierpinski3d splodesic stonerview surfaces voronoi]
+         kaleidocycle lockward menger noof pulsar quasicrystal rubikblocks sierpinski3d splodesic stonerview surfaces voronoi]
     } else if $slug != null {
         [$slug]
     } else {

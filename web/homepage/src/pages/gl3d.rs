@@ -87,6 +87,7 @@ uniform vec4 u_material_diffuse_back;
 uniform vec4 u_material_specular;
 uniform float u_shininess;
 uniform vec4 u_scene_ambient;
+uniform bool u_color_material;
 uniform bool u_textured;
 uniform sampler2D u_tex;
 uniform bool u_tex_add;
@@ -137,7 +138,11 @@ void main() {
   // Which side of the surface this is, by winding rather than by normal, since
   // that is what GL_FRONT and GL_BACK mean. The two are the same colour unless
   // the saver asked for a different one inside.
-  vec4 diffuse = gl_FrontFacing ? u_material_diffuse : u_material_diffuse_back;
+  // GL_COLOR_MATERIAL: the colour comes from the vertex rather than the
+  // material, which is the only way a lit surface can be more than one colour.
+  vec4 diffuse = u_color_material
+               ? v_color
+               : (gl_FrontFacing ? u_material_diffuse : u_material_diffuse_back);
 
   vec3 c = diffuse.rgb * u_scene_ambient.rgb;
   for (int i = 0; i < LIGHTS; i++) {
@@ -176,6 +181,7 @@ struct Uniforms {
     material_specular: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
+    color_material: Option<WebGlUniformLocation>,
     textured: Option<WebGlUniformLocation>,
     texgen_sphere: Option<WebGlUniformLocation>,
     tex: Option<WebGlUniformLocation>,
@@ -216,6 +222,7 @@ impl Uniforms {
             material_specular: at("u_material_specular"),
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
+            color_material: at("u_color_material"),
             textured: at("u_textured"),
             texgen_sphere: at("u_texgen_sphere"),
             tex: at("u_tex"),
@@ -516,6 +523,7 @@ impl Gl3dEngine {
                 None => {}
             }
             gl.uniform4fv_with_f32_array(u.scene_ambient.as_ref(), &batch.scene_ambient);
+            gl.uniform1i(u.color_material.as_ref(), i32::from(batch.color_material));
             gl.uniform1i(u.lighting.as_ref(), i32::from(batch.lighting));
             if batch.lighting {
                 let m = &batch.material;

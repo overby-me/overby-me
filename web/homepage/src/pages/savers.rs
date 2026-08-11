@@ -1108,6 +1108,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::energystream::start
 );
 gl3d_saver!(
+    "pulsar",
+    pulsar_body,
+    pulsar_start,
+    xscreensaver::hacks3d::pulsar::start
+);
+gl3d_saver!(
     "quasicrystal",
     quasicrystal_body,
     quasicrystal_start,
@@ -2226,6 +2232,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "noof",
         label: "Noof",
         start: Start::Gl3d(noof_start),
+    },
+    Entry {
+        slug: "pulsar",
+        label: "Pulsar",
+        start: Start::Gl3d(pulsar_start),
     },
     Entry {
         slug: "quasicrystal",

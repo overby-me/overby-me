@@ -395,6 +395,14 @@ pub struct Batch {
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
     pub texture: Option<u32>,
     pub tex_env: TexEnv,
+    /// `glEnable (GL_COLOR_MATERIAL)` with `GL_AMBIENT_AND_DIFFUSE`: a lit
+    /// surface takes its colour from `glColor` rather than from the material.
+    ///
+    /// Most savers use this to say what `glMaterialfv` would have said and are
+    /// ported as though they had; it matters where the colour varies *within* a
+    /// block, since a material is one colour for the whole of it and a vertex
+    /// colour is not.
+    pub color_material: bool,
     /// `glEnable (GL_TEXTURE_GEN_S/T)` with `GL_SPHERE_MAP`: work the texture
     /// coordinates out from which way the surface faces rather than taking the
     /// ones the saver gave, so a texture of a room reflects off it.
@@ -427,6 +435,7 @@ impl Batch {
             && self.texture == other.texture
             && self.tex_env == other.tex_env
             && self.tex_gen_sphere == other.tex_gen_sphere
+            && self.color_material == other.color_material
             && self.scene_ambient == other.scene_ambient
             // A copy has to happen where it was asked for, so a batch carrying
             // one never merges with its neighbours.
@@ -501,6 +510,7 @@ pub struct Glx {
     bound_texture: Option<u32>,
     texturing: bool,
     tex_gen_sphere: bool,
+    color_material: bool,
     tex_env: TexEnv,
     uv: [f32; 2],
     clear_depth_pending: bool,
@@ -551,6 +561,7 @@ impl Glx {
             bound_texture: None,
             texturing: false,
             tex_gen_sphere: false,
+            color_material: false,
             tex_env: TexEnv::Modulate,
             uv: [0.0, 0.0],
             clear_depth_pending: false,
@@ -950,6 +961,11 @@ impl Glx {
         self.tex_gen_sphere = on;
     }
 
+    /// `glEnable (GL_COLOR_MATERIAL)`: see [`Batch::color_material`].
+    pub fn color_material(&mut self, on: bool) {
+        self.color_material = on;
+    }
+
     /// `glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S/T, ..)`: clamp at
     /// the edges rather than repeat.
     pub fn tex_clamp(&mut self, clamp: bool) {
@@ -1126,6 +1142,7 @@ impl Glx {
             },
             tex_env: self.tex_env,
             tex_gen_sphere: self.tex_gen_sphere,
+            color_material: self.color_material,
             copy_to_texture: None,
         }
     }
