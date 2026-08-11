@@ -1048,6 +1048,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::skytentacles::start
 );
 gl3d_saver!(
+    "glmatrix",
+    glmatrix_body,
+    glmatrix_start,
+    xscreensaver::hacks3d::glmatrix::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2530,6 +2536,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "skytentacles",
         label: "Sky Tentacles",
         start: Start::Gl3d(skytentacles_start),
+    },
+    Entry {
+        slug: "glmatrix",
+        label: "GL Matrix",
+        start: Start::Gl3d(glmatrix_start),
     },
     Entry {
         slug: "hexstrut",

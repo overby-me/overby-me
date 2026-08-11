@@ -46,6 +46,7 @@ pub mod geodesic;
 pub mod gibson;
 pub mod glblur;
 pub mod glknots;
+pub mod glmatrix;
 pub mod glschool;
 pub mod glsnake;
 mod glsnake_models;
@@ -133,6 +134,7 @@ pub static ALL: &[&Saver3d] = &[
     &headroom::SAVER,
     &highvoltage::SAVER,
     &chompytower::SAVER,
+    &glmatrix::SAVER,
     &hexstrut::SAVER,
     &skytentacles::SAVER,
     &sproingies::SAVER,
