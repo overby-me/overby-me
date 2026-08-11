@@ -136,7 +136,7 @@ impl Gl3dEngine {
 
         let [vx, vy, vw, vh] = frame.viewport;
         gl.viewport(vx, vy, vw.max(1), vh.max(1));
-        gl.enable(Gl::DEPTH_TEST);
+
         if let Some([r, g, b, a]) = frame.clear {
             gl.clear_color(r, g, b, a);
             gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
@@ -169,6 +169,11 @@ impl Gl3dEngine {
 
         gl.use_program(Some(&self.program));
         for batch in &frame.batches {
+            if batch.depth_test {
+                gl.enable(Gl::DEPTH_TEST);
+            } else {
+                gl.disable(Gl::DEPTH_TEST);
+            }
             gl.uniform_matrix4fv_with_f32_array(self.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform1f(self.point_size.as_ref(), batch.point_size);
             // Line width above 1 is not portable in WebGL and is quietly

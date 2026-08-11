@@ -1011,6 +1011,12 @@ gl3d_saver!(
     cubicgrid_start,
     xscreensaver::hacks3d::cubicgrid::start
 );
+gl3d_saver!(
+    "hexstrut",
+    hexstrut_body,
+    hexstrut_start,
+    xscreensaver::hacks3d::hexstrut::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1909,6 +1915,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cubicgrid",
         label: "Cubic Grid",
         start: Start::Gl3d(cubicgrid_start),
+    },
+    Entry {
+        slug: "hexstrut",
+        label: "Hex Strut",
+        start: Start::Gl3d(hexstrut_start),
     },
     Entry {
         slug: "alienbeacon",

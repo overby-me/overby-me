@@ -195,7 +195,7 @@ def main [
          prococean protophore rigrekt selfreflect skyline stardome starnest
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
          universeball
-         cubicgrid]
+         cubicgrid hexstrut]
     } else if $slug != null {
         [$slug]
     } else {

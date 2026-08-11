@@ -18,11 +18,12 @@
 use crate::runtime::Saver3d;
 
 pub mod cubicgrid;
+pub mod hexstrut;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
 /// the reason [`crate::all`] gives.
 #[cfg(not(target_arch = "wasm32"))]
-pub static ALL: &[&Saver3d] = &[&cubicgrid::SAVER];
+pub static ALL: &[&Saver3d] = &[&cubicgrid::SAVER, &hexstrut::SAVER];
 
 #[cfg(test)]
 mod tests {

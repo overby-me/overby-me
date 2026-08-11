@@ -163,6 +163,22 @@ impl Mat4 {
     }
 }
 
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if len == 0.0 {
+        return v;
+    }
+    [v[0] / len, v[1] / len, v[2] / len]
+}
+
 /// What a batch of vertices makes. `GL_QUADS`, `GL_QUAD_STRIP` and
 /// `GL_POLYGON` are absent on purpose: OpenGL ES has no such primitives, so
 /// they are cut into triangles as the block closes, exactly as `jwzgles.c`
@@ -212,6 +228,9 @@ pub struct Batch {
     pub mvp: Mat4,
     pub point_size: f32,
     pub line_width: f32,
+    /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
+    /// and want it in the order they drew it.
+    pub depth_test: bool,
 }
 
 /// Everything a frame draws.
@@ -263,6 +282,7 @@ pub struct Glx {
     color: [f32; 4],
     normal: [f32; 3],
     point_size: f32,
+    depth_test: bool,
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -294,6 +314,7 @@ impl Glx {
             color: [1.0, 1.0, 1.0, 1.0],
             normal: [0.0, 0.0, 1.0],
             point_size: 1.0,
+            depth_test: true,
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -414,6 +435,21 @@ impl Glx {
         self.frustum(-r, r, -t, t, near, far);
     }
 
+    /// `gluLookAt`: put the eye somewhere and point it at something.
+    pub fn look_at(&mut self, eye: [f32; 3], centre: [f32; 3], up: [f32; 3]) {
+        let f = normalize([centre[0] - eye[0], centre[1] - eye[1], centre[2] - eye[2]]);
+        let s = normalize(cross(f, normalize(up)));
+        let u = cross(s, f);
+        let m = Mat4([
+            s[0], u[0], -f[0], 0.0, //
+            s[1], u[1], -f[1], 0.0, //
+            s[2], u[2], -f[2], 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ]);
+        self.mult(m);
+        self.translate(-eye[0], -eye[1], -eye[2]);
+    }
+
     /// The modelview matrix, for the savers that read it back.
     pub fn modelview(&self) -> Mat4 {
         self.modelview.last().copied().unwrap_or(Mat4::IDENTITY)
@@ -443,6 +479,13 @@ impl Glx {
 
     pub fn line_width(&mut self, width: f32) {
         self.record_or(Cmd::LineWidth(width), |g| g.line_width = width);
+    }
+
+    /// `glEnable(GL_DEPTH_TEST)` / `glDisable(GL_DEPTH_TEST)`. A saver drawing
+    /// a flat scene turns it off so its polygons stack in the order it drew
+    /// them rather than by how far away they are.
+    pub fn depth_test(&mut self, on: bool) {
+        self.depth_test = on;
     }
 
     /* Vertices */
@@ -536,6 +579,7 @@ impl Glx {
             count,
             mvp,
             point_size: self.point_size,
+            depth_test: self.depth_test,
             line_width: self.line_width,
         });
     }
