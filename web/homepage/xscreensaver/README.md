@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (68) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (69) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -242,6 +242,13 @@ It keeps upstream's literals character for character and only strips the C
 around them, so a converted model diffs cleanly against its source. Paste the
 `const` it prints into `src/models.rs`; `runtime::gllist` reads it back and
 replays it into the recorder, wireframe included.
+
+Size is not the constraint it looks like. The cow in `bouncingcow` comes to
+970 kB across its six parts and that is fine: a model is text rather than
+source, so it costs nothing to compile, and it lands in one lazily-loaded
+chunk that is only fetched by someone who opens that saver. What is worth
+checking first is the *vertex* count, which is what gets drawn every frame: the
+cow's hide is thirteen thousand and three cows are still cheap.
 
 ## Code splitting
 

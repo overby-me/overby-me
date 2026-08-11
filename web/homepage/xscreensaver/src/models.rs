@@ -65,3 +65,12 @@ pub const SECCAM_CAP: &str = include_str!("../models/seccam_cap.gllist");
 pub const SECCAM_HINGE: &str = include_str!("../models/seccam_hinge.gllist");
 pub const SECCAM_LENS: &str = include_str!("../models/seccam_lens.gllist");
 pub const SECCAM_PIPE: &str = include_str!("../models/seccam_pipe.gllist");
+
+/// The six parts of the cow in `bouncingcow`. It is by some way the biggest
+/// model here; the hide alone is thirteen thousand vertices.
+pub const COW_FACE: &str = include_str!("../models/cow_face.gllist");
+pub const COW_HIDE: &str = include_str!("../models/cow_hide.gllist");
+pub const COW_HOOFS: &str = include_str!("../models/cow_hoofs.gllist");
+pub const COW_HORNS: &str = include_str!("../models/cow_horns.gllist");
+pub const COW_TAIL: &str = include_str!("../models/cow_tail.gllist");
+pub const COW_UDDER: &str = include_str!("../models/cow_udder.gllist");
