@@ -38,6 +38,7 @@ pub mod shapes;
 pub mod spline;
 pub mod text;
 pub mod tty;
+pub mod tube;
 pub mod xlockmore;
 
 pub use color::{Pixel, XColor};
@@ -49,6 +50,7 @@ pub use opts::{Opt, OptKind, Resources, SelectItem};
 pub use rand::{frand, random, random_below, ya_rand_init};
 pub use rotator::{Rotator, Trackball};
 pub use shapes::{do_normal, unit_dome, unit_sphere};
+pub use tube::{cone, tube, unit_cone, unit_tube};
 
 /// An input event, reduced to what the hacks actually look at.
 #[derive(Clone, Copy, Debug, PartialEq)]

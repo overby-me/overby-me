@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (9) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (11) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -449,6 +449,13 @@ thirty-one of them compute. The sphere is one long triangle strip rather than a
 strip per band, which is upstream's shape and worth keeping: the join between
 two bands is a pair of degenerate triangles that cover no pixels and turn the
 whole thing into a single run.
+
+`runtime::tube` is `tube.c`: a cylinder or a cone between two points, which
+seventeen savers want. The geometry is only a unit tube about the y axis; the
+interesting part is that it aims one with two rotations rather than a basis,
+and that the cap size extends a tube past both of its ends, so a chain of them
+meeting at angles reads as one continuous bent pipe with no notches at the
+joins. `glknots` is eight hundred of them end to end.
 
 Two more helpers came with the tier because nearly every saver in it uses them,
 and they are in `runtime::rotator`: the `rotator`, which is what turns an object

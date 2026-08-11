@@ -1059,6 +1059,18 @@ gl3d_saver!(
     beats_start,
     xscreensaver::hacks3d::beats::start
 );
+gl3d_saver!(
+    "glknots",
+    glknots_body,
+    glknots_start,
+    xscreensaver::hacks3d::glknots::start
+);
+gl3d_saver!(
+    "dangerball",
+    dangerball_body,
+    dangerball_start,
+    xscreensaver::hacks3d::dangerball::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1972,6 +1984,16 @@ pub static SAVERS: &[Entry] = &[
         slug: "cubicgrid",
         label: "Cubic Grid",
         start: Start::Gl3d(cubicgrid_start),
+    },
+    Entry {
+        slug: "dangerball",
+        label: "Danger Ball",
+        start: Start::Gl3d(dangerball_start),
+    },
+    Entry {
+        slug: "glknots",
+        label: "GL Knots",
+        start: Start::Gl3d(glknots_start),
     },
     Entry {
         slug: "hexstrut",

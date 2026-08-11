@@ -63,6 +63,7 @@ exclude = [
   'www\.organic\.com/staff/',
   'home\.sol\.no/',
   'cs\.cmu\.edu/~spot/',
+  'astronomy\.swin\.edu\.au/~pbourke/',
   'complexification\.net/gallery/machines/interMomentary/',
   'complexification\.net/gallery/machines/substrate/',
   # A citation in life.asm, one of the m6502 demo programs vendored verbatim

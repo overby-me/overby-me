@@ -21,6 +21,8 @@ pub mod beats;
 pub mod cubestack;
 pub mod cubestorm;
 pub mod cubicgrid;
+pub mod dangerball;
+pub mod glknots;
 pub mod hexstrut;
 pub mod hypnowheel;
 pub mod menger;
@@ -35,6 +37,8 @@ pub static ALL: &[&Saver3d] = &[
     &cubicgrid::SAVER,
     &beats::SAVER,
     &cubestack::SAVER,
+    &dangerball::SAVER,
+    &glknots::SAVER,
     &hexstrut::SAVER,
     &menger::SAVER,
     &sierpinski3d::SAVER,
