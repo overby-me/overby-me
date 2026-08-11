@@ -1348,6 +1348,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cage::start
 );
 gl3d_saver!(
+    "circuit",
+    circuit_body,
+    circuit_start,
+    xscreensaver::hacks3d::circuit::start
+);
+gl3d_saver!(
     "cityflow",
     cityflow_body,
     cityflow_start,
@@ -2488,6 +2494,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cityflow",
         label: "City Flow",
         start: Start::Gl3d(cityflow_start),
+    },
+    Entry {
+        slug: "circuit",
+        label: "Circuit",
+        start: Start::Gl3d(circuit_start),
     },
     Entry {
         slug: "crackberg",

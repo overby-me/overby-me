@@ -28,6 +28,7 @@ pub mod bubble3d;
 pub mod cage;
 pub mod carousel;
 pub mod chompytower;
+pub mod circuit;
 pub mod cityflow;
 pub mod crackberg;
 pub mod cube21;
@@ -132,6 +133,7 @@ pub static ALL: &[&Saver3d] = &[
     &bubble3d::SAVER,
     &cage::SAVER,
     &cityflow::SAVER,
+    &circuit::SAVER,
     &cube21::SAVER,
     &crackberg::SAVER,
     &cubenetic::SAVER,
