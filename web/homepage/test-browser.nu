@@ -195,7 +195,7 @@ def main [
          prococean protophore rigrekt selfreflect skyline stardome starnest
          stripeytorus synthwavecity topologica trainmandala trizm truchetzoom
          universeball
-         cubicgrid hexstrut hypnowheel menger sierpinski3d]
+         cubestack cubicgrid hexstrut hypnowheel menger sierpinski3d]
     } else if $slug != null {
         [$slug]
     } else {

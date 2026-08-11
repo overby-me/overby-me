@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (5) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (6) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -394,10 +394,17 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 such thing), per-vertex colour and normals, point size, the depth test, face
 culling, blending, display lists, and two lights. Texturing is not there yet.
 
-Blending is the two `glBlendFunc` pairs the savers pass rather than the full
-matrix of factors, and more become variants when one of them needs a third.
-`hypnowheel` is entirely `GL_ONE, GL_ONE`: it is a stack of translucent
-spirals whose overlaps add up towards white, and that adding is the picture.
+Blending is the `glBlendFunc` pairs the savers pass rather than the full matrix
+of factors, and each new pair becomes another variant. Two of the ported savers
+are mostly made of it: `hypnowheel` is `GL_ONE, GL_ONE`, a stack of translucent
+spirals whose overlaps add up towards white, and `cubestack` is
+`GL_SRC_ALPHA, GL_ONE` with the depth test off, so every cube in its stack shows
+through every other.
+
+`runtime::easing` is upstream's `utils/easing.c`, all thirty-one curves, which
+nineteen of the savers use. They are CSS's semantics and CSS's constants, so
+the springy ones genuinely overshoot: `back` pulls away before it sets off and
+`elastic` rings around the end before it settles.
 
 There are two lights, because two is the most any saver here turns on, and the
 limit grows when one wants more. A light's position goes through the modelview

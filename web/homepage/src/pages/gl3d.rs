@@ -296,6 +296,10 @@ impl Gl3dEngine {
                     gl.enable(Gl::BLEND);
                     gl.blend_func(Gl::ONE, Gl::ONE);
                 }
+                Blend::AlphaAdd => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_func(Gl::SRC_ALPHA, Gl::ONE);
+                }
                 Blend::Alpha => {
                     gl.enable(Gl::BLEND);
                     gl.blend_func(Gl::SRC_ALPHA, Gl::ONE_MINUS_SRC_ALPHA);

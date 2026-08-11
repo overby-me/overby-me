@@ -226,6 +226,9 @@ pub enum Blend {
     /// brighter and eventually white. What makes overlapping translucent
     /// shapes glow.
     Add,
+    /// `GL_SRC_ALPHA, GL_ONE`: adds, but scaled by the alpha, so a
+    /// translucent thing glows without a solid one blowing out.
+    AlphaAdd,
     /// `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`: ordinary transparency.
     Alpha,
 }

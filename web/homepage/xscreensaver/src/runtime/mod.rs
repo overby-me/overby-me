@@ -22,6 +22,7 @@
 pub mod analogtv;
 pub mod color;
 pub mod delaunay;
+pub mod easing;
 pub mod erase;
 pub mod fb;
 pub mod font;
@@ -39,6 +40,7 @@ pub mod tty;
 pub mod xlockmore;
 
 pub use color::{Pixel, XColor};
+pub use easing::{Ease, ease};
 pub use fb::{Fb, GXFunc, Gc, Pixmap, XArc, XImage, XPoint, XRectangle, XSegment};
 pub use hack3d::{Gl, Hack3d, Runner3d};
 pub use image::ImageLoad;

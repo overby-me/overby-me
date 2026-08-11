@@ -1035,6 +1035,12 @@ gl3d_saver!(
     hypnowheel_start,
     xscreensaver::hacks3d::hypnowheel::start
 );
+gl3d_saver!(
+    "cubestack",
+    cubestack_body,
+    cubestack_start,
+    xscreensaver::hacks3d::cubestack::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1928,6 +1934,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "cubestack",
+        label: "Cube Stack",
+        start: Start::Gl3d(cubestack_start),
     },
     Entry {
         slug: "cubicgrid",
