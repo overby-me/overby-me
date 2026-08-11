@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (85) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (86) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -68,6 +68,13 @@ are written for it. Two of them feed these bytes to a terminal emulator, where a
 line feed moves down a line and only a carriage return goes back to the left
 margin, so without it the text walks off the right-hand side one line at a time;
 the others already have code that expects to see the pair.
+
+There is a second font, and it is not made of pixels. `runtime::glutstroke` is
+GLUT's Roman simplex, the vector font upstream carries in `glut_roman.h`: a
+character is a few open polylines in a hundred-unit em and how far to move
+along afterwards. Nothing about it is filled, so a saver that wants a solid
+letter builds one along the lines itself, which is what `gltext` does with a
+tube along every segment and a ball at every joint.
 
 ## Pictures that are meant to break
 

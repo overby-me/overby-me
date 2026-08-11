@@ -1054,6 +1054,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::skytentacles::start
 );
 gl3d_saver!(
+    "gltext",
+    gltext_body,
+    gltext_start,
+    xscreensaver::hacks3d::gltext::start
+);
+gl3d_saver!(
     "glmatrix",
     glmatrix_body,
     glmatrix_start,
@@ -2583,6 +2589,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "skytentacles",
         label: "Sky Tentacles",
         start: Start::Gl3d(skytentacles_start),
+    },
+    Entry {
+        slug: "gltext",
+        label: "GL Text",
+        start: Start::Gl3d(gltext_start),
     },
     Entry {
         slug: "glmatrix",

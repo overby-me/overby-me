@@ -55,6 +55,7 @@ pub mod glmatrix;
 pub mod glschool;
 pub mod glsnake;
 mod glsnake_models;
+pub mod gltext;
 pub mod gravitywell;
 pub mod headroom;
 pub mod hexstrut;
@@ -143,6 +144,7 @@ pub static ALL: &[&Saver3d] = &[
     &carousel::SAVER,
     &chompytower::SAVER,
     &glmatrix::SAVER,
+    &gltext::SAVER,
     &fliptext::SAVER,
     &flipflop::SAVER,
     &flipscreen3d::SAVER,

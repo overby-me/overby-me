@@ -29,6 +29,7 @@ pub mod fb;
 pub mod font;
 pub mod gl;
 pub mod gllist;
+pub mod glutstroke;
 pub mod hack3d;
 pub mod image;
 pub mod involute;
