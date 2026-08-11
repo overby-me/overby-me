@@ -1030,6 +1030,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::winduprobot::start
 );
 gl3d_saver!(
+    "sproingies",
+    sproingies_body,
+    sproingies_start,
+    xscreensaver::hacks3d::sproingies::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2497,6 +2503,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "winduprobot",
         label: "Windup Robot",
         start: Start::Gl3d(winduprobot_start),
+    },
+    Entry {
+        slug: "sproingies",
+        label: "Sproingies",
+        start: Start::Gl3d(sproingies_start),
     },
     Entry {
         slug: "hexstrut",

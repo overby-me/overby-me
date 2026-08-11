@@ -167,3 +167,12 @@ pub const ROBOT_HAND_HALF: &str = include_str!("../models/robot_hand_half.gllist
 pub const ROBOT_LEG_HALF: &str = include_str!("../models/robot_leg_half.gllist");
 pub const ROBOT_ROTATOR_HALF: &str = include_str!("../models/robot_rotator_half.gllist");
 pub const ROBOT_WIREFRAME: &str = include_str!("../models/robot_wireframe.gllist");
+
+/// The six frames of a sproingie hop, and the point cloud it blows into.
+pub const S1_1: &str = include_str!("../models/s1_1.gllist");
+pub const S1_2: &str = include_str!("../models/s1_2.gllist");
+pub const S1_3: &str = include_str!("../models/s1_3.gllist");
+pub const S1_4: &str = include_str!("../models/s1_4.gllist");
+pub const S1_5: &str = include_str!("../models/s1_5.gllist");
+pub const S1_6: &str = include_str!("../models/s1_6.gllist");
+pub const S1_B: &str = include_str!("../models/s1_b.gllist");
