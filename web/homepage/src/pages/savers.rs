@@ -1210,6 +1210,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::tronbit::start
 );
 gl3d_saver!(
+    "unknownpleasures",
+    unknownpleasures_body,
+    unknownpleasures_start,
+    xscreensaver::hacks3d::unknownpleasures::start
+);
+gl3d_saver!(
     "stairs",
     stairs_body,
     stairs_start,
@@ -2366,6 +2372,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "tronbit",
         label: "TronBit",
         start: Start::Gl3d(tronbit_start),
+    },
+    Entry {
+        slug: "unknownpleasures",
+        label: "Unknown Pleasures",
+        start: Start::Gl3d(unknownpleasures_start),
     },
     Entry {
         slug: "voronoi",
