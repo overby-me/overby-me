@@ -1138,6 +1138,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::pinion::start
 );
 gl3d_saver!(
+    "providence",
+    providence_body,
+    providence_start,
+    xscreensaver::hacks3d::providence::start
+);
+gl3d_saver!(
     "pulsar",
     pulsar_body,
     pulsar_start,
@@ -2427,6 +2433,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "projectiveplane",
         label: "Projective Plane",
         start: Start::Gl3d(projectiveplane_start),
+    },
+    Entry {
+        slug: "providence",
+        label: "Providence",
+        start: Start::Gl3d(providence_start),
     },
     Entry {
         slug: "pulsar",

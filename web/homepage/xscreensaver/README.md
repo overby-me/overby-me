@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (59) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (60) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -472,11 +472,15 @@ change starts a new batch. Both totals therefore scale with the number of
 objects a frame draws, not with the number of lists it compiled. For
 calibration, at 1280x720 `splodesic` draws 5120 batches, `cubestorm` 2880
 batches and 34k vertices, and `beats` 343k vertices, and all three are fine; six
-thousand batches is about the ceiling. Two savers are deferred on this rather
+thousand batches is about the ceiling. Four savers are deferred on this rather
 than on anything about their code: `glcells` at its default quality draws 800
 cells of 640 triangles each, and `squirtorus` about thirty thousand quads per
-sphincter with sixteen on screen. Measure before starting one of the crowded
-ones.
+sphincter with sixteen on screen. `covid19` draws sixty virus particles whose
+spikes and surface proteins come to some seven hundred matrix changes each, so
+around forty thousand batches a frame. `deepstars` makes its star trails by
+redrawing the whole sky up to four hundred times a frame at descending alpha,
+which is free when the stars live on the card and is eight million points when
+they do not. Measure before starting one of the crowded ones.
 
 A depth clear partway through a frame is an ordering, not a state, so it rides
 on the batch it precedes rather than on the frame. `voronoi` is the reason:

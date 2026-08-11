@@ -59,6 +59,7 @@ pub mod noof;
 pub mod papercube;
 pub mod pinion;
 pub mod projectiveplane;
+pub mod providence;
 pub mod pulsar;
 pub mod quasicrystal;
 pub mod raverhoop;
@@ -122,6 +123,7 @@ pub static ALL: &[&Saver3d] = &[
     &papercube::SAVER,
     &pinion::SAVER,
     &projectiveplane::SAVER,
+    &providence::SAVER,
     &pulsar::SAVER,
     &quasicrystal::SAVER,
     &raverhoop::SAVER,
