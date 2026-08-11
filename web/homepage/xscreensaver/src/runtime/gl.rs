@@ -216,6 +216,53 @@ pub struct Vertex {
     pub normal: [f32; 3],
 }
 
+/// `GL_LIGHT0`, which is the only light any of these savers turns on.
+///
+/// The position is in *eye* space: `glLightfv(GL_LIGHT0, GL_POSITION, ..)`
+/// transforms what it is given by the modelview matrix current at the time of
+/// the call, which is how a saver pins a light to the scene rather than to the
+/// object it is about to rotate. A `w` of 0 means the light is infinitely far
+/// away and only its direction matters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Light {
+    pub position: [f32; 4],
+    pub ambient: [f32; 4],
+    pub diffuse: [f32; 4],
+    pub specular: [f32; 4],
+}
+
+impl Default for Light {
+    /// OpenGL's own defaults for `GL_LIGHT0`.
+    fn default() -> Self {
+        Light {
+            position: [0.0, 0.0, 1.0, 0.0],
+            ambient: [0.0, 0.0, 0.0, 1.0],
+            diffuse: [1.0, 1.0, 1.0, 1.0],
+            specular: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+/// `glMaterialfv (GL_FRONT, ..)`. Ambient and diffuse are one field because
+/// `GL_AMBIENT_AND_DIFFUSE` is what the savers set, nearly without exception.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Material {
+    pub ambient_diffuse: [f32; 4],
+    pub specular: [f32; 4],
+    pub shininess: f32,
+}
+
+impl Default for Material {
+    /// OpenGL's own defaults.
+    fn default() -> Self {
+        Material {
+            ambient_diffuse: [0.8, 0.8, 0.8, 1.0],
+            specular: [0.0, 0.0, 0.0, 1.0],
+            shininess: 0.0,
+        }
+    }
+}
+
 /// One `glBegin`/`glEnd` block: what to draw, where its vertices are, and the
 /// state that was current when the block opened.
 #[derive(Clone, Debug, PartialEq)]
@@ -226,6 +273,14 @@ pub struct Batch {
     pub count: usize,
     /// Projection times modelview, ready for a `mat4` uniform.
     pub mvp: Mat4,
+    /// The modelview on its own, which lighting needs: the shading is worked
+    /// out in eye space, where the light is.
+    pub modelview: Mat4,
+    pub lighting: bool,
+    pub light: Light,
+    pub material: Material,
+    /// `glEnable(GL_CULL_FACE)`: throw away the back of every face.
+    pub cull_face: bool,
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
@@ -283,6 +338,10 @@ pub struct Glx {
     normal: [f32; 3],
     point_size: f32,
     depth_test: bool,
+    lighting: bool,
+    light: Light,
+    material: Material,
+    cull_face: bool,
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -315,6 +374,10 @@ impl Glx {
             normal: [0.0, 0.0, 1.0],
             point_size: 1.0,
             depth_test: true,
+            lighting: false,
+            light: Light::default(),
+            material: Material::default(),
+            cull_face: false,
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -488,6 +551,57 @@ impl Glx {
         self.depth_test = on;
     }
 
+    /// `glEnable(GL_CULL_FACE)`.
+    pub fn cull_face(&mut self, on: bool) {
+        self.cull_face = on;
+    }
+
+    /// `glEnable(GL_LIGHTING)`. With it on the vertex colours are ignored and
+    /// the material is what is shaded, which is OpenGL's rule and not a
+    /// simplification: a saver that wants a lit object sets a material for it.
+    pub fn lighting(&mut self, on: bool) {
+        self.lighting = on;
+    }
+
+    /// `glLightfv (GL_LIGHT0, GL_POSITION, ..)`.
+    ///
+    /// The position is taken through the modelview matrix as it stands now,
+    /// which is what fixes the light to the scene rather than to whatever the
+    /// saver is about to rotate. `w` of 0 makes it directional.
+    pub fn light_position(&mut self, x: f32, y: f32, z: f32, w: f32) {
+        let m = self.modelview().0;
+        let mut o = [0.0f32; 4];
+        for (row, out) in o.iter_mut().enumerate() {
+            *out = m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row] * w;
+        }
+        self.light.position = o;
+    }
+
+    pub fn light_ambient(&mut self, rgba: [f32; 4]) {
+        self.light.ambient = rgba;
+    }
+
+    pub fn light_diffuse(&mut self, rgba: [f32; 4]) {
+        self.light.diffuse = rgba;
+    }
+
+    pub fn light_specular(&mut self, rgba: [f32; 4]) {
+        self.light.specular = rgba;
+    }
+
+    /// `glMaterialfv (GL_FRONT, GL_AMBIENT_AND_DIFFUSE, ..)`.
+    pub fn material_ambient_diffuse(&mut self, rgba: [f32; 4]) {
+        self.material.ambient_diffuse = rgba;
+    }
+
+    pub fn material_specular(&mut self, rgba: [f32; 4]) {
+        self.material.specular = rgba;
+    }
+
+    pub fn material_shininess(&mut self, shininess: f32) {
+        self.material.shininess = shininess;
+    }
+
     /* Vertices */
 
     pub fn color3f(&mut self, r: f32, g: f32, b: f32) {
@@ -580,6 +694,11 @@ impl Glx {
             mvp,
             point_size: self.point_size,
             depth_test: self.depth_test,
+            modelview: self.modelview(),
+            lighting: self.lighting,
+            light: self.light,
+            material: self.material,
+            cull_face: self.cull_face,
             line_width: self.line_width,
         });
     }

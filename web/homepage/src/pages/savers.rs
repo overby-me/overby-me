@@ -1017,6 +1017,12 @@ gl3d_saver!(
     hexstrut_start,
     xscreensaver::hacks3d::hexstrut::start
 );
+gl3d_saver!(
+    "sierpinski3d",
+    sierpinski3d_body,
+    sierpinski3d_start,
+    xscreensaver::hacks3d::sierpinski3d::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -1920,6 +1926,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hexstrut",
         label: "Hex Strut",
         start: Start::Gl3d(hexstrut_start),
+    },
+    Entry {
+        slug: "sierpinski3d",
+        label: "Sierpinski 3D",
+        start: Start::Gl3d(sierpinski3d_start),
     },
     Entry {
         slug: "alienbeacon",

@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (2) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (3) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -391,9 +391,21 @@ What is implemented so far is what the ported savers need, and it grows with
 them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 `gluPerspective` and `gluLookAt`, `glBegin` through `glEnd` for every primitive
 (quads and polygons are cut into triangles as the block closes, since ES has no
-such thing), per-vertex colour and normals, point size, and the depth test.
-Lighting and texturing are not there yet; both are fixed-function state, so both
-will land as a uniform and a branch in the one shader pair.
+such thing), per-vertex colour and normals, point size, the depth test, face
+culling, display lists, and one light. Texturing is not there yet.
+
+The light is `GL_LIGHT0` and nothing else, because `GL_LIGHT0` and nothing else
+is what these savers turn on. Its position goes through the modelview matrix as
+`glLightfv` is called, which is what fixes it to the scene rather than to the
+object about to be rotated, and it arrives at the shader already in eye space.
+Two deliberate differences from OpenGL 1.3, neither of which changes what is
+depicted: the shading is per fragment rather than per vertex, which on shapes
+this low-polygon only looks better, and lighting is two-sided, so the savers
+that leave culling off can see the inside of a thing as well as the outside.
+
+Materials are `GL_AMBIENT_AND_DIFFUSE` in one field, because that is what the
+savers set; with lighting on, vertex colours are ignored, which is OpenGL's own
+rule rather than a shortcut.
 
 State that can differ between one `glBegin` block and the next rides on the
 batch rather than on the frame, which is what lets a saver turn the depth test
