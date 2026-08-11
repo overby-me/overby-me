@@ -40,6 +40,7 @@ pub mod dumpsterfire;
 pub mod energystream;
 pub mod engine;
 pub mod etruscanvenus;
+pub mod flipscreen3d;
 pub mod fliptext;
 pub mod flyingtoasters;
 pub mod gears;
@@ -139,6 +140,7 @@ pub static ALL: &[&Saver3d] = &[
     &chompytower::SAVER,
     &glmatrix::SAVER,
     &fliptext::SAVER,
+    &flipscreen3d::SAVER,
     &gflux::SAVER,
     &hexstrut::SAVER,
     &starwars::SAVER,
