@@ -1006,6 +1006,12 @@ saver!(
 );
 
 gl3d_saver!(
+    "crackberg",
+    crackberg_body,
+    crackberg_start,
+    xscreensaver::hacks3d::crackberg::start
+);
+gl3d_saver!(
     "cubicgrid",
     cubicgrid_body,
     cubicgrid_start,
@@ -2470,6 +2476,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cityflow",
         label: "City Flow",
         start: Start::Gl3d(cityflow_start),
+    },
+    Entry {
+        slug: "crackberg",
+        label: "Crackberg",
+        start: Start::Gl3d(crackberg_start),
     },
     Entry {
         slug: "cube21",
