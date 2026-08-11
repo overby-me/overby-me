@@ -1252,6 +1252,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::papercube::start
 );
 gl3d_saver!(
+    "engine",
+    engine_body,
+    engine_start,
+    xscreensaver::hacks3d::engine::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2436,6 +2442,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "surfaces",
         label: "Surfaces",
         start: Start::Gl3d(surfaces_start),
+    },
+    Entry {
+        slug: "engine",
+        label: "Engine",
+        start: Start::Gl3d(engine_start),
     },
     Entry {
         slug: "geodesic",

@@ -409,6 +409,9 @@ pub struct Batch {
     /// one of them to win: the coplanar one is pushed back by a slope-scaled
     /// amount so it stops fighting for the depth buffer.
     pub polygon_offset: Option<(f32, f32)>,
+    /// `glDepthMask`. Off for a translucent surface, so that its own faces
+    /// blend with each other instead of the nearest one hiding the rest.
+    pub depth_mask: bool,
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
@@ -461,6 +464,7 @@ impl Batch {
             && self.viewport == other.viewport
             && self.blend == other.blend
             && self.polygon_offset == other.polygon_offset
+            && self.depth_mask == other.depth_mask
             && self.fog == other.fog
             && self.texture == other.texture
             && self.tex_env == other.tex_env
@@ -547,6 +551,7 @@ pub struct Glx {
     clear_color_pending: bool,
     blend: Blend,
     polygon_offset: Option<(f32, f32)>,
+    depth_mask: bool,
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -600,6 +605,7 @@ impl Glx {
             clear_color_pending: false,
             blend: Blend::Off,
             polygon_offset: None,
+            depth_mask: true,
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -799,6 +805,11 @@ impl Glx {
     /// `glPolygonOffset`, with `None` for `glDisable(GL_POLYGON_OFFSET_FILL)`.
     pub fn polygon_offset(&mut self, offset: Option<(f32, f32)>) {
         self.polygon_offset = offset;
+    }
+
+    /// `glDepthMask`: whether what is drawn writes depth as well as reading it.
+    pub fn depth_mask(&mut self, on: bool) {
+        self.depth_mask = on;
     }
 
     pub fn blend(&mut self, blend: Blend) {
@@ -1205,6 +1216,7 @@ impl Glx {
             viewport: self.frame.viewport,
             blend: self.blend,
             polygon_offset: self.polygon_offset,
+            depth_mask: self.depth_mask,
             line_width: self.line_width,
             scene_ambient: self.scene_ambient,
             fog: self.fog,

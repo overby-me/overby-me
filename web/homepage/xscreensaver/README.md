@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (53) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (54) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -490,6 +490,13 @@ are mostly made of it: `hypnowheel` is `GL_ONE, GL_ONE`, a stack of translucent
 spirals whose overlaps add up towards white, and `cubestack` is
 `GL_SRC_ALPHA, GL_ONE` with the depth test off, so every cube in its stack shows
 through every other.
+
+`glDepthMask` and `glPolygonOffset` are both per batch. The first is what lets
+a translucent object blend with itself rather than have its nearest face hide
+the rest, which is how `engine` shows its machinery through the block; the
+second is for two surfaces drawn in the same place where one has to win, which
+is how `geodesic` overlaps two frequencies of the same sphere while one fades
+into the other.
 
 `runtime::easing` is upstream's `utils/easing.c`, all thirty-one curves, which
 nineteen of the savers use. They are CSS's semantics and CSS's constants, so

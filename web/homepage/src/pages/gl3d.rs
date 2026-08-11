@@ -487,6 +487,7 @@ impl Gl3dEngine {
                 gl.disable(Gl::CULL_FACE);
             }
             gl.front_face(if batch.front_face_cw { Gl::CW } else { Gl::CCW });
+            gl.depth_mask(batch.depth_mask);
             match batch.polygon_offset {
                 Some((factor, units)) => {
                     gl.enable(Gl::POLYGON_OFFSET_FILL);

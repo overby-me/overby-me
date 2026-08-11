@@ -35,6 +35,7 @@ pub mod cubicgrid;
 pub mod dangerball;
 pub mod discoball;
 pub mod energystream;
+pub mod engine;
 pub mod gears;
 pub mod geodesic;
 pub mod glblur;
@@ -93,6 +94,7 @@ pub static ALL: &[&Saver3d] = &[
     &dangerball::SAVER,
     &discoball::SAVER,
     &energystream::SAVER,
+    &engine::SAVER,
     &gears::SAVER,
     &geodesic::SAVER,
     &glblur::SAVER,
