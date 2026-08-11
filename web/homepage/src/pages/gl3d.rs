@@ -19,7 +19,7 @@ use web_sys::{
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
-use xscreensaver::runtime::gl::{Frame, Primitive};
+use xscreensaver::runtime::gl::{Frame, MAX_LIGHTS, Primitive};
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
 const FLOATS_PER_VERTEX: usize = 10;
@@ -56,11 +56,13 @@ precision highp float;
 in vec4 v_color;
 in vec3 v_normal;
 in vec3 v_eye;
+#define LIGHTS 2
 uniform bool u_lighting;
-uniform vec4 u_light_position;
-uniform vec4 u_light_ambient;
-uniform vec4 u_light_diffuse;
-uniform vec4 u_light_specular;
+uniform bool u_light_on[LIGHTS];
+uniform vec4 u_light_position[LIGHTS];
+uniform vec4 u_light_ambient[LIGHTS];
+uniform vec4 u_light_diffuse[LIGHTS];
+uniform vec4 u_light_specular[LIGHTS];
 uniform vec4 u_material_diffuse;
 uniform vec4 u_material_specular;
 uniform float u_shininess;
@@ -72,21 +74,26 @@ void main() {
     return;
   }
   vec3 n = normalize (v_normal);
-  // A w of zero is a light infinitely far away, so its position is a
-  // direction; otherwise it is a place, and the direction is from here to it.
-  vec3 l = normalize (u_light_position.w == 0.0
-                      ? u_light_position.xyz
-                      : u_light_position.xyz - v_eye);
+  vec3 eye = normalize (-v_eye);
   // Two-sided: a back face is lit by its own side. OpenGL would cull or shade
   // it separately, and the savers that leave culling off want to see both.
-  if (dot (n, normalize (-v_eye)) < 0.0) n = -n;
+  if (dot (n, eye) < 0.0) n = -n;
 
-  vec3 c = u_material_diffuse.rgb * (u_scene_ambient.rgb + u_light_ambient.rgb);
-  c += u_material_diffuse.rgb * u_light_diffuse.rgb * max (dot (n, l), 0.0);
-  if (u_shininess > 0.0) {
-    vec3 h = normalize (l + normalize (-v_eye));
-    c += u_material_specular.rgb * u_light_specular.rgb
-       * pow (max (dot (n, h), 0.0), u_shininess);
+  vec3 c = u_material_diffuse.rgb * u_scene_ambient.rgb;
+  for (int i = 0; i < LIGHTS; i++) {
+    if (! u_light_on[i]) continue;
+    vec4 p = u_light_position[i];
+    // A w of zero is a light infinitely far away, so its position is a
+    // direction. Otherwise it is a homogeneous point, and w has to be divided
+    // out before the direction to it means anything.
+    vec3 l = normalize (p.w == 0.0 ? p.xyz : p.xyz / p.w - v_eye);
+    c += u_material_diffuse.rgb * u_light_ambient[i].rgb;
+    c += u_material_diffuse.rgb * u_light_diffuse[i].rgb * max (dot (n, l), 0.0);
+    if (u_shininess > 0.0) {
+      vec3 h = normalize (l + eye);
+      c += u_material_specular.rgb * u_light_specular[i].rgb
+         * pow (max (dot (n, h), 0.0), u_shininess);
+    }
   }
   frag_color = vec4 (c, u_material_diffuse.a);
 }
@@ -98,10 +105,12 @@ struct Uniforms {
     modelview: Option<WebGlUniformLocation>,
     point_size: Option<WebGlUniformLocation>,
     lighting: Option<WebGlUniformLocation>,
-    light_position: Option<WebGlUniformLocation>,
-    light_ambient: Option<WebGlUniformLocation>,
-    light_diffuse: Option<WebGlUniformLocation>,
-    light_specular: Option<WebGlUniformLocation>,
+    /// One location per light, since GLSL arrays are addressed by element.
+    light_on: Vec<Option<WebGlUniformLocation>>,
+    light_position: Vec<Option<WebGlUniformLocation>>,
+    light_ambient: Vec<Option<WebGlUniformLocation>>,
+    light_diffuse: Vec<Option<WebGlUniformLocation>>,
+    light_specular: Vec<Option<WebGlUniformLocation>>,
     material_diffuse: Option<WebGlUniformLocation>,
     material_specular: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
@@ -116,10 +125,21 @@ impl Uniforms {
             modelview: at("u_modelview"),
             point_size: at("u_point_size"),
             lighting: at("u_lighting"),
-            light_position: at("u_light_position"),
-            light_ambient: at("u_light_ambient"),
-            light_diffuse: at("u_light_diffuse"),
-            light_specular: at("u_light_specular"),
+            light_on: (0..MAX_LIGHTS)
+                .map(|i| at(&format!("u_light_on[{i}]")))
+                .collect(),
+            light_position: (0..MAX_LIGHTS)
+                .map(|i| at(&format!("u_light_position[{i}]")))
+                .collect(),
+            light_ambient: (0..MAX_LIGHTS)
+                .map(|i| at(&format!("u_light_ambient[{i}]")))
+                .collect(),
+            light_diffuse: (0..MAX_LIGHTS)
+                .map(|i| at(&format!("u_light_diffuse[{i}]")))
+                .collect(),
+            light_specular: (0..MAX_LIGHTS)
+                .map(|i| at(&format!("u_light_specular[{i}]")))
+                .collect(),
             material_diffuse: at("u_material_diffuse"),
             material_specular: at("u_material_specular"),
             shininess: at("u_shininess"),
@@ -274,11 +294,19 @@ impl Gl3dEngine {
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);
             gl.uniform1i(u.lighting.as_ref(), i32::from(batch.lighting));
             if batch.lighting {
-                let (l, m) = (&batch.light, &batch.material);
-                gl.uniform4fv_with_f32_array(u.light_position.as_ref(), &l.position);
-                gl.uniform4fv_with_f32_array(u.light_ambient.as_ref(), &l.ambient);
-                gl.uniform4fv_with_f32_array(u.light_diffuse.as_ref(), &l.diffuse);
-                gl.uniform4fv_with_f32_array(u.light_specular.as_ref(), &l.specular);
+                let m = &batch.material;
+                for i in 0..MAX_LIGHTS {
+                    let on = batch.light_enabled[i];
+                    gl.uniform1i(u.light_on[i].as_ref(), i32::from(on));
+                    if !on {
+                        continue;
+                    }
+                    let l = &batch.lights[i];
+                    gl.uniform4fv_with_f32_array(u.light_position[i].as_ref(), &l.position);
+                    gl.uniform4fv_with_f32_array(u.light_ambient[i].as_ref(), &l.ambient);
+                    gl.uniform4fv_with_f32_array(u.light_diffuse[i].as_ref(), &l.diffuse);
+                    gl.uniform4fv_with_f32_array(u.light_specular[i].as_ref(), &l.specular);
+                }
                 gl.uniform4fv_with_f32_array(u.material_diffuse.as_ref(), &m.ambient_diffuse);
                 gl.uniform4fv_with_f32_array(u.material_specular.as_ref(), &m.specular);
                 gl.uniform1f(u.shininess.as_ref(), m.shininess);

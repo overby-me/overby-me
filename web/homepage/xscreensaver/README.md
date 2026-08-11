@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (3) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (4) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -394,10 +394,13 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 such thing), per-vertex colour and normals, point size, the depth test, face
 culling, display lists, and one light. Texturing is not there yet.
 
-The light is `GL_LIGHT0` and nothing else, because `GL_LIGHT0` and nothing else
-is what these savers turn on. Its position goes through the modelview matrix as
-`glLightfv` is called, which is what fixes it to the scene rather than to the
-object about to be rotated, and it arrives at the shader already in eye space.
+There are two lights, because two is the most any saver here turns on, and the
+limit grows when one wants more. A light's position goes through the modelview
+matrix as `glLightfv` is called, which is what fixes it to the scene rather than
+to the object about to be rotated, and it arrives at the shader already in eye
+space, `w` and all: a `w` of zero means a direction, and any other means a
+homogeneous point that has to be divided through before the direction to it
+means anything. `menger` passes `w` of 0.1, so that division is not academic.
 Two deliberate differences from OpenGL 1.3, neither of which changes what is
 depicted: the shading is per fragment rather than per vertex, which on shapes
 this low-polygon only looks better, and lighting is two-sided, so the savers

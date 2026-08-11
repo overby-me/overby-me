@@ -216,7 +216,11 @@ pub struct Vertex {
     pub normal: [f32; 3],
 }
 
-/// `GL_LIGHT0`, which is the only light any of these savers turns on.
+/// How many lights a saver can turn on. OpenGL guarantees eight; the savers
+/// here use one or two, and this grows when one wants more.
+pub const MAX_LIGHTS: usize = 2;
+
+/// One of `GL_LIGHT0` and friends.
 ///
 /// The position is in *eye* space: `glLightfv(GL_LIGHT0, GL_POSITION, ..)`
 /// transforms what it is given by the modelview matrix current at the time of
@@ -277,7 +281,9 @@ pub struct Batch {
     /// out in eye space, where the light is.
     pub modelview: Mat4,
     pub lighting: bool,
-    pub light: Light,
+    /// Which of the lights are on.
+    pub light_enabled: [bool; MAX_LIGHTS],
+    pub lights: [Light; MAX_LIGHTS],
     pub material: Material,
     /// `glEnable(GL_CULL_FACE)`: throw away the back of every face.
     pub cull_face: bool,
@@ -339,7 +345,8 @@ pub struct Glx {
     point_size: f32,
     depth_test: bool,
     lighting: bool,
-    light: Light,
+    lights: [Light; MAX_LIGHTS],
+    light_enabled: [bool; MAX_LIGHTS],
     material: Material,
     cull_face: bool,
     line_width: f32,
@@ -358,13 +365,14 @@ pub struct Glx {
     compile_and_execute: bool,
 }
 
-impl Default for Glx {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Glx {
+    /// A context in OpenGL's documented initial state: identity matrices, white
+    /// current colour, lighting off.
+    ///
+    /// No `Default`, deliberately. Clippy asks for one and the house lint
+    /// refuses it, and the house lint is closer to right: a `Glx` is a device,
+    /// not a value, and nothing should be conjuring one implicitly.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Glx {
             modelview: vec![Mat4::IDENTITY],
@@ -375,7 +383,8 @@ impl Glx {
             point_size: 1.0,
             depth_test: true,
             lighting: false,
-            light: Light::default(),
+            lights: [Light::default(); MAX_LIGHTS],
+            light_enabled: [false; MAX_LIGHTS],
             material: Material::default(),
             cull_face: false,
             line_width: 1.0,
@@ -563,30 +572,46 @@ impl Glx {
         self.lighting = on;
     }
 
-    /// `glLightfv (GL_LIGHT0, GL_POSITION, ..)`.
+    /// `glEnable` of one of the lights. Turning lighting on is separate: a saver does
+    /// both, and so must a port.
+    pub fn light_enable(&mut self, n: usize, on: bool) {
+        if n < MAX_LIGHTS {
+            self.light_enabled[n] = on;
+        }
+    }
+
+    /// `glLightfv` of a light's `GL_POSITION`.
     ///
     /// The position is taken through the modelview matrix as it stands now,
     /// which is what fixes the light to the scene rather than to whatever the
     /// saver is about to rotate. `w` of 0 makes it directional.
-    pub fn light_position(&mut self, x: f32, y: f32, z: f32, w: f32) {
+    pub fn light_position(&mut self, n: usize, x: f32, y: f32, z: f32, w: f32) {
         let m = self.modelview().0;
         let mut o = [0.0f32; 4];
         for (row, out) in o.iter_mut().enumerate() {
             *out = m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row] * w;
         }
-        self.light.position = o;
+        if let Some(light) = self.lights.get_mut(n) {
+            light.position = o;
+        }
     }
 
-    pub fn light_ambient(&mut self, rgba: [f32; 4]) {
-        self.light.ambient = rgba;
+    pub fn light_ambient(&mut self, n: usize, rgba: [f32; 4]) {
+        if let Some(light) = self.lights.get_mut(n) {
+            light.ambient = rgba;
+        }
     }
 
-    pub fn light_diffuse(&mut self, rgba: [f32; 4]) {
-        self.light.diffuse = rgba;
+    pub fn light_diffuse(&mut self, n: usize, rgba: [f32; 4]) {
+        if let Some(light) = self.lights.get_mut(n) {
+            light.diffuse = rgba;
+        }
     }
 
-    pub fn light_specular(&mut self, rgba: [f32; 4]) {
-        self.light.specular = rgba;
+    pub fn light_specular(&mut self, n: usize, rgba: [f32; 4]) {
+        if let Some(light) = self.lights.get_mut(n) {
+            light.specular = rgba;
+        }
     }
 
     /// `glMaterialfv (GL_FRONT, GL_AMBIENT_AND_DIFFUSE, ..)`.
@@ -696,7 +721,8 @@ impl Glx {
             depth_test: self.depth_test,
             modelview: self.modelview(),
             lighting: self.lighting,
-            light: self.light,
+            lights: self.lights,
+            light_enabled: self.light_enabled,
             material: self.material,
             cull_face: self.cull_face,
             line_width: self.line_width,

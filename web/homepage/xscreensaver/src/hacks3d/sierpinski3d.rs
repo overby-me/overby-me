@@ -142,7 +142,8 @@ impl Hack3d for Gasket {
 
         if !self.wireframe {
             g.glx.color4f(1.0, 1.0, 1.0, 1.0);
-            g.glx.light_position(-4.0, 3.0, 10.0, 1.0);
+            g.glx.light_position(0, -4.0, 3.0, 10.0, 1.0);
+            g.glx.light_enable(0, true);
             for c in &mut self.ccolor {
                 *c = (*c + 1) % self.colors.len().max(1);
             }
