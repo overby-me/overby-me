@@ -58,6 +58,7 @@ pub mod splodesic;
 pub mod stairs;
 pub mod stonerview;
 pub mod surfaces;
+pub mod tronbit;
 pub mod voronoi;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
@@ -104,6 +105,7 @@ pub static ALL: &[&Saver3d] = &[
     &stairs::SAVER,
     &stonerview::SAVER,
     &surfaces::SAVER,
+    &tronbit::SAVER,
     &voronoi::SAVER,
 ];
 

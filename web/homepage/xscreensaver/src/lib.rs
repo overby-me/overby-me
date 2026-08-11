@@ -19,6 +19,7 @@
 pub mod hacks2d;
 pub mod hacks3d;
 pub mod images;
+pub mod models;
 pub mod runtime;
 pub mod shadertoy;
 

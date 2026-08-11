@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (42) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (43) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -219,6 +219,29 @@ sixteen-bit samples. It returns the colour and, separately, a depth-1 bitmap of
 where the picture is opaque, because `Fb` has no alpha channel to put it in and
 neither does X: a hack draws a sprite by clipping the colour through the
 bitmap, which is what `image_data_to_pixmap` hands it upstream.
+
+## Shapes
+
+A couple of dozen of the OpenGL savers are a program wrapped around a model
+somebody drew: a toaster, a skull, a golden apple, the polyhedra `tronbit`
+wears. Upstream converts each to C source at build time, a flat array of
+interleaved floats plus a `struct gllist` header saying how to read it, and
+draws it with one `glInterleavedArrays` and one `glDrawArrays`.
+
+Here the arrays are assets rather than source, because a Rust file with tens of
+thousands of float literals in it takes minutes to compile. `gen-gllist.nu`
+converts one:
+
+```console
+$ nu gen-gllist.nu <checkout>/hacks/glx xscreensaver/models tronbit_no.c
+tronbit_no: 1080 verts, n3f_v3f, triangles -> xscreensaver/models/tronbit_no.gllist
+pub const TRONBIT_NO: &str = include_str!("../models/tronbit_no.gllist");
+```
+
+It keeps upstream's literals character for character and only strips the C
+around them, so a converted model diffs cleanly against its source. Paste the
+`const` it prints into `src/models.rs`; `runtime::gllist` reads it back and
+replays it into the recorder, wireframe included.
 
 ## Code splitting
 
