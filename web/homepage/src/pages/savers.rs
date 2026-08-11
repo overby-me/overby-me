@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "discoball",
+    discoball_body,
+    discoball_start,
+    xscreensaver::hacks3d::discoball::start
+);
+gl3d_saver!(
     "energystream",
     energystream_body,
     energystream_start,
@@ -2064,6 +2070,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "dangerball",
         label: "Danger Ball",
         start: Start::Gl3d(dangerball_start),
+    },
+    Entry {
+        slug: "discoball",
+        label: "Discoball",
+        start: Start::Gl3d(discoball_start),
     },
     Entry {
         slug: "energystream",
