@@ -233,6 +233,18 @@ pub enum Blend {
     Alpha,
 }
 
+/// `GL_FOG`, in the one mode the savers ask for: `GL_EXP2`, where what
+/// survives at a distance is `exp(-(density * distance)^2)`.
+///
+/// A saver reaches for fog when its scene runs off towards a horizon: without
+/// it the far end of the geometry is drawn as brightly as the near end and
+/// piles into an unreadable band. `gravitywell`'s grid is the case in point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fog {
+    pub density: f32,
+    pub color: [f32; 4],
+}
+
 /// How many lights a saver can turn on. OpenGL guarantees eight; the savers
 /// here use one or two, and this grows when one wants more.
 pub const MAX_LIGHTS: usize = 2;
@@ -323,6 +335,8 @@ pub struct Batch {
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
     /// and want it in the order they drew it.
     pub depth_test: bool,
+    /// `glEnable(GL_FOG)`, and what it fades to.
+    pub fog: Option<Fog>,
 }
 
 impl Batch {
@@ -343,6 +357,7 @@ impl Batch {
             && self.front_face_cw == other.front_face_cw
             && !other.clear_depth_first
             && self.blend == other.blend
+            && self.fog == other.fog
     }
 }
 
@@ -403,6 +418,7 @@ pub struct Glx {
     cull_face: bool,
     front_face_cw: bool,
     clear_color: [f32; 4],
+    fog: Option<Fog>,
     clear_depth_pending: bool,
     blend: Blend,
     line_width: f32,
@@ -445,6 +461,7 @@ impl Glx {
             cull_face: false,
             front_face_cw: false,
             clear_color: [0.0, 0.0, 0.0, 1.0],
+            fog: None,
             clear_depth_pending: false,
             blend: Blend::Off,
             line_width: 1.0,
@@ -631,6 +648,13 @@ impl Glx {
     }
 
     /// `glBlendFunc`, and the enable that goes with it.
+    /// `glFogf (GL_FOG_DENSITY, ..)` and `glFogfv (GL_FOG_COLOR, ..)` with
+    /// `glEnable (GL_FOG)`, or `None` for `glDisable`. Only `GL_EXP2` is
+    /// implemented, which is the only mode any of these savers uses.
+    pub fn fog(&mut self, fog: Option<Fog>) {
+        self.fog = fog;
+    }
+
     pub fn blend(&mut self, blend: Blend) {
         self.blend = blend;
     }
@@ -861,6 +885,7 @@ impl Glx {
             clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
             blend: self.blend,
             line_width: self.line_width,
+            fog: self.fog,
         };
 
         // Run of blocks with nothing between them but more vertices: fold them

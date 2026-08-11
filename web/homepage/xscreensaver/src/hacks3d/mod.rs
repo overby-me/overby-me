@@ -26,6 +26,7 @@ pub mod cubestorm;
 pub mod cubicgrid;
 pub mod dangerball;
 pub mod glknots;
+pub mod gravitywell;
 pub mod hexstrut;
 pub mod hextrail;
 pub mod hypnowheel;
@@ -49,6 +50,7 @@ pub static ALL: &[&Saver3d] = &[
     &dangerball::SAVER,
     &glknots::SAVER,
     &hexstrut::SAVER,
+    &gravitywell::SAVER,
     &hextrail::SAVER,
     &kaleidocycle::SAVER,
     &menger::SAVER,

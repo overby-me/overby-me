@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (17) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (18) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -392,8 +392,14 @@ them: the matrix stack with `glRotate`/`glTranslate`/`glScale`/`glFrustum`,
 `gluPerspective` and `gluLookAt`, `glBegin` through `glEnd` for every primitive
 (quads and polygons are cut into triangles as the block closes, since ES has no
 such thing), per-vertex colour and normals, point size, the depth test and a
-mid-frame clear of it, face culling and winding, blending, display lists, and
-two lights. Texturing is not there yet.
+mid-frame clear of it, face culling and winding, blending, display lists, two
+lights, and fog. Texturing is not there yet.
+
+Fog is `GL_EXP2` only, which is the only mode any of these asks for: what
+survives at a distance is `exp(-(density * distance)^2)`. It matters more than
+it sounds for the savers that run off towards a horizon. `gravitywell`'s grid is
+five hundred units across, and without fog every line at the far end is drawn as
+brightly as the ones in front and the back half is a solid band.
 
 One thing is recorded and then thrown away: line width. WebGL draws every line
 one pixel wide whatever it is asked for, on every implementation that matters,

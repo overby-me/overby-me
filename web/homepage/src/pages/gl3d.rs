@@ -68,10 +68,22 @@ uniform vec4 u_material_diffuse_back;
 uniform vec4 u_material_specular;
 uniform float u_shininess;
 uniform vec4 u_scene_ambient;
+uniform bool u_fog;
+uniform float u_fog_density;
+uniform vec4 u_fog_color;
 out vec4 frag_color;
+
+// GL_EXP2, the one fog mode these savers ask for: what survives at a distance
+// is exp(-(density * distance)^2).
+vec4 fogged (vec4 c) {
+  if (! u_fog) return c;
+  float d = u_fog_density * length (v_eye);
+  return vec4 (mix (u_fog_color.rgb, c.rgb, clamp (exp (-d * d), 0.0, 1.0)), c.a);
+}
+
 void main() {
   if (! u_lighting) {
-    frag_color = v_color;
+    frag_color = fogged (v_color);
     return;
   }
   vec3 n = normalize (v_normal);
@@ -100,7 +112,7 @@ void main() {
          * pow (max (dot (n, h), 0.0), u_shininess);
     }
   }
-  frag_color = vec4 (c, diffuse.a);
+  frag_color = fogged (vec4 (c, diffuse.a));
 }
 ";
 
@@ -121,6 +133,9 @@ struct Uniforms {
     material_specular: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
+    fog: Option<WebGlUniformLocation>,
+    fog_density: Option<WebGlUniformLocation>,
+    fog_color: Option<WebGlUniformLocation>,
 }
 
 impl Uniforms {
@@ -151,6 +166,9 @@ impl Uniforms {
             material_specular: at("u_material_specular"),
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
+            fog: at("u_fog"),
+            fog_density: at("u_fog_density"),
+            fog_color: at("u_fog_color"),
         }
     }
 }
@@ -318,6 +336,11 @@ impl Gl3dEngine {
             }
             gl.uniform_matrix4fv_with_f32_array(u.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);
+            gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
+            if let Some(fog) = batch.fog {
+                gl.uniform1f(u.fog_density.as_ref(), fog.density);
+                gl.uniform4fv_with_f32_array(u.fog_color.as_ref(), &fog.color);
+            }
             gl.uniform1i(u.lighting.as_ref(), i32::from(batch.lighting));
             if batch.lighting {
                 let m = &batch.material;

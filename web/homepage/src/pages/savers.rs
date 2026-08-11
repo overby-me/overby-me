@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "gravitywell",
+    gravitywell_body,
+    gravitywell_start,
+    xscreensaver::hacks3d::gravitywell::start
+);
+gl3d_saver!(
     "hextrail",
     hextrail_body,
     hextrail_start,
@@ -2045,6 +2051,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "glknots",
         label: "GL Knots",
         start: Start::Gl3d(glknots_start),
+    },
+    Entry {
+        slug: "gravitywell",
+        label: "Gravity Well",
+        start: Start::Gl3d(gravitywell_start),
     },
     Entry {
         slug: "hexstrut",
