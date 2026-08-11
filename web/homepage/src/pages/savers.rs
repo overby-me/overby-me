@@ -1060,6 +1060,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::starwars::start
 );
 gl3d_saver!(
+    "fliptext",
+    fliptext_body,
+    fliptext_start,
+    xscreensaver::hacks3d::fliptext::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2552,6 +2558,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "starwars",
         label: "Star Wars",
         start: Start::Gl3d(starwars_start),
+    },
+    Entry {
+        slug: "fliptext",
+        label: "Flip Text",
+        start: Start::Gl3d(fliptext_start),
     },
     Entry {
         slug: "hexstrut",
