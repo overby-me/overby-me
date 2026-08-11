@@ -52,6 +52,7 @@ pub mod kaleidocycle;
 pub mod klein;
 pub mod lockward;
 pub mod menger;
+pub mod moebius;
 pub mod moebiusgears;
 pub mod molecule;
 pub mod morph3d;
@@ -118,6 +119,7 @@ pub static ALL: &[&Saver3d] = &[
     &klein::SAVER,
     &lockward::SAVER,
     &menger::SAVER,
+    &moebius::SAVER,
     &moebiusgears::SAVER,
     &molecule::SAVER,
     &morph3d::SAVER,

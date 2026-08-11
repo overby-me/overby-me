@@ -1036,6 +1036,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::noof::start
 );
 gl3d_saver!(
+    "moebius",
+    moebius_body,
+    moebius_start,
+    xscreensaver::hacks3d::moebius::start
+);
+gl3d_saver!(
     "moebiusgears",
     moebiusgears_body,
     moebiusgears_start,
@@ -2420,6 +2426,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "menger",
         label: "Menger",
         start: Start::Gl3d(menger_start),
+    },
+    Entry {
+        slug: "moebius",
+        label: "Moebius",
+        start: Start::Gl3d(moebius_start),
     },
     Entry {
         slug: "moebiusgears",
