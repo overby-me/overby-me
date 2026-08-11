@@ -1216,6 +1216,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::morph3d::start
 );
 gl3d_saver!(
+    "superquadrics",
+    superquadrics_body,
+    superquadrics_start,
+    xscreensaver::hacks3d::superquadrics::start
+);
+gl3d_saver!(
     "unknownpleasures",
     unknownpleasures_body,
     unknownpleasures_start,
@@ -2368,6 +2374,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "stonerview",
         label: "Stoner View",
         start: Start::Gl3d(stonerview_start),
+    },
+    Entry {
+        slug: "superquadrics",
+        label: "Superquadrics",
+        start: Start::Gl3d(superquadrics_start),
     },
     Entry {
         slug: "surfaces",
