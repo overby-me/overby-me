@@ -86,6 +86,7 @@ pub mod spheremonics;
 pub mod splodesic;
 pub mod sproingies;
 pub mod stairs;
+pub mod starwars;
 pub mod stonerview;
 pub mod superquadrics;
 pub mod surfaces;
@@ -136,6 +137,7 @@ pub static ALL: &[&Saver3d] = &[
     &chompytower::SAVER,
     &glmatrix::SAVER,
     &hexstrut::SAVER,
+    &starwars::SAVER,
     &skytentacles::SAVER,
     &sproingies::SAVER,
     &winduprobot::SAVER,

@@ -1054,6 +1054,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::glmatrix::start
 );
 gl3d_saver!(
+    "starwars",
+    starwars_body,
+    starwars_start,
+    xscreensaver::hacks3d::starwars::start
+);
+gl3d_saver!(
     "hexstrut",
     hexstrut_body,
     hexstrut_start,
@@ -2541,6 +2547,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "glmatrix",
         label: "GL Matrix",
         start: Start::Gl3d(glmatrix_start),
+    },
+    Entry {
+        slug: "starwars",
+        label: "Star Wars",
+        start: Start::Gl3d(starwars_start),
     },
     Entry {
         slug: "hexstrut",
