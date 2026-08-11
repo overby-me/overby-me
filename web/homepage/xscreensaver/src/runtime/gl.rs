@@ -384,6 +384,15 @@ pub struct Batch {
     /// mid-frame `glClear(GL_DEPTH_BUFFER_BIT)` means: everything after it
     /// draws over everything before it, whatever the distances say.
     pub clear_depth_first: bool,
+    /// Clear the colour buffer too, which is what a *second* `glClear` in one
+    /// frame means: what has been drawn so far was scaffolding, and the real
+    /// picture starts here. `glblur` renders its scene small, copies it to a
+    /// texture, and then wipes it to draw the blur instead.
+    pub clear_color_first: bool,
+    /// `glViewport`. Held per batch rather than per frame because a saver may
+    /// shrink it, draw into the corner, and put it back; the frame carries the
+    /// viewport it started with, for the clear.
+    pub viewport: [i32; 4],
     pub blend: Blend,
     pub point_size: f32,
     pub line_width: f32,
@@ -433,6 +442,8 @@ impl Batch {
             && self.cull_face == other.cull_face
             && self.front_face_cw == other.front_face_cw
             && !other.clear_depth_first
+            && !other.clear_color_first
+            && self.viewport == other.viewport
             && self.blend == other.blend
             && self.fog == other.fog
             && self.texture == other.texture
@@ -517,6 +528,7 @@ pub struct Glx {
     tex_env: TexEnv,
     uv: [f32; 2],
     clear_depth_pending: bool,
+    clear_color_pending: bool,
     blend: Blend,
     line_width: f32,
 
@@ -568,6 +580,7 @@ impl Glx {
             tex_env: TexEnv::Modulate,
             uv: [0.0, 0.0],
             clear_depth_pending: false,
+            clear_color_pending: false,
             blend: Blend::Off,
             line_width: 1.0,
             shape: None,
@@ -726,6 +739,11 @@ impl Glx {
     pub fn clear(&mut self) {
         if self.frame.clear.is_none() {
             self.frame.clear = Some(self.clear_color);
+        } else {
+            // A second clear in one frame cannot be the frame's own; it wipes
+            // what has been drawn so far, so it attaches to what comes next.
+            self.clear_color_pending = true;
+            self.clear_depth_pending = true;
         }
     }
 
@@ -1148,6 +1166,8 @@ impl Glx {
             cull_face: self.cull_face,
             front_face_cw: self.front_face_cw,
             clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
+            clear_color_first: std::mem::take(&mut self.clear_color_pending),
+            viewport: self.frame.viewport,
             blend: self.blend,
             line_width: self.line_width,
             scene_ambient: self.scene_ambient,

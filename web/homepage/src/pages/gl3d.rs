@@ -411,14 +411,21 @@ impl Gl3dEngine {
                 },
             };
             gl.bind_texture(Gl::TEXTURE_2D, Some(&handle));
+            // A texture with no bytes is one that is only ever copied into from
+            // the screen. It is allocated without an alpha channel, because
+            // the drawing buffer has none either and a blit out of a
+            // multisampled buffer is only legal between identical formats.
+            // Sampling it then gives an alpha of one, which is what upstream
+            // gets from the GL_LUMINANCE it copies to.
+            let format = if t.data.is_empty() { Gl::RGB } else { Gl::RGBA };
             let ok = gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
                 Gl::TEXTURE_2D,
                 0,
-                Gl::RGBA as i32,
+                format as i32,
                 t.width,
                 t.height,
                 0,
-                Gl::RGBA,
+                format,
                 Gl::UNSIGNED_BYTE,
                 // No bytes means reserve the size and leave it black, which is
                 // what a texture that is only ever copied into asks for. WebGL
@@ -467,7 +474,11 @@ impl Gl3dEngine {
                 gl.disable(Gl::CULL_FACE);
             }
             gl.front_face(if batch.front_face_cw { Gl::CW } else { Gl::CCW });
-            if batch.clear_depth_first {
+            let [bx, by, bw, bh] = batch.viewport;
+            gl.viewport(bx, by, bw.max(1), bh.max(1));
+            if batch.clear_color_first {
+                gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
+            } else if batch.clear_depth_first {
                 gl.clear(Gl::DEPTH_BUFFER_BIT);
             }
             match batch.blend {
@@ -588,8 +599,8 @@ impl Gl3dEngine {
                     }
                 };
                 let (w, h) = (
-                    frame.viewport[2].min(t.width),
-                    frame.viewport[3].min(t.height),
+                    batch.viewport[2].min(t.width),
+                    batch.viewport[3].min(t.height),
                 );
                 gl.bind_framebuffer(Gl::DRAW_FRAMEBUFFER, fbo);
                 gl.framebuffer_texture_2d(

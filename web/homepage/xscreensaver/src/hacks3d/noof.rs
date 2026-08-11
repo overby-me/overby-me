@@ -33,13 +33,12 @@
 //! the visible difference is none, because a flower re-rolled on frame one
 //! looks exactly like a flower rolled at start-up.
 //!
-//! Nothing is erased between frames: each one draws the last one back before
-//! drawing on it, so a flower smears rather than moves. It does not build up
-//! for ever, because the fill of every petal is black at a bit over a third
-//! alpha, so a flower sweeping its own disc darkens what is under it by half
-//! again each pass and a trail is gone within a few frames of being crossed.
-//! What is left is a spiky shape with two or three of its recent positions
-//! showing behind it.
+//! What makes the picture rather than the motion is that nothing is ever
+//! erased. Each frame draws the last one back before drawing on it, so the
+//! petals leave every position they have been in and the screen fills with a
+//! dense weave of outlines. It does not silt up into a solid block, because
+//! the fill of every petal is black at a bit over a third alpha, so a flower
+//! sweeping its own disc darkens what is under it as it goes.
 //!
 //! Upstream keeps the old frame in a texture and copies the screen into it at
 //! the end of every frame, because a colour buffer is no longer guaranteed to
