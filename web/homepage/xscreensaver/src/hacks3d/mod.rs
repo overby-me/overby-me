@@ -43,6 +43,7 @@ pub mod quasicrystal;
 pub mod rubikblocks;
 pub mod sierpinski3d;
 pub mod splodesic;
+pub mod stonerview;
 pub mod voronoi;
 
 /// Every ported OpenGL saver, in the order they were added. Native only, for
@@ -74,6 +75,7 @@ pub static ALL: &[&Saver3d] = &[
     &rubikblocks::SAVER,
     &sierpinski3d::SAVER,
     &splodesic::SAVER,
+    &stonerview::SAVER,
     &voronoi::SAVER,
 ];
 
@@ -149,19 +151,40 @@ mod tests {
         }
     }
 
+    /// A digest of everything a frame would draw: where its vertices are and
+    /// under which matrices. Compared rather than the frames themselves so that
+    /// a failure prints a number instead of a megabyte of floats.
+    fn frame_fingerprint(r: &Runner3d) -> u64 {
+        let f = r.frame();
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for x in f
+            .batches
+            .iter()
+            .flat_map(|b| b.mvp.0)
+            .chain(f.vertices.iter().flat_map(|v| v.pos))
+        {
+            h ^= u64::from(x.to_bits());
+            h = h.wrapping_mul(0x100_0000_01b3);
+        }
+        h
+    }
+
     /// Looking once is not enough: these all turn over, so two frames a moment
     /// apart must not be identical.
+    ///
+    /// What moves is usually the matrices, but it need not be: `stonerview`
+    /// draws all forty of its squares under one matrix and animates the corners
+    /// instead, so the vertices count too.
     #[test]
     fn every_saver_keeps_moving() {
         for saver in ALL {
             let mut r = (saver.start)(StartArgs::new(640, 480, "", 20260811));
             r.step();
-            let before: Vec<[f32; 16]> = r.frame().batches.iter().map(|b| b.mvp.0).collect();
+            let before = frame_fingerprint(&r);
             for _ in 0..60 {
                 r.step();
             }
-            let after: Vec<[f32; 16]> = r.frame().batches.iter().map(|b| b.mvp.0).collect();
-            assert_ne!(before, after, "{} froze", saver.def.slug);
+            assert_ne!(before, frame_fingerprint(&r), "{} froze", saver.def.slug);
         }
     }
 
