@@ -51,6 +51,7 @@ pub mod geodesic;
 pub mod gflux;
 pub mod gibson;
 pub mod glblur;
+pub mod glhanoi;
 pub mod glknots;
 pub mod glmatrix;
 pub mod glschool;
@@ -146,6 +147,7 @@ pub static ALL: &[&Saver3d] = &[
     &gibson::SAVER,
     &glblur::SAVER,
     &glknots::SAVER,
+    &glhanoi::SAVER,
     &glschool::SAVER,
     &headroom::SAVER,
     &handsy::SAVER,

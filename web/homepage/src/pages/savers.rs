@@ -1522,6 +1522,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::glblur::start
 );
 gl3d_saver!(
+    "glhanoi",
+    glhanoi_body,
+    glhanoi_start,
+    xscreensaver::hacks3d::glhanoi::start
+);
+gl3d_saver!(
     "glknots",
     glknots_body,
     glknots_start,
@@ -2551,6 +2557,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "glblur",
         label: "GL Blur",
         start: Start::Gl3d(glblur_start),
+    },
+    Entry {
+        slug: "glhanoi",
+        label: "GL Hanoi",
+        start: Start::Gl3d(glhanoi_start),
     },
     Entry {
         slug: "glknots",
