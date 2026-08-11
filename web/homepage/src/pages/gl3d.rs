@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 use web_sys::{
     HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlContextAttributes,
-    WebGlProgram, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
+    WebGlFramebuffer, WebGlProgram, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
@@ -229,12 +229,16 @@ pub struct Gl3dEngine {
     /// Textures the saver has built, uploaded once and kept. A saver makes
     /// them when it starts and refers to them by name from then on.
     textures: HashMap<u32, (WebGlTexture, u32)>,
+    /// Somewhere to point a texture at when a saver asks for a screenshot of
+    /// its own frame. Made on the first one; most savers never ask.
+    copy_fbo: Option<WebGlFramebuffer>,
 }
 
 impl Gl3dEngine {
     pub fn new(canvas: &HtmlCanvasElement, runner: Runner3d) -> Option<Self> {
         // Depth is on: these are 3D. Antialiasing is left at the browser's
-        // default, unlike the Shadertoy engine, because nothing here blits.
+        // default, unlike the Shadertoy engine, and the saver that wants a
+        // screenshot of its own frame resolves the multisampling with a blit.
         let options = WebGlContextAttributes::new();
         options.set_depth(true);
         options.set_alpha(false);
@@ -288,6 +292,7 @@ impl Gl3dEngine {
             capacity: 0,
             scratch: Vec::new(),
             textures: HashMap::new(),
+            copy_fbo: None,
         })
     }
 
@@ -318,6 +323,7 @@ impl Gl3dEngine {
             runner,
             scratch,
             textures,
+            copy_fbo,
             ..
         } = self;
         let frame: &Frame = runner.frame();
@@ -360,8 +366,12 @@ impl Gl3dEngine {
         // that the saver has redrawn. Most build theirs once at startup and
         // never touch it again; `cubenetic` rebuilds its every frame, which is
         // what the generation counter is for.
-        for batch in &frame.batches {
-            let Some(id) = batch.texture else { continue };
+        for id in frame
+            .batches
+            .iter()
+            .flat_map(|b| [b.texture, b.copy_to_texture])
+            .flatten()
+        {
             let Some(t) = runner.texture(id) else {
                 continue;
             };
@@ -385,7 +395,14 @@ impl Gl3dEngine {
                 0,
                 Gl::RGBA,
                 Gl::UNSIGNED_BYTE,
-                Some(&t.data),
+                // No bytes means reserve the size and leave it black, which is
+                // what a texture that is only ever copied into asks for. WebGL
+                // guarantees the zero fill, so there is nothing to send.
+                if t.data.is_empty() {
+                    None
+                } else {
+                    Some(&t.data)
+                },
             );
             if ok.is_err() {
                 log::error!("gl3d: texture {id} would not upload");
@@ -510,11 +527,49 @@ impl Gl3dEngine {
             // Line width above 1 is not portable in WebGL and is quietly
             // ignored by every browser that matters, so it is not set here
             // either; the savers that ask for a thick line get a thin one.
-            gl.draw_arrays(
-                mode(batch.primitive),
-                batch.first as i32,
-                batch.count as i32,
-            );
+            if batch.count > 0 {
+                gl.draw_arrays(
+                    mode(batch.primitive),
+                    batch.first as i32,
+                    batch.count as i32,
+                );
+            }
+            // And now, if this batch was the saver asking for a screenshot,
+            // take one. What is read is the drawing buffer as it stands, which
+            // is everything above this line; the browser does not throw that
+            // away until the frame is composited.
+            //
+            // By blit rather than glCopyTexSubImage2D, which is what the C
+            // calls: the canvas is antialiased, so the default framebuffer is
+            // multisampled, and a copy out of a multisampled buffer is an
+            // error. A blit to a single-sampled one is exactly the resolve
+            // that rule exists to force, and same-size with NEAREST is the
+            // form of it that a multisampled source allows.
+            if let Some(id) = batch.copy_to_texture
+                && let (Some((handle, _)), Some(t)) = (textures.get(&id), runner.texture(id))
+            {
+                let fbo = match copy_fbo {
+                    Some(f) => Some(&*f),
+                    None => {
+                        *copy_fbo = gl.create_framebuffer();
+                        copy_fbo.as_ref()
+                    }
+                };
+                let (w, h) = (
+                    frame.viewport[2].min(t.width),
+                    frame.viewport[3].min(t.height),
+                );
+                gl.bind_framebuffer(Gl::DRAW_FRAMEBUFFER, fbo);
+                gl.framebuffer_texture_2d(
+                    Gl::DRAW_FRAMEBUFFER,
+                    Gl::COLOR_ATTACHMENT0,
+                    Gl::TEXTURE_2D,
+                    Some(handle),
+                    0,
+                );
+                gl.blit_framebuffer(0, 0, w, h, 0, 0, w, h, Gl::COLOR_BUFFER_BIT, Gl::NEAREST);
+                gl.bind_framebuffer(Gl::DRAW_FRAMEBUFFER, None);
+            }
         }
         gl.bind_vertex_array(None);
         gl.use_program(None);

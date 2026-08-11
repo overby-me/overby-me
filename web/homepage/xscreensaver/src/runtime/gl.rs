@@ -223,7 +223,10 @@ pub struct Vertex {
 pub struct Texture {
     pub width: i32,
     pub height: i32,
-    /// `width * height * 4` bytes.
+    /// `width * height * 4` bytes, or empty for a texture that was allocated
+    /// but not filled: the size is reserved and the contents are black. That
+    /// is what a texture only ever copied into from the screen wants, and it
+    /// saves carrying a megabyte of zeroes across to the host.
     pub data: Vec<u8>,
     /// `GL_CLAMP_TO_EDGE` rather than `GL_REPEAT`, for a texture that is one
     /// picture rather than a tile.
@@ -392,6 +395,10 @@ pub struct Batch {
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
     pub texture: Option<u32>,
     pub tex_env: TexEnv,
+    /// `glCopyTexSubImage2D`: once this batch has been drawn, copy the screen
+    /// into this texture. A batch carrying one usually has no vertices of its
+    /// own and exists only to say where in the frame the copy happens.
+    pub copy_to_texture: Option<u32>,
 }
 
 impl Batch {
@@ -416,6 +423,10 @@ impl Batch {
             && self.texture == other.texture
             && self.tex_env == other.tex_env
             && self.scene_ambient == other.scene_ambient
+            // A copy has to happen where it was asked for, so a batch carrying
+            // one never merges with its neighbours.
+            && self.copy_to_texture.is_none()
+            && other.copy_to_texture.is_none()
     }
 }
 
@@ -899,6 +910,28 @@ impl Glx {
         t.generation += 1;
     }
 
+    /// `glCopyTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h)`: copy the
+    /// screen, as far as it has been drawn, into the bound texture.
+    ///
+    /// This is how a saver keeps the previous frame. In the olden days one
+    /// could draw into the front buffer and find one's pixels still there next
+    /// time round; nothing guarantees that now, so a saver that piles frame on
+    /// frame saves the result and draws it back at the top of the next one.
+    /// `noof` accumulates its flowers this way.
+    ///
+    /// Recorded as a batch of its own, so the copy happens where it was asked
+    /// for rather than at the end of the frame.
+    pub fn copy_tex_sub_image_2d(&mut self) {
+        let Some(id) = self.bound_texture else {
+            return;
+        };
+        self.flush();
+        let first = self.frame.vertices.len();
+        let mut b = self.batch_state(Primitive::Points, first, 0);
+        b.copy_to_texture = Some(id);
+        self.frame.batches.push(b);
+    }
+
     /// `glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S/T, ..)`: clamp at
     /// the edges rather than repeat.
     pub fn tex_clamp(&mut self, clamp: bool) {
@@ -1019,33 +1052,7 @@ impl Glx {
         if count == 0 {
             return;
         }
-        let mvp = self.projection().mul(&self.modelview());
-        let batch = Batch {
-            primitive,
-            first,
-            count,
-            mvp,
-            point_size: self.point_size,
-            depth_test: self.depth_test,
-            modelview: self.modelview(),
-            lighting: self.lighting,
-            lights: self.lights,
-            light_enabled: self.light_enabled,
-            material: self.material,
-            cull_face: self.cull_face,
-            front_face_cw: self.front_face_cw,
-            clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
-            blend: self.blend,
-            line_width: self.line_width,
-            scene_ambient: self.scene_ambient,
-            fog: self.fog,
-            texture: if self.texturing {
-                self.bound_texture
-            } else {
-                None
-            },
-            tex_env: self.tex_env,
-        };
+        let batch = self.batch_state(primitive, first, count);
 
         // Run of blocks with nothing between them but more vertices: fold them
         // into one. A saver drawing a cube as forty-eight separate quads is
@@ -1069,6 +1076,39 @@ impl Glx {
             return;
         }
         self.frame.batches.push(batch);
+    }
+
+    /// Everything a batch opening now would carry, bar its vertices. Taken
+    /// rather than read, in the case of a pending depth clear: whichever batch
+    /// is built first is the one that does the clearing.
+    fn batch_state(&mut self, primitive: Primitive, first: usize, count: usize) -> Batch {
+        Batch {
+            primitive,
+            first,
+            count,
+            mvp: self.projection().mul(&self.modelview()),
+            point_size: self.point_size,
+            depth_test: self.depth_test,
+            modelview: self.modelview(),
+            lighting: self.lighting,
+            lights: self.lights,
+            light_enabled: self.light_enabled,
+            material: self.material,
+            cull_face: self.cull_face,
+            front_face_cw: self.front_face_cw,
+            clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
+            blend: self.blend,
+            line_width: self.line_width,
+            scene_ambient: self.scene_ambient,
+            fog: self.fog,
+            texture: if self.texturing {
+                self.bound_texture
+            } else {
+                None
+            },
+            tex_env: self.tex_env,
+            copy_to_texture: None,
+        }
     }
 
     fn projection(&self) -> Mat4 {
@@ -1208,6 +1248,55 @@ impl Glx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A screenshot has to happen where the saver asked for it, so it lands as
+    /// a batch of its own between what it is meant to catch and what comes
+    /// after, and neighbouring blocks never fold over it.
+    #[test]
+    fn a_screenshot_holds_its_place_in_the_frame() {
+        let mut g = Glx::new();
+        g.start_frame(100, 100);
+        let tex = g.gen_texture();
+        g.bind_texture(tex);
+        g.tex_image_2d(128, 128, Vec::new());
+
+        let dot = |g: &mut Glx| {
+            g.begin(Shape::Points);
+            g.vertex3f(0.0, 0.0, 0.0);
+            g.end();
+        };
+        dot(&mut g);
+        g.copy_tex_sub_image_2d();
+        dot(&mut g);
+
+        let b = &g.frame().batches;
+        assert_eq!(b.len(), 3, "the two dots merged across the screenshot");
+        assert_eq!(b[0].copy_to_texture, None);
+        assert_eq!(b[1].copy_to_texture, Some(tex));
+        assert_eq!(b[1].count, 0, "a screenshot draws nothing itself");
+        assert_eq!(b[2].copy_to_texture, None);
+
+        // Without one in the way the same two dots are one batch, which is
+        // what the assertion above is worth checking against.
+        g.start_frame(100, 100);
+        dot(&mut g);
+        dot(&mut g);
+        assert_eq!(g.frame().batches.len(), 1);
+    }
+
+    /// A texture with no bytes is a size and nothing else, for one that is only
+    /// ever copied into.
+    #[test]
+    fn a_texture_can_be_reserved_without_an_image() {
+        let mut g = Glx::new();
+        let tex = g.gen_texture();
+        assert!(g.texture(tex).is_none(), "no size yet, so no texture yet");
+        g.bind_texture(tex);
+        g.tex_image_2d(64, 32, Vec::new());
+        let t = g.texture(tex).expect("a reserved texture is a texture");
+        assert_eq!((t.width, t.height), (64, 32));
+        assert!(t.data.is_empty());
+    }
 
     /// The clear colour is state, and state outlives the frame it was set in.
     /// A saver sets it once when it starts and clears with it for ever after;

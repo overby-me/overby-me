@@ -1024,6 +1024,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::sierpinski3d::start
 );
 gl3d_saver!(
+    "noof",
+    noof_body,
+    noof_start,
+    xscreensaver::hacks3d::noof::start
+);
+gl3d_saver!(
     "menger",
     menger_body,
     menger_start,
@@ -2159,6 +2165,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "menger",
         label: "Menger",
         start: Start::Gl3d(menger_start),
+    },
+    Entry {
+        slug: "noof",
+        label: "Noof",
+        start: Start::Gl3d(noof_start),
     },
     Entry {
         slug: "quasicrystal",
