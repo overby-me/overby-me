@@ -1216,6 +1216,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::morph3d::start
 );
 gl3d_saver!(
+    "hydrostat",
+    hydrostat_body,
+    hydrostat_start,
+    xscreensaver::hacks3d::hydrostat::start
+);
+gl3d_saver!(
     "superquadrics",
     superquadrics_body,
     superquadrics_start,
@@ -2384,6 +2390,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "surfaces",
         label: "Surfaces",
         start: Start::Gl3d(surfaces_start),
+    },
+    Entry {
+        slug: "hydrostat",
+        label: "Hydrostat",
+        start: Start::Gl3d(hydrostat_start),
     },
     Entry {
         slug: "morph3d",

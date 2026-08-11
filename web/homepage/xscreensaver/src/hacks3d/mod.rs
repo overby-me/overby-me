@@ -42,6 +42,7 @@ pub mod glschool;
 pub mod gravitywell;
 pub mod hexstrut;
 pub mod hextrail;
+pub mod hydrostat;
 pub mod hypnowheel;
 pub mod kaleidocycle;
 pub mod lockward;
@@ -93,6 +94,7 @@ pub static ALL: &[&Saver3d] = &[
     &hexstrut::SAVER,
     &gravitywell::SAVER,
     &hextrail::SAVER,
+    &hydrostat::SAVER,
     &kaleidocycle::SAVER,
     &lockward::SAVER,
     &menger::SAVER,

@@ -30,6 +30,10 @@ exclude = [
   "https://api.tokenfactory.nebius.com/",
   "https://console.mistral.ai/",
   "https://startpage.com/",
+  # Dead links inside vendored upstream XScreenSaver copyright headers, which
+  # are kept verbatim: the pages moved or went away years after the code cited
+  # them.
+  'soulwire\.co\.uk',
   "https://x.com/",
   # Placeholder URLs in rust/curl comments and test fixtures: the literal
   # hosts "host"/"proxy.example", the literal port ":port", and ellipsis
