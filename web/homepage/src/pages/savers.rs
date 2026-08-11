@@ -1150,6 +1150,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::quasicrystal::start
 );
 gl3d_saver!(
+    "klein",
+    klein_body,
+    klein_start,
+    xscreensaver::hacks3d::klein::start
+);
+gl3d_saver!(
     "lockward",
     lockward_body,
     lockward_start,
@@ -2381,6 +2387,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "kaleidocycle",
         label: "Kaleidocycle",
         start: Start::Gl3d(kaleidocycle_start),
+    },
+    Entry {
+        slug: "klein",
+        label: "Klein",
+        start: Start::Gl3d(klein_start),
     },
     Entry {
         slug: "lockward",
