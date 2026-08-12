@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (129) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (131) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -748,6 +748,26 @@ make two triangles of no area, which raster to nothing, and every strip is an
 even number of vertices long so the winding of what follows a join is
 unchanged. Two thousand draw calls became thirty-two, for four thousand more
 vertices out of half a million.
+
+`covid19` is the deferral that was exactly backwards, and it is worth writing
+down why, because the reasoning that deferred it looks sound. A hundred virions
+of a hundred spikes each is a great deal of geometry, so it was put aside on
+volume. But upstream builds every model *twice*, coarse and fine, and switches
+to the coarse ones as soon as there are more than forty on screen. So its
+default of sixty is its cheap configuration and a dozen large ones is its
+expensive one: measured, a coarse model is 4762 vertices and a fine one 152366,
+so sixty coarse ones come to 286k a frame where forty fine ones would have come
+to 6.1 million. The lesson is to find the setting the saver actually runs at
+before counting its vertices at the setting you imagined.
+
+What did have to be solved is that a virion is 239 separate triangle strips
+coarse and 936 fine, so sixty of them drawn the way upstream draws them would be
+fourteen thousand draw calls. Each of the twenty models is baked once into a
+single joined strip, and a virion is then one call.
+
+`co____9` is the same saver under a name that does not date it, which is what
+upstream ships to the App Store. It has a configuration file of its own, so it
+has a slug of its own here too, pointing at the same code.
 
 `cubocteversion` is the same eversion done in straight lines, and the contrast
 with `sphereeversion` is the point of having both. There is no formula and no

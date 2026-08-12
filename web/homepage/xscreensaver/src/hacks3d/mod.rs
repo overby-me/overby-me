@@ -36,6 +36,7 @@ pub mod chompytower;
 pub mod circuit;
 pub mod cityflow;
 pub mod companioncube;
+pub mod covid19;
 pub mod crackberg;
 pub mod crumbler;
 pub mod cube21;
@@ -182,6 +183,8 @@ pub static ALL: &[&Saver3d] = &[
     &cage::SAVER,
     &cityflow::SAVER,
     &circuit::SAVER,
+    &covid19::SAVER,
+    &covid19::renamed::SAVER,
     &crumbler::SAVER,
     &cube21::SAVER,
     &crackberg::SAVER,

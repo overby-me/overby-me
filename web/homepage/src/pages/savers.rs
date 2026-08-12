@@ -1276,6 +1276,18 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "covid19",
+    covid19_body,
+    covid19_start,
+    xscreensaver::hacks3d::covid19::start
+);
+gl3d_saver!(
+    "co____9",
+    co_9_body,
+    co_9_start,
+    xscreensaver::hacks3d::covid19::renamed::start
+);
+gl3d_saver!(
     "crumbler",
     crumbler_body,
     crumbler_start,
@@ -2788,6 +2800,16 @@ pub static SAVERS: &[Entry] = &[
         slug: "crackberg",
         label: "Crackberg",
         start: Start::Gl3d(crackberg_start),
+    },
+    Entry {
+        slug: "co____9",
+        label: "Co____9",
+        start: Start::Gl3d(co_9_start),
+    },
+    Entry {
+        slug: "covid19",
+        label: "COVID19",
+        start: Start::Gl3d(covid19_start),
     },
     Entry {
         slug: "crumbler",
