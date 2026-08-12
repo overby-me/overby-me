@@ -41,10 +41,15 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let can_vote_res = crate::use_data_resource!(|(cv_ctx, cv_token, cv_user)| async move {
         match cv_user {
             Some(uid) => graphql::is_active_member(cv_token.as_deref(), &cv_ctx, &uid).await,
-            None => false,
+            None => Some(false),
         }
     });
-    let can_vote = (*can_vote_res.read()).unwrap_or(false);
+    // Two layers of "don't know" collapse to one: the resource has not answered
+    // yet, or it answered that it could not tell. Either way say nothing. The
+    // old `unwrap_or(false)` read both as "no voting rights", so the banner
+    // announced that on every load before the answer arrived, and kept saying it
+    // if the query failed.
+    let can_vote: Option<bool> = (*can_vote_res.read()).flatten();
 
     // Live-update when a poll opens/closes: subscribe to the context `active`
     // relation so a freshly-opened ballot appears without a reload.
@@ -104,7 +109,9 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
                 // First render: remember the current poll without notifying.
                 None => seen_poll.set(Some(apid)),
                 Some(prev) => {
-                    if can_vote && apid.is_some() && apid != prev {
+                    // Only on a known yes: an unknown right is not a reason to
+                    // tell someone a vote has opened for them.
+                    if can_vote == Some(true) && apid.is_some() && apid != prev {
                         crate::pwa::notify(&t("vote.pollOpenTitle"), &t("vote.pollOpenBody"));
                     }
                     seen_poll.set(Some(apid));
@@ -131,13 +138,15 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
         // Voting-rights indicator (React VoteApp's canVote status) — a tonal status
         // banner rather than a plain card (DESIGN).
         if is_auth {
-            div {
-                class: if can_vote { "status-banner" } else { "status-banner is-negative" },
-                span { class: "material-icons",
-                    if can_vote { "how_to_reg" } else { "do_not_disturb" }
-                }
-                span { class: "body-medium",
-                    if can_vote { "{t(\"vote.hasVotingRight\")}" } else { "{t(\"vote.noVotingRight\")}" }
+            if let Some(may) = can_vote {
+                div {
+                    class: if may { "status-banner" } else { "status-banner is-negative" },
+                    span { class: "material-icons",
+                        if may { "how_to_reg" } else { "do_not_disturb" }
+                    }
+                    span { class: "body-medium",
+                        if may { "{t(\"vote.hasVotingRight\")}" } else { "{t(\"vote.noVotingRight\")}" }
+                    }
                 }
             }
         }

@@ -166,6 +166,32 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // Whether this reader is an active member of the poll's context, to warn
+    // BEFORE they fill in a ballot the server will refuse. VoteApp has shown this
+    // for a while; a poll opened from its own page (which is where a link to a
+    // ballot lands) showed nothing, so the first news of having no vote was the
+    // refusal after casting one.
+    //
+    // A warning, not a gate. Membership is one of four things the insert rule
+    // wants (see graphql::is_active_member), so a ballot can still be refused
+    // with this saying yes, and the check is narrower than the rule even on its
+    // own arm. Hiding the ballot on it would take the vote away from people the
+    // server would have accepted, and the honest answer for the rest is the one
+    // the server gives.
+    let rights_ctx = context_id.clone();
+    let rights_token = session.read().access_token.clone();
+    let rights_user = session.read().user.as_ref().map(|u| u.id.clone());
+    let may_vote_res =
+        crate::use_data_resource!(|(rights_ctx, rights_token, rights_user)| async move {
+            match (rights_ctx, rights_user) {
+                (Some(ctx), Some(uid)) => {
+                    graphql::is_active_member(rights_token.as_deref(), &ctx, &uid).await
+                }
+                _ => None,
+            }
+        });
+    let may_vote: Option<bool> = (*may_vote_res.read()).flatten();
+
     let options_len = options.len();
     let mut selected = use_signal(|| vec![false; options_len]);
     let mut error = use_signal(String::new);
@@ -596,6 +622,16 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             }
 
             div { class: "card-content",
+                // Only the negative, and only when it is known and would matter:
+                // someone about to fill in a ballot. A positive banner on every
+                // poll is noise, and saying nothing while the answer is still
+                // unknown beats guessing at it.
+                if is_auth && open && !voted && !projector && may_vote == Some(false) {
+                    div { class: "status-banner is-negative",
+                        span { class: "material-icons", "do_not_disturb" }
+                        span { class: "body-medium", "{t(\"vote.noVotingRight\")}" }
+                    }
+                }
                 if options.is_empty() {
                     p {
                         class: "body-medium",

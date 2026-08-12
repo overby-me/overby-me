@@ -541,10 +541,27 @@ pub struct MemberIdRef {
     pub id: Uuid,
 }
 
-/// Whether the user is an active member of a context — the port's approximation
-/// of React VoteApp's `canVote` (an active membership carrying the vote/vote
-/// insert permission), used for the voting-rights card.
-pub async fn is_active_member(access_token: Option<&str>, context_id: &str, user_id: &str) -> bool {
+/// Whether the user is an active member of a context, for the voting-rights
+/// banner.
+///
+/// `None` means "could not tell", and is NOT "no". It used to answer `false` on
+/// a failed query, which is a confident "you have no voting rights" shown to a
+/// member whose network hiccuped. Callers must treat `None` as unknown and say
+/// nothing.
+///
+/// Advisory, never a gate. It answers one of the four things
+/// `insert_with_email_invites` (migrations/0015) asks before it accepts a
+/// ballot: there must also be a `vote/vote` permission in the context, the poll
+/// must be open, and its parent must be attachable. And it is narrower than
+/// even that one arm, because the rule matches a member row by `nodeId` OR by
+/// `email` and this matches only `nodeId`, so someone invited by an address they
+/// have not yet linked reads as a stranger here and is not. The server decides;
+/// this only warns.
+pub async fn is_active_member(
+    access_token: Option<&str>,
+    context_id: &str,
+    user_id: &str,
+) -> Option<bool> {
     use cynic::QueryBuilder;
     let where_clause = MembersBoolExp {
         parent_id: Some(UuidComparisonExp {
@@ -563,8 +580,8 @@ pub async fn is_active_member(access_token: Option<&str>, context_id: &str, user
     let op = MembersExistQuery::build(MembersExistVariables { where_clause });
     execute(access_token, op)
         .await
+        .ok()
         .map(|r| !r.members.is_empty())
-        .unwrap_or(false)
 }
 
 /// Invite a known user by node id (binds `nodeId` + `name`), as opposed to the
