@@ -10,10 +10,9 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (133) |
+| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (134) |
 
-`webcollage` and `vidwhacker` are not portable: they scrape images off the live
-web. `co____9` is `covid19` under a name that does not date it, generated from
+`co____9` is `covid19` under a name that does not date it, generated from
 the same source at build time, so it is counted once. `mismunch` was retired
 upstream in version 5.08 and merged into `munch`, which since then draws either
 kind depending on a resource; the name still has a configuration file of its
@@ -733,6 +732,33 @@ in a single call: 97 batches at any setting, from 151009. What still had to
 give was the length of the exposure, not the number of stars; a sparser sky
 with longer trails was tried first and looked like a different picture, since
 how dense the sky is is most of what it looks like.
+
+`sonar` was on the not-portable list for years of this document's life and
+should not have been, which is worth writing down as a way of being wrong. It
+pings the hosts on your network and plots them by response time, and a browser
+cannot open a raw socket, so it went in the same bin as `webcollage`. But the
+ping sensor is one of two: upstream also has a 112-line simulation that makes
+two teams of blips up, and that is what runs on any machine where the binary is
+not setuid. The saver is 1,265 lines of scope and 112 lines of sensor, and only
+the sensor was ever blocked.
+
+Choosing a ping option here therefore does what choosing it upstream on an
+unprivileged machine does: the reason is shown for six seconds and the
+simulation runs instead. That is not a stub standing in for the real thing, it
+is the real thing's own failure path, which is why the message is worded like
+the ones in `sonar-icmp.c`.
+
+Its sweep is the one place the frame budget got involved. The trailing wedge is
+a quad strip whose alpha falls off along its length, and upstream sets that with
+`glMaterialfv` between columns; material is batch state here, so that is a draw
+call per column, forty rings by forty-four columns, 1,760 of them for the sweep
+alone. Turning on `GL_COLOR_MATERIAL` makes it per-vertex data instead and the
+sweep is one call. It is the same property being set either way, since
+colour-material tracks `GL_AMBIENT_AND_DIFFUSE` by default.
+
+Its two team-name knobs are the one thing not in the panel: they are `<string>`
+in the XML and the panel has no text field, so they are read from the query
+string and nothing else. There are six string options in all 314 savers.
 
 `unicrud` is the one that is genuinely blocked, and on two things at once. It
 picks a codepoint at random from 0 to 0x2F800 and draws it four inches high, so
