@@ -1510,6 +1510,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::splodesic::start
 );
 gl3d_saver!(
+    "jigglypuff",
+    jigglypuff_body,
+    jigglypuff_start,
+    xscreensaver::hacks3d::jigglypuff::start
+);
+gl3d_saver!(
     "kaleidocycle",
     kaleidocycle_body,
     kaleidocycle_start,
@@ -2711,6 +2717,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hypnowheel",
         label: "Hypnowheel",
         start: Start::Gl3d(hypnowheel_start),
+    },
+    Entry {
+        slug: "jigglypuff",
+        label: "Jiggly Puff",
+        start: Start::Gl3d(jigglypuff_start),
     },
     Entry {
         slug: "kaleidocycle",
