@@ -135,7 +135,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                         // Toggle a word-level diff against the motion.
                                         if can_diff {
                                             button {
-                                                class: "btn-text btn-sm amendment-diff-toggle",
+                                                class: "btn btn-text btn-sm amendment-diff-toggle",
                                                 onclick: {
                                                     let this_id = this_id.clone();
                                                     move |_| {

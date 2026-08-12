@@ -503,10 +503,25 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                         cast_pending.set(None);
                         error.set(t("vote.hasVoted"))
                     }
-                    _ => {
+                    Err(e) => {
                         // Genuine failure: roll the ballot back so they can retry.
                         cast_pending.set(None);
-                        error.set(t("error.somethingWentWrong"))
+                        // Say which failure. The backend refuses a ballot for
+                        // reasons the voter can act on ("not a member of this
+                        // context" means ask the chair for a seat), and answering
+                        // all of them with "something went wrong" turns a fixable
+                        // situation into a mystery.
+                        error.set(match e.as_str() {
+                            "not a member of this context" => t("vote.noVotingRight"),
+                            "poll closed" => t("vote.closed"),
+                            _ => t("error.somethingWentWrong"),
+                        });
+                        // And report it. The remote log ships from `log::` calls
+                        // (snackbar.rs is where most of them come from); this arm
+                        // wrote to an inline error signal instead and so reached
+                        // Better Stack from nowhere. A refused ballot is exactly
+                        // the event worth seeing from the outside.
+                        log::error!("cast ballot failed on poll {poll}: {e}");
                     }
                 }
             });
@@ -735,8 +750,14 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                     // which is a clean display, and only when there are results to save).
                     if show_results && !projector {
                         div { class: "results-actions mt-1",
+                            // `btn` carries the layout (inline-flex, centring, the
+                            // icon/label gap, the 40px pill); `btn-text` only
+                            // colours it. Without the base these were bare native
+                            // buttons: icon on the text baseline, no gap, no pill,
+                            // no label typography. The leading space in the label
+                            // was standing in for the gap, so it goes too.
                             button {
-                                class: "btn-text",
+                                class: "btn btn-text",
                                 onclick: {
                                     let csv = results_csv.clone();
                                     let file = results_filename.clone();
@@ -749,13 +770,13 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                     }
                                 },
                                 span { class: "material-icons", "download" }
-                                " {t(\"vote.exportCsv\")}"
+                                "{t(\"vote.exportCsv\")}"
                             }
                             button {
-                                class: "btn-text",
+                                class: "btn btn-text",
                                 onclick: move |_| crate::export::print_page(),
                                 span { class: "material-icons", "print" }
-                                " {t(\"vote.print\")}"
+                                "{t(\"vote.print\")}"
                             }
                         }
                     }
