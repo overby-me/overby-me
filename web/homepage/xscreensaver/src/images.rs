@@ -175,6 +175,11 @@ pub const CHROMESPHERE: &[u8] = include_bytes!("../images/chromesphere.png");
 /// `jigglymap.png`: the sky `jigglypuff` reflects in its chrome, which is not
 /// there.
 pub const JIGGLYMAP: &[u8] = include_bytes!("../images/jigglymap.png");
+
+/// The two photographs `peepers` wraps its eyeballs in: the white of the eye
+/// with its veins, and the iris.
+pub const SCLERA: &[u8] = include_bytes!("../images/sclera.png");
+pub const IRIS: &[u8] = include_bytes!("../images/iris.png");
 /// The glyph sheet `glmatrix` rains down: sixteen by thirteen characters.
 pub const MATRIX3: &[u8] = include_bytes!("../images/matrix3.png");
 /// The skin of the thing in `skytentacles`.

@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (94) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (95) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -256,6 +256,16 @@ source, so it costs nothing to compile, and it lands in one lazily-loaded
 chunk that is only fetched by someone who opens that saver. What is worth
 checking first is the *vertex* count, which is what gets drawn every frame: the
 cow's hide is thirteen thousand and three cows are still cheap.
+
+One thing to check on any saver that wraps a photograph round something:
+**textures here are top-down and OpenGL's are bottom-up**. A texture
+coordinate of zero is the *first* row of the decoded image, where in GL it is
+the last, so `v` has to be turned over: `v = 1 - v_gl`. It does not show on a
+texture that is symmetric or abstract, which is most of them, and it shows
+loudly on one that is not. `peepers` wraps a photograph of an eyeball along a
+lathe, white at the front and red at the back; with `v` the wrong way round
+every eye comes out bloodshot with a pale pupil, which is wrong but not
+obviously a bug.
 
 Not every shape is drawn, though. `runtime::marching` is upstream's
 `marching.c`: give it a function that says how solid any point in space is and

@@ -1102,6 +1102,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::flipscreen3d::start
 );
 gl3d_saver!(
+    "peepers",
+    peepers_body,
+    peepers_start,
+    xscreensaver::hacks3d::peepers::start
+);
+gl3d_saver!(
     "photopile",
     photopile_body,
     photopile_start,
@@ -2692,6 +2698,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "flipscreen3d",
         label: "Flip Screen 3D",
         start: Start::Gl3d(flipscreen3d_start),
+    },
+    Entry {
+        slug: "peepers",
+        label: "Peepers",
+        start: Start::Gl3d(peepers_start),
     },
     Entry {
         slug: "photopile",
