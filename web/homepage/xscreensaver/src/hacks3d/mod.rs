@@ -88,6 +88,7 @@ pub mod klein;
 pub mod lavalite;
 pub mod lockward;
 pub mod menger;
+pub mod mirrorblob;
 pub mod moebius;
 pub mod moebiusgears;
 pub mod molecule;
@@ -184,6 +185,7 @@ pub static ALL: &[&Saver3d] = &[
     &gflux::SAVER,
     &hilbert::SAVER,
     &jigsaw::SAVER,
+    &mirrorblob::SAVER,
     &nakagin::SAVER,
     &photopile::SAVER,
     &peepers::SAVER,

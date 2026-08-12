@@ -1156,6 +1156,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::moebiusgears::start
 );
 gl3d_saver!(
+    "mirrorblob",
+    mirrorblob_body,
+    mirrorblob_start,
+    xscreensaver::hacks3d::mirrorblob::start
+);
+gl3d_saver!(
     "nakagin",
     nakagin_body,
     nakagin_start,
@@ -2837,6 +2843,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "moebiusgears",
         label: "Moebius Gears",
         start: Start::Gl3d(moebiusgears_start),
+    },
+    Entry {
+        slug: "mirrorblob",
+        label: "Mirror Blob",
+        start: Start::Gl3d(mirrorblob_start),
     },
     Entry {
         slug: "nakagin",
