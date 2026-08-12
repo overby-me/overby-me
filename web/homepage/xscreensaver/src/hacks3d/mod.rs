@@ -80,6 +80,7 @@ pub mod hydrostat;
 pub mod hypertorus;
 pub mod hypnowheel;
 pub mod jigglypuff;
+pub mod jigsaw;
 pub mod kaleidocycle;
 pub mod kallisti;
 pub mod klein;
@@ -180,6 +181,7 @@ pub static ALL: &[&Saver3d] = &[
     &flipscreen3d::SAVER,
     &gflux::SAVER,
     &hilbert::SAVER,
+    &jigsaw::SAVER,
     &nakagin::SAVER,
     &photopile::SAVER,
     &peepers::SAVER,

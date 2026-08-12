@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (102) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (103) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -499,6 +499,13 @@ so the sky behind a tree would come out as a rectangle of nothing. Discarding
 writes neither colour nor depth. Fog also runs in two modes: `GL_EXP2`, where
 what survives at a distance is `exp(-(density * distance)^2)`, and `GL_LINEAR`,
 which ramps between two distances.
+
+There is no polygon tessellator, so a saver that fills a concave outline has to
+triangulate it itself. That is less of a gap than it sounds, because upstream's
+own OpenGL ES build has no GLU either and every saver that wants one already
+carries a fallback: `jigsaw` cuts each puzzle piece into eighths and fans each
+one out by hand, and the port takes that path rather than growing a
+tessellator.
 
 One thing is recorded and then thrown away: line width. WebGL draws every line
 one pixel wide whatever it is asked for, on every implementation that matters,

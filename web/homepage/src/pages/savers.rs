@@ -1522,6 +1522,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::hilbert::start
 );
 gl3d_saver!(
+    "jigsaw",
+    jigsaw_body,
+    jigsaw_start,
+    xscreensaver::hacks3d::jigsaw::start
+);
+gl3d_saver!(
     "superquadrics",
     superquadrics_body,
     superquadrics_start,
@@ -2970,6 +2976,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "hilbert",
         label: "Hilbert",
         start: Start::Gl3d(hilbert_start),
+    },
+    Entry {
+        slug: "jigsaw",
+        label: "Jigsaw",
+        start: Start::Gl3d(jigsaw_start),
     },
     Entry {
         slug: "hydrostat",
