@@ -352,6 +352,11 @@ pub struct Material {
     pub back_ambient: [f32; 4],
     pub specular: [f32; 4],
     pub shininess: f32,
+    /// `GL_EMISSION`: light the surface gives off itself, added on top of
+    /// whatever falls on it. A saver reaches for it when something is meant to
+    /// glow rather than be lit: `boxed`'s balls carry half their own colour
+    /// this way, so they read as coloured even in the shadow of the box.
+    pub emission: [f32; 4],
 }
 
 impl Default for Material {
@@ -364,6 +369,7 @@ impl Default for Material {
             back_ambient: [0.2, 0.2, 0.2, 1.0],
             specular: [0.0, 0.0, 0.0, 1.0],
             shininess: 0.0,
+            emission: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }
@@ -964,6 +970,12 @@ impl Glx {
     pub fn material_shininess(&mut self, shininess: f32) {
         self.split_block();
         self.material.shininess = shininess;
+    }
+
+    /// `glMaterialfv (GL_FRONT_AND_BACK, GL_EMISSION, ..)`.
+    pub fn material_emission(&mut self, rgba: [f32; 4]) {
+        self.split_block();
+        self.material.emission = rgba;
     }
 
     /// Close the run of vertices so far into a batch and carry on with the

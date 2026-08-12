@@ -87,6 +87,7 @@ uniform vec4 u_material_diffuse_back;
 uniform vec4 u_material_ambient;
 uniform vec4 u_material_ambient_back;
 uniform vec4 u_material_specular;
+uniform vec4 u_material_emission;
 uniform float u_shininess;
 uniform vec4 u_scene_ambient;
 uniform bool u_color_material;
@@ -156,7 +157,9 @@ void main() {
                ? v_color.rgb
                : (gl_FrontFacing ? u_material_ambient.rgb : u_material_ambient_back.rgb);
 
-  vec3 c = ambient * u_scene_ambient.rgb;
+  // GL_EMISSION: what the surface gives off itself, before anything lands
+  // on it.
+  vec3 c = u_material_emission.rgb + ambient * u_scene_ambient.rgb;
   for (int i = 0; i < LIGHTS; i++) {
     if (! u_light_on[i]) continue;
     vec4 p = u_light_position[i];
@@ -193,6 +196,7 @@ struct Uniforms {
     material_ambient: Option<WebGlUniformLocation>,
     material_ambient_back: Option<WebGlUniformLocation>,
     material_specular: Option<WebGlUniformLocation>,
+    material_emission: Option<WebGlUniformLocation>,
     shininess: Option<WebGlUniformLocation>,
     scene_ambient: Option<WebGlUniformLocation>,
     color_material: Option<WebGlUniformLocation>,
@@ -236,6 +240,7 @@ impl Uniforms {
             material_ambient: at("u_material_ambient"),
             material_ambient_back: at("u_material_ambient_back"),
             material_specular: at("u_material_specular"),
+            material_emission: at("u_material_emission"),
             shininess: at("u_shininess"),
             scene_ambient: at("u_scene_ambient"),
             color_material: at("u_color_material"),
@@ -594,6 +599,7 @@ impl Gl3dEngine {
                 gl.uniform4fv_with_f32_array(u.material_ambient.as_ref(), &m.ambient);
                 gl.uniform4fv_with_f32_array(u.material_ambient_back.as_ref(), &m.back_ambient);
                 gl.uniform4fv_with_f32_array(u.material_specular.as_ref(), &m.specular);
+                gl.uniform4fv_with_f32_array(u.material_emission.as_ref(), &m.emission);
                 gl.uniform1f(u.shininess.as_ref(), m.shininess);
             }
             gl.uniform1f(u.point_size.as_ref(), batch.point_size);

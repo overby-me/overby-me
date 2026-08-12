@@ -1354,6 +1354,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::bouncingcow::start
 );
 gl3d_saver!(
+    "boxed",
+    boxed_body,
+    boxed_start,
+    xscreensaver::hacks3d::boxed::start
+);
+gl3d_saver!(
     "bubble3d",
     bubble3d_body,
     bubble3d_start,
@@ -2508,6 +2514,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "bouncingcow",
         label: "Bouncing Cow",
         start: Start::Gl3d(bouncingcow_start),
+    },
+    Entry {
+        slug: "boxed",
+        label: "Boxed",
+        start: Start::Gl3d(boxed_start),
     },
     Entry {
         slug: "bubble3d",

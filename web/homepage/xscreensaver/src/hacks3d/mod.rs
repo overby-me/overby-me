@@ -25,6 +25,7 @@ pub mod blinkbox;
 pub mod blocktube;
 pub mod boing;
 pub mod bouncingcow;
+pub mod boxed;
 pub mod bubble3d;
 pub mod cage;
 pub mod carousel;
@@ -136,6 +137,7 @@ pub static ALL: &[&Saver3d] = &[
     &beats::SAVER,
     &bouncingcow::SAVER,
     &bubble3d::SAVER,
+    &boxed::SAVER,
     &cage::SAVER,
     &cityflow::SAVER,
     &circuit::SAVER,

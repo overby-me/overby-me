@@ -176,6 +176,10 @@ pub const CHROMESPHERE: &[u8] = include_bytes!("../images/chromesphere.png");
 /// there.
 pub const JIGGLYMAP: &[u8] = include_bytes!("../images/jigglymap.png");
 
+/// `boxed.h`: the picture on the box `boxed`'s balls fall into, kept as
+/// upstream's GIMP header rather than converted, and unpacked by the saver.
+pub const BOXED_TEXTURE: &str = include_str!("../images/boxed.h");
+
 /// The two photographs `peepers` wraps its eyeballs in: the white of the eye
 /// with its veins, and the iris.
 pub const SCLERA: &[u8] = include_bytes!("../images/sclera.png");
