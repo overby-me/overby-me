@@ -260,3 +260,30 @@ pub const COMPANION_HEART: &str = include_str!("../models/companion_heart.gllist
 /// The boundaries of the world's time zones, drawn by hand by jwz as line
 /// segments on a flat map. `glplanet` bends them round its globe.
 pub const TIMEZONES: &str = include_str!("../models/timezones.gllist");
+
+/// The nine shapes `pipes` bolts on to its plumbing when the factory knob is
+/// up: a valve, the collar and bolts that hold a fitting together, the four
+/// pieces of a pressure gauge, and the ring of coins and bolts around an
+/// elbow. Ed Mackey modelled them in Lightwave in 1997.
+pub const PIPES_BIGVALVE: &str = include_str!("../models/pipes_bigvalve.lwo");
+pub const PIPES_BOLTS3D: &str = include_str!("../models/pipes_bolts3d.lwo");
+pub const PIPES_PIPEBETWEENBOLTS: &str = include_str!("../models/pipes_pipebetweenbolts.lwo");
+pub const PIPES_ELBOWBOLTS: &str = include_str!("../models/pipes_elbowbolts.lwo");
+pub const PIPES_ELBOWCOINS: &str = include_str!("../models/pipes_elbowcoins.lwo");
+pub const PIPES_GUAGEHEAD: &str = include_str!("../models/pipes_guagehead.lwo");
+pub const PIPES_GUAGEFACE: &str = include_str!("../models/pipes_guageface.lwo");
+pub const PIPES_GUAGEDIAL: &str = include_str!("../models/pipes_guagedial.lwo");
+pub const PIPES_GUAGECONNECTOR: &str = include_str!("../models/pipes_guageconnector.lwo");
+
+/// All nine of them, for the tests that check the converter's output.
+pub const PIPES_MODELS: &[&str] = &[
+    PIPES_BIGVALVE,
+    PIPES_BOLTS3D,
+    PIPES_PIPEBETWEENBOLTS,
+    PIPES_ELBOWBOLTS,
+    PIPES_ELBOWCOINS,
+    PIPES_GUAGEHEAD,
+    PIPES_GUAGEFACE,
+    PIPES_GUAGEDIAL,
+    PIPES_GUAGECONNECTOR,
+];

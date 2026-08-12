@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (125) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (126) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -228,6 +228,17 @@ check every registered saver draws something, keeps changing, is reproducible
 from its seed, and survives degenerate window sizes, mid-run resizes, pointer
 events and both extremes of every option it declares.
 
+One trap when a test reaches past `start` and builds a hack's own structs: the
+random generator has to be seeded first, with `ya_rand_init`. `runtime::rand`
+is a faithful port of upstream's `yarandom.c`, including that its unseeded
+state has both lags at index zero, which makes every call double one element in
+place; after about 1760 calls the whole vector has been shifted out to zero and
+`random()` returns nothing but zeroes for ever. Upstream never notices because
+it seeds before it draws, and neither does anything here that goes through
+`Runner::start`. What it looks like when you do notice is a hang rather than a
+wrong picture: `pipes` picks its starting cell by rejection sampling, and with a
+generator that has stopped generating there is nothing left to reject to.
+
 Thirty-eight of the 2D hacks came from xlockmore and are written against
 `ModeInfo` and the `MI_*` accessors rather than `screenhack.h`. They go through
 `runtime::xlockmore`, which is the same adaptor `hacks/xlockmore.c` is upstream:
@@ -330,6 +341,32 @@ source, so it costs nothing to compile, and it lands in one lazily-loaded
 chunk that is only fetched by someone who opens that saver. What is worth
 checking first is the *vertex* count, which is what gets drawn every frame: the
 cow's hide is thirteen thousand and three cows are still cheap.
+
+### The other model format
+
+One saver predates `gllist` and has its own. `pipes` bolts nine shapes onto its
+plumbing, and those came out of Lightwave 3D in 1997 as three flat arrays each:
+the points, one normal per polygon, and a stream of polygon records. A record is
+a vertex count, that many point indices, and one filler slot; a count of nought
+ends the stream. Nothing indexes the normals, which are read in order, one per
+polygon, so the thing has to be walked rather than handed to `glDrawArrays`.
+`buildlwo.c` is the ninety-eight lines that walk it.
+
+That is all "blocked on LWO models" ever meant. `gen-lwo.nu` converts the file
+the same way `gen-gllist.nu` does, and `runtime::lwo` is the walker:
+
+```console
+$ nu gen-lwo.nu <checkout>/hacks/glx xscreensaver/models pipeobjs.c
+BigValve: 716 points, 3785 polygon words -> xscreensaver/models/pipes_bigvalve.lwo
+...
+```
+
+The one departure is that a face is drawn as a fan of triangles rather than as a
+`GL_POLYGON`. The recorder can only take a polygon as a triangle fan, and a fan
+cannot be merged with the fan beside it, so six hundred and twenty faces on one
+valve would be six hundred and twenty draw calls. The faces are planar and
+convex and the normal is flat, so splaying each one from its first vertex draws
+exactly the same triangles in one batch.
 
 One thing to check on any saver that wraps a photograph round something:
 **textures here are top-down and OpenGL's are bottom-up**. A texture

@@ -38,6 +38,7 @@ pub mod image;
 pub mod involute;
 pub mod jpeg;
 pub mod kaleido;
+pub mod lwo;
 pub mod marching;
 pub mod opts;
 pub mod png;

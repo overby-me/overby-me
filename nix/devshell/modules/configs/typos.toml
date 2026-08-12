@@ -39,6 +39,7 @@ extend-ignore-re = [
   # rotator.c's own name for its wander function.
   "SINOID",
   "sinoid",
+  "begining",
   "descrete",
   "resoources",
   "distrubtable",
@@ -165,6 +166,12 @@ BLOAD = "BLOAD"
 # rubik's -sizex/-sizey/-sizez options, which give the three edge lengths of
 # an LxMxN cube; the resource name has to stay as upstream spells it.
 sizez = "sizez"
+# Ed Mackey spelled the pressure gauge he modelled for pipes "guage", and it is
+# the name of four of its Lightwave objects, so it is what the converted assets
+# and every function that draws them are called.
+guage = "guage"
+Guage = "Guage"
+GUAGE = "GUAGE"
 
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.

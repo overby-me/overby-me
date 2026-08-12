@@ -1366,6 +1366,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::pinion::start
 );
 gl3d_saver!(
+    "pipes",
+    pipes_body,
+    pipes_start,
+    xscreensaver::hacks3d::pipes::start
+);
+gl3d_saver!(
     "platonicfolding",
     platonicfolding_body,
     platonicfolding_start,
@@ -3059,6 +3065,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pinion",
         label: "Pinion",
         start: Start::Gl3d(pinion_start),
+    },
+    Entry {
+        slug: "pipes",
+        label: "Pipes",
+        start: Start::Gl3d(pipes_start),
     },
     Entry {
         slug: "projectiveplane",
