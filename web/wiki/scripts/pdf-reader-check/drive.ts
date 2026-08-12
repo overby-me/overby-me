@@ -18,22 +18,25 @@
 
 const [sessionFile, pdfPath, url, outPrefix] = Deno.args;
 if (!outPrefix) {
-  console.error("usage: drive.ts <session.json> <fixture.pdf> <url> <out-prefix>");
-  Deno.exit(2);
+	console.error(
+		"usage: drive.ts <session.json> <fixture.pdf> <url> <out-prefix>",
+	);
+	Deno.exit(2);
 }
 
 const signin = JSON.parse(await Deno.readTextFile(sessionFile)).session;
 const wikiSession = {
-  user: {
-    id: signin.user.id,
-    email: signin.user.email ?? "",
-    display_name: signin.user.displayName ?? "",
-    avatar_url: signin.user.avatarUrl ?? "",
-  },
-  access_token: signin.accessToken,
-  refresh_token: signin.refreshToken,
-  node_id: null,
-  access_token_expires_at: Date.now() + (signin.accessTokenExpiresIn ?? 900) * 1000,
+	user: {
+		id: signin.user.id,
+		email: signin.user.email ?? "",
+		display_name: signin.user.displayName ?? "",
+		avatar_url: signin.user.avatarUrl ?? "",
+	},
+	access_token: signin.accessToken,
+	refresh_token: signin.refreshToken,
+	node_id: null,
+	access_token_expires_at:
+		Date.now() + (signin.accessTokenExpiresIn ?? 900) * 1000,
 };
 const pdf = await Deno.readFile(pdfPath);
 let binary = "";
@@ -43,137 +46,153 @@ const pdfBase64 = btoa(binary);
 const port = 9300 + Math.floor(Math.random() * 600);
 const chromium = Deno.env.get("CHROMIUM") ?? "chromium";
 const chrome = new Deno.Command(chromium, {
-  args: [
-    "--headless=new",
-    "--no-sandbox",
-    "--disable-gpu",
-    "--use-gl=swiftshader",
-    "--enable-unsafe-swiftshader",
-    `--window-size=${Deno.env.get("WINDOW") ?? "1400,1000"}`,
-    `--user-data-dir=${outPrefix}-profile`,
-    `--remote-debugging-port=${port}`,
-    "about:blank",
-  ],
-  stdout: "null",
-  stderr: "null",
+	args: [
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--use-gl=swiftshader",
+		"--enable-unsafe-swiftshader",
+		`--window-size=${Deno.env.get("WINDOW") ?? "1400,1000"}`,
+		`--user-data-dir=${outPrefix}-profile`,
+		`--remote-debugging-port=${port}`,
+		"about:blank",
+	],
+	stdout: "null",
+	stderr: "null",
 }).spawn();
 
 async function targetUrl(): Promise<string> {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const tabs = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      const page = tabs.find((t: { type: string }) => t.type === "page");
-      if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
-    } catch { /* not up yet */ }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error("chromium never opened a debugging port");
+	for (let i = 0; i < 60; i++) {
+		try {
+			const tabs = await (
+				await fetch(`http://127.0.0.1:${port}/json/list`)
+			).json();
+			const page = tabs.find((t: { type: string }) => t.type === "page");
+			if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
+		} catch {
+			/* not up yet */
+		}
+		await new Promise((r) => setTimeout(r, 250));
+	}
+	throw new Error("chromium never opened a debugging port");
 }
 
 const ws = new WebSocket(await targetUrl());
-await new Promise((res) => ws.onopen = res);
+await new Promise((res) => (ws.onopen = res));
 
 let nextId = 1;
 const pending = new Map<number, (v: unknown) => void>();
 const logged: string[] = [];
 // deno-lint-ignore no-explicit-any
-function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
-  const id = nextId++;
-  return new Promise((res) => {
-    pending.set(id, res);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
+function send(
+	method: string,
+	params: Record<string, unknown> = {},
+): Promise<any> {
+	const id = nextId++;
+	return new Promise((res) => {
+		pending.set(id, res);
+		ws.send(JSON.stringify({ id, method, params }));
+	});
 }
 
 /// Make anything carrying a `fileId` claim to be a PDF, wherever it sits in the
 /// answer: the app reads the mime off the node's own data blob.
 // deno-lint-ignore no-explicit-any
 function claimPdf(value: any): boolean {
-  let touched = false;
-  if (Array.isArray(value)) {
-    for (const v of value) touched = claimPdf(v) || touched;
-  } else if (value && typeof value === "object") {
-    if (typeof value.fileId === "string") {
-      value.type = "application/pdf";
-      touched = true;
-    }
-    for (const k of Object.keys(value)) touched = claimPdf(value[k]) || touched;
-  }
-  return touched;
+	let touched = false;
+	if (Array.isArray(value)) {
+		for (const v of value) touched = claimPdf(v) || touched;
+	} else if (value && typeof value === "object") {
+		if (typeof value.fileId === "string") {
+			value.type = "application/pdf";
+			touched = true;
+		}
+		for (const k of Object.keys(value)) touched = claimPdf(value[k]) || touched;
+	}
+	return touched;
 }
 
-let rewrote = 0, served = 0;
+let rewrote = 0,
+	served = 0;
 ws.onmessage = async (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.id && pending.has(msg.id)) {
-    pending.get(msg.id)!(msg.result);
-    pending.delete(msg.id);
-    return;
-  }
-  if (msg.method === "Runtime.consoleAPICalled") {
-    logged.push(
-      `${msg.params.type}: ${(msg.params.args ?? []).map((a: { value?: unknown; description?: string }) =>
-        a.value !== undefined ? String(a.value) : (a.description ?? "")).join(" ")}`,
-    );
-    return;
-  }
-  if (msg.method === "Runtime.exceptionThrown") {
-    logged.push(`exception: ${msg.params.exceptionDetails?.exception?.description ?? ""}`);
-    return;
-  }
-  if (msg.method !== "Fetch.requestPaused") return;
+	const msg = JSON.parse(e.data);
+	if (msg.id && pending.has(msg.id)) {
+		pending.get(msg.id)!(msg.result);
+		pending.delete(msg.id);
+		return;
+	}
+	if (msg.method === "Runtime.consoleAPICalled") {
+		logged.push(
+			`${msg.params.type}: ${(msg.params.args ?? [])
+				.map((a: { value?: unknown; description?: string }) =>
+					a.value !== undefined ? String(a.value) : (a.description ?? ""),
+				)
+				.join(" ")}`,
+		);
+		return;
+	}
+	if (msg.method === "Runtime.exceptionThrown") {
+		logged.push(
+			`exception: ${msg.params.exceptionDetails?.exception?.description ?? ""}`,
+		);
+		return;
+	}
+	if (msg.method !== "Fetch.requestPaused") return;
 
-  const { requestId, request, responseStatusCode } = msg.params;
-  // The file's BYTES. Only the bare `/v1/files/<id>` GET: `<id>/presignedurl`
-  // is a different request the page also makes, and swallowing it leaves the
-  // card with no url and the reader unmounted behind an empty state.
-  if (
-    /\/v1\/files\/[0-9a-fA-F-]+$/.test(request.url.split("?")[0]) &&
-    request.method === "GET" && responseStatusCode === undefined
-  ) {
-    served++;
-    await send("Fetch.fulfillRequest", {
-      requestId,
-      responseCode: 200,
-      responseHeaders: [
-        { name: "content-type", value: "application/pdf" },
-        { name: "access-control-allow-origin", value: "*" },
-      ],
-      body: pdfBase64,
-    });
-    return;
-  }
-  if (/\/v1\/graphql/.test(request.url) && responseStatusCode !== undefined) {
-    try {
-      const got = await send("Fetch.getResponseBody", { requestId });
-      const text = got.base64Encoded ? atob(got.body) : got.body;
-      const json = JSON.parse(text);
-      if (claimPdf(json)) rewrote++;
-      await send("Fetch.fulfillRequest", {
-        requestId,
-        responseCode: 200,
-        responseHeaders: [
-          { name: "content-type", value: "application/json" },
-          { name: "access-control-allow-origin", value: "*" },
-        ],
-        body: btoa(unescape(encodeURIComponent(JSON.stringify(json)))),
-      });
-      return;
-    } catch { /* fall through */ }
-  }
-  await send("Fetch.continueRequest", { requestId });
+	const { requestId, request, responseStatusCode } = msg.params;
+	// The file's BYTES. Only the bare `/v1/files/<id>` GET: `<id>/presignedurl`
+	// is a different request the page also makes, and swallowing it leaves the
+	// card with no url and the reader unmounted behind an empty state.
+	if (
+		/\/v1\/files\/[0-9a-fA-F-]+$/.test(request.url.split("?")[0]) &&
+		request.method === "GET" &&
+		responseStatusCode === undefined
+	) {
+		served++;
+		await send("Fetch.fulfillRequest", {
+			requestId,
+			responseCode: 200,
+			responseHeaders: [
+				{ name: "content-type", value: "application/pdf" },
+				{ name: "access-control-allow-origin", value: "*" },
+			],
+			body: pdfBase64,
+		});
+		return;
+	}
+	if (/\/v1\/graphql/.test(request.url) && responseStatusCode !== undefined) {
+		try {
+			const got = await send("Fetch.getResponseBody", { requestId });
+			const text = got.base64Encoded ? atob(got.body) : got.body;
+			const json = JSON.parse(text);
+			if (claimPdf(json)) rewrote++;
+			await send("Fetch.fulfillRequest", {
+				requestId,
+				responseCode: 200,
+				responseHeaders: [
+					{ name: "content-type", value: "application/json" },
+					{ name: "access-control-allow-origin", value: "*" },
+				],
+				body: btoa(unescape(encodeURIComponent(JSON.stringify(json)))),
+			});
+			return;
+		} catch {
+			/* fall through */
+		}
+	}
+	await send("Fetch.continueRequest", { requestId });
 };
 
 await send("Page.enable");
 await send("Runtime.enable");
 await send("Fetch.enable", {
-  patterns: [
-    { urlPattern: "*/v1/files/*", requestStage: "Request" },
-    { urlPattern: "*/v1/graphql*", requestStage: "Response" },
-  ],
+	patterns: [
+		{ urlPattern: "*/v1/files/*", requestStage: "Request" },
+		{ urlPattern: "*/v1/graphql*", requestStage: "Response" },
+	],
 });
 await send("Page.addScriptToEvaluateOnNewDocument", {
-  source: `localStorage.setItem("wiki_session", ${JSON.stringify(JSON.stringify(wikiSession))});
+	source: `localStorage.setItem("wiki_session", ${JSON.stringify(JSON.stringify(wikiSession))});
            localStorage.setItem("wiki_pdf_viewer", "native");`,
 });
 
@@ -213,13 +232,16 @@ const read = `(() => {
 
 // deno-lint-ignore no-explicit-any
 const snap = async (): Promise<any> =>
-  JSON.parse((await send("Runtime.evaluate", { expression: read, returnByValue: true })).result.value);
+	JSON.parse(
+		(await send("Runtime.evaluate", { expression: read, returnByValue: true }))
+			.result.value,
+	);
 
 const press = async (selector: string) => {
-  await send("Runtime.evaluate", {
-    expression: `(document.querySelector(${JSON.stringify(selector)}) || {click(){}}).click()`,
-  });
-  await new Promise((r) => setTimeout(r, 2500));
+	await send("Runtime.evaluate", {
+		expression: `(document.querySelector(${JSON.stringify(selector)}) || {click(){}}).click()`,
+	});
+	await new Promise((r) => setTimeout(r, 2500));
 };
 const forward = ".pdf-pages .pdf-pages-step:last-of-type";
 const back = ".pdf-pages .pdf-pages-step";
@@ -231,7 +253,9 @@ await press(back);
 seen.afterBack = await snap();
 // The end of the document: its last page must be reportable even though a
 // final page shorter than the window can never be scrolled to the top.
-await send("Runtime.evaluate", { expression: "window.scrollTo(0, document.body.scrollHeight)" });
+await send("Runtime.evaluate", {
+	expression: "window.scrollTo(0, document.body.scrollHeight)",
+});
 await new Promise((r) => setTimeout(r, 2500));
 seen.atTheEnd = await snap();
 seen.rewroteAnswers = rewrote;
@@ -241,12 +265,17 @@ seen.console = logged.slice(-15);
 await Deno.writeTextFile(`${outPrefix}.json`, JSON.stringify(seen, null, 1));
 const shot = await send("Page.captureScreenshot", { format: "png" });
 if (shot?.data) {
-  await Deno.writeFile(`${outPrefix}.png`, Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0)));
+	await Deno.writeFile(
+		`${outPrefix}.png`,
+		Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0)),
+	);
 }
 await Deno.writeTextFile(`${outPrefix}.log`, logged.join("\n"));
 ws.close();
 try {
-  chrome.kill();
-} catch { /* already gone */ }
+	chrome.kill();
+} catch {
+	/* already gone */
+}
 await chrome.status;
 console.log(`wrote ${outPrefix}.json`);

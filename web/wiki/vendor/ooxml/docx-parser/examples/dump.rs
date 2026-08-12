@@ -15,9 +15,14 @@ fn main() {
             serde_json::Value::Array(items) => items.iter().for_each(|i| walk(i, n)),
             serde_json::Value::Object(o) => {
                 if o.contains_key("runs") && o.contains_key("indentLeft") {
-                    let text: String = o["runs"].as_array().map(|rs| rs.iter()
-                        .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-                        .collect()).unwrap_or_default();
+                    let text: String = o["runs"]
+                        .as_array()
+                        .map(|rs| {
+                            rs.iter()
+                                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     if *n < 30 {
                         println!(
                             "{n:3} ind {:>6.1}/{:>6.1}pt after {:>5.1} line {:?} lvl {:?} font {:?}/{:?} style {:?} {:?}",
