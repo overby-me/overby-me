@@ -448,6 +448,17 @@ impl Trackball {
         self.q.to_matrix()
     }
 
+    /// `gltrackball_get_quaternion`: where the user has dragged it to, as a
+    /// quaternion rather than a matrix.
+    ///
+    /// The savers that turn a thing in four dimensions want this: `polytopes`
+    /// builds a 4x4 rotation out of *two* quaternions, which is not something
+    /// a 3x3 matrix can be taken apart into again.
+    pub fn quaternion(&mut self) -> Quat {
+        self.inertia();
+        self.q
+    }
+
     /// `gltrackball_event_handler`. True if the event was one of ours.
     pub fn event(&mut self, event: &super::XEvent, w: i32, h: i32) -> bool {
         match event {

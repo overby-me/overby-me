@@ -1510,6 +1510,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::projectiveplane::start
 );
 gl3d_saver!(
+    "polytopes",
+    polytopes_body,
+    polytopes_start,
+    xscreensaver::hacks3d::polytopes::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2890,6 +2896,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "projectiveplane",
         label: "Projective Plane",
         start: Start::Gl3d(projectiveplane_start),
+    },
+    Entry {
+        slug: "polytopes",
+        label: "Polytopes",
+        start: Start::Gl3d(polytopes_start),
     },
     Entry {
         slug: "providence",

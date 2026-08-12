@@ -101,6 +101,7 @@ pub mod papercube;
 pub mod peepers;
 pub mod photopile;
 pub mod pinion;
+pub mod polytopes;
 pub mod projectiveplane;
 pub mod providence;
 pub mod pulsar;
@@ -194,6 +195,7 @@ pub static ALL: &[&Saver3d] = &[
     &photopile::SAVER,
     &peepers::SAVER,
     &hexstrut::SAVER,
+    &polytopes::SAVER,
     &starwars::SAVER,
     &skytentacles::SAVER,
     &sproingies::SAVER,
