@@ -36,6 +36,24 @@ fn Spans(spans: Vec<Span>) -> Element {
     rsx! {
         for (i , span) in spans.iter().enumerate() {
             {
+                // A span standing for a picture rather than for words: the badge
+                // a table cell was drawn with, kept beside the words it belongs
+                // to (see `pdf_text::Span::image`). Sized from the points it was
+                // drawn at, capped to the cell so a logo cannot push a column
+                // wider than the reading; `alt` is empty because it is
+                // decoration, and a screen reader announcing "image" between a
+                // name and a serial number would be noise.
+                if let Some(picture) = &span.image {
+                    return rsx! {
+                        img {
+                            key: "{i}",
+                            class: "pdf-cell-image",
+                            src: "{picture.src}",
+                            alt: "",
+                            style: "width:{picture.width:.0}px;height:{picture.height:.0}px;",
+                        }
+                    };
+                }
                 let mut style = match &span.color {
                     Some(color) => format!("color:{color};"),
                     None => String::new(),

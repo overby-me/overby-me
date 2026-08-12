@@ -243,7 +243,7 @@ pub enum Align {
 /// Colour is per RUN in a PDF, not per paragraph: a document can turn one word
 /// red in the middle of a sentence, and a block that carried a single colour
 /// would lose that. `None` is the ordinary ink of the document.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Span {
     pub text: String,
     /// A CSS colour, or `None` for whatever the reading surface uses.
@@ -253,6 +253,17 @@ pub struct Span {
     pub underline: bool,
     /// Where this stretch takes the reader, if the file made it a link.
     pub link: Option<Link>,
+    /// A picture drawn inside a table cell, standing where the words would.
+    ///
+    /// A cell is a run of spans, so a badge beside a name can be one of them and
+    /// travel with it through the reflow. Without this an image can only be a
+    /// block of its own, which on a two-column grid means it lands under the row
+    /// rather than in it: a signature page's approval marks and its MitID logos
+    /// all came out stacked between the signers instead of beside them.
+    ///
+    /// Boxed because it is rare and `Picture` is not small: every span in a long
+    /// document would otherwise carry its width.
+    pub image: Option<Box<Picture>>,
 }
 
 /// Where a link goes.
@@ -2595,6 +2606,7 @@ fn rows_align(a: &[Cell], b: &[Cell], size: f64) -> bool {
 }
 
 /// A mark too small to be a picture, and where it sits.
+#[derive(Clone)]
 struct Mark {
     x: f64,
     right: f64,
@@ -3335,6 +3347,7 @@ fn cells_of(runs: &[Run], size: f64) -> Vec<Cell> {
                 italic: run.italic,
                 underline: run.underline,
                 link: run.link.clone(),
+                image: None,
             };
             match cell.spans.last_mut() {
                 Some(last) if last.matches(&here) => {
@@ -3394,6 +3407,7 @@ fn join_line(runs: &[Run]) -> Option<Line> {
             italic: run.italic,
             underline: run.underline,
             link: run.link.clone(),
+            image: None,
         };
         match spans.last_mut() {
             Some(last) if last.matches(&here) => {
@@ -4959,14 +4973,20 @@ pub fn extract(bytes: &[u8]) -> Result<Extracted, String> {
         // The links live beside the content stream rather than in it, so they
         // are read first and handed to the walk, which cuts its runs on them.
         let areas = page_links(&doc, page_id, &by_id, &mut places);
-        let drawn = page_runs(&doc, page_id, &mut budget, &areas);
+        let mut drawn = page_runs(&doc, page_id, &mut budget, &areas);
         // The page as it was drawn, before the reading takes it apart. Built
         // here because this is the last place the positions exist: `lines_from`
         // turns the runs into lines and the lines into a reading order, which is
         // a different thing from a page and cannot be turned back into one.
         layout.push(page_layout(&doc, page_id, &drawn));
         let mut lines = lines_from(drawn.runs);
-        mark_the_lines(&mut lines, &drawn.marks);
+        // Badges first: an image that belongs to a cell of a row is taken out of
+        // the page's flow and put in that cell, so it travels with the words it
+        // was drawn beside instead of being swept below them by the reflow.
+        // Whatever is left over carries on as before -- a bullet, a picture in
+        // the column, or nothing.
+        let marks = place_in_cells(&mut lines, &drawn.marks, &mut drawn.pictures);
+        mark_the_lines(&mut lines, &marks);
         for line in &mut lines {
             line.page = page_no + 1;
         }
@@ -5203,6 +5223,105 @@ fn aim_at_the_headings(blocks: &mut Vec<Block>, wanted: &[Option<(String, usize)
 /// which is level with a line of text and just to its left, in the margin the
 /// text is indented past. Nothing else about it says "bullet" at all: this
 /// document's is the organisation's logo, drawn ten points square.
+/// How far above or below a row an image may sit and still belong to it.
+///
+/// The signature page's badges hang 17pt under the last line of the signer they
+/// belong to, and the next signer's first line is 60pt further down. Anything
+/// between those two numbers separates the case that works from the case that
+/// attaches every badge to the wrong person, which is worse than not showing it.
+const CELL_IMAGE_REACH: f64 = 24.0;
+
+/// Put the images that belong to a row's cells into those cells.
+///
+/// A reflow linearises a grid, so an image drawn beside a name comes out under
+/// it: on the signature page every MitID logo ended up stacked between the
+/// signers, and the approval marks were dropped entirely for not being bullets.
+/// An image that sits in a cell should travel with that cell instead.
+///
+/// Deliberately narrow. It only looks at lines already cut into two or more
+/// cells, which is a page that was read as a grid, so a document without one is
+/// untouched: the pictures it returns and the marks it leaves behind go on to
+/// the same places they went before. That is what makes this safe to do at all,
+/// given how much else reads these lines.
+///
+/// Takes the pictures by value, keeping the ones it did not place, and returns
+/// the marks it did not place. Both are then handled exactly as before.
+fn place_in_cells(
+    lines: &mut [Line],
+    marks: &[Mark],
+    pictures: &mut Vec<(f64, Picture)>,
+) -> Vec<Mark> {
+    // Which cell of a row holds this x. A cell's own left/right are its TEXT,
+    // so a badge in the whitespace after the words is inside none of them; the
+    // column it stands in is what the cell starts mark out.
+    let column_at = |line: &Line, x: f64| -> Option<usize> {
+        if line.cells.len() < 2 {
+            return None;
+        }
+        line.cells
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, c)| x >= c.left)
+            .map(|(i, _)| i)
+    };
+    // The row this image belongs to: the nearest one, above or below, within
+    // reach. Nearest rather than "the row above" because which side a badge
+    // falls on is the page's business -- these hang below, another design may
+    // set them level or above -- while "closest" is true either way.
+    let nearest = |lines: &[Line], middle: f64, x: f64| -> Option<(usize, usize)> {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.picture.is_none() && l.rule.is_none())
+            .filter_map(|(i, l)| column_at(l, x).map(|c| (i, c, (l.y - middle).abs())))
+            .filter(|(_, _, d)| *d <= CELL_IMAGE_REACH)
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(i, c, _)| (i, c))
+    };
+
+    let mut placed: Vec<(usize, usize, Picture)> = Vec::new();
+    pictures.retain(|(top, picture)| {
+        let middle = top - picture.height / 2.0;
+        match nearest(lines, middle, picture.left) {
+            Some((line, cell)) => {
+                placed.push((line, cell, picture.clone()));
+                false
+            }
+            None => true,
+        }
+    });
+    let mut left_over = Vec::new();
+    for mark in marks {
+        match nearest(lines, mark.middle, mark.x) {
+            Some((line, cell)) => placed.push((
+                line,
+                cell,
+                Picture {
+                    left: mark.x,
+                    path: None,
+                    src: mark.src.clone(),
+                    width: mark.right - mark.x,
+                    height: mark.right - mark.x,
+                },
+            )),
+            None => left_over.push(mark.clone()),
+        }
+    }
+    // Left to right within a cell, so two badges keep the order they were drawn
+    // in rather than the order they happened to be found in.
+    placed.sort_by(|a, b| a.2.left.total_cmp(&b.2.left));
+    for (line, cell, picture) in placed {
+        if let Some(cell) = lines[line].cells.get_mut(cell) {
+            cell.spans.push(Span {
+                image: Some(Box::new(picture)),
+                ..Default::default()
+            });
+        }
+    }
+    left_over
+}
+
 fn mark_the_lines(lines: &mut [Line], marks: &[Mark]) {
     for line in lines.iter_mut() {
         if line.picture.is_some() || !line.left.is_finite() {
@@ -6524,6 +6643,7 @@ mod tests {
                 color: None,
                 bold: false,
                 italic: false,
+                image: None,
             }],
             bullet: None,
             picture: None,
@@ -6636,6 +6756,7 @@ mod tests {
                     color: None,
                     bold: false,
                     italic: false,
+                    image: None,
                 }],
                 align: Align::Left,
             }],
@@ -6689,6 +6810,7 @@ mod tests {
             color: color.map(str::to_string),
             bold: false,
             italic: false,
+            image: None,
         }
     }
 
@@ -6787,6 +6909,7 @@ mod tests {
                 color: None,
                 bold: false,
                 italic: false,
+                image: None,
             }],
             bullet: None,
             picture: None,
@@ -6915,6 +7038,142 @@ mod tests {
         assert_eq!(second, &[0, 0, 255, 0, 255, 0], "red, then green");
     }
 
+    /// A badge goes in the cell of the signer it was drawn beside.
+    ///
+    /// Built from the real geometry of a Penneo signature page (the annual
+    /// report's page 26). Three signer rows at a 120pt pitch, each a line of
+    /// text cut into two columns starting at x=43 and x=320; each signer's block
+    /// ends with a timestamp, and 17pt under it hangs an approval mark, with the
+    /// MitID logo centred a point below the same line.
+    ///
+    /// What this pins is WHICH row each badge lands on. The rows are close
+    /// enough together that an off-by-one attaches every mark to the wrong
+    /// person, which is worse than the dropped marks this replaced: a signature
+    /// page that confidently shows the wrong approvals.
+    #[test]
+    fn a_badge_lands_on_the_signer_it_was_drawn_beside() {
+        let cells = |y: f64| Line {
+            y,
+            size: 8.0,
+            right: 500.0,
+            left: 43.0,
+            page: 1,
+            text: String::new(),
+            spans: Vec::new(),
+            bullet: None,
+            picture: None,
+            rule: None,
+            tail_gap: 0.0,
+            cells: vec![
+                Cell {
+                    left: 43.0,
+                    right: 123.0,
+                    spans: Vec::new(),
+                },
+                Cell {
+                    left: 320.0,
+                    right: 399.0,
+                    spans: Vec::new(),
+                },
+            ],
+            natural_cells: 2,
+        };
+        // The last line of each signer's block, 120pt apart.
+        let mut lines = vec![cells(604.9), cells(484.9), cells(364.9)];
+        // The approval marks: 17pt below each, at the right of each column.
+        let mark = |x: f64, middle: f64| Mark {
+            x,
+            right: x + 17.0,
+            middle,
+            src: format!("mark-{x:.0}-{middle:.0}"),
+        };
+        let marks = vec![
+            mark(260.6, 587.9),
+            mark(537.3, 587.9),
+            mark(260.6, 467.9),
+            mark(537.3, 467.9),
+        ];
+        // The MitID logos: 50pt tall, their top 24pt above the same line.
+        let logo = |left: f64, top: f64| {
+            (
+                top,
+                Picture {
+                    left,
+                    path: None,
+                    src: format!("logo-{left:.0}-{top:.0}"),
+                    width: 50.0,
+                    height: 50.0,
+                },
+            )
+        };
+        let mut pictures = vec![logo(201.6, 628.9), logo(478.3, 628.9)];
+
+        let left_over = place_in_cells(&mut lines, &marks, &mut pictures);
+        assert!(left_over.is_empty(), "every mark had a row within reach");
+        assert!(pictures.is_empty(), "every logo had a row within reach");
+
+        let placed = |line: usize, cell: usize| -> Vec<String> {
+            lines[line].cells[cell]
+                .spans
+                .iter()
+                .filter_map(|s| s.image.as_ref().map(|p| p.src.clone()))
+                .collect()
+        };
+        // Row one keeps its own logo and its own mark, per column, and the logo
+        // comes first because it was drawn to the left of the mark.
+        assert_eq!(placed(0, 0), vec!["logo-202-629", "mark-261-588"]);
+        assert_eq!(placed(0, 1), vec!["logo-478-629", "mark-537-588"]);
+        // Row two takes the marks 17pt under IT, not the ones under row one.
+        assert_eq!(placed(1, 0), vec!["mark-261-468"]);
+        assert_eq!(placed(1, 1), vec!["mark-537-468"]);
+        // And row three, which had none drawn near it, takes none.
+        assert!(placed(2, 0).is_empty() && placed(2, 1).is_empty());
+    }
+
+    /// A page that is not a grid keeps every image exactly where it was.
+    ///
+    /// The whole reason this is safe: a line that was never cut into cells has
+    /// no column for an image to fall into, so a document without tables goes
+    /// through untouched and its bullets and pictures reach the places they
+    /// always did.
+    #[test]
+    fn a_page_without_cells_places_nothing() {
+        let mut lines = vec![Line {
+            y: 604.9,
+            size: 11.0,
+            right: 300.0,
+            left: 43.0,
+            page: 1,
+            text: "An ordinary paragraph".into(),
+            spans: Vec::new(),
+            bullet: None,
+            picture: None,
+            rule: None,
+            tail_gap: 0.0,
+            cells: Vec::new(),
+            natural_cells: 0,
+        }];
+        let marks = vec![Mark {
+            x: 30.0,
+            right: 40.0,
+            middle: 604.9,
+            src: "bullet".into(),
+        }];
+        let mut pictures = vec![(
+            628.9,
+            Picture {
+                left: 100.0,
+                path: None,
+                src: "figure".into(),
+                width: 50.0,
+                height: 50.0,
+            },
+        )];
+        let left_over = place_in_cells(&mut lines, &marks, &mut pictures);
+        assert_eq!(left_over.len(), 1, "the mark is still the line's to claim");
+        assert_eq!(pictures.len(), 1, "the picture is still a block of its own");
+    }
+
     /// Grey expands to grey rather than being read as a third of a colour.
     #[test]
     fn a_grey_image_is_not_misread() {
@@ -7000,6 +7259,7 @@ mod tests {
                 italic: false,
                 underline: false,
                 link: None,
+                image: None,
             }],
         };
         let row = |y: f64, cells: Vec<super::Cell>| Line {
@@ -7366,6 +7626,7 @@ mod tests {
             bold: false,
             italic: false,
             link: stale,
+            image: None,
         }];
         let mended = mend_written_links(spans);
         let linked: Vec<(&str, &Link)> = mended
@@ -7394,6 +7655,7 @@ mod tests {
             bold: false,
             italic: false,
             link: link.clone(),
+            image: None,
         }];
         assert_eq!(mend_written_links(spans.clone()), spans);
     }
@@ -7567,6 +7829,7 @@ mod tests {
                 italic: false,
                 underline: false,
                 link: to.map(|id| Link::Place(id.into())),
+                image: None,
             }],
             page: "3".into(),
             indent: 0,
