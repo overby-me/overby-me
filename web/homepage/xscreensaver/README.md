@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (91) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (92) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -256,6 +256,15 @@ source, so it costs nothing to compile, and it lands in one lazily-loaded
 chunk that is only fetched by someone who opens that saver. What is worth
 checking first is the *vertex* count, which is what gets drawn every frame: the
 cow's hide is thirteen thousand and three cows are still cheap.
+
+Not every shape is drawn, though. `runtime::marching` is upstream's
+`marching.c`: give it a function that says how solid any point in space is and
+it walks a grid over it and builds the surface where that value crosses a
+threshold. `lavalite` is what wants it, and it is why its blobs merge and part
+rather than passing through each other. The cost is the *grid*, not the
+geometry: it calls the field function once per grid point and six more times
+per emitted vertex when smoothing, so the resolution knob is quadratic in what
+it costs and its top end is set by measurement.
 
 ## Code splitting
 

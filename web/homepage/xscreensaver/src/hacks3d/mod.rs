@@ -76,6 +76,7 @@ pub mod hypnowheel;
 pub mod kaleidocycle;
 pub mod kallisti;
 pub mod klein;
+pub mod lavalite;
 pub mod lockward;
 pub mod menger;
 pub mod moebius;
@@ -178,6 +179,7 @@ pub static ALL: &[&Saver3d] = &[
     &kallisti::SAVER,
     &klein::SAVER,
     &lockward::SAVER,
+    &lavalite::SAVER,
     &menger::SAVER,
     &moebius::SAVER,
     &moebiusgears::SAVER,

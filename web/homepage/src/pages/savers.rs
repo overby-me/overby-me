@@ -1306,6 +1306,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::klein::start
 );
 gl3d_saver!(
+    "lavalite",
+    lavalite_body,
+    lavalite_start,
+    xscreensaver::hacks3d::lavalite::start
+);
+gl3d_saver!(
     "lockward",
     lockward_body,
     lockward_start,
@@ -2709,6 +2715,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "klein",
         label: "Klein",
         start: Start::Gl3d(klein_start),
+    },
+    Entry {
+        slug: "lavalite",
+        label: "Lavalite",
+        start: Start::Gl3d(lavalite_start),
     },
     Entry {
         slug: "lockward",

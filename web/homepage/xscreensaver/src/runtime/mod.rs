@@ -34,6 +34,7 @@ pub mod hack3d;
 pub mod image;
 pub mod involute;
 pub mod jpeg;
+pub mod marching;
 pub mod opts;
 pub mod png;
 pub mod rand;
