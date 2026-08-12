@@ -204,7 +204,15 @@
         # `#![feature(rustc_private)]`, which the stable `pkgs.cargo` here
         # cannot build. Its clippy runs on the pinned nightly via the
         # `fe-c-clippy` flake check (--all-features) instead.
-        excludes = ["^rust/fe-c/"];
+        #
+        # web/wiki/vendor is upstream code held at a pinned commit (see
+        # vendor/ooxml/README.md), so its lints are not ours to answer and
+        # fixing them is divergence we would have to re-apply on every
+        # re-vendor. It has never been clean; it stayed invisible only because
+        # nothing touched those files. `nix fmt` reaching them is what put the
+        # crate in this hook's scope, since the hook lints whole crates rather
+        # than the changed file.
+        excludes = ["^rust/fe-c/" "^web/wiki/vendor/"];
         entry = "${pkgs.writeShellScript "clippy-multi-project" ''
           # Determine which Cargo projects contain changed .rs files.
           # Arguments are the changed .rs file paths passed by pre-commit.
