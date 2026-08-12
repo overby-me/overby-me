@@ -1516,6 +1516,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::glforestfire::start
 );
 gl3d_saver!(
+    "gleidescope",
+    gleidescope_body,
+    gleidescope_start,
+    xscreensaver::hacks3d::gleidescope::start
+);
+gl3d_saver!(
     "hilbert",
     hilbert_body,
     hilbert_start,
@@ -2971,6 +2977,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "glforestfire",
         label: "GL Forest Fire",
         start: Start::Gl3d(glforestfire_start),
+    },
+    Entry {
+        slug: "gleidescope",
+        label: "Gleidescope",
+        start: Start::Gl3d(gleidescope_start),
     },
     Entry {
         slug: "hilbert",
