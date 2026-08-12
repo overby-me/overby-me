@@ -1210,6 +1210,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::antmaze::start
 );
 gl3d_saver!(
+    "antspotlight",
+    antspotlight_body,
+    antspotlight_start,
+    xscreensaver::hacks3d::antspotlight::start
+);
+gl3d_saver!(
     "atunnel",
     atunnel_body,
     atunnel_start,
@@ -2514,6 +2520,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "antmaze",
         label: "Ant Maze",
         start: Start::Gl3d(antmaze_start),
+    },
+    Entry {
+        slug: "antspotlight",
+        label: "Ant Spotlight",
+        start: Start::Gl3d(antspotlight_start),
     },
     Entry {
         slug: "atunnel",

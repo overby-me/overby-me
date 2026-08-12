@@ -19,6 +19,7 @@ use crate::runtime::Saver3d;
 
 pub mod antinspect;
 pub mod antmaze;
+pub mod antspotlight;
 pub mod atunnel;
 pub mod beats;
 pub mod blinkbox;
@@ -131,6 +132,7 @@ mod winduprobot_wobble;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
     &antinspect::SAVER,
+    &antspotlight::SAVER,
     &atunnel::SAVER,
     &antmaze::SAVER,
     &blinkbox::SAVER,

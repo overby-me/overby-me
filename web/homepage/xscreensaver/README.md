@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (101) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (102) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -602,6 +602,18 @@ Two deliberate differences from OpenGL 1.3, neither of which changes what is
 depicted: the shading is per fragment rather than per vertex, which on shapes
 this low-polygon only looks better, and lighting is two-sided, so the savers
 that leave culling off can see the inside of a thing as well as the outside.
+
+There are no spotlights: no cutoff, no exponent, no attenuation. Only two
+savers want one, and both can have it without the runtime growing. `circuit`
+approximates its with a point light, because all its does is pick out the
+component nearest the front. `antspotlight` cannot, since its beam *is* the
+picture: the floor is unlit and the only part of the image ever drawn is a fan
+of triangle strips spreading out from under the ant. That fan is built afresh
+every frame, so the port works the light out per vertex and hands it over as a
+vertex colour. That is not an approximation of `GL_SPOT_CUTOFF`; it is the same
+arithmetic, since fixed-function lighting is per vertex too, moved out of the
+pipeline and into the saver. Any saver whose lit geometry it generates itself
+can do the same.
 
 Materials are `GL_AMBIENT_AND_DIFFUSE` in one field, because that is what the
 savers set; with lighting on, vertex colours are ignored, which is OpenGL's own
