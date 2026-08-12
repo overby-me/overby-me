@@ -90,6 +90,16 @@ const NUMBDIST: usize = 16;
 /// Angle of a single turn step.
 const TURN_STEP: f32 = 0.5;
 
+/// Which eversion this run is showing. Upstream picks between the two at
+/// random and they share everything but the surface.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Method {
+    /// The closed-form Bednorz eversion.
+    Analytic,
+    /// The corrugations of the film "Outside In".
+    Corrugations,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DisplayMode {
     Surface,
@@ -671,6 +681,755 @@ fn bednorz_point_normal(phi: f64, theta: f64, bsp: &ShapePar) -> ([f32; 3], [f32
 }
 
 /* -------------------------------------------------------------------------
+ * The corrugations eversion
+ *
+ * Parts of this are based on Michael J. McGuffin's sphereEversion, which is in
+ * turn based on evert by Nathaniel Thurston at the Geometry Center. The
+ * modified code is used with permission.
+ * ---------------------------------------------------------------------- */
+
+/// Number of subdivisions of the surface.
+const NUM_STRIPS: usize = 8;
+const NUM_U: usize = 128;
+const NUM_V: usize = 64;
+/* Number of subdivisions per band */
+const NUMB_PAR: usize = NUM_U / 8;
+const NUMB_MER: usize = NUM_V / 2;
+
+/// A value and its two first partial derivatives.
+///
+/// The corrugations eversion is built out of these rather than out of numbers,
+/// which is how it gets its surface normals: every operation carries the
+/// derivatives along with the value, so the tangents fall out of evaluating
+/// the formula rather than having to be differentiated by hand or estimated
+/// from neighbours. Upstream calls it a jet.
+#[derive(Clone, Copy, Default)]
+struct OneJet {
+    f: f32,
+    fu: f32,
+    fv: f32,
+}
+
+/// A value and its first and second partial derivatives.
+#[derive(Clone, Copy, Default)]
+struct TwoJet {
+    f: f32,
+    fu: f32,
+    fv: f32,
+    fuu: f32,
+    fuv: f32,
+    fvv: f32,
+}
+
+impl OneJet {
+    fn new(d: f32, du: f32, dv: f32) -> Self {
+        OneJet {
+            f: d,
+            fu: du,
+            fv: dv,
+        }
+    }
+
+    fn scale(self, d: f32) -> Self {
+        OneJet::new(d * self.f, d * self.fu, d * self.fv)
+    }
+
+    fn offset(self, d: f32) -> Self {
+        OneJet::new(self.f + d, self.fu, self.fv)
+    }
+
+    /// `fmod`, brought back into `0..d`.
+    fn modulo(self, d: f32) -> Self {
+        let mut f = self.f % d;
+        if f < 0.0 {
+            f += d;
+        }
+        OneJet::new(f, self.fu, self.fv)
+    }
+
+    /// `sin(2 pi x)`, which is what upstream means by the sine of a jet: its
+    /// angles are turns rather than radians.
+    fn sin(self) -> Self {
+        let t = self.scale(std::f32::consts::TAU);
+        let (s, c) = t.f.sin_cos();
+        OneJet::new(s, c * t.fu, c * t.fv)
+    }
+
+    fn cos(self) -> Self {
+        let t = self.scale(std::f32::consts::TAU);
+        let (s, c) = t.f.sin_cos();
+        OneJet::new(c, -s * t.fu, -s * t.fv)
+    }
+
+    fn powf(self, n: f32) -> Self {
+        let x0 = self.f.powf(n);
+        let x1 = if self.f == 0.0 { 0.0 } else { n * x0 / self.f };
+        OneJet::new(x0, x1 * self.fu, x1 * self.fv)
+    }
+
+    /// Throw away the derivative in one direction, so that what follows treats
+    /// this as constant along it.
+    fn annihilate(self, index: usize) -> Self {
+        if index == 0 {
+            OneJet::new(self.f, 0.0, self.fv)
+        } else {
+            OneJet::new(self.f, self.fu, 0.0)
+        }
+    }
+
+    fn interpolate(self, other: Self, weight: Self) -> Self {
+        self * weight.scale(-1.0).offset(1.0) + other * weight
+    }
+}
+
+impl std::ops::Add for OneJet {
+    type Output = OneJet;
+    fn add(self, o: OneJet) -> OneJet {
+        OneJet::new(self.f + o.f, self.fu + o.fu, self.fv + o.fv)
+    }
+}
+
+impl std::ops::Sub for OneJet {
+    type Output = OneJet;
+    fn sub(self, o: OneJet) -> OneJet {
+        OneJet::new(self.f - o.f, self.fu - o.fu, self.fv - o.fv)
+    }
+}
+
+impl std::ops::Mul for OneJet {
+    type Output = OneJet;
+    fn mul(self, o: OneJet) -> OneJet {
+        OneJet::new(
+            self.f * o.f,
+            self.f * o.fu + self.fu * o.f,
+            self.f * o.fv + self.fv * o.f,
+        )
+    }
+}
+
+impl TwoJet {
+    fn new(d: f32, du: f32, dv: f32) -> Self {
+        TwoJet {
+            f: d,
+            fu: du,
+            fv: dv,
+            ..TwoJet::default()
+        }
+    }
+
+    fn one_jet(self) -> OneJet {
+        OneJet::new(self.f, self.fu, self.fv)
+    }
+
+    fn scale(self, d: f32) -> Self {
+        TwoJet {
+            f: d * self.f,
+            fu: d * self.fu,
+            fv: d * self.fv,
+            fuu: d * self.fuu,
+            fuv: d * self.fuv,
+            fvv: d * self.fvv,
+        }
+    }
+
+    fn offset(self, d: f32) -> Self {
+        TwoJet {
+            f: self.f + d,
+            ..self
+        }
+    }
+
+    fn modulo(self, d: f32) -> Self {
+        let mut f = self.f % d;
+        if f < 0.0 {
+            f += d;
+        }
+        TwoJet { f, ..self }
+    }
+
+    fn sin(self) -> Self {
+        let t = self.scale(std::f32::consts::TAU);
+        let (s, c) = t.f.sin_cos();
+        TwoJet {
+            f: s,
+            fu: c * t.fu,
+            fv: c * t.fv,
+            fuu: c * t.fuu - s * t.fu * t.fu,
+            fuv: c * t.fuv - s * t.fu * t.fv,
+            fvv: c * t.fvv - s * t.fv * t.fv,
+        }
+    }
+
+    fn cos(self) -> Self {
+        let t = self.scale(std::f32::consts::TAU);
+        let (s, c) = t.f.sin_cos();
+        let (s, c) = (c, -s);
+        TwoJet {
+            f: s,
+            fu: c * t.fu,
+            fv: c * t.fv,
+            fuu: c * t.fuu - s * t.fu * t.fu,
+            fuv: c * t.fuv - s * t.fu * t.fv,
+            fvv: c * t.fvv - s * t.fv * t.fv,
+        }
+    }
+
+    fn powf(self, n: f32) -> Self {
+        let x0 = self.f.powf(n);
+        let x1 = if self.f == 0.0 { 0.0 } else { n * x0 / self.f };
+        let x2 = if self.f == 0.0 {
+            0.0
+        } else {
+            (n - 1.0) * x1 / self.f
+        };
+        TwoJet {
+            f: x0,
+            fu: x1 * self.fu,
+            fv: x1 * self.fv,
+            fuu: x1 * self.fuu + x2 * self.fu * self.fu,
+            fuv: x1 * self.fuv + x2 * self.fu * self.fv,
+            fvv: x1 * self.fvv + x2 * self.fv * self.fv,
+        }
+    }
+
+    /// The derivative in one direction, as a jet one order lower.
+    fn differentiate(self, index: usize) -> OneJet {
+        if index == 0 {
+            OneJet::new(self.fu, self.fuu, self.fuv)
+        } else {
+            OneJet::new(self.fv, self.fuv, self.fvv)
+        }
+    }
+
+    fn annihilate(self, index: usize) -> Self {
+        if index == 0 {
+            TwoJet {
+                f: self.f,
+                fu: 0.0,
+                fv: self.fv,
+                fuu: 0.0,
+                fuv: 0.0,
+                fvv: self.fvv,
+            }
+        } else {
+            TwoJet {
+                f: self.f,
+                fu: self.fu,
+                fv: 0.0,
+                fuu: self.fuu,
+                fuv: 0.0,
+                fvv: 0.0,
+            }
+        }
+    }
+}
+
+impl std::ops::Add for TwoJet {
+    type Output = TwoJet;
+    fn add(self, o: TwoJet) -> TwoJet {
+        TwoJet {
+            f: self.f + o.f,
+            fu: self.fu + o.fu,
+            fv: self.fv + o.fv,
+            fuu: self.fuu + o.fuu,
+            fuv: self.fuv + o.fuv,
+            fvv: self.fvv + o.fvv,
+        }
+    }
+}
+
+impl std::ops::Sub for TwoJet {
+    type Output = TwoJet;
+    fn sub(self, o: TwoJet) -> TwoJet {
+        TwoJet {
+            f: self.f - o.f,
+            fu: self.fu - o.fu,
+            fv: self.fv - o.fv,
+            fuu: self.fuu - o.fuu,
+            fuv: self.fuv - o.fuv,
+            fvv: self.fvv - o.fvv,
+        }
+    }
+}
+
+impl std::ops::Mul for TwoJet {
+    type Output = TwoJet;
+    fn mul(self, o: TwoJet) -> TwoJet {
+        TwoJet {
+            f: self.f * o.f,
+            fu: self.f * o.fu + self.fu * o.f,
+            fv: self.f * o.fv + self.fv * o.f,
+            fuu: self.f * o.fuu + 2.0 * self.fu * o.fu + self.fuu * o.f,
+            fuv: self.f * o.fuv + self.fu * o.fv + self.fv * o.fu + self.fuv * o.f,
+            fvv: self.f * o.fvv + 2.0 * self.fv * o.fv + self.fvv * o.f,
+        }
+    }
+}
+
+/// A point of the surface, carried with its first derivatives.
+#[derive(Clone, Copy, Default)]
+struct OneJetVec {
+    x: OneJet,
+    y: OneJet,
+    z: OneJet,
+}
+
+/// A point of the surface, carried with its first and second derivatives.
+#[derive(Clone, Copy, Default)]
+struct TwoJetVec {
+    x: TwoJet,
+    y: TwoJet,
+    z: TwoJet,
+}
+
+impl OneJetVec {
+    fn scale_jet(self, a: OneJet) -> Self {
+        OneJetVec {
+            x: self.x * a,
+            y: self.y * a,
+            z: self.z * a,
+        }
+    }
+
+    fn annihilate(self, index: usize) -> Self {
+        OneJetVec {
+            x: self.x.annihilate(index),
+            y: self.y.annihilate(index),
+            z: self.z.annihilate(index),
+        }
+    }
+
+    fn cross(self, w: Self) -> Self {
+        OneJetVec {
+            x: self.y * w.z - self.z * w.y,
+            y: self.z * w.x - self.x * w.z,
+            z: self.x * w.y - self.y * w.x,
+        }
+    }
+
+    fn dot(self, w: Self) -> OneJet {
+        self.x * w.x + self.y * w.y + self.z * w.z
+    }
+
+    fn normalize(self) -> Self {
+        let a = self.dot(self);
+        let s = if a.f > 0.0 {
+            a.powf(-0.5)
+        } else {
+            OneJet::default()
+        };
+        self.scale_jet(s)
+    }
+
+    /// Turn about the z axis by an angle that is itself a jet.
+    fn rotate_z(self, angle: OneJet) -> Self {
+        let s = angle.sin();
+        let c = angle.cos();
+        OneJetVec {
+            x: self.x * c + self.y * s,
+            y: self.y * c - self.x * s,
+            z: self.z,
+        }
+    }
+}
+
+impl std::ops::Add for OneJetVec {
+    type Output = OneJetVec;
+    fn add(self, o: OneJetVec) -> OneJetVec {
+        OneJetVec {
+            x: self.x + o.x,
+            y: self.y + o.y,
+            z: self.z + o.z,
+        }
+    }
+}
+
+impl TwoJetVec {
+    fn one_jet_vec(self) -> OneJetVec {
+        OneJetVec {
+            x: self.x.one_jet(),
+            y: self.y.one_jet(),
+            z: self.z.one_jet(),
+        }
+    }
+
+    fn scale(self, a: f32) -> Self {
+        TwoJetVec {
+            x: self.x.scale(a),
+            y: self.y.scale(a),
+            z: self.z.scale(a),
+        }
+    }
+
+    fn scale_jet(self, a: TwoJet) -> Self {
+        TwoJetVec {
+            x: self.x * a,
+            y: self.y * a,
+            z: self.z * a,
+        }
+    }
+
+    fn annihilate(self, index: usize) -> Self {
+        TwoJetVec {
+            x: self.x.annihilate(index),
+            y: self.y.annihilate(index),
+            z: self.z.annihilate(index),
+        }
+    }
+
+    fn differentiate(self, index: usize) -> OneJetVec {
+        OneJetVec {
+            x: self.x.differentiate(index),
+            y: self.y.differentiate(index),
+            z: self.z.differentiate(index),
+        }
+    }
+
+    fn rotate_z(self, angle: f32) -> Self {
+        let (s, c) = (angle * std::f32::consts::TAU).sin_cos();
+        TwoJetVec {
+            x: self.x.scale(c) + self.y.scale(s),
+            y: self.x.scale(-s) + self.y.scale(c),
+            z: self.z,
+        }
+    }
+
+    fn rotate_y(self, angle: f32) -> Self {
+        let (s, c) = (angle * std::f32::consts::TAU).sin_cos();
+        TwoJetVec {
+            x: self.x.scale(c) + self.z.scale(-s),
+            y: self.y,
+            z: self.x.scale(s) + self.z.scale(c),
+        }
+    }
+
+    fn interpolate_jet(self, other: Self, weight: TwoJet) -> Self {
+        self.scale_jet(weight.scale(-1.0).offset(1.0)) + other.scale_jet(weight)
+    }
+
+    fn interpolate(self, other: Self, weight: f32) -> Self {
+        self.scale(1.0 - weight) + other.scale(weight)
+    }
+}
+
+impl std::ops::Add for TwoJetVec {
+    type Output = TwoJetVec;
+    fn add(self, o: TwoJetVec) -> TwoJetVec {
+        TwoJetVec {
+            x: self.x + o.x,
+            y: self.y + o.y,
+            z: self.z + o.z,
+        }
+    }
+}
+
+/// The cross-section of the corrugated belt: a figure eight that starts as a
+/// circle, opens into a lobe, and closes again.
+fn figure_eight(w: OneJetVec, h: OneJetVec, bend: OneJetVec, form: OneJet, v: OneJet) -> OneJetVec {
+    let vv = v.modulo(1.0);
+    let cos_vv = vv.cos();
+    let vv2 = vv.scale(2.0);
+    let sin_vv2 = vv2.sin();
+    let cos_vv2 = vv2.cos();
+    let mut height = cos_vv2.offset(-1.0).scale(-1.0);
+    if vv.f > 0.25 && vv.f < 0.75 {
+        height = height.scale(-1.0).offset(4.0);
+    }
+    let heights = height.scale(0.6);
+    let heights_sqs = (heights * heights).scale(1.0 / 64.0);
+    let hh = h + bend.scale_jet(heights_sqs);
+    let interp = cos_vv.offset(-1.0).scale(-2.0).interpolate(heights, form);
+    w.scale_jet(sin_vv2) + hh.scale_jet(interp)
+}
+
+/// Put the corrugation on the curve: build a frame at each point of it and
+/// sweep the figure eight along.
+fn add_figure_eight(
+    p: TwoJetVec,
+    u: TwoJet,
+    v: OneJet,
+    form: TwoJet,
+    scale: TwoJet,
+    num_strips: usize,
+) -> OneJetVec {
+    let size = form * scale;
+    let f = form.scale(2.0) - form * form;
+    let fo = f.one_jet();
+    let sizeo = size.one_jet();
+    let dv = p.differentiate(1).annihilate(1);
+    let pa = p.annihilate(1);
+    let du = pa.differentiate(0).normalize();
+    let h = du.cross(dv).normalize().scale_jet(sizeo);
+    let w = h.cross(du).normalize().scale_jet(sizeo.scale(1.1));
+    let dsize = size.differentiate(0);
+    let duu = u.differentiate(0);
+    let bend = du.scale_jet(dsize).scale_jet(duu.powf(-1.0));
+    let fe = figure_eight(w, h, bend, fo, v);
+    let vs = v.scale(1.0 / num_strips as f32);
+    (pa.one_jet_vec() + fe).rotate_z(vs)
+}
+
+/// A quarter turn of an ellipse, which is the shape the belt's spine takes.
+fn arc(u: TwoJet, xsize: f32, ysize: f32, zsize: f32) -> TwoJetVec {
+    /* sin(two_jet(0,0,1)) and cos(two_jet(0,0,1)), worked out once. */
+    const SIN_V: TwoJet = TwoJet {
+        f: 0.0,
+        fu: 0.0,
+        fv: std::f32::consts::TAU,
+        fuu: 0.0,
+        fuv: 0.0,
+        fvv: 0.0,
+    };
+    const COS_V: TwoJet = TwoJet {
+        f: 1.0,
+        fu: 0.0,
+        fv: 0.0,
+        fuu: 0.0,
+        fuv: 0.0,
+        fvv: -std::f32::consts::TAU * std::f32::consts::TAU,
+    };
+    let uq = u.scale(0.25);
+    let sin_uq = uq.sin();
+    TwoJetVec {
+        x: sin_uq * SIN_V.scale(xsize),
+        y: sin_uq * COS_V.scale(ysize),
+        z: uq.cos().scale(zsize),
+    }
+}
+
+/// The two reparameterisations of the spine, which are what push one pole past
+/// the other.
+fn param1(x: TwoJet) -> TwoJet {
+    let mut offset = 0.0;
+    let mut xm = x.modulo(4.0);
+    if xm.f > 2.0 {
+        xm = xm.offset(-2.0);
+        offset = 2.0;
+    }
+    let xm_sq = xm.powf(2.0);
+    if xm.f <= 1.0 {
+        (xm_sq.scale(-1.0) + xm.scale(2.0)).offset(offset)
+    } else {
+        (xm_sq + xm.scale(-2.0)).offset(offset + 2.0)
+    }
+}
+
+fn param2(x: TwoJet) -> TwoJet {
+    let mut offset = 0.0;
+    let mut xm = x.modulo(4.0);
+    if xm.f > 2.0 {
+        xm = xm.offset(-2.0);
+        offset = 2.0;
+    }
+    let xm_sq = xm.powf(2.0);
+    if xm.f <= 1.0 {
+        xm_sq.offset(offset)
+    } else {
+        (xm_sq.scale(-1.0) + xm.scale(4.0)).offset(offset - 2.0)
+    }
+}
+
+/// The smoothstep that blends the two reparameterisations.
+fn u_interp(x: TwoJet) -> TwoJet {
+    let mut xm = x.modulo(2.0);
+    if xm.f > 1.0 {
+        xm = xm.scale(-1.0).offset(2.0);
+    }
+    xm.powf(2.0).scale(3.0) + xm.powf(3.0).scale(-2.0)
+}
+
+/// How far the corrugation has formed at this point along the spine.
+fn ff_interp(x: TwoJet) -> TwoJet {
+    const FFPOW: f32 = 3.0;
+    let mut xm = x.modulo(2.0);
+    if xm.f > 1.0 {
+        xm = xm.scale(-1.0).offset(2.0);
+    }
+    xm = xm.scale(1.06).offset(-0.05);
+    if xm.f < 0.0 {
+        TwoJet::new(0.0, 0.0, 0.0)
+    } else if xm.f > 1.0 {
+        TwoJet::new(1.0, 0.0, 0.0)
+    } else {
+        xm.powf(FFPOW - 1.0).scale(FFPOW) + xm.powf(FFPOW).scale(1.0 - FFPOW)
+    }
+}
+
+/// How big the corrugation is at this point along the spine.
+fn fs_interp(x: TwoJet) -> TwoJet {
+    const FSPOW: f32 = 3.0;
+    let mut xm = x.modulo(2.0);
+    if xm.f > 1.0 {
+        xm = xm.scale(-1.0).offset(2.0);
+    }
+    (xm.powf(FSPOW - 1.0).scale(FSPOW) + xm.powf(FSPOW).scale(1.0 - FSPOW)).scale(-0.2)
+}
+
+fn stage1(u: TwoJet) -> TwoJetVec {
+    arc(u, 1.0, 1.0, 1.0)
+}
+
+fn stage2(u: TwoJet) -> TwoJetVec {
+    let a1 = arc(param1(u), 0.9, 0.9, -1.0);
+    let a2 = arc(param2(u), 1.0, 1.0, 0.5);
+    a1.interpolate_jet(a2, u_interp(u))
+}
+
+fn stage3(u: TwoJet) -> TwoJetVec {
+    let a1 = arc(param1(u), -0.9, -0.9, -1.0);
+    let a2 = arc(param2(u), -1.0, 1.0, -0.5);
+    a1.interpolate_jet(a2, u_interp(u))
+}
+
+fn stage4(u: TwoJet) -> TwoJetVec {
+    arc(u, -1.0, -1.0, -1.0)
+}
+
+fn scene12(u: TwoJet, t: f32) -> TwoJetVec {
+    stage1(u).interpolate(stage2(u), t)
+}
+
+fn scene23(u: TwoJet, t: f32) -> TwoJetVec {
+    let t = t * 0.5;
+    let tt = if u.f <= 1.0 { t } else { -t };
+    let a1 = arc(param1(u), 0.9, 0.9, -1.0).rotate_z(tt);
+    let a2 = arc(param2(u), 1.0, 1.0, 0.5).rotate_y(t);
+    a1.interpolate_jet(a2, u_interp(u))
+}
+
+fn scene34(u: TwoJet, t: f32) -> TwoJetVec {
+    stage3(u).interpolate(stage4(u), t)
+}
+
+/// The five acts of the eversion. Each takes a point of the parameter square
+/// and a time within its own act.
+fn corrugate(u: f32, v: f32, t: f32, num_strips: usize) -> OneJetVec {
+    let uj = TwoJet::new(u, 1.0, 0.0);
+    let vj = OneJet::new(v, 0.0, 1.0);
+    let form = ff_interp(uj).scale(t);
+    add_figure_eight(stage1(uj), uj, vj, form, fs_interp(uj), num_strips)
+}
+
+fn push_through(u: f32, v: f32, t: f32, num_strips: usize) -> OneJetVec {
+    let uj = TwoJet::new(u, 1.0, 0.0);
+    let vj = OneJet::new(v, 0.0, 1.0);
+    add_figure_eight(
+        scene12(uj, t),
+        uj,
+        vj,
+        ff_interp(uj),
+        fs_interp(uj),
+        num_strips,
+    )
+}
+
+fn twist(u: f32, v: f32, t: f32, num_strips: usize) -> OneJetVec {
+    let uj = TwoJet::new(u, 1.0, 0.0);
+    let vj = OneJet::new(v, 0.0, 1.0);
+    add_figure_eight(
+        scene23(uj, t),
+        uj,
+        vj,
+        ff_interp(uj),
+        fs_interp(uj),
+        num_strips,
+    )
+}
+
+fn un_push(u: f32, v: f32, t: f32, num_strips: usize) -> OneJetVec {
+    let uj = TwoJet::new(u, 1.0, 0.0);
+    let vj = OneJet::new(v, 0.0, 1.0);
+    add_figure_eight(
+        scene34(uj, t),
+        uj,
+        vj,
+        ff_interp(uj),
+        fs_interp(uj),
+        num_strips,
+    )
+}
+
+fn un_corrugate(u: f32, v: f32, t: f32, num_strips: usize) -> OneJetVec {
+    let uj = TwoJet::new(u, 1.0, 0.0);
+    let vj = OneJet::new(v, 0.0, 1.0);
+    let form = ff_interp(uj).scale(1.0 - t);
+    add_figure_eight(stage4(uj), uj, vj, form, fs_interp(uj), num_strips)
+}
+
+/// The point and the normal, from a jet that already carries the tangents.
+fn gen_point_and_normal(p: &OneJetVec) -> ([f32; 3], [f32; 3]) {
+    let nx = p.y.fu * p.z.fv - p.z.fu * p.y.fv;
+    let ny = p.z.fu * p.x.fv - p.x.fu * p.z.fv;
+    let nz = p.x.fu * p.y.fv - p.y.fu * p.x.fv;
+    let s = nx * nx + ny * ny + nz * nz;
+    let s = if s > 0.0 { (1.0 / s).sqrt() } else { 0.0 };
+    ([p.x.f, p.y.f, p.z.f], [-nx * s, -ny * s, -nz * s])
+}
+
+/// Evaluate one act over the parameter square.
+fn gen_surface(func: Act, t: f32, points: &mut [f32], normals: &mut [f32], num_strips: usize) {
+    let delta_u = 1.0 / NUM_U as f32;
+    let delta_v = 1.0 / NUM_V as f32;
+    for j in 0..=NUM_U {
+        let mut u = j as f32 * delta_u;
+        let val = func(u, 0.0, t, num_strips);
+        let speedv = (val.x.fv * val.x.fv + val.y.fv * val.y.fv + val.z.fv * val.z.fv).sqrt();
+        if speedv == 0.0 {
+            /* Perturb a bit, hoping to avoid degeneracy */
+            u += if u < 1.0 { f32::EPSILON } else { -f32::EPSILON };
+        }
+        for k in 0..=NUM_V {
+            let l = 3 * (j * (NUM_V + 1) + k);
+            let v = k as f32 * delta_v;
+            let val = func(u, v, t, num_strips);
+            let (p, n) = gen_point_and_normal(&val);
+            points[l..l + 3].copy_from_slice(&p);
+            normals[l..l + 3].copy_from_slice(&n);
+        }
+    }
+}
+
+/// One act of the eversion: where a point of the parameter square goes at a
+/// time within that act.
+type Act = fn(f32, f32, f32, usize) -> OneJetVec;
+
+/// The eversion's five acts, and when each of them happens.
+fn generate_geometry(points: &mut [f32], normals: &mut [f32], time: f32, num_strips: usize) {
+    /* Start of corrugation */
+    const CORR_START: f32 = 0.00;
+    /* Start of push (poles are pushed through each other) */
+    const PUSH_START: f32 = 0.10;
+    /* Start of twist (poles rotate in opposite directions) */
+    const TWIST_START: f32 = 0.23;
+    /* Start of unpush (poles held fixed while corrugations pushed through
+    center) */
+    const UNPUSH_START: f32 = 0.60;
+    /* Start of uncorrugation */
+    const UNCORR_START: f32 = 0.93;
+
+    let (func, t): (Act, f32) = if time >= UNCORR_START {
+        (un_corrugate, (time - UNCORR_START) / (1.0 - UNCORR_START))
+    } else if time >= UNPUSH_START {
+        (
+            un_push,
+            (time - UNPUSH_START) / (UNCORR_START - UNPUSH_START),
+        )
+    } else if time >= TWIST_START {
+        (twist, (time - TWIST_START) / (UNPUSH_START - TWIST_START))
+    } else if time >= PUSH_START {
+        (
+            push_through,
+            (time - PUSH_START) / (TWIST_START - PUSH_START),
+        )
+    } else if time >= CORR_START {
+        (corrugate, (time - CORR_START) / (PUSH_START - CORR_START))
+    } else {
+        return;
+    };
+    gen_surface(func, t, points, normals, num_strips);
+}
+
+/* -------------------------------------------------------------------------
  * The saver
  * ---------------------------------------------------------------------- */
 
@@ -682,12 +1441,19 @@ const MATC: [[f32; 3]; 3] = [
 ];
 
 const LIGHT_POSITION: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
+/// The two-sided colours. The analytic eversion is red outside and green
+/// inside; the corrugations eversion is gold and purple, as the film is.
 const MAT_DIFF_FRONT: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const MAT_DIFF_BACK: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
 const MAT_DIFF_TRANS_FRONT: [f32; 4] = [1.0, 0.0, 0.0, 0.7];
 const MAT_DIFF_TRANS_BACK: [f32; 4] = [0.0, 1.0, 0.0, 0.7];
+const MAT_DIFF_GOLD: [f32; 4] = [1.0, 0.843, 0.0, 1.0];
+const MAT_DIFF_PURPLE: [f32; 4] = [0.5, 0.0, 0.5, 1.0];
+const MAT_DIFF_GOLD_TRANS: [f32; 4] = [1.0, 0.843, 0.0, 0.7];
+const MAT_DIFF_PURPLE_TRANS: [f32; 4] = [0.5, 0.0, 0.5, 0.7];
 
 struct SphereEversionState {
+    method: Method,
     display_mode: DisplayMode,
     random_display_mode: bool,
     appearance: Appearance,
@@ -697,17 +1463,25 @@ struct SphereEversionState {
     projection: Projection,
     graticule: bool,
     random_graticule: bool,
-    /// The order of the eversion, upstream's `g`.
+    /// The order of the eversion, upstream's `g`. Analytic only.
     g: i32,
     random_g: bool,
+    /// How much of the corrugations eversion to show. Upstream exposes these
+    /// two for `outsidein` rather than for this saver, and its own
+    /// configuration file says so, so they are left at what it defaults them
+    /// to: all eight lunes and both hemispheres.
+    num_hemispheres: usize,
+    strip_step: usize,
 
     /* 3D rotation angles */
     alpha: f32,
     beta: f32,
     delta: f32,
     anim_state: AnimState,
-    /// Deformation parameter.
+    /// Deformation parameter of the analytic eversion, from -6 to 6.
     tau: f32,
+    /// Deformation parameter of the corrugations eversion, from 0 to 1.
+    time: f32,
     defdir: f32,
     turn_step: i32,
     num_turn: i32,
@@ -746,6 +1520,10 @@ impl SphereEversionState {
         if self.colors == Colors::TwoSided || self.colors == Colors::Earth {
             return;
         }
+        if self.method == Method::Corrugations {
+            self.setup_corrugation_colors();
+            return;
+        }
         let transparent = self.display_mode == DisplayMode::Transparent;
         let phi_range = 2.0 * std::f32::consts::PI;
         let theta_range = std::f32::consts::PI;
@@ -762,6 +1540,43 @@ impl SphereEversionState {
                 let (cf, cb) = color(angle, &MATC, transparent);
                 self.colf[4 * o..4 * o + 4].copy_from_slice(&cf);
                 self.colb[4 * o..4 * o + 4].copy_from_slice(&cb);
+            }
+        }
+    }
+
+    /// The same, for the corrugations eversion, whose samples are indexed by
+    /// hemisphere and lune as well as by the two surface parameters.
+    fn setup_corrugation_colors(&mut self) {
+        let transparent = self.display_mode == DisplayMode::Transparent;
+        let angle_strip = std::f32::consts::TAU / NUM_STRIPS as f32;
+        for hemisphere in 0..2 {
+            for strip in 0..NUM_STRIPS {
+                for j in 0..=NUM_U {
+                    let f = (NUM_U - j) as f32 / NUM_U as f32;
+                    let theta = if hemisphere & 1 == 0 {
+                        0.5 * std::f32::consts::PI * f
+                    } else {
+                        -0.5 * std::f32::consts::PI * f
+                    };
+                    for k in 0..=NUM_V {
+                        let mut phi = if hemisphere & 1 == 0 {
+                            angle_strip * k as f32 / NUM_V as f32
+                        } else {
+                            angle_strip * (NUM_V - k) as f32 / NUM_V as f32
+                        };
+                        phi += strip as f32 * angle_strip;
+                        let l =
+                            ((hemisphere * NUM_STRIPS + strip) * (NUM_U + 1) + j) * (NUM_V + 1) + k;
+                        let angle = if self.colors == Colors::Parallel {
+                            (2.0 * theta + 3.0 * std::f32::consts::PI / 4.0) * (2.0 / 3.0)
+                        } else {
+                            phi
+                        };
+                        let (cf, cb) = color(angle, &MATC, transparent);
+                        self.colf[4 * l..4 * l + 4].copy_from_slice(&cf);
+                        self.colb[4 * l..4 * l + 4].copy_from_slice(&cb);
+                    }
+                }
             }
         }
     }
@@ -945,6 +1760,128 @@ impl SphereEversionState {
         g.glx.vertex3f(p[0], p[1], p[2]);
     }
 
+    /// The vertices of every triangle strip of one lune, for the current
+    /// appearance. Every lune has the same ones, so they are worked out once.
+    fn corrugation_strips(&self) -> Vec<Vec<usize>> {
+        let mut strips = Vec::new();
+        match self.appearance {
+            Appearance::Solid | Appearance::MeridianBands => {
+                for k in 0..NUM_V {
+                    if self.appearance == Appearance::MeridianBands
+                        && (k & (NUMB_MER - 1)) >= NUMB_MER / 4
+                        && (k & (NUMB_MER - 1)) < 3 * NUMB_MER / 4
+                    {
+                        continue;
+                    }
+                    let mut strip = Vec::with_capacity(2 * (NUM_U + 1));
+                    for j in 0..=NUM_U {
+                        for i in 0..=1 {
+                            strip.push(j * (NUM_V + 1) + k + i);
+                        }
+                    }
+                    strips.push(strip);
+                }
+            }
+            Appearance::ParallelBands => {
+                for j in 0..NUM_U {
+                    if (j & (NUMB_PAR - 1)) >= NUMB_PAR / 4
+                        && (j & (NUMB_PAR - 1)) < 3 * NUMB_PAR / 4
+                    {
+                        continue;
+                    }
+                    let mut strip = Vec::with_capacity(2 * (NUM_V + 1));
+                    for k in (0..=NUM_V).rev() {
+                        for i in 0..=1 {
+                            strip.push((j + i) * (NUM_V + 1) + k);
+                        }
+                    }
+                    strips.push(strip);
+                }
+            }
+        }
+        strips
+    }
+
+    /// `outside_in_ff`: draw the corrugations eversion.
+    ///
+    /// One lune's worth of surface is evaluated and then drawn sixteen times
+    /// under different rotations, eight lunes to a hemisphere, which is how
+    /// the whole sphere is made out of one belt. The two-pass trick the
+    /// analytic eversion needs applies here too, for the same reason.
+    ///
+    /// Upstream opens a block per strip, which would be sixty-four draw calls
+    /// a lune and two thousand a frame here, since a triangle strip cannot
+    /// merge with the strip beside it. So the strips of a lune are joined into
+    /// one with the usual pair of repeated vertices between them: they make
+    /// two triangles of no area, which raster to nothing, and every strip is
+    /// an even number of vertices long so the winding of what follows a join
+    /// is unchanged. Thirty-two draw calls a frame, and four thousand vertices
+    /// more.
+    fn draw_corrugations(&self, g: &mut Gl) {
+        let per_vertex = self.colors != Colors::TwoSided && self.colors != Colors::Earth;
+        let passes = if per_vertex { 2 } else { 1 };
+        let strips = self.corrugation_strips();
+
+        for pass in 0..passes {
+            if per_vertex {
+                g.glx.front_face_cw(pass == 1);
+                g.glx.cull_face(true);
+                g.glx.color_material(true);
+            } else {
+                g.glx.cull_face(false);
+                g.glx.color_material(false);
+            }
+            let colors = if pass == 0 { &self.colf } else { &self.colb };
+
+            for hemisphere in 0..self.num_hemispheres {
+                g.glx.push_matrix();
+                g.glx.rotate(hemisphere as f32 * 180.0, 0.0, 1.0, 0.0);
+                for strip in (0..NUM_STRIPS).step_by(self.strip_step) {
+                    let angle = if hemisphere == 0 {
+                        -(strip as f32)
+                    } else {
+                        strip as f32 + 1.0
+                    } * 360.0
+                        / NUM_STRIPS as f32;
+                    g.glx.push_matrix();
+                    g.glx.rotate(angle, 0.0, 0.0, 1.0);
+                    let base = (hemisphere * NUM_STRIPS + strip) * (NUM_U + 1) * (NUM_V + 1);
+
+                    g.glx.begin(Shape::TriangleStrip);
+                    let mut prev: Option<usize> = None;
+                    for run in &strips {
+                        if let Some(p) = prev {
+                            self.emit_corrugation(g, p, base + p, colors, per_vertex);
+                            let f = run[0];
+                            self.emit_corrugation(g, f, base + f, colors, per_vertex);
+                        }
+                        for &l in run {
+                            self.emit_corrugation(g, l, base + l, colors, per_vertex);
+                        }
+                        prev = run.last().copied();
+                    }
+                    g.glx.end();
+
+                    g.glx.pop_matrix();
+                }
+                g.glx.pop_matrix();
+            }
+        }
+        g.glx.cull_face(false);
+        g.glx.front_face_cw(false);
+    }
+
+    fn emit_corrugation(&self, g: &mut Gl, l: usize, m: usize, colors: &[f32], per_vertex: bool) {
+        if per_vertex {
+            let c = &colors[4 * m..4 * m + 4];
+            g.glx.color4f(c[0], c[1], c[2], c[3]);
+        }
+        g.glx
+            .normal3f(self.sn[3 * l], self.sn[3 * l + 1], self.sn[3 * l + 2]);
+        g.glx
+            .vertex3f(self.sp[3 * l], self.sp[3 * l + 1], self.sp[3 * l + 2]);
+    }
+
     /// The white wireframe globe drawn over the surface.
     fn draw_graticule(&self, g: &mut Gl, mat: &[[f32; 3]; 3]) {
         g.glx.color4f(1.0, 1.0, 1.0, 1.0);
@@ -986,16 +1923,33 @@ impl SphereEversionState {
             return;
         }
         if self.anim_state == AnimState::Deform {
-            self.tau += self.defdir * self.deform_speed * 0.001;
-            if self.tau < BEDNORZ_TAU_MIN {
-                self.tau = BEDNORZ_TAU_MIN;
-                self.defdir = -self.defdir;
-                self.anim_state = AnimState::Turn;
-            }
-            if self.tau > BEDNORZ_TAU_MAX {
-                self.tau = BEDNORZ_TAU_MAX;
-                self.defdir = -self.defdir;
-                self.anim_state = AnimState::Turn;
+            // The two eversions run their deformation parameter over
+            // different ranges at different rates, and both turn around at
+            // each end.
+            if self.method == Method::Analytic {
+                self.tau += self.defdir * self.deform_speed * 0.001;
+                if self.tau < BEDNORZ_TAU_MIN {
+                    self.tau = BEDNORZ_TAU_MIN;
+                    self.defdir = -self.defdir;
+                    self.anim_state = AnimState::Turn;
+                }
+                if self.tau > BEDNORZ_TAU_MAX {
+                    self.tau = BEDNORZ_TAU_MAX;
+                    self.defdir = -self.defdir;
+                    self.anim_state = AnimState::Turn;
+                }
+            } else {
+                self.time += self.defdir * self.deform_speed * 0.0001;
+                if self.time < 0.0 {
+                    self.time = 0.0;
+                    self.defdir = -self.defdir;
+                    self.anim_state = AnimState::Turn;
+                }
+                if self.time > 1.0 {
+                    self.time = 1.0;
+                    self.defdir = -self.defdir;
+                    self.anim_state = AnimState::Turn;
+                }
             }
             if self.anim_state == AnimState::Turn {
                 self.qs = angles_to_quat(self.alpha, self.beta, self.delta);
@@ -1104,27 +2058,58 @@ impl Hack3d for SphereEversionState {
 
     fn draw(&mut self, g: &mut Gl) -> u32 {
         self.animate();
-        self.compute_surface();
 
-        /* Compute the rotation that rotates the surface in 3D, including the
-        trackball rotations. */
-        let r1 = rotateall(self.alpha, self.beta, self.delta);
-        let q = self.trackball.quaternion();
-        let r2 = quat_to_rotmat([q.x as f32, q.y as f32, q.z as f32, q.w as f32]);
-        let mat = mult_rotmat(&r2, &r1);
+        let corrugations = self.method == Method::Corrugations;
+        let mut mat = [[0.0f32; 3]; 3];
+        if corrugations {
+            let (mut sp, mut sn) = (std::mem::take(&mut self.sp), std::mem::take(&mut self.sn));
+            generate_geometry(&mut sp, &mut sn, self.time, NUM_STRIPS);
+            self.sp = sp;
+            self.sn = sn;
+        } else {
+            self.compute_surface();
+            /* Compute the rotation that rotates the surface in 3D, including
+            the trackball rotations. */
+            let r1 = rotateall(self.alpha, self.beta, self.delta);
+            let q = self.trackball.quaternion();
+            let r2 = quat_to_rotmat([q.x as f32, q.y as f32, q.z as f32, q.w as f32]);
+            mat = mult_rotmat(&r2, &r1);
+        }
 
         g.glx.clear_color(0.0, 0.0, 0.0, 0.0);
         g.glx.clear();
 
         g.glx.matrix_mode_projection();
         g.glx.load_identity();
-        if self.projection == Projection::Perspective {
-            g.glx.perspective(60.0, self.aspect, 0.1, 10.0);
-        } else if self.aspect >= 1.0 {
-            g.glx.ortho(-self.aspect, self.aspect, -1.0, 1.0, 0.1, 10.0);
+        // The corrugations eversion is bigger than the analytic one and sits
+        // further away, so its near and far planes are set from where it is
+        // rather than at a fixed depth.
+        let (near, far) = if corrugations {
+            (-self.offset3d[2] - 2.0, -self.offset3d[2] + 2.0)
         } else {
-            g.glx
-                .ortho(-1.0, 1.0, -1.0 / self.aspect, 1.0 / self.aspect, 0.1, 10.0);
+            (0.1, 10.0)
+        };
+        let half = if corrugations { 1.8 } else { 1.0 };
+        if self.projection == Projection::Perspective {
+            g.glx.perspective(60.0, self.aspect, near, far);
+        } else if self.aspect >= 1.0 {
+            g.glx.ortho(
+                -half * self.aspect,
+                half * self.aspect,
+                -half,
+                half,
+                near,
+                far,
+            );
+        } else {
+            g.glx.ortho(
+                -half,
+                half,
+                -half / self.aspect,
+                half / self.aspect,
+                near,
+                far,
+            );
         }
         g.glx.matrix_mode_modelview();
         g.glx.load_identity();
@@ -1155,25 +2140,56 @@ impl Hack3d for SphereEversionState {
         }
 
         if self.colors == Colors::TwoSided || self.colors == Colors::Earth {
-            let (front, back) = if self.display_mode == DisplayMode::Transparent {
-                (MAT_DIFF_TRANS_FRONT, MAT_DIFF_TRANS_BACK)
-            } else {
-                (MAT_DIFF_FRONT, MAT_DIFF_BACK)
+            let (front, back) = match (self.method, self.display_mode) {
+                (Method::Analytic, DisplayMode::Transparent) => {
+                    (MAT_DIFF_TRANS_FRONT, MAT_DIFF_TRANS_BACK)
+                }
+                (Method::Analytic, _) => (MAT_DIFF_FRONT, MAT_DIFF_BACK),
+                (Method::Corrugations, DisplayMode::Transparent) => {
+                    (MAT_DIFF_GOLD_TRANS, MAT_DIFF_PURPLE_TRANS)
+                }
+                (Method::Corrugations, _) => (MAT_DIFF_GOLD, MAT_DIFF_PURPLE),
             };
             g.glx.material_ambient_diffuse(front);
             g.glx.material_back_ambient_diffuse(back);
         }
 
-        g.glx.polygon_offset(Some((1.0, 1.0)));
-        self.draw_surface(g, &mat);
-        g.glx.polygon_offset(None);
+        if corrugations {
+            // The corrugations eversion turns the whole sphere with the
+            // matrix stack rather than turning its points, because the one
+            // lune it evaluates is drawn sixteen times.
+            g.glx.translate(0.0, 0.0, self.offset3d[2]);
+            let q = self.trackball.quaternion();
+            g.glx.mult_matrix(rotmat_4(quat_to_rotmat([
+                q.x as f32, q.y as f32, q.z as f32, q.w as f32,
+            ])));
+            g.glx.rotate(self.alpha, 1.0, 0.0, 0.0);
+            g.glx.rotate(self.beta, 0.0, 1.0, 0.0);
+            g.glx.rotate(self.delta, 0.0, 0.0, 1.0);
+            self.draw_corrugations(g);
+        } else {
+            g.glx.polygon_offset(Some((1.0, 1.0)));
+            self.draw_surface(g, &mat);
+            g.glx.polygon_offset(None);
 
-        if self.graticule {
-            self.draw_graticule(g, &mat);
+            if self.graticule {
+                self.draw_graticule(g, &mat);
+            }
         }
 
         g.res.int("delay").max(0) as u32
     }
+}
+
+/// A rotation as a matrix the runtime can multiply in.
+fn rotmat_4(m: [[f32; 3]; 3]) -> crate::runtime::gl::Mat4 {
+    // Column major, and upstream's `m[i][j]` is row i column j.
+    crate::runtime::gl::Mat4([
+        m[0][0], m[1][0], m[2][0], 0.0, //
+        m[0][1], m[1][1], m[2][1], 0.0, //
+        m[0][2], m[1][2], m[2][2], 0.0, //
+        0.0, 0.0, 0.0, 1.0,
+    ])
 }
 
 /// Pick one of `n` at random, for the knobs whose value is "random".
@@ -1182,6 +2198,19 @@ fn pick(n: u32) -> u32 {
 }
 
 fn init(g: &mut Gl) -> Box<dyn Hack3d> {
+    let em = g.res.string("eversionMethod").to_string();
+    let method = match em.as_str() {
+        "analytic" => Method::Analytic,
+        "corrugations" => Method::Corrugations,
+        _ => {
+            if pick(2) == 0 {
+                Method::Analytic
+            } else {
+                Method::Corrugations
+            }
+        }
+    };
+
     let mode = g.res.string("mode").to_string();
     let (display_mode, random_display_mode) = match mode.as_str() {
         "surface" => (DisplayMode::Surface, false),
@@ -1259,8 +2288,21 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
         deform_speed = 10.0;
     }
 
-    let n = (NUMPH + 1) * (NUMTH + 1);
+    // The two eversions sample different grids: the analytic one evaluates
+    // the whole sphere, the corrugations one evaluates a single lune and
+    // draws it sixteen times, with a colour per lune.
+    let (points, colors_len) = match method {
+        Method::Analytic => {
+            let n = (NUMPH + 1) * (NUMTH + 1);
+            (n, n)
+        }
+        Method::Corrugations => (
+            (NUM_U + 1) * (NUM_V + 1),
+            2 * NUM_STRIPS * (NUM_U + 1) * (NUM_V + 1),
+        ),
+    };
     let mut st = SphereEversionState {
+        method,
         display_mode,
         random_display_mode,
         appearance,
@@ -1278,19 +2320,36 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
         delta: frand(360.0) as f32,
         anim_state: AnimState::Deform,
         tau: BEDNORZ_TAU_MAX,
-        defdir: -1.0,
+        time: 0.0,
+        // The analytic eversion starts at the far end of its range and runs
+        // down; the corrugations one starts at nought and runs up.
+        defdir: if method == Method::Analytic {
+            -1.0
+        } else {
+            1.0
+        },
         turn_step: 0,
         num_turn: 0,
         qs: [0.0; 4],
         qe: [0.0; 4],
         eta_min: BEDNORZ_ETA_MIN,
         beta_max: BEDNORZ_BETA_MAX,
-        offset3d: [0.0, 0.0, -1.8],
+        offset3d: [
+            0.0,
+            0.0,
+            if method == Method::Analytic {
+                -1.8
+            } else {
+                -3.2
+            },
+        ],
+        num_hemispheres: 2,
+        strip_step: 1,
 
-        sp: vec![0.0; 3 * n],
-        sn: vec![0.0; 3 * n],
-        colf: vec![0.0; 4 * n],
-        colb: vec![0.0; 4 * n],
+        sp: vec![0.0; 3 * points],
+        sn: vec![0.0; 3 * points],
+        colf: vec![0.0; 4 * colors_len],
+        colb: vec![0.0; 4 * colors_len],
 
         aspect: 1.0,
         trackball: Trackball::new(),
@@ -1310,6 +2369,7 @@ fn init(g: &mut Gl) -> Box<dyn Hack3d> {
 
 const DEFAULTS: &[&str] = &[
     "*delay:        10000",
+    "*eversionMethod: random",
     "*showFPS:      False",
     "*mode:         random",
     "*appearance:   random",
@@ -1433,8 +2493,24 @@ const ORDERS: &[SelectItem] = &[
     },
 ];
 
+const METHODS: &[SelectItem] = &[
+    SelectItem {
+        value: "random",
+        label: "Random deformation",
+    },
+    SelectItem {
+        value: "analytic",
+        label: "Analytic",
+    },
+    SelectItem {
+        value: "corrugations",
+        label: "Corrugations",
+    },
+];
+
 const OPTS: &[Opt] = &[
     Opt::slider("delay", "Frame rate", 0.0, 100_000.0, 1000.0, 0, "10000").inverted(),
+    Opt::select("eversionMethod", "Deformation", METHODS, "random"),
     Opt::slider(
         "deformSpeed",
         "Deformation speed",
@@ -1498,6 +2574,7 @@ mod tests {
             // Build the surface by hand at the extreme of tau.
             let n = (NUMPH + 1) * (NUMTH + 1);
             let mut st = SphereEversionState {
+                method: Method::Analytic,
                 display_mode: DisplayMode::Surface,
                 random_display_mode: false,
                 appearance: Appearance::Solid,
@@ -1514,6 +2591,7 @@ mod tests {
                 delta: 0.0,
                 anim_state: AnimState::Deform,
                 tau,
+                time: 0.0,
                 defdir: -1.0,
                 turn_step: 0,
                 num_turn: 0,
@@ -1522,6 +2600,8 @@ mod tests {
                 eta_min: BEDNORZ_ETA_MIN,
                 beta_max: BEDNORZ_BETA_MAX,
                 offset3d: [0.0; 3],
+                num_hemispheres: 2,
+                strip_step: 1,
                 sp: vec![0.0; 3 * n],
                 sn: vec![0.0; 3 * n],
                 colf: vec![0.0; 4 * n],
@@ -1736,25 +2816,103 @@ mod tests {
         );
     }
 
+    /// The corrugations eversion begins and ends as a sphere too, and its
+    /// belt really is a unit one: with the corrugation amplitude at nought,
+    /// every point of it is exactly one from the middle.
+    #[test]
+    fn the_corrugations_belt_begins_and_ends_round() {
+        let n = (NUM_U + 1) * (NUM_V + 1);
+        for time in [0.0, 1.0] {
+            let mut sp = vec![0.0f32; 3 * n];
+            let mut sn = vec![0.0f32; 3 * n];
+            generate_geometry(&mut sp, &mut sn, time, NUM_STRIPS);
+            let mut lo = f32::MAX;
+            let mut hi = 0.0f32;
+            for o in 0..n {
+                let (x, y, z) = (sp[3 * o], sp[3 * o + 1], sp[3 * o + 2]);
+                let r = (x * x + y * y + z * z).sqrt();
+                lo = lo.min(r);
+                hi = hi.max(r);
+            }
+            assert!(
+                (lo - 1.0).abs() < 0.001 && (hi - 1.0).abs() < 0.001,
+                "at time {time} the radius ran from {lo} to {hi}"
+            );
+        }
+    }
+
+    /// In between, the belt has corrugations on it, so it is nothing like a
+    /// sphere. The five acts of the eversion all put geometry somewhere.
+    #[test]
+    fn the_corrugations_run_through_five_acts() {
+        let n = (NUM_U + 1) * (NUM_V + 1);
+        let mut shapes = std::collections::BTreeSet::new();
+        // One time in each act: corrugate, push, twist, unpush, uncorrugate.
+        for time in [0.05, 0.15, 0.4, 0.8, 0.96] {
+            let mut sp = vec![0.0f32; 3 * n];
+            let mut sn = vec![0.0f32; 3 * n];
+            generate_geometry(&mut sp, &mut sn, time, NUM_STRIPS);
+            let mut hi = 0.0f32;
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for o in 0..n {
+                let (x, y, z) = (sp[3 * o], sp[3 * o + 1], sp[3 * o + 2]);
+                assert!(x.is_finite() && y.is_finite() && z.is_finite(), "at {time}");
+                hi = hi.max((x * x + y * y + z * z).sqrt());
+                for v in [x, y, z] {
+                    h ^= u64::from(v.to_bits());
+                    h = h.wrapping_mul(0x100_0000_01b3);
+                }
+            }
+            assert!(hi > 0.5, "the belt collapsed at time {time}");
+            shapes.insert(h);
+        }
+        assert_eq!(shapes.len(), 5, "two acts drew the same shape");
+    }
+
+    /// Both eversions can be asked for by name, and they are different
+    /// shapes: one lune drawn sixteen times is not one whole sphere.
+    #[test]
+    fn both_eversions_can_be_chosen() {
+        let a = run("eversionMethod=analytic&colors=two-sided&graticule=off", 2);
+        let c = run("eversionMethod=corrugations&colors=two-sided", 2);
+        assert!(!a.frame().vertices.is_empty());
+        assert!(!c.frame().vertices.is_empty());
+        assert_ne!(a.frame().batches.len(), c.frame().batches.len());
+    }
+
     /// How much geometry a frame comes to, which is the thing to watch on a
     /// saver that rebuilds its whole surface every frame.
     #[test]
     fn a_frame_fits_in_the_budget() {
-        // The heaviest setting: a solid surface whose two sides are coloured
-        // per vertex, so it is drawn twice, with the graticule over it. 267k
-        // vertices in 527 strips, and a strip cannot merge with the strip
-        // beside it.
-        let r = run("appearance=solid&colors=meridian&graticule=on", 3);
-        let f = r.frame();
-        assert!(
-            f.vertices.len() < 400_000,
-            "a frame came to {} vertices",
-            f.vertices.len()
-        );
-        assert!(
-            f.batches.len() < 700,
-            "a frame came to {} batches",
-            f.batches.len()
-        );
+        // The heaviest setting of each: a solid surface whose two sides are
+        // coloured per vertex, so it is drawn twice. A triangle strip cannot
+        // merge with the strip beside it, so the strip count is the draw call
+        // count, and the corrugations eversion has far more of them because
+        // it draws one lune sixteen times.
+        for (query, verts, batches) in [
+            (
+                "eversionMethod=analytic&appearance=solid&colors=meridian&graticule=on",
+                400_000,
+                700,
+            ),
+            (
+                "eversionMethod=corrugations&appearance=solid&colors=meridian",
+                560_000,
+                40,
+            ),
+        ] {
+            let r = run(query, 3);
+            let f = r.frame();
+            assert!(
+                f.vertices.len() < verts,
+                "{query} came to {} vertices",
+                f.vertices.len()
+            );
+            assert!(
+                f.batches.len() < batches,
+                "{query} came to {} batches",
+                f.batches.len()
+            );
+        }
     }
 }

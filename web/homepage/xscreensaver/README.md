@@ -24,11 +24,6 @@ The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
 a 6502 with an assembler. The OpenGL tier has started; see below.
 
-One of the 128 is only partly in: `sphereeversion` is two eversions under one
-name and has the analytic one, not the corrugations one. It is counted because
-the saver runs and draws a real eversion, and the knob that would have chosen
-the missing half is not offered. See below.
-
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
 above.
@@ -710,13 +705,20 @@ which upstream does not bundle and links against. Porting it means writing
 `gleScrew` and `gleTaper` first, with their join styles, which is a library in
 its own right.
 
-`sphereeversion` is half in, and the half that is missing is worth naming
-precisely. It is two savers under one slug: upstream picks at random between an
-analytic eversion, a closed-form formula from Bednorz and Bednorz (2019), and
-the corrugations of the 1994 film "Outside In". The analytic one is ported; the
-corrugations one is not yet. Its `eversion-method` knob is therefore not
-offered, so nothing in the panel points at something that is not there, and the
-saver draws a real sphere eversion at every setting it does offer.
+`sphereeversion` is two savers under one slug, and both are in. Upstream picks
+at random between an analytic eversion, a closed-form formula from Bednorz and
+Bednorz (2019), and the corrugations of the 1994 film "Outside In". They share
+everything but the surface: the same twelve options, the same turn between
+eversions, the same colourings.
+
+The two are built completely differently, which is the interesting part. The
+analytic one evaluates a formula and its two partial derivatives at 257 by 257
+points of the sphere. The corrugations one is built out of *jets*: a value
+carried along with its own derivatives, so that every operation propagates them
+and the surface normals fall out of evaluating the formula rather than having to
+be differentiated by hand. It evaluates one lune of the sphere and draws it
+sixteen times, eight lunes to a hemisphere, which is how the whole sphere is
+made out of one belt.
 
 Both halves have a fixed-function path beside their GLSL one, and unlike
 `timetunnel`'s those fallbacks are the whole saver rather than a stub, so the
@@ -737,6 +739,15 @@ faces to the camera, so the two passes cover exactly the fragments the single
 unculled pass would have. It costs twice the vertices, and only for the two
 colourings that vary over the surface: 267k in 527 strips at the heaviest
 setting, against 133k for the two-sided colouring, which needs one pass.
+
+The corrugations half needed one more thing. Upstream opens a block per strip,
+which is sixty-four draw calls a lune and two thousand a frame here, since a
+triangle strip cannot merge with the strip beside it. So the strips of a lune
+are joined into one with the usual pair of repeated vertices between them: they
+make two triangles of no area, which raster to nothing, and every strip is an
+even number of vertices long so the winding of what follows a join is
+unchanged. Two thousand draw calls became thirty-two, for four thousand more
+vertices out of half a million.
 
 `timetunnel` was deferred for a different reason, and it is the case where
 following upstream's own fallback would have been the wrong answer. The two
