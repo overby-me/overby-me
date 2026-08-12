@@ -62,14 +62,28 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     system-manager = {
-      # system-manager imports a curated subset of NixOS modules that is
-      # version-locked to nixpkgs-unstable (its own default). Following this
-      # flake's stable nixpkgs (26.05) pulls in modules whose dependencies
-      # aren't part of that subset (e.g. nginx referencing `security.dhparams`),
-      # breaking evaluation. Follow nixpkgs-unstable to match its expectations.
+      # Pinned to a nixpkgs revision rather than following one of ours.
+      #
+      # system-manager imports a curated subset of NixOS modules and re-declares
+      # some of their options itself, so it fits a narrow window of nixpkgs
+      # rather than a channel. Following the stable 26.05 pulls in modules whose
+      # dependencies are not part of that subset (nginx reaching for
+      # `security.dhparams`). Following nixpkgs-unstable held up only until
+      # unstable moved past the window: 26.11 declares `nix.enable`, which
+      # system-manager also declares, and a duplicate declaration is an
+      # evaluation error that no amount of local configuration can absorb.
+      #
+      # The revision below is the one system-manager's own lock names, so it is
+      # the combination upstream tests. Dropping the override entirely does not
+      # get that for free: a dependency's lock file is never consulted, so Nix
+      # would resolve its `nixos-unstable` ref to whatever is newest today and
+      # land back on the same error.
+      #
+      # Bump this when system-manager bumps, not on its own. It is deliberately
+      # not a channel ref: floating is what broke it.
       url = "github:numtide/system-manager";
       inputs = {
-        nixpkgs.follows = "nixpkgs-unstable";
+        nixpkgs.url = "github:NixOS/nixpkgs/61b7c44c4073f0b827768aff0049561b5110ea5a";
         flake-compat.follows = "flake-compat";
         # Do NOT reach into system-manager's `userborn` input to dedupe its
         # dev-time transitive inputs. Overriding `userborn.inputs.*` makes the
