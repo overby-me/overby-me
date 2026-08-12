@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (110) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (111) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -499,6 +499,16 @@ so the sky behind a tree would come out as a rectangle of nothing. Discarding
 writes neither colour nor depth. Fog also runs in two modes: `GL_EXP2`, where
 what survives at a distance is `exp(-(density * distance)^2)`, and `GL_LINEAR`,
 which ramps between two distances.
+
+The stencil buffer is there in the cut-down form the savers use it in: a
+comparison of `GL_ALWAYS` or `GL_EQUAL`, a reference value, and whether a
+fragment that passes writes that value back. The two chess savers both want the
+same thing from it, which is a mirror with an edge: `queens` paints its board
+tiles into the stencil with the colour mask off, then draws the pieces a second
+time upside down under the board with the test set to `GL_EQUAL`, so the
+reflection lands on the tiles and stops dead where they do. Anything more
+elaborate than that (separate front and back faces, increment and decrement,
+write masks) would need the state to grow, and nothing has asked.
 
 There is no polygon tessellator, so a saver that fills a concave outline has to
 triangulate it itself. That is less of a gap than it sounds, because upstream's

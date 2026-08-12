@@ -1522,6 +1522,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::polytopes::start
 );
 gl3d_saver!(
+    "queens",
+    queens_body,
+    queens_start,
+    xscreensaver::hacks3d::queens::start
+);
+gl3d_saver!(
     "geodesic",
     geodesic_body,
     geodesic_start,
@@ -2928,6 +2934,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "pulsar",
         label: "Pulsar",
         start: Start::Gl3d(pulsar_start),
+    },
+    Entry {
+        slug: "queens",
+        label: "Queens",
+        start: Start::Gl3d(queens_start),
     },
     Entry {
         slug: "quasicrystal",

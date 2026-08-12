@@ -108,6 +108,7 @@ pub mod projectiveplane;
 pub mod providence;
 pub mod pulsar;
 pub mod quasicrystal;
+pub mod queens;
 pub mod raverhoop;
 pub mod razzledazzle;
 pub mod romanboy;
@@ -200,6 +201,7 @@ pub static ALL: &[&Saver3d] = &[
     &peepers::SAVER,
     &hexstrut::SAVER,
     &polytopes::SAVER,
+    &queens::SAVER,
     &starwars::SAVER,
     &skytentacles::SAVER,
     &sproingies::SAVER,

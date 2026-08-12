@@ -385,6 +385,32 @@ pub enum DepthFunc {
     Equal,
 }
 
+/// `glStencilFunc`. Only the comparisons the savers ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StencilFunc {
+    /// Draw whatever the buffer says, which is what a pass writing the mask
+    /// wants: it is there to leave a mark, not to be masked itself.
+    Always,
+    Equal,
+}
+
+/// `glStencilFunc` with `glStencilOp`, cut down to what the savers ask for.
+///
+/// The stencil buffer is a per-pixel scribble pad the size of the screen, and
+/// the chess savers use it for one thing: paint the board's tiles into it with
+/// the colour mask off, then draw the pieces upside down under the board with
+/// the test set to `Equal`, so a reflection appears on the tiles and nowhere
+/// else. Neither of them needs an action for the failing cases, so a batch
+/// carries a comparison, a reference value, and whether a fragment that passes
+/// writes that value back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stencil {
+    pub func: StencilFunc,
+    pub reference: i32,
+    /// `glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE)` rather than all `GL_KEEP`.
+    pub write: bool,
+}
+
 /// One `glBegin`/`glEnd` block: what to draw, where its vertices are, and the
 /// state that was current when the block opened.
 #[derive(Clone, Debug, PartialEq)]
@@ -455,6 +481,9 @@ pub struct Batch {
     /// would still write depth over the whole quad and punch a hole in the
     /// scene behind. Discarding writes nothing at all.
     pub alpha_test: Option<f32>,
+    /// `glEnable (GL_STENCIL_TEST)` and the state that goes with it, or `None`
+    /// for `glDisable`.
+    pub stencil: Option<Stencil>,
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
     pub texture: Option<u32>,
     pub tex_env: TexEnv,
@@ -502,6 +531,7 @@ impl Batch {
             && self.color_mask == other.color_mask
             && self.fog == other.fog
             && self.alpha_test == other.alpha_test
+            && self.stencil == other.stencil
             && self.texture == other.texture
             && self.tex_env == other.tex_env
             && self.tex_gen_sphere == other.tex_gen_sphere
@@ -577,6 +607,7 @@ pub struct Glx {
     scene_ambient: [f32; 4],
     fog: Option<Fog>,
     alpha_test: Option<f32>,
+    stencil: Option<Stencil>,
     textures: Vec<Texture>,
     bound_texture: Option<u32>,
     texturing: bool,
@@ -634,6 +665,7 @@ impl Glx {
             scene_ambient: [0.2, 0.2, 0.2, 1.0],
             fog: None,
             alpha_test: None,
+            stencil: None,
             textures: Vec::new(),
             bound_texture: None,
             texturing: false,
@@ -848,6 +880,12 @@ impl Glx {
     /// `None` for `glDisable`.
     pub fn alpha_test(&mut self, reference: Option<f32>) {
         self.alpha_test = reference;
+    }
+
+    /// `glStencilFunc` and `glStencilOp` together, with `glEnable
+    /// (GL_STENCIL_TEST)`, or `None` for `glDisable`.
+    pub fn stencil(&mut self, stencil: Option<Stencil>) {
+        self.stencil = stencil;
     }
 
     /// `glPolygonOffset`, with `None` for `glDisable(GL_POLYGON_OFFSET_FILL)`.
@@ -1308,6 +1346,7 @@ impl Glx {
             scene_ambient: self.scene_ambient,
             fog: self.fog,
             alpha_test: self.alpha_test,
+            stencil: self.stencil,
             texture: if self.texturing {
                 self.bound_texture
             } else {

@@ -21,7 +21,9 @@ use web_sys::{
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
-use xscreensaver::runtime::gl::{Blend, DepthFunc, Fog, Frame, MAX_LIGHTS, Primitive, TexEnv};
+use xscreensaver::runtime::gl::{
+    Blend, DepthFunc, Fog, Frame, MAX_LIGHTS, Primitive, StencilFunc, TexEnv,
+};
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
 const FLOATS_PER_VERTEX: usize = 12;
@@ -286,11 +288,14 @@ pub struct Gl3dEngine {
 
 impl Gl3dEngine {
     pub fn new(canvas: &HtmlCanvasElement, runner: Runner3d) -> Option<Self> {
-        // Depth is on: these are 3D. Antialiasing is left at the browser's
-        // default, unlike the Shadertoy engine, and the saver that wants a
-        // screenshot of its own frame resolves the multisampling with a blit.
+        // Depth is on: these are 3D. Stencil is on for the two chess savers,
+        // which mask their reflections to the board with it. Antialiasing is
+        // left at the browser's default, unlike the Shadertoy engine, and the
+        // saver that wants a screenshot of its own frame resolves the
+        // multisampling with a blit.
         let options = WebGlContextAttributes::new();
         options.set_depth(true);
+        options.set_stencil(true);
         options.set_alpha(false);
         let gl: Gl = canvas
             .get_context_with_context_options("webgl2", &options)
@@ -382,8 +387,12 @@ impl Gl3dEngine {
         gl.viewport(vx, vy, vw.max(1), vh.max(1));
 
         if let Some([r, g, b, a]) = frame.clear {
+            // A clear writes through the masks, so put them back first: the
+            // last batch of the frame before may well have left one off.
+            gl.color_mask(true, true, true, true);
+            gl.depth_mask(true);
             gl.clear_color(r, g, b, a);
-            gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
+            gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT | Gl::STENCIL_BUFFER_BIT);
         }
         if frame.batches.is_empty() {
             return;
@@ -507,6 +516,25 @@ impl Gl3dEngine {
             });
             let m = batch.color_mask;
             gl.color_mask(m[0], m[1], m[2], m[3]);
+            match batch.stencil {
+                Some(s) => {
+                    gl.enable(Gl::STENCIL_TEST);
+                    gl.stencil_func(
+                        match s.func {
+                            StencilFunc::Always => Gl::ALWAYS,
+                            StencilFunc::Equal => Gl::EQUAL,
+                        },
+                        s.reference,
+                        !0,
+                    );
+                    gl.stencil_op(
+                        Gl::KEEP,
+                        Gl::KEEP,
+                        if s.write { Gl::REPLACE } else { Gl::KEEP },
+                    );
+                }
+                None => gl.disable(Gl::STENCIL_TEST),
+            }
             match batch.polygon_offset {
                 Some((factor, units)) => {
                     gl.enable(Gl::POLYGON_OFFSET_FILL);
