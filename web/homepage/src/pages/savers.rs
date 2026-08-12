@@ -1240,6 +1240,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::beats::start
 );
 gl3d_saver!(
+    "crumbler",
+    crumbler_body,
+    crumbler_start,
+    xscreensaver::hacks3d::crumbler::start
+);
+gl3d_saver!(
     "cube21",
     cube21_body,
     cube21_start,
@@ -2645,6 +2651,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "crackberg",
         label: "Crackberg",
         start: Start::Gl3d(crackberg_start),
+    },
+    Entry {
+        slug: "crumbler",
+        label: "Crumbler",
+        start: Start::Gl3d(crumbler_start),
     },
     Entry {
         slug: "cube21",

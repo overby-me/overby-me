@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (112) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (113) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -125,6 +125,24 @@ sets carry from `A + M > 0xff` instead of `A >= M`. They are kept exactly as
 they are, because the thirty-three programs were written on that web page
 against that interpreter, and an instruction repaired here is a program broken
 there.
+
+## A convex hull
+
+`runtime::quickhull` is Karim Naaji's `3d-quickhull`, which upstream carries as
+`quickhull.c`: the smallest shape that contains a cloud of points. `crumbler` is
+what wants it, because its pieces are not modelled at all. A piece is a few
+thousand random points and what you see is the hull of them, so breaking one in
+two is a matter of splitting the points and taking two hulls.
+
+Two things are done differently from the C. It allocates faces and edges for
+`n * (n - 1)` triangles up front, which is gigabytes at the point counts
+`crumbler` uses and only works because a system that overcommits never hands out
+the pages; here they are vectors that grow to the few thousand actually used,
+and the out-of-memory retry loop that reduces the density until the allocation
+succeeds has nothing left to do. And its duplicate-point pass is a quadratic
+scan that shuffles the array down on every removal, which is minutes of work at
+the higher densities; the same rule is answered here with a grid of
+epsilon-sized cells.
 
 ## How a port works
 

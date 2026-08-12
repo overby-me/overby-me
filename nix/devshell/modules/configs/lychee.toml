@@ -35,6 +35,7 @@ exclude = [
   # them.
   'soulwire\.co\.uk',
   "https://x.com/",
+  'box2d\.org/files/',
   # Placeholder URLs in rust/curl comments and test fixtures: the literal
   # hosts "host"/"proxy.example", the literal port ":port", and ellipsis
   # paths are examples, not real links.

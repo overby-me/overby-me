@@ -22,6 +22,9 @@ extend-ignore-re = [
   # XScreenSaver copyright headers and revision histories, transcribed verbatim
   # into the Rust ports in web/homepage/xscreensaver.
   "[Oo]rignal",
+  # quickhull.c's own comments, kept with the code they explain.
+  "ajacent",
+  "approprate",
   "10ths",
   "chuncks",
   # The PDB file format really does spell its bond record CONECT; molecule.rs

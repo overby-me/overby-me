@@ -38,6 +38,7 @@ pub mod jpeg;
 pub mod marching;
 pub mod opts;
 pub mod png;
+pub mod quickhull;
 pub mod rand;
 pub mod rotator;
 pub mod shapes;
