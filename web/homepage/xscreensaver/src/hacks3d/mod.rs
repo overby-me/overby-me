@@ -116,6 +116,7 @@ pub mod papercube;
 pub mod peepers;
 pub mod photopile;
 pub mod pinion;
+pub mod platonicfolding;
 pub mod polyhedra;
 pub mod polytopes;
 pub mod projectiveplane;
@@ -250,6 +251,7 @@ pub static ALL: &[&Saver3d] = &[
     &noof::SAVER,
     &papercube::SAVER,
     &pinion::SAVER,
+    &platonicfolding::SAVER,
     &polyhedra::SAVER,
     &projectiveplane::SAVER,
     &providence::SAVER,
