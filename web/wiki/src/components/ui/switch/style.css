@@ -55,6 +55,41 @@
   background-color: var(--md-sys-color-on-primary);
 }
 
+/* The two Expressive behaviours the sizes above were missing.
+
+   Pressed, the handle goes to 28dp — bigger than the selected 24dp, so the
+   switch answers the finger before it answers the state. It is pinned 2px off
+   the track edge rather than kept concentric, because at 28dp inside a 32dp
+   track there is nowhere else for it to be.
+
+   And a state layer, which every other control here has: 8% on-surface on
+   hover, 10% pressed, drawn as a ring on the handle so it reads on both halves
+   of the track. Not transitioned — a state layer that fades in lags the press
+   it is meant to acknowledge. */
+.dx-switch:active .dx-switch-thumb,
+.dx-switch[data-state="checked"]:active .dx-switch-thumb {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+.dx-switch:active .dx-switch-thumb {
+  left: 0.125rem;
+}
+.dx-switch[data-state="checked"]:active .dx-switch-thumb {
+  left: calc(3.25rem - 1.75rem - 0.125rem);
+}
+
+.dx-switch:hover .dx-switch-thumb {
+  box-shadow: 0 0 0 0.5rem
+    color-mix(in oklab, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.dx-switch:active .dx-switch-thumb {
+  box-shadow: 0 0 0 0.5rem
+    color-mix(in oklab, var(--md-sys-color-on-surface) 10%, transparent);
+}
+.dx-switch[data-disabled="true"]:hover .dx-switch-thumb {
+  box-shadow: none;
+}
+
 /* Only apply disabled styles when data-disabled is "true" */
 .dx-switch[data-disabled="true"] {
   cursor: not-allowed;

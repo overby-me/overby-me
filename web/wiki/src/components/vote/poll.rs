@@ -599,6 +599,12 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                             let len = opts.len();
                             rsx! {
                                 RadioGroup {
+                                    // How you voted is not a breadcrumb. Every
+                                    // option here carries its text as both label
+                                    // and aria-label, which is exactly what the
+                                    // trail records, so without this a click on
+                                    // "Imod" is filed under the voter's name.
+                                    "data-private": "true",
                                     value: current,
                                     on_value_change: move |v: String| {
                                         if let Ok(idx) = v.parse::<usize>() {
@@ -639,7 +645,8 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                             }
                         }
                     } else {
-                        div { class: "list",
+                        // Same reason as the single-choice branch above.
+                        div { class: "list", "data-private": "true",
                             for ri in order.iter() {
                                 {
                                     let ri = *ri;
@@ -1045,8 +1052,22 @@ pub(super) fn StartPollDialog(
                     }
                 }
             }
+            // The M3 two-line list item every other switch in this app uses
+            // (usermenu's dark mode, perm's open-to-all): leading state icon,
+            // label over a supporting line, control at the end. These two rows
+            // had a bare label and no icon, so they sat flush against the dialog
+            // edge with nothing to align to, and each carried its explanation as
+            // a parenthetical in the label — which is the supporting line, set as
+            // the title. The icon tracks the state, so the row reads as on or off
+            // from across a table.
             div { class: "list-item switch-row",
-                span { class: "switch-row-label", "{t(\"poll.hideResult\")}" }
+                span { class: "material-icons",
+                    {if hidden() { "visibility_off" } else { "visibility" }}
+                }
+                div { class: "list-item-text",
+                    div { class: "list-item-primary", "{t(\"poll.hideResult\")}" }
+                    div { class: "list-item-secondary", "{t(\"poll.hideResultHint\")}" }
+                }
                 Switch {
                     checked: Some(hidden()),
                     aria_label: t("poll.hideResult"),
@@ -1054,7 +1075,13 @@ pub(super) fn StartPollDialog(
                 }
             }
             div { class: "list-item switch-row",
-                span { class: "switch-row-label", "{t(\"poll.secretBallot\")}" }
+                span { class: "material-icons",
+                    {if secret() { "lock" } else { "lock_open" }}
+                }
+                div { class: "list-item-text",
+                    div { class: "list-item-primary", "{t(\"poll.secretBallot\")}" }
+                    div { class: "list-item-secondary", "{t(\"poll.secretBallotHint\")}" }
+                }
                 Switch {
                     checked: Some(secret()),
                     aria_label: t("poll.secretBallot"),

@@ -174,7 +174,12 @@ let css_files = (ls $assets | where name =~ '\.css$' | get name)
 let parse_errors = (
     $css_files
     | each {|f|
-        let out = (do -i { ^biome format $f } | complete)
+        # `complete` has to take the external command directly. Written as
+        # `do -i { ^biome format $f } | complete` it receives the block's value
+        # instead and nushell refuses it, which took the whole check down after
+        # the four ratchets had already passed. `complete` captures a non-zero
+        # exit without raising, so it needs no `do -i` around it.
+        let out = (^biome format $f | complete)
         if $out.exit_code != 0 and ($out.stderr | str contains "parse") {
             $f
         } else {

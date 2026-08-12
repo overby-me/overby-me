@@ -84,6 +84,12 @@ pub fn record_navigation(path: &str) {
 
 /// A compact description of an element for a breadcrumb: `tag#id.class "label"`,
 /// resolved to the nearest interactive ancestor. Never includes input values.
+///
+/// Anything under `[data-private]` is described by shape alone. The label here
+/// comes from the element's own text, and for a control whose text IS the answer
+/// -- a ballot option -- that turns the trail into a record of how someone voted,
+/// filed under their name and user id. A secret ballot goes to lengths to keep
+/// the vote off the vote row; it must not arrive in a log instead.
 fn describe(el: &web_sys::Element) -> String {
     let target = el
         .closest("button, a, input, textarea, select, [role=button], .btn, .btn-icon, .list-item, .folder-item")
@@ -91,6 +97,24 @@ fn describe(el: &web_sys::Element) -> String {
         .flatten()
         .unwrap_or_else(|| el.clone());
     let tag = target.tag_name().to_lowercase();
+    // Asked of the CLICKED element, not of `target`: `target` is an ancestor, so
+    // a marker on a container between them would be missed by the wider one.
+    if el.closest("[data-private]").ok().flatten().is_some() {
+        let id = target.id();
+        let id_part = if id.is_empty() {
+            String::new()
+        } else {
+            format!("#{id}")
+        };
+        let class_part = target
+            .get_attribute("class")
+            .unwrap_or_default()
+            .split_whitespace()
+            .next()
+            .map(|c| format!(".{c}"))
+            .unwrap_or_default();
+        return format!("{tag}{id_part}{class_part} [private]");
+    }
     let id = target.id();
     let id_part = if id.is_empty() {
         String::new()
