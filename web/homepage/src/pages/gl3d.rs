@@ -506,7 +506,7 @@ impl Gl3dEngine {
                 DepthFunc::Equal => Gl::EQUAL,
             });
             let m = batch.color_mask;
-            gl.color_mask(m, m, m, m);
+            gl.color_mask(m[0], m[1], m[2], m[3]);
             match batch.polygon_offset {
                 Some((factor, units)) => {
                     gl.enable(Gl::POLYGON_OFFSET_FILL);

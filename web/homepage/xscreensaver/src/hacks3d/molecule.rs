@@ -1109,7 +1109,7 @@ mod tests {
         r.step();
         let f = r.frame();
         assert!(
-            f.batches.iter().any(|b| !b.color_mask),
+            f.batches.iter().any(|b| b.color_mask != [true; 4]),
             "nothing was drawn to depth only"
         );
         assert!(

@@ -430,9 +430,12 @@ pub struct Batch {
     /// blend with each other instead of the nearest one hiding the rest.
     pub depth_mask: bool,
     pub depth_func: DepthFunc,
-    /// `glColorMask`. False for a pass that is only there to fill the depth
-    /// buffer, which is how a saver marks out where a later pass may draw.
-    pub color_mask: bool,
+    /// `glColorMask`, per channel. All false for a pass that is only there to
+    /// fill the depth buffer, which is how a saver marks out where a later
+    /// pass may draw. Some savers mask individual channels instead:
+    /// `esper`'s flash writes only blue and alpha, which tints what is
+    /// already on screen rather than covering it.
+    pub color_mask: [bool; 4],
     pub point_size: f32,
     pub line_width: f32,
     /// `glEnable(GL_DEPTH_TEST)`. Off for the savers that draw a flat scene
@@ -587,7 +590,7 @@ pub struct Glx {
     polygon_offset: Option<(f32, f32)>,
     depth_mask: bool,
     depth_func: DepthFunc,
-    color_mask: bool,
+    color_mask: [bool; 4],
     line_width: f32,
 
     /// The block in progress, and the vertices it has so far.
@@ -644,7 +647,7 @@ impl Glx {
             polygon_offset: None,
             depth_mask: true,
             depth_func: DepthFunc::Less,
-            color_mask: true,
+            color_mask: [true; 4],
             line_width: 1.0,
             shape: None,
             pending: Vec::new(),
@@ -864,7 +867,12 @@ impl Glx {
     /// `glColorMask`, all four channels at once, which is the only way the
     /// savers use it.
     pub fn color_mask(&mut self, on: bool) {
-        self.color_mask = on;
+        self.color_mask = [on; 4];
+    }
+
+    /// `glColorMask` with the four channels given separately.
+    pub fn color_mask_rgba(&mut self, m: [bool; 4]) {
+        self.color_mask = m;
     }
 
     pub fn blend(&mut self, blend: Blend) {

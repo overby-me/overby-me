@@ -45,6 +45,7 @@ pub mod discoball;
 pub mod dumpsterfire;
 pub mod energystream;
 pub mod engine;
+pub mod esper;
 pub mod etruscanvenus;
 pub mod flipflop;
 pub mod flipscreen3d;
@@ -163,6 +164,7 @@ pub static ALL: &[&Saver3d] = &[
     &dumpsterfire::SAVER,
     &energystream::SAVER,
     &engine::SAVER,
+    &esper::SAVER,
     &etruscanvenus::SAVER,
     &flyingtoasters::SAVER,
     &gears::SAVER,

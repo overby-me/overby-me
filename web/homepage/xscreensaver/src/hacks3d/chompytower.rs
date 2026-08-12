@@ -934,10 +934,14 @@ mod tests {
             r.step();
         }
         let f = r.frame();
-        let masked = f.batches.iter().filter(|b| !b.color_mask).count();
+        let masked = f
+            .batches
+            .iter()
+            .filter(|b| b.color_mask != [true; 4])
+            .count();
         assert!(masked > 0, "nothing was drawn into the depth buffer alone");
         // And the trunk is drawn after it, with the colour mask back on.
         let last = f.batches.last().expect("no batches");
-        assert!(last.color_mask, "the trunk is invisible");
+        assert_eq!(last.color_mask, [true; 4], "the trunk is invisible");
     }
 }

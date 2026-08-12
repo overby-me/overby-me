@@ -725,7 +725,11 @@ mod tests {
         let mut r = start(StartArgs::new(640, 480, "mode=ships", 20260811));
         r.step();
         let f = r.frame();
-        let masked = f.batches.iter().filter(|b| !b.color_mask).count();
+        let masked = f
+            .batches
+            .iter()
+            .filter(|b| b.color_mask != [true; 4])
+            .count();
         assert!(masked > 0, "nothing was drawn depth-only");
         // And the sea and sky that follow are drawn with the depth test on,
         // so the hull rejects them.
@@ -733,7 +737,7 @@ mod tests {
             .batches
             .iter()
             .rev()
-            .find(|b| b.color_mask && b.depth_test)
+            .find(|b| b.color_mask == [true; 4] && b.depth_test)
             .expect("no sea");
         assert!(sea.count >= 6, "the sea is not a quad");
     }

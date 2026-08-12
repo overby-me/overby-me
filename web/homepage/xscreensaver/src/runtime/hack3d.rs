@@ -57,6 +57,27 @@ pub struct GlImage {
 const DAY: f64 = 24.0 * 60.0 * 60.0;
 
 impl Gl {
+    /// A display with nothing behind it, for the tests of savers whose
+    /// interesting code takes a `&mut Gl` and would otherwise be reachable
+    /// only by driving a whole [`Runner3d`].
+    #[cfg(test)]
+    pub fn for_test(width: i32, height: i32) -> Gl {
+        let mut glx = Glx::new();
+        glx.start_frame(width, height);
+        Gl {
+            glx,
+            res: Resources::new(&[], &[], ""),
+            time: 0.0,
+            width,
+            height,
+            mono_p: false,
+            wall_clock_base: 0.0,
+            words: super::text::TextChannel::default(),
+            images: super::image::ImageChannel::default(),
+            image_pending: None,
+        }
+    }
+
     pub fn width(&self) -> i32 {
         self.width
     }
