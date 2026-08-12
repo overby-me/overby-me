@@ -669,13 +669,32 @@ change starts a new batch. Both totals therefore scale with the number of
 objects a frame draws, not with the number of lists it compiled. For
 calibration, at 1280x720 `splodesic` draws 5120 batches, `cubestorm` 2880
 batches and 34k vertices, and `beats` 343k vertices, and all three are fine; six
-thousand batches is about the ceiling. Three savers are deferred on this rather
-than on anything about their code: `glcells` at its default quality draws 800
-cells of 640 triangles each, and `squirtorus` about thirty thousand quads per
-sphincter with sixteen on screen. `covid19` draws sixty virus particles whose
-spikes and surface proteins come to some seven hundred matrix changes each, so
-around forty thousand batches a frame. Measure before starting one of the
-crowded ones.
+thousand batches is about the ceiling. Three savers were deferred on this rather
+than on anything about their code, and re-measuring all three is what turned up
+the joining trick above and the covid19 correction below. None of them is
+blocked; what each needs is written down here so the next pass does not have to
+derive it again.
+
+`covid19` is done, and it is the cautionary one: see below.
+
+`glcells` grows a colony of up to 800 cells, each a half-dodecahedron subdivided
+`quality` times. Its quality is 3, which is 10 * 4^3 = 640 triangles a cell, so
+a full colony is 1.54 million vertices a frame. That is too much, but quality is
+an internal constant that upstream's own configuration file does not expose, and
+one step down is 10 * 4^2 = 160 triangles a cell and 384k a frame, which is
+comfortable. The colony is what the saver is about, not how round one cell is,
+so the setting to lower is the quality rather than the cell count. The cells
+also all share one shape and differ only by a matrix and a colour, so baking
+each frame's cells into one block the way `pipes` does makes the whole colony a
+single draw call.
+
+`squirtorus` fires rings out of sixteen sphincters. Each ring is a torus of
+20 by 60, which is 7200 vertices once its quad strips are triangles, and each
+sphincter is given `BELLRAND(60)` of them, so about thirty. If every ring of
+every sphincter were in flight at once that would be 3.5 million vertices a
+frame; how many actually are at one time is the number to measure first, since
+a ring that has finished is skipped. Its hundred precomputed torus frames are
+memory rather than per-frame cost.
 
 `deepstars` was on that list and came off it, which is the shape to look for
 before giving up on a crowded saver. Its star trails are the whole sky redrawn
@@ -688,6 +707,15 @@ in a single call: 97 batches at any setting, from 151009. What still had to
 give was the length of the exposure, not the number of stars; a sparser sky
 with longer trails was tried first and looked like a different picture, since
 how dense the sky is is most of what it looks like.
+
+`unicrud` is the one that is genuinely blocked, and on two things at once. It
+picks a codepoint at random from 0 to 0x2F800 and draws it four inches high, so
+it wants a font covering essentially the whole Basic Multilingual Plane plus the
+CJK compatibility ideographs; `runtime::font` is one compiled-in bitmap font of
+Latin glyphs, and the alternative is megabytes of CJK outlines. It also captions
+each character with its Unicode name, which upstream obtains by shelling out to
+perl, noting in a comment that the only alternative is to embed the 943 KB of
+NamesList.txt. Neither half has a small answer.
 
 `worldpieces` is deferred on a dependency too, and a bigger one. It cuts each
 country's outline into a mesh with Shewchuk's Triangle, asking for a quality
