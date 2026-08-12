@@ -197,7 +197,11 @@ pub fn FeedList(
             // it falls through to an empty queue and does nothing, which is right:
             // the feed's own arrivals come from the stream.
             let token = crate::session::current_token();
-            let _ = ctx.clone();
+            // The fetch below applies the feed's predicate, which needs both of
+            // these; `ctx` used to be cloned into nothing just to be counted as
+            // used by the reactive hook.
+            let uid = user_id.clone().unwrap_or_default();
+            let fetch_ctx = ctx.clone();
             let mut arrivals = arrivals;
             spawn(async move {
                 // The stream named the rows; fetch those and no others. This used
@@ -222,8 +226,13 @@ pub fn FeedList(
                     .into_iter()
                     .filter(|id| !seen.contains(id))
                     .collect();
-                let fresh: Vec<model::ChildNodeFields> =
-                    graphql::query_nodes_by_ids(token.as_deref(), &wanted).await;
+                let fresh: Vec<model::ChildNodeFields> = graphql::query_nodes_by_ids(
+                    token.as_deref(),
+                    &wanted,
+                    &uid,
+                    fetch_ctx.as_deref(),
+                )
+                .await;
                 if fresh.is_empty() {
                     return;
                 }

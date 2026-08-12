@@ -378,20 +378,48 @@ pub async fn query_orphans(
 /// The row shape stays defined by `ChildNodeFields` rather than being spelled out
 /// again inside a subscription string, so the feed's rows cannot drift from the
 /// feed's rows.
+/// Named ids AND the feed's own predicate.
+///
+/// Pure and separate from the request, like [`recent_where_clause`], because the
+/// meaning is the part worth reading and testing.
+///
+/// The id filter used to stand alone here, which made the live feed a different
+/// feed from the one the first page came from. The subscription that names these
+/// ids is scoped by [`feed_scope`] only -- no mime, no submitted, no parent -- so
+/// it names everything created in the subtree, and fetching by id spliced all of
+/// it in. A candidature still being written appeared in Newest the moment it was
+/// created and left on the next refetch, which is the only reason it looked brief
+/// rather than wrong.
+pub(crate) fn nodes_by_ids_where(
+    ids: &[String],
+    user_id: &str,
+    context_id: Option<&str>,
+) -> NodesBoolExp {
+    NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                id: Some(UuidComparisonExp {
+                    in_: Some(ids.iter().cloned().map(Uuid).collect()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            recent_where_clause(user_id, context_id),
+        ]),
+        ..Default::default()
+    }
+}
+
 pub async fn query_nodes_by_ids(
     access_token: Option<&str>,
     ids: &[String],
+    user_id: &str,
+    context_id: Option<&str>,
 ) -> Vec<model::ChildNodeFields> {
     if ids.is_empty() {
         return Vec::new();
     }
-    let where_clause = NodesBoolExp {
-        id: Some(UuidComparisonExp {
-            in_: Some(ids.iter().cloned().map(Uuid).collect()),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
+    let where_clause = nodes_by_ids_where(ids, user_id, context_id);
     let order_by = vec![NodesOrderBy {
         created_at: Some(OrderBy::Desc),
         ..Default::default()
@@ -470,5 +498,24 @@ mod scope_tests {
         let json = serde_json::to_string(&feed_scope(None, "u-1")).expect("serialize");
         assert!(json.contains("context"), "{json}");
         assert!(json.contains("u-1"), "{json}");
+    }
+
+    /// An arrival is held to the same predicate as a page.
+    ///
+    /// The subscription behind the live feed is scoped by `feed_scope` alone, so
+    /// it names every node created in the subtree, drafts included. Fetching
+    /// those by id used to filter on the ids and nothing else, which put an
+    /// unsubmitted candidature into Newest until the next refetch removed it.
+    /// The submitted test is the one that was missed, so assert it by name and
+    /// the rest by shape.
+    #[test]
+    fn an_arrival_carries_the_feeds_own_predicate() {
+        let by_id = nodes_by_ids_where(&["n-1".to_string()], "u-1", Some("ctx-1"));
+        let json = serde_json::to_string(&by_id).expect("serialize");
+        assert!(json.contains(r#""id":{"_in":["n-1"]}"#), "{json}");
+        assert!(json.contains(r#""mutable":{"_eq":false}"#), "{json}");
+        // And the rest of it: the mime allowlist, the scope, the live parent.
+        assert!(json.contains("wiki/document"), "{json}");
+        assert!(json.contains("ctx-1"), "{json}");
     }
 }
