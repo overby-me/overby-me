@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (117) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (118) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -143,6 +143,35 @@ succeeds has nothing left to do. And its duplicate-point pass is a quadratic
 scan that shuffles the array down on every removal, which is minutes of work at
 the higher densities; the same rule is answered here with a grid of
 epsilon-sized cells.
+
+## The eighty uniform polyhedra
+
+`runtime::kaleido` is Zvi Har'El's `kaleido`, which upstream carries as
+`polyhedra.c`: a table of eighty Wythoff symbols, and the machinery that turns
+one of those symbols into an actual solid. Nothing about it is a lookup. The
+symbol says which spherical triangle to reflect in and how often the generating
+point goes round each of its corners; from that the code recovers the rotation
+group, solves for where the point has to sit with Newton's method, walks the
+group to get every vertex, and reads the faces off the incidence structure.
+The dual comes from the same data with vertices and faces swapped.
+
+Two divergences. There is no edge list, since nothing asks for one, and no
+name-guessing pass, since everything is asked for by table index rather than by
+Wythoff symbol. And the Newton solve is bounded to a thousand iterations: it
+converges in a handful, but a loop with no bound at all is a browser tab that
+hangs rather than a program that can be killed.
+
+The tests check each of the eighty against its published Euler characteristic
+and density, that every vertex lands on the unit sphere, and that the incidence
+matrix and the adjacency matrix agree with each other.
+
+`runtime::teapot` is the hundred and sixty-first solid, which is a joke, and is
+Martin Newell's teapot as thirty-two bicubic Bezier patches. Upstream hands the
+control points to `glMap2f` and lets `glEvalMesh2` walk the grid with
+`GL_AUTO_NORMAL`. There are no evaluators here, so the Bernstein polynomials
+and their derivatives are worked out directly, which is what an evaluator does;
+upstream's own OpenGL ES fallback instead ships a large table of triangles that
+had been evaluated in advance, and evaluating them is both smaller and rounder.
 
 ## How a port works
 
@@ -540,13 +569,20 @@ into one. `endgame` is the one that needs it, and not for falloff: it fades a
 whole game in and out by winding the constant term from a hundred down to one,
 which is dark to fully lit and back.
 
-There is no polygon tessellator, so a saver that fills a concave outline has to
-triangulate it itself. That is less of a gap than it sounds, because upstream's
-own OpenGL ES build has no GLU either and every saver that wants one already
-carries a fallback: `jigsaw` cuts each puzzle piece into eighths and fans each
-one out by hand, and `dnalogo` carries the triangles its desktop build's
-tessellator produced for the pizza slice once and had saved. Both ports take
-that path rather than growing a tessellator.
+`runtime::tess` is the polygon tessellator, standing in for GLU's. It is ear
+clipping: find a corner whose triangle sticks out of the outline and holds none
+of the other corners, cut it off, repeat. That is enough for a simple polygon
+and not enough for one that crosses itself, which GLU would fill by the odd
+winding rule; nothing has needed that yet.
+
+For a long time there was none, because upstream's own OpenGL ES build has no
+GLU either and every saver that wants one already carries a fallback: `jigsaw`
+cuts each puzzle piece into eighths and fans each one out by hand, and
+`dnalogo` carries the triangles its desktop build's tessellator produced for
+the pizza slice once and had saved. Both ports still take that path.
+`polyhedra` is the one with no fallback to take: several of the duals have
+faces shaped like three-pointed stars, and fanning one of those out from a
+corner fills in the notches.
 
 There is no texture *generation* beyond `GL_SPHERE_MAP`, and no texture
 matrix. `atlantis` is the saver that wants more: it lays a noise texture over

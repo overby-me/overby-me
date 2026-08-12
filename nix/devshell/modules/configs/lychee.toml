@@ -36,6 +36,10 @@ exclude = [
   'soulwire\.co\.uk',
   "https://x.com/",
   'box2d\.org/files/',
+  # Zvi Har'El's home page, named in the kaleido copyright notice that
+  # web/homepage/xscreensaver/src/runtime/kaleido.rs keeps verbatim. The site
+  # serves a certificate this machine's root store does not trust.
+  'math\.technion\.ac\.il/~rl',
   # Placeholder URLs in rust/curl comments and test fixtures: the literal
   # hosts "host"/"proxy.example", the literal port ":port", and ellipsis
   # paths are examples, not real links.
