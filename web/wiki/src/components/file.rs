@@ -1241,9 +1241,14 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         if file_mime == "application/pdf" && PDF_VIEWER() == PdfViewer::Native {
                             super::widgets::SheetGroup {
                                 div { class: "sheet-label", "{t(\"file.pdfLayout\")}" }
+                                // Default first, as in the renderer group below
+                                // (Native before Browser). Reflow is what a reader
+                                // arrives in, so listing "As printed" above it put
+                                // the option nobody chose at the top and made the
+                                // selected row the lower one.
                                 for layout in [
-                                    super::pdf::PdfLayout::Page,
                                     super::pdf::PdfLayout::Reflow,
+                                    super::pdf::PdfLayout::Page,
                                 ] {
                                     button {
                                         key: "{layout.label_key()}",
