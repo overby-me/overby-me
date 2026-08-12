@@ -644,6 +644,15 @@ give was the length of the exposure, not the number of stars; a sparser sky
 with longer trails was tried first and looked like a different picture, since
 how dense the sky is is most of what it looks like.
 
+`worldpieces` is deferred on a dependency too, and a bigger one. It cuts each
+country's outline into a mesh with Shewchuk's Triangle, asking for a quality
+constrained Delaunay triangulation with holes, a minimum angle, a maximum area
+and a bounded number of Steiner points. `runtime::tess` is ear clipping and
+`runtime::delaunay` is the plain unconstrained kind; neither is that, and
+Triangle itself is 638 KB of C whose whole difficulty is getting its geometric
+predicates right in floating point. It is not blocked on anything about the
+Earth: `runtime::dymaxion` and the maps are both in.
+
 `extrusion` is deferred on a dependency rather than on anything about its own
 552 lines: it draws everything through GLE, the tubing and extrusion library,
 which upstream does not bundle and links against. Porting it means writing
