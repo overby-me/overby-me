@@ -1659,6 +1659,12 @@ gl3d_saver!(
     dangerball_start,
     xscreensaver::hacks3d::dangerball::start
 );
+gl3d_saver!(
+    "deepstars",
+    deepstars_body,
+    deepstars_start,
+    xscreensaver::hacks3d::deepstars::start
+);
 gl_saver!(
     "alienbeacon",
     alienbeacon_body,
@@ -2662,6 +2668,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "dangerball",
         label: "Danger Ball",
         start: Start::Gl3d(dangerball_start),
+    },
+    Entry {
+        slug: "deepstars",
+        label: "Deep Stars",
+        start: Start::Gl3d(deepstars_start),
     },
     Entry {
         slug: "discoball",
