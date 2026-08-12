@@ -145,6 +145,7 @@ pub mod truchet;
 pub mod twang;
 pub mod vermiculate;
 pub mod vfeedback;
+pub mod vidwhacker;
 pub mod vines;
 pub mod wander;
 pub mod webcollage;
@@ -293,6 +294,7 @@ pub static ALL: &[&Saver] = &[
     &tessellimage::SAVER,
     &thornbird::SAVER,
     &triangle::SAVER,
+    &vidwhacker::SAVER,
     &vines::SAVER,
     &truchet::SAVER,
     &twang::SAVER,

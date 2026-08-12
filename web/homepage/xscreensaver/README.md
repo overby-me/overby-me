@@ -8,12 +8,13 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 144 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (144) |
+| 2D | 145 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (145) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (134) |
 
-`webcollage` is neither: upstream is a perl script and a C helper rather than a
-`hacks/*.c`, but what it needs at run time is a framebuffer, so it is counted
+`webcollage` and `vidwhacker` are neither: upstream is a perl script and a C
+helper for the first and a shell script for the second, rather than a
+`hacks/*.c`. What they need at run time is a framebuffer, so they are counted
 with the 2D tier. `co____9` is `covid19` under a name that does not date it,
 generated from the same source at build time, so it is counted once.
 `mismunch` was retired upstream in version 5.08 and merged into `munch`, which
@@ -23,7 +24,8 @@ at the same code with the resource nailed down.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
-a 6502 with an assembler. The OpenGL tier has started; see below.
+a 6502 with an assembler. Four of the OpenGL tier are left and all four are
+blocked on something that is not a screensaver; they are described at the end.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -734,6 +736,45 @@ in a single call: 97 batches at any setting, from 151009. What still had to
 give was the length of the exposure, not the number of stars; a sparser sky
 with longer trails was tried first and looked like a different picture, since
 how dense the sky is is most of what it looks like.
+
+`vidwhacker` was the last one on the not-portable list, and it is the one whose
+label was most misleading. It reads a video capture card, which nothing here
+can do, so it went in the bin with the others. But almost none of the program
+is about that: it is a shell script that grabs a frame and pipes it through one
+of nineteen netpbm pipelines, and the pipelines are the saver. Reading the
+frame is two lines of it.
+
+So porting it meant porting netpbm. `runtime::netpbm` is `pamedge`, `pamoil`,
+`pgmbentley`, `ppmrelief`, `ppmspread`, `ppmshift`, `pgmenhance`, `pnmnorm`,
+`pnmsmooth`, `pnminvert`, `pamarith`, `pgmnoise`, `pamcrater` and three of
+`ppmpat`'s patterns, from netpbm's own C. Four of the names in the script are
+the old ones and searching for them finds nothing: `pgmedge` is `pamedge` now,
+`pgmcrater` is `pamcrater`, `ppmnorm` is `pnmnorm`, `pnmarith` is `pamarith`.
+
+Doing it from the source rather than from a description was worth it twice.
+`ppm_luminosity` rounds rather than truncating, and truncating turns some greys
+one shade darker on the way through `ppmtopgm`, because the three weights only
+sum to one to within a float. And `pamarith` works in normalised samples, so a
+multiply is a multiply of *fractions*: the byte arithmetic that is easy to
+write instead would saturate everything to white rather than darkening it.
+
+One tool had to be made faster to be usable. `pamoil` takes the commonest value
+in a seven by seven window, and netpbm clears and then searches a 256-entry
+histogram for every pixel of every plane, when at most 49 of those entries can
+be non-zero. Touching only the entries that were used, and doing one plane
+rather than three when the picture is grey (which both pipelines that reach it
+guarantee, since they run `ppmtopgm` first), takes the oil pipeline at 1280 by
+800 from 1.7 seconds to 0.18 and the worst of the nineteen from 1.9 to 0.49.
+The output is unchanged, but only because the tie-break was kept: netpbm scans
+its histogram in value order, so two equally common values resolve to the
+darker one, and a running best would resolve to whichever the window happened
+to be walked over first. That is the kind of difference that does not show up
+in a screenshot.
+
+Pipeline 10 is transcribed with a hole in it. It computes a second difference
+into `FILE3` and then outputs `FILE1`, so the whole second half of it is dead.
+That is upstream's, and the note is here so the next reader does not think the
+port dropped something.
 
 `webcollage` was on the not-portable list too, and for a better reason than
 `sonar` was: it finds its pictures by feeding random words to image search

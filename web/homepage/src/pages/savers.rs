@@ -909,6 +909,12 @@ saver!(
     xscreensaver::hacks2d::twang::start
 );
 saver!(
+    "vidwhacker",
+    vidwhacker_body,
+    vidwhacker_start,
+    xscreensaver::hacks2d::vidwhacker::start
+);
+saver!(
     "vines",
     vines_body,
     vines_start,
@@ -2644,6 +2650,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "twang",
         label: "Twang",
         start: Start::Fb(twang_start),
+    },
+    Entry {
+        slug: "vidwhacker",
+        label: "Vid Whacker",
+        start: Start::Fb(vidwhacker_start),
     },
     Entry {
         slug: "vines",
