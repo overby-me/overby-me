@@ -293,6 +293,14 @@ performance", and a globe drawn 500 pixels across samples about one texel per
 pixel at this size anyway. `earth_flat.png` is upstream's own file untouched,
 because it ships at 1024x512 already.
 
+The same reasoning applies to `klondike`'s fifty-two cards, which upstream
+renders from SVG at 360x540 and pads with a drop shadow, coming to three
+megabytes. They go in at half that size with a thirty-two colour palette,
+which is 392 KB and is indistinguishable at the size a card is ever drawn:
+the face cards are line art, and quantising line art costs nothing. Their
+own licences are in `images/klondike/attribution.txt`, which is upstream's
+file: the fronts are public domain and the back is CC BY-SA.
+
 ## Shapes
 
 A couple of dozen of the OpenGL savers are a program wrapped around a model

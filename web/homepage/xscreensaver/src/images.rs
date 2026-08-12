@@ -223,3 +223,66 @@ pub const EARTH: &[u8] = include_bytes!("../images/earth.png");
 pub const EARTH_NIGHT: &[u8] = include_bytes!("../images/earth_night.png");
 pub const EARTH_FLAT: &[u8] = include_bytes!("../images/earth_flat.png");
 pub const EARTH_WATER: &[u8] = include_bytes!("../images/earth_water.png");
+
+/// The fifty-two cards `klondike` deals, plus two backs. Upstream renders
+/// these from SVG at 360x540 and pads them with a drop shadow, which comes to
+/// three megabytes; here they are half that size with a thirty-two colour
+/// palette, which is 392 KB and looks the same at the size a card is drawn.
+/// The originals and their licences are named in `images/klondike/
+/// attribution.txt`, which is upstream's file.
+pub const KLONDIKE_CARDS: &[(&str, &[u8])] = &[
+    ("C2", include_bytes!("../images/klondike/C2.png")),
+    ("C3", include_bytes!("../images/klondike/C3.png")),
+    ("C4", include_bytes!("../images/klondike/C4.png")),
+    ("C5", include_bytes!("../images/klondike/C5.png")),
+    ("C6", include_bytes!("../images/klondike/C6.png")),
+    ("C7", include_bytes!("../images/klondike/C7.png")),
+    ("C8", include_bytes!("../images/klondike/C8.png")),
+    ("C9", include_bytes!("../images/klondike/C9.png")),
+    ("CA", include_bytes!("../images/klondike/CA.png")),
+    ("CJ", include_bytes!("../images/klondike/CJ.png")),
+    ("CK", include_bytes!("../images/klondike/CK.png")),
+    ("CQ", include_bytes!("../images/klondike/CQ.png")),
+    ("CT", include_bytes!("../images/klondike/CT.png")),
+    ("D2", include_bytes!("../images/klondike/D2.png")),
+    ("D3", include_bytes!("../images/klondike/D3.png")),
+    ("D4", include_bytes!("../images/klondike/D4.png")),
+    ("D5", include_bytes!("../images/klondike/D5.png")),
+    ("D6", include_bytes!("../images/klondike/D6.png")),
+    ("D7", include_bytes!("../images/klondike/D7.png")),
+    ("D8", include_bytes!("../images/klondike/D8.png")),
+    ("D9", include_bytes!("../images/klondike/D9.png")),
+    ("DA", include_bytes!("../images/klondike/DA.png")),
+    ("DJ", include_bytes!("../images/klondike/DJ.png")),
+    ("DK", include_bytes!("../images/klondike/DK.png")),
+    ("DQ", include_bytes!("../images/klondike/DQ.png")),
+    ("DT", include_bytes!("../images/klondike/DT.png")),
+    ("H2", include_bytes!("../images/klondike/H2.png")),
+    ("H3", include_bytes!("../images/klondike/H3.png")),
+    ("H4", include_bytes!("../images/klondike/H4.png")),
+    ("H5", include_bytes!("../images/klondike/H5.png")),
+    ("H6", include_bytes!("../images/klondike/H6.png")),
+    ("H7", include_bytes!("../images/klondike/H7.png")),
+    ("H8", include_bytes!("../images/klondike/H8.png")),
+    ("H9", include_bytes!("../images/klondike/H9.png")),
+    ("HA", include_bytes!("../images/klondike/HA.png")),
+    ("HJ", include_bytes!("../images/klondike/HJ.png")),
+    ("HK", include_bytes!("../images/klondike/HK.png")),
+    ("HQ", include_bytes!("../images/klondike/HQ.png")),
+    ("HT", include_bytes!("../images/klondike/HT.png")),
+    ("S2", include_bytes!("../images/klondike/S2.png")),
+    ("S3", include_bytes!("../images/klondike/S3.png")),
+    ("S4", include_bytes!("../images/klondike/S4.png")),
+    ("S5", include_bytes!("../images/klondike/S5.png")),
+    ("S6", include_bytes!("../images/klondike/S6.png")),
+    ("S7", include_bytes!("../images/klondike/S7.png")),
+    ("S8", include_bytes!("../images/klondike/S8.png")),
+    ("S9", include_bytes!("../images/klondike/S9.png")),
+    ("SA", include_bytes!("../images/klondike/SA.png")),
+    ("SJ", include_bytes!("../images/klondike/SJ.png")),
+    ("SK", include_bytes!("../images/klondike/SK.png")),
+    ("SQ", include_bytes!("../images/klondike/SQ.png")),
+    ("ST", include_bytes!("../images/klondike/ST.png")),
+    ("back", include_bytes!("../images/klondike/back.png")),
+    ("back0", include_bytes!("../images/klondike/back0.png")),
+];
