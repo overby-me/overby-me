@@ -1320,11 +1320,27 @@ pub fn can_edit_node(is_owner: bool, is_context_owner: bool, mutable: bool) -> b
 pub fn visible_sorted(
     children: &[crate::model::ChildNodeFields],
 ) -> Vec<crate::model::ChildNodeFields> {
-    let mut out: Vec<crate::model::ChildNodeFields> = children
-        .iter()
-        .filter(|c| c.mime.as_ref().map(|m| !m.hidden).unwrap_or(true))
-        .cloned()
-        .collect();
+    sorted_children(
+        &children
+            .iter()
+            .filter(|c| c.mime.as_ref().map(|m| !m.hidden).unwrap_or(true))
+            .cloned()
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The same ordering, keeping hidden-mime entries.
+///
+/// For a section that names the one mime it lists. A hidden mime is kept out of
+/// the GENERIC listing of a node's children (migration 0009: "hidden governs
+/// listings, not resolution"), and `vote/poll` is one -- so a polls section
+/// built on [`visible_sorted`] asks for the children that are not polls and
+/// renders nothing, however many polls the node has. `vote/comment` is hidden
+/// the same way, which is why the comment thread fetches its own.
+pub fn sorted_children(
+    children: &[crate::model::ChildNodeFields],
+) -> Vec<crate::model::ChildNodeFields> {
+    let mut out: Vec<crate::model::ChildNodeFields> = children.to_vec();
     out.sort_by(|a, b| {
         a.index.cmp(&b.index).then_with(|| {
             let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
@@ -1490,6 +1506,33 @@ mod tests {
         let names: Vec<&str> = out.iter().map(|c| c.name.as_str()).collect();
         // hidden dropped; index 0 before index 1; within index 0 older first.
         assert_eq!(names, vec!["a-older", "a", "b"]);
+    }
+
+    /// A section that lists ONE hidden mime has to keep it.
+    ///
+    /// `vote/poll` is hidden in production, so the polls list on a motion and on
+    /// a position -- both built on `visible_sorted` -- rendered nothing however
+    /// many polls the node had, and `if !polls.is_empty()` hid the section
+    /// entirely. Same ordering, no hidden filter.
+    #[test]
+    fn sorted_children_keeps_a_hidden_mime_that_a_section_asks_for() {
+        let children = vec![
+            child("poll-b", 1, true, "2024-01-01"),
+            child("visible", 0, false, "2024-01-02"),
+            child("poll-a", 0, true, "2024-01-01"),
+        ];
+        let sorted = sorted_children(&children);
+        let kept: Vec<&str> = sorted.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(kept, vec!["poll-a", "visible", "poll-b"]);
+        // And the filtering version still filters, so the generic listing that
+        // relies on it is unchanged.
+        assert_eq!(
+            visible_sorted(&children)
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["visible"]
+        );
     }
 
     #[test]

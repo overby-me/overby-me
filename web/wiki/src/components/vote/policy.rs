@@ -21,7 +21,13 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let children = visible_sorted(&node.children);
     let children = &children;
 
-    let polls: Vec<_> = children
+    // From the raw children, not `children` above: `vote/poll` is a hidden mime,
+    // and `visible_sorted` drops those. This section names the mime it lists, so
+    // the flag that keeps polls out of a generic listing does not apply -- and
+    // with it applied the list was empty on every motion that had ever held a
+    // poll.
+    let all_children = super::super::loader::sorted_children(&node.children);
+    let polls: Vec<_> = all_children
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/poll"))
         .collect();

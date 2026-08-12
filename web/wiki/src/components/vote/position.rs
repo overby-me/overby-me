@@ -68,7 +68,11 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     // parts of the tree, still open and close together.
     let poll_open = use_signal(|| false);
 
-    let polls: Vec<_> = children
+    // Raw children, for the reason spelled out in `policy.rs`: `vote/poll` is a
+    // hidden mime and `visible_sorted` drops those, so this list was empty
+    // however many polls the position had.
+    let all_children = super::super::loader::sorted_children(&node.children);
+    let polls: Vec<_> = all_children
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/poll"))
         .collect();

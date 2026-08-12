@@ -511,10 +511,24 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                         // context" means ask the chair for a seat), and answering
                         // all of them with "something went wrong" turns a fixable
                         // situation into a mystery.
-                        error.set(match e.as_str() {
-                            "not a member of this context" => t("vote.noVotingRight"),
-                            "poll closed" => t("vote.closed"),
-                            _ => t("error.somethingWentWrong"),
+                        // "check constraint of an insert/update permission has
+                        // failed" is how Hasura says it refused the ballot under
+                        // `insert_with_email_invites` (migrations/0015). Every
+                        // arm of that rule is a variant of "you may not vote
+                        // here": no vote permission in this context, the poll
+                        // closed under you, the poll's parent locked. The voter
+                        // cannot act on which, only on the fact, and answering
+                        // with "something went wrong" hides that this is a
+                        // decision rather than a fault. Which arm it was is in
+                        // the log line below.
+                        let refused = e.contains("permission has failed")
+                            || e == "not a member of this context";
+                        error.set(if refused {
+                            t("vote.noVotingRight")
+                        } else if e == "poll closed" {
+                            t("vote.closed")
+                        } else {
+                            t("error.somethingWentWrong")
                         });
                         // And report it. The remote log ships from `log::` calls
                         // (snackbar.rs is where most of them come from); this arm
