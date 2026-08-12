@@ -406,10 +406,35 @@ impl Log for RemoteLogger {
         let benign = record.target().starts_with("lopdf")
             && msg.contains("Size entry of trailer dictionary");
         if record.level() <= Level::Warn && !benign && SOURCE_TOKEN.is_some() {
-            let entry = make_entry(
-                level_str(record.level()),
-                format!("{}: {msg}", record.target()),
-            );
+            // A stack for an error, none for a warning.
+            //
+            // `make_entry_with_stack` says why above: a stack sampled in the
+            // handler is a trace of the logger. For a `log::` call it is worse
+            // than that, because almost every one of them runs inside a spawned
+            // task, and on wasm a task's stack begins at the microtask that
+            // resumed it -- every `.await` before that has already erased the
+            // caller. What arrives is the executor's resume path, expanded by
+            // fat LTO into inlined generics from across the tree, so a refused
+            // ballot came back naming the docx renderer and the colour library.
+            // Checked against a real report: the symbols resolve correctly and
+            // the frames are honest, they are just not the ones that led here.
+            //
+            // Warnings are the routine ones -- a session expiring, a server
+            // refusing something -- where the message and the breadcrumb trail
+            // already carry it, and 200 lines of plumbing per report cost
+            // bandwidth and read as evidence. Errors keep theirs: the frames are
+            // no better, but they are rare enough to be worth having when the
+            // message alone does not explain it.
+            //
+            // A panic is untouched (`ship_sync` below): its hook runs on the
+            // failing stack, synchronously, which is the case all of this was
+            // built for and the one where the frames are the answer.
+            let level = level_str(record.level());
+            let message = format!("{}: {msg}", record.target());
+            let entry = match record.level() {
+                Level::Error => make_entry(level, message),
+                _ => make_entry_with_stack(level, message, None),
+            };
             PENDING.with(|p| p.borrow_mut().push(entry));
         }
     }
