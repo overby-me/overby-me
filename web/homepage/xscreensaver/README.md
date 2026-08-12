@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (121) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (122) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -277,6 +277,21 @@ sixteen-bit samples. It returns the colour and, separately, a depth-1 bitmap of
 where the picture is opaque, because `Fb` has no alpha channel to put it in and
 neither does X: a hack draws a sprite by clipping the colour through the
 bitmap, which is what `image_data_to_pixmap` hands it upstream.
+
+One set of those is not upstream's file byte for byte, and it is worth saying
+which and why. The four maps of the Earth (`earth.png`, `earth_night.png`,
+`earth_water.png`) are shipped at 4096x2048, which is 6.8 MB for the first of
+them alone, and six savers want one or more. Every saver here arrives as its
+own lazily-loaded chunk and `wasm-split` emits no shared chunk, so a file
+referenced by six savers is carried six times over and, worse, is downloaded in
+full by anyone who visits one of them. They are stored at 1024x512 instead: a
+quarter of the size in each direction, 515 KB for the day map. That is not a
+judgement call about how much detail a globe needs, because upstream already
+made it. `dymaxionmap` halves the built-in maps until they are under 2048
+wide before it uses them, with the comment "the 2048x1024 images kill
+performance", and a globe drawn 500 pixels across samples about one texel per
+pixel at this size anyway. `earth_flat.png` is upstream's own file untouched,
+because it ships at 1024x512 already.
 
 ## Shapes
 

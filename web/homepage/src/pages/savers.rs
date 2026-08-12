@@ -1684,6 +1684,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::kaleidocycle::start
 );
 gl3d_saver!(
+    "glplanet",
+    glplanet_body,
+    glplanet_start,
+    xscreensaver::hacks3d::glplanet::start
+);
+gl3d_saver!(
     "glschool",
     glschool_body,
     glschool_start,
@@ -2830,6 +2836,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "glknots",
         label: "GL Knots",
         start: Start::Gl3d(glknots_start),
+    },
+    Entry {
+        slug: "glplanet",
+        label: "GL Planet",
+        start: Start::Gl3d(glplanet_start),
     },
     Entry {
         slug: "glschool",

@@ -256,3 +256,7 @@ pub const LAMENT_MODEL_TETRA_USW: &str = include_str!("../models/lament_model_te
 pub const COMPANION_QUAD: &str = include_str!("../models/companion_quad.gllist");
 pub const COMPANION_DISC: &str = include_str!("../models/companion_disc.gllist");
 pub const COMPANION_HEART: &str = include_str!("../models/companion_heart.gllist");
+
+/// The boundaries of the world's time zones, drawn by hand by jwz as line
+/// segments on a flat map. `glplanet` bends them round its globe.
+pub const TIMEZONES: &str = include_str!("../models/timezones.gllist");

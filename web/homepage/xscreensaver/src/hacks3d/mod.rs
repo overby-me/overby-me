@@ -71,6 +71,7 @@ pub mod glforestfire;
 pub mod glhanoi;
 pub mod glknots;
 pub mod glmatrix;
+pub mod glplanet;
 pub mod glschool;
 pub mod glslideshow;
 pub mod glsnake;
@@ -211,6 +212,7 @@ pub static ALL: &[&Saver3d] = &[
     &flipflop::SAVER,
     &flipscreen3d::SAVER,
     &gflux::SAVER,
+    &glplanet::SAVER,
     &hilbert::SAVER,
     &jigsaw::SAVER,
     &maze3d::SAVER,

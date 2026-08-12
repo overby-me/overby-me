@@ -213,3 +213,13 @@ pub const TOAST_PNG: &[u8] = include_bytes!("../images/toast.png");
 /// six walls of Lemarchand's Box in gold leaf, then the inside of it, then the
 /// Leviathan.
 pub const LAMENT512: &[u8] = include_bytes!("../images/lament512.png");
+
+/// The Earth in daylight and at night, as satellite photographs on an
+/// equirectangular projection, plus the flat political map and the mask that
+/// says which of it is water. Upstream ships all four at 4096x2048; these are
+/// a quarter of that in each direction, which is what upstream's own
+/// `dymaxionmap` shrinks them to before it uses them.
+pub const EARTH: &[u8] = include_bytes!("../images/earth.png");
+pub const EARTH_NIGHT: &[u8] = include_bytes!("../images/earth_night.png");
+pub const EARTH_FLAT: &[u8] = include_bytes!("../images/earth_flat.png");
+pub const EARTH_WATER: &[u8] = include_bytes!("../images/earth_water.png");
