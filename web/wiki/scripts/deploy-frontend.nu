@@ -60,8 +60,9 @@ def main [
     }
 
     print $"building ($site) ..."
+    # No exit-code check here or after zip below: nushell raises on a non-zero
+    # external command and stops the script, so a guard would never run.
     ^just build
-    if $env.LAST_EXIT_CODE != 0 { fail "the build failed" }
 
     # Put back anything the build dropped. `cp -n` semantics: never overwrite the
     # sidecar this build just produced.
@@ -90,10 +91,13 @@ def main [
     }
 
     let stamp = (open ($public | path join "version.json") | get commit)
-    let zip = (mktemp --tmpdir --suffix .zip)
+    # A path inside a temp DIR, not `mktemp --suffix .zip`: that creates the file,
+    # and zip reads an existing empty file as an archive it cannot parse
+    # ("Zip file structure invalid") rather than as somewhere to write.
+    let stage = (mktemp -d)
+    let zip = ($stage | path join "site.zip")
     cd $public
     ^zip -qr $zip .
-    if $env.LAST_EXIT_CODE != 0 { fail "zip failed" }
 
     print $"dropping ($stamp) on ($site) ..."
     let out = (
@@ -103,7 +107,7 @@ def main [
             --data-binary $"@($zip)"
         | complete
     )
-    rm -f $zip
+    rm -rf $stage
     if $out.exit_code != 0 or not ($out.stdout | str contains "Build succeeded") {
         fail $"the drop failed:\n($out.stdout)($out.stderr)"
     }
