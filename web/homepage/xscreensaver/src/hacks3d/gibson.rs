@@ -931,7 +931,7 @@ pub static DEF: SaverDef = SaverDef {
     about: About {
         author: "Jamie Zawinski",
         year: "2020",
-        video: Some("https://www.youtube.com/watch?v=NhKmipo_Ek4"),
+        video: Some("https://www.youtube.com/watch?v=_gOhMR3TrHA"),
         blurb: "Hacking the Gibson, as per the 1995 classic film, Hackers.",
     },
 };

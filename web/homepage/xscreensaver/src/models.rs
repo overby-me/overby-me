@@ -203,3 +203,14 @@ pub const HANDSY_MODEL_THUMB_PROXIMAL: &str =
 pub const HANDSY_MODEL_THUMB_METACARPAL: &str =
     include_str!("../models/handsy_model_thumb_metacarpal.gllist");
 pub const HANDSY_MODEL_PALM: &str = include_str!("../models/handsy_model_palm.gllist");
+
+/// The pieces of one cell of `splitflap`'s board: a quarter of the frame, a
+/// quarter of the disc it turns on, and half of a fin's edge and face.
+pub const SPLITFLAP_OBJ_BOX_QUARTER_FRAME: &str =
+    include_str!("../models/splitflap_obj_box_quarter_frame.gllist");
+pub const SPLITFLAP_OBJ_DISC_QUARTER: &str =
+    include_str!("../models/splitflap_obj_disc_quarter.gllist");
+pub const SPLITFLAP_OBJ_FIN_EDGE_HALF: &str =
+    include_str!("../models/splitflap_obj_fin_edge_half.gllist");
+pub const SPLITFLAP_OBJ_FIN_FACE_HALF: &str =
+    include_str!("../models/splitflap_obj_fin_face_half.gllist");

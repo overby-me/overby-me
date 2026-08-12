@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (96) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (97) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -514,6 +514,14 @@ around forty thousand batches a frame. `deepstars` makes its star trails by
 redrawing the whole sky up to four hundred times a frame at descending alpha,
 which is free when the stars live on the card and is eight million points when
 they do not. Measure before starting one of the crowded ones.
+
+`timetunnel` is deferred for a different reason: the two functions that draw
+its signs and its tunnels are wrapped in `#ifndef HAVE_JWZGLES` upstream, so
+its own OpenGL ES build draws neither. They want a blend *constant*
+(`glBlendColor`), a blend *equation* (`GL_FUNC_REVERSE_SUBTRACT`) and a texture
+matrix, none of which this runtime has either. Porting it faithfully means
+adding all three first; porting it as upstream's mobile build behaves means
+shipping a saver with most of itself missing.
 
 A saver whose crowd is a *setting* can keep its code and lower the setting
 instead. `winduprobot` draws twenty-five robots of sixty-three thousand

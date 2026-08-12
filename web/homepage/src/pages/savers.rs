@@ -1516,6 +1516,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::stonerview::start
 );
 gl3d_saver!(
+    "splitflap",
+    splitflap_body,
+    splitflap_start,
+    xscreensaver::hacks3d::splitflap::start
+);
+gl3d_saver!(
     "splodesic",
     splodesic_body,
     splodesic_start,
@@ -2854,6 +2860,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "sierpinski3d",
         label: "Sierpinski 3D",
         start: Start::Gl3d(sierpinski3d_start),
+    },
+    Entry {
+        slug: "splitflap",
+        label: "Split Flap",
+        start: Start::Gl3d(splitflap_start),
     },
     Entry {
         slug: "splodesic",
