@@ -196,9 +196,10 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     let mut selected = use_signal(|| vec![false; options_len]);
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
-    // Optimistic cast: the chosen option indices, shown as voted + counted at once
-    // and dropped once the refetch confirms (`voted` flips true) or on error.
-    let mut cast_pending = use_signal(|| None::<Vec<usize>>);
+    // Optimistic cast: the chosen option indices AND the tally total as it stood
+    // when they were cast, shown as voted + counted at once and dropped once the
+    // tally itself passes that total (see `show_opt`) or on error.
+    let mut cast_pending = use_signal(|| None::<(Vec<usize>, usize)>);
     // In-flight guard so a rapid double-click cannot fire two casts (the second
     // would fail the one-vote uniqueness check).
     let mut casting = use_signal(|| false);
@@ -319,14 +320,35 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         counts.resize(n_opts, 0);
         (counts, total)
     });
-    let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
-    // Fold the optimistic cast into the tally + voted state until the refetch
-    // reflects it (`voted` true), then drop the optimistic add so it is not counted
-    // twice. On error `cast_pending` is cleared, snapping the ballot back.
-    let show_opt = cast_pending.read().is_some() && !voted;
+    let (counts, fetched_total) = tally.read().clone().unwrap_or((vec![], 0));
+    // Fold the optimistic cast into the tally until the TALLY has caught up, then
+    // drop it so the ballot is not counted twice.
+    //
+    // This used to hold the optimistic add until `voted` turned true, and `voted`
+    // is a different query from the tally. Both re-run on the same `rev` bump and
+    // resolve independently, so whichever landed first moved the bars a second
+    // time: `voted` first dropped the +1 back onto a tally that had not refreshed
+    // yet, and the bars fell and then rose; the tally first counted the ballot
+    // twice, and they overshot and came back. Either way the bars animated, sat,
+    // and animated again a moment after the vote.
+    //
+    // The honest test is the tally's own number. `cast_pending` remembers the
+    // total as it stood when the ballot was cast, and the optimistic add stands
+    // until the server reports more than that. The displayed total therefore only
+    // ever rises, and it rises once: it goes from fetched+1 to a fetched value
+    // that already includes the ballot, which is the same number and so no
+    // transition at all.
+    //
+    // Another voter arriving in the same moment can satisfy this early. That
+    // costs nothing: the count is still going up, and the tally is the authority
+    // either way.
+    let show_opt = match cast_pending.read().as_ref() {
+        Some((_, total_at_cast)) => fetched_total <= *total_at_cast,
+        None => false,
+    };
     let counts = if show_opt {
         let mut c = counts;
-        if let Some(chosen) = cast_pending.read().as_ref() {
+        if let Some((chosen, _)) = cast_pending.read().as_ref() {
             for &i in chosen {
                 if let Some(x) = c.get_mut(i) {
                     *x += 1;
@@ -338,9 +360,9 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         counts
     };
     let total_votes = if show_opt {
-        total_votes + 1
+        fetched_total + 1
     } else {
-        total_votes
+        fetched_total
     };
     let voted = voted || cast_pending.read().is_some();
     // Eligible voters = active members of the poll's context, for the turnout /
@@ -484,8 +506,10 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             let ctx = ctx.clone();
             let uid = uid.clone();
             // Optimistic: show the ballot as cast and move the tally bars at once.
+            // The total is stamped as it stands NOW, which is what tells the tally
+            // apart from itself-plus-this-ballot when it comes back.
             casting.set(true);
-            cast_pending.set(Some(chosen.clone()));
+            cast_pending.set(Some((chosen.clone(), total_votes)));
             spawn(async move {
                 // Key the vote by the voter, so a second cast collides on the nodes
                 // (parent_id, key) UNIQUE constraint — the DB enforces one vote per
@@ -512,8 +536,9 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                 match result {
                     Ok(()) => {
                         show_snackbar(&t("vote.hasVoted"));
-                        // Leave cast_pending: `voted` will flip true on refetch and the
-                        // optimistic add drops itself (show_opt gates on !voted).
+                        // Leave cast_pending: it keeps the ballot showing as cast,
+                        // and the optimistic add drops itself once the refetched
+                        // tally passes the total stamped into it (see `show_opt`).
                         refresh += 1;
                     }
                     // "already voted" is the backend's secret-ballot signal; a
