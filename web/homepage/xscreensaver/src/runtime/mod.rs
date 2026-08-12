@@ -32,6 +32,7 @@ pub mod gl;
 pub mod gllist;
 pub mod glutstroke;
 pub mod hack3d;
+pub mod hopf;
 pub mod image;
 pub mod involute;
 pub mod jpeg;

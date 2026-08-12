@@ -1,0 +1,1094 @@
+HOPF1
+so single_point_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_point_rot_z single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_point_rot_z single_point_rot_z
+so single_point_move_hopf_torus 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 0.0 0.0 4.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_move_hopf_torus single_point_move_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_point_move_hopf_torus single_point_move_hopf_torus
+so single_point_move_hopf_spiral 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 0.0 -12.5663706143592 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_move_hopf_spiral single_point_move_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_point_move_hopf_spiral single_point_move_hopf_spiral
+so single_point_to_double_point_rot_z 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 5.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_double_point_rot_z single_point_to_double_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so double_point_rot_z 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 3.1415926535898 4.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_point_rot_z double_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+so double_point_to_single_point_rot_z 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 6.2831853071796 6.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_point_to_single_point_rot_z double_point_to_single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps double_point_rot_z single_point_to_double_point_rot_z double_point_rot_z double_point_to_single_point_rot_z
+so single_point_to_double_point_move_hopf_torus 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 -1.0 0.0 0.0 3.1415926535898 1.0
+mo single_point_to_double_point_move_hopf_torus single_point_to_double_point_move_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so double_point_move_hopf_torus 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 0.0 0.0 4.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 -3.1415926535898 3.1415926535898 1.0 0.0 0.0 0.0 4.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_point_move_hopf_torus double_point_move_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+so double_point_to_single_point_move_hopf_torus 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 -1.0 0.0 3.1415926535898 6.2831853071796 1.0
+mo double_point_to_single_point_move_hopf_torus double_point_to_single_point_move_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps double_point_move_hopf_torus single_point_to_double_point_move_hopf_torus double_point_move_hopf_torus double_point_to_single_point_move_hopf_torus
+so single_point_to_double_point_move_hopf_spiral 2
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 0.0 -6.2831853071796 5.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_double_point_move_hopf_spiral single_point_to_double_point_move_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+so double_point_move_hopf_spiral 2
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 0.0 -12.5663706143592 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 6.2831853071796 -6.2831853071796 4.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_point_move_hopf_spiral double_point_move_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+so double_point_to_single_point_move_hopf_spiral 2
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 6.2831853071796 0.0 6.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_point_to_single_point_move_hopf_spiral double_point_to_single_point_move_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps double_point_move_hopf_spiral single_point_to_double_point_move_hopf_spiral double_point_move_hopf_spiral double_point_to_single_point_move_hopf_spiral
+anims single_point single_point_rot_z single_point_move_hopf_torus single_point_move_hopf_spiral double_point_rot_z double_point_move_hopf_torus double_point_move_hopf_spiral
+so single_point_to_single_torus_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_single_torus_rot_z single_point_to_single_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_point_to_single_torus_rot_z single_point_to_single_torus_rot_z
+so single_point_to_single_torus_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_single_torus_rot_rnd single_point_to_single_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_point_to_single_torus_rot_rnd single_point_to_single_torus_rot_rnd
+anims single_point_to_single_torus single_point_to_single_torus_rot_z single_point_to_single_torus_rot_rnd
+so single_point_to_double_torus_rot_z 2
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo single_point_to_double_torus_rot_z single_point_to_double_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_point_to_double_torus_rot_z single_point_to_double_torus_rot_z
+so single_point_to_double_torus_rot_rnd 2
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_double_torus_rot_rnd single_point_to_double_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_point_to_double_torus_rot_rnd single_point_to_double_torus_rot_rnd
+anims single_point_to_double_torus single_point_to_double_torus_rot_z single_point_to_double_torus_rot_rnd
+so single_point_to_triple_torus_rot_z 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo single_point_to_triple_torus_rot_z single_point_to_triple_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_point_to_triple_torus_rot_z single_point_to_triple_torus_rot_z
+so single_point_to_triple_torus_rot_rnd 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_triple_torus_rot_rnd single_point_to_triple_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_point_to_triple_torus_rot_rnd single_point_to_triple_torus_rot_rnd
+anims single_point_to_triple_torus single_point_to_triple_torus_rot_z single_point_to_triple_torus_rot_rnd
+so single_point_to_single_seifert_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_single_seifert_rot_z single_point_to_single_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_point_to_single_seifert_rot_z single_point_to_single_seifert_rot_z
+so single_point_to_single_seifert_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_single_seifert_rot_rnd single_point_to_single_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_point_to_single_seifert_rot_rnd single_point_to_single_seifert_rot_rnd
+anims single_point_to_single_seifert single_point_to_single_seifert_rot_z single_point_to_single_seifert_rot_rnd
+so single_point_to_triple_seifert_rot_z 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.130899693899575 1.0 0.0 -3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.130899693899575 1.0 0.0 -3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 0.0 3.1415926535898 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_point_to_triple_seifert_rot_z single_point_to_triple_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_point_to_triple_seifert_rot_z single_point_to_triple_seifert_rot_z
+so single_point_to_triple_seifert_rot_z_move_spiral 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 -2.0 -2.0 0.0 0.0 3.1415926535898 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_triple_seifert_rot_z_move_spiral single_point_to_triple_seifert_rot_z_move_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 120.0
+so single_point_to_triple_seifert_rot_z_move_north_1 2
+0.0 3.1415926535898 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 5.0
+0.0 3.1415926535898 3.1415926535898 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_triple_seifert_rot_z_move_north_1 single_point_to_triple_seifert_rot_z_move_north_1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_point_to_triple_seifert_rot_z_move_north_2 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+0.0 3.1415926535898 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 5.0
+0.0 3.1415926535898 3.1415926535898 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_triple_seifert_rot_z_move_north_2 single_point_to_triple_seifert_rot_z_move_north_2 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_point_to_triple_seifert_rot_z_move_north_3 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 4.0
+0.0 3.1415926535898 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 5.0
+mo single_point_to_triple_seifert_rot_z_move_north_3 single_point_to_triple_seifert_rot_z_move_north_3 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_point_to_triple_seifert_rot_z_linear 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 4.0
+0.0 2.7925268031909334 2.7925268031909334 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+mo single_point_to_triple_seifert_rot_z_linear single_point_to_triple_seifert_rot_z_linear 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_point_to_triple_seifert_rot_z_loosen 6
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 6.0
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 6.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 6.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 6.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 6.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 6.0
+mo single_point_to_triple_seifert_rot_z_loosen single_point_to_triple_seifert_rot_z_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_point_to_triple_seifert_move_north single_point_to_triple_seifert_rot_z_move_spiral single_point_to_triple_seifert_rot_z_move_north_1 single_point_to_triple_seifert_rot_z_move_north_2 single_point_to_triple_seifert_rot_z_move_north_3 single_point_to_triple_seifert_rot_z_linear single_point_to_triple_seifert_rot_z_loosen
+anims single_point_to_triple_seifert single_point_to_triple_seifert_rot_z single_point_to_triple_seifert_move_north
+so single_point_to_single_hopf_torus_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_single_hopf_torus_rot_rnd single_point_to_single_hopf_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_point_to_single_hopf_torus_rot_rnd single_point_to_single_hopf_torus_rot_rnd
+so single_point_to_single_loose_hopf_torus 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_point_to_single_loose_hopf_torus single_point_to_single_loose_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+so single_hopf_torus_to_single_dense_hopf_torus 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 -0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 -0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_single_dense_hopf_torus single_hopf_torus_to_single_dense_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps single_point_to_single_hopf_torus_densify single_point_to_single_loose_hopf_torus single_hopf_torus_to_single_dense_hopf_torus
+anims single_point_to_single_hopf_torus single_point_to_single_hopf_torus_rot_rnd single_point_to_single_hopf_torus_densify
+so single_hopf_spiral_to_single_point_expand_sector 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 0.0 -3.1415926535898 1.0 0.0 6.2831853071796 1.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_point_expand_sector single_hopf_spiral_to_single_point_expand_sector 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_spiral_to_single_point_expand_sector single_hopf_spiral_to_single_point_expand_sector
+anims single_point_to_single_hopf_spiral single_hopf_spiral_to_single_point_expand_sector
+so single_torus_to_single_point_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_point_rot_z single_torus_to_single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_to_single_point_rot_z single_torus_to_single_point_rot_z
+so single_torus_to_single_point_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_point_rot_rnd single_torus_to_single_point_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_to_single_point_rot_rnd single_torus_to_single_point_rot_rnd
+anims single_torus_to_single_point single_torus_to_single_point_rot_z single_torus_to_single_point_rot_rnd
+so single_torus_rot_x 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 1.0
+mo single_torus_rot_x single_torus_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 180.0
+ps single_torus_rot_x single_torus_rot_x
+so single_torus_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_torus_rot_z single_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_rot_z single_torus_rot_z
+so single_torus_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_rot_rnd single_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_rot_rnd single_torus_rot_rnd
+so single_torus_move 1
+0.0 0.17453292519943334 2.9670597283903666 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_torus_move single_torus_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_torus_move single_torus_move
+so single_torus_to_meridian_torus_densify 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+mo single_torus_to_meridian_torus_densify single_torus_to_meridian_torus_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so single_meridian_torus_rot_x 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+mo single_meridian_torus_rot_x single_meridian_torus_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+so single_meridian_torus_to_torus_loosen 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+mo single_meridian_torus_to_torus_loosen single_meridian_torus_to_torus_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_torus_meridian single_torus_to_meridian_torus_densify single_meridian_torus_rot_x single_meridian_torus_to_torus_loosen
+anims single_torus single_torus_rot_x single_torus_rot_z single_torus_rot_rnd single_torus_move single_torus_meridian
+so single_torus_to_single_dense_torus_densify_two 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_dense_torus_densify_two single_torus_to_single_dense_torus_densify_two 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+so single_dense_torus_to_double_torus_rot_z 2
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_dense_torus_to_double_torus_rot_z single_dense_torus_to_double_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_torus_to_double_torus_rot_z single_torus_to_single_dense_torus_densify_two single_dense_torus_to_double_torus_rot_z
+so single_torus_to_double_torus_rot_rnd 2
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_double_torus_rot_rnd single_torus_to_double_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_torus_to_double_torus_rot_rnd single_torus_to_double_torus_rot_rnd
+anims single_torus_to_double_torus single_torus_to_double_torus_rot_z single_torus_to_double_torus_rot_rnd
+so single_torus_to_single_dense_torus_densify_three 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_dense_torus_densify_three single_torus_to_single_dense_torus_densify_three 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+so single_dense_torus_to_triple_torus_rot_z 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_dense_torus_to_triple_torus_rot_z single_dense_torus_to_triple_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_torus_to_triple_torus_rot_z single_torus_to_single_dense_torus_densify_three single_dense_torus_to_triple_torus_rot_z
+so single_torus_to_triple_torus_rot_rnd 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_triple_torus_rot_rnd single_torus_to_triple_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_torus_to_triple_torus_rot_rnd single_torus_to_triple_torus_rot_rnd
+anims single_torus_to_triple_torus single_torus_to_triple_torus_rot_z single_torus_to_triple_torus_rot_rnd
+so single_torus_to_single_seifert_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_seifert_rot_z single_torus_to_single_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_torus_to_single_seifert_rot_z single_torus_to_single_seifert_rot_z
+so single_torus_to_single_seifert_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_seifert_rot_rnd single_torus_to_single_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_to_single_seifert_rot_rnd single_torus_to_single_seifert_rot_rnd
+so single_torus_to_single_seifert_flip 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 0.0 12.0 -0.99785892 0.06540313 0.0 0.0 3.1415926535898 1.0
+mo single_torus_to_single_seifert_flip single_torus_to_single_seifert_flip 0.25 1.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_torus_to_single_seifert_flip single_torus_to_single_seifert_flip
+anims single_torus_to_single_seifert single_torus_to_single_seifert_rot_z single_torus_to_single_seifert_rot_rnd single_torus_to_single_seifert_flip
+so single_dense_torus_to_triple_seifert_rot_z 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 2.0943951023932 3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 4.1887902047864 -3.1415926535898 1.0 2.0943951023932 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 2.0943951023932 -3.1415926535898 1.0 2.0943951023932 3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo single_dense_torus_to_triple_seifert_rot_z single_dense_torus_to_triple_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_torus_to_triple_seifert_rot_z single_torus_to_single_dense_torus_densify_three single_dense_torus_to_triple_seifert_rot_z
+so single_torus_to_triple_seifert_rot_rnd 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_triple_seifert_rot_rnd single_torus_to_triple_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_torus_to_triple_seifert_rot_rnd single_torus_to_triple_seifert_rot_rnd
+anims single_torus_to_triple_seifert single_torus_to_triple_seifert_rot_z single_torus_to_triple_seifert_rot_rnd
+so single_torus_to_single_dense_torus 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_dense_torus single_torus_to_single_dense_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so single_dense_torus_to_single_hopf_torus 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_torus_to_single_hopf_torus single_dense_torus_to_single_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_torus_to_single_hopf_torus_densify single_torus_to_single_dense_torus single_dense_torus_to_single_hopf_torus
+anims single_torus_to_single_hopf_torus single_torus_to_single_hopf_torus_densify
+so single_torus_to_single_dense_unwound_torus 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_dense_unwound_torus single_torus_to_single_dense_unwound_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so single_dense_unwound_torus_to_single_hopf_spiral 1
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 1.0 2.0 1.0 0.0 -3.1415926535898 1.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_unwound_torus_to_single_hopf_spiral single_dense_unwound_torus_to_single_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_to_single_hopf_spiral_wind single_torus_to_single_dense_unwound_torus single_dense_unwound_torus_to_single_hopf_spiral
+so single_torus_to_single_hopf_spiral_unwind 1
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 3.0 2.0 1.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_torus_to_single_hopf_spiral_unwind single_torus_to_single_hopf_spiral_unwind 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_torus_to_single_hopf_spiral_unwind single_torus_to_single_hopf_spiral_unwind
+anims single_torus_to_single_hopf_spiral single_torus_to_single_hopf_spiral_wind single_torus_to_single_hopf_spiral_unwind
+so double_torus_to_single_point_rot_z 2
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo double_torus_to_single_point_rot_z double_torus_to_single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps double_torus_to_single_point_rot_z double_torus_to_single_point_rot_z
+so double_torus_to_single_point_rot_rnd 2
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_single_point_rot_rnd double_torus_to_single_point_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_single_point_rot_rnd double_torus_to_single_point_rot_rnd
+anims double_torus_to_single_point double_torus_to_single_point_rot_z double_torus_to_single_point_rot_rnd
+so double_torus_to_single_dense_torus_rot_z 2
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo double_torus_to_single_dense_torus_rot_z double_torus_to_single_dense_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_dense_torus_to_single_torus_loosen_two 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_torus_to_single_torus_loosen_two single_dense_torus_to_single_torus_loosen_two 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+ps double_torus_to_single_torus_rot_z double_torus_to_single_dense_torus_rot_z single_dense_torus_to_single_torus_loosen_two
+so double_torus_to_single_torus_rot_rnd 2
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_single_torus_rot_rnd double_torus_to_single_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_single_torus_rot_rnd double_torus_to_single_torus_rot_rnd
+anims double_torus_to_single_torus double_torus_to_single_torus_rot_z double_torus_to_single_torus_rot_rnd
+so double_torus_rot_x 2
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo double_torus_rot_x double_torus_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+ps double_torus_rot_x double_torus_rot_x
+so double_torus_rot_y_p1 2
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 1.0 0.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 1.0 0.0 0.0 1.5707963267949 1.0
+mo double_torus_rot_y_p1 double_torus_rot_y_p1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so double_torus_rot_y_p2 2
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 1.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 1.0 0.0 1.5707963267949 1.5707963267949 0.0
+mo double_torus_rot_y_p2 double_torus_rot_y_p2 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 180.0
+so double_torus_rot_y_p3 2
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 1.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 1.0 0.0 1.5707963267949 3.1415926535898 1.0
+mo double_torus_rot_y_p3 double_torus_rot_y_p3 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps double_torus_rot_y double_torus_rot_y_p1 double_torus_rot_y_p2 double_torus_rot_y_p3
+so double_torus_rot_rnd_move_densify 4
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_rot_rnd_move_densify double_torus_rot_rnd_move_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so double_torus_rot_rnd_rot 2
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0654498469497875 0.0 6.2831853071796 6.2831853071796 0.0 0.0 48.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.7925268031909334 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0654498469497875 0.0 6.2831853071796 6.2831853071796 0.0 0.0 48.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_rot_rnd_rot double_torus_rot_rnd_rot 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so double_torus_rot_rnd_move_loosen 4
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_rot_rnd_move_loosen double_torus_rot_rnd_move_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps double_torus_rot_rnd double_torus_rot_rnd_move_densify double_torus_rot_rnd_rot double_torus_rot_rnd_move_loosen
+so double_torus_move 2
+0.0 1.3962634015954667 0.17453292519943334 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.7453292519943335 2.9670597283903666 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo double_torus_move double_torus_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps double_torus_move double_torus_move
+anims double_torus double_torus_rot_x double_torus_rot_y double_torus_rot_rnd double_torus_move
+so double_torus_to_triple_torus_rot_z 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 0.26179938779915 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo double_torus_to_triple_torus_rot_z double_torus_to_triple_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_triple_torus_rot_z double_torus_to_triple_torus_rot_z
+so double_torus_to_triple_torus_rot_rnd 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_triple_torus_rot_rnd double_torus_to_triple_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_triple_torus_rot_rnd double_torus_to_triple_torus_rot_rnd
+anims double_torus_to_triple_torus double_torus_to_triple_torus_rot_z double_torus_to_triple_torus_rot_rnd
+so double_torus_to_single_dense_seifert_two_rot_z 2
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.5707963267949 -1.603521250269794 1.0 6.2831853071796 1.5707963267949 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.5707963267949 -1.6689710972195815 1.0 -6.2831853071796 -1.5707963267949 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo double_torus_to_single_dense_seifert_two_rot_z double_torus_to_single_dense_seifert_two_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+so single_dense_seifert_two_to_single_seifert_rot_z 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.108867730114907 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1743175770646936 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_seifert_two_to_single_seifert_rot_z single_dense_seifert_two_to_single_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+ps double_torus_to_single_seifert_rot_z double_torus_to_single_dense_seifert_two_rot_z single_dense_seifert_two_to_single_seifert_rot_z
+so double_torus_to_single_seifert_rot_rnd 4
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 6.2831853071796 3.1415926535898 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.2724923474893752 1.0 6.2831853071796 3.1415926535898 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.2724923474893752 1.0 6.2831853071796 3.1415926535898 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_single_seifert_rot_rnd double_torus_to_single_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_single_seifert_rot_rnd double_torus_to_single_seifert_rot_rnd
+anims double_torus_to_single_seifert double_torus_to_single_seifert_rot_z double_torus_to_single_seifert_rot_rnd
+so double_torus_to_triple_seifert_rot_z 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 1.0 3.1415926535898 0.0 1.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 1.0 1.5707963267949 0.0 1.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 1.5707963267949 0.0 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 3.1415926535898 0.0 1.0
+mo double_torus_to_triple_seifert_rot_z double_torus_to_triple_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_triple_seifert_rot_z double_torus_to_triple_seifert_rot_z
+so double_torus_to_triple_seifert_rot_rnd 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_triple_seifert_rot_rnd double_torus_to_triple_seifert_rot_rnd 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps double_torus_to_triple_seifert_rot_rnd double_torus_to_triple_seifert_rot_rnd
+anims double_torus_to_triple_seifert double_torus_to_triple_seifert_rot_z double_torus_to_triple_seifert_rot_rnd
+so double_torus_to_loose_double_torus 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 1.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 0.26179938779915 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_loose_double_torus double_torus_to_loose_double_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so loose_double_torus_to_loose_hopf_torus 2
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.26179938779915 0.26179938779915 0.0 6.2831853071796 6.2831853071796 0.0 4.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo loose_double_torus_to_loose_hopf_torus loose_double_torus_to_loose_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so loose_hopf_torus_to_hopf_torus 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 -0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 -0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo loose_hopf_torus_to_hopf_torus loose_hopf_torus_to_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps double_torus_to_single_hopf_torus_densify double_torus_to_loose_double_torus loose_double_torus_to_loose_hopf_torus loose_hopf_torus_to_hopf_torus
+anims double_torus_to_single_hopf_torus double_torus_to_single_hopf_torus_densify
+so double_torus_to_single_loose_hopf_spiral_merge 2
+1.0 -0.78539816339745 0.0 1.0 0.0 1.0 1.0 2.0 2.0 0.0 0.0 -3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.78539816339745 0.0 1.0 0.0 1.0 1.0 2.0 2.0 0.0 -3.1415926535898 0.0 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo double_torus_to_single_loose_hopf_spiral_merge double_torus_to_single_loose_hopf_spiral_merge 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_loose_hopf_spiral_to_single_hopf_spiral 3
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.010692959690225 -3.054326190990084 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.010692959690225 -2.9670597283903666 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_loose_hopf_spiral_to_single_hopf_spiral single_loose_hopf_spiral_to_single_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps double_torus_to_single_hopf_spiral_merge double_torus_to_single_loose_hopf_spiral_merge single_loose_hopf_spiral_to_single_hopf_spiral
+anims double_torus_to_single_hopf_spiral double_torus_to_single_hopf_spiral_merge
+so triple_torus_to_single_point_rot_z 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo triple_torus_to_single_point_rot_z triple_torus_to_single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps triple_torus_to_single_point_rot_z triple_torus_to_single_point_rot_z
+so triple_torus_to_single_point_rot_rnd 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_single_point_rot_rnd triple_torus_to_single_point_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_single_point_rot_rnd triple_torus_to_single_point_rot_rnd
+anims triple_torus_to_single_point triple_torus_to_single_point_rot_z triple_torus_to_single_point_rot_rnd
+so triple_torus_to_single_dense_torus_rot_z 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo triple_torus_to_single_dense_torus_rot_z triple_torus_to_single_dense_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so single_dense_torus_to_single_torus_loosen_three 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_torus_to_single_torus_loosen_three single_dense_torus_to_single_torus_loosen_three 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+ps triple_torus_to_single_torus_rot_z triple_torus_to_single_dense_torus_rot_z single_dense_torus_to_single_torus_loosen_three
+so triple_torus_to_single_torus_rot_rnd 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_single_torus_rot_rnd triple_torus_to_single_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_single_torus_rot_rnd triple_torus_to_single_torus_rot_rnd
+anims triple_torus_to_single_torus triple_torus_to_single_torus_rot_z triple_torus_to_single_torus_rot_rnd
+so triple_torus_to_double_torus_rot_z 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 0.26179938779915 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo triple_torus_to_double_torus_rot_z triple_torus_to_double_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_double_torus_rot_z triple_torus_to_double_torus_rot_z
+so triple_torus_to_double_torus_rot_rnd 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_double_torus_rot_rnd triple_torus_to_double_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_double_torus_rot_rnd triple_torus_to_double_torus_rot_rnd
+anims triple_torus_to_double_torus triple_torus_to_double_torus_rot_z triple_torus_to_double_torus_rot_rnd
+so triple_torus_rot_x 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo triple_torus_rot_x triple_torus_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+ps triple_torus_rot_x triple_torus_rot_x
+so triple_torus_to_vertical_triple_torus_densify 9
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+mo triple_torus_to_vertical_triple_torus_densify triple_torus_to_vertical_triple_torus_densify 0.0 0.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0 120.0
+so vertical_triple_torus_rot_x 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+mo vertical_triple_torus_rot_x vertical_triple_torus_rot_x 0.0 0.0 -1.0 0.0 0.0 1.5707963267949 7.8539816339745006 1.0 360.0
+so vertical_triple_torus_move_z 3
+0.0 3.124139361069857 1.5882496193148432 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 0.017453292519943334 1.5533430342749568 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+mo vertical_triple_torus_move_z vertical_triple_torus_move_z 0.0 0.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0 360.0
+so vertical_triple_torus_to_triple_torus_loosen 9
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0
+mo vertical_triple_torus_to_triple_torus_loosen vertical_triple_torus_to_triple_torus_loosen 0.0 0.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0 120.0
+ps triple_torus_three_sphere triple_torus_to_vertical_triple_torus_densify vertical_triple_torus_rot_x vertical_triple_torus_move_z vertical_triple_torus_to_triple_torus_loosen
+so triple_torus_rot_rnd_move_densify 6
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_rot_rnd_move_densify triple_torus_rot_rnd_move_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so triple_torus_rot_rnd_rot 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0654498469497875 0.0 6.2831853071796 6.2831853071796 0.0 0.0 48.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0654498469497875 0.0 6.2831853071796 6.2831853071796 0.0 0.0 48.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.7925268031909334 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0654498469497875 0.0 6.2831853071796 6.2831853071796 0.0 0.0 48.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_rot_rnd_rot triple_torus_rot_rnd_rot 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so triple_torus_rot_rnd_move_loosen 6
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0654498469497875 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_rot_rnd_move_loosen triple_torus_rot_rnd_move_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps triple_torus_rot_rnd triple_torus_rot_rnd_move_densify triple_torus_rot_rnd_rot triple_torus_rot_rnd_move_loosen
+so triple_torus_move 3
+0.0 0.17453292519943334 1.3962634015954667 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.9670597283903666 1.7453292519943335 2.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo triple_torus_move triple_torus_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps triple_torus_move triple_torus_move
+anims triple_torus triple_torus_rot_x triple_torus_three_sphere triple_torus_rot_rnd triple_torus_move
+so triple_torus_to_single_dense_seifert_three_rot_z 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -4.7123889803847 -1.0908307824964583 1.0 6.2831853071796 1.0471975511966 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -4.7123889803847 -2.138028333693059 1.0 6.2831853071796 1.0471975511966 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -4.7123889803847 -3.185225884889659 1.0 6.2831853071796 1.0471975511966 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo triple_torus_to_single_dense_seifert_three_rot_z triple_torus_to_single_dense_seifert_three_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+so single_dense_seifert_three_to_single_seifert_rot_z 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.0979594222899416 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.185225884889659 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_seifert_three_to_single_seifert_rot_z single_dense_seifert_three_to_single_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+ps triple_torus_to_single_seifert_rot_z triple_torus_to_single_dense_seifert_three_rot_z single_dense_seifert_three_to_single_seifert_rot_z
+so triple_torus_to_single_seifert_rot_rnd 9
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.6651914291881003 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.2724923474893752 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.2724923474893752 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.6651914291881003 3.2724923474893752 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.40339204138895 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.40339204138895 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.6651914291881003 3.40339204138895 1.0 6.2831853071796 3.1415926535898 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_single_seifert_rot_rnd triple_torus_to_single_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_single_seifert_rot_rnd triple_torus_to_single_seifert_rot_rnd
+anims triple_torus_to_single_seifert triple_torus_to_single_seifert_rot_z triple_torus_to_single_seifert_rot_rnd
+so triple_torus_to_triple_seifert_rot_z 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 1.0 -1.5707963267949 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 -1.5707963267949 6.2831853071796 1.0
+mo triple_torus_to_triple_seifert_rot_z triple_torus_to_triple_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_triple_seifert_rot_z triple_torus_to_triple_seifert_rot_z
+so triple_torus_to_triple_seifert_rot_rnd 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_triple_seifert_rot_rnd triple_torus_to_triple_seifert_rot_rnd 0.75 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_triple_seifert_rot_rnd triple_torus_to_triple_seifert_rot_rnd
+anims triple_torus_to_triple_seifert triple_torus_to_triple_seifert_rot_z triple_torus_to_triple_seifert_rot_rnd
+so triple_torus_to_single_hopf_torus_densify 5
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 -0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 -0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 0.0 0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_single_hopf_torus_densify triple_torus_to_single_hopf_torus_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 120.0
+ps triple_torus_to_single_hopf_torus_densify triple_torus_to_single_hopf_torus_densify
+anims triple_torus_to_single_hopf_torus triple_torus_to_single_hopf_torus_densify
+so triple_torus_to_single_hopf_spiral_merge 3
+1.0 -0.78539816339745 0.0 1.0 0.0 1.0 1.0 2.0 2.0 0.0 0.0 -3.1415926535898 1.0 3.1415926535898 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 2.0 2.0 0.0 -1.5707963267949 -1.0471975511966 1.0 3.1415926535898 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.78539816339745 0.0 1.0 0.0 1.0 1.0 2.0 2.0 0.0 -3.1415926535898 1.0471975511966 1.0 3.1415926535898 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_torus_to_single_hopf_spiral_merge triple_torus_to_single_hopf_spiral_merge 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_torus_to_single_hopf_spiral_merge triple_torus_to_single_hopf_spiral_merge
+anims triple_torus_to_single_hopf_spiral triple_torus_to_single_hopf_spiral_merge
+so single_seifert_to_single_point_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 3.1415926535898 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_point_rot_z single_seifert_to_single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_seifert_to_single_point_rot_z single_seifert_to_single_point_rot_z
+so single_seifert_to_single_point_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 3.1415926535898 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_point_rot_rnd single_seifert_to_single_point_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_to_single_point_rot_rnd single_seifert_to_single_point_rot_rnd
+anims single_seifert_to_single_point single_seifert_to_single_point_rot_z single_seifert_to_single_point_rot_rnd
+so single_seifert_to_single_torus_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_torus_rot_z single_seifert_to_single_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_seifert_to_single_torus_rot_z single_seifert_to_single_torus_rot_z
+so single_seifert_to_single_torus_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_torus_rot_rnd single_seifert_to_single_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_to_single_torus_rot_rnd single_seifert_to_single_torus_rot_rnd
+so single_seifert_to_single_torus_flip 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 0.0 12.0 0.99785892 -0.06540313 0.0 3.1415926535898 0.0 1.0
+mo single_seifert_to_single_torus_flip single_seifert_to_single_torus_flip 0.25 1.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_seifert_to_single_torus_flip single_seifert_to_single_torus_flip
+anims single_seifert_to_single_torus single_seifert_to_single_torus_rot_z single_seifert_to_single_torus_rot_rnd single_seifert_to_single_torus_flip
+so single_seifert_to_single_dense_seifert_rot_z 2
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.108867730114907 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1743175770646936 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_dense_seifert_rot_z single_seifert_to_single_dense_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+so single_dense_seifert_to_double_torus_rot_z 2
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.603521250269794 -1.5707963267949 1.0 1.5707963267949 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.6689710972195815 -1.5707963267949 1.0 -1.5707963267949 -6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo single_dense_seifert_to_double_torus_rot_z single_dense_seifert_to_double_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_seifert_to_double_torus_rot_z single_seifert_to_single_dense_seifert_rot_z single_dense_seifert_to_double_torus_rot_z
+so single_seifert_to_double_torus_rot_rnd 4
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 6.2831853071796 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.40339204138895 1.0 3.1415926535898 6.2831853071796 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.1415926535898 1.0 3.1415926535898 6.2831853071796 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.40339204138895 1.0 3.1415926535898 6.2831853071796 1.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_double_torus_rot_rnd single_seifert_to_double_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_seifert_to_double_torus_rot_rnd single_seifert_to_double_torus_rot_rnd
+anims single_seifert_to_double_torus single_seifert_to_double_torus_rot_z single_seifert_to_double_torus_rot_rnd
+so single_seifert_to_single_dense_seifert_three_rot_z 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.0979594222899416 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.185225884889659 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_dense_seifert_three_rot_z single_seifert_to_single_dense_seifert_three_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 30.0
+so single_dense_seifert_three_to_triple_torus_rot_z 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.0908307824964583 -4.7123889803847 1.0 1.0471975511966 6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -2.138028333693059 -4.7123889803847 1.0 1.0471975511966 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.185225884889659 -4.7123889803847 1.0 1.0471975511966 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_dense_seifert_three_to_triple_torus_rot_z single_dense_seifert_three_to_triple_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_seifert_to_triple_torus_rot_z single_seifert_to_single_dense_seifert_three_rot_z single_dense_seifert_three_to_triple_torus_rot_z
+so single_seifert_to_triple_torus_rot_rnd 9
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.40339204138895 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.6651914291881003 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.1415926535898 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.40339204138895 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.6651914291881003 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.1415926535898 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.40339204138895 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.6651914291881003 1.0 3.1415926535898 6.2831853071796 1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_triple_torus_rot_rnd single_seifert_to_triple_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_seifert_to_triple_torus_rot_rnd single_seifert_to_triple_torus_rot_rnd
+anims single_seifert_to_triple_torus single_seifert_to_triple_torus_rot_z single_seifert_to_triple_torus_rot_rnd
+so single_seifert_rot_x 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_rot_x single_seifert_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 180.0
+ps single_seifert_rot_x single_seifert_rot_x
+so single_seifert_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_seifert_rot_z single_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_rot_z single_seifert_rot_z
+so single_seifert_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_rot_rnd single_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_rot_rnd single_seifert_rot_rnd
+so single_seifert_move 1
+0.0 0.17453292519943334 2.9670597283903666 2.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_seifert_move single_seifert_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_seifert_move single_seifert_move
+anims single_seifert single_seifert_rot_x single_seifert_rot_z single_seifert_rot_rnd single_seifert_move
+so single_dense_seifert_three_to_triple_seifert_rot_z 3
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.0908307824964583 -3.1415926535898 1.0 1.0471975511966 3.1415926535898 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -2.138028333693059 -3.1415926535898 1.0 1.0471975511966 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.185225884889659 -3.1415926535898 1.0 1.0471975511966 3.1415926535898 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_dense_seifert_three_to_triple_seifert_rot_z single_dense_seifert_three_to_triple_seifert_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_seifert_to_triple_seifert_rot_z single_seifert_to_single_dense_seifert_three_rot_z single_dense_seifert_three_to_triple_seifert_rot_z
+so single_seifert_to_triple_seifert_rot_rnd 9
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.2724923474893752 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.40339204138895 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.2724923474893752 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.40339204138895 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.2724923474893752 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.40339204138895 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_triple_seifert_rot_rnd single_seifert_to_triple_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_seifert_to_triple_seifert_rot_rnd single_seifert_to_triple_seifert_rot_rnd
+anims single_seifert_to_triple_seifert single_seifert_to_triple_seifert_rot_z single_seifert_to_triple_seifert_rot_rnd
+so single_seifert_to_single_hopf_torus_densify 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.19395253114963 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.24631240870946 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.29867228626929 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.35103216382912 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_hopf_torus_densify single_seifert_to_single_hopf_torus_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_to_single_hopf_torus_densify single_seifert_to_single_hopf_torus_densify
+anims single_seifert_to_single_hopf_torus single_seifert_to_single_hopf_torus_densify
+so single_seifert_to_single_hopf_spiral_wind_hor 3
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 1.0 2.0 1.0 0.130899693899575 -3.1415926535898 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 1.0 2.0 1.0 0.130899693899575 -3.054326190990084 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 1.0 2.0 1.0 0.130899693899575 -2.9670597283903666 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_seifert_to_single_hopf_spiral_wind_hor single_seifert_to_single_hopf_spiral_wind_hor 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_to_single_hopf_spiral_wind_hor single_seifert_to_single_hopf_spiral_wind_hor
+so single_seifert_to_single_dense_seifert_vert 3
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 0.0 0.0 -6.2831853071796 -3.1415926535898 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 0.0 1.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 0.0 0.0 -6.2831853071796 -3.054326190990084 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 0.0 1.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 0.0 0.0 -6.2831853071796 -2.9670597283903666 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 1.5707963267949 0.0 1.0
+mo single_seifert_to_single_dense_seifert_vert single_seifert_to_single_dense_seifert_vert 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 120.0
+so single_dense_seifert_to_single_hopf_spiral_wind 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 2.0 1.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_seifert_to_single_hopf_spiral_wind single_dense_seifert_to_single_hopf_spiral_wind 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_seifert_to_single_hopf_spiral_wind_vert single_seifert_to_single_dense_seifert_vert single_dense_seifert_to_single_hopf_spiral_wind
+anims single_seifert_to_single_hopf_spiral single_seifert_to_single_hopf_spiral_wind_hor single_seifert_to_single_hopf_spiral_wind_vert
+so triple_seifert_to_single_point_rot_z 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.130899693899575 0.0 1.0 -3.1415926535898 0.0 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.130899693899575 0.0 1.0 -3.1415926535898 0.0 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 0.0 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo triple_seifert_to_single_point_rot_z triple_seifert_to_single_point_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_single_point_rot_z triple_seifert_to_single_point_rot_z
+so triple_seifert_to_single_point_rot_z_densify 6
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 5.0
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 5.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 5.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 5.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 5.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 5.0
+mo triple_seifert_to_single_point_rot_z_densify triple_seifert_to_single_point_rot_z_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so triple_seifert_to_single_point_rot_z_linear 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 4.0
+0.0 2.7925268031909334 2.7925268031909334 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+mo triple_seifert_to_single_point_rot_z_linear triple_seifert_to_single_point_rot_z_linear 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so triple_seifert_to_single_point_rot_z_move_south_1 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 4.0
+0.0 2.7925268031909334 3.1415926535898 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 6.0
+mo triple_seifert_to_single_point_rot_z_move_south_1 triple_seifert_to_single_point_rot_z_move_south_1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so triple_seifert_to_single_point_rot_z_move_south_2 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 4.0
+0.0 1.5707963267949 3.1415926535898 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 6.0
+0.0 3.1415926535898 3.1415926535898 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_point_rot_z_move_south_2 triple_seifert_to_single_point_rot_z_move_south_2 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so triple_seifert_to_single_point_rot_z_move_south_3 2
+0.0 0.3490658503988667 3.1415926535898 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 6.0
+0.0 3.1415926535898 3.1415926535898 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_point_rot_z_move_south_3 triple_seifert_to_single_point_rot_z_move_south_3 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+so triple_seifert_to_single_point_rot_z_move_spiral 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 3.1415926535898 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_point_rot_z_move_spiral triple_seifert_to_single_point_rot_z_move_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 120.0
+ps triple_seifert_to_single_point_move_south triple_seifert_to_single_point_rot_z_densify triple_seifert_to_single_point_rot_z_linear triple_seifert_to_single_point_rot_z_move_south_1 triple_seifert_to_single_point_rot_z_move_south_2 triple_seifert_to_single_point_rot_z_move_south_3 triple_seifert_to_single_point_rot_z_move_spiral
+anims triple_seifert_to_single_point triple_seifert_to_single_point_rot_z triple_seifert_to_single_point_move_south
+so triple_seifert_to_single_dense_torus_rot_z 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 2.0943951023932 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 4.1887902047864 1.0 3.1415926535898 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 2.0943951023932 1.0 3.1415926535898 2.0943951023932 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo triple_seifert_to_single_dense_torus_rot_z triple_seifert_to_single_dense_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_single_torus_rot_z triple_seifert_to_single_dense_torus_rot_z single_dense_torus_to_single_torus_loosen_three
+so triple_seifert_to_single_torus_rot_rnd 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_torus_rot_rnd triple_seifert_to_single_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_single_torus_rot_rnd triple_seifert_to_single_torus_rot_rnd
+anims triple_seifert_to_single_torus triple_seifert_to_single_torus_rot_z triple_seifert_to_single_torus_rot_rnd
+so triple_seifert_to_double_torus_rot_z 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 3.1415926535898 1.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 3.1415926535898 1.0
+mo triple_seifert_to_double_torus_rot_z triple_seifert_to_double_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_double_torus_rot_z triple_seifert_to_double_torus_rot_z
+so triple_seifert_to_double_torus_rot_rnd 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_double_torus_rot_rnd triple_seifert_to_double_torus_rot_rnd 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_double_torus_rot_rnd triple_seifert_to_double_torus_rot_rnd
+anims triple_seifert_to_double_torus triple_seifert_to_double_torus_rot_z triple_seifert_to_double_torus_rot_rnd
+so triple_seifert_to_triple_torus_rot_z 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 1.0 0.0 4.7123889803847 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 0.0 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 4.7123889803847 1.0
+mo triple_seifert_to_triple_torus_rot_z triple_seifert_to_triple_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_triple_torus_rot_z triple_seifert_to_triple_torus_rot_z
+so triple_seifert_to_triple_torus_rot_rnd 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_triple_torus_rot_rnd triple_seifert_to_triple_torus_rot_rnd 0.75 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_triple_torus_rot_rnd triple_seifert_to_triple_torus_rot_rnd
+anims triple_seifert_to_triple_torus triple_seifert_to_triple_torus_rot_z triple_seifert_to_triple_torus_rot_rnd
+so triple_seifert_to_single_dense_seifert_three_rot_z 3
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 -1.0908307824964583 1.0 3.1415926535898 1.0471975511966 1.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 -2.138028333693059 1.0 3.1415926535898 1.0471975511966 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.1415926535898 -3.185225884889659 1.0 3.1415926535898 1.0471975511966 1.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo triple_seifert_to_single_dense_seifert_three_rot_z triple_seifert_to_single_dense_seifert_three_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps triple_seifert_to_single_seifert_rot_z triple_seifert_to_single_dense_seifert_three_rot_z single_dense_seifert_three_to_single_seifert_rot_z
+so triple_seifert_to_single_seifert_rot_rnd 9
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.2724923474893752 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.2724923474893752 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.2724923474893752 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.40339204138895 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.2724923474893752 3.40339204138895 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.40339204138895 3.40339204138895 1.0 3.1415926535898 3.1415926535898 0.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_seifert_rot_rnd triple_seifert_to_single_seifert_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_single_seifert_rot_rnd triple_seifert_to_single_seifert_rot_rnd
+anims triple_seifert_to_single_seifert triple_seifert_to_single_seifert_rot_z triple_seifert_to_single_seifert_rot_rnd
+so triple_seifert_rot_x 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo triple_seifert_rot_x triple_seifert_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+ps triple_seifert_rot_x triple_seifert_rot_x
+so triple_seifert_to_vertical_triple_seifert_densify 6
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0
+mo triple_seifert_to_vertical_triple_seifert_densify triple_seifert_to_vertical_triple_seifert_densify 0.0 0.0 -1.0 0.0 0.0 0.0 1.5707963267949 1.0 120.0
+so vertical_triple_seifert_rot_x 3
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+mo vertical_triple_seifert_rot_x vertical_triple_seifert_rot_x 0.0 0.0 -1.0 0.0 0.0 1.5707963267949 7.8539816339745006 1.0 360.0
+so vertical_triple_seifert_move_z 3
+0.0 3.124139361069857 1.5882496193148432 2.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+0.0 0.017453292519943334 1.5533430342749568 2.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0
+mo vertical_triple_seifert_move_z vertical_triple_seifert_move_z 0.0 0.0 -1.0 0.0 0.0 1.5707963267949 1.5707963267949 0.0 360.0
+so vertical_triple_seifert_to_triple_seifert_loosen 6
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0
+mo vertical_triple_seifert_to_triple_seifert_loosen vertical_triple_seifert_to_triple_seifert_loosen 0.0 0.0 -1.0 0.0 0.0 1.5707963267949 0.0 1.0 120.0
+ps triple_seifert_three_sphere triple_seifert_to_vertical_triple_seifert_densify vertical_triple_seifert_rot_x vertical_triple_seifert_move_z vertical_triple_seifert_to_triple_seifert_loosen
+so triple_seifert_rot_rnd_move_densify 6
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 0.3490658503988667 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.7925268031909334 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.207042500539588 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_rot_rnd_move_densify triple_seifert_rot_rnd_move_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so triple_seifert_rot_rnd_rot 3
+0.0 0.3490658503988667 0.3490658503988667 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 2.7925268031909334 2.7925268031909334 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 48.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo triple_seifert_rot_rnd_rot triple_seifert_rot_rnd_rot 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+so triple_seifert_rot_rnd_move_loosen 6
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.3490658503988667 0.78539816339745 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.7925268031909334 2.35619449019235 1.0 0.0 0.0 0.0 0.0 0.0 0.0 3.207042500539588 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_rot_rnd_move_loosen triple_seifert_rot_rnd_move_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps triple_seifert_rot_rnd triple_seifert_rot_rnd_move_densify triple_seifert_rot_rnd_rot triple_seifert_rot_rnd_move_loosen
+so triple_seifert_move 3
+0.0 0.17453292519943334 1.3962634015954667 2.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+0.0 2.9670597283903666 1.7453292519943335 2.0 0.0 0.0 0.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 -1.0 0.0 6.2831853071796 1.0
+mo triple_seifert_move triple_seifert_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps triple_seifert_move triple_seifert_move
+anims triple_seifert triple_seifert_rot_x triple_seifert_three_sphere triple_seifert_rot_rnd triple_seifert_move
+so triple_seifert_to_single_hopf_torus_densify 5
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.0368728984701403 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 3.0892327760299705 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 1.5707963267949 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 0.05235987755983 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 1.5707963267949 1.0 0.0 0.392699081698725 1.0 0.0 0.0 0.0 3.1415926535898 0.10471975511966 1.0 3.1415926535898 6.2831853071796 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_hopf_torus_densify triple_seifert_to_single_hopf_torus_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps triple_seifert_to_single_hopf_torus_densify triple_seifert_to_single_hopf_torus_densify
+anims triple_seifert_to_single_hopf_torus triple_seifert_to_single_hopf_torus_densify
+so triple_seifert_to_single_hopf_spiral_merge 3
+1.0 -0.78539816339745 0.0 1.0 0.0 1.0 1.0 2.0 2.0 0.0 0.0654498469497875 -3.1415926535898 1.0 1.5707963267949 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 0.0 1.0 1.0 2.0 2.0 0.0 0.0654498469497875 -1.0471975511966 1.0 1.5707963267949 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.78539816339745 0.0 1.0 0.0 1.0 1.0 2.0 2.0 0.0 -3.0761428066400125 1.0471975511966 1.0 1.5707963267949 2.0943951023932 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo triple_seifert_to_single_hopf_spiral_merge triple_seifert_to_single_hopf_spiral_merge 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps triple_seifert_to_single_hopf_spiral_merge triple_seifert_to_single_hopf_spiral_merge
+anims triple_seifert_to_single_hopf_spiral triple_seifert_to_single_hopf_spiral_merge
+so single_hopf_torus_to_single_point_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_single_point_rot_rnd single_hopf_torus_to_single_point_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_to_single_point_rot_rnd single_hopf_torus_to_single_point_rot_rnd
+so single_dense_hopf_torus_to_single_hopf_torus 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 -0.10471975511966 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 -0.05235987755983 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.05235987755983 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.10471975511966 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_hopf_torus_to_single_hopf_torus single_dense_hopf_torus_to_single_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so single_loose_hopf_torus_to_single_point 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_loose_hopf_torus_to_single_point single_loose_hopf_torus_to_single_point 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_to_single_point_loosen single_dense_hopf_torus_to_single_hopf_torus single_loose_hopf_torus_to_single_point
+anims single_hopf_torus_to_single_point single_hopf_torus_to_single_point_rot_rnd single_hopf_torus_to_single_point_loosen
+so single_hopf_torus_to_single_loose_torus 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_single_loose_torus single_hopf_torus_to_single_loose_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_hopf_torus_to_single_torus_loosen single_dense_hopf_torus_to_single_hopf_torus single_hopf_torus_to_single_loose_torus
+anims single_hopf_torus_to_single_torus single_hopf_torus_to_single_torus_loosen
+so hopf_torus_to_loose_hopf_torus 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 -0.10471975511966 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 -0.05235987755983 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.05235987755983 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.10471975511966 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo hopf_torus_to_loose_hopf_torus hopf_torus_to_loose_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so loose_hopf_torus_to_loose_double_torus 2
+0.0 1.5707963267949 0.78539816339745 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.26179938779915 0.26179938779915 0.0 6.2831853071796 6.2831853071796 0.0 4.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo loose_hopf_torus_to_loose_double_torus loose_hopf_torus_to_loose_double_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so loose_double_torus_to_double_torus 4
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.78539816339745 0.78539816339745 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 1.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 2.35619449019235 2.35619449019235 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.26179938779915 0.26179938779915 0.0 6.2831853071796 6.2831853071796 0.0 0.0 12.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo loose_double_torus_to_double_torus loose_double_torus_to_double_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps single_hopf_torus_to_double_torus_loosen hopf_torus_to_loose_hopf_torus loose_hopf_torus_to_loose_double_torus loose_double_torus_to_double_torus
+anims single_hopf_torus_to_double_torus single_hopf_torus_to_double_torus_loosen
+so single_hopf_torus_to_triple_torus_loosen 5
+0.0 1.5707963267949 0.78539816339745 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 -0.10471975511966 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 -0.05235987755983 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.05235987755983 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.10471975511966 0.0 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_triple_torus_loosen single_hopf_torus_to_triple_torus_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 120.0
+ps single_hopf_torus_to_triple_torus_loosen single_hopf_torus_to_triple_torus_loosen
+anims single_hopf_torus_to_triple_torus single_hopf_torus_to_triple_torus_loosen
+so single_hopf_torus_to_single_seifert_loosen 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.1415926535898 3.1415926535898 0.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.19395253114963 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.24631240870946 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.29867228626929 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.35103216382912 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_single_seifert_loosen single_hopf_torus_to_single_seifert_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_to_single_seifert_loosen single_hopf_torus_to_single_seifert_loosen
+anims single_hopf_torus_to_single_seifert single_hopf_torus_to_single_seifert_loosen
+so single_hopf_torus_to_triple_seifert_loosen 5
+0.0 1.5707963267949 0.78539816339745 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.0368728984701403 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 0.78539816339745 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 3.0892327760299705 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 1.5707963267949 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.05235987755983 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 2.35619449019235 1.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.10471975511966 3.1415926535898 1.0 6.2831853071796 3.1415926535898 1.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_triple_seifert_loosen single_hopf_torus_to_triple_seifert_loosen 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_to_triple_seifert_loosen single_hopf_torus_to_triple_seifert_loosen
+anims single_hopf_torus_to_triple_seifert single_hopf_torus_to_triple_seifert_loosen
+so single_hopf_torus_rot_x 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_rot_x single_hopf_torus_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+ps single_hopf_torus_rot_x single_hopf_torus_rot_x
+so single_hopf_torus_rot_z 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_hopf_torus_rot_z single_hopf_torus_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_rot_z single_hopf_torus_rot_z
+so single_hopf_torus_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_rot_rnd single_hopf_torus_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_rot_rnd single_hopf_torus_rot_rnd
+so single_hopf_torus_wave 1
+0.0 1.5707963267949 1.5707963267949 0.0 -0.392699081698725 0.392699081698725 3.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_wave single_hopf_torus_wave 0.25 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_torus_wave single_hopf_torus_wave
+so single_hopf_torus_move 1
+0.0 0.5235987755983 2.6179938779915 2.0 0.130899693899575 0.392699081698725 3.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_hopf_torus_move single_hopf_torus_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_hopf_torus_move single_hopf_torus_move
+so single_hopf_torus_to_single_hopf_flower 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 0.0 -0.5 1.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_single_hopf_flower single_hopf_torus_to_single_hopf_flower 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+so single_hopf_flower_rot_x 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 -0.5 -0.5 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_flower_rot_x single_hopf_flower_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+so single_hopf_flower_to_single_hopf_torus 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 -0.5 0.0 1.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_flower_to_single_hopf_torus single_hopf_flower_to_single_hopf_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_hopf_flower_rot_x single_hopf_torus_to_single_hopf_flower single_hopf_flower_rot_x single_hopf_flower_to_single_hopf_torus
+so single_hopf_flower_rot_rnd 1
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.392699081698725 0.0 -0.5 -0.5 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_flower_rot_rnd single_hopf_flower_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_flower_rot_rnd single_hopf_torus_to_single_hopf_flower single_hopf_flower_rot_rnd single_hopf_flower_to_single_hopf_torus
+so single_hopf_flower_move 1
+0.0 0.5235987755983 2.6179938779915 2.0 0.1963495408493625 0.392699081698725 3.0 -0.5 -0.5 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 120.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_hopf_flower_move single_hopf_flower_move 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_hopf_flower_move single_hopf_torus_to_single_hopf_flower single_hopf_flower_move single_hopf_flower_to_single_hopf_torus
+anims single_hopf_torus single_hopf_torus_rot_x single_hopf_torus_rot_z single_hopf_torus_rot_rnd single_hopf_torus_move single_hopf_torus_wave single_hopf_flower_rot_x single_hopf_flower_rot_rnd single_hopf_flower_move
+so single_hopf_torus_to_single_mid_density_torus 5
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.05235987755983 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.10471975511966 0.08726646259971667 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.15707963267949002 0.17453292519943334 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.392699081698725 0.0 1.0 0.0 0.0 0.0 0.20943951023932 0.17453292519943334 1.0 6.2831853071796 6.2831853071796 0.0 4.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_torus_to_single_mid_density_torus single_hopf_torus_to_single_mid_density_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 90.0
+ps single_hopf_torus_to_single_hopf_spiral_wind single_hopf_torus_to_single_mid_density_torus single_dense_unwound_torus_to_single_hopf_spiral
+anims single_hopf_torus_to_single_hopf_spiral single_hopf_torus_to_single_hopf_spiral_wind
+so single_hopf_spiral_to_single_point_shrink_sector 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.1415926535898 0.0 1.0 6.2831853071796 0.0 1.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_point_shrink_sector single_hopf_spiral_to_single_point_shrink_sector 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_spiral_to_single_point_shrink_sector single_hopf_spiral_to_single_point_shrink_sector
+anims single_hopf_spiral_to_single_point single_hopf_spiral_to_single_point_shrink_sector
+so single_hopf_spiral_to_single_dense_torus_unwind 1
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -3.1415926535898 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_dense_torus_unwind single_hopf_spiral_to_single_dense_torus_unwind 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+so single_dense_unwound_torus_to_single_torus 3
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 1.5707963267949 1.5707963267949 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -0.08726646259971667 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_dense_unwound_torus_to_single_torus single_dense_unwound_torus_to_single_torus 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+ps single_hopf_spiral_to_single_torus_unwind single_hopf_spiral_to_single_dense_torus_unwind single_dense_unwound_torus_to_single_torus
+so single_hopf_spiral_to_single_torus_wind 1
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 3.0 1.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_torus_wind single_hopf_spiral_to_single_torus_wind 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_spiral_to_single_torus_wind single_hopf_spiral_to_single_torus_wind
+anims single_hopf_spiral_to_single_torus single_hopf_spiral_to_single_torus_unwind single_hopf_spiral_to_single_torus_wind
+so single_hopf_spiral_to_single_loose_hopf_spiral 3
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.054326190990084 -3.010692959690225 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -2.9670597283903666 -3.010692959690225 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_loose_hopf_spiral single_hopf_spiral_to_single_loose_hopf_spiral 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 60.0
+so single_loose_hopf_spiral_to_double_torus_split 2
+1.0 0.0 -0.78539816339745 1.0 1.0 0.0 1.0 2.0 2.0 0.0 -3.1415926535898 -6.2831853071796 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.78539816339745 1.0 1.0 0.0 1.0 2.0 2.0 0.0 0.0 3.1415926535898 1.0 3.1415926535898 3.1415926535898 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_loose_hopf_spiral_to_double_torus_split single_loose_hopf_spiral_to_double_torus_split 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_hopf_spiral_to_double_torus_split single_hopf_spiral_to_single_loose_hopf_spiral single_loose_hopf_spiral_to_double_torus_split
+anims single_hopf_spiral_to_double_torus single_hopf_spiral_to_double_torus_split
+so single_hopf_spiral_to_triple_torus_split 3
+1.0 0.0 -0.78539816339745 1.0 1.0 0.0 1.0 2.0 2.0 0.0 -3.1415926535898 -6.2831853071796 1.0 2.0943951023932 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 2.0 0.0 -1.0471975511966 -1.5707963267949 1.0 2.0943951023932 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.78539816339745 1.0 1.0 0.0 1.0 2.0 2.0 0.0 1.0471975511966 3.1415926535898 1.0 2.0943951023932 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_triple_torus_split single_hopf_spiral_to_triple_torus_split 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_hopf_spiral_to_triple_torus_split single_hopf_spiral_to_triple_torus_split
+anims single_hopf_spiral_to_triple_torus single_hopf_spiral_to_triple_torus_split
+so single_hopf_spiral_to_single_seifert_unwind_hor 3
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -3.1415926535898 0.130899693899575 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -3.054326190990084 0.130899693899575 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -2.9670597283903666 0.130899693899575 1.0 6.2831853071796 3.1415926535898 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_seifert_unwind_hor single_hopf_spiral_to_single_seifert_unwind_hor 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+ps single_hopf_spiral_to_single_seifert_unwind_hor single_hopf_spiral_to_single_seifert_unwind_hor
+so single_hopf_spiral_to_single_dense_seifert_unwind 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 0.0 1.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_dense_seifert_unwind single_hopf_spiral_to_single_dense_seifert_unwind 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 180.0
+so single_dense_seifert_vert_to_single_seifert 3
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 0.0 0.0 -3.1415926535898 -6.2831853071796 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 0.0 0.0 -3.054326190990084 -6.2831853071796 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 0.0 0.0 0.0 -2.9670597283903666 -6.2831853071796 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 1.0 0.0 0.0 0.0 1.5707963267949 1.0
+mo single_dense_seifert_vert_to_single_seifert single_dense_seifert_vert_to_single_seifert 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 120.0
+ps single_hopf_spiral_to_single_seifert_unwind_vert single_hopf_spiral_to_single_dense_seifert_unwind single_dense_seifert_vert_to_single_seifert
+anims single_hopf_spiral_to_single_seifert single_hopf_spiral_to_single_seifert_unwind_hor single_hopf_spiral_to_single_seifert_unwind_vert
+so single_hopf_spiral_to_triple_seifert_split 3
+1.0 0.0 -0.78539816339745 1.0 1.0 0.0 1.0 2.0 2.0 0.0 -3.1415926535898 -6.217735460229814 1.0 2.0943951023932 1.5707963267949 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 2.0 0.0 -1.0471975511966 0.0654498469497875 1.0 2.0943951023932 1.5707963267949 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.78539816339745 1.0 1.0 0.0 1.0 2.0 2.0 0.0 1.0471975511966 3.207042500539588 1.0 2.0943951023932 1.5707963267949 1.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_triple_seifert_split single_hopf_spiral_to_triple_seifert_split 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_hopf_spiral_to_triple_seifert_split single_hopf_spiral_to_triple_seifert_split
+anims single_hopf_spiral_to_triple_seifert single_hopf_spiral_to_triple_seifert_split
+so single_hopf_spiral_to_single_torus_densify 5
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -3.1415926535898 0.0 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -3.054326190990084 0.05235987755983 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -3.054326190990084 0.10471975511966 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -2.9670597283903666 0.15707963267949002 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+1.0 0.0 0.0 0.0 1.0 0.0 1.0 2.0 1.0 1.0 -2.9670597283903666 0.20943951023932 1.0 6.2831853071796 6.2831853071796 0.0 0.0 24.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_to_single_torus_densify single_hopf_spiral_to_single_torus_densify 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 240.0
+ps single_hopf_spiral_to_single_hopf_torus_unwind single_hopf_spiral_to_single_torus_densify single_dense_torus_to_single_hopf_torus
+anims single_hopf_spiral_to_single_hopf_torus single_hopf_spiral_to_single_hopf_torus_unwind
+so single_hopf_spiral_rot_x 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_rot_x single_hopf_spiral_rot_x 0.0 0.0 1.0 0.0 0.0 0.0 6.2831853071796 1.0 360.0
+ps single_hopf_spiral_rot_x single_hopf_spiral_rot_x
+so single_hopf_spiral_rot_z 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 1.0 0.0 6.2831853071796 1.0
+mo single_hopf_spiral_rot_z single_hopf_spiral_rot_z 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_hopf_spiral_rot_z single_hopf_spiral_rot_z
+so single_hopf_spiral_rot_rnd 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 2.0 2.0 0.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_rot_rnd single_hopf_spiral_rot_rnd 1.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_hopf_spiral_rot_rnd single_hopf_spiral_rot_rnd
+so single_hopf_spiral_winding 1
+1.0 0.0 0.0 0.0 1.0 1.0 0.0 1.0 3.0 2.0 -3.1415926535898 -3.1415926535898 0.0 6.2831853071796 6.2831853071796 0.0 0.0 72.0 0.0 0.0 0.0 0.0 0.0 0.0
+mo single_hopf_spiral_winding single_hopf_spiral_winding 0.5 1.0 0.0 0.0 0.0 0.0 0.0 0.0 360.0
+ps single_hopf_spiral_winding single_hopf_spiral_winding
+anims single_hopf_spiral single_hopf_spiral_rot_x single_hopf_spiral_rot_z single_hopf_spiral_rot_rnd single_hopf_spiral_winding
+table single_point single_point_to_single_torus single_point_to_double_torus single_point_to_triple_torus single_point_to_single_seifert single_point_to_triple_seifert single_point_to_single_hopf_torus single_point_to_single_hopf_spiral single_torus_to_single_point single_torus single_torus_to_double_torus single_torus_to_triple_torus single_torus_to_single_seifert single_torus_to_triple_seifert single_torus_to_single_hopf_torus single_torus_to_single_hopf_spiral double_torus_to_single_point double_torus_to_single_torus double_torus double_torus_to_triple_torus double_torus_to_single_seifert double_torus_to_triple_seifert double_torus_to_single_hopf_torus double_torus_to_single_hopf_spiral triple_torus_to_single_point triple_torus_to_single_torus triple_torus_to_double_torus triple_torus triple_torus_to_single_seifert triple_torus_to_triple_seifert triple_torus_to_single_hopf_torus triple_torus_to_single_hopf_spiral single_seifert_to_single_point single_seifert_to_single_torus single_seifert_to_double_torus single_seifert_to_triple_torus single_seifert single_seifert_to_triple_seifert single_seifert_to_single_hopf_torus single_seifert_to_single_hopf_spiral triple_seifert_to_single_point triple_seifert_to_single_torus triple_seifert_to_double_torus triple_seifert_to_triple_torus triple_seifert_to_single_seifert triple_seifert triple_seifert_to_single_hopf_torus triple_seifert_to_single_hopf_spiral single_hopf_torus_to_single_point single_hopf_torus_to_single_torus single_hopf_torus_to_double_torus single_hopf_torus_to_triple_torus single_hopf_torus_to_single_seifert single_hopf_torus_to_triple_seifert single_hopf_torus single_hopf_torus_to_single_hopf_spiral single_hopf_spiral_to_single_point single_hopf_spiral_to_single_torus single_hopf_spiral_to_double_torus single_hopf_spiral_to_triple_torus single_hopf_spiral_to_single_seifert single_hopf_spiral_to_triple_seifert single_hopf_spiral_to_single_hopf_torus single_hopf_spiral

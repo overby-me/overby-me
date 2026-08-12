@@ -650,6 +650,21 @@ vertices each, which is 1.6 million a frame; its default here is five, which
 comes to the same 334k `beats` draws, and its slider still goes to a hundred.
 Say so in the saver's own comment when you do this, with the measurement.
 
+`hopffibration` is the one where lowering the setting is not enough, and it is
+worth knowing why, because the ceiling it hits is vertices rather than batches.
+Its fibers are tubes swept along curves that are subdivided until they are
+smooth, and its heaviest animation draws two hundred and sixteen of them. In
+the coarsest of the three detail levels its own knob offers, that is 767k
+vertices a frame, or 35 MB written and uploaded thirty times a second; at the
+default it is 1.6 million and 74 MB. The batch count is fine, because the fiber
+colours ride on the vertices and the whole thing goes down in one call. What is
+not fine is that upstream sends the geometry to the card once and draws it from
+there many times over, and a recorder that rebuilds every vertex of every frame
+has no equivalent. The maths, the base-point choreography and the eight-by-eight
+table of animations are all ported and tested in `runtime::hopf`, with the
+measurement as a test; what is missing is a way for geometry to outlive a frame,
+which would also lift `covid19`, `glcells` and `squirtorus`.
+
 Batches also break on *state*, and the state that catches people out is the
 front-face winding. Two quads with opposite windings can never share a batch, so
 a loop that emits a top face and then a bottom face, over and over, costs two
