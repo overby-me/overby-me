@@ -391,7 +391,21 @@ impl Log for RemoteLogger {
             &format!("[{}] {}: {}", record.level(), record.target(), msg),
         );
         // Ship only warn/error, and only when a token is configured.
-        if record.level() <= Level::Warn && SOURCE_TOKEN.is_some() {
+        //
+        // Minus one message. A PDF trailer's `/Size` must be one more than the
+        // highest object number, and producers get it wrong by one often enough
+        // that lopdf simply counts the entries itself and says so. It has the
+        // right answer before it warns, and the document renders. Shipping it
+        // put a named user's report in Better Stack for every such file, which
+        // reads as a fault in this app and is not one.
+        //
+        // Deliberately this message and not the whole crate: a PDF library's
+        // complaints are worth seeing in an app that renders PDFs, and this is
+        // the one that is provably self-correcting. A wording change upstream
+        // fails open, back to noise rather than to silence.
+        let benign = record.target().starts_with("lopdf")
+            && msg.contains("Size entry of trailer dictionary");
+        if record.level() <= Level::Warn && !benign && SOURCE_TOKEN.is_some() {
             let entry = make_entry(
                 level_str(record.level()),
                 format!("{}: {msg}", record.target()),
