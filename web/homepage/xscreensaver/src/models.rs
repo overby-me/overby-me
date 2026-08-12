@@ -214,3 +214,38 @@ pub const SPLITFLAP_OBJ_FIN_EDGE_HALF: &str =
     include_str!("../models/splitflap_obj_fin_edge_half.gllist");
 pub const SPLITFLAP_OBJ_FIN_FACE_HALF: &str =
     include_str!("../models/splitflap_obj_fin_face_half.gllist");
+
+/// The thirty pieces Lemarchand's Box comes apart into: the whole closed cube,
+/// the two halves of the star, the four corner tetrahedra, the lid and its
+/// four flaps, the pillar, the taser, and the ten shells of the Leviathan.
+pub const LAMENT_MODEL_BOX: &str = include_str!("../models/lament_model_box.gllist");
+pub const LAMENT_MODEL_ISO_BASE_A: &str = include_str!("../models/lament_model_iso_base_a.gllist");
+pub const LAMENT_MODEL_ISO_BASE_B: &str = include_str!("../models/lament_model_iso_base_b.gllist");
+pub const LAMENT_MODEL_ISO_DEN: &str = include_str!("../models/lament_model_iso_den.gllist");
+pub const LAMENT_MODEL_ISO_DSE: &str = include_str!("../models/lament_model_iso_dse.gllist");
+pub const LAMENT_MODEL_ISO_DWN: &str = include_str!("../models/lament_model_iso_dwn.gllist");
+pub const LAMENT_MODEL_ISO_SWD: &str = include_str!("../models/lament_model_iso_swd.gllist");
+pub const LAMENT_MODEL_ISO_UNE: &str = include_str!("../models/lament_model_iso_une.gllist");
+pub const LAMENT_MODEL_ISO_UNW: &str = include_str!("../models/lament_model_iso_unw.gllist");
+pub const LAMENT_MODEL_ISO_USE: &str = include_str!("../models/lament_model_iso_use.gllist");
+pub const LAMENT_MODEL_ISO_USW: &str = include_str!("../models/lament_model_iso_usw.gllist");
+pub const LAMENT_MODEL_LEVIATHAN: &str = include_str!("../models/lament_model_leviathan.gllist");
+pub const LAMENT_MODEL_LID_A: &str = include_str!("../models/lament_model_lid_a.gllist");
+pub const LAMENT_MODEL_LID_B: &str = include_str!("../models/lament_model_lid_b.gllist");
+pub const LAMENT_MODEL_LID_BASE: &str = include_str!("../models/lament_model_lid_base.gllist");
+pub const LAMENT_MODEL_LID_C: &str = include_str!("../models/lament_model_lid_c.gllist");
+pub const LAMENT_MODEL_LID_D: &str = include_str!("../models/lament_model_lid_d.gllist");
+pub const LAMENT_MODEL_PILLAR_A: &str = include_str!("../models/lament_model_pillar_a.gllist");
+pub const LAMENT_MODEL_PILLAR_B: &str = include_str!("../models/lament_model_pillar_b.gllist");
+pub const LAMENT_MODEL_PILLAR_BASE: &str =
+    include_str!("../models/lament_model_pillar_base.gllist");
+pub const LAMENT_MODEL_STAR_D: &str = include_str!("../models/lament_model_star_d.gllist");
+pub const LAMENT_MODEL_STAR_U: &str = include_str!("../models/lament_model_star_u.gllist");
+pub const LAMENT_MODEL_TASER_A: &str = include_str!("../models/lament_model_taser_a.gllist");
+pub const LAMENT_MODEL_TASER_B: &str = include_str!("../models/lament_model_taser_b.gllist");
+pub const LAMENT_MODEL_TASER_BASE: &str = include_str!("../models/lament_model_taser_base.gllist");
+pub const LAMENT_MODEL_TETRA_BASE: &str = include_str!("../models/lament_model_tetra_base.gllist");
+pub const LAMENT_MODEL_TETRA_DSE: &str = include_str!("../models/lament_model_tetra_dse.gllist");
+pub const LAMENT_MODEL_TETRA_DWN: &str = include_str!("../models/lament_model_tetra_dwn.gllist");
+pub const LAMENT_MODEL_TETRA_UNE: &str = include_str!("../models/lament_model_tetra_une.gllist");
+pub const LAMENT_MODEL_TETRA_USW: &str = include_str!("../models/lament_model_tetra_usw.gllist");

@@ -208,3 +208,8 @@ pub const MATRIX3: &[u8] = include_bytes!("../images/matrix3.png");
 /// The skin of the thing in `skytentacles`.
 pub const SCALES: &[u8] = include_bytes!("../images/scales.png");
 pub const TOAST_PNG: &[u8] = include_bytes!("../images/toast.png");
+
+/// `lament512.png`: eight 512-square tiles stacked into one tall picture. The
+/// six walls of Lemarchand's Box in gold leaf, then the inside of it, then the
+/// Leviathan.
+pub const LAMENT512: &[u8] = include_bytes!("../images/lament512.png");

@@ -96,6 +96,7 @@ pub mod jigsaw;
 pub mod kaleidocycle;
 pub mod kallisti;
 pub mod klein;
+pub mod lament;
 pub mod lavalite;
 pub mod lockward;
 pub mod maze3d;
@@ -230,6 +231,7 @@ pub static ALL: &[&Saver3d] = &[
     &jigglypuff::SAVER,
     &kallisti::SAVER,
     &klein::SAVER,
+    &lament::SAVER,
     &lockward::SAVER,
     &lavalite::SAVER,
     &menger::SAVER,

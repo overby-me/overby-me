@@ -1384,6 +1384,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::klein::start
 );
 gl3d_saver!(
+    "lament",
+    lament_body,
+    lament_start,
+    xscreensaver::hacks3d::lament::start
+);
+gl3d_saver!(
     "lavalite",
     lavalite_body,
     lavalite_start,
@@ -2241,6 +2247,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "kaleidescope",
         label: "Kaleidescope",
         start: Start::Fb(kaleidescope_start),
+    },
+    Entry {
+        slug: "lament",
+        label: "Lament",
+        start: Start::Gl3d(lament_start),
     },
     Entry {
         slug: "laser",
