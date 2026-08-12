@@ -1408,6 +1408,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::klein::start
 );
 gl3d_saver!(
+    "klondike",
+    klondike_body,
+    klondike_start,
+    xscreensaver::hacks3d::klondike::start
+);
+gl3d_saver!(
     "lament",
     lament_body,
     lament_start,
@@ -2298,6 +2304,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "laser",
         label: "Laser",
         start: Start::Fb(laser_start),
+    },
+    Entry {
+        slug: "klondike",
+        label: "Klondike",
+        start: Start::Gl3d(klondike_start),
     },
     Entry {
         slug: "kumppa",
