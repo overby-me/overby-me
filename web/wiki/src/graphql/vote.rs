@@ -58,50 +58,6 @@ pub async fn create_poll(
     Ok(inserted)
 }
 
-/// How many votes the given user has already cast on a poll (used to show the
-/// "you have voted" state and hide the ballot). Own votes are visible to the
-/// voter via row permissions.
-pub async fn count_user_votes(
-    access_token: Option<&str>,
-    poll_id: &str,
-    user_id: &str,
-) -> Result<usize, String> {
-    let where_clause = NodesBoolExp {
-        and: Some(vec![
-            NodesBoolExp {
-                parent_id: Some(UuidComparisonExp {
-                    in_: None,
-                    eq: Some(Uuid(poll_id.to_string())),
-                    is_null: None,
-                }),
-                ..Default::default()
-            },
-            NodesBoolExp {
-                mime_id: Some(StringComparisonExp {
-                    eq: Some("vote/vote".to_string()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            NodesBoolExp {
-                owner_id: Some(UuidComparisonExp {
-                    in_: None,
-                    eq: Some(Uuid(user_id.to_string())),
-                    is_null: None,
-                }),
-                ..Default::default()
-            },
-        ]),
-        ..Default::default()
-    };
-    let operation = NodesWhereQuery::build(NodesLimitVariables {
-        where_clause,
-        limit: None,
-    });
-    let result = execute(access_token, operation).await?;
-    Ok(result.nodes.len())
-}
-
 #[derive(cynic::QueryFragment, Debug, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
@@ -274,20 +230,25 @@ pub async fn poll_tally(
     access_token: Option<&str>,
     poll_id: &str,
     options: usize,
-) -> Result<(Vec<usize>, usize), String> {
-    let query = poll_tally_query(poll_id, options);
+    own_of: Option<&str>,
+) -> Result<(Vec<usize>, usize, usize), String> {
+    let query = poll_tally_query(poll_id, options, own_of);
     let data = execute_raw(access_token, &query).await?;
     Ok(parse_tally(&data, options))
 }
 
-/// The aliased aggregates back into `(per option, total)`.
+/// The aliased aggregates back into `(per option, total, own)`.
 ///
 /// Separate and pure because the shape is easy to get wrong and impossible to
 /// notice: `execute_raw` returns the `data` OBJECT, not the whole response, and
 /// reaching for `data.data.o0` silently yielded zero for every option. The query
 /// was verified against production and the parsing was not, so a poll would have
 /// shown an empty result with no error anywhere.
-fn parse_tally(data: &serde_json::Value, options: usize) -> (Vec<usize>, usize) {
+///
+/// `own` is 0 when it was not asked for, which is the same answer a voter who has
+/// not voted gets. Both mean "do not treat this as having voted", so the caller
+/// that cannot use it (a secret poll) does not have to tell them apart.
+fn parse_tally(data: &serde_json::Value, options: usize) -> (Vec<usize>, usize, usize) {
     let count_at = |key: &str| -> usize {
         data.get(key)
             .and_then(|a| a.get("aggregate"))
@@ -296,14 +257,24 @@ fn parse_tally(data: &serde_json::Value, options: usize) -> (Vec<usize>, usize) 
             .unwrap_or(0) as usize
     };
     let counts = (0..options).map(|i| count_at(&format!("o{i}"))).collect();
-    (counts, count_at("total"))
+    (counts, count_at("total"), count_at("own"))
 }
 
-/// The tally query: one aliased aggregate per option, plus the total.
+/// The tally query: one aliased aggregate per option, the total, and — when
+/// `own_of` is given — how many of them are this voter's.
 ///
 /// A vote's `data` is the array of chosen indices, so option `i` is counted with
 /// jsonb containment — `data @> [i]` — which is what `_contains` compiles to.
-fn poll_tally_query(poll_id: &str, options: usize) -> String {
+///
+/// `own` rides along rather than being asked for separately. Casting a ballot
+/// refreshed two requests: this one, and a whole-node query whose rows were
+/// counted with `.len()`. Two requests on the same trigger resolve at different
+/// times, which is what made the result bars move twice; and the second was the
+/// expensive kind, selecting path, data, mime and parent for every ballot to
+/// learn one integer. One aggregate answers it. A secret poll cannot use this at
+/// all, since its ballots carry no `ownerId` (that is the point of them), and
+/// asks the backend's marker instead.
+fn poll_tally_query(poll_id: &str, options: usize, own_of: Option<&str>) -> String {
     let id = gql_escape(poll_id);
     let base = format!("parentId: {{_eq: \"{id}\"}}, mimeId: {{_eq: \"vote/vote\"}}");
     let mut q = String::from("query PollTally {\n");
@@ -314,8 +285,16 @@ fn poll_tally_query(poll_id: &str, options: usize) -> String {
         ));
     }
     q.push_str(&format!(
-        "  total: nodesAggregate(where: {{{base}}}) {{ aggregate {{ count }} }}\n}}"
+        "  total: nodesAggregate(where: {{{base}}}) {{ aggregate {{ count }} }}\n"
     ));
+    if let Some(uid) = own_of {
+        let uid = gql_escape(uid);
+        q.push_str(&format!(
+            "  own: nodesAggregate(where: {{{base}, ownerId: {{_eq: \"{uid}\"}}}}) \
+             {{ aggregate {{ count }} }}\n"
+        ));
+    }
+    q.push('}');
     q
 }
 
@@ -323,9 +302,29 @@ fn poll_tally_query(poll_id: &str, options: usize) -> String {
 mod tally_tests {
     use super::*;
 
+    /// One request per refresh, not two.
+    ///
+    /// The voter's own count rides in the tally. Asked separately it was a second
+    /// request on the same trigger, landing at a different moment and moving the
+    /// result bars again; and it was a whole-node query counted with `.len()`.
+    #[test]
+    fn the_tally_counts_the_voters_own_ballots_in_the_same_request() {
+        let q = poll_tally_query("poll-1", 3, Some("user-1"));
+        assert!(q.contains("own: nodesAggregate"), "{q}");
+        assert!(q.contains(r#"ownerId: {_eq: "user-1"}"#), "{q}");
+        // Still one query, and still no rows.
+        assert_eq!(q.matches("query ").count(), 1, "{q}");
+        assert!(!q.contains("nodes("), "{q}");
+
+        // A secret poll has no ownerId to count by, so it does not ask.
+        let secret = poll_tally_query("poll-1", 3, None);
+        assert!(!secret.contains("own:"), "{secret}");
+        assert!(!secret.contains("ownerId"), "{secret}");
+    }
+
     #[test]
     fn the_tally_asks_the_server_to_count_each_option() {
-        let q = poll_tally_query("poll-1", 3);
+        let q = poll_tally_query("poll-1", 3, None);
         // One aggregate per option, each matching ballots that contain it...
         for i in 0..3 {
             assert!(q.contains(&format!("o{i}: nodesAggregate")), "{q}");
@@ -342,9 +341,14 @@ mod tally_tests {
     /// A hidden poll still shows turnout, and must not count what it will not show.
     #[test]
     fn a_hidden_poll_asks_only_for_the_total() {
-        let q = poll_tally_query("poll-1", 0);
+        let q = poll_tally_query("poll-1", 0, None);
         assert!(q.contains("total: nodesAggregate"), "{q}");
         assert!(!q.contains("o0:"), "{q}");
+        // Still true when the voter's own count rides along: hiding the tally
+        // hides the per-option counts, not whether this reader has voted.
+        let with_own = poll_tally_query("poll-1", 0, Some("user-1"));
+        assert!(with_own.contains("own: nodesAggregate"), "{with_own}");
+        assert!(!with_own.contains("o0:"), "{with_own}");
     }
 
     /// The shape `execute_raw` actually returns, captured from production.
@@ -356,11 +360,16 @@ mod tally_tests {
             "o0": {"aggregate": {"count": 166}},
             "o1": {"aggregate": {"count": 167}},
             "o2": {"aggregate": {"count": 167}},
-            "total": {"aggregate": {"count": 500}}
+            "total": {"aggregate": {"count": 500}},
+            "own": {"aggregate": {"count": 1}}
         });
-        assert_eq!(parse_tally(&data, 3), (vec![166, 167, 167], 500));
+        assert_eq!(parse_tally(&data, 3), (vec![166, 167, 167], 500, 1));
         // A hidden poll asks for the total alone.
-        assert_eq!(parse_tally(&data, 0), (vec![], 500));
+        assert_eq!(parse_tally(&data, 0), (vec![], 500, 1));
+        // An absent `own` (a secret poll never asks) reads as not having voted,
+        // which is the same answer and needs no separate case.
+        let no_own = serde_json::json!({"total": {"aggregate": {"count": 7}}});
+        assert_eq!(parse_tally(&no_own, 0), (vec![], 7, 0));
     }
 
     /// A response wrapped one level too deep must not read as "no votes".
@@ -377,6 +386,8 @@ mod tally_tests {
     /// A poll id is escaped like any other interpolated value.
     #[test]
     fn the_poll_id_is_escaped() {
-        assert!(poll_tally_query("a\"b", 1).contains("a\\\"b"));
+        assert!(poll_tally_query("a\"b", 1, None).contains("a\\\"b"));
+        // And so is the user id, which is interpolated the same way.
+        assert!(poll_tally_query("p", 1, Some("c\"d")).contains("c\\\"d"));
     }
 }
