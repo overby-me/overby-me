@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (120) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (121) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -650,20 +650,18 @@ vertices each, which is 1.6 million a frame; its default here is five, which
 comes to the same 334k `beats` draws, and its slider still goes to a hundred.
 Say so in the saver's own comment when you do this, with the measurement.
 
-`hopffibration` is the one where lowering the setting is not enough, and it is
-worth knowing why, because the ceiling it hits is vertices rather than batches.
-Its fibers are tubes swept along curves that are subdivided until they are
-smooth, and its heaviest animation draws two hundred and sixteen of them. In
-the coarsest of the three detail levels its own knob offers, that is 767k
-vertices a frame, or 35 MB written and uploaded thirty times a second; at the
-default it is 1.6 million and 74 MB. The batch count is fine, because the fiber
-colours ride on the vertices and the whole thing goes down in one call. What is
-not fine is that upstream sends the geometry to the card once and draws it from
-there many times over, and a recorder that rebuilds every vertex of every frame
-has no equivalent. The maths, the base-point choreography and the eight-by-eight
-table of animations are all ported and tested in `runtime::hopf`, with the
-measurement as a test; what is missing is a way for geometry to outlive a frame,
-which would also lift `covid19`, `glcells` and `squirtorus`.
+`hopffibration` is the one to look at before deferring a saver on its geometry,
+because measuring the wrong quantity nearly lost it. Its fibers are tubes swept
+along curves subdivided until they are smooth, and its heaviest animation draws
+two hundred and sixteen of them: 767k vertices a frame at the coarsest of the
+three detail levels its knob offers, and 1.6 million at upstream's default. On
+the heaviest animation at the default setting it looks impossible. But the
+heaviest animation is four of a hundred and eighty-eight, and at coarse the
+median is 256k a frame and the upper quartile 343k, which is exactly what
+`beats` draws. So it ships, with coarse as the default here and the knob still
+offering the other two, the same accommodation `winduprobot` gets. The geometry
+really is rebuilt every frame, because it moves every frame; upstream streams
+it too, with `GL_STREAM_DRAW`. Measure the distribution, not the maximum.
 
 Batches also break on *state*, and the state that catches people out is the
 front-face winding. Two quads with opposite windings can never share a batch, so

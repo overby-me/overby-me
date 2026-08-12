@@ -89,6 +89,7 @@ pub mod hexstrut;
 pub mod hextrail;
 pub mod highvoltage;
 pub mod hilbert;
+pub mod hopffibration;
 pub mod hydrostat;
 pub mod hypertorus;
 pub mod hypnowheel;
@@ -227,6 +228,7 @@ pub static ALL: &[&Saver3d] = &[
     &glsnake::SAVER,
     &gravitywell::SAVER,
     &hextrail::SAVER,
+    &hopffibration::SAVER,
     &hydrostat::SAVER,
     &hypertorus::SAVER,
     &kaleidocycle::SAVER,

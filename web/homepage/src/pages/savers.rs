@@ -1504,6 +1504,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::morph3d::start
 );
 gl3d_saver!(
+    "hopffibration",
+    hopffibration_body,
+    hopffibration_start,
+    xscreensaver::hacks3d::hopffibration::start
+);
+gl3d_saver!(
     "hydrostat",
     hydrostat_body,
     hydrostat_start,
@@ -3179,6 +3185,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "jigsaw",
         label: "Jigsaw",
         start: Start::Gl3d(jigsaw_start),
+    },
+    Entry {
+        slug: "hopffibration",
+        label: "Hopf Fibration",
+        start: Start::Gl3d(hopffibration_start),
     },
     Entry {
         slug: "hydrostat",

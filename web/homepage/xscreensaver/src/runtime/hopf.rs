@@ -47,14 +47,11 @@
 //!   megabyte of C struct literals upstream, converted by
 //!   `web/homepage/gen-hopfanimations.nu` into an asset this module reads.
 //!
-//! There is no `hopffibration` saver drawing any of this yet, and the reason
-//! is measured rather than guessed: see the test at the bottom of this file.
-//! The heaviest animation is two hundred and sixteen fibers, which even at the
-//! coarsest of upstream's three detail levels comes to 767k vertices a frame.
-//! Upstream sends that to the card once and draws it many times; a recorder
-//! that rebuilds every vertex of every frame would be writing and uploading
-//! 35 MB thirty times a second. What the saver waits on is geometry that
-//! outlives a frame, not anything in here.
+//! [`crate::hacks3d::hopffibration`] is what draws it. How much geometry that
+//! comes to is the saver's one difficulty and is measured by a test at the
+//! bottom of this file: the heaviest of the hundred and eighty-eight
+//! animations is two hundred and sixteen fibers, or 767k vertices a frame at
+//! the coarsest detail level. The median is a third of that.
 
 use std::f32::consts::PI;
 
@@ -1345,15 +1342,12 @@ mod cost {
     }
 
     #[test]
-    fn the_fibers_are_more_geometry_than_a_frame_can_be_rebuilt_from() {
-        // This is the measurement that keeps `hopffibration` from being a
-        // saver yet. Upstream sends the fibers to the card once and draws
-        // them from there; the recorder writes every vertex of every frame
-        // into one buffer and uploads the lot, so the heaviest animation
-        // costs tens of megabytes a frame however few draw calls it is.
-        //
-        // If the runtime ever grows geometry that outlives a frame, this is
-        // the number that says whether it is enough.
+    fn the_heaviest_animation_is_the_one_that_sets_the_detail_default() {
+        // The geometry moves every frame, so it is rebuilt every frame,
+        // which is what upstream does too. How much of it there is decides
+        // which detail level the saver defaults to, and the number that
+        // matters is the middle of the distribution rather than the top of
+        // it: the heaviest animation is four of a hundred and eighty-eight.
         let a = Animations::parse(ANIMATIONS);
         let heaviest = a
             .multi
@@ -1370,6 +1364,16 @@ mod cost {
         assert!(coarse > 700_000, "{coarse}");
         assert!(medium > 1_500_000, "{medium}");
         assert!(fine > 2_500_000, "{fine}");
+
+        // And the middle of the distribution at coarse, which is where the
+        // saver actually spends its time: a third of the worst case, and
+        // about what the runtime draws elsewhere without trouble.
+        let mut all: Vec<usize> = a.multi.iter().map(|m| vertices(m, 8, 0.0010)).collect();
+        all.sort_unstable();
+        let median = all[all.len() / 2];
+        let upper = all[all.len() * 3 / 4];
+        assert!(median < 300_000, "the median animation is {median}");
+        assert!(upper < 400_000, "the upper quartile is {upper}");
         assert!(coarse < medium && medium < fine);
     }
 }
