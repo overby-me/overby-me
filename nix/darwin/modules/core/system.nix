@@ -10,6 +10,13 @@
     # nix-darwin's own state version (separate from home-manager's).
     stateVersion = darwinStateVersion;
 
+    # Every `system.defaults` key below that lives in a per-user domain rather
+    # than a system one (NSGlobalDomain, dock, finder, screencapture,
+    # hitoolbox) is written on behalf of this account. nix-darwin used to
+    # assume the invoking user and now refuses to evaluate without being told,
+    # so this is not optional while any of those are set.
+    primaryUser = "overby.me";
+
     # Sensible macOS defaults. These map to `defaults write` settings and are
     # applied on `darwin-rebuild switch`.
     defaults = {
