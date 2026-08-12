@@ -373,6 +373,17 @@ impl Gl3dEngine {
         self.runner.def()
     }
 
+    /// Host side: has the saver asked for words? `starwars` and `fliptext`
+    /// are the 3D ones that read text.
+    pub fn take_text_request(&mut self) -> bool {
+        self.runner.take_text_request()
+    }
+
+    /// Host side: hand the saver some words.
+    pub fn deliver_text(&mut self, s: &str) {
+        self.runner.deliver_text(s);
+    }
+
     /// Run a different saver, or the same one with different knobs, on the
     /// context we already have.
     pub fn restart(&mut self, runner: Runner3d) {

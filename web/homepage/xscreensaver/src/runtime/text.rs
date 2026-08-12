@@ -51,17 +51,48 @@ pub struct TextChannel {
     /// pipe so `xscreensaver-text` can wrap to the right width.
     pub(crate) columns: i32,
     pub(crate) max_lines: i32,
+    /// When the hack first asked and the host had nothing, so a source that
+    /// never answers does not leave a saver with no words at all.
+    waiting_since: Option<f64>,
 }
 
+/// How long to wait for a host before falling back to the compiled-in
+/// passage, in seconds.
+///
+/// The same reasoning as [`super::image`]'s: long enough to fetch over a slow
+/// connection, short enough that a broken source does not look like a hang.
+/// Without it a text source that fails leaves the screen empty forever, which
+/// is worse than the wrong words.
+const PATIENCE: f64 = 20.0;
+
 impl TextChannel {
+    /// Host side: take some words, folded to the width the hack asked for.
+    ///
+    /// The folding is not the host's job to remember. Upstream sends the width
+    /// down the pipe (`textclient_reshape`) and `xscreensaver-text` wraps its
+    /// output to it, because several hacks lay the words out exactly as they
+    /// arrive and would otherwise run a paragraph off the side of the screen.
+    /// The compiled-in fallback already wraps; text from a host has to as
+    /// well, or the two paths look different and only one of them is right.
+    pub(crate) fn deliver(&mut self, s: &str) {
+        let folded;
+        let text = if self.columns > 0 {
+            folded = wrap(s, self.columns as usize);
+            &folded
+        } else {
+            s
+        };
+        self.pending.extend(text.as_bytes());
+    }
+
     /// `textclient_getc`: the next character, or `None` if there is none to be
     /// had this instant.
-    pub(crate) fn getc(&mut self) -> Option<u8> {
+    pub(crate) fn getc(&mut self, now: f64) -> Option<u8> {
         if self.lf_owed {
             self.lf_owed = false;
             return Some(b'\n');
         }
-        match self.next_byte() {
+        match self.next_byte(now) {
             Some(b'\n') => {
                 self.lf_owed = true;
                 Some(b'\r')
@@ -70,15 +101,21 @@ impl TextChannel {
         }
     }
 
-    fn next_byte(&mut self) -> Option<u8> {
+    fn next_byte(&mut self, now: f64) -> Option<u8> {
         if let Some(c) = self.pending.pop_front() {
+            self.waiting_since = None;
             return Some(c);
         }
         if self.host_supplies {
             // Waiting on the host. Upstream returns -1 here and the hacks are
             // written to cope, because a pipe is not always ready.
             self.requested = true;
-            return None;
+            let since = *self.waiting_since.get_or_insert(now);
+            if now - since < PATIENCE {
+                return None;
+            }
+            // The host has had long enough. Fall through to the passage, and
+            // keep the request standing so a source that recovers is used.
         }
         let text = if self.wrapped.is_empty() {
             FALLBACK
@@ -170,11 +207,70 @@ mod tests {
     fn with_no_host_the_passage_repeats_forever() {
         let mut c = TextChannel::default();
         let n = FALLBACK.len() + FALLBACK.matches('\n').count();
-        let first: Vec<u8> = (0..n).filter_map(|_| c.getc()).collect();
+        let first: Vec<u8> = (0..n).filter_map(|_| c.getc(0.0)).collect();
         assert_eq!(first.len(), n, "every character came back");
         assert_eq!(first[0], b'A');
         // And it wraps rather than running dry.
-        assert_eq!(c.getc(), Some(b'A'));
+        assert_eq!(c.getc(0.0), Some(b'A'));
+    }
+
+    /// Text from a host is folded to the width the hack asked for, exactly as
+    /// the compiled-in passage is. Without this a saver that lays words out
+    /// as they arrive runs its lines off the side of the screen, and the two
+    /// paths through the channel disagree.
+    #[test]
+    fn delivered_text_is_folded_to_the_page() {
+        let mut c = TextChannel::default();
+        c.host_supplies = true;
+        c.reshape(20, 24);
+        c.deliver("the quick brown fox jumps over the lazy dog");
+
+        let mut got = String::new();
+        while let Some(b) = c.getc(0.0) {
+            got.push(b as char);
+        }
+        // Carriage returns are the channel's terminal line endings; the
+        // question here is only where the breaks fell.
+        for line in got.replace('\r', "").lines() {
+            assert!(
+                line.chars().count() <= 20,
+                "line ran to {} columns: {line:?}",
+                line.chars().count()
+            );
+        }
+        assert!(got.contains("quick"), "the words themselves survived");
+
+        // With no width asked for, it is passed through untouched.
+        let mut c = TextChannel::default();
+        c.host_supplies = true;
+        c.deliver("a b c");
+        let mut got = String::new();
+        while let Some(b) = c.getc(0.0) {
+            got.push(b as char);
+        }
+        assert_eq!(got, "a b c");
+    }
+
+    /// A host that says it supplies text and then never does must not leave a
+    /// saver with nothing to read. The image channel falls back to colour
+    /// bars; this one falls back to the passage, and keeps the request
+    /// standing so a source that recovers is still used.
+    #[test]
+    fn a_silent_host_eventually_gets_the_passage() {
+        let mut c = TextChannel::default();
+        c.host_supplies = true;
+        assert_eq!(c.getc(0.0), None, "it should wait at first");
+        assert_eq!(c.getc(PATIENCE - 0.1), None, "it gave up too early");
+        assert_eq!(
+            c.getc(PATIENCE + 0.1),
+            Some(b'A'),
+            "it never gave up, so the screen stays empty"
+        );
+        assert!(c.requested, "the request should still stand");
+
+        // And a host that does answer is preferred over the passage again.
+        c.pending.extend(b"hello");
+        assert_eq!(c.getc(PATIENCE + 0.2), Some(b'h'));
     }
 
     /// Every line ends the way it would coming out of a terminal, because the
@@ -185,7 +281,10 @@ mod tests {
     fn a_line_ends_with_a_return_and_then_a_feed() {
         let mut c = TextChannel::default();
         c.reshape(40, 15);
-        let text: String = (0..500).filter_map(|_| c.getc()).map(char::from).collect();
+        let text: String = (0..500)
+            .filter_map(|_| c.getc(0.0))
+            .map(char::from)
+            .collect();
         assert!(text.contains("\r\n"));
         assert!(!text.contains('\n') || !text.replace("\r\n", "").contains('\n'));
 
@@ -196,7 +295,7 @@ mod tests {
             ..TextChannel::default()
         };
         c.pending.extend(b"one\ntwo\n");
-        let text: String = (0..8).filter_map(|_| c.getc()).map(char::from).collect();
+        let text: String = (0..8).filter_map(|_| c.getc(0.0)).map(char::from).collect();
         assert_eq!(text, "one\r\ntwo");
     }
 
@@ -206,7 +305,10 @@ mod tests {
     fn asking_for_a_width_gets_lines_that_fit() {
         let mut c = TextChannel::default();
         c.reshape(40, 15);
-        let text: String = (0..2000).filter_map(|_| c.getc()).map(char::from).collect();
+        let text: String = (0..2000)
+            .filter_map(|_| c.getc(0.0))
+            .map(char::from)
+            .collect();
         assert!(text.starts_with("Alice was beginning"));
         let lines: Vec<&str> = text.lines().collect();
         let widest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
@@ -218,7 +320,10 @@ mod tests {
 
         // And with no width asked for, the passage arrives as it is written.
         let mut c = TextChannel::default();
-        let text: String = (0..300).filter_map(|_| c.getc()).map(char::from).collect();
+        let text: String = (0..300)
+            .filter_map(|_| c.getc(0.0))
+            .map(char::from)
+            .collect();
         assert!(text.lines().next().is_some_and(|l| l.chars().count() > 40));
     }
 
@@ -230,12 +335,12 @@ mod tests {
             host_supplies: true,
             ..TextChannel::default()
         };
-        assert_eq!(c.getc(), None);
+        assert_eq!(c.getc(0.0), None);
         assert!(c.requested, "and the request is visible to the host");
 
         c.pending.extend(b"hi");
-        assert_eq!(c.getc(), Some(b'h'));
-        assert_eq!(c.getc(), Some(b'i'));
-        assert_eq!(c.getc(), None);
+        assert_eq!(c.getc(0.0), Some(b'h'));
+        assert_eq!(c.getc(0.0), Some(b'i'));
+        assert_eq!(c.getc(0.0), None);
     }
 }

@@ -107,11 +107,27 @@ impl Gl {
     /// `textclient_getc`: the next character of the text this saver is
     /// reading, or `None` if there is none to be had this instant.
     pub fn text_getc(&mut self) -> Option<u8> {
-        self.words.getc()
+        self.words.getc(self.time)
     }
 
     /// `textclient_reshape`: how wide the page is now, so the source can wrap
     /// to it.
+    /// Host side: tell the runtime that text can be fetched. Without this the
+    /// compiled-in passage is served, which is what the native tests get.
+    pub fn set_text_host(&mut self, supplies: bool) {
+        self.words.host_supplies = supplies;
+    }
+
+    /// Host side: has a hack asked for text since the last check?
+    pub fn take_text_request(&mut self) -> bool {
+        std::mem::take(&mut self.words.requested)
+    }
+
+    /// Host side: hand over some words.
+    pub fn deliver_text(&mut self, s: &str) {
+        self.words.deliver(s);
+    }
+
     pub fn text_reshape(&mut self, columns: i32, max_lines: i32) {
         self.words.reshape(columns, max_lines);
     }
@@ -194,6 +210,7 @@ impl Runner3d {
             images: super::image::ImageChannel::default(),
             image_pending: None,
         };
+        gl.set_text_host(args.text_host);
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);
         Self {
@@ -203,6 +220,16 @@ impl Runner3d {
             next_due: 0.0,
             started: false,
         }
+    }
+
+    /// Host side: has the hack asked for text since the last check?
+    pub fn take_text_request(&mut self) -> bool {
+        self.gl.take_text_request()
+    }
+
+    /// Host side: hand over some words.
+    pub fn deliver_text(&mut self, s: &str) {
+        self.gl.deliver_text(s);
     }
 
     pub fn def(&self) -> &'static SaverDef {

@@ -204,7 +204,7 @@ impl Dpy {
     /// `textclient_getc`: the next character of the text this saver is
     /// reading, or `None` if there is none to be had this instant.
     pub fn text_getc(&mut self) -> Option<u8> {
-        self.words.getc()
+        self.words.getc(self.time)
     }
 
     /// `textclient_reshape`: how wide the page is now, so the source can wrap
@@ -227,7 +227,7 @@ impl Dpy {
 
     /// Host side: hand over some more text to read.
     pub fn deliver_text(&mut self, s: &str) {
-        self.words.pending.extend(s.as_bytes());
+        self.words.deliver(s);
     }
 
     /// The window, as a drawable.
@@ -324,6 +324,9 @@ pub struct StartArgs {
     /// ask for their image in `init`, and a request made before the host has
     /// spoken up is answered on the spot with colour bars.
     pub image_host: bool,
+    /// Whether a host is going to supply text. Same contract as
+    /// `image_host`: without it the compiled-in passage is served.
+    pub text_host: bool,
     /// The local time of day when the saver starts, in seconds since midnight.
     /// Only the clocks read it, and the tests leave it at midnight.
     pub wall_clock: f64,
@@ -337,11 +340,17 @@ impl StartArgs {
             query: query.to_string(),
             seed,
             image_host: false,
+            text_host: false,
             wall_clock: 0.0,
         }
     }
 
     /// Declare that the host will answer image requests.
+    pub fn with_text_host(mut self, text_host: bool) -> Self {
+        self.text_host = text_host;
+        self
+    }
+
     pub fn with_image_host(mut self, image_host: bool) -> Self {
         self.image_host = image_host;
         self
@@ -423,6 +432,7 @@ impl Runner {
         let res = Resources::new(def.defaults, def.opts, &args.query);
         let mut dpy = Dpy::new(args.width, args.height, res);
         dpy.set_image_host(args.image_host);
+        dpy.set_text_host(args.text_host);
         dpy.set_wall_clock(args.wall_clock);
         let hack = new(&mut dpy);
         Self {

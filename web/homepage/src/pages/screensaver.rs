@@ -30,6 +30,7 @@ use crate::pages::gl::GlEngine;
 use crate::pages::gl3d::Gl3dEngine;
 use crate::pages::savers::{self, Start};
 use crate::pages::ui::{Choice, Details, Slider, Toggle};
+use crate::text::{self, Source as TextSource};
 use crate::url::{captured_query, replace_query};
 
 /// How long to wait before asking an image source again after it came up
@@ -91,6 +92,17 @@ struct Host {
     image_fetching: bool,
     /// Do not hammer a hashtag firehose that has not produced anything yet.
     image_retry_at: f64,
+    /// Where this saver's words come from, for the hacks that read text.
+    text_source: TextSource,
+    /// The same three flags again, for text. A saver reads text a character
+    /// at a time and asks constantly, so this has the same shape as the
+    /// picture bookkeeping rather than a different one.
+    text_wanted: bool,
+    text_fetching: bool,
+    text_retry_at: f64,
+    /// Whether this saver has ever asked for words, so the panel only offers
+    /// a "Words" section for the ten or so that read any.
+    reads_text: bool,
 }
 
 impl Host {
@@ -109,11 +121,33 @@ impl Host {
         self.image_wanted = false;
         self.image_fetching = false;
         self.image_retry_at = 0.0;
+        self.text_wanted = false;
+        self.text_fetching = false;
+        self.text_retry_at = 0.0;
+    }
+
+    /// Has the hack asked for words? Both the framebuffer and the 3D savers
+    /// do: `starwars` and `fliptext` are the ones people notice.
+    fn wants_text(&mut self) -> bool {
+        match &mut self.engine {
+            Engine::Fb(fb) => fb.runner.dpy.take_text_request(),
+            Engine::Gl3d(gl) => gl.take_text_request(),
+            Engine::Gl(_) => false,
+        }
+    }
+
+    fn deliver_text(&mut self, s: &str) {
+        match &mut self.engine {
+            Engine::Fb(fb) => fb.runner.dpy.deliver_text(s),
+            Engine::Gl3d(gl) => gl.deliver_text(s),
+            Engine::Gl(_) => {}
+        }
     }
 
     fn start_args(&self, query: &str) -> StartArgs {
         StartArgs::new(self.buf_w, self.buf_h, query, seed())
             .with_image_host(self.source != Source::None)
+            .with_text_host(true)
             .with_wall_clock(wall_clock_seconds())
     }
 
@@ -268,6 +302,7 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
 
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
         let mut fetch: Option<(Source, i32, i32)> = None;
+        let mut fetch_text: Option<TextSource> = None;
         let connected = {
             let mut h = host.borrow_mut();
             if h.canvas.is_connected() {
@@ -282,6 +317,15 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                 if h.image_wanted && !h.image_fetching && now >= h.image_retry_at {
                     h.image_fetching = true;
                     fetch = Some((h.source.clone(), h.buf_w, h.buf_h));
+                }
+
+                if h.wants_text() {
+                    h.text_wanted = true;
+                    h.reads_text = true;
+                }
+                if h.text_wanted && !h.text_fetching && now >= h.text_retry_at {
+                    h.text_fetching = true;
+                    fetch_text = Some(h.text_source.clone());
                 }
                 true
             } else {
@@ -305,6 +349,27 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                     // Nothing to show yet: a hashtag nobody has posted under
                     // since we started listening. Ask again shortly.
                     None => h.image_retry_at = now_seconds() + IMAGE_RETRY_SECONDS,
+                }
+            });
+        }
+        if let Some(source) = fetch_text {
+            let host = Rc::clone(&host);
+            wasm_bindgen_futures::spawn_local(async move {
+                let words = text::next_text(&source).await;
+                let mut h = host.borrow_mut();
+                h.text_fetching = false;
+                match words {
+                    Some(w) => {
+                        h.text_wanted = false;
+                        // Upstream's pipe yields a paragraph at a time with a
+                        // blank line after it, and the hacks are laid out for
+                        // that.
+                        h.deliver_text(&format!("{}\n\n", w.trim_end()));
+                    }
+                    // A hashtag nobody has posted under yet, or a source that
+                    // did not answer. Either way, ask again shortly; the
+                    // runtime falls back to its own passage meanwhile.
+                    None => h.text_retry_at = now_seconds() + IMAGE_RETRY_SECONDS,
                 }
             });
         }
@@ -332,10 +397,17 @@ fn to_query(settings: &BTreeMap<String, String>) -> String {
 /// The address-bar query: the panel's settings plus the picture source, which
 /// the panel does not own but which has to survive being written back or a
 /// reload would lose it.
-fn shareable_query(settings: &BTreeMap<String, String>, source: &Source) -> String {
+fn shareable_query(
+    settings: &BTreeMap<String, String>,
+    source: &Source,
+    words: &TextSource,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(images) = source.as_param() {
         parts.push(format!("images={images}"));
+    }
+    if let Some(text) = words.as_param() {
+        parts.push(format!("text={text}"));
     }
     let settings = to_query(settings);
     if !settings.is_empty() {
@@ -428,7 +500,12 @@ fn SaverStage(slug: String) -> Element {
             .as_ref()
             .map(|h| h.borrow().source.clone())
             .unwrap_or(Source::None);
-        replace_query(&shareable_query(&settings.read(), &source));
+        let words = host
+            .read()
+            .as_ref()
+            .map(|h| h.borrow().text_source.clone())
+            .unwrap_or_default();
+        replace_query(&shareable_query(&settings.read(), &source, &words));
         let Some(h) = host.read().clone() else { return };
         // Every borrow of the host is scoped to a single statement on purpose:
         // the restart has to await the saver's chunk, and a `RefCell` borrow
@@ -488,10 +565,12 @@ fn SaverStage(slug: String) -> Element {
                 canvas.set_height(h as u32);
 
                 let source = Source::from_query(&captured_query());
+                let text_source = TextSource::from_query(&captured_query());
                 let query = to_query(&settings.peek());
                 // Fetches the saver's own wasm chunk the first time.
                 let args = StartArgs::new(w, h, &query, seed())
                     .with_image_host(source != Source::None)
+                    .with_text_host(true)
                     .with_wall_clock(wall_clock_seconds());
                 // The context has to match the saver: asking a canvas for "2d"
                 // after it has given out a "webgl2" (or the other way round)
@@ -537,6 +616,11 @@ fn SaverStage(slug: String) -> Element {
                     image_wanted: false,
                     image_fetching: false,
                     image_retry_at: 0.0,
+                    text_source,
+                    text_wanted: false,
+                    text_fetching: false,
+                    text_retry_at: 0.0,
+                    reads_text: false,
                 };
                 built.announce_image_source();
                 let h = Rc::new(RefCell::new(built));
@@ -565,6 +649,12 @@ fn SaverStage(slug: String) -> Element {
     let pictures = host.read().as_ref().and_then(|h| {
         let h = h.borrow();
         h.source.describe().map(|from| (from, h.image_title()))
+    });
+    // And where the words come from, for the hacks that read text. Only shown
+    // when the saver actually asks for any.
+    let words = host.read().as_ref().and_then(|h| {
+        let h = h.borrow();
+        h.reads_text.then(|| h.text_source.describe())
     });
 
     rsx! {
@@ -698,6 +788,15 @@ fn SaverStage(slug: String) -> Element {
                                     br {}
                                     span { style: "color:#888;font-style:italic;", "{caption}" }
                                 }
+                            }
+                        }
+                    }
+
+                    if let Some(from) = words.clone() {
+                        Details { summary: "Words",
+                            div {
+                                style: "font-size:12px;color:#bbb;line-height:1.5;",
+                                "From {from}"
                             }
                         }
                     }

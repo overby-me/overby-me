@@ -3,6 +3,7 @@ mod atproto_web;
 mod graph;
 mod images;
 mod pages;
+mod text;
 mod url;
 
 use dioxus::prelude::*;

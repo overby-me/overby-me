@@ -64,6 +64,24 @@ has some, and with no host the compiled-in passage is served instead. Upstream
 reads bytes from a pipe to `xscreensaver-text` and copes with there being none
 ready yet, so this yields nothing rather than blocking, the same way.
 
+The host fills it the way it fills the picture channel, chosen with a `text`
+parameter: `?text=@handle` reads an account's posts, `?text=%23tag` reads a
+hashtag live, and `?text=<url>` reads any URL you name. With nothing set the
+words are a poem, which is the nearest thing to `fortune(6)` still answering:
+`fortune` has no surviving public API, and the quote services that do answer
+either send no `access-control-allow-origin` or return a single line, which is
+thin material for a saver that wants a stream.
+
+Two things about that channel are worth stating because getting either wrong
+is invisible until you look. Text from the host is folded to the width the
+hack asked for, exactly as the compiled-in passage is, because several hacks
+lay the words out as they arrive and would otherwise run a paragraph off the
+side of the screen. And a host that promises words and then fails gets twenty
+seconds before the passage is served instead: without that, a source that does
+not answer leaves the screen permanently blank, which is worse than the wrong
+words. The picture channel already fell back to colour bars; this one did not
+fall back at all.
+
 A hack also tells the source how wide its page is (`textclient_reshape`), and
 upstream's folds its output to that. So does the fallback: several hacks lay the
 words out exactly as they arrive and would otherwise run a paragraph off the
