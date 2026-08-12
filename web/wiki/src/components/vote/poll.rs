@@ -101,19 +101,28 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
     }
 }
 
+/// The standard ballot, as stored on a poll.
+///
+/// Markers, not words. A poll used to be opened with the Danish "For" / "Imod" /
+/// "Blank" written into its data, which the ballot then drew verbatim, so an
+/// English reader was asked to vote "Imod". Storing the language a poll happened
+/// to be opened in makes the record answer in that language forever.
+///
+/// Lowercase and unmistakably not display text, so a reader never sees one and a
+/// future language never has to be the canonical one.
+const FOR: &str = "for";
+const AGAINST: &str = "against";
+const BLANK: &str = "blank";
+
 /// A ballot option as the reader should see it.
 ///
-/// The standard motion ballot is stored on the poll as the literal strings
-/// "For" / "Imod" / "Blank", written in Danish when the poll was opened, and the
-/// ballot drew them verbatim — so an English reader voted "Imod". They are safe
-/// to translate because nothing depends on them: a ballot records the option's
-/// INDEX, and the abstention is identified by position (the last option), never
-/// by its text. The stored words carry no meaning the code reads.
+/// Safe to translate because nothing reads the stored word: a ballot records the
+/// option's INDEX, and the abstention is identified by position (the last
+/// option), never by its text.
 ///
-/// So the canonical words stay in the record and the reader is shown their own
-/// language, which also fixes every poll already held. Anything else passes
-/// through: a candidate's name is a proper noun and a custom option is whatever
-/// the chair wrote, and neither is ours to rewrite.
+/// Anything that is not a standard marker passes through: a candidate's name is
+/// a proper noun and a custom option is whatever the chair wrote, and neither is
+/// ours to rewrite.
 pub fn option_label(stored: &str) -> String {
     match option_key(stored) {
         Some(key) => t(key),
@@ -128,6 +137,13 @@ pub fn option_label(stored: &str) -> String {
 /// This half is the part with a choice in it.
 fn option_key(stored: &str) -> Option<&'static str> {
     match stored {
+        FOR => Some("vote.optionFor"),
+        AGAINST => Some("vote.optionAgainst"),
+        BLANK => Some("vote.optionBlank"),
+        // The Danish words polls were opened with before there were markers.
+        // Few of those exist -- the poll system has barely been used -- but
+        // they cost three arms to keep readable, and dropping them would leave
+        // the ones that do exist showing Danish to everyone forever.
         "For" => Some("vote.optionFor"),
         "Imod" => Some("vote.optionAgainst"),
         "Blank" => Some("vote.optionBlank"),
@@ -1027,10 +1043,10 @@ pub(super) fn StartPollDialog(
             .filter(|c| c.mime_id.as_deref() == Some("vote/candidate"))
             .map(|c| c.name.clone())
             .collect();
-        o.push("Blank".to_string());
+        o.push(BLANK.to_string());
         o
     } else {
-        vec!["For".to_string(), "Imod".to_string(), "Blank".to_string()]
+        vec![FOR.to_string(), AGAINST.to_string(), BLANK.to_string()]
     };
     let opt_count = options.len();
     let max_range = opt_count.saturating_sub(1).max(1);
@@ -1231,17 +1247,24 @@ mod tests {
     /// position — so translating the display changes nothing that is counted.
     #[test]
     fn only_the_standard_ballot_options_are_translated() {
+        // The markers a poll is opened with now.
+        assert_eq!(option_key("for"), Some("vote.optionFor"));
+        assert_eq!(option_key("against"), Some("vote.optionAgainst"));
+        assert_eq!(option_key("blank"), Some("vote.optionBlank"));
+        // And the Danish words the few older polls carry.
         assert_eq!(option_key("For"), Some("vote.optionFor"));
         assert_eq!(option_key("Imod"), Some("vote.optionAgainst"));
         assert_eq!(option_key("Blank"), Some("vote.optionBlank"));
         // A candidate's name is a proper noun, a chair's custom option is their
-        // wording, and neither is ours to rewrite.
+        // wording, and neither is ours to rewrite. This also proves the arms
+        // above match by value: were `FOR` read as a binding instead of a
+        // constant, the first arm would swallow every option and this would be
+        // Some.
         assert_eq!(option_key("Karoline Hinke Grove"), None);
         assert_eq!(option_key("Udsæt til næste HB"), None);
-        // Nothing is guessed at: only the exact stored forms map, so a chair who
-        // writes their own lowercase "imod" keeps it.
-        assert_eq!(option_key("imod"), None);
-        assert_eq!(option_key(" For"), None);
+        // Nothing is guessed at: only the exact stored forms map.
+        assert_eq!(option_key(" for"), None);
+        assert_eq!(option_key("AGAINST"), None);
     }
 
     #[test]
