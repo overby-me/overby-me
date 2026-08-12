@@ -1006,6 +1006,12 @@ saver!(
 );
 
 gl3d_saver!(
+    "flurry",
+    flurry_body,
+    flurry_start,
+    xscreensaver::hacks3d::flurry::start
+);
+gl3d_saver!(
     "atlantis",
     atlantis_body,
     atlantis_start,
@@ -2582,6 +2588,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "flurry",
+        label: "Flurry",
+        start: Start::Gl3d(flurry_start),
     },
     Entry {
         slug: "atlantis",

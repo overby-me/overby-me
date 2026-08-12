@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (114) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (115) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -587,6 +587,13 @@ in a single call: 97 batches at any setting, from 151009. What still had to
 give was the length of the exposure, not the number of stars; a sparser sky
 with longer trails was tried first and looked like a different picture, since
 how dense the sky is is most of what it looks like.
+
+`extrusion` is deferred on a dependency rather than on anything about its own
+552 lines: it draws everything through GLE, the tubing and extrusion library,
+which upstream does not bundle and links against. Porting it means writing
+`gleExtrusion`, `gleTwistExtrusion`, `gleSuperExtrusion`, `gleHelicoid`,
+`gleScrew` and `gleTaper` first, with their join styles, which is a library in
+its own right.
 
 `timetunnel` is deferred for a different reason: the two functions that draw
 its signs and its tunnels are wrapped in `#ifndef HAVE_JWZGLES` upstream, so

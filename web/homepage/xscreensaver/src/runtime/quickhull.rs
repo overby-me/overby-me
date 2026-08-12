@@ -968,9 +968,9 @@ mod tests {
         let corners = points.clone();
         for _ in 0..400 {
             points.push(Vertex::new(
-                (frand(1.6) - 0.8) as f64,
-                (frand(1.6) - 0.8) as f64,
-                (frand(1.6) - 0.8) as f64,
+                frand(1.6) - 0.8,
+                frand(1.6) - 0.8,
+                frand(1.6) - 0.8,
             ));
         }
         let hull = quickhull3d(&points);
@@ -991,11 +991,7 @@ mod tests {
         ya_rand_init(20260812);
         let mut points = Vec::new();
         while points.len() < 2000 {
-            let v = Vertex::new(
-                (0.5 - frand(1.0)) as f64,
-                (0.5 - frand(1.0)) as f64,
-                (0.5 - frand(1.0)) as f64,
-            );
+            let v = Vertex::new(0.5 - frand(1.0), 0.5 - frand(1.0), 0.5 - frand(1.0));
             if v.length2() < 0.25 {
                 points.push(v);
             }

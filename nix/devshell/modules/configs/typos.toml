@@ -25,6 +25,10 @@ extend-ignore-re = [
   # quickhull.c's own comments, kept with the code they explain.
   "ajacent",
   "approprate",
+  # Tobias Sargeant, who wrote half of flurry.
+  "Sargeant",
+  # flurry's own variable names: `brite` and `briteFactor`.
+  "[Bb]rite",
   "10ths",
   "chuncks",
   # The PDB file format really does spell its bond record CONECT; molecule.rs

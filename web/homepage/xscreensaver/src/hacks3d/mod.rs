@@ -56,6 +56,7 @@ pub mod etruscanvenus;
 pub mod flipflop;
 pub mod flipscreen3d;
 pub mod fliptext;
+pub mod flurry;
 pub mod flyingtoasters;
 pub mod gears;
 pub mod geodesic;
@@ -145,6 +146,7 @@ mod winduprobot_wobble;
 /// the reason [`crate::all`] gives.
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
+    &flurry::SAVER,
     &atlantis::SAVER,
     &antinspect::SAVER,
     &antspotlight::SAVER,
