@@ -4447,8 +4447,15 @@ select:focus {
 /* Poll result bars */
 /* M3 linear progress (poll / vote / admin result bars): full-round track on the
    highest container tone, primary indicator, spring fill. */
-/* DESIGN (expressive result bars): taller track, a green-primary to
-   magenta-tertiary tonal gradient (the brand's two axes), and a spring grow-in. */
+/* DESIGN (expressive result bars): taller track and a green-primary to
+   magenta-tertiary tonal gradient (the brand's two axes).
+   The spring is in the width TRANSITION, deliberately, and there is no
+   keyframe grow-in beside it. A `transition` runs when the number changes; an
+   `animation` runs when the element is created, and these bars are created
+   whenever the results replace the ballot or the surrounding branch re-renders.
+   With both, casting a vote played the grow-in and then the transition, which
+   read as the bar animating, settling, and animating again. One motion, tied to
+   the thing that actually moved. */
 .vote-bar {
 	height: 12px;
 	border-radius: var(--md-sys-shape-corner-full);
@@ -4463,16 +4470,6 @@ select:focus {
 	transition: width var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
 	transform-origin: left center;
-	animation: vote-bar-grow var(--md-sys-motion-duration-long2)
-		var(--md-sys-motion-spring-spatial-default) both;
-}
-@keyframes vote-bar-grow {
-	from {
-		transform: scaleX(0);
-	}
-	to {
-		transform: scaleX(1);
-	}
 }
 
 /* DESIGN (tactile ballot): each open-poll option reads as a bordered card
