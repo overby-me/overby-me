@@ -1342,6 +1342,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::dumpsterfire::start
 );
 gl3d_saver!(
+    "dymaxionmap",
+    dymaxionmap_body,
+    dymaxionmap_start,
+    xscreensaver::hacks3d::dymaxionmap::start
+);
+gl3d_saver!(
     "endgame",
     endgame_body,
     endgame_start,
@@ -3286,6 +3292,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "driftclouds",
         label: "Drift Clouds",
         start: Start::Gl(driftclouds_start),
+    },
+    Entry {
+        slug: "dymaxionmap",
+        label: "Dymaxion Map",
+        start: Start::Gl3d(dymaxionmap_start),
     },
     Entry {
         slug: "elementalring",

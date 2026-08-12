@@ -49,6 +49,7 @@ pub mod deepstars;
 pub mod discoball;
 pub mod dnalogo;
 pub mod dumpsterfire;
+pub mod dymaxionmap;
 pub mod endgame;
 pub mod endgame_games;
 pub mod energystream;
@@ -206,6 +207,7 @@ pub static ALL: &[&Saver3d] = &[
     &carousel::SAVER,
     &chompytower::SAVER,
     &companioncube::SAVER,
+    &dymaxionmap::SAVER,
     &glmatrix::SAVER,
     &gltext::SAVER,
     &fliptext::SAVER,
