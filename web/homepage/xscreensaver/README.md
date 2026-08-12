@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (131) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (132) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -677,16 +677,23 @@ derive it again.
 
 `covid19` is done, and it is the cautionary one: see below.
 
-`glcells` grows a colony of up to 800 cells, each a half-dodecahedron subdivided
-`quality` times. Its quality is 3, which is 10 * 4^3 = 640 triangles a cell, so
-a full colony is 1.54 million vertices a frame. That is too much, but quality is
-an internal constant that upstream's own configuration file does not expose, and
-one step down is 10 * 4^2 = 160 triangles a cell and 384k a frame, which is
-comfortable. The colony is what the saver is about, not how round one cell is,
-so the setting to lower is the quality rather than the cell count. The cells
-also all share one shape and differ only by a matrix and a colour, so baking
-each frame's cells into one block the way `pipes` does makes the whole colony a
-single draw call.
+`glcells` is done, and it is where that lowering was applied. A cell is a
+half-dodecahedron subdivided `quality` times; upstream's quality is 3, which is
+10 * 4^3 = 640 triangles a cell and 1.54 million vertices for a full colony of
+800. One step down is 160 triangles and 384k, which is comfortable, and quality
+is an internal constant that upstream's own configuration file does not expose.
+The colony is what the saver is about rather than how round any one cell is, so
+that is the setting lowered, and the knob is offered so it can be put back. The
+cells all share one shape and differ only by a matrix, so the matrix is applied
+on the way out and the whole colony is one draw call however many there are.
+
+Its subdivision is done differently from upstream's, which splits every triangle
+into four and then welds the duplicates back together by searching the whole
+vertex list. Remembering each edge's midpoint as it is made gives the same
+shape without the search. The test is Euler's formula: the base is a
+half-dodecahedron, which is a disc rather than a closed surface, so V - E + F is
+one and stays one however often it is subdivided, and a weld that missed an edge
+would break it.
 
 `squirtorus` fires rings out of sixteen sphincters. Each ring is a torus of
 20 by 60, which is 7200 vertices once its quad strips are triangles, and each

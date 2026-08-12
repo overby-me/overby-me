@@ -1768,6 +1768,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::gibson::start
 );
 gl3d_saver!(
+    "glcells",
+    glcells_body,
+    glcells_start,
+    xscreensaver::hacks3d::glcells::start
+);
+gl3d_saver!(
     "glblur",
     glblur_body,
     glblur_start,
@@ -2895,6 +2901,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "gibson",
         label: "Gibson",
         start: Start::Gl3d(gibson_start),
+    },
+    Entry {
+        slug: "glcells",
+        label: "GL Cells",
+        start: Start::Gl3d(glcells_start),
     },
     Entry {
         slug: "glblur",
