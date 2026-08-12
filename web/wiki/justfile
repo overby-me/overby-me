@@ -57,10 +57,29 @@ build:
     printf '{"commit":"%s","version":"0.1.0"}\n' "$GIT_COMMIT" \
         > target/dx/wiki-dioxus/release/web/public/version.json
 
+# Build and deploy the frontend to a statichost.eu site (default: production).
+#
+# Needs two credentials in the environment, neither of which is in the repo:
+#
+#   BETTERSTACK_SOURCE_TOKEN  enables --features remote-logging in the build.
+#                             REQUIRED: a bundle without it looks identical once
+#                             deployed and silently reports no crashes, so the
+#                             script refuses rather than ship one by accident,
+#                             and checks the built wasm as well as the env var.
+#   STATICHOST_APIKEY         the drop credential.
+#
+#   BETTERSTACK_SOURCE_TOKEN=... STATICHOST_APIKEY=... just deploy-frontend
+#   ... just deploy-frontend radikal-wiki        # the dev site instead
+#
+# A drop REPLACES the site, so the script carries symbols/ across the build
+# (see its header) and verifies the deployed commit is the one being served.
+deploy-frontend site="wiki-prod":
+    nu scripts/deploy-frontend.nu {{site}}
+
 # Build the deployable frontend bundle (index.html + assets + sw.js at the root)
-# via the Nix package, then print the output dir. The final upload to
-# statichost.eu (dev.radikal.wiki) is manual — see README.md#deploy — since the
-# statichost credentials are not in the repo.
+# via the Nix package, then print the output dir. Unlike `deploy-frontend` this
+# is the hermetic Nix build, which has no Better Stack token and so ships
+# without remote logging; it uploads nothing.
 deploy-build:
     #!/usr/bin/env bash
     set -euo pipefail
