@@ -163,6 +163,8 @@ iz = "iz"
 # BLOAD = Apple DOS 3.3 command (Binary LOAD), typed by the apple2 saver
 bload = "bload"
 BLOAD = "BLOAD"
+# sphereeversion's colour rotation matrix, which upstream calls matc.
+matc = "matc"
 # rubik's -sizex/-sizey/-sizez options, which give the three edge lengths of
 # an LxMxN cube; the resource name has to stay as upstream spells it.
 sizez = "sizez"

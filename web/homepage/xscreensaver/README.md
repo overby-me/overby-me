@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (127) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (128) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -23,6 +23,11 @@ resource nailed down.
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
 a 6502 with an assembler. The OpenGL tier has started; see below.
+
+One of the 128 is only partly in: `sphereeversion` is two eversions under one
+name and has the analytic one, not the corrugations one. It is counted because
+the saver runs and draws a real eversion, and the knob that would have chosen
+the missing half is not offered. See below.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -704,6 +709,34 @@ which upstream does not bundle and links against. Porting it means writing
 `gleExtrusion`, `gleTwistExtrusion`, `gleSuperExtrusion`, `gleHelicoid`,
 `gleScrew` and `gleTaper` first, with their join styles, which is a library in
 its own right.
+
+`sphereeversion` is half in, and the half that is missing is worth naming
+precisely. It is two savers under one slug: upstream picks at random between an
+analytic eversion, a closed-form formula from Bednorz and Bednorz (2019), and
+the corrugations of the 1994 film "Outside In". The analytic one is ported; the
+corrugations one is not yet. Its `eversion-method` knob is therefore not
+offered, so nothing in the panel points at something that is not there, and the
+saver draws a real sphere eversion at every setting it does offer.
+
+Both halves have a fixed-function path beside their GLSL one, and unlike
+`timetunnel`'s those fallbacks are the whole saver rather than a stub, so the
+fallback is what is ported. The one thing it cannot do is the earth colouring,
+which upstream wraps day, night and water textures around the sphere in a
+fragment shader; upstream's own fixed-function path quietly draws the plain
+two-sided red and green instead, and so does this. The option stays, because
+upstream's does.
+
+One thing the port had to solve rather than copy. Upstream draws the surface
+once with culling off and two-sided lighting, setting `GL_FRONT` and `GL_BACK`
+materials *per vertex*, which real GL allows inside a block and this recorder
+cannot: a material is batch state, so changing it every vertex would put every
+vertex in its own draw call. A vertex colour is not state. So the surface is
+drawn twice, culling one side each time, with the front colours on the first
+pass and the back colours on the second. A triangle only ever shows one of its
+faces to the camera, so the two passes cover exactly the fragments the single
+unculled pass would have. It costs twice the vertices, and only for the two
+colourings that vary over the surface: 267k in 527 strips at the heaviest
+setting, against 133k for the two-sided colouring, which needs one pass.
 
 `timetunnel` was deferred for a different reason, and it is the case where
 following upstream's own fallback would have been the wrong answer. The two

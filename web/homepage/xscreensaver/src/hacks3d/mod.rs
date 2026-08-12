@@ -135,6 +135,7 @@ pub mod sballs;
 pub mod sierpinski3d;
 pub mod skulloop;
 pub mod skytentacles;
+pub mod sphereeversion;
 pub mod spheremonics;
 pub mod splitflap;
 pub mod splodesic;
@@ -270,6 +271,7 @@ pub static ALL: &[&Saver3d] = &[
     &sballs::SAVER,
     &sierpinski3d::SAVER,
     &skulloop::SAVER,
+    &sphereeversion::SAVER,
     &spheremonics::SAVER,
     &splodesic::SAVER,
     &splitflap::SAVER,

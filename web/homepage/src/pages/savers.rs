@@ -1552,6 +1552,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::skulloop::start
 );
 gl3d_saver!(
+    "sphereeversion",
+    sphereeversion_body,
+    sphereeversion_start,
+    xscreensaver::hacks3d::sphereeversion::start
+);
+gl3d_saver!(
     "spheremonics",
     spheremonics_body,
     spheremonics_start,
@@ -3176,6 +3182,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "skulloop",
         label: "Skulloop",
         start: Start::Gl3d(skulloop_start),
+    },
+    Entry {
+        slug: "sphereeversion",
+        label: "Sphere Eversion",
+        start: Start::Gl3d(sphereeversion_start),
     },
     Entry {
         slug: "spheremonics",
