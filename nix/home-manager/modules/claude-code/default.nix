@@ -261,6 +261,13 @@ in {
       ".claude/skills/mojo-syntax".source = "${inputs.modular-skills}/mojo-syntax";
       ".claude/skills/mojo-gpu-fundamentals".source = "${inputs.modular-skills}/mojo-gpu-fundamentals";
       ".claude/skills/mojo-python-interop".source = "${inputs.modular-skills}/mojo-python-interop";
+
+      # Locally authored skills. Kept beside this module as real files rather
+      # than inlined the way RTK.md is above: they are markdown that wants
+      # diffing and editing as markdown, and a skill full of code examples would
+      # otherwise have to escape every dollar-brace and pair of single quotes
+      # to survive a Nix indented string.
+      ".claude/skills/code-comments".source = ./skills/code-comments;
     };
     # Copy settings.json and CLAUDE.md (not symlink) so Claude Code can write to them
     activation.claudeSettings = lib.hm.dag.entryAfter ["writeBoundary"] ''
