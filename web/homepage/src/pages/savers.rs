@@ -1006,6 +1006,12 @@ saver!(
 );
 
 gl3d_saver!(
+    "atlantis",
+    atlantis_body,
+    atlantis_start,
+    xscreensaver::hacks3d::atlantis::start
+);
+gl3d_saver!(
     "crackberg",
     crackberg_body,
     crackberg_start,
@@ -2576,6 +2582,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "atlantis",
+        label: "Atlantis",
+        start: Start::Gl3d(atlantis_start),
     },
     Entry {
         slug: "antinspect",

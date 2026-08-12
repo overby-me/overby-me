@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (113) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (114) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -546,6 +546,14 @@ own OpenGL ES build has no GLU either and every saver that wants one already
 carries a fallback: `jigsaw` cuts each puzzle piece into eighths and fans each
 one out by hand, and the port takes that path rather than growing a
 tessellator.
+
+There is no texture *generation* beyond `GL_SPHERE_MAP`, and no texture
+matrix. `atlantis` is the saver that wants more: it lays a noise texture over
+the whole tank with `GL_EYE_LINEAR`, which reads the texture at a fragment's
+own position in eye space, and scales it down with a matrix. Upstream's own
+OpenGL ES build has neither and quietly drops the effect; the port works the
+coordinates out per vertex instead, which is what the fixed-function pipeline
+would have done, and folds the scale into the planes.
 
 One thing is recorded and then thrown away: line width. WebGL draws every line
 one pixel wide whatever it is asked for, on every implementation that matters,

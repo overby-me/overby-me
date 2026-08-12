@@ -12,6 +12,8 @@
 
 /// `tunnel0.png` to `tunnel5.png`: the six walls `atunnel` flies through,
 /// 64 or 128 square, greyscale or palettised.
+/// `atlantis`'s water: a small tile of noise laid over the whole tank.
+pub const SEA_TEXTURE: &[u8] = include_bytes!("../images/sea-texture.png");
 pub const TUNNEL0: &[u8] = include_bytes!("../images/tunnel0.png");
 pub const TUNNEL1: &[u8] = include_bytes!("../images/tunnel1.png");
 pub const TUNNEL2: &[u8] = include_bytes!("../images/tunnel2.png");
