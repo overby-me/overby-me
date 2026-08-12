@@ -480,8 +480,8 @@
 | ✅ | 2D Renderer | [Vello 🦀](https://github.com/linebender/vello) | | 🆗 | [Skia 💣](https://github.com/google/skia), [Cairo 💣](https://en.wikipedia.org/wiki/Cairo_(graphics)) |
 | ✅ | 3D Renderer | [Wgpu 🦀](https://github.com/gfx-rs/wgpu) | | [Vulkan 📖](https://www.vulkan.org) | |
 | ✅ | Compositor Framework | [Smithay 🦀](https://github.com/Smithay/smithay) | | 🆗 | [Mutter 💣](https://gitlab.gnome.org/GNOME/mutter) |
-| 🚧 | UI Toolkit | [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | | [Web Component 📖](https://www.webcomponents.org/) | [React 🐒](https://react.dev) |
-| 🚧 | UI Components | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | [Material 3 🦀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki-dioxus/src/components/ui) | 🆗 | [MUI 🐒](https://mui.com) |
+| ✅ | UI Toolkit | [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | | [Web Component 📖](https://www.webcomponents.org/) | [React 🐒](https://react.dev) |
+| ✅ | UI Components | [MD 3 Expressive Components 🦀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki/src/components/ui) | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | 🆗 | [MUI 🐒](https://mui.com) |
 | 🚫 | XR Toolkit | [Stereokit 💣](https://github.com/StereoKit/StereoKit) | | 🆗 | |
 | 🚧 | Browser Engine | [Gecko 🦀💣](https://en.wikipedia.org/wiki/Gecko_(software)) | [Servo 🦀](https://github.com/servo/servo) | ⬅️ | |
 | 🚫 | ECMAScript Engine | [V8 💣](https://v8.dev) | [Boa 🦀](https://github.com/boa-dev/boa), [Nova 🦀](https://github.com/trynova/nova) | 🆗 | |
@@ -500,7 +500,7 @@
 | ✅ | ECMAScript Runtime | [Deno 🦀](https://github.com/denoland/deno) | [Bun 🦀](https://github.com/oven-sh/bun) | [Deno Node APIs](https://docs.deno.com/runtime/reference/node_apis) | [Node.js 💣](https://github.com/nodejs/node) |
 | ✅ | Container Runtime | [Youki 🦀](https://github.com/containers/youki) | | [OCI 📖](https://github.com/opencontainers/runtime-spec) | [Runc 🐹](https://github.com/opencontainers/runc) |
 | ✅ | Virtualization | [Cloud Hypervisor 🦀](https://github.com/cloud-hypervisor/cloud-hypervisor) | | [KVM 📖](https://en.wikipedia.org/wiki/Kernel-based_Virtual_Machine) | [QEMU 💣](https://github.com/qemu/qemu) |
-| 🚧 | Meta Database | [Hasura λ➡️🦀](https://github.com/hasura/graphql-engine) | [Turso ⏳🦀](https://github.com/tursodatabase/turso) | [GraphQL](https://graphql.org), [SQLite 📖](https://www.sqlite.org) | [SurrealDB 🦀](https://github.com/surrealdb/surrealdb) |
+| 🚧 | Meta Database | [Hasura λ➡️🦀](https://github.com/hasura/graphql-engine) | [Turso 🦀](https://github.com/tursodatabase/turso) | [GraphQL](https://graphql.org), [SQLite 📖](https://www.sqlite.org) | [SurrealDB 🦀](https://github.com/surrealdb/surrealdb) |
 | 🚧 | Database | [Postgres 💣](https://github.com/postgres/postgres) | [Tikv 🦀](https://github.com/tikv/tikv) | 🆗 | |
 | 🚧 | Storage Engine | | [Sled 🦀](https://github.com/spacejam/sled), [Fjall 🦀](https://github.com/fjall-rs/fjall) | 🆗 | [RocksDB 💣](https://github.com/facebook/rocksdb) |
 | ✅ | Web Server | [Ferron 🦀](https://github.com/ferronweb/ferron) | [Moella 🦀](https://github.com/Icelk/moella) | 🆗 | [Caddy 🐹](https://github.com/caddyserver/caddy), [Nginx 💣](https://github.com/nginx/nginx) |
