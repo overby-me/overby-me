@@ -1300,6 +1300,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::dumpsterfire::start
 );
 gl3d_saver!(
+    "endgame",
+    endgame_body,
+    endgame_start,
+    xscreensaver::hacks3d::endgame::start
+);
+gl3d_saver!(
     "energystream",
     energystream_body,
     energystream_start,
@@ -2689,6 +2695,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "dumpsterfire",
         label: "Dumpster Fire",
         start: Start::Gl3d(dumpsterfire_start),
+    },
+    Entry {
+        slug: "endgame",
+        label: "Endgame",
+        start: Start::Gl3d(endgame_start),
     },
     Entry {
         slug: "energystream",

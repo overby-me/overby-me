@@ -47,7 +47,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::Saver3d;
 use crate::runtime::chessmodels::Piece;
-use crate::runtime::gl::{Blend, Shape, Stencil, StencilFunc};
+use crate::runtime::gl::{Blend, Shape, Stencil, StencilFunc, StencilOp};
 use crate::runtime::{
     About, Gl, Hack3d, Opt, Runner3d, SaverDef, StartArgs, Trackball, XEvent, random_below,
     screenhack_event_helper,
@@ -202,7 +202,7 @@ impl Queens {
         g.glx.stencil(Some(Stencil {
             func: StencilFunc::Always,
             reference: 1,
-            write: true,
+            pass: StencilOp::Replace,
         }));
         g.glx.color_mask(false);
         g.glx.cull_face(false);
@@ -227,7 +227,7 @@ impl Queens {
         g.glx.stencil(Some(Stencil {
             func: StencilFunc::Equal,
             reference: 1,
-            write: false,
+            pass: StencilOp::Keep,
         }));
 
         g.glx.push_matrix();
@@ -533,15 +533,16 @@ mod tests {
         // read by the mirrored pieces.
         let writes = batches
             .iter()
-            .filter(|b| b.stencil.is_some_and(|s| s.write))
+            .filter(|b| b.stencil.is_some_and(|s| s.pass == StencilOp::Replace))
             .count();
         assert_eq!(writes, 1, "{writes}");
-        assert!(batches.iter().any(|b| b.stencil.is_some_and(|s| !s.write)));
         assert!(
             batches
                 .iter()
-                .all(|b| b.color_mask == [true; 4] || b.stencil.is_some_and(|s| s.write))
+                .any(|b| b.stencil.is_some_and(|s| s.pass == StencilOp::Keep))
         );
+        assert!(batches.iter().all(|b| b.color_mask == [true; 4]
+            || b.stencil.is_some_and(|s| s.pass == StencilOp::Replace)));
         // Eight queens, upright and reflected, plus a board.
         let pieces = batches.iter().filter(|b| b.count > 100).count();
         assert!(pieces >= 16, "{pieces} of {}", batches.len());
@@ -577,7 +578,7 @@ mod tests {
         let stencilled = squares(
             batches
                 .iter()
-                .find(|b| b.stencil.is_some_and(|s| s.write))
+                .find(|b| b.stencil.is_some_and(|s| s.pass == StencilOp::Replace))
                 .expect("a stencil pass"),
         );
         // The first board batch is the one drawn in the first of the two

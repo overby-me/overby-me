@@ -22,7 +22,7 @@ use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
 use xscreensaver::runtime::gl::{
-    Blend, DepthFunc, Fog, Frame, MAX_LIGHTS, Primitive, StencilFunc, TexEnv,
+    Blend, DepthFunc, Fog, Frame, MAX_LIGHTS, Primitive, StencilFunc, StencilOp, TexEnv,
 };
 
 /// Position, colour and normal, in the order [`Frame`] holds them.
@@ -67,8 +67,8 @@ void main() {
 }
 ";
 
-/// The fixed-function lighting equation, for one light and no attenuation,
-/// which is all any of these savers asks for. Shading is per fragment rather
+/// The fixed-function lighting equation, for as many lights as any of these
+/// savers turns on, with distance attenuation. Shading is per fragment rather
 /// than per vertex as OpenGL 1.3 did it; on the low-polygon shapes these draw
 /// that is a visible improvement and never a difference in what is depicted.
 const FRAGMENT_SHADER: &str = r"#version 300 es
@@ -84,6 +84,8 @@ uniform vec4 u_light_position[LIGHTS];
 uniform vec4 u_light_ambient[LIGHTS];
 uniform vec4 u_light_diffuse[LIGHTS];
 uniform vec4 u_light_specular[LIGHTS];
+// Constant, linear and quadratic terms of 1 / (c + l*d + q*d*d).
+uniform vec3 u_light_attenuation[LIGHTS];
 uniform vec4 u_material_diffuse;
 uniform vec4 u_material_diffuse_back;
 uniform vec4 u_material_ambient;
@@ -172,14 +174,23 @@ void main() {
     // A w of zero is a light infinitely far away, so its position is a
     // direction. Otherwise it is a homogeneous point, and w has to be divided
     // out before the direction to it means anything.
-    vec3 l = normalize (p.w == 0.0 ? p.xyz : p.xyz / p.w - v_eye);
-    c += ambient * u_light_ambient[i].rgb;
-    c += diffuse.rgb * u_light_diffuse[i].rgb * max (dot (n, l), 0.0);
+    vec3 to = (p.w == 0.0 ? p.xyz : p.xyz / p.w - v_eye);
+    vec3 l = normalize (to);
+    // A light infinitely far away does not attenuate; a positional one falls
+    // off with the distance to the fragment.
+    vec3 k = u_light_attenuation[i];
+    float att = (p.w == 0.0)
+              ? 1.0
+              : 1.0 / max (k.x + length (to) * (k.y + length (to) * k.z), 1e-6);
+    vec3 lc = vec3 (0.0);
+    lc += ambient * u_light_ambient[i].rgb;
+    lc += diffuse.rgb * u_light_diffuse[i].rgb * max (dot (n, l), 0.0);
     if (u_shininess > 0.0) {
       vec3 h = normalize (l + eye);
-      c += u_material_specular.rgb * u_light_specular[i].rgb
-         * pow (max (dot (n, h), 0.0), u_shininess);
+      lc += u_material_specular.rgb * u_light_specular[i].rgb
+          * pow (max (dot (n, h), 0.0), u_shininess);
     }
+    c += lc * att;
   }
   frag_color = fogged (textured (vec4 (c, diffuse.a)));
   if (frag_color.a < u_alpha_ref) discard;
@@ -196,6 +207,7 @@ struct Uniforms {
     light_on: Vec<Option<WebGlUniformLocation>>,
     light_position: Vec<Option<WebGlUniformLocation>>,
     light_ambient: Vec<Option<WebGlUniformLocation>>,
+    light_attenuation: Vec<Option<WebGlUniformLocation>>,
     light_diffuse: Vec<Option<WebGlUniformLocation>>,
     light_specular: Vec<Option<WebGlUniformLocation>>,
     material_diffuse: Option<WebGlUniformLocation>,
@@ -233,6 +245,9 @@ impl Uniforms {
                 .collect(),
             light_position: (0..MAX_LIGHTS)
                 .map(|i| at(&format!("u_light_position[{i}]")))
+                .collect(),
+            light_attenuation: (0..MAX_LIGHTS)
+                .map(|i| at(&format!("u_light_attenuation[{i}]")))
                 .collect(),
             light_ambient: (0..MAX_LIGHTS)
                 .map(|i| at(&format!("u_light_ambient[{i}]")))
@@ -523,6 +538,7 @@ impl Gl3dEngine {
                         match s.func {
                             StencilFunc::Always => Gl::ALWAYS,
                             StencilFunc::Equal => Gl::EQUAL,
+                            StencilFunc::NotEqual => Gl::NOTEQUAL,
                         },
                         s.reference,
                         !0,
@@ -530,7 +546,11 @@ impl Gl3dEngine {
                     gl.stencil_op(
                         Gl::KEEP,
                         Gl::KEEP,
-                        if s.write { Gl::REPLACE } else { Gl::KEEP },
+                        match s.pass {
+                            StencilOp::Keep => Gl::KEEP,
+                            StencilOp::Replace => Gl::REPLACE,
+                            StencilOp::Incr => Gl::INCR,
+                        },
                     );
                 }
                 None => gl.disable(Gl::STENCIL_TEST),
@@ -544,10 +564,17 @@ impl Gl3dEngine {
             }
             let [bx, by, bw, bh] = batch.viewport;
             gl.viewport(bx, by, bw.max(1), bh.max(1));
+            let mut bits = 0;
             if batch.clear_color_first {
-                gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
+                bits |= Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT;
             } else if batch.clear_depth_first {
-                gl.clear(Gl::DEPTH_BUFFER_BIT);
+                bits |= Gl::DEPTH_BUFFER_BIT;
+            }
+            if batch.clear_stencil_first {
+                bits |= Gl::STENCIL_BUFFER_BIT;
+            }
+            if bits != 0 {
+                gl.clear(bits);
             }
             match batch.blend {
                 Blend::Off => gl.disable(Gl::BLEND),
@@ -626,6 +653,7 @@ impl Gl3dEngine {
                     gl.uniform4fv_with_f32_array(u.light_ambient[i].as_ref(), &l.ambient);
                     gl.uniform4fv_with_f32_array(u.light_diffuse[i].as_ref(), &l.diffuse);
                     gl.uniform4fv_with_f32_array(u.light_specular[i].as_ref(), &l.specular);
+                    gl.uniform3fv_with_f32_array(u.light_attenuation[i].as_ref(), &l.attenuation);
                 }
                 gl.uniform4fv_with_f32_array(u.material_diffuse.as_ref(), &m.ambient_diffuse);
                 gl.uniform4fv_with_f32_array(

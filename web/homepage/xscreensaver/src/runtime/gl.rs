@@ -317,6 +317,12 @@ pub struct Light {
     pub ambient: [f32; 4],
     pub diffuse: [f32; 4],
     pub specular: [f32; 4],
+    /// `GL_CONSTANT_ATTENUATION`, `GL_LINEAR_ATTENUATION` and
+    /// `GL_QUADRATIC_ATTENUATION`: what a positional light contributes falls
+    /// off as `1 / (c + l*d + q*d*d)` with the distance to the fragment.
+    /// `endgame` fades a whole game in and out by winding the constant term
+    /// from a hundred down to one, which is dark to fully lit.
+    pub attenuation: [f32; 3],
 }
 
 impl Default for Light {
@@ -327,6 +333,7 @@ impl Default for Light {
             ambient: [0.0, 0.0, 0.0, 1.0],
             diffuse: [1.0, 1.0, 1.0, 1.0],
             specular: [1.0, 1.0, 1.0, 1.0],
+            attenuation: [1.0, 0.0, 0.0],
         }
     }
 }
@@ -392,23 +399,37 @@ pub enum StencilFunc {
     /// wants: it is there to leave a mark, not to be masked itself.
     Always,
     Equal,
+    /// Draw only where the mask is *not* the reference, which is how a shadow
+    /// pass paints the union of what it marked without the overlaps piling up.
+    NotEqual,
+}
+
+/// What a fragment that passes both tests does to the buffer, the third
+/// argument of `glStencilOp`. The other two are `GL_KEEP` throughout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StencilOp {
+    Keep,
+    Replace,
+    /// `GL_INCR`. A shadow pass uses it rather than `GL_REPLACE` so that
+    /// several overlapping shadows still leave a non-zero mark each.
+    Incr,
 }
 
 /// `glStencilFunc` with `glStencilOp`, cut down to what the savers ask for.
 ///
 /// The stencil buffer is a per-pixel scribble pad the size of the screen, and
-/// the chess savers use it for one thing: paint the board's tiles into it with
-/// the colour mask off, then draw the pieces upside down under the board with
-/// the test set to `Equal`, so a reflection appears on the tiles and nowhere
-/// else. Neither of them needs an action for the failing cases, so a batch
-/// carries a comparison, a reference value, and whether a fragment that passes
-/// writes that value back.
+/// the chess savers use it for two things. One is a mirror with an edge: paint
+/// the board's tiles into it with the colour mask off, then draw the pieces
+/// upside down under the board with the test set to `Equal`, so a reflection
+/// appears on the tiles and nowhere else. The other is shadows: mark where
+/// every piece's flattened silhouette falls, then wash one dark quad over the
+/// whole board with the test set to `NotEqual` zero, so the shadows join into
+/// one shape rather than darkening each other where they cross.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stencil {
     pub func: StencilFunc,
     pub reference: i32,
-    /// `glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE)` rather than all `GL_KEEP`.
-    pub write: bool,
+    pub pass: StencilOp,
 }
 
 /// One `glBegin`/`glEnd` block: what to draw, where its vertices are, and the
@@ -442,6 +463,10 @@ pub struct Batch {
     /// picture starts here. `glblur` renders its scene small, copies it to a
     /// texture, and then wipes it to draw the blur instead.
     pub clear_color_first: bool,
+    /// Clear the stencil buffer before drawing this batch. `endgame` marks its
+    /// shadows into the stencil part way through a frame, so what the
+    /// reflection pass left there has to go first.
+    pub clear_stencil_first: bool,
     /// `glViewport`. Held per batch rather than per frame because a saver may
     /// shrink it, draw into the corner, and put it back; the frame carries the
     /// viewport it started with, for the clear.
@@ -523,6 +548,7 @@ impl Batch {
             && self.front_face_cw == other.front_face_cw
             && !other.clear_depth_first
             && !other.clear_color_first
+            && !other.clear_stencil_first
             && self.viewport == other.viewport
             && self.blend == other.blend
             && self.polygon_offset == other.polygon_offset
@@ -617,6 +643,7 @@ pub struct Glx {
     uv: [f32; 2],
     clear_depth_pending: bool,
     clear_color_pending: bool,
+    clear_stencil_pending: bool,
     blend: Blend,
     polygon_offset: Option<(f32, f32)>,
     depth_mask: bool,
@@ -675,6 +702,7 @@ impl Glx {
             uv: [0.0, 0.0],
             clear_depth_pending: false,
             clear_color_pending: false,
+            clear_stencil_pending: false,
             blend: Blend::Off,
             polygon_offset: None,
             depth_mask: true,
@@ -888,6 +916,13 @@ impl Glx {
         self.stencil = stencil;
     }
 
+    /// `glClear (GL_STENCIL_BUFFER_BIT)` part way through a frame. The whole
+    /// buffer is cleared with the colour and the depth at the start of one, so
+    /// this is only for a saver that uses the stencil for two things in turn.
+    pub fn clear_stencil(&mut self) {
+        self.clear_stencil_pending = true;
+    }
+
     /// `glPolygonOffset`, with `None` for `glDisable(GL_POLYGON_OFFSET_FILL)`.
     pub fn polygon_offset(&mut self, offset: Option<(f32, f32)>) {
         self.polygon_offset = offset;
@@ -981,6 +1016,14 @@ impl Glx {
     pub fn light_specular(&mut self, n: usize, rgba: [f32; 4]) {
         if let Some(light) = self.lights.get_mut(n) {
             light.specular = rgba;
+        }
+    }
+
+    /// `glLightf` of `GL_CONSTANT_ATTENUATION`, `GL_LINEAR_ATTENUATION` and
+    /// `GL_QUADRATIC_ATTENUATION` together.
+    pub fn light_attenuation(&mut self, n: usize, constant: f32, linear: f32, quadratic: f32) {
+        if let Some(light) = self.lights.get_mut(n) {
+            light.attenuation = [constant, linear, quadratic];
         }
     }
 
@@ -1336,6 +1379,7 @@ impl Glx {
             front_face_cw: self.front_face_cw,
             clear_depth_first: std::mem::take(&mut self.clear_depth_pending),
             clear_color_first: std::mem::take(&mut self.clear_color_pending),
+            clear_stencil_first: std::mem::take(&mut self.clear_stencil_pending),
             viewport: self.frame.viewport,
             blend: self.blend,
             polygon_offset: self.polygon_offset,

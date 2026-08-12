@@ -211,5 +211,8 @@ extend-exclude = [
   # And the names of glsnake shapes, which come from the puzzle manual and
   # from the people who wrote the saver, spelling and all.
   "web/homepage/xscreensaver/src/hacks3d/glsnake_models.rs",
+  # And endgame's games, whose moves are algebraic chess notation rather than
+  # words: Ba6 is a bishop, Rhe1 a rook, Nf3 a knight.
+  "web/homepage/xscreensaver/src/hacks3d/endgame_games.rs",
 ]
 ignore-hidden = false

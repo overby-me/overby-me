@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (111) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (112) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -501,14 +501,26 @@ what survives at a distance is `exp(-(density * distance)^2)`, and `GL_LINEAR`,
 which ramps between two distances.
 
 The stencil buffer is there in the cut-down form the savers use it in: a
-comparison of `GL_ALWAYS` or `GL_EQUAL`, a reference value, and whether a
-fragment that passes writes that value back. The two chess savers both want the
-same thing from it, which is a mirror with an edge: `queens` paints its board
-tiles into the stencil with the colour mask off, then draws the pieces a second
-time upside down under the board with the test set to `GL_EQUAL`, so the
-reflection lands on the tiles and stops dead where they do. Anything more
-elaborate than that (separate front and back faces, increment and decrement,
-write masks) would need the state to grow, and nothing has asked.
+comparison of `GL_ALWAYS`, `GL_EQUAL` or `GL_NOTEQUAL`, a reference value, and
+what a passing fragment does to the buffer, which is one of `GL_KEEP`,
+`GL_REPLACE` and `GL_INCR`. The two chess savers want two things from it. One
+is a mirror with an edge: `queens` paints its board tiles into the stencil with
+the colour mask off, then draws the pieces a second time upside down under the
+board with the test set to `GL_EQUAL`, so the reflection lands on the tiles and
+stops dead where they do. The other is shadows: `endgame` flattens every piece
+onto the board through a projection matrix built from the light's position,
+marks the silhouettes into the stencil rather than drawing them, and then
+washes one dark quad over the whole board wherever the mark is not zero.
+Drawing the flattened pieces directly would darken the board twice where two
+shadows crossed; marking and washing gives their union. Anything more elaborate
+than that (separate front and back faces, decrement, write masks) would need
+the state to grow, and nothing has asked.
+
+Lights attenuate with distance, `1 / (c + l*d + q*d*d)` as OpenGL has it, which
+costs nothing for the savers that leave the terms at their defaults and turn
+into one. `endgame` is the one that needs it, and not for falloff: it fades a
+whole game in and out by winding the constant term from a hundred down to one,
+which is dark to fully lit and back.
 
 There is no polygon tessellator, so a saver that fills a concave outline has to
 triangulate it itself. That is less of a gap than it sounds, because upstream's

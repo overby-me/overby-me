@@ -44,6 +44,8 @@ pub mod dangerball;
 pub mod deepstars;
 pub mod discoball;
 pub mod dumpsterfire;
+pub mod endgame;
+pub mod endgame_games;
 pub mod energystream;
 pub mod engine;
 pub mod esper;
@@ -165,6 +167,7 @@ pub static ALL: &[&Saver3d] = &[
     &deepstars::SAVER,
     &discoball::SAVER,
     &dumpsterfire::SAVER,
+    &endgame::SAVER,
     &energystream::SAVER,
     &engine::SAVER,
     &esper::SAVER,
