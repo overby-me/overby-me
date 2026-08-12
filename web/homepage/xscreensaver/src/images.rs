@@ -286,3 +286,10 @@ pub const KLONDIKE_CARDS: &[(&str, &[u8])] = &[
     ("back", include_bytes!("../images/klondike/back.png")),
     ("back0", include_bytes!("../images/klondike/back0.png")),
 ];
+
+/// `timetunnel`'s own textures: the three tunnel walls it scrolls, and the
+/// star that bursts out of the middle of them.
+pub const TIMETUNNEL0: &[u8] = include_bytes!("../images/timetunnel0.png");
+pub const TIMETUNNEL1: &[u8] = include_bytes!("../images/timetunnel1.png");
+pub const TIMETUNNEL2: &[u8] = include_bytes!("../images/timetunnel2.png");
+pub const TUNNELSTAR: &[u8] = include_bytes!("../images/tunnelstar.png");

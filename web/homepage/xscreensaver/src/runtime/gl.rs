@@ -241,7 +241,7 @@ pub struct Texture {
 
 /// `glBlendFunc`, as the two pairs the savers actually pass it. More become
 /// variants when one of them needs a third.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Blend {
     /// `glDisable (GL_BLEND)`.
     Off,
@@ -266,6 +266,24 @@ pub enum Blend {
     /// `GL_ONE_MINUS_DST_COLOR, GL_ZERO`: replaces what is there with the
     /// source times its inverse, so it both inverts and darkens.
     InverseDst,
+    /// `GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA`, with `glBlendColor`
+    /// setting the constant: a cross-fade at a strength the vertices know
+    /// nothing about.
+    ///
+    /// The three that follow are how `timetunnel` assembles its picture. It
+    /// draws the same handful of textured quads over and over at strengths
+    /// that come from a timeline rather than from the geometry, so the
+    /// strength has to live outside the vertices; a vertex alpha would have to
+    /// be rewritten every frame and would still be multiplied by the texture's
+    /// own alpha, which is doing a different job.
+    ConstantFade(f32),
+    /// `GL_CONSTANT_ALPHA, GL_ONE`: the same strength, added on top of what is
+    /// already there rather than mixed into it.
+    ConstantAdd(f32),
+    /// `GL_CONSTANT_ALPHA, GL_ONE` under `glBlendEquation
+    /// (GL_FUNC_REVERSE_SUBTRACT)`: taken *away* from what is there. It is how
+    /// a bright shape punches a dark one out of the tunnel behind it.
+    ConstantSubtract(f32),
 }
 
 /// `GL_FOG`, in the two modes the savers ask for.
@@ -297,6 +315,11 @@ pub enum TexEnv {
     /// `GL_ADD`: the colours add and the alphas multiply. `energystream` wants
     /// it so its flares pile up into white where they overlap.
     Add,
+    /// `GL_REPLACE`: the texture *is* the colour, and whatever the lighting or
+    /// `glColor` worked out is thrown away. `timetunnel` sets it and then
+    /// leaves a yellow `glColor` standing, which under the default would tint
+    /// the whole tunnel.
+    Replace,
 }
 
 /// How many lights a saver can turn on. OpenGL guarantees eight; most of the

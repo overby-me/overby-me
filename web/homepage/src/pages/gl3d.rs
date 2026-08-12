@@ -97,7 +97,8 @@ uniform vec4 u_scene_ambient;
 uniform bool u_color_material;
 uniform bool u_textured;
 uniform sampler2D u_tex;
-uniform bool u_tex_add;
+// 0 is GL_MODULATE, 1 is GL_ADD, 2 is GL_REPLACE.
+uniform int u_tex_env;
 uniform bool u_fog;
 // 0 is GL_EXP2, 1 is GL_LINEAR, 2 is GL_EXP.
 uniform int u_fog_mode;
@@ -110,14 +111,16 @@ uniform vec4 u_fog_color;
 uniform float u_alpha_ref;
 out vec4 frag_color;
 
-// GL_MODULATE, the default texture environment and the only one any of these
-// asks for: the texture multiplies whatever colour came out of the lighting.
+// The three texture environments these savers ask for. GL_MODULATE, the
+// default, multiplies the texture into whatever colour came out of the
+// lighting; GL_ADD sums the colours and multiplies the alphas; GL_REPLACE
+// discards the colour and shows the texture alone.
 vec4 textured (vec4 c) {
   if (! u_textured) return c;
   vec4 t = texture (u_tex, v_uv);
-  // GL_ADD sums the colours and multiplies the alphas; GL_MODULATE, the
-  // default, multiplies both.
-  return u_tex_add ? vec4 (c.rgb + t.rgb, c.a * t.a) : c * t;
+  if (u_tex_env == 2) return t;
+  if (u_tex_env == 1) return vec4 (c.rgb + t.rgb, c.a * t.a);
+  return c * t;
 }
 
 // The two fog modes these savers ask for. GL_EXP2 leaves exp(-(density*d)^2)
@@ -222,7 +225,7 @@ struct Uniforms {
     textured: Option<WebGlUniformLocation>,
     texgen_sphere: Option<WebGlUniformLocation>,
     tex: Option<WebGlUniformLocation>,
-    tex_add: Option<WebGlUniformLocation>,
+    tex_env: Option<WebGlUniformLocation>,
     alpha_ref: Option<WebGlUniformLocation>,
     fog_mode: Option<WebGlUniformLocation>,
     fog_start: Option<WebGlUniformLocation>,
@@ -270,7 +273,7 @@ impl Uniforms {
             textured: at("u_textured"),
             texgen_sphere: at("u_texgen_sphere"),
             tex: at("u_tex"),
-            tex_add: at("u_tex_add"),
+            tex_env: at("u_tex_env"),
             alpha_ref: at("u_alpha_ref"),
             fog_mode: at("u_fog_mode"),
             fog_start: at("u_fog_start"),
@@ -602,7 +605,29 @@ impl Gl3dEngine {
                     gl.enable(Gl::BLEND);
                     gl.blend_func(Gl::ONE_MINUS_DST_COLOR, Gl::ZERO);
                 }
+                Blend::ConstantFade(a) => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_color(0.0, 0.0, 0.0, a);
+                    gl.blend_func(Gl::CONSTANT_ALPHA, Gl::ONE_MINUS_CONSTANT_ALPHA);
+                }
+                Blend::ConstantAdd(a) => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_color(0.0, 0.0, 0.0, a);
+                    gl.blend_func(Gl::CONSTANT_ALPHA, Gl::ONE);
+                }
+                Blend::ConstantSubtract(a) => {
+                    gl.enable(Gl::BLEND);
+                    gl.blend_color(0.0, 0.0, 0.0, a);
+                    gl.blend_func(Gl::CONSTANT_ALPHA, Gl::ONE);
+                }
             }
+            // The equation is separate state from the factors, and only one
+            // batch in the collection ever changes it, so it is set back
+            // rather than left for the next batch to find.
+            gl.blend_equation(match batch.blend {
+                Blend::ConstantSubtract(_) => Gl::FUNC_REVERSE_SUBTRACT,
+                _ => Gl::FUNC_ADD,
+            });
             gl.uniform_matrix4fv_with_f32_array(u.mvp.as_ref(), false, &batch.mvp.0);
             gl.uniform_matrix4fv_with_f32_array(u.modelview.as_ref(), false, &batch.modelview.0);
             match batch.texture.and_then(|id| textures.get(&id)) {
@@ -615,7 +640,14 @@ impl Gl3dEngine {
                 None => gl.uniform1i(u.textured.as_ref(), 0),
             }
             gl.uniform1i(u.texgen_sphere.as_ref(), i32::from(batch.tex_gen_sphere));
-            gl.uniform1i(u.tex_add.as_ref(), i32::from(batch.tex_env == TexEnv::Add));
+            gl.uniform1i(
+                u.tex_env.as_ref(),
+                match batch.tex_env {
+                    TexEnv::Modulate => 0,
+                    TexEnv::Add => 1,
+                    TexEnv::Replace => 2,
+                },
+            );
             gl.uniform1f(u.alpha_ref.as_ref(), batch.alpha_test.unwrap_or(0.0));
             gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
             match batch.fog {

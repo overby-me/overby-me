@@ -86,6 +86,16 @@ impl Gl {
         self.height
     }
 
+    /// How long this saver has been running, in seconds.
+    ///
+    /// A saver that animates against a clock rather than a frame count wants
+    /// the difference between two of these. [`Gl::wall_clock`] would do, but
+    /// it wraps at midnight, and a saver differencing it would see one frame a
+    /// day run backwards.
+    pub fn elapsed(&self) -> f64 {
+        self.time
+    }
+
     /// The local time of day in seconds since midnight, as
     /// [`crate::runtime::Dpy::wall_clock`] gives it: the host's clock at
     /// startup plus the saver's own elapsed time, so a run stays reproducible

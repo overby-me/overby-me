@@ -145,6 +145,7 @@ pub mod stonerview;
 pub mod superquadrics;
 pub mod surfaces;
 pub mod tangram;
+pub mod timetunnel;
 pub mod topblock;
 pub mod tronbit;
 pub mod unknownpleasures;
@@ -277,6 +278,7 @@ pub static ALL: &[&Saver3d] = &[
     &superquadrics::SAVER,
     &surfaces::SAVER,
     &tangram::SAVER,
+    &timetunnel::SAVER,
     &topblock::SAVER,
     &tronbit::SAVER,
     &unknownpleasures::SAVER,
@@ -391,6 +393,7 @@ mod tests {
             .iter()
             .flat_map(|b| b.mvp.0)
             .chain(f.vertices.iter().flat_map(|v| v.pos))
+            .chain(f.vertices.iter().flat_map(|v| v.uv))
         {
             h ^= u64::from(x.to_bits());
             h = h.wrapping_mul(0x100_0000_01b3);
@@ -403,7 +406,9 @@ mod tests {
     ///
     /// What moves is usually the matrices, but it need not be: `stonerview`
     /// draws all forty of its squares under one matrix and animates the corners
-    /// instead, so the vertices count too.
+    /// instead, so the vertices count too, and `timetunnel` opens on three
+    /// seconds of two stationary walls with the texture scrolling along them,
+    /// so the texture coordinates do as well.
     #[test]
     fn every_saver_keeps_moving() {
         for saver in ALL {

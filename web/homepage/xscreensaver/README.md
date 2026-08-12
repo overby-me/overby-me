@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (126) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (127) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -705,13 +705,25 @@ which upstream does not bundle and links against. Porting it means writing
 `gleScrew` and `gleTaper` first, with their join styles, which is a library in
 its own right.
 
-`timetunnel` is deferred for a different reason: the two functions that draw
-its signs and its tunnels are wrapped in `#ifndef HAVE_JWZGLES` upstream, so
-its own OpenGL ES build draws neither. They want a blend *constant*
-(`glBlendColor`), a blend *equation* (`GL_FUNC_REVERSE_SUBTRACT`) and a texture
-matrix, none of which this runtime has either. Porting it faithfully means
-adding all three first; porting it as upstream's mobile build behaves means
-shipping a saver with most of itself missing.
+`timetunnel` was deferred for a different reason, and it is the case where
+following upstream's own fallback would have been the wrong answer. The two
+functions that draw its signs and its tunnels are wrapped in `#ifndef
+HAVE_JWZGLES`, so upstream's OpenGL ES build draws neither and a phone shows a
+wall tunnel and nothing else. Every other saver that has a fixed-function
+fallback has one worth porting; this one's fallback is the saver with most of
+itself missing.
+
+The three things it wanted turned out to be one small runtime addition each,
+which is the general lesson: measure what a missing feature costs before
+calling it a wall. `glBlendColor` and `glBlendEquation` are both plain WebGL 2
+calls, so `Blend` grew `ConstantFade`, `ConstantAdd` and `ConstantSubtract` and
+the host sets the constant and the equation alongside the factors. The texture
+matrix is the one that stayed out of the runtime, because only this saver has
+ever wanted one: it carries a 2x3 affine by hand and applies it as each
+coordinate is written, the way `dymaxionmap` does. What that costs is that its
+tunnels cannot live in a display list, since a list would replay the
+coordinates already transformed; they are rebuilt each frame instead, and a
+tunnel is thirty quads.
 
 A saver whose crowd is a *setting* can keep its code and lower the setting
 instead. `winduprobot` draws twenty-five robots of sixty-three thousand

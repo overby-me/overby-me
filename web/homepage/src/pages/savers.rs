@@ -1570,6 +1570,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::tangram::start
 );
 gl3d_saver!(
+    "timetunnel",
+    timetunnel_body,
+    timetunnel_start,
+    xscreensaver::hacks3d::timetunnel::start
+);
+gl3d_saver!(
     "papercube",
     papercube_body,
     papercube_start,
@@ -3265,6 +3271,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "tangram",
         label: "Tangram",
         start: Start::Gl3d(tangram_start),
+    },
+    Entry {
+        slug: "timetunnel",
+        label: "Time Tunnel",
+        start: Start::Gl3d(timetunnel_start),
     },
     Entry {
         slug: "topblock",
