@@ -1,3 +1,9 @@
+[package]
+name = "slice-oob"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
 # corpus-slice-oob (point 1 / case-mode slice-reborrow gap): a `&[T]` built with
 # a too-large length over a small buffer (`from_raw_parts(buf.as_ptr(), 1000)`
 # over a 4-element buffer) is indexed in bounds of its *claimed* length but past
@@ -9,15 +15,9 @@
 # check builds it in both modes and asserts both abort OutOfBounds.
 [workspace]
 
-[package]
-name = "slice-oob"
-version = "0.0.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-cementite = { path = "../../crates/cementite" }
-
 [[bin]]
 name = "slice-oob"
 path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }

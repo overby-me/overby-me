@@ -1,3 +1,9 @@
+[package]
+name = "binary-vec-io-0109"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
 # corpus-binary-vec-io-0109 (RUSTSEC-2025-0109): binary_vec_io 0.1.12's
 # `binary_write_from_ref<T>(f, p: &T, n)` builds
 # `slice::from_raw_parts(p as *const u8, n * size_of::<T>())` — an n-element-
@@ -10,16 +16,10 @@
 # OutOfBounds.
 [workspace]
 
-[package]
-name = "binary-vec-io-0109"
-version = "0.0.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-cementite = { path = "../../crates/cementite" }
-binary_vec_io = "=0.1.12"
-
 [[bin]]
 name = "binary-vec-io-0109"
 path = "src/main.rs"
+
+[dependencies]
+binary_vec_io = "=0.1.12"
+cementite = { path = "../../crates/cementite" }

@@ -49,6 +49,17 @@ disabled_rules = [
   # bootstrap buffer does raw pointer arithmetic. Same call as rust/bash.
   "rust_unsafe_raw_pointer_cast",
 
+  # `from_raw_parts` with a length the buffer does not have is not a mistake
+  # in corpus/, it is the specimen. corpus/slice-oob builds a `&[u64]`
+  # claiming 1000 elements over a 4-element buffer precisely so the checker
+  # has an out-of-bounds read to catch, and several other entries reproduce
+  # real CVEs with the same shape (elf-rs-0079, binary-vec-io-0109). A rule
+  # that fires on the bug under test cannot distinguish a corpus from a
+  # regression. Directory-wide because the pre-commit hook scans from
+  # rust/fe-c whenever any file under it changes, so a nested corpus config
+  # would not be consulted.
+  "rust_unsafe_from_raw_parts",
+
   # deslop indexes one file at a time, so cross-module calls (`table::…`)
   # and extern-C calls (`strdup`, the C harness) read as unresolved/
   # hallucinated even though they compile and link fine.

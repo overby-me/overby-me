@@ -289,7 +289,7 @@ the **mint site** (`minted_at`, where the dangling reference was born): point
 dedicated lock-free `Record.mint` field that survives `poison`), and the heap
 use-after-free report surfaces it. Demonstrated end to end by `corpus/heap-mint`
 (`fe-c-heap-mint`): a `Box` freed while a field reference into it is held aborts
-`UseAfterFree` naming `minted_at=35 read_at=40` in `case` (through names
+`UseAfterFree` naming `minted_at=38 read_at=43` in `case` (through names
 `minted_at`), plus a `note_mint` unit test (record + survive-poison). It does
 **not** surface on `lru-0130` (lru's reborrow is inside the uninstrumented
 crate; instrumenting lru does not help — its optimized-MIR reborrow does not

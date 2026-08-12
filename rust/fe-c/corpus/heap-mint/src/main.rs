@@ -28,7 +28,10 @@ struct Pair {
 }
 
 fn main() {
-    let boxed = Box::new(Pair { a: 0xAAAA, b: 0xBBBB });
+    let boxed = Box::new(Pair {
+        a: 0xAAAA,
+        b: 0xBBBB,
+    });
     let p = Box::into_raw(boxed);
     // Mint a field reference into the heap allocation. The cast ensure records
     // THIS source line on the allocation as its mint site.

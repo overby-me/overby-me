@@ -1,10 +1,14 @@
-[workspace]
-
 [package]
 name = "partial-sort-0016"
 version = "0.0.0"
 edition = "2021"
 publish = false
+
+[workspace]
+
+[[bin]]
+name = "partial-sort-0016"
+path = "src/main.rs"
 
 [dependencies]
 cementite = { path = "../../crates/cementite" }
@@ -15,9 +19,5 @@ partial_sort = "=0.1.1"
 # core's get_unchecked inlines into partial_sort's MIR (where the point-1 ensure
 # can see the out-of-bounds reborrow).
 [profile.dev]
-debug-assertions = false
 opt-level = 3
-
-[[bin]]
-name = "partial-sort-0016"
-path = "src/main.rs"
+debug-assertions = false

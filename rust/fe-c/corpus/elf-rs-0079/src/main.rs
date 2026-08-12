@@ -39,6 +39,7 @@ fn crafted_elf() -> Vec<u8> {
     buf[4] = 2; // EI_CLASS = ELFCLASS64
     buf[5] = 1; // EI_DATA  = little-endian
     buf[6] = 1; // EI_VERSION
+
     // e_shoff @ 0x28: section header table offset = 0 (table starts at the base)
     buf[40..48].copy_from_slice(&0u64.to_le_bytes());
     // e_ehsize @ 0x34: header size = 64 (so from_bytes's length check passes)

@@ -22,7 +22,10 @@ fn main() {
         .arg(&obj)
         .status()
         .expect("spawn C compiler");
-    assert!(compile.success(), "compiling ffi_harness.c with {cc} failed");
+    assert!(
+        compile.success(),
+        "compiling ffi_harness.c with {cc} failed"
+    );
 
     let ar = std::env::var("AR").unwrap_or_else(|_| "ar".to_string());
     let archive_status = Command::new(&ar)
@@ -31,7 +34,10 @@ fn main() {
         .arg(&obj)
         .status()
         .expect("spawn ar");
-    assert!(archive_status.success(), "archiving libffi_harness.a with {ar} failed");
+    assert!(
+        archive_status.success(),
+        "archiving libffi_harness.a with {ar} failed"
+    );
 
     println!("cargo::rustc-link-search=native={out_dir}");
     println!("cargo::rustc-link-lib=static=ffi_harness");

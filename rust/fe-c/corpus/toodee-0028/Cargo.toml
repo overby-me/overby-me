@@ -1,3 +1,9 @@
+[package]
+name = "toodee-0028"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
 # corpus-toodee-0028 (RUSTSEC-2021-0028 / CVE-2021-28028): an out-of-bounds
 # write. toodee 0.2.0's `insert_row` reserves space based on the iterator's
 # `ExactSizeIterator::len()`, then `ptr::write`s the *actual* items it yields. A
@@ -6,16 +12,10 @@
 # write-call extent check, resolved from the `as_mut_ptr` root. Both modes abort.
 [workspace]
 
-[package]
+[[bin]]
 name = "toodee-0028"
-version = "0.0.0"
-edition = "2021"
-publish = false
+path = "src/main.rs"
 
 [dependencies]
 cementite = { path = "../../crates/cementite" }
 toodee = "=0.2.0"
-
-[[bin]]
-name = "toodee-0028"
-path = "src/main.rs"

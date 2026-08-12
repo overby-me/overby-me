@@ -71,7 +71,7 @@ dangling-read site (`read_at`). The mint line is recorded on the allocation by
 `note_mint` at `ensure` time (a dedicated lock-free `Record.mint` field that
 survives `poison`) and surfaced end to end by `corpus/heap-mint`
 (`fe-c-heap-mint`): a `Box` freed while a field reference into it is held aborts
-`UseAfterFree` naming `minted_at=35 read_at=40` in `case` (through names
+`UseAfterFree` naming `minted_at=38 read_at=43` in `case` (through names
 `minted_at`). It does **not** surface on `lru-0130` because lru's reborrow is
 inside the uninstrumented crate; instrumenting lru does not help (its
 optimized-MIR reborrow does not resolve the node record), so `heap-mint` is the

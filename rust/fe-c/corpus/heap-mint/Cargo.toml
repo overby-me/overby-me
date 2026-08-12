@@ -1,3 +1,9 @@
+[package]
+name = "heap-mint"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
 # corpus-heap-mint (trace -0130 debuggability): a heap Box is freed while a
 # field reference minted into it is still held, and the value is read through
 # the dangling reference. Both modes abort UseAfterFree; because the mint
@@ -8,15 +14,9 @@
 # (A4b / I11).
 [workspace]
 
-[package]
-name = "heap-mint"
-version = "0.0.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-cementite = { path = "../../crates/cementite" }
-
 [[bin]]
 name = "heap-mint"
 path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }

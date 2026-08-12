@@ -1,3 +1,9 @@
+[package]
+name = "smallvec-0009"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
 # corpus-smallvec-0009 (RUSTSEC-2019-0009): a heap use-after-free. Calling
 # `SmallVec::grow(current_capacity)` on a spilled (heap) SmallVec frees the
 # existing data, leaving the SmallVec pointing at freed memory; a subsequent
@@ -7,16 +13,10 @@
 # dependency; injected checks are symbol-level (A4b / I11).
 [workspace]
 
-[package]
+[[bin]]
 name = "smallvec-0009"
-version = "0.0.0"
-edition = "2021"
-publish = false
+path = "src/main.rs"
 
 [dependencies]
 cementite = { path = "../../crates/cementite" }
 smallvec = "=0.6.9"
-
-[[bin]]
-name = "smallvec-0009"
-path = "src/main.rs"

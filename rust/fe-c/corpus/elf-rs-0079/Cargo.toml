@@ -1,3 +1,9 @@
+[package]
+name = "elf-rs-0079"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
 # corpus-elf-rs-0079 (RUSTSEC-2022-0079): elf_rs 0.2.0 parses an ELF header and
 # builds `from_raw_parts(content.as_ptr().add(sh_off), sh_num)` for the section
 # header table, with `sh_off`/`sh_num` taken straight from the (attacker-
@@ -11,16 +17,10 @@
 # OutOfBounds.
 [workspace]
 
-[package]
+[[bin]]
 name = "elf-rs-0079"
-version = "0.0.0"
-edition = "2021"
-publish = false
+path = "src/main.rs"
 
 [dependencies]
 cementite = { path = "../../crates/cementite" }
 elf_rs = "=0.2.0"
-
-[[bin]]
-name = "elf-rs-0079"
-path = "src/main.rs"
