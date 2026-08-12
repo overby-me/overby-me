@@ -1504,6 +1504,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::geodesicgears::start
 );
 gl3d_saver!(
+    "glforestfire",
+    glforestfire_body,
+    glforestfire_start,
+    xscreensaver::hacks3d::glforestfire::start
+);
+gl3d_saver!(
     "superquadrics",
     superquadrics_body,
     superquadrics_start,
@@ -2937,6 +2943,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "geodesicgears",
         label: "Geodesic Gears",
         start: Start::Gl3d(geodesicgears_start),
+    },
+    Entry {
+        slug: "glforestfire",
+        label: "GL Forest Fire",
+        start: Start::Gl3d(glforestfire_start),
     },
     Entry {
         slug: "hydrostat",

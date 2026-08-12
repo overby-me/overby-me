@@ -27,6 +27,14 @@ pub const WOOD: &[u8] = include_bytes!("../images/wood.png");
 /// sphere map so that the slabs look like polished metal.
 pub const BLOCKTUBE: &[u8] = include_bytes!("../images/blocktube.png");
 
+/// `ground.png`: the forest floor of `glforestfire`, tiled sixteen times
+/// across a forty-unit square of ground.
+pub const GROUND: &[u8] = include_bytes!("../images/ground.png");
+
+/// `tree.png`: one tree on a transparent background. `glforestfire` stands two
+/// copies of it back to back in a cross, so it reads from any side.
+pub const TREE: &[u8] = include_bytes!("../images/tree.png");
+
 /// `bob.png`: the face flag waves when it is not waving words. From xlockmore
 /// by way of XScreenSaver, 64x64, four bits of palette.
 pub const BOB: &[u8] = include_bytes!("../images/bob.png");

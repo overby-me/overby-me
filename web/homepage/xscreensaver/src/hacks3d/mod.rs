@@ -55,6 +55,7 @@ pub mod geodesicgears;
 pub mod gflux;
 pub mod gibson;
 pub mod glblur;
+pub mod glforestfire;
 pub mod glhanoi;
 pub mod glknots;
 pub mod glmatrix;
@@ -160,6 +161,7 @@ pub static ALL: &[&Saver3d] = &[
     &geodesicgears::SAVER,
     &gibson::SAVER,
     &glblur::SAVER,
+    &glforestfire::SAVER,
     &glknots::SAVER,
     &glhanoi::SAVER,
     &glschool::SAVER,

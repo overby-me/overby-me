@@ -101,6 +101,9 @@ uniform float u_fog_density;
 uniform float u_fog_start;
 uniform float u_fog_end;
 uniform vec4 u_fog_color;
+// GL_ALPHA_TEST with GL_GEQUAL: anything below this is thrown away rather
+// than blended. Zero when the test is off, which nothing can fall below.
+uniform float u_alpha_ref;
 out vec4 frag_color;
 
 // GL_MODULATE, the default texture environment and the only one any of these
@@ -134,6 +137,7 @@ vec4 fogged (vec4 c) {
 void main() {
   if (! u_lighting) {
     frag_color = fogged (textured (v_color));
+    if (frag_color.a < u_alpha_ref) discard;
     return;
   }
   vec3 n = normalize (v_normal);
@@ -176,6 +180,7 @@ void main() {
     }
   }
   frag_color = fogged (textured (vec4 (c, diffuse.a)));
+  if (frag_color.a < u_alpha_ref) discard;
 }
 ";
 
@@ -204,6 +209,7 @@ struct Uniforms {
     texgen_sphere: Option<WebGlUniformLocation>,
     tex: Option<WebGlUniformLocation>,
     tex_add: Option<WebGlUniformLocation>,
+    alpha_ref: Option<WebGlUniformLocation>,
     fog_mode: Option<WebGlUniformLocation>,
     fog_start: Option<WebGlUniformLocation>,
     fog_end: Option<WebGlUniformLocation>,
@@ -248,6 +254,7 @@ impl Uniforms {
             texgen_sphere: at("u_texgen_sphere"),
             tex: at("u_tex"),
             tex_add: at("u_tex_add"),
+            alpha_ref: at("u_alpha_ref"),
             fog_mode: at("u_fog_mode"),
             fog_start: at("u_fog_start"),
             fog_end: at("u_fog_end"),
@@ -554,6 +561,7 @@ impl Gl3dEngine {
             }
             gl.uniform1i(u.texgen_sphere.as_ref(), i32::from(batch.tex_gen_sphere));
             gl.uniform1i(u.tex_add.as_ref(), i32::from(batch.tex_env == TexEnv::Add));
+            gl.uniform1f(u.alpha_ref.as_ref(), batch.alpha_test.unwrap_or(0.0));
             gl.uniform1i(u.fog.as_ref(), i32::from(batch.fog.is_some()));
             match batch.fog {
                 Some(Fog::Exp2 { density, color }) => {

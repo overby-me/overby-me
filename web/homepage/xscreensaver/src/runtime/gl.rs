@@ -443,6 +443,15 @@ pub struct Batch {
     pub scene_ambient: [f32; 4],
     /// `glEnable(GL_FOG)`, and what it fades to.
     pub fog: Option<Fog>,
+    /// `glAlphaFunc (GL_GEQUAL, ref)` with `glEnable (GL_ALPHA_TEST)`: throw
+    /// the fragment away rather than blending it when its alpha comes out
+    /// below `ref`. `GL_GEQUAL` is the only comparison the savers ask for.
+    ///
+    /// A saver reaches for it when a texture is a cut-out: `glforestfire`'s
+    /// trees are quads whose background is transparent, and blending them
+    /// would still write depth over the whole quad and punch a hole in the
+    /// scene behind. Discarding writes nothing at all.
+    pub alpha_test: Option<f32>,
     /// Which texture is bound, if `GL_TEXTURE_2D` is enabled.
     pub texture: Option<u32>,
     pub tex_env: TexEnv,
@@ -489,6 +498,7 @@ impl Batch {
             && self.depth_func == other.depth_func
             && self.color_mask == other.color_mask
             && self.fog == other.fog
+            && self.alpha_test == other.alpha_test
             && self.texture == other.texture
             && self.tex_env == other.tex_env
             && self.tex_gen_sphere == other.tex_gen_sphere
@@ -563,6 +573,7 @@ pub struct Glx {
     clear_color: [f32; 4],
     scene_ambient: [f32; 4],
     fog: Option<Fog>,
+    alpha_test: Option<f32>,
     textures: Vec<Texture>,
     bound_texture: Option<u32>,
     texturing: bool,
@@ -619,6 +630,7 @@ impl Glx {
             clear_color: [0.0, 0.0, 0.0, 1.0],
             scene_ambient: [0.2, 0.2, 0.2, 1.0],
             fog: None,
+            alpha_test: None,
             textures: Vec::new(),
             bound_texture: None,
             texturing: false,
@@ -827,6 +839,12 @@ impl Glx {
     /// implemented, which is the only mode any of these savers uses.
     pub fn fog(&mut self, fog: Option<Fog>) {
         self.fog = fog;
+    }
+
+    /// `glAlphaFunc (GL_GEQUAL, ref)` with `glEnable (GL_ALPHA_TEST)`, or
+    /// `None` for `glDisable`.
+    pub fn alpha_test(&mut self, reference: Option<f32>) {
+        self.alpha_test = reference;
     }
 
     /// `glPolygonOffset`, with `None` for `glDisable(GL_POLYGON_OFFSET_FILL)`.
@@ -1281,6 +1299,7 @@ impl Glx {
             line_width: self.line_width,
             scene_ambient: self.scene_ambient,
             fog: self.fog,
+            alpha_test: self.alpha_test,
             texture: if self.texturing {
                 self.bound_texture
             } else {
