@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (132) |
+| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (133) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -695,13 +695,32 @@ half-dodecahedron, which is a disc rather than a closed surface, so V - E + F is
 one and stays one however often it is subdivided, and a weld that missed an edge
 would break it.
 
-`squirtorus` fires rings out of sixteen sphincters. Each ring is a torus of
-20 by 60, which is 7200 vertices once its quad strips are triangles, and each
-sphincter is given `BELLRAND(60)` of them, so about thirty. If every ring of
-every sphincter were in flight at once that would be 3.5 million vertices a
-frame; how many actually are at one time is the number to measure first, since
-a ring that has finished is skipped. Its hundred precomputed torus frames are
-memory rather than per-frame cost.
+`squirtorus` fires rings out of sixteen sphincters, and was deferred on the
+worry that all of them might be in flight at once. Measuring first was the whole
+of it, and it moved the answer twice.
+
+The hole, not the ring, is the expensive part. Upstream compiles a hundred
+display lists for it at a hundred degrees of openness, which is impossible here
+where a list is replayed as geometry: one hole is 109,500 vertices, so a hundred
+of them is eleven million. But a hole is a surface of revolution, so keeping the
+150-point profile and generating the mesh at draw time costs nothing in memory
+and nothing per frame either.
+
+That leaves how many holes to draw, and the number to measure is not the vertex
+count of a hole but how often a burst happens. Over twenty thousand frames, at
+upstream's sixteen a ring is in the air 81% of the time and there are 23 of them
+when there are any; at six it is 45% and 8.9. What decides it is the worst
+frame rather than the average, because a burst puts twenty toruses in the sky
+at once: over four thousand frames, six peaks at 812 thousand vertices and ten
+already peaks at 1.57 million. Six is the largest count whose worst frame still
+fits, so six is the default, and the knob still goes to fifty.
+
+Its one porting trap has nothing to do with any of that. The stars are drawn
+under an orthographic projection which upstream pushes and pops around them;
+leaving it set means every frame after the first draws the world with it, and
+the whole scene lands past the far plane. What that looks like is a starfield on
+an empty black page, which reads as "the geometry is wrong" and is not. Probing
+one vertex through `batch.mvp` said where it actually landed in a second.
 
 `deepstars` was on that list and came off it, which is the shape to look for
 before giving up on a crowded saver. Its star trails are the whole sky redrawn

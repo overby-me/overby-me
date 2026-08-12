@@ -144,6 +144,7 @@ pub mod spheremonics;
 pub mod splitflap;
 pub mod splodesic;
 pub mod sproingies;
+pub mod squirtorus;
 pub mod stairs;
 pub mod starwars;
 pub mod stonerview;
@@ -283,6 +284,7 @@ pub static ALL: &[&Saver3d] = &[
     &spheremonics::SAVER,
     &splodesic::SAVER,
     &splitflap::SAVER,
+    &squirtorus::SAVER,
     &stairs::SAVER,
     &stonerview::SAVER,
     &superquadrics::SAVER,
