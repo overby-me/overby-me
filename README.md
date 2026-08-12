@@ -24,6 +24,7 @@
   - [📦 Packages](#-packages)
   - [📋 Configurations](#-configurations)
   - [🧩 Modules](#-modules)
+  - [🧰 Libraries](#-libraries)
 - [📏 Standards](#-standards)
   - [🔌 Hardware](#-hardware)
   - [🔗 Software](#-software)
