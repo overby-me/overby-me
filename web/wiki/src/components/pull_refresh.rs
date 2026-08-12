@@ -1,7 +1,9 @@
 //! Pull-to-refresh: drag down (touch) or over-scroll up (wheel / trackpad) while
 //! already at the top of the page to reload the current view, with a spinner
-//! animation. The whole document scrolls (there is no inner scroll container),
-//! so the gesture is tracked against `window.scrollY`. A refresh bumps the global
+//! animation. The gesture is tracked against the document's scroll position, and
+//! declined outright when it begins inside a box that scrolls on its own (see
+//! [`inside_own_scroller`], which is the correction to this module having been
+//! written when there were none). A refresh bumps the global
 //! data version, which the path resolver and app resources depend on, so the
 //! visible view refetches without a full reload.
 
@@ -34,6 +36,54 @@ pub(crate) fn at_top() -> bool {
     web_sys::window()
         .map(|_| crate::scroll_host::scroll_top() <= 0.0)
         .unwrap_or(false)
+}
+
+/// Whether the gesture began inside an element that scrolls on its own.
+///
+/// This module was written when the document was the only scroller, which is what
+/// let it decide everything from `window.scrollY`. It is not true any more: a
+/// spreadsheet, a wide table and a page-view document are all `overflow: auto`
+/// boxes. Panning inside one while the page happened to be at the top armed a
+/// refresh, so dragging a sheet around reloaded the view under the reader's
+/// finger.
+///
+/// ANY scrollable ancestor disqualifies the gesture, not only one already
+/// scrolled away from its top. A pannable surface owns the drags that begin on
+/// it, and a sheet still at its origin is exactly where someone's first pan is a
+/// downward one.
+///
+/// Walks to `body`, since the document scroller is the one this module is for.
+fn inside_own_scroller(target: Option<web_sys::EventTarget>) -> bool {
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
+    let mut node = target.and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+    while let Some(el) = node {
+        let tag = el.tag_name().to_lowercase();
+        if tag == "body" || tag == "html" {
+            return false;
+        }
+        // Overflowing AND allowed to scroll. Either test alone is wrong: a box
+        // that merely could scroll but has nothing to scroll steals nothing, and
+        // `overflow: hidden` content that exceeds its box is not draggable.
+        let overflows =
+            el.scroll_height() > el.client_height() || el.scroll_width() > el.client_width();
+        if overflows {
+            if let Ok(Some(style)) = win.get_computed_style(&el) {
+                let scrollable = |axis: &str| {
+                    matches!(
+                        style.get_property_value(axis).unwrap_or_default().as_str(),
+                        "auto" | "scroll" | "overlay"
+                    )
+                };
+                if scrollable("overflow-y") || scrollable("overflow-x") {
+                    return true;
+                }
+            }
+        }
+        node = el.parent_element();
+    }
+    false
 }
 
 /// Set the pull distance only when it actually changes. Touch/wheel handlers fire
@@ -90,7 +140,7 @@ fn install_listeners() {
                 let Ok(te) = e.dyn_into::<web_sys::TouchEvent>() else {
                     return;
                 };
-                if !at_top() {
+                if !at_top() || inside_own_scroller(te.target()) {
                     active.set(false);
                     return;
                 }
@@ -170,6 +220,11 @@ fn install_listeners() {
                     return;
                 };
                 let dy = we.delta_y();
+                // Same exclusion as the touch path: a trackpad swipe over a
+                // spreadsheet is that spreadsheet's, even at the top of the page.
+                if inside_own_scroller(we.target()) {
+                    return;
+                }
                 if dy < 0.0 && at_top() {
                     let cur = *PULL_DISTANCE.peek();
                     let dist = (cur + (-dy) * DAMPING).min(MAX_PULL);
