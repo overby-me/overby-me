@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (97) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (98) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -528,6 +528,16 @@ instead. `winduprobot` draws twenty-five robots of sixty-three thousand
 vertices each, which is 1.6 million a frame; its default here is five, which
 comes to the same 334k `beats` draws, and its slider still goes to a hundred.
 Say so in the saver's own comment when you do this, with the measurement.
+
+Batches also break on *state*, and the state that catches people out is the
+front-face winding. Two quads with opposite windings can never share a batch, so
+a loop that emits a top face and then a bottom face, over and over, costs two
+batches per iteration however few vertices it moves: the spoke drawing in
+`runtime::involute` cost 381 batches for one gear that way, and `geodesicgears`
+draws ninety-two gears from one shape. Walking the loop once per winding draws
+the same quads in a different order and comes to four batches, which is what it
+does now. The gears are opaque and depth-tested, so nothing about the picture
+depends on which order they went down in.
 
 One shape of expensive frame has a way out. A saver that billboards sprites
 takes the modelview matrix, forces its rotation to the identity and loads that

@@ -51,6 +51,7 @@ pub mod fliptext;
 pub mod flyingtoasters;
 pub mod gears;
 pub mod geodesic;
+pub mod geodesicgears;
 pub mod gflux;
 pub mod gibson;
 pub mod glblur;
@@ -155,6 +156,7 @@ pub static ALL: &[&Saver3d] = &[
     &flyingtoasters::SAVER,
     &gears::SAVER,
     &geodesic::SAVER,
+    &geodesicgears::SAVER,
     &gibson::SAVER,
     &glblur::SAVER,
     &glknots::SAVER,

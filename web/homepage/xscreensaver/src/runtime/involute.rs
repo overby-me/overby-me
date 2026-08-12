@@ -236,6 +236,14 @@ fn draw_disc(g: &mut Glx, segments: i32, ra: f32, rb: f32, z: f32, up_p: bool, w
 }
 
 /// N thick radial bars between two radii, as a solid slab each.
+///
+/// Upstream walks the ring once and emits each quad as it comes to it, which
+/// alternates the front-face winding on every segment. Winding is batch state
+/// here, so that costs two batches per segment: a six-spoke ring came to over
+/// three hundred of them. The ring is walked twice instead, once for each
+/// winding, which draws exactly the same quads in a different order and comes
+/// to four batches. The gears are opaque and depth-tested, so the order they
+/// go down in is not visible.
 #[allow(clippy::too_many_arguments)]
 fn draw_spokes(
     g: &mut Glx,
@@ -282,84 +290,90 @@ fn draw_spokes(
     let segments2 = (insegs + outsegs) * n;
     let width = TAU / segments2 as f32;
 
-    let mut tick = 0;
-    let mut state = 0;
-    for i in 0..segments2 {
-        let th1 = i as f32 * width;
-        let th2 = th1 + width;
-        let (cth1, sth1) = (th1.cos(), th1.sin());
-        let (cth2, sth2) = (th2.cos(), th2.sin());
+    let shape = if wire_p { Shape::Lines } else { Shape::Quads };
 
-        let mut changed = i == 0;
-        if state == 0 && tick == insegs {
-            tick = 0;
-            state = 1;
-            changed = true;
-        } else if state == 1 && tick == outsegs {
-            tick = 0;
-            state = 0;
-            changed = true;
+    // Pass 0 is everything wound counter-clockwise (the tops, and a spoke's
+    // trailing edge); pass 1 is everything wound clockwise (the bottoms, and a
+    // spoke's leading edge).
+    for pass in 0..2 {
+        let cw = pass == 1;
+        g.front_face_cw(cw);
+
+        let mut tick = 0;
+        let mut state = 0;
+        for i in 0..segments2 {
+            let th1 = i as f32 * width;
+            let th2 = th1 + width;
+            let (cth1, sth1) = (th1.cos(), th1.sin());
+            let (cth2, sth2) = (th2.cos(), th2.sin());
+
+            let mut changed = i == 0;
+            if state == 0 && tick == insegs {
+                tick = 0;
+                state = 1;
+                changed = true;
+            } else if state == 1 && tick == outsegs {
+                tick = 0;
+                state = 0;
+                changed = true;
+            }
+
+            if (state == 1 || (state == 0 && changed)) && !wire_p {
+                if cw {
+                    // bottom
+                    g.begin(shape);
+                    g.normal3f(0.0, 0.0, 1.0);
+                    g.vertex3f(s2 * cth1 * ra, s2 * sth1 * ra, z2);
+                    g.vertex3f(s2 * cth1 * rb, s2 * sth1 * rb, z2);
+                    g.vertex3f(s2 * cth2 * rb, s2 * sth2 * rb, z2);
+                    g.vertex3f(s2 * cth2 * ra, s2 * sth2 * ra, z2);
+                    g.end();
+                } else {
+                    // top
+                    g.begin(shape);
+                    g.normal3f(0.0, 0.0, -1.0);
+                    g.vertex3f(s1 * cth1 * ra, s1 * sth1 * ra, z1);
+                    g.vertex3f(s1 * cth1 * rb, s1 * sth1 * rb, z1);
+                    g.vertex3f(s1 * cth2 * rb, s1 * sth2 * rb, z1);
+                    g.vertex3f(s1 * cth2 * ra, s1 * sth2 * ra, z1);
+                    g.end();
+                }
+            }
+
+            if cw && state == 1 && changed {
+                // left: the leading edge of a spoke
+                g.begin(shape);
+                let n = calc_normal(
+                    [s1 * cth1 * rb, s1 * sth1 * rb, z1],
+                    [s1 * cth1 * ra, s1 * sth1 * ra, z1],
+                    [s2 * cth1 * rb, s2 * sth1 * rb, z2],
+                );
+                g.normal3f(n[0], n[1], n[2]);
+                g.vertex3f(s1 * cth1 * ra, s1 * sth1 * ra, z1);
+                g.vertex3f(s1 * cth1 * rb, s1 * sth1 * rb, z1);
+                g.vertex3f(s2 * cth1 * rb, s2 * sth1 * rb, z2);
+                g.vertex3f(s2 * cth1 * ra, s2 * sth1 * ra, z2);
+                g.end();
+            }
+
+            if !cw && state == 0 && changed {
+                // right: the trailing edge
+                g.begin(shape);
+                let n = calc_normal(
+                    [s1 * cth2 * ra, s1 * sth2 * ra, z1],
+                    [s1 * cth2 * rb, s1 * sth2 * rb, z1],
+                    [s2 * cth2 * rb, s2 * sth2 * rb, z2],
+                );
+                g.normal3f(n[0], n[1], n[2]);
+                g.vertex3f(s1 * cth2 * ra, s1 * sth2 * ra, z1);
+                g.vertex3f(s1 * cth2 * rb, s1 * sth2 * rb, z1);
+                g.vertex3f(s2 * cth2 * rb, s2 * sth2 * rb, z2);
+                g.vertex3f(s2 * cth2 * ra, s2 * sth2 * ra, z2);
+                g.end();
+            }
+
+            tick += 1;
         }
-
-        let shape = if wire_p { Shape::Lines } else { Shape::Quads };
-
-        if (state == 1 || (state == 0 && changed)) && !wire_p {
-            // top
-            g.front_face_cw(false);
-            g.begin(shape);
-            g.normal3f(0.0, 0.0, -1.0);
-            g.vertex3f(s1 * cth1 * ra, s1 * sth1 * ra, z1);
-            g.vertex3f(s1 * cth1 * rb, s1 * sth1 * rb, z1);
-            g.vertex3f(s1 * cth2 * rb, s1 * sth2 * rb, z1);
-            g.vertex3f(s1 * cth2 * ra, s1 * sth2 * ra, z1);
-            g.end();
-
-            // bottom
-            g.front_face_cw(true);
-            g.begin(shape);
-            g.normal3f(0.0, 0.0, 1.0);
-            g.vertex3f(s2 * cth1 * ra, s2 * sth1 * ra, z2);
-            g.vertex3f(s2 * cth1 * rb, s2 * sth1 * rb, z2);
-            g.vertex3f(s2 * cth2 * rb, s2 * sth2 * rb, z2);
-            g.vertex3f(s2 * cth2 * ra, s2 * sth2 * ra, z2);
-            g.end();
-        }
-
-        if state == 1 && changed {
-            // left: the leading edge of a spoke
-            g.front_face_cw(true);
-            g.begin(shape);
-            let n = calc_normal(
-                [s1 * cth1 * rb, s1 * sth1 * rb, z1],
-                [s1 * cth1 * ra, s1 * sth1 * ra, z1],
-                [s2 * cth1 * rb, s2 * sth1 * rb, z2],
-            );
-            g.normal3f(n[0], n[1], n[2]);
-            g.vertex3f(s1 * cth1 * ra, s1 * sth1 * ra, z1);
-            g.vertex3f(s1 * cth1 * rb, s1 * sth1 * rb, z1);
-            g.vertex3f(s2 * cth1 * rb, s2 * sth1 * rb, z2);
-            g.vertex3f(s2 * cth1 * ra, s2 * sth1 * ra, z2);
-            g.end();
-        }
-
-        if state == 0 && changed {
-            // right: the trailing edge
-            g.front_face_cw(false);
-            g.begin(shape);
-            let n = calc_normal(
-                [s1 * cth2 * ra, s1 * sth2 * ra, z1],
-                [s1 * cth2 * rb, s1 * sth2 * rb, z1],
-                [s2 * cth2 * rb, s2 * sth2 * rb, z2],
-            );
-            g.normal3f(n[0], n[1], n[2]);
-            g.vertex3f(s1 * cth2 * ra, s1 * sth2 * ra, z1);
-            g.vertex3f(s1 * cth2 * rb, s1 * sth2 * rb, z1);
-            g.vertex3f(s2 * cth2 * rb, s2 * sth2 * rb, z2);
-            g.vertex3f(s2 * cth2 * ra, s2 * sth2 * ra, z2);
-            g.end();
-        }
-
-        tick += 1;
     }
 }
 
@@ -986,5 +1000,35 @@ mod tests {
         // Spokes take the middle ring out of the running.
         let spoked = Gear { spokes: 6, ..gear };
         assert_eq!(biggest_ring(&spoked).0, 0);
+    }
+
+    /// A spoked gear draws the same quads as an unspoked one, grouped by
+    /// winding rather than one segment at a time. It must not cost an order of
+    /// magnitude more batches than a plain gear for it: a sphere of ninety-two
+    /// of them is drawn from one shape, so a few hundred batches here is tens
+    /// of thousands there.
+    #[test]
+    fn spokes_do_not_cost_a_batch_each() {
+        let plain = a_gear();
+        let spoked = Gear {
+            spokes: 6,
+            spoke_thickness: 3.0,
+            ..a_gear()
+        };
+
+        let mut g = Glx::new();
+        draw_gear(&mut g, &plain, false);
+        let plain_batches = g.frame().batches.len();
+
+        let mut g = Glx::new();
+        draw_gear(&mut g, &spoked, false);
+        let f = g.frame();
+        let (spoked_batches, spoked_vertices) = (f.batches.len(), f.vertices.len());
+
+        assert!(spoked_vertices > 0, "the spokes drew nothing");
+        assert!(
+            spoked_batches <= plain_batches + 4,
+            "{spoked_batches} batches against {plain_batches} for a plain gear"
+        );
     }
 }
