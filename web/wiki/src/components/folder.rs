@@ -172,11 +172,12 @@ pub fn FolderApp(
         }
     });
     let bsky_linked = (*bsky_link.read()).unwrap_or(false);
-    // Owner toggle state for showing this context's comments on the projector.
+    // Chair toggle state for showing this context's comments on the projector.
+    // Gated on the same condition as the control it labels (see below).
     let mut screen_comments = use_signal(|| None::<bool>);
     {
         let ctx = node_context.clone();
-        let can = can_manage;
+        let can = is_context_owner;
         // Reactive on the context — NOT a one-shot `use_hook` — since this
         // component is reused across sibling navigations without remounting;
         // keyed on `ctx` so moving to a different context refetches its setting.
@@ -358,9 +359,13 @@ pub fn FolderApp(
                                 }
                             }
                         },
-                        // Owner: what the chair puts in front of the room — this
-                        // container on the Screen, and its comments beside it.
-                        if can_manage {
+                        // What the chair puts in front of the room: this container
+                        // on the Screen, and its comments beside it. The chair
+                        // only, for the reason spelled out in `content.rs`: both
+                        // writes target the context's relations, which no one but
+                        // a context owner may write, so gating on `can_manage`
+                        // showed the node's author a control that always failed.
+                        if is_context_owner {
                             super::widgets::SheetGroup { title: t("common.toolsMeeting"),
                             button {
                                 class: "sheet-action",

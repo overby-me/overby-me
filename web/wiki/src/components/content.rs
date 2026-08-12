@@ -135,13 +135,15 @@ pub fn ContentApp(
         .map(|c| c.0.clone())
         .unwrap_or_else(|| node.id.0.clone());
 
-    // Owner toggle state: whether the context is currently set to also show the
+    // Chair toggle state: whether the context is currently set to also show the
     // active node's comments on the projector (the `screenComments` relation).
-    // The hook is unconditional (stable order); only the fetch is owner-gated.
+    // The hook is unconditional (stable order); only the fetch is gated, on the
+    // same condition as the control it labels, so a reader who will never see
+    // the toggle does not ask the server about it.
     let mut screen_comments = use_signal(|| None::<bool>);
     {
         let ctx = node_context.clone();
-        let can = can_manage;
+        let can = is_ctx_owner;
         // Reactive on the context — NOT a one-shot `use_hook` — since this
         // component is reused across sibling navigations without remounting;
         // keyed on `ctx`, so moving to a node in a different context refetches
@@ -288,9 +290,18 @@ pub fn ContentApp(
                         }
                     }
                 },
-                // Owner: what the chair puts in front of the room — this node on
-                // the context's projector (Screen view), and its comments beside it.
-                if can_manage {
+                // What the chair puts in front of the room: this node on the
+                // context's projector (Screen view), and its comments beside it.
+                //
+                // The chair, and only the chair. Both writes target the CONTEXT's
+                // relations (`parent_id = node_context`), which the backend lets
+                // no one but a context owner touch, so `can_manage` was the wrong
+                // gate: it also admits the node's own author. A candidate opening
+                // their own candidacy page got two chair controls, and both
+                // answered "Noget gik galt!". `is_context_owner` is true for an
+                // event's own owner too, since `create_context` seeds the creator
+                // as its first OWNER member, so nothing legitimate is lost here.
+                if is_ctx_owner {
                     super::widgets::SheetGroup { title: t("common.toolsMeeting"),
                     button {
                         class: "sheet-action",
