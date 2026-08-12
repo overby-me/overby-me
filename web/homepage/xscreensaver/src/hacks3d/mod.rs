@@ -74,6 +74,7 @@ pub mod headroom;
 pub mod hexstrut;
 pub mod hextrail;
 pub mod highvoltage;
+pub mod hilbert;
 pub mod hydrostat;
 pub mod hypertorus;
 pub mod hypnowheel;
@@ -176,6 +177,7 @@ pub static ALL: &[&Saver3d] = &[
     &flipflop::SAVER,
     &flipscreen3d::SAVER,
     &gflux::SAVER,
+    &hilbert::SAVER,
     &nakagin::SAVER,
     &photopile::SAVER,
     &peepers::SAVER,
