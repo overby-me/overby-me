@@ -87,6 +87,7 @@ pub mod moebius;
 pub mod moebiusgears;
 pub mod molecule;
 pub mod morph3d;
+pub mod nakagin;
 pub mod noof;
 pub mod papercube;
 pub mod peepers;
@@ -173,6 +174,7 @@ pub static ALL: &[&Saver3d] = &[
     &flipflop::SAVER,
     &flipscreen3d::SAVER,
     &gflux::SAVER,
+    &nakagin::SAVER,
     &photopile::SAVER,
     &peepers::SAVER,
     &hexstrut::SAVER,
