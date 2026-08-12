@@ -238,7 +238,10 @@ def main [
     if $console { $run.stderr | lines | each {|l| print -e $l } | ignore }
 
     mut failed = []
-    for s in $slugs {
+    for path in $slugs {
+        # A slug may carry a query ("webcollage?images=@handle"); the driver
+        # names the file after the slug alone, so strip it here too.
+        let s = ($path | split row "?" | first)
         let png = $"/tmp/screensaver-($s).png"
         if not ($png | path exists) {
             log-fail $"($s): no screenshot"

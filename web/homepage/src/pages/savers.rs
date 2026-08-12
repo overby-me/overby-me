@@ -939,6 +939,12 @@ saver!(
     xscreensaver::hacks2d::wander::start
 );
 saver!(
+    "webcollage",
+    webcollage_body,
+    webcollage_start,
+    xscreensaver::hacks2d::webcollage::start
+);
+saver!(
     "whirlwindwarp",
     whirlwindwarp_body,
     whirlwindwarp_start,
@@ -2663,6 +2669,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "wander",
         label: "Wander",
         start: Start::Fb(wander_start),
+    },
+    Entry {
+        slug: "webcollage",
+        label: "Web Collage",
+        start: Start::Fb(webcollage_start),
     },
     Entry {
         slug: "whirlwindwarp",

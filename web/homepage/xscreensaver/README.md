@@ -8,16 +8,18 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
+| 2D | 144 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (144) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
 | OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (134) |
 
-`co____9` is `covid19` under a name that does not date it, generated from
-the same source at build time, so it is counted once. `mismunch` was retired
-upstream in version 5.08 and merged into `munch`, which since then draws either
-kind depending on a resource; the name still has a configuration file of its
-own, so it has a slug of its own here too, pointing at the same code with the
-resource nailed down.
+`webcollage` is neither: upstream is a perl script and a C helper rather than a
+`hacks/*.c`, but what it needs at run time is a framebuffer, so it is counted
+with the 2D tier. `co____9` is `covid19` under a name that does not date it,
+generated from the same source at build time, so it is counted once.
+`mismunch` was retired upstream in version 5.08 and merged into `munch`, which
+since then draws either kind depending on a resource; the name still has a
+configuration file of its own, so it has a slug of its own here too, pointing
+at the same code with the resource nailed down.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
@@ -732,6 +734,31 @@ in a single call: 97 batches at any setting, from 151009. What still had to
 give was the length of the exposure, not the number of stars; a sparser sky
 with longer trails was tried first and looked like a different picture, since
 how dense the sky is is most of what it looks like.
+
+`webcollage` was on the not-portable list too, and for a better reason than
+`sonar` was: it finds its pictures by feeding random words to image search
+engines and pulling the results out of the pages that come back. None of that
+can happen from a page. But that is the part of the program that answers where
+the next picture comes from, and `runtime::image` is already a channel with a
+host on the other end of it: the pictures come from atproto, so
+`?images=@handle` collages an account and `?images=%23tag` collages a hashtag
+live as people post to it. Upstream's description is "this is what the Internet
+looks like"; the internet moved and the saver did not have to.
+
+What is ported exactly is the arithmetic, because it is the whole look of the
+thing. A picture is not scaled to fit: it is halved until it fits, which gives
+a wide spread of sizes rather than a uniform one, and the rectangle it is
+fitting into is itself halved with probability 0.3, twice. The chance of
+cropping starts at 0.2 and climbs with size, and climbs by 0.7 for anything
+banner-shaped, which saturates it. Crops are bell-distributed towards the
+middle of the picture unless it is a banner, in which case they are uniform.
+Paste positions deliberately hang pictures off the edges and are cropped back.
+And every picture gets a sinusoidal alpha ramp around its border, without which
+the collage is a grid of hard rectangles.
+
+The one thing the framebuffer cannot do is upstream's alpha channel, so the
+bevel is folded into the per-pixel blend instead of being written into the
+image and composited afterwards. Same arithmetic, one pass.
 
 `sonar` was on the not-portable list for years of this document's life and
 should not have been, which is worth writing down as a way of being wrong. It

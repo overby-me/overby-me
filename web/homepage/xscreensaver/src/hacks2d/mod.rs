@@ -147,6 +147,7 @@ pub mod vermiculate;
 pub mod vfeedback;
 pub mod vines;
 pub mod wander;
+pub mod webcollage;
 pub mod whirlwindwarp;
 pub mod whirlygig;
 pub mod worm;
@@ -298,6 +299,7 @@ pub static ALL: &[&Saver] = &[
     &vermiculate::SAVER,
     &vfeedback::SAVER,
     &wander::SAVER,
+    &webcollage::SAVER,
     &whirlwindwarp::SAVER,
     &whirlygig::SAVER,
     &worm::SAVER,
