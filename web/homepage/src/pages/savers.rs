@@ -1006,6 +1006,12 @@ saver!(
 );
 
 gl3d_saver!(
+    "dnalogo",
+    dnalogo_body,
+    dnalogo_start,
+    xscreensaver::hacks3d::dnalogo::start
+);
+gl3d_saver!(
     "juggler3d",
     juggler3d_body,
     juggler3d_start,
@@ -2594,6 +2600,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "dnalogo",
+        label: "DNA Logo",
+        start: Start::Gl3d(dnalogo_start),
     },
     Entry {
         slug: "juggler3d",

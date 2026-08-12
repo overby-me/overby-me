@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (116) |
+| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (117) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
@@ -544,8 +544,9 @@ There is no polygon tessellator, so a saver that fills a concave outline has to
 triangulate it itself. That is less of a gap than it sounds, because upstream's
 own OpenGL ES build has no GLU either and every saver that wants one already
 carries a fallback: `jigsaw` cuts each puzzle piece into eighths and fans each
-one out by hand, and the port takes that path rather than growing a
-tessellator.
+one out by hand, and `dnalogo` carries the triangles its desktop build's
+tessellator produced for the pizza slice once and had saved. Both ports take
+that path rather than growing a tessellator.
 
 There is no texture *generation* beyond `GL_SPHERE_MAP`, and no texture
 matrix. `atlantis` is the saver that wants more: it lays a noise texture over

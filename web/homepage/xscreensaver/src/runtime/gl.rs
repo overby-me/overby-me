@@ -605,6 +605,9 @@ enum Cmd {
     TexCoord([f32; 2]),
     BindTexture(u32),
     Texturing(bool),
+    /// `glFrontFace`. A saver that builds a shape out of pieces wound both
+    /// ways, as `dnalogo`'s gasket is, gets half of it culled without this.
+    FrontFace(bool),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -956,7 +959,7 @@ impl Glx {
     /// default. A saver whose faces are wound clockwise says so rather than
     /// having its outsides culled.
     pub fn front_face_cw(&mut self, cw: bool) {
-        self.front_face_cw = cw;
+        self.record_or(Cmd::FrontFace(cw), |g| g.front_face_cw = cw);
     }
 
     /// `glGetIntegerv (GL_FRONT_FACE, ..)`, for code that has to set the
@@ -1546,6 +1549,7 @@ impl Glx {
             Cmd::TexCoord(uv) => self.uv = uv,
             Cmd::BindTexture(id) => self.bound_texture = Some(id),
             Cmd::Texturing(on) => self.texturing = on,
+            Cmd::FrontFace(cw) => self.front_face_cw = cw,
         }
     }
 }

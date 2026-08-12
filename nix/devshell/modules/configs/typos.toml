@@ -25,6 +25,8 @@ extend-ignore-re = [
   # quickhull.c's own comments, kept with the code they explain.
   "ajacent",
   "approprate",
+  # In the header of dnapizza.h, transcribed verbatim into the port.
+  "vertexes",
   # Tobias Sargeant, who wrote half of flurry.
   "Sargeant",
   # flurry's own variable names: `brite` and `briteFactor`.
@@ -155,6 +157,8 @@ paeth = "paeth"
 Paeth = "Paeth"
 # iy = the second image coordinate, paired with ix (xscreensaver ports)
 iy = "iy"
+# iz = the index after i, paired with ia, in dnalogo's gasket rim
+iz = "iz"
 # BLOAD = Apple DOS 3.3 command (Binary LOAD), typed by the apple2 saver
 bload = "bload"
 BLOAD = "BLOAD"

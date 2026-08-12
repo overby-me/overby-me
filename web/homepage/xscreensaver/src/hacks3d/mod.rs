@@ -46,6 +46,7 @@ pub mod cubicgrid;
 pub mod dangerball;
 pub mod deepstars;
 pub mod discoball;
+pub mod dnalogo;
 pub mod dumpsterfire;
 pub mod endgame;
 pub mod endgame_games;
@@ -147,6 +148,7 @@ mod winduprobot_wobble;
 /// the reason [`crate::all`] gives.
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
+    &dnalogo::SAVER,
     &juggler3d::SAVER,
     &flurry::SAVER,
     &atlantis::SAVER,
