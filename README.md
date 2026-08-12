@@ -750,7 +750,7 @@
 | ✅ | Media Sharing | [PinkLeap 🌀](https://pinkleap.app/@overby.me) | [Flashes 🔒🇪🇺🌀](https://github.com/birdsongapps/Flashes) | [AT Protocol 🌀](https://atproto.com) | [Pixelfed 🇪🇺](https://pixelfed.social/niclasoverby), [Meta Instagram (Flufi) 🔒🇺🇸](https://flufi.me) |
 | 🚧 | Long-form Video | [Alphabet YouTube 🔒🇺🇸](https://youtube.com) | [Skytube 🔒🇺🇸🌀](https://skytube.video), [PeerTube 🌐🇪🇺](https://joinpeertube.org) | [AT Protocol 🌀](https://atproto.com) | |
 | 🚧 | Short-form Video | | [SkyLight 🔒🇺🇸🌀](https://skylight.social), [Spark 🔒🇺🇸🌀](https://sprk.so) | [AT Protocol 🌀](https://atproto.com) | |
-| 🚧 | Live Streaming | [Stream.place 🌀](https://stream.place/) | | [AT Protocol 🌀](https://atproto.com) | [Twitch 🔒🇺🇸](https://twitch.tv) |
+| ✅ | Live Streaming | [Stream.place 🌀](https://stream.place/) | | [AT Protocol 🌀](https://atproto.com) | [Twitch 🔒🇺🇸](https://twitch.tv) |
 
 #### Meetup
 
