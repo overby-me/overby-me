@@ -44,6 +44,8 @@ pub mod cubestack;
 pub mod cubestorm;
 pub mod cubetwist;
 pub mod cubicgrid;
+pub mod cubocteversion;
+pub mod cubocteversion_models;
 pub mod dangerball;
 pub mod deepstars;
 pub mod discoball;
@@ -185,6 +187,7 @@ pub static ALL: &[&Saver3d] = &[
     &crackberg::SAVER,
     &cubenetic::SAVER,
     &cubestack::SAVER,
+    &cubocteversion::SAVER,
     &dangerball::SAVER,
     &deepstars::SAVER,
     &discoball::SAVER,

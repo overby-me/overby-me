@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (128) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (129) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
 web. `co____9` is `covid19` under a name that does not date it, generated from
@@ -748,6 +748,29 @@ make two triangles of no area, which raster to nothing, and every strip is an
 even number of vertices long so the winding of what follows a join is
 unchanged. Two thousand draw calls became thirty-two, for four thousand more
 vertices out of half a million.
+
+`cubocteversion` is the same eversion done in straight lines, and the contrast
+with `sphereeversion` is the point of having both. There is no formula and no
+jet: it keeps twelve vertices, thirty edges and twenty flat triangles the whole
+way, and everts by moving the vertices along straight lines from one polyhedron
+to the next. Richard Denner and Francois Apery each worked out a sequence of
+them, forty-five and seven, and the eversion *is* those tables, eased so the
+corners do not show.
+
+What is not tabulated is where the surface passes through itself, and that is
+the part worth knowing about. It is found rather than modelled: every pair of
+non-adjacent triangles is intersected against every other, every frame, by
+Devillers and Guigue's predicate, and the segments that come back are drawn as
+orange tubes. Both sets of tubes are balls and cylinders, up to twelve hundred
+triangle strips of them, and they are joined the same way the corrugations
+eversion's lunes are, so the whole plumbing is two draw calls.
+
+Its transparency knob is not offered here. It chose between two depth-peeling
+schemes, which are a way of drawing correct transparency in a fragment shader;
+the fixed-function path has none of that and neither has this, so the knob
+would have had nothing to select. Its earth colouring is in the same position
+as `sphereeversion`'s, and upstream's fixed-function path likewise declines to
+pick it at random.
 
 `timetunnel` was deferred for a different reason, and it is the case where
 following upstream's own fallback would have been the wrong answer. The two

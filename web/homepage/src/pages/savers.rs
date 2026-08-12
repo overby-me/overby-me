@@ -1294,6 +1294,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::cubetwist::start
 );
 gl3d_saver!(
+    "cubocteversion",
+    cubocteversion_body,
+    cubocteversion_start,
+    xscreensaver::hacks3d::cubocteversion::start
+);
+gl3d_saver!(
     "cubenetic",
     cubenetic_body,
     cubenetic_start,
@@ -2812,6 +2818,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "cubetwist",
         label: "Cube Twist",
         start: Start::Gl3d(cubetwist_start),
+    },
+    Entry {
+        slug: "cubocteversion",
+        label: "Cuboctahedron Eversion",
+        start: Start::Gl3d(cubocteversion_start),
     },
     Entry {
         slug: "cubicgrid",
