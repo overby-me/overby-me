@@ -18,6 +18,7 @@
 use crate::runtime::Saver3d;
 
 pub mod antinspect;
+pub mod antmaze;
 pub mod atunnel;
 pub mod beats;
 pub mod blinkbox;
@@ -123,6 +124,7 @@ mod winduprobot_wobble;
 pub static ALL: &[&Saver3d] = &[
     &antinspect::SAVER,
     &atunnel::SAVER,
+    &antmaze::SAVER,
     &blinkbox::SAVER,
     &blocktube::SAVER,
     &boing::SAVER,
