@@ -1006,6 +1006,12 @@ saver!(
 );
 
 gl3d_saver!(
+    "juggler3d",
+    juggler3d_body,
+    juggler3d_start,
+    xscreensaver::hacks3d::juggler3d::start
+);
+gl3d_saver!(
     "flurry",
     flurry_body,
     flurry_start,
@@ -2588,6 +2594,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "xspirograph",
         label: "XSpirograph",
         start: Start::Fb(xspirograph_start),
+    },
+    Entry {
+        slug: "juggler3d",
+        label: "Juggler 3D",
+        start: Start::Gl3d(juggler3d_start),
     },
     Entry {
         slug: "flurry",

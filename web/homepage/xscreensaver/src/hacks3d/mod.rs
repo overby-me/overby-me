@@ -76,6 +76,7 @@ mod glsnake_models;
 pub mod gltext;
 pub mod gravitywell;
 pub mod handsy;
+pub mod juggler3d;
 // Public because it is converted upstream data rather than a private helper:
 // the header defines three animations that its own table never lists, a whole
 // round of rock-paper-scissors among them, and they are kept because this is
@@ -146,6 +147,7 @@ mod winduprobot_wobble;
 /// the reason [`crate::all`] gives.
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
+    &juggler3d::SAVER,
     &flurry::SAVER,
     &atlantis::SAVER,
     &antinspect::SAVER,
