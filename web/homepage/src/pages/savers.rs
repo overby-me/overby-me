@@ -1162,6 +1162,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::mirrorblob::start
 );
 gl3d_saver!(
+    "maze3d",
+    maze3d_body,
+    maze3d_start,
+    xscreensaver::hacks3d::maze3d::start
+);
+gl3d_saver!(
     "nakagin",
     nakagin_body,
     nakagin_start,
@@ -2848,6 +2854,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "mirrorblob",
         label: "Mirror Blob",
         start: Start::Gl3d(mirrorblob_start),
+    },
+    Entry {
+        slug: "maze3d",
+        label: "Maze 3D",
+        start: Start::Gl3d(maze3d_start),
     },
     Entry {
         slug: "nakagin",

@@ -35,6 +35,15 @@ pub const GROUND: &[u8] = include_bytes!("../images/ground.png");
 /// copies of it back to back in a cross, so it reads from any side.
 pub const TREE: &[u8] = include_bytes!("../images/tree.png");
 
+/// The six pictures `maze3d` is built out of: brick for the walls, small
+/// tiles for the ceiling, boards for the floor, and the START and FINISH
+/// signs. The rat it sometimes passes is `bob.png`.
+pub const BRICK1: &[u8] = include_bytes!("../images/brick1.png");
+pub const BRICK2: &[u8] = include_bytes!("../images/brick2.png");
+pub const WOOD2: &[u8] = include_bytes!("../images/wood2.png");
+pub const START: &[u8] = include_bytes!("../images/start.png");
+pub const LOGO_32: &[u8] = include_bytes!("../images/logo-32.png");
+
 /// `bob.png`: the face flag waves when it is not waving words. From xlockmore
 /// by way of XScreenSaver, 64x64, four bits of palette.
 pub const BOB: &[u8] = include_bytes!("../images/bob.png");
