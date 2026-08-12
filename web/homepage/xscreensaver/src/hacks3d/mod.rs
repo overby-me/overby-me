@@ -62,6 +62,7 @@ pub mod glhanoi;
 pub mod glknots;
 pub mod glmatrix;
 pub mod glschool;
+pub mod glslideshow;
 pub mod glsnake;
 mod glsnake_models;
 pub mod gltext;
@@ -173,6 +174,7 @@ pub static ALL: &[&Saver3d] = &[
     &glknots::SAVER,
     &glhanoi::SAVER,
     &glschool::SAVER,
+    &glslideshow::SAVER,
     &headroom::SAVER,
     &handsy::SAVER,
     &highvoltage::SAVER,
@@ -291,15 +293,27 @@ mod tests {
         if seen > 10 {
             return true;
         }
+        // Or a batch big enough to be *around* the camera rather than inside
+        // its box: one whose projected extent covers the middle of the screen
+        // in x and y while lying somewhere between the near and far planes.
+        // `glslideshow` is the case in point, since one screen-filling quad
+        // has only four vertices and none of them is strictly inside.
         f.batches.iter().any(|b| {
             let ps: Vec<[f32; 3]> = f.vertices[b.first..b.first + b.count]
                 .iter()
                 .map(|v| b.mvp.transform(v.pos))
                 .collect();
-            (0..3).all(|k| {
-                ps.iter().map(|p| p[k]).fold(f32::MAX, f32::min) <= 0.0
-                    && ps.iter().map(|p| p[k]).fold(f32::MIN, f32::max) >= 0.0
-            })
+            if ps.is_empty() {
+                return false;
+            }
+            let lo = |k: usize| ps.iter().map(|p| p[k]).fold(f32::MAX, f32::min);
+            let hi = |k: usize| ps.iter().map(|p| p[k]).fold(f32::MIN, f32::max);
+            lo(0) <= 0.0
+                && hi(0) >= 0.0
+                && lo(1) <= 0.0
+                && hi(1) >= 0.0
+                && lo(2) <= 1.0
+                && hi(2) >= -1.0
         })
     }
 

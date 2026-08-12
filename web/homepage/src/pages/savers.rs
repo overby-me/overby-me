@@ -1534,6 +1534,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::gleidescope::start
 );
 gl3d_saver!(
+    "glslideshow",
+    glslideshow_body,
+    glslideshow_start,
+    xscreensaver::hacks3d::glslideshow::start
+);
+gl3d_saver!(
     "hilbert",
     hilbert_body,
     hilbert_start,
@@ -3004,6 +3010,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "gleidescope",
         label: "Gleidescope",
         start: Start::Gl3d(gleidescope_start),
+    },
+    Entry {
+        slug: "glslideshow",
+        label: "GL Slideshow",
+        start: Start::Gl3d(glslideshow_start),
     },
     Entry {
         slug: "hilbert",
