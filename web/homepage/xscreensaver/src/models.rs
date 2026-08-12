@@ -249,3 +249,10 @@ pub const LAMENT_MODEL_TETRA_DSE: &str = include_str!("../models/lament_model_te
 pub const LAMENT_MODEL_TETRA_DWN: &str = include_str!("../models/lament_model_tetra_dwn.gllist");
 pub const LAMENT_MODEL_TETRA_UNE: &str = include_str!("../models/lament_model_tetra_une.gllist");
 pub const LAMENT_MODEL_TETRA_USW: &str = include_str!("../models/lament_model_tetra_usw.gllist");
+
+/// The three shapes a Weighted Storage Cube is made of, repeated four, one and
+/// one time on each of its six faces: the rounded corner piece, the recessed
+/// disc, and the heart in the middle of it.
+pub const COMPANION_QUAD: &str = include_str!("../models/companion_quad.gllist");
+pub const COMPANION_DISC: &str = include_str!("../models/companion_disc.gllist");
+pub const COMPANION_HEART: &str = include_str!("../models/companion_heart.gllist");

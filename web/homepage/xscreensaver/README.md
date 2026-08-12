@@ -8,13 +8,17 @@ different runtime:
 
 | Tier | Savers | Upstream | Runtime it needs | State |
 |-|-|-|-|-|
-| 2D | 142 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (142) |
+| 2D | 143 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (143) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 136 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (119) |
+| OpenGL | 137 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (120) |
 
 `webcollage` and `vidwhacker` are not portable: they scrape images off the live
-web. `co____9`, `companioncube` and `mismunch` are aliases or variants of other
-savers.
+web. `co____9` is `covid19` under a name that does not date it, generated from
+the same source at build time, so it is counted once. `mismunch` was retired
+upstream in version 5.08 and merged into `munch`, which since then draws either
+kind depending on a resource; the name still has a configuration file of its
+own, so it has a slug of its own here too, pointing at the same code with the
+resource nailed down.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is

@@ -98,6 +98,7 @@ pub mod marbling;
 pub mod maze;
 pub mod memscroller;
 pub mod metaballs;
+pub mod mismunch;
 pub mod moire;
 pub mod moire2;
 pub mod mountain;
@@ -249,6 +250,7 @@ pub static ALL: &[&Saver] = &[
     &maze::SAVER,
     &memscroller::SAVER,
     &metaballs::SAVER,
+    &mismunch::SAVER,
     &moire2::SAVER,
     &mountain::SAVER,
     &munch::SAVER,

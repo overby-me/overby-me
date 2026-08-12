@@ -602,6 +602,12 @@ saver!(
     xscreensaver::hacks2d::lissie::start
 );
 saver!(
+    "mismunch",
+    mismunch_body,
+    mismunch_start,
+    xscreensaver::hacks2d::mismunch::start
+);
+saver!(
     "moire",
     moire_body,
     moire_start,
@@ -1028,6 +1034,12 @@ gl3d_saver!(
     atlantis_body,
     atlantis_start,
     xscreensaver::hacks3d::atlantis::start
+);
+gl3d_saver!(
+    "companioncube",
+    companioncube_body,
+    companioncube_start,
+    xscreensaver::hacks3d::companioncube::start
 );
 gl3d_saver!(
     "crackberg",
@@ -2009,6 +2021,11 @@ pub static SAVERS: &[Entry] = &[
         start: Start::Fb(cloudlife_start),
     },
     Entry {
+        slug: "companioncube",
+        label: "Companion Cube",
+        start: Start::Gl3d(companioncube_start),
+    },
+    Entry {
         slug: "compass",
         label: "Compass",
         start: Start::Fb(compass_start),
@@ -2957,6 +2974,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "menger",
         label: "Menger",
         start: Start::Gl3d(menger_start),
+    },
+    Entry {
+        slug: "mismunch",
+        label: "Mismunch",
+        start: Start::Fb(mismunch_start),
     },
     Entry {
         slug: "moebius",

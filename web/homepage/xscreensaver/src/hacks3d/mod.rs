@@ -35,6 +35,7 @@ pub mod carousel;
 pub mod chompytower;
 pub mod circuit;
 pub mod cityflow;
+pub mod companioncube;
 pub mod crackberg;
 pub mod crumbler;
 pub mod cube21;
@@ -202,6 +203,7 @@ pub static ALL: &[&Saver3d] = &[
     &highvoltage::SAVER,
     &carousel::SAVER,
     &chompytower::SAVER,
+    &companioncube::SAVER,
     &glmatrix::SAVER,
     &gltext::SAVER,
     &fliptext::SAVER,

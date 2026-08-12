@@ -231,7 +231,7 @@ impl Munch {
     }
 }
 
-fn init(d: &mut Dpy) -> Box<dyn Screenhack> {
+pub(super) fn init(d: &mut Dpy) -> Box<dyn Screenhack> {
     let fg = d.res.pixel("foreground");
     let bg = d.res.pixel("background");
     let mut gc = Gc::new(fg, bg);
@@ -342,7 +342,7 @@ const MISMUNCH_MODES: &[SelectItem] = &[
     },
 ];
 
-const DRAW_MODES: &[SelectItem] = &[
+pub(super) const DRAW_MODES: &[SelectItem] = &[
     SelectItem {
         value: "true",
         label: "XOR",
