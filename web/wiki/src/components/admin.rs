@@ -689,6 +689,9 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
         .and_then(|d| d.0.get("hidden"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // Shown through `option_label`, like the ballot itself: the standard motion
+    // options are stored in Danish and the chair's console read them raw, so an
+    // English results table listed "Imod".
     let opts: Vec<String> = poll
         .data
         .as_ref()
@@ -696,7 +699,8 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
         .and_then(|o| o.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
+                .filter_map(|v| v.as_str())
+                .map(super::vote::option_label)
                 .collect()
         })
         .unwrap_or_default();

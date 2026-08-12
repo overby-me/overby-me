@@ -13,7 +13,7 @@ mod poll;
 mod position;
 
 pub use policy::PolicyApp;
-pub use poll::PollApp;
+pub use poll::{option_label, PollApp};
 pub use position::PositionApp;
 
 // Re-exported so the sub-apps reach each other's buttons/badge through

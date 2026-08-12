@@ -101,6 +101,40 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
     }
 }
 
+/// A ballot option as the reader should see it.
+///
+/// The standard motion ballot is stored on the poll as the literal strings
+/// "For" / "Imod" / "Blank", written in Danish when the poll was opened, and the
+/// ballot drew them verbatim — so an English reader voted "Imod". They are safe
+/// to translate because nothing depends on them: a ballot records the option's
+/// INDEX, and the abstention is identified by position (the last option), never
+/// by its text. The stored words carry no meaning the code reads.
+///
+/// So the canonical words stay in the record and the reader is shown their own
+/// language, which also fixes every poll already held. Anything else passes
+/// through: a candidate's name is a proper noun and a custom option is whatever
+/// the chair wrote, and neither is ours to rewrite.
+pub fn option_label(stored: &str) -> String {
+    match option_key(stored) {
+        Some(key) => t(key),
+        None => stored.to_string(),
+    }
+}
+
+/// Which stored option is a standard one, and the key it is shown through.
+///
+/// Split out so the decision can be tested: `t` reads the language off a
+/// `GlobalSignal` and needs a Dioxus runtime, which a unit test has none of.
+/// This half is the part with a choice in it.
+fn option_key(stored: &str) -> Option<&'static str> {
+    match stored {
+        "For" => Some("vote.optionFor"),
+        "Imod" => Some("vote.optionAgainst"),
+        "Blank" => Some("vote.optionBlank"),
+        _ => None,
+    }
+}
+
 /// The options / min / max a poll's `data` describes.
 struct PollConfig {
     options: Vec<String>,
@@ -425,6 +459,11 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     let multi_select = max_vote > 1;
 
     let opts = options.clone();
+    // What the reader sees. `opts` stays as stored, because that is what the
+    // indices in every ballot are indices INTO; only the words change (see
+    // `option_label`). Everything below draws from this and nothing computes from
+    // it.
+    let opts: Vec<String> = opts.iter().map(|o| option_label(o)).collect();
 
     // A single strict maximum is the winner (trophy + verdict); two or more options
     // sharing the top count is a tie — no trophy, shown as "Uafgjort". A tie on a
@@ -1181,8 +1220,29 @@ pub(super) fn StartPollDialog(
 
 #[cfg(test)]
 mod tests {
-    use super::{ballot_order, poll_config};
+    use super::{ballot_order, option_key, poll_config};
     use serde_json::json;
+
+    /// The standard ballot translates; everything else is left alone.
+    ///
+    /// The three canonical words are stored on every poll in Danish, so an
+    /// English reader was asked to vote "Imod". They are only ever displayed —
+    /// a ballot records the option's index, and the abstention is found by
+    /// position — so translating the display changes nothing that is counted.
+    #[test]
+    fn only_the_standard_ballot_options_are_translated() {
+        assert_eq!(option_key("For"), Some("vote.optionFor"));
+        assert_eq!(option_key("Imod"), Some("vote.optionAgainst"));
+        assert_eq!(option_key("Blank"), Some("vote.optionBlank"));
+        // A candidate's name is a proper noun, a chair's custom option is their
+        // wording, and neither is ours to rewrite.
+        assert_eq!(option_key("Karoline Hinke Grove"), None);
+        assert_eq!(option_key("Udsæt til næste HB"), None);
+        // Nothing is guessed at: only the exact stored forms map, so a chair who
+        // writes their own lowercase "imod" keeps it.
+        assert_eq!(option_key("imod"), None);
+        assert_eq!(option_key(" For"), None);
+    }
 
     #[test]
     fn poll_config_reads_options_and_bounds() {
