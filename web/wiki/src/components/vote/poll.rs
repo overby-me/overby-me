@@ -840,13 +840,51 @@ fn ballot_order(n: usize, mut rand: impl FnMut() -> f64) -> Vec<usize> {
     order
 }
 
-/// Owner-only control to open a poll on a policy / change / position: a "start"
-/// button and a small dialog (hide-result toggle, plus a vote-range for a
-/// position with more than two candidates). Mirrors React's PollDialog — it
-/// closes any prior active poll, inserts a `vote/poll`, sets the context
-/// `active` relation, and navigates to the new ballot.
+/// The chair's row that opens [`StartPollDialog`], for the tools sheet's Meeting
+/// group. Split from the dialog because the two cannot live in the same place:
+/// the modal sheet is `transform`ed and `overflow: hidden`, and a transform makes
+/// an element the containing block for its `position: fixed` descendants, so a
+/// dialog rendered inside the sheet is positioned against the SHEET and clipped
+/// by it. `content.rs` splits its delete confirmation for the same reason.
+///
+/// `open` is therefore owned by the caller, which renders the row here and the
+/// dialog out in the page body.
 #[component]
-pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
+pub(super) fn StartPollButton(node: NodeWithChildren, open: Signal<bool>) -> Element {
+    let mut open = open;
+    // Non-owners get nothing. The sheet group is owner-gated too; this is the
+    // component's own guarantee, not a reliance on where it is rendered.
+    if !node.is_context_owner.unwrap_or(false) {
+        return rsx! {};
+    }
+    rsx! {
+        // A row, not a card. As a card this was a permanent empty header reading
+        // "New poll" above the list of polls it creates, which announced a poll
+        // section on pages that had none and repeated the heading on pages that
+        // did. Opening a poll is a chair's action, so it sits with the chair's
+        // other actions; the polls themselves are the list, which hides when
+        // there are none.
+        button {
+            class: "sheet-action",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "ballot" }
+            "{t(\"poll.newPoll\")}"
+        }
+    }
+}
+
+/// Owner-only dialog to open a poll on a policy / change / position (hide-result
+/// toggle, plus a vote-range for a position with more than two candidates).
+/// Mirrors React's PollDialog — it closes any prior active poll, inserts a
+/// `vote/poll`, sets the context `active` relation, and navigates to the new
+/// ballot. Its trigger is [`StartPollButton`].
+#[component]
+pub(super) fn StartPollDialog(
+    node: NodeWithChildren,
+    path: Vec<String>,
+    open: Signal<bool>,
+) -> Element {
+    let mut open = open;
     let mime = node.mime_id.clone().unwrap_or_default();
     let is_position = mime == "vote/position";
     let options: Vec<String> = if is_position {
@@ -866,7 +904,6 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
 
     let session = use_session();
     let nav = use_navigator();
-    let mut open = use_signal(|| false);
     let mut hidden = use_signal(|| is_position);
     // Secret ballot: casts route through the backend so vote nodes carry no
     // owner_id (untraceable). Defaults on for candidate elections (positions).
@@ -885,23 +922,6 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
     let range_label = t("poll.voteRange");
 
     rsx! {
-        div { class: "card app-card mt-1",
-            div { class: "card-header",
-                // `small`, like every other section card on the pages this sits
-                // among (candidates, questions, amendments, polls): a full-size
-                // avatar belongs to a page header, not to a section of one.
-                div { class: "avatar small", {icon_el("vote/poll")} }
-                h3 { class: "title-medium", "{t(\"poll.newPoll\")}" }
-                div { class: "flex-grow" }
-                button {
-                    class: "btn-icon add-action state-layer",
-                    aria_label: "{t(\"poll.newPoll\")}",
-                    title: "{t(\"poll.newPoll\")}",
-                    onclick: move |_| open.set(true),
-                    span { class: "material-icons", "play_arrow" }
-                }
-            }
-        }
         crate::components::widgets::Dialog {
             open: open(),
             on_dismiss: move |_| open.set(false),

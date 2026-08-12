@@ -55,14 +55,28 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         .map(|d| crate::components::content::slate_plain_text(&d.0))
         .unwrap_or_default();
     let mut diff_open = use_signal(|| Option::<String>::None);
+    // Owned here so the sheet row and the dialog, which must render in different
+    // parts of the tree, still open and close together.
+    let poll_open = use_signal(|| false);
 
     rsx! {
         // Main content. The comment thread renders at the end, below the
         // amendments and polls.
-        ContentApp { node: node.clone() }
-
-        // Owner-only: open a poll on this policy/change.
-        StartPollButton { node: node.clone(), path: path.clone() }
+        // Opening a poll on this motion is a chair's action, so it rides in the
+        // tools sheet's Meeting group rather than standing as its own card. The
+        // polls it makes are the section further down, which shows itself only
+        // when there is something in it.
+        //
+        // Row and dialog are separated on purpose: the sheet is transformed, so
+        // anything `position: fixed` inside it is clipped to the sheet (see
+        // `StartPollButton`). The dialog therefore renders out here.
+        ContentApp {
+            node: node.clone(),
+            meeting_actions: rsx! {
+                StartPollButton { node: node.clone(), open: poll_open }
+            },
+        }
+        StartPollDialog { node: node.clone(), path: path.clone(), open: poll_open }
 
         // Amendments — always shown so its create action (in the header) has a
         // home; the body shows an empty state until the first amendment lands.

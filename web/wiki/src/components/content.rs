@@ -41,6 +41,15 @@ pub fn ContentApp(
     /// empty state stands down rather than announcing a lack nobody felt.
     #[props(default)]
     extra: Option<Element>,
+    /// Extra rows for the Meeting group of the tools sheet, for a composite view
+    /// whose node type has a chair action of its own: a policy or a position can
+    /// have a poll opened on it. They land in the group they belong to rather
+    /// than as a card of their own, which is what "open a poll" had been.
+    ///
+    /// Rendered inside the same `is_context_owner` gate as the rest of the group,
+    /// so a caller cannot widen who sees a chair's control by passing one.
+    #[props(default)]
+    meeting_actions: Option<Element>,
 ) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
@@ -355,6 +364,10 @@ pub fn ContentApp(
                         } else {
                             "{t(\"content.showCommentsScreen\")}"
                         }
+                    }
+                    // The node type's own chair action, if it has one.
+                    if let Some(rows) = meeting_actions.clone() {
+                        {rows}
                     }
                     }
                 }

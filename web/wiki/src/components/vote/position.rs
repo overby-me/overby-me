@@ -64,6 +64,10 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/candidate"))
         .collect();
+    // Owned here so the sheet row and the dialog, which must render in different
+    // parts of the tree, still open and close together.
+    let poll_open = use_signal(|| false);
+
     let polls: Vec<_> = children
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/poll"))
@@ -184,12 +188,22 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // The position's text and its candidates as ONE card (see
         // `candidate_section` above). The comment thread renders at the very end,
         // below the polls.
-        ContentApp { node: node.clone(), extra: candidate_section }
-
-        // Polls come after the candidates they are opened on: a poll is voted on
-        // the field, so the field is read first. Owner-only creation sits with
-        // them rather than above the gallery.
-        StartPollButton { node: node.clone(), path: path.clone() }
+        // Opening a poll is a chair's action and rides in the tools sheet's
+        // Meeting group. It used to be a card between the candidate gallery and
+        // the polls, which put a permanent "New poll" heading on every position
+        // whether or not one had ever been opened.
+        //
+        // Row and dialog are separated on purpose: the sheet is transformed, so
+        // anything `position: fixed` inside it is clipped to the sheet (see
+        // `StartPollButton`). The dialog therefore renders out here.
+        ContentApp {
+            node: node.clone(),
+            extra: candidate_section,
+            meeting_actions: rsx! {
+                StartPollButton { node: node.clone(), open: poll_open }
+            },
+        }
+        StartPollDialog { node: node.clone(), path: path.clone(), open: poll_open }
 
         // Polls opened on this position.
         if !polls.is_empty() {
