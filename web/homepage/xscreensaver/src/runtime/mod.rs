@@ -20,6 +20,7 @@
 //! so a saver behaves identically in a `cargo test` and on the page.
 
 pub mod analogtv;
+pub mod cdt;
 pub mod chessmodels;
 pub mod color;
 pub mod delaunay;

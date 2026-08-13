@@ -36,6 +36,7 @@ pub mod chompytower;
 pub mod circuit;
 pub mod cityflow;
 pub mod companioncube;
+pub mod countries;
 pub mod covid19;
 pub mod crackberg;
 pub mod crumbler;
