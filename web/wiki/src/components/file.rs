@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::graphql::{self};
 use crate::i18n::t;
@@ -321,6 +322,43 @@ mod tests {
             !g.contains("src="),
             "gview ignores src, which would render nothing: {g}"
         );
+    }
+
+    /// The brands an iPhone writes are recognised, and nothing else is.
+    ///
+    /// This decides whether a file is decoded here or handed to the browser, and
+    /// it is asked of files whose mime said only `application/octet-stream`. A
+    /// false positive parks an ordinary picture on a spinner and then shows it as
+    /// undrawable, so the shape of the box matters as much as the brand: `ftyp`
+    /// at 4, the brand at 8.
+    #[test]
+    fn only_a_heif_container_is_taken_for_one() {
+        use super::looks_like_heif;
+        let ftyp = |brand: &[u8]| {
+            let mut v = vec![0, 0, 0, 0x18];
+            v.extend_from_slice(b"ftyp");
+            v.extend_from_slice(brand);
+            v.extend_from_slice(&[0; 8]);
+            v
+        };
+        for brand in [b"heic", b"heix", b"mif1", b"msf1"] {
+            assert!(looks_like_heif(&ftyp(brand)), "{:?}", brand);
+        }
+        // AVIF is the same container holding AV1, which every browser draws
+        // itself and this decoder cannot read. Taking it would turn a picture
+        // that works into one that does not.
+        assert!(!looks_like_heif(&ftyp(b"avif")));
+        // An MP4 is ISO-BMFF too, and its brand is the only thing telling them
+        // apart.
+        assert!(!looks_like_heif(&ftyp(b"isom")));
+        // Ordinary pictures, which reach this whenever a mime was unhelpful.
+        assert!(!looks_like_heif(&[
+            0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]));
+        assert!(!looks_like_heif(b"\x89PNG\r\n\x1a\n\0\0\0\0\0"));
+        // And a file too short to hold a brand is not read past its end.
+        assert!(!looks_like_heif(b"\0\0\0\x18ftyp"));
+        assert!(!looks_like_heif(&[]));
     }
 
     /// Microsoft cannot render OpenDocument, so it is not offered for one.
@@ -916,6 +954,9 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     )
     .unwrap_or_default();
 
+    // A HEIC has to be decoded here before anything can draw it.
+    let heif = use_heif_preview(file_id.to_string(), file_mime.to_string());
+
     // Downloading fetches the bytes when the reader asks for them, rather than
     // following a link minted when the page opened.
     //
@@ -1292,6 +1333,23 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                     div { class: "empty-state empty-state-sm",
                         div { class: "spinner spinner-sm" }
                     }
+                } else if let HeifPreview::Decoding = heif {
+                    // Decoding a twelve-megapixel photo is not instant, and this
+                    // is the same spinner the file's own arrival shows.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "spinner spinner-sm" }
+                    }
+                } else if let HeifPreview::Ready(src) = &heif {
+                    super::widgets::ZoomableImage { src: src.clone(), alt: name.to_string() }
+                } else if let HeifPreview::Failed = heif {
+                    // Say so rather than showing a broken picture. The download
+                    // action still works, and on a phone the file opens.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "broken_image" }
+                        }
+                        p { class: "empty-state-body", "{t(\"file.imageNotDrawable\")}" }
+                    }
                 } else if file_mime.starts_with("image/") {
                     super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
                 } else if file_mime.starts_with("video/") {
@@ -1377,4 +1435,133 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
             context_id: context_id.clone(),
         }
     }
+}
+
+/// Where a HEIC has got to: not one, being decoded, drawable, or beyond us.
+#[derive(Clone, PartialEq)]
+pub enum HeifPreview {
+    /// Nothing to do. Every ordinary image is this, and so is a HEIC whose bytes
+    /// have not arrived yet -- the caller cannot tell them apart, and must not:
+    /// deciding "not a HEIC" from a mime alone is what this sniffs to avoid.
+    NotHeif,
+    Decoding,
+    Ready(String),
+    /// Decoded and refused. A HEIC is a container, and one holding something
+    /// other than an HEVC still (a burst, a depth map, an AV1 image) is a file
+    /// this decoder will not read however long it is given.
+    Failed,
+}
+
+/// Fetch a file and, if it turns out to be a HEIC, decode it for display.
+///
+/// Keyed on the file, so moving between two images does not leave the first
+/// one's picture on the second's page.
+///
+/// The bytes are fetched WHATEVER the mime says, when the mime is one that could
+/// plausibly be a HEIC -- see `is_heif_mime` for why the mime cannot be trusted
+/// on its own -- and the sniff decides. An ordinary JPEG never reaches here.
+pub fn use_heif_preview(file_id: String, mime: String) -> HeifPreview {
+    let mut state = use_signal(|| HeifPreview::NotHeif);
+    let maybe = is_heif_mime(&mime) || mime == "application/octet-stream" || mime.is_empty();
+    use_effect(use_reactive!(|(file_id, maybe)| {
+        state.set(HeifPreview::NotHeif);
+        if !maybe || file_id.is_empty() {
+            return;
+        }
+        let Some(token) = crate::session::current_token() else {
+            return;
+        };
+        state.set(HeifPreview::Decoding);
+        spawn(async move {
+            let url = crate::backend_api::file_url(&file_id);
+            let bytes = match reqwest::Client::new()
+                .get(&url)
+                .bearer_auth(&token)
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => resp.bytes().await.ok(),
+                _ => None,
+            };
+            let Some(bytes) = bytes else {
+                state.set(HeifPreview::Failed);
+                return;
+            };
+            // Sniffed, not assumed: an `application/octet-stream` is far more
+            // often something ordinary, and that one must go back to being drawn
+            // from storage rather than sitting on a spinner.
+            if !looks_like_heif(&bytes) {
+                state.set(HeifPreview::NotHeif);
+                return;
+            }
+            match heif_to_data_url(&bytes) {
+                Some(url) => state.set(HeifPreview::Ready(url)),
+                None => state.set(HeifPreview::Failed),
+            }
+        });
+    }));
+    state()
+}
+
+/// Whether this is a photo off a phone that browsers may refuse to draw.
+///
+/// Firefox draws no HEIC at all, so an iPhone photo is a broken image there.
+/// Matched on the mime AND on the file's own bytes, because the mime is whatever
+/// the uploading browser claimed: a HEIC picked from a file dialog often arrives
+/// as `application/octet-stream`, and the files that prompted this are already in
+/// storage under whatever they were given then.
+pub fn is_heif_mime(mime: &str) -> bool {
+    matches!(
+        mime,
+        "image/heic" | "image/heif" | "image/heic-sequence" | "image/heif-sequence"
+    )
+}
+
+/// Whether these bytes open with an ISO-BMFF `ftyp` box naming a HEIF brand.
+///
+/// The layout is `[4 bytes length][ftyp][major brand]`, so the brand sits at 8.
+/// `heic`/`heix` are the HEVC still images an iPhone writes; `mif1`/`msf1` are
+/// the generic image brands; `avif` is the same container with AV1 inside, which
+/// every current browser draws itself and which this decoder does not read -- so
+/// it is deliberately NOT in the list.
+pub fn looks_like_heif(bytes: &[u8]) -> bool {
+    bytes.len() > 12
+        && &bytes[4..8] == b"ftyp"
+        && matches!(
+            &bytes[8..12],
+            b"heic" | b"heix" | b"heim" | b"heis" | b"mif1" | b"msf1"
+        )
+}
+
+/// Decode a HEIF/HEIC image and hand back something an `<img>` will draw.
+///
+/// Decoded here rather than converted on upload, because the files that prompted
+/// this are already in storage; an upload-time fix would leave them broken.
+///
+/// The canvas does the encoding. `heif-oxide` gives pixels, and turning pixels
+/// back into a picture would otherwise need a PNG or JPEG writer compiled in
+/// beside it -- where the browser already has both, and drawing to a canvas to
+/// read a data URL back off it costs nothing but the round trip.
+///
+/// JPEG, not PNG: these are photographs, and a 12-megapixel PNG data URL is tens
+/// of megabytes of base64 for a picture nobody will pixel-peep.
+pub fn heif_to_data_url(bytes: &[u8]) -> Option<String> {
+    let image = heif_oxide::decode_bytes(bytes).ok()?;
+    let (width, height) = (image.width, image.height);
+    let rgba = image.to_rgba8();
+    let document = web_sys::window()?.document()?;
+    let canvas: web_sys::HtmlCanvasElement =
+        document.create_element("canvas").ok()?.dyn_into().ok()?;
+    canvas.set_width(width);
+    canvas.set_height(height);
+    let context: web_sys::CanvasRenderingContext2d =
+        canvas.get_context("2d").ok()??.dyn_into().ok()?;
+    let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        wasm_bindgen::Clamped(&rgba),
+        width,
+        height,
+    )
+    .ok()?;
+    context.put_image_data(&data, 0.0, 0.0).ok()?;
+    canvas.to_data_url_with_type("image/jpeg").ok()
 }
