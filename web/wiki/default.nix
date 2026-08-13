@@ -59,6 +59,14 @@
           ./src
           ./assets
           ./graphql
+          # The page shell: the boot screen, the wasm-fetch recovery path and
+          # the `heicDecode` worker glue. Without it dx writes a default one,
+          # and this build quietly stopped matching what `just build` deploys.
+          ./index.html
+          # The HEIC decoder's own wasm module, built by `just build` into a
+          # Web Worker (heic-worker/). A workspace member, so it is vendored
+          # from the same Cargo.lock as everything else.
+          ./heic-worker
           # Path dependencies: the OOXML parsers and the patched dioxus-core.
           # Cargo cannot resolve the manifest without them.
           ./vendor

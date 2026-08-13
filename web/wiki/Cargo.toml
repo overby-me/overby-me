@@ -3,6 +3,18 @@ name = "wiki-dioxus"
 version = "0.1.0"
 edition = "2021"
 
+# A workspace purely so `heic-worker` shares this Cargo.lock. The Nix build
+# (default.nix) vendors from exactly one lockfile, so a second crate with its
+# own could not be built there at all.
+#
+# `vendor/*` is excluded because a path dependency inside a workspace directory
+# would otherwise be made a member, and members are linted: `cargo clippy -D
+# warnings` started failing on upstream's code in the ooxml parsers, which is
+# not ours to fix and not what the gate is for.
+[workspace]
+members = ["heic-worker"]
+exclude = ["vendor"]
+
 [dependencies]
 # (xlsx roster parsing moved to the backend to keep calamine/zip/inflate out of
 # the wasm bundle — see nhost::parse_roster / backend roster.rs.)
@@ -30,10 +42,6 @@ docx-parser = { path = "vendor/ooxml/docx-parser" }
 # adaptive WindowSizeClass signal from inside the Dioxus runtime.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
-# VENDORED for a wasm fix (vendor/heif-oxide, see its README-VENDOR.md): the
-# published crate spawns threads to decode tiles, which no browser can do, so
-# every HEIC took the app down instead of drawing.
-heif-oxide = { path = "vendor/heif-oxide" }
 js-sys = "0.3"
 log = "0.4"
 lopdf = { version = "0.44.0", default-features = false, features = ["wasm_js"] }
@@ -91,7 +99,6 @@ web-sys = { version = "=0.3.98", features = [
   "HtmlImageElement",
   "HtmlSelectElement",
   "HtmlTextAreaElement",
-  "ImageData",
   "Location",
   "MessageEvent",
   "Navigator",

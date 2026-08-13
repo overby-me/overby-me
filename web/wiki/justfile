@@ -46,6 +46,20 @@ build:
     #                /assets/ path, whose scope would only be /assets/)
     cp assets/_redirects target/dx/wiki-dioxus/release/web/public/_redirects
     cp assets/_headers target/dx/wiki-dioxus/release/web/public/_headers
+    # The HEIC decoder, as its own wasm module for the Web Worker that runs it
+    # (heic-worker/src/lib.rs). Built with the default release profile rather
+    # than the app's size-tuned `wasm-release`: this one is fetched only by a
+    # visitor who actually meets a HEIC, and opt-level=3 decodes an iPhone photo
+    # in about two thirds the time of opt-level="z".
+    #
+    # At the ROOT and unhashed, because the worker script names both files by
+    # absolute path -- it has no bundler to rewrite them. `_headers` therefore
+    # keeps them revalidated rather than immutable like /assets/*.
+    cargo build --release --target wasm32-unknown-unknown -p heic-worker
+    wasm-bindgen --target no-modules --no-typescript --out-name heic-decode \
+        --out-dir target/dx/wiki-dioxus/release/web/public \
+        target/wasm32-unknown-unknown/release/heic_worker.wasm
+    cp assets/heic-worker.js target/dx/wiki-dioxus/release/web/public/heic-worker.js
     # sw.js carries the build it is, so a page can ask the worker serving it
     # which deploy it came from (src/logging.rs). Substituted here rather than
     # baked by `dx`, which does not process this file.

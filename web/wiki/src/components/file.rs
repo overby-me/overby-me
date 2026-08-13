@@ -1494,7 +1494,7 @@ pub fn use_heif_preview(file_id: String, mime: String) -> HeifPreview {
                 state.set(HeifPreview::NotHeif);
                 return;
             }
-            match heif_to_data_url(&bytes) {
+            match heif_object_url(&bytes).await {
                 Some(url) => state.set(HeifPreview::Ready(url)),
                 None => state.set(HeifPreview::Failed),
             }
@@ -1533,67 +1533,31 @@ pub fn looks_like_heif(bytes: &[u8]) -> bool {
         )
 }
 
-/// Decode a HEIF/HEIC image and hand back something an `<img>` will draw.
+/// Decode a HEIF/HEIC image in the Worker, and hand back a URL to draw.
 ///
-/// Decoded here rather than converted on upload, because the files that prompted
-/// this are already in storage; an upload-time fix would leave them broken.
+/// The whole job -- decode, downscale, JPEG encode -- happens off the main
+/// thread (`assets/heic-worker.js`), so a two-second decode costs the page no
+/// frames. What comes back is an object URL for a Blob, which `use_drop`
+/// revokes like any other.
 ///
-/// The canvas does the encoding. `heif-oxide` gives pixels, and turning pixels
-/// back into a picture would otherwise need a PNG or JPEG writer compiled in
-/// beside it -- where the browser already has both, and drawing to a canvas to
-/// read a data URL back off it costs nothing but the round trip.
-///
-/// JPEG, not PNG: these are photographs, and a 12-megapixel PNG data URL is tens
-/// of megabytes of base64 for a picture nobody will pixel-peep.
-pub fn heif_to_data_url(bytes: &[u8]) -> Option<String> {
-    let image = heif_oxide::decode_bytes(bytes).ok()?;
-    let (width, height) = (image.width, image.height);
-    let rgba = image.to_rgba8();
-    let document = web_sys::window()?.document()?;
-    let canvas: web_sys::HtmlCanvasElement =
-        document.create_element("canvas").ok()?.dyn_into().ok()?;
-    canvas.set_width(width);
-    canvas.set_height(height);
-    let context: web_sys::CanvasRenderingContext2d =
-        canvas.get_context("2d").ok()??.dyn_into().ok()?;
-    let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-        wasm_bindgen::Clamped(&rgba),
-        width,
-        height,
-    )
-    .ok()?;
-    context.put_image_data(&data, 0.0, 0.0).ok()?;
-    // Down to something a screen can use, if it came off a modern phone.
-    //
-    // The portrait that prompted this is 2453x4362: eleven megapixels, which is
-    // 43 MB of RGBA before the canvas holds 43 MB more of its own, and then a
-    // base64 data URL of the whole thing on top. One is survivable; a list of
-    // candidates decoding a dozen at once is not, and a card a few hundred
-    // pixels wide had no use for any of it.
-    //
-    // Scaled by the browser through a second canvas rather than by hand: it
-    // filters properly, and the large canvas is dropped right after.
-    let longest = width.max(height);
-    if longest > HEIF_MAX_EDGE {
-        let scale = f64::from(HEIF_MAX_EDGE) / f64::from(longest);
-        let w = (f64::from(width) * scale).round().max(1.0);
-        let h = (f64::from(height) * scale).round().max(1.0);
-        let small: web_sys::HtmlCanvasElement =
-            document.create_element("canvas").ok()?.dyn_into().ok()?;
-        small.set_width(w as u32);
-        small.set_height(h as u32);
-        let ctx: web_sys::CanvasRenderingContext2d =
-            small.get_context("2d").ok()??.dyn_into().ok()?;
-        ctx.draw_image_with_html_canvas_element_and_dw_and_dh(&canvas, 0.0, 0.0, w, h)
-            .ok()?;
-        return small.to_data_url_with_type("image/jpeg").ok();
-    }
-    canvas.to_data_url_with_type("image/jpeg").ok()
+/// The decoder lives ONLY in the worker, which is why nothing here falls back to
+/// decoding on the main thread. Keeping a copy in the app would have put a
+/// megabyte of HEVC decoder in the bundle that every visitor downloads, to serve
+/// the one case where the worker glue is missing -- a shell cached from before
+/// this shipped, which revalidates on the next load anyway. Those get no picture
+/// for one load, exactly as they did before any of this existed.
+pub async fn heif_object_url(bytes: &[u8]) -> Option<String> {
+    let window = web_sys::window()?;
+    let decode = js_sys::Reflect::get(&window, &wasm_bindgen::JsValue::from_str("heicDecode"))
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())?;
+    let arg = js_sys::Uint8Array::from(bytes);
+    let promise = decode
+        .call1(&wasm_bindgen::JsValue::NULL, &arg)
+        .ok()
+        .and_then(|p| p.dyn_into::<js_sys::Promise>().ok())?;
+    let value = wasm_bindgen_futures::JsFuture::from(promise).await.ok()?;
+    // Null is the worker reporting it could not read the file. Decoding again
+    // here would only reach the same decoder and block the page to do it.
+    value.as_string()
 }
-
-/// The longest edge a decoded HEIC is reduced to.
-///
-/// Above a retina phone's own screen, so opening the picture still shows more
-/// than the page did; far below the eleven megapixels a phone camera writes,
-/// which nothing here displays and which costs tens of megabytes to carry.
-const HEIF_MAX_EDGE: u32 = 2048;

@@ -275,5 +275,55 @@
                 };
             })();
         </script>
+        <script>
+            // Hands a HEIC to the worker and gives back an object URL for a
+            // JPEG the browser can draw (see assets/heic-worker.js).
+            //
+            // Here rather than in Rust because the worker, the request ids and
+            // the promise that pairs them are all plain JS; the app calls this
+            // and awaits it (components/loader.rs). If this is missing -- an
+            // old shell still cached, say -- the caller falls back to decoding
+            // on the main thread, which is slow but correct.
+            (function () {
+                var worker = null;
+                var seq = 0;
+                var pending = new Map();
+
+                function settle(id, url) {
+                    var resolve = pending.get(id);
+                    if (!resolve) return;
+                    pending.delete(id);
+                    resolve(url);
+                }
+
+                window.heicDecode = function (bytes) {
+                    return new Promise(function (resolve) {
+                        if (!worker) {
+                            // Started on first use, so a visitor who never meets
+                            // a HEIC never fetches the decoder at all.
+                            worker = new Worker("/heic-worker.js");
+                            worker.onmessage = function (e) {
+                                settle(e.data.id, e.data.blob ? URL.createObjectURL(e.data.blob) : null);
+                            };
+                            worker.onerror = function () {
+                                // The worker is gone; nothing pending can ever
+                                // be answered, so fail them all rather than
+                                // leave the images spinning forever.
+                                pending.forEach(function (r) { r(null); });
+                                pending.clear();
+                                worker = null;
+                            };
+                        }
+                        var id = ++seq;
+                        pending.set(id, resolve);
+                        // A copy, because `bytes` is a view into the wasm heap:
+                        // transferring it would detach the app's own memory, and
+                        // not transferring it would copy anyway on the way out.
+                        var copy = bytes.slice();
+                        worker.postMessage({ id: id, bytes: copy }, [copy.buffer]);
+                    });
+                };
+            })();
+        </script>
     </body>
 </html>

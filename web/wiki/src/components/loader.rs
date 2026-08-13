@@ -828,12 +828,13 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
             // the mime: these files were uploaded long before anything here knew
             // to look, under whatever type the browser claimed at the time.
             //
-            // A data URL rather than a blob, because the canvas hands back a data
-            // URL and wrapping it into a blob to match the shape below would be
-            // work for nothing. `revoke_object_url` on one is a harmless no-op,
-            // so the cleanup path needs no special case.
+            // Decoded in a Worker, because it is slow enough to be felt: about
+            // two seconds for an eleven-megapixel photo, during which a main
+            // thread doing it cannot scroll, animate or answer a tap. `await`
+            // here is a real suspension -- the work is on another thread, and
+            // this task resumes when it answers.
             if crate::components::file::looks_like_heif(&bytes) {
-                if let Some(url) = crate::components::file::heif_to_data_url(&bytes) {
+                if let Some(url) = crate::components::file::heif_object_url(&bytes).await {
                     blob_url.set(Some(url));
                 }
                 return;

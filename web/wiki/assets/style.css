@@ -2955,6 +2955,46 @@ select:focus {
    banner-proportioned cover rendered at full row width came out as a thin
    strip. A fixed frame plus `cover` crops any source to the same rhythm, and
    the cap keeps a tall one from pushing the next row off screen. */
+/* DESIGN (pictures arrive, they do not appear): every picture in the app is
+   fetched as bytes and handed to the element as a blob URL, so the element does
+   not exist until the download finishes and then exists at full size. The result
+   was a photo banging into place mid-scroll, shoving the text below it down.
+
+   The shove cannot be avoided without knowing the picture's shape before it
+   arrives, which nothing here does — but the bang can. This is the entrance MD3
+   gives an element the reader did not ask for: a fade with a small rise, on
+   emphasized-decelerate, arriving rather than snapping.
+
+   `backwards`, not `both`: the end state is the element's natural one, so there
+   is nothing to hold afterwards, and holding it would outrank any later
+   transform (the zoom on a comment image, the carousel's own).
+
+   Deliberately NOT on the hero covers: those are background-images on a div
+   that is already on the page, so they have no entrance to give. */
+@keyframes image-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(var(--md-sys-spacing-2)) scale(0.985);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+.recent-cover,
+.m3-carousel-img,
+.comment-image img {
+	animation: image-arrive var(--md-sys-motion-duration-long1)
+		var(--md-sys-motion-easing-emphasized-decelerate) backwards;
+}
+/* Reduced motion: still arrive, just without the movement. */
+@media (prefers-reduced-motion: reduce) {
+	.recent-cover,
+	.m3-carousel-img,
+	.comment-image img {
+		animation: none;
+	}
+}
 .recent-cover {
 	display: block;
 	margin-top: var(--md-sys-spacing-2);
