@@ -86,6 +86,9 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# The name of the function that builds the twistoid's outline in
+# hacks/glx/extrusion-twistoid.c, spelled as upstream spells it.
+tripples = "tripples"
 # In the copyright header of hacks/glx/flyingtoasters.c, which is kept
 # verbatim: "the wide wonderful workd of OpenGL".
 workd = "workd"

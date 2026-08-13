@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 145 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (145) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (136) |
+| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (137) |
 
 `webcollage` and `vidwhacker` are neither: upstream is a perl script and a C
 helper for the first and a shell script for the second, rather than a
@@ -24,9 +24,9 @@ at the same code with the resource nailed down.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
-a 6502 with an assembler. Two of the OpenGL tier are left, one waiting on a
-library and one on an algorithm. Neither is impossible; they are described at
-the end.
+a 6502 with an assembler. One of the OpenGL tier is left, `worldpieces`,
+waiting on a triangulator rather than on anything about the Earth; it is
+described at the end.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -819,6 +819,27 @@ the collage is a grid of hard rectangles.
 The one thing the framebuffer cannot do is upstream's alpha channel, so the
 bevel is folded into the per-pixel blend instead of being written into the
 image and composited afterwards. Same arithmetic, one pass.
+
+`extrusion` came off the blocked list the same way `unicrud` did, by asking
+what the saver needs rather than what it links against. It draws everything
+through GLE, the tubing and extrusion library, which XScreenSaver does not
+bundle, and porting GLE would be a library's worth of work. But the slice of
+it the seven shapes use is one sweep with one join style: the only
+`gleSetJoinStyle` any of them asks for is `TUBE_JN_ANGLE`, so none of the cut,
+round or raw join machinery is wanted, and the named shapes are wrappers.
+`gleHelicoid` is `gleSpiral` with a circular outline, and `gleSpiral` builds a
+helical path with a transform per station and hands it to the ordinary
+extrusion. So `runtime::extrude` is that one sweep, and every shape here is an
+outline, a path, and sometimes a transform.
+
+The interesting part is the corner. A swept shape is not a stack of copies of
+its outline: at each station the outline sits in the plane bisecting the angle
+between the segment arriving and the one leaving, so consecutive segments meet
+along one shared ring, with no gap outside the bend and no overlap inside.
+That ring is found by running a line through each outline point parallel to the
+segment and intersecting it with the bisecting plane. The test for it asserts
+exactly that sharing: the back ring of one segment and the front ring of the
+next are the same points.
 
 `unicrud` came off the blocked list by asking a different question. It picks a
 codepoint anywhere from 0 to 0x2F800 and draws it four inches high, and

@@ -1030,6 +1030,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::dnalogo::start
 );
 gl3d_saver!(
+    "extrusion",
+    extrusion_body,
+    extrusion_start,
+    xscreensaver::hacks3d::extrusion::start
+);
+gl3d_saver!(
     "juggler3d",
     juggler3d_body,
     juggler3d_start,
@@ -2187,6 +2193,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "discrete",
         label: "Discrete",
         start: Start::Fb(discrete_start),
+    },
+    Entry {
+        slug: "extrusion",
+        label: "Extrusion",
+        start: Start::Gl3d(extrusion_start),
     },
     Entry {
         slug: "fuzzyflakes",

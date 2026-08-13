@@ -27,6 +27,7 @@ pub mod dropshadow;
 pub mod dymaxion;
 pub mod easing;
 pub mod erase;
+pub mod extrude;
 pub mod fb;
 pub mod font;
 pub mod gl;

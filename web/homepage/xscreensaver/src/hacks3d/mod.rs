@@ -59,6 +59,7 @@ pub mod energystream;
 pub mod engine;
 pub mod esper;
 pub mod etruscanvenus;
+pub mod extrusion;
 pub mod flipflop;
 pub mod flipscreen3d;
 pub mod fliptext;
@@ -170,6 +171,7 @@ mod winduprobot_wobble;
 #[cfg(not(target_arch = "wasm32"))]
 pub static ALL: &[&Saver3d] = &[
     &dnalogo::SAVER,
+    &extrusion::SAVER,
     &juggler3d::SAVER,
     &flurry::SAVER,
     &atlantis::SAVER,
