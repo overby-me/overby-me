@@ -807,7 +807,7 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
 }
 
 #[component]
-pub fn Cardioid() -> Element {
+pub fn CardioidInner() -> Element {
     // Seed from the query captured in `main()` before the router ran.
     let mut settings = use_signal(|| Settings::from_query(&captured_query()));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);

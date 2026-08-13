@@ -10,9 +10,9 @@ pub mod ui;
 mod x;
 mod yt;
 
-pub use atproto::AtProto;
-pub use cardioid::Cardioid;
+pub mod lazy;
 pub use index::Index;
+pub use lazy::{AtProto, Cardioid};
 pub use screensaver::{Screensaver, ScreensaverRandom};
 pub use search::Search;
 pub use x::X;
