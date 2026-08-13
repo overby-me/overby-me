@@ -76,7 +76,7 @@ pub fn SheetGroup(
 pub fn ExportAction(node_id: String, name: String) -> Element {
     let session = crate::session::use_session();
     let mut exporting = use_signal(|| false);
-    let label = crate::i18n::t("folder.export");
+    let label = crate::i18n::t("folder.download");
     rsx! {
         button {
             class: "sheet-quick-action",
@@ -92,7 +92,7 @@ pub fn ExportAction(node_id: String, name: String) -> Element {
                 let id = node_id.clone();
                 let name = name.clone();
                 exporting.set(true);
-                crate::snackbar::show_snackbar(&crate::i18n::t("folder.exporting"));
+                crate::snackbar::show_snackbar(&crate::i18n::t("folder.downloading"));
                 spawn(async move {
                     crate::export::export_tree(token, id, name).await;
                     exporting.set(false);

@@ -412,8 +412,8 @@ const EN_JSON: &str = r#"{
     "folder": {
         "manageFolder": "Manage folder",
         "proposedBy": "Proposed by",
-        "export": "Export",
-        "exporting": "Generating export…",
+        "download": "Download",
+        "downloading": "Preparing download…",
         "copy": "Copy",
         "paste": "Paste here",
         "pasting": "Pasting…",
@@ -1033,8 +1033,8 @@ const DA_JSON: &str = r#"{
     "folder": {
         "manageFolder": "Administrer mappe",
         "proposedBy": "Foresl\u00e5et af",
-        "export": "Eksporter",
-        "exporting": "Genererer eksport\u2026",
+        "download": "Hent",
+        "downloading": "Forbereder download\u2026",
         "copy": "Kopier",
         "paste": "Inds\u00e6t her",
         "pasting": "Inds\u00e6tter\u2026",
