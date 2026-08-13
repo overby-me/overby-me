@@ -63,6 +63,27 @@ const MAX_BLOB_BYTES: u64 = 3_000_000;
 /// only references until we fetch them, but a stale one is a dull one.
 const TAG_QUEUE_MAX: usize = 32;
 
+/// How far back to replay the firehose when a tag is first asked for.
+///
+/// Jetstream takes a `cursor` and replays from it as fast as it can, which is
+/// what makes a hashtag usable at all. Measured on the live firehose: posts
+/// arrive at about 52 a second and one in seven carries a picture, but only
+/// about one in a thousand carries any particular tag. Waiting for `#art` to
+/// come past live took 12 seconds; for `#caturday`, nothing in 30. The saver
+/// gives up after 20 and draws colour bars, which is what makes a hashtag look
+/// broken. Replaying five minutes of backlog found the first `#art` picture in
+/// one second, after 81 KB.
+const REPLAY_WINDOW_SECONDS: f64 = 300.0;
+
+/// Stop replaying once this many pictures are queued. The saver needs one to
+/// start with and the rest arrive live, so there is no reason to pull the
+/// whole backlog: five minutes of it is 14 MB.
+const REPLAY_ENOUGH: usize = 4;
+
+/// ...or once the replay has cost this much, which is what happens for a tag
+/// nobody has posted under. About twenty seconds of firehose.
+const REPLAY_MAX_BYTES: usize = 1_000_000;
+
 /// Where a saver's pictures come from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -158,8 +179,39 @@ impl Source {
 struct BlobRef {
     did: String,
     cid: String,
-    /// The post's alt text, used as the caption.
+    /// What to call the picture: the alt text if the poster wrote any, and
+    /// failing that the words of the post it was attached to.
     alt: Option<String>,
+}
+
+impl BlobRef {
+    /// Fall back to `caption` where the poster left the alt text empty, which
+    /// most do. Savers that write the picture's name under it, `photopile`
+    /// above all, otherwise have nothing to write.
+    fn captioned(mut self, caption: Option<String>) -> Self {
+        if self.alt.is_none() {
+            self.alt = caption;
+        }
+        self
+    }
+}
+
+/// The longest caption worth drawing under a picture.
+const CAPTION_MAX_CHARS: usize = 72;
+
+/// A one-line caption from a post's text.
+///
+/// The first non-empty line, cut at a word boundary: a saver draws this in one
+/// line in a bitmap font, and a whole thread under a photograph is not a
+/// caption.
+fn caption_from_text(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if line.chars().count() <= CAPTION_MAX_CHARS {
+        return Some(line.to_string());
+    }
+    let cut: String = line.chars().take(CAPTION_MAX_CHARS).collect();
+    let end = cut.rfind(' ').unwrap_or(cut.len());
+    Some(format!("{}\u{2026}", cut[..end].trim_end()))
 }
 
 thread_local! {
@@ -193,6 +245,9 @@ struct Record {
 #[derive(Deserialize)]
 struct PostValue {
     embed: Option<Embed>,
+    /// The words of the post, which caption a picture with no alt text.
+    #[serde(default)]
+    text: String,
 }
 
 /// `app.bsky.embed.images` directly, or wrapped in a `recordWithMedia`.
@@ -284,7 +339,9 @@ pub async fn next_picture(source: &Source, max_w: i32, max_h: i32) -> Option<Pic
     match decode(&url, max_w, max_h).await {
         Ok(image) => Some(Picture {
             image,
-            title: blob.alt,
+            // A post with neither alt text nor words still came from
+            // somewhere, and that is better than "(untitled)".
+            title: blob.alt.or_else(|| source.describe()),
         }),
         Err(e) => {
             log::warn!("screensaver images: {e}");
@@ -328,8 +385,15 @@ async fn harvest_account(account: &str) -> Result<Vec<BlobRef>, String> {
     let blobs: Vec<BlobRef> = page
         .records
         .iter()
-        .filter_map(|r| r.value.embed.as_ref())
-        .flat_map(|e| e.blobs(&did))
+        .flat_map(|r| {
+            let caption = caption_from_text(&r.value.text);
+            r.value
+                .embed
+                .iter()
+                .flat_map(|e| e.blobs(&did))
+                .map(|b| b.captioned(caption.clone()))
+                .collect::<Vec<_>>()
+        })
         .collect();
     Ok(blobs)
 }
@@ -344,6 +408,9 @@ async fn pds_for(did: &str) -> Option<String> {
 }
 
 /// Subscribe to the firehose for a tag, if we are not already on it.
+///
+/// The subscription starts in the recent past: see [`REPLAY_WINDOW_SECONDS`]
+/// for why a live-only firehose makes a hashtag look broken.
 fn ensure_tag_subscription(tag: &str) {
     let already = TAG_SOCKET.with(|s| {
         s.borrow()
@@ -353,13 +420,43 @@ fn ensure_tag_subscription(tag: &str) {
     if already {
         return;
     }
+    // A different tag than the one queued: those pictures belong to the old
+    // one, and showing them under the new tag would be a lie.
+    TAG_QUEUE.with(|q| q.borrow_mut().clear());
+    subscribe(tag.to_string(), Replay::Yes);
+}
 
-    let Ok(socket) = web_sys::WebSocket::new(JETSTREAM) else {
+/// Whether to open the firehose in the past or at the live edge.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Replay {
+    /// Start [`REPLAY_WINDOW_SECONDS`] ago, so there is something to show now.
+    Yes,
+    /// Start where the firehose is, which costs nothing to keep open.
+    No,
+}
+
+/// Open the firehose for `tag`.
+///
+/// A replaying socket swaps itself for a live one as soon as it has found
+/// enough pictures, or spent enough trying. Reconnecting rather than reading
+/// on is the point: the whole backlog is a hundred times the size of the part
+/// of it worth having.
+fn subscribe(tag: String, replay: Replay) {
+    let url = match replay {
+        Replay::Yes => {
+            let from = (js_sys::Date::now() - REPLAY_WINDOW_SECONDS * 1000.0) * 1000.0;
+            format!("{JETSTREAM}&cursor={from:.0}")
+        }
+        Replay::No => JETSTREAM.to_string(),
+    };
+    let Ok(socket) = web_sys::WebSocket::new(&url) else {
         log::warn!("screensaver images: could not open the firehose");
         return;
     };
 
-    let wanted = tag.to_string();
+    let spent = std::cell::Cell::new(0usize);
+    let swapped = std::cell::Cell::new(false);
+    let wanted = tag.clone();
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |ev: MessageEvent| {
         let Some(text) = ev.data().as_string() else {
             return;
@@ -373,17 +470,30 @@ fn ensure_tag_subscription(tag: &str) {
                 q.push_back(blob);
             });
         }
+        if replay == Replay::No || swapped.get() {
+            return;
+        }
+        spent.set(spent.get() + text.len());
+        let queued = TAG_QUEUE.with(|q| q.borrow().len());
+        if queued >= REPLAY_ENOUGH || spent.get() >= REPLAY_MAX_BYTES {
+            // Installing the live socket closes this one, so this closure
+            // stops being called; the flag guards any frames already behind
+            // it in the event loop.
+            swapped.set(true);
+            subscribe(wanted.clone(), Replay::No);
+        }
     });
     socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     on_message.forget();
 
     TAG_SOCKET.with(|s| {
         // Dropping the previous socket closes it, which is what we want when
-        // the saver switches tags.
+        // the saver switches tags, and what retires a replay once it has done
+        // its job.
         if let Some((_, old)) = s.borrow_mut().take() {
             let _ = old.close();
         }
-        *s.borrow_mut() = Some((tag.to_string(), socket));
+        *s.borrow_mut() = Some((tag, socket));
     });
 }
 
@@ -411,11 +521,15 @@ fn tagged_images(frame: &str, tag: &str) -> Vec<BlobRef> {
     if !record.mentions_tag(tag) {
         return Vec::new();
     }
+    let caption = caption_from_text(&record.text);
     record
         .embed
         .as_ref()
         .map(|e| e.blobs(&did))
         .unwrap_or_default()
+        .into_iter()
+        .map(|b| b.captioned(caption.clone()))
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -589,6 +703,36 @@ mod tests {
             Some("#art")
         );
         assert_eq!(Source::None.describe(), None);
+    }
+
+    /// A picture with no alt text is captioned with the words of its post.
+    #[test]
+    fn a_caption_is_one_line_of_the_post() {
+        assert_eq!(
+            caption_from_text("  A photograph of a bridge.  "),
+            Some("A photograph of a bridge.".to_string())
+        );
+        // The first line that says anything, not the first line.
+        assert_eq!(
+            caption_from_text("\n\n  second line has the words\nand a third"),
+            Some("second line has the words".to_string())
+        );
+        assert_eq!(caption_from_text("   \n  "), None);
+    }
+
+    /// A whole thread is not a caption; it is cut at a word.
+    #[test]
+    fn a_long_caption_is_cut_at_a_word() {
+        let long = "the quick brown fox jumps over the lazy dog and keeps on jumping until it is tired out";
+        let cut = caption_from_text(long).expect("a caption");
+        assert!(cut.ends_with('\u{2026}'), "not elided: {cut}");
+        assert!(
+            cut.chars().count() <= CAPTION_MAX_CHARS + 1,
+            "too long: {cut}"
+        );
+        assert!(long.starts_with(cut.trim_end_matches('\u{2026}').trim_end()));
+        // Cut between words, so no half a word is left on screen.
+        assert!(!cut.trim_end_matches('\u{2026}').ends_with(' '));
     }
 
     /// The panel hands over what was typed, and nobody types `%23`.
