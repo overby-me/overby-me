@@ -97,3 +97,78 @@ pub fn Choice(
         }
     }
 }
+
+/// Where a saver's pictures or words come from: a kind, and a name in it.
+///
+/// The two halves are one query parameter (`?images=%23art`), but nobody
+/// should have to write that. The kind is a menu and the name is a plain
+/// field, so a hashtag is typed as `art` and an account as `overby.me`.
+///
+/// The first kind in `kinds` is the one that needs no name (colour bars, a
+/// poem); it commits the moment it is chosen. The rest commit when the field
+/// is left or `Enter` is pressed, so a saver is not restarted per keystroke.
+#[component]
+pub fn SourcePicker(
+    label: String,
+    /// `(value, label)`, the first being the kind that needs no name.
+    kinds: Vec<(String, String)>,
+    /// What the name field should say when it is empty, per kind value.
+    hints: Vec<(String, String)>,
+    kind: String,
+    name: String,
+    onchange: EventHandler<(String, String)>,
+) -> Element {
+    let mut chosen = use_signal(|| kind.clone());
+    let mut typed = use_signal(|| name.clone());
+    let bare = kinds.first().map(|(v, _)| v.clone()).unwrap_or_default();
+    let hint = hints
+        .iter()
+        .find(|(v, _)| *v == chosen())
+        .map(|(_, h)| h.clone())
+        .unwrap_or_default();
+
+    rsx! {
+        div {
+            style: "margin-bottom:8px;",
+            div { style: "font-size:12px;color:#bbb;margin-bottom:2px;", "{label}" }
+            select {
+                style: "width:100%;padding:4px;background:#222;color:#eee;border:1px solid #555;\
+                        border-radius:6px;font:inherit;font-size:13px;",
+                onchange: move |e| {
+                    let v = e.value();
+                    chosen.set(v.clone());
+                    // Switching to a kind whose name is still blank leaves the
+                    // saver where it is: the field is there to be filled in.
+                    if v == bare || !typed().trim().is_empty() {
+                        onchange.call((v, typed()));
+                    }
+                },
+                for (v , l) in kinds.iter().cloned() {
+                    option { value: "{v}", selected: v == chosen(), "{l}" }
+                }
+            }
+            if chosen() != bare {
+                input {
+                    r#type: "text",
+                    value: "{typed}",
+                    placeholder: "{hint}",
+                    spellcheck: false,
+                    autocapitalize: "none",
+                    // `box-sizing` because an <input> is content-box by
+                    // default where a <select> is border-box, and a 100%-wide
+                    // one would hang over the edge of the panel.
+                    style: "box-sizing:border-box;width:100%;margin-top:6px;padding:5px 7px;\
+                            background:#222;color:#eee;border:1px solid #555;border-radius:6px;\
+                            font:inherit;font-size:13px;",
+                    oninput: move |e| typed.set(e.value()),
+                    onchange: move |e| onchange.call((chosen(), e.value())),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter {
+                            onchange.call((chosen(), typed()));
+                        }
+                    },
+                }
+            }
+        }
+    }
+}

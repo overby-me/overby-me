@@ -30,7 +30,7 @@ use crate::images::{self, Source};
 use crate::pages::gl::GlEngine;
 use crate::pages::gl3d::Gl3dEngine;
 use crate::pages::savers::{self, Start};
-use crate::pages::ui::{Choice, Details, Slider, Toggle};
+use crate::pages::ui::{Choice, Details, Slider, SourcePicker, Toggle};
 use crate::text::{self, Source as TextSource};
 use crate::tiles;
 use crate::url::{captured_query, replace_query};
@@ -272,6 +272,16 @@ impl Host {
         }
     }
 
+    /// Does this hack work on a picture at all? It says so by asking for one
+    /// on its first frame, whether or not a source is configured.
+    fn uses_images(&self) -> bool {
+        match &self.engine {
+            Engine::Fb(fb) => fb.runner.dpy.hack_uses_images(),
+            Engine::Gl3d(gl) => gl.hack_uses_images(),
+            Engine::Gl(_) => false,
+        }
+    }
+
     fn image_title(&self) -> Option<String> {
         match &self.engine {
             Engine::Fb(fb) => fb.runner.dpy.image_title().map(str::to_string),
@@ -339,7 +349,12 @@ fn now_seconds() -> f64 {
 type AnimationClosure = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
 /// requestAnimationFrame loop; stops once the canvas leaves the document.
-fn start_animation_loop(host: Rc<RefCell<Host>>) {
+///
+/// `delivered` counts the pictures handed to the saver. The panel reads it so
+/// that a caption, or the note that a hashtag has not produced anything yet,
+/// is refreshed when the picture is: the loop is not a component and nothing
+/// else would tell dioxus that the host had changed under it.
+fn start_animation_loop(host: Rc<RefCell<Host>>, mut delivered: Signal<u32>) {
     let f: AnimationClosure = Rc::new(RefCell::new(None));
     let g = Rc::clone(&f);
 
@@ -405,6 +420,7 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                     Some(p) => {
                         h.image_wanted = false;
                         h.deliver_image(p.image, p.title);
+                        *delivered.write() += 1;
                     }
                     // Nothing to show yet: a hashtag nobody has posted under
                     // since we started listening. Ask again shortly.
@@ -549,7 +565,15 @@ fn SaverStage(slug: String) -> Element {
     // Only the knobs the user actually moved, so a shared link stays short and
     // an unset option keeps following the hack's own default.
     let mut settings = use_signal(|| initial_settings(&captured_query()));
+    // Where the pictures and the words come from. Signals rather than fields
+    // on the host, because the panel edits them and a change restarts the hack
+    // the same way moving a slider does.
+    let mut picture_source = use_signal(|| Source::from_query(&captured_query()));
+    let mut text_source = use_signal(|| TextSource::from_query(&captured_query()));
     let mut paused = use_signal(|| false);
+    // Bumped by the animation loop each time a picture reaches the saver, so
+    // the panel's caption follows the picture on screen.
+    let pictures_delivered = use_signal(|| 0u32);
     let host: Signal<Option<Rc<RefCell<Host>>>> = use_signal(|| None);
     let mut failed = use_signal(|| false);
 
@@ -561,27 +585,31 @@ fn SaverStage(slug: String) -> Element {
     // means "Reset" also re-rolls anything the hack randomises at startup.
     use_effect(move || {
         let query = to_query(&settings.read());
-        let source = host
-            .read()
-            .as_ref()
-            .map(|h| h.borrow().source.clone())
-            .unwrap_or(Source::None);
-        let words = host
-            .read()
-            .as_ref()
-            .map(|h| h.borrow().text_source.clone())
-            .unwrap_or_default();
-        replace_query(&shareable_query(&settings.read(), &source, &words));
+        let pictures = picture_source.read().clone();
+        let words = text_source.read().clone();
+        replace_query(&shareable_query(&settings.read(), &pictures, &words));
         let Some(h) = host.read().clone() else { return };
         // Every borrow of the host is scoped to a single statement on purpose:
         // the restart has to await the saver's chunk, and a `RefCell` borrow
         // still open at that point would panic the moment the animation frame
         // in flight touched the host.
-        let unchanged = h.borrow().query == query;
+        //
+        // A new picture source restarts the hack as an option change does.
+        // Hacks read their picture in `init`, and whether there is a host to
+        // ask at all is settled when they start.
+        let unchanged = {
+            let h = h.borrow();
+            h.query == query && h.source == pictures && h.text_source == words
+        };
         if unchanged {
             return;
         }
         spawn(async move {
+            {
+                let mut h = h.borrow_mut();
+                h.source = pictures;
+                h.text_source = words;
+            }
             let args = h.borrow().start_args(&query);
             // Already resident by now, so this resolves without another fetch.
             match &entry.start {
@@ -630,8 +658,8 @@ fn SaverStage(slug: String) -> Element {
                 canvas.set_width(w as u32);
                 canvas.set_height(h as u32);
 
-                let source = Source::from_query(&captured_query());
-                let text_source = TextSource::from_query(&captured_query());
+                let source = picture_source.peek().clone();
+                let text_source = text_source.peek().clone();
                 let query = to_query(&settings.peek());
                 // Fetches the saver's own wasm chunk the first time.
                 let args = StartArgs::new(w, h, &query, seed())
@@ -693,7 +721,7 @@ fn SaverStage(slug: String) -> Element {
                 built.announce_image_source();
                 let h = Rc::new(RefCell::new(built));
                 host.set(Some(Rc::clone(&h)));
-                start_animation_loop(h);
+                start_animation_loop(h, pictures_delivered);
             });
         }
     };
@@ -713,17 +741,19 @@ fn SaverStage(slug: String) -> Element {
     // The saver's definition only exists once its chunk has loaded and the hack
     // has started, so the panel appears with it rather than before it.
     let def = host.read().as_ref().map(|h| h.borrow().def());
-    // Where the pictures come from, and what the one on screen is called.
-    let pictures = host.read().as_ref().and_then(|h| {
-        let h = h.borrow();
-        h.source.describe().map(|from| (from, h.image_title()))
-    });
-    // And where the words come from, for the hacks that read text. Only shown
-    // when the saver actually asks for any.
-    let words = host.read().as_ref().and_then(|h| {
-        let h = h.borrow();
-        h.reads_text.then(|| h.text_source.describe())
-    });
+    // The picture controls are only offered for the thirty-odd savers that
+    // work on a picture, and the word controls for the ten that read text.
+    // Both savers say so themselves, by asking on their first frame.
+    let uses_pictures = host
+        .read()
+        .as_ref()
+        .is_some_and(|h| h.borrow().uses_images());
+    // Reading the counter is what subscribes the panel to picture deliveries.
+    let picture_title = {
+        let _ = pictures_delivered();
+        host.read().as_ref().and_then(|h| h.borrow().image_title())
+    };
+    let reads_words = host.read().as_ref().is_some_and(|h| h.borrow().reads_text);
 
     rsx! {
         div {
@@ -867,24 +897,66 @@ fn SaverStage(slug: String) -> Element {
                         }
                     }
 
-                    if let Some((from , caption)) = pictures.clone() {
-                        Details { summary: "Pictures",
+                    if uses_pictures {
+                        // The summary carries the source, so a collapsed panel
+                        // still says where the picture came from.
+                        Details {
+                            summary: match picture_source.read().describe() {
+                                Some(from) => format!("Pictures \u{00b7} {from}"),
+                                None => "Pictures".to_string(),
+                            },
+                            SourcePicker {
+                                label: "This saver works on a picture. Take them from:",
+                                kinds: vec![
+                                    ("none".to_string(), "Colour bars".to_string()),
+                                    ("account".to_string(), "An account's own posts".to_string()),
+                                    ("tag".to_string(), "A hashtag, live".to_string()),
+                                ],
+                                hints: vec![
+                                    ("account".to_string(), "overby.me".to_string()),
+                                    ("tag".to_string(), "caturday".to_string()),
+                                ],
+                                kind: picture_source.read().parts().0.to_string(),
+                                name: picture_source.read().parts().1,
+                                onchange: move |(kind, name): (String, String)| {
+                                    picture_source.set(Source::from_parts(&kind, &name));
+                                },
+                            }
                             div {
                                 style: "font-size:12px;color:#bbb;line-height:1.5;",
-                                "From {from}"
-                                if let Some(caption) = caption {
-                                    br {}
+                                if let Some(caption) = picture_title.clone() {
                                     span { style: "color:#888;font-style:italic;", "{caption}" }
+                                } else if matches!(*picture_source.read(), Source::Tag(_)) {
+                                    "Waiting for someone to post one."
                                 }
                             }
                         }
                     }
 
-                    if let Some(from) = words.clone() {
-                        Details { summary: "Words",
-                            div {
-                                style: "font-size:12px;color:#bbb;line-height:1.5;",
-                                "From {from}"
+                    if reads_words {
+                        Details {
+                            summary: format!(
+                                "Words \u{00b7} {}",
+                                text_source.read().describe()
+                            ),
+                            SourcePicker {
+                                label: "This saver reads text. Take it from:",
+                                kinds: vec![
+                                    ("fortune".to_string(), "A poem".to_string()),
+                                    ("account".to_string(), "An account's own posts".to_string()),
+                                    ("tag".to_string(), "A hashtag, live".to_string()),
+                                    ("url".to_string(), "A web page".to_string()),
+                                ],
+                                hints: vec![
+                                    ("account".to_string(), "overby.me".to_string()),
+                                    ("tag".to_string(), "poetry".to_string()),
+                                    ("url".to_string(), "https://example.com/page".to_string()),
+                                ],
+                                kind: text_source.read().parts().0.to_string(),
+                                name: text_source.read().parts().1,
+                                onchange: move |(kind, name): (String, String)| {
+                                    text_source.set(TextSource::from_parts(&kind, &name));
+                                },
                             }
                         }
                     }

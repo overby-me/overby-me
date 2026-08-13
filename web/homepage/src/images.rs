@@ -116,6 +116,33 @@ impl Source {
         }
     }
 
+    /// The panel's two fields for this source: which kind it is, and the name
+    /// inside it.
+    pub fn parts(&self) -> (&'static str, String) {
+        match self {
+            Source::None => ("none", String::new()),
+            Source::Account(a) => ("account", a.clone()),
+            Source::Tag(t) => ("tag", t.clone()),
+        }
+    }
+
+    /// Build a source from the panel's two fields.
+    ///
+    /// The name is taken as typed: nobody should have to know that a hashtag
+    /// has to reach the query string as `%23`. A leading `@` or `#` is
+    /// stripped rather than doubled, so pasting `#art` works too.
+    pub fn from_parts(kind: &str, name: &str) -> Self {
+        let name = name.trim().trim_start_matches(['@', '#']).trim();
+        if name.is_empty() {
+            return Source::None;
+        }
+        match kind {
+            "account" => Source::Account(name.to_string()),
+            "tag" => Source::Tag(name.to_ascii_lowercase()),
+            _ => Source::None,
+        }
+    }
+
     /// What to show in the panel.
     pub fn describe(&self) -> Option<String> {
         match self {
@@ -562,6 +589,38 @@ mod tests {
             Some("#art")
         );
         assert_eq!(Source::None.describe(), None);
+    }
+
+    /// The panel hands over what was typed, and nobody types `%23`.
+    #[test]
+    fn the_panel_fields_build_a_source_without_escapes() {
+        assert_eq!(Source::from_parts("tag", "art"), Source::Tag("art".into()));
+        assert_eq!(
+            Source::from_parts("account", "overby.me"),
+            Source::Account("overby.me".into())
+        );
+        // Pasting the sigil in is not an error, and does not double it.
+        assert_eq!(Source::from_parts("tag", "#Art"), Source::Tag("art".into()));
+        assert_eq!(
+            Source::from_parts("account", " @overby.me "),
+            Source::Account("overby.me".into())
+        );
+        // A kind with nothing in it is no source at all.
+        assert_eq!(Source::from_parts("tag", "  "), Source::None);
+        assert_eq!(Source::from_parts("none", "art"), Source::None);
+    }
+
+    /// What the panel shows is what the URL says, both ways round.
+    #[test]
+    fn parts_and_from_parts_round_trip() {
+        for source in [
+            Source::None,
+            Source::Account("overby.me".into()),
+            Source::Tag("caturday".into()),
+        ] {
+            let (kind, name) = source.parts();
+            assert_eq!(Source::from_parts(kind, &name), source);
+        }
     }
 
     #[test]

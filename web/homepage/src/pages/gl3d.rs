@@ -400,6 +400,11 @@ impl Gl3dEngine {
         self.runner.take_image_request()
     }
 
+    /// Host side: does this saver work on a picture at all?
+    pub fn hack_uses_images(&self) -> bool {
+        self.runner.hack_uses_images()
+    }
+
     /// Host side: hand the saver a decoded picture.
     pub fn deliver_image(&mut self, image: XImage, title: Option<String>) {
         self.runner.deliver_image(image, title);

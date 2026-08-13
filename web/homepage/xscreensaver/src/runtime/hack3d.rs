@@ -200,6 +200,12 @@ impl Gl {
         std::mem::take(&mut self.images.requested)
     }
 
+    /// Host side: does this hack work on a picture at all? See
+    /// [`crate::Dpy::hack_uses_images`].
+    pub fn hack_uses_images(&self) -> bool {
+        self.images.ever_wanted
+    }
+
     /// Host side: hand over a decoded picture, and optionally what to call it.
     pub fn deliver_image(&mut self, image: super::XImage, title: Option<String>) {
         self.images.ready = Some(image);
@@ -323,6 +329,12 @@ impl Runner3d {
     /// Host side: has the hack asked for a picture since the last check?
     pub fn take_image_request(&mut self) -> bool {
         self.gl.take_image_request()
+    }
+
+    /// Host side: does this hack work on a picture at all? See
+    /// [`crate::Dpy::hack_uses_images`].
+    pub fn hack_uses_images(&self) -> bool {
+        self.gl.hack_uses_images()
     }
 
     /// Host side: what map tiles the saver is waiting for.

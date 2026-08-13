@@ -45,6 +45,11 @@ pub struct ImageChannel {
     pub(crate) host_supplies: bool,
     /// Set by a hack asking for an image; cleared when the host takes it.
     pub(crate) requested: bool,
+    /// Set the first time a hack asks for a picture, whether or not there was
+    /// a host to ask. Unlike `requested` it is never cleared: the page reads
+    /// it to decide whether this saver is one of the thirty that work on a
+    /// picture, and so whether to offer the controls for choosing one.
+    pub(crate) ever_wanted: bool,
     /// Filled by the host, consumed by the next `load_image_async_simple`.
     pub(crate) ready: Option<XImage>,
     /// The most recent image's caption, if the host supplied one.
@@ -75,6 +80,7 @@ impl ImageChannel {
             height: window.height(),
         };
         let Some(load) = pending else {
+            self.ever_wanted = true;
             if self.host_supplies {
                 self.requested = true;
                 return Some(ImageLoad { started: now });
@@ -237,6 +243,19 @@ mod tests {
             fb.pixels().iter().any(|p| *p != ALPHA),
             "no test card drawn"
         );
+    }
+
+    /// A hack says it works on a picture by asking for one, and it says so
+    /// whether or not anybody was listening. The page needs the answer before
+    /// a source is configured, which is exactly when there is no host.
+    #[test]
+    fn a_hack_that_asks_says_so_with_no_host_at_all() {
+        let mut ch = ImageChannel::default();
+        let mut fb = Fb::new(64, 48);
+        assert!(!ch.ever_wanted, "nothing has asked yet");
+
+        assert!(ch.poll(&mut fb, 0.0, None).is_none(), "no host to wait for");
+        assert!(ch.ever_wanted, "the hack asked and it went unrecorded");
     }
 
     #[test]

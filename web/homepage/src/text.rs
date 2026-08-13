@@ -130,6 +130,29 @@ impl Source {
         }
     }
 
+    /// The panel's two fields for this source: which kind it is, and the name
+    /// inside it. See [`crate::images::Source::parts`].
+    pub fn parts(&self) -> (&'static str, String) {
+        match self {
+            Source::Fortune => ("fortune", String::new()),
+            Source::Account(a) => ("account", a.clone()),
+            Source::Tag(t) => ("tag", t.clone()),
+            Source::Url(u) => ("url", u.clone()),
+        }
+    }
+
+    /// Build a source from the panel's two fields.
+    pub fn from_parts(kind: &str, name: &str) -> Self {
+        let trimmed = name.trim();
+        let bare = trimmed.trim_start_matches(['@', '#']).trim();
+        match kind {
+            "account" if !bare.is_empty() => Source::Account(bare.to_string()),
+            "tag" if !bare.is_empty() => Source::Tag(bare.to_ascii_lowercase()),
+            "url" if !trimmed.is_empty() => Source::Url(trimmed.to_string()),
+            _ => Source::Fortune,
+        }
+    }
+
     /// What to show in the panel.
     pub fn describe(&self) -> String {
         match self {
@@ -502,5 +525,43 @@ impl PostRecord {
                 .to_ascii_lowercase()
                 .split(|c: char| !(c.is_alphanumeric() || c == '#' || c == '_'))
                 .any(|w| w.strip_prefix('#') == Some(tag))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Source;
+
+    /// The panel hands over what was typed. A hashtag is `poetry`, not
+    /// `%23poetry`, and a pasted `#poetry` is not doubled.
+    #[test]
+    fn the_panel_fields_build_a_source_without_escapes() {
+        assert_eq!(
+            Source::from_parts("tag", "Poetry"),
+            Source::Tag("poetry".into())
+        );
+        assert_eq!(
+            Source::from_parts("tag", "#poetry"),
+            Source::Tag("poetry".into())
+        );
+        assert_eq!(
+            Source::from_parts("url", "https://example.com/a"),
+            Source::Url("https://example.com/a".into())
+        );
+        // Nothing typed falls back to the poem, which is the default.
+        assert_eq!(Source::from_parts("account", " "), Source::Fortune);
+    }
+
+    #[test]
+    fn parts_and_from_parts_round_trip() {
+        for source in [
+            Source::Fortune,
+            Source::Account("overby.me".into()),
+            Source::Tag("poetry".into()),
+            Source::Url("https://example.com/a".into()),
+        ] {
+            let (kind, name) = source.parts();
+            assert_eq!(Source::from_parts(kind, &name), source);
+        }
     }
 }

@@ -193,6 +193,14 @@ impl Dpy {
         std::mem::take(&mut self.images.requested)
     }
 
+    /// Host side: does this hack work on a picture at all? True once it has
+    /// asked for one, which it does on its first frame, and true whether or
+    /// not there was a host to answer. The page offers the picture controls
+    /// only for the savers this is true of.
+    pub fn hack_uses_images(&self) -> bool {
+        self.images.ever_wanted
+    }
+
     /// Host side: hand over a decoded image, and optionally what to call it.
     pub fn deliver_image(&mut self, image: XImage, title: Option<String>) {
         self.images.ready = Some(image);
