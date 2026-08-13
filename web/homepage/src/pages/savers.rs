@@ -68,1963 +68,4626 @@ pub struct Entry {
 ///
 /// Without the `split` feature this compiles to a direct call, so `dx serve`
 /// works normally and there is no wasm machinery in the build at all.
-macro_rules! saver {
-    ($slug:literal, $body:ident, $load:ident, $path:path) => {
-        fn $body(args: StartArgs) -> Runner {
-            $path(args)
-        }
-
-        #[cfg(feature = "split")]
-        fn $load(args: StartArgs) -> RunnerFuture {
-            Box::pin(async {
-                // The module name is the slug, so the emitted chunk is
-                // recognisable in the network tab and in the bundle.
-                static MODULE: wasm_split::LazyLoader<StartArgs, Runner> =
-            wasm_split::lazy_loader!(extern $slug fn $body(props: StartArgs) -> Runner);
-                if MODULE.load().await {
-                    MODULE.call(args).ok()
-                } else {
-                    None
-                }
-            })
-        }
-
-        #[cfg(not(feature = "split"))]
-        fn $load(args: StartArgs) -> RunnerFuture {
-            Box::pin(async { Some($body(args)) })
-        }
-    };
-}
-
 /// The same, for an OpenGL saver.
-macro_rules! gl3d_saver {
-    ($slug:literal, $body:ident, $load:ident, $path:path) => {
-        fn $body(args: StartArgs) -> Runner3d {
-            $path(args)
-        }
-
-        #[cfg(feature = "split")]
-        fn $load(args: StartArgs) -> Runner3dFuture {
-            Box::pin(async {
-                static MODULE: wasm_split::LazyLoader<StartArgs, Runner3d> =
-            wasm_split::lazy_loader!(extern $slug fn $body(props: StartArgs) -> Runner3d);
-                if MODULE.load().await {
-                    MODULE.call(args).ok()
-                } else {
-                    None
-                }
-            })
-        }
-
-        #[cfg(not(feature = "split"))]
-        fn $load(args: StartArgs) -> Runner3dFuture {
-            Box::pin(async { Some($body(args)) })
-        }
-    };
-}
-
 /// The same, for a Shadertoy saver. Its chunk holds the program text rather
 /// than code, since the runner is shared and lives in the main module.
-macro_rules! gl_saver {
-    ($slug:literal, $body:ident, $load:ident, $path:path) => {
-        fn $body(args: StartArgs) -> Shadertoy {
-            $path(args)
-        }
-
-        #[cfg(feature = "split")]
-        fn $load(args: StartArgs) -> ShadertoyFuture {
-            Box::pin(async {
-                static MODULE: wasm_split::LazyLoader<StartArgs, Shadertoy> =
-            wasm_split::lazy_loader!(extern $slug fn $body(props: StartArgs) -> Shadertoy);
-                if MODULE.load().await {
-                    MODULE.call(args).ok()
-                } else {
-                    None
-                }
-            })
-        }
-
-        #[cfg(not(feature = "split"))]
-        fn $load(args: StartArgs) -> ShadertoyFuture {
-            Box::pin(async { Some($body(args)) })
-        }
-    };
+/// What a chunk hands back: the engine the saver actually started.
+///
+/// # Why the savers are grouped, and why only some of them are split
+///
+/// One chunk per saver is what this file did first, and `wasm-split` 0.7.9
+/// cannot do it. Above a threshold it miscompiles the indirect function table:
+/// every route then dispatches to the wrong component, the app rewrites its
+/// own URL to `/screensaver` and sits on "Picking a screensaver" forever, with
+/// no error in the console, no failed request, and a build that reports
+/// success. Ten savers to a chunk keeps the table small enough to come out
+/// right.
+///
+/// The limit is on how much code leaves the main module, not on how many
+/// chunks there are. Measured: 312 savers in 8 chunks fails, in 16 fails, and
+/// individually fails; 160 savers in 16 chunks works, 240 does not. So the
+/// first 16 groups are split and the rest stay resident. That is worth
+/// having: it takes the main module from 18.6 MB to 12.2 MB, which is 6.6 MB
+/// to 4.8 MB once compressed.
+///
+/// Anchoring the shared runtime in main by keeping one saver of each engine
+/// resident was tried and does not help; the runtime still leaves.
+///
+/// If you add savers, check the split still works before shipping. It fails
+/// silently, and `nu test-browser.nu <slug>` catches it: a broken split makes
+/// every saver render the same placeholder, so identical mean and spread
+/// across two different savers is the signature.
+#[cfg(feature = "split")]
+#[allow(clippy::large_enum_variant)]
+pub enum Started {
+    Fb(Runner),
+    Gl3d(Runner3d),
+    Gl(Shadertoy),
+}
+fn ant_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::ant::start(args)
+}
+fn abstractile_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::abstractile::start(args)
+}
+fn anemone_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::anemone::start(args)
+}
+fn anemotaxis_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::anemotaxis::start(args)
+}
+fn apollonian_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::apollonian::start(args)
+}
+fn apple2_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::apple2::start(args)
+}
+fn attraction_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::attraction::start(args)
+}
+fn barcode_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::barcode::start(args)
+}
+fn binaryhorizon_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::binaryhorizon::start(args)
+}
+fn binaryring_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::binaryring::start(args)
+}
+#[cfg(feature = "split")]
+fn group_0_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(ant_body(a))),
+        1 => Some(Started::Fb(abstractile_body(a))),
+        2 => Some(Started::Fb(anemone_body(a))),
+        3 => Some(Started::Fb(anemotaxis_body(a))),
+        4 => Some(Started::Fb(apollonian_body(a))),
+        5 => Some(Started::Fb(apple2_body(a))),
+        6 => Some(Started::Fb(attraction_body(a))),
+        7 => Some(Started::Fb(barcode_body(a))),
+        8 => Some(Started::Fb(binaryhorizon_body(a))),
+        9 => Some(Started::Fb(binaryring_body(a))),
+        _ => None,
+    }
 }
 
-saver!(
-    "ant",
-    ant_body,
-    ant_start,
-    xscreensaver::hacks2d::ant::start
-);
-saver!(
-    "abstractile",
-    abstractile_body,
-    abstractile_start,
-    xscreensaver::hacks2d::abstractile::start
-);
-saver!(
-    "anemone",
-    anemone_body,
-    anemone_start,
-    xscreensaver::hacks2d::anemone::start
-);
-saver!(
-    "anemotaxis",
-    anemotaxis_body,
-    anemotaxis_start,
-    xscreensaver::hacks2d::anemotaxis::start
-);
-saver!(
-    "apollonian",
-    apollonian_body,
-    apollonian_start,
-    xscreensaver::hacks2d::apollonian::start
-);
-saver!(
-    "apple2",
-    apple2_body,
-    apple2_start,
-    xscreensaver::hacks2d::apple2::start
-);
-saver!(
-    "attraction",
-    attraction_body,
-    attraction_start,
-    xscreensaver::hacks2d::attraction::start
-);
-saver!(
-    "barcode",
-    barcode_body,
-    barcode_start,
-    xscreensaver::hacks2d::barcode::start
-);
-saver!(
-    "binaryhorizon",
-    binaryhorizon_body,
-    binaryhorizon_start,
-    xscreensaver::hacks2d::binaryhorizon::start
-);
-saver!(
-    "binaryring",
-    binaryring_body,
-    binaryring_start,
-    xscreensaver::hacks2d::binaryring::start
-);
-saver!(
-    "blaster",
-    blaster_body,
-    blaster_start,
-    xscreensaver::hacks2d::blaster::start
-);
-saver!(
-    "blitspin",
-    blitspin_body,
-    blitspin_start,
-    xscreensaver::hacks2d::blitspin::start
-);
-saver!(
-    "bsod",
-    bsod_body,
-    bsod_start,
-    xscreensaver::hacks2d::bsod::start
-);
-saver!(
-    "bouboule",
-    bouboule_body,
-    bouboule_start,
-    xscreensaver::hacks2d::bouboule::start
-);
-saver!(
-    "boxfit",
-    boxfit_body,
-    boxfit_start,
-    xscreensaver::hacks2d::boxfit::start
-);
-saver!(
-    "braid",
-    braid_body,
-    braid_start,
-    xscreensaver::hacks2d::braid::start
-);
-saver!(
-    "bubbles",
-    bubbles_body,
-    bubbles_start,
-    xscreensaver::hacks2d::bubbles::start
-);
-saver!(
-    "bumps",
-    bumps_body,
-    bumps_start,
-    xscreensaver::hacks2d::bumps::start
-);
-saver!(
-    "ccurve",
-    ccurve_body,
-    ccurve_start,
-    xscreensaver::hacks2d::ccurve::start
-);
-saver!(
-    "celtic",
-    celtic_body,
-    celtic_start,
-    xscreensaver::hacks2d::celtic::start
-);
-saver!(
-    "cloudlife",
-    cloudlife_body,
-    cloudlife_start,
-    xscreensaver::hacks2d::cloudlife::start
-);
-saver!(
-    "compass",
-    compass_body,
-    compass_start,
-    xscreensaver::hacks2d::compass::start
-);
-saver!(
-    "coral",
-    coral_body,
-    coral_start,
-    xscreensaver::hacks2d::coral::start
-);
-saver!(
-    "critical",
-    critical_body,
-    critical_start,
-    xscreensaver::hacks2d::critical::start
-);
-saver!(
-    "crystal",
-    crystal_body,
-    crystal_start,
-    xscreensaver::hacks2d::crystal::start
-);
-saver!(
-    "cwaves",
-    cwaves_body,
-    cwaves_start,
-    xscreensaver::hacks2d::cwaves::start
-);
-saver!(
-    "deco",
-    deco_body,
-    deco_start,
-    xscreensaver::hacks2d::deco::start
-);
-saver!(
-    "cynosure",
-    cynosure_body,
-    cynosure_start,
-    xscreensaver::hacks2d::cynosure::start
-);
-saver!(
-    "decayscreen",
-    decayscreen_body,
-    decayscreen_start,
-    xscreensaver::hacks2d::decayscreen::start
-);
-saver!(
-    "deluxe",
-    deluxe_body,
-    deluxe_start,
-    xscreensaver::hacks2d::deluxe::start
-);
-saver!(
-    "demon",
-    demon_body,
-    demon_start,
-    xscreensaver::hacks2d::demon::start
-);
-saver!(
-    "discrete",
-    discrete_body,
-    discrete_start,
-    xscreensaver::hacks2d::discrete::start
-);
-saver!(
-    "fuzzyflakes",
-    fuzzyflakes_body,
-    fuzzyflakes_start,
-    xscreensaver::hacks2d::fuzzyflakes::start
-);
-saver!(
-    "galaxy",
-    galaxy_body,
-    galaxy_start,
-    xscreensaver::hacks2d::galaxy::start
-);
-saver!(
-    "greynetic",
-    greynetic_body,
-    greynetic_start,
-    xscreensaver::hacks2d::greynetic::start
-);
-saver!(
-    "distort",
-    distort_body,
-    distort_start,
-    xscreensaver::hacks2d::distort::start
-);
-saver!(
-    "drift",
-    drift_body,
-    drift_start,
-    xscreensaver::hacks2d::drift::start
-);
-saver!(
-    "droste",
-    droste_body,
-    droste_start,
-    xscreensaver::hacks2d::droste::start
-);
-saver!(
-    "epicycle",
-    epicycle_body,
-    epicycle_start,
-    xscreensaver::hacks2d::epicycle::start
-);
-saver!(
-    "euler2d",
-    euler2d_body,
-    euler2d_start,
-    xscreensaver::hacks2d::euler2d::start
-);
-saver!(
-    "eruption",
-    eruption_body,
-    eruption_start,
-    xscreensaver::hacks2d::eruption::start
-);
-saver!(
-    "fadeplot",
-    fadeplot_body,
-    fadeplot_start,
-    xscreensaver::hacks2d::fadeplot::start
-);
-saver!(
-    "fiberlamp",
-    fiberlamp_body,
-    fiberlamp_start,
-    xscreensaver::hacks2d::fiberlamp::start
-);
-saver!(
-    "filmleader",
-    filmleader_body,
-    filmleader_start,
-    xscreensaver::hacks2d::filmleader::start
-);
-saver!(
-    "fireworkx",
-    fireworkx_body,
-    fireworkx_start,
-    xscreensaver::hacks2d::fireworkx::start
-);
-saver!(
-    "flag",
-    flag_body,
-    flag_start,
-    xscreensaver::hacks2d::flag::start
-);
-saver!(
-    "flame",
-    flame_body,
-    flame_start,
-    xscreensaver::hacks2d::flame::start
-);
-saver!(
-    "flow",
-    flow_body,
-    flow_start,
-    xscreensaver::hacks2d::flow::start
-);
-saver!(
-    "fluidballs",
-    fluidballs_body,
-    fluidballs_start,
-    xscreensaver::hacks2d::fluidballs::start
-);
-saver!(
-    "fontglide",
-    fontglide_body,
-    fontglide_start,
-    xscreensaver::hacks2d::fontglide::start
-);
-saver!(
-    "forest",
-    forest_body,
-    forest_start,
-    xscreensaver::hacks2d::forest::start
-);
-saver!(
-    "glitchpeg",
-    glitchpeg_body,
-    glitchpeg_start,
-    xscreensaver::hacks2d::glitchpeg::start
-);
-saver!(
-    "goop",
-    goop_body,
-    goop_start,
-    xscreensaver::hacks2d::goop::start
-);
-saver!(
-    "grav",
-    grav_body,
-    grav_start,
-    xscreensaver::hacks2d::grav::start
-);
-saver!(
-    "halo",
-    halo_body,
-    halo_start,
-    xscreensaver::hacks2d::halo::start
-);
-saver!(
-    "halftone",
-    halftone_body,
-    halftone_start,
-    xscreensaver::hacks2d::halftone::start
-);
-saver!(
-    "helix",
-    helix_body,
-    helix_start,
-    xscreensaver::hacks2d::helix::start
-);
-saver!(
-    "hexadrop",
-    hexadrop_body,
-    hexadrop_start,
-    xscreensaver::hacks2d::hexadrop::start
-);
-saver!(
-    "hopalong",
-    hopalong_body,
-    hopalong_start,
-    xscreensaver::hacks2d::hopalong::start
-);
-saver!(
-    "hyperball",
-    hyperball_body,
-    hyperball_start,
-    xscreensaver::hacks2d::hyperball::start
-);
-saver!(
-    "hypercube",
-    hypercube_body,
-    hypercube_start,
-    xscreensaver::hacks2d::hypercube::start
-);
-saver!(
-    "ifs",
-    ifs_body,
-    ifs_start,
-    xscreensaver::hacks2d::ifs::start
-);
-saver!(
-    "imsmap",
-    imsmap_body,
-    imsmap_start,
-    xscreensaver::hacks2d::imsmap::start
-);
-saver!(
-    "interaggregate",
-    interaggregate_body,
-    interaggregate_start,
-    xscreensaver::hacks2d::interaggregate::start
-);
-saver!(
-    "interference",
-    interference_body,
-    interference_start,
-    xscreensaver::hacks2d::interference::start
-);
-saver!(
-    "intermomentary",
-    intermomentary_body,
-    intermomentary_start,
-    xscreensaver::hacks2d::intermomentary::start
-);
-saver!(
-    "juggle",
-    juggle_body,
-    juggle_start,
-    xscreensaver::hacks2d::juggle::start
-);
-saver!(
-    "julia",
-    julia_body,
-    julia_start,
-    xscreensaver::hacks2d::julia::start
-);
-saver!(
-    "kaleidescope",
-    kaleidescope_body,
-    kaleidescope_start,
-    xscreensaver::hacks2d::kaleidescope::start
-);
-saver!(
-    "laser",
-    laser_body,
-    laser_start,
-    xscreensaver::hacks2d::laser::start
-);
-saver!(
-    "kumppa",
-    kumppa_body,
-    kumppa_start,
-    xscreensaver::hacks2d::kumppa::start
-);
-saver!(
-    "lcdscrub",
-    lcdscrub_body,
-    lcdscrub_start,
-    xscreensaver::hacks2d::lcdscrub::start
-);
-saver!(
-    "lightning",
-    lightning_body,
-    lightning_start,
-    xscreensaver::hacks2d::lightning::start
-);
-saver!(
-    "lisa",
-    lisa_body,
-    lisa_start,
-    xscreensaver::hacks2d::lisa::start
-);
-saver!(
-    "lissie",
-    lissie_body,
-    lissie_start,
-    xscreensaver::hacks2d::lissie::start
-);
-saver!(
-    "mismunch",
-    mismunch_body,
-    mismunch_start,
-    xscreensaver::hacks2d::mismunch::start
-);
-saver!(
-    "moire",
-    moire_body,
-    moire_start,
-    xscreensaver::hacks2d::moire::start
-);
-saver!(
-    "lmorph",
-    lmorph_body,
-    lmorph_start,
-    xscreensaver::hacks2d::lmorph::start
-);
-saver!(
-    "loop",
-    loop_body,
-    loop_start,
-    xscreensaver::hacks2d::r#loop::start
-);
-saver!(
-    "m6502",
-    m6502_body,
-    m6502_start,
-    xscreensaver::hacks2d::m6502::start
-);
-saver!(
-    "marbling",
-    marbling_body,
-    marbling_start,
-    xscreensaver::hacks2d::marbling::start
-);
-saver!(
-    "maze",
-    maze_body,
-    maze_start,
-    xscreensaver::hacks2d::maze::start
-);
-saver!(
-    "memscroller",
-    memscroller_body,
-    memscroller_start,
-    xscreensaver::hacks2d::memscroller::start
-);
-saver!(
-    "metaballs",
-    metaballs_body,
-    metaballs_start,
-    xscreensaver::hacks2d::metaballs::start
-);
-saver!(
-    "moire2",
-    moire2_body,
-    moire2_start,
-    xscreensaver::hacks2d::moire2::start
-);
-saver!(
-    "mountain",
-    mountain_body,
-    mountain_start,
-    xscreensaver::hacks2d::mountain::start
-);
-saver!(
-    "munch",
-    munch_body,
-    munch_start,
-    xscreensaver::hacks2d::munch::start
-);
-saver!(
-    "nerverot",
-    nerverot_body,
-    nerverot_start,
-    xscreensaver::hacks2d::nerverot::start
-);
-saver!(
-    "noseguy",
-    noseguy_body,
-    noseguy_start,
-    xscreensaver::hacks2d::noseguy::start
-);
-saver!(
-    "pacman",
-    pacman_body,
-    pacman_start,
-    xscreensaver::hacks2d::pacman::start
-);
-saver!(
-    "pedal",
-    pedal_body,
-    pedal_start,
-    xscreensaver::hacks2d::pedal::start
-);
-saver!(
-    "penetrate",
-    penetrate_body,
-    penetrate_start,
-    xscreensaver::hacks2d::penetrate::start
-);
-saver!(
-    "penrose",
-    penrose_body,
-    penrose_start,
-    xscreensaver::hacks2d::penrose::start
-);
-saver!(
-    "petri",
-    petri_body,
-    petri_start,
-    xscreensaver::hacks2d::petri::start
-);
-saver!(
-    "phosphor",
-    phosphor_body,
-    phosphor_start,
-    xscreensaver::hacks2d::phosphor::start
-);
-saver!(
-    "piecewise",
-    piecewise_body,
-    piecewise_start,
-    xscreensaver::hacks2d::piecewise::start
-);
-saver!(
-    "polyominoes",
-    polyominoes_body,
-    polyominoes_start,
-    xscreensaver::hacks2d::polyominoes::start
-);
-saver!(
-    "pong",
-    pong_body,
-    pong_start,
-    xscreensaver::hacks2d::pong::start
-);
-saver!(
-    "popsquares",
-    popsquares_body,
-    popsquares_start,
-    xscreensaver::hacks2d::popsquares::start
-);
-saver!(
-    "pyro",
-    pyro_body,
-    pyro_start,
-    xscreensaver::hacks2d::pyro::start
-);
-saver!(
-    "qix",
-    qix_body,
-    qix_start,
-    xscreensaver::hacks2d::qix::start
-);
-saver!(
-    "rdbomb",
-    rdbomb_body,
-    rdbomb_start,
-    xscreensaver::hacks2d::rdbomb::start
-);
-saver!(
-    "ripples",
-    ripples_body,
-    ripples_start,
-    xscreensaver::hacks2d::ripples::start
-);
-saver!(
-    "rocks",
-    rocks_body,
-    rocks_start,
-    xscreensaver::hacks2d::rocks::start
-);
-saver!(
-    "rorschach",
-    rorschach_body,
-    rorschach_start,
-    xscreensaver::hacks2d::rorschach::start
-);
+#[cfg(feature = "split")]
+static GROUP_0: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_0" fn group_0_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn ant_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
 
-saver!(
-    "rotor",
-    rotor_body,
-    rotor_start,
-    xscreensaver::hacks2d::rotor::start
-);
-saver!(
-    "scooter",
-    scooter_body,
-    scooter_start,
-    xscreensaver::hacks2d::scooter::start
-);
-saver!(
-    "shadebobs",
-    shadebobs_body,
-    shadebobs_start,
-    xscreensaver::hacks2d::shadebobs::start
-);
-saver!(
-    "rotzoomer",
-    rotzoomer_body,
-    rotzoomer_start,
-    xscreensaver::hacks2d::rotzoomer::start
-);
-saver!(
-    "sierpinski",
-    sierpinski_body,
-    sierpinski_start,
-    xscreensaver::hacks2d::sierpinski::start
-);
-saver!(
-    "slidescreen",
-    slidescreen_body,
-    slidescreen_start,
-    xscreensaver::hacks2d::slidescreen::start
-);
-saver!(
-    "slip",
-    slip_body,
-    slip_start,
-    xscreensaver::hacks2d::slip::start
-);
-saver!(
-    "speedmine",
-    speedmine_body,
-    speedmine_start,
-    xscreensaver::hacks2d::speedmine::start
-);
-saver!(
-    "sphere",
-    sphere_body,
-    sphere_start,
-    xscreensaver::hacks2d::sphere::start
-);
-saver!(
-    "spiral",
-    spiral_body,
-    spiral_start,
-    xscreensaver::hacks2d::spiral::start
-);
-saver!(
-    "spotlight",
-    spotlight_body,
-    spotlight_start,
-    xscreensaver::hacks2d::spotlight::start
-);
-saver!(
-    "squiral",
-    squiral_body,
-    squiral_start,
-    xscreensaver::hacks2d::squiral::start
-);
-saver!(
-    "starfish",
-    starfish_body,
-    starfish_start,
-    xscreensaver::hacks2d::starfish::start
-);
-saver!(
-    "strange",
-    strange_body,
-    strange_start,
-    xscreensaver::hacks2d::strange::start
-);
-saver!(
-    "substrate",
-    substrate_body,
-    substrate_start,
-    xscreensaver::hacks2d::substrate::start
-);
-saver!(
-    "swirl",
-    swirl_body,
-    swirl_start,
-    xscreensaver::hacks2d::swirl::start
-);
-saver!(
-    "t3d",
-    t3d_body,
-    t3d_start,
-    xscreensaver::hacks2d::t3d::start
-);
-saver!(
-    "tessellimage",
-    tessellimage_body,
-    tessellimage_start,
-    xscreensaver::hacks2d::tessellimage::start
-);
-saver!(
-    "thornbird",
-    thornbird_body,
-    thornbird_start,
-    xscreensaver::hacks2d::thornbird::start
-);
-saver!(
-    "triangle",
-    triangle_body,
-    triangle_start,
-    xscreensaver::hacks2d::triangle::start
-);
-saver!(
-    "twang",
-    twang_body,
-    twang_start,
-    xscreensaver::hacks2d::twang::start
-);
-saver!(
-    "vidwhacker",
-    vidwhacker_body,
-    vidwhacker_start,
-    xscreensaver::hacks2d::vidwhacker::start
-);
-saver!(
-    "vines",
-    vines_body,
-    vines_start,
-    xscreensaver::hacks2d::vines::start
-);
-saver!(
-    "truchet",
-    truchet_body,
-    truchet_start,
-    xscreensaver::hacks2d::truchet::start
-);
-saver!(
-    "vermiculate",
-    vermiculate_body,
-    vermiculate_start,
-    xscreensaver::hacks2d::vermiculate::start
-);
-saver!(
-    "vfeedback",
-    vfeedback_body,
-    vfeedback_start,
-    xscreensaver::hacks2d::vfeedback::start
-);
-saver!(
-    "wander",
-    wander_body,
-    wander_start,
-    xscreensaver::hacks2d::wander::start
-);
-saver!(
-    "webcollage",
-    webcollage_body,
-    webcollage_start,
-    xscreensaver::hacks2d::webcollage::start
-);
-saver!(
-    "whirlwindwarp",
-    whirlwindwarp_body,
-    whirlwindwarp_start,
-    xscreensaver::hacks2d::whirlwindwarp::start
-);
-saver!(
-    "whirlygig",
-    whirlygig_body,
-    whirlygig_start,
-    xscreensaver::hacks2d::whirlygig::start
-);
-saver!(
-    "worm",
-    worm_body,
-    worm_start,
-    xscreensaver::hacks2d::worm::start
-);
-saver!(
-    "wormhole",
-    wormhole_body,
-    wormhole_start,
-    xscreensaver::hacks2d::wormhole::start
-);
-saver!(
-    "zoom",
-    zoom_body,
-    zoom_start,
-    xscreensaver::hacks2d::zoom::start
-);
-saver!(
-    "xanalogtv",
-    xanalogtv_body,
-    xanalogtv_start,
-    xscreensaver::hacks2d::xanalogtv::start
-);
-saver!(
-    "xflame",
-    xflame_body,
-    xflame_start,
-    xscreensaver::hacks2d::xflame::start
-);
-saver!(
-    "xjack",
-    xjack_body,
-    xjack_start,
-    xscreensaver::hacks2d::xjack::start
-);
-saver!(
-    "xlyap",
-    xlyap_body,
-    xlyap_start,
-    xscreensaver::hacks2d::xlyap::start
-);
-saver!(
-    "xmatrix",
-    xmatrix_body,
-    xmatrix_start,
-    xscreensaver::hacks2d::xmatrix::start
-);
-saver!(
-    "xrayswarm",
-    xrayswarm_body,
-    xrayswarm_start,
-    xscreensaver::hacks2d::xrayswarm::start
-);
-saver!(
-    "xspirograph",
-    xspirograph_body,
-    xspirograph_start,
-    xscreensaver::hacks2d::xspirograph::start
-);
+#[cfg(not(feature = "split"))]
+fn ant_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(ant_body(args)) })
+}
+#[cfg(feature = "split")]
+fn abstractile_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
 
-gl3d_saver!(
-    "dnalogo",
-    dnalogo_body,
-    dnalogo_start,
-    xscreensaver::hacks3d::dnalogo::start
-);
-gl3d_saver!(
-    "extrusion",
-    extrusion_body,
-    extrusion_start,
-    xscreensaver::hacks3d::extrusion::start
-);
-gl3d_saver!(
-    "juggler3d",
-    juggler3d_body,
-    juggler3d_start,
-    xscreensaver::hacks3d::juggler3d::start
-);
-gl3d_saver!(
-    "flurry",
-    flurry_body,
-    flurry_start,
-    xscreensaver::hacks3d::flurry::start
-);
-gl3d_saver!(
-    "atlantis",
-    atlantis_body,
-    atlantis_start,
-    xscreensaver::hacks3d::atlantis::start
-);
-gl3d_saver!(
-    "companioncube",
-    companioncube_body,
-    companioncube_start,
-    xscreensaver::hacks3d::companioncube::start
-);
-gl3d_saver!(
-    "crackberg",
-    crackberg_body,
-    crackberg_start,
-    xscreensaver::hacks3d::crackberg::start
-);
-gl3d_saver!(
-    "cubicgrid",
-    cubicgrid_body,
-    cubicgrid_start,
-    xscreensaver::hacks3d::cubicgrid::start
-);
-gl3d_saver!(
-    "handsy",
-    handsy_body,
-    handsy_start,
-    xscreensaver::hacks3d::handsy::start
-);
-gl3d_saver!(
-    "headroom",
-    headroom_body,
-    headroom_start,
-    xscreensaver::hacks3d::headroom::start
-);
-gl3d_saver!(
-    "highvoltage",
-    highvoltage_body,
-    highvoltage_start,
-    xscreensaver::hacks3d::highvoltage::start
-);
-gl3d_saver!(
-    "mapscroller",
-    mapscroller_body,
-    mapscroller_start,
-    xscreensaver::hacks3d::mapscroller::start
-);
-gl3d_saver!(
-    "unicrud",
-    unicrud_body,
-    unicrud_start,
-    xscreensaver::hacks3d::unicrud::start
-);
-gl3d_saver!(
-    "winduprobot",
-    winduprobot_body,
-    winduprobot_start,
-    xscreensaver::hacks3d::winduprobot::start
-);
-gl3d_saver!(
-    "sproingies",
-    sproingies_body,
-    sproingies_start,
-    xscreensaver::hacks3d::sproingies::start
-);
-gl3d_saver!(
-    "carousel",
-    carousel_body,
-    carousel_start,
-    xscreensaver::hacks3d::carousel::start
-);
-gl3d_saver!(
-    "chompytower",
-    chompytower_body,
-    chompytower_start,
-    xscreensaver::hacks3d::chompytower::start
-);
-gl3d_saver!(
-    "skytentacles",
-    skytentacles_body,
-    skytentacles_start,
-    xscreensaver::hacks3d::skytentacles::start
-);
-gl3d_saver!(
-    "gltext",
-    gltext_body,
-    gltext_start,
-    xscreensaver::hacks3d::gltext::start
-);
-gl3d_saver!(
-    "glmatrix",
-    glmatrix_body,
-    glmatrix_start,
-    xscreensaver::hacks3d::glmatrix::start
-);
-gl3d_saver!(
-    "starwars",
-    starwars_body,
-    starwars_start,
-    xscreensaver::hacks3d::starwars::start
-);
-gl3d_saver!(
-    "fliptext",
-    fliptext_body,
-    fliptext_start,
-    xscreensaver::hacks3d::fliptext::start
-);
-gl3d_saver!(
-    "flipflop",
-    flipflop_body,
-    flipflop_start,
-    xscreensaver::hacks3d::flipflop::start
-);
-gl3d_saver!(
-    "flipscreen3d",
-    flipscreen3d_body,
-    flipscreen3d_start,
-    xscreensaver::hacks3d::flipscreen3d::start
-);
-gl3d_saver!(
-    "peepers",
-    peepers_body,
-    peepers_start,
-    xscreensaver::hacks3d::peepers::start
-);
-gl3d_saver!(
-    "photopile",
-    photopile_body,
-    photopile_start,
-    xscreensaver::hacks3d::photopile::start
-);
-gl3d_saver!(
-    "gflux",
-    gflux_body,
-    gflux_start,
-    xscreensaver::hacks3d::gflux::start
-);
-gl3d_saver!(
-    "hexstrut",
-    hexstrut_body,
-    hexstrut_start,
-    xscreensaver::hacks3d::hexstrut::start
-);
-gl3d_saver!(
-    "sballs",
-    sballs_body,
-    sballs_start,
-    xscreensaver::hacks3d::sballs::start
-);
-gl3d_saver!(
-    "sierpinski3d",
-    sierpinski3d_body,
-    sierpinski3d_start,
-    xscreensaver::hacks3d::sierpinski3d::start
-);
-gl3d_saver!(
-    "noof",
-    noof_body,
-    noof_start,
-    xscreensaver::hacks3d::noof::start
-);
-gl3d_saver!(
-    "moebius",
-    moebius_body,
-    moebius_start,
-    xscreensaver::hacks3d::moebius::start
-);
-gl3d_saver!(
-    "moebiusgears",
-    moebiusgears_body,
-    moebiusgears_start,
-    xscreensaver::hacks3d::moebiusgears::start
-);
-gl3d_saver!(
-    "mirrorblob",
-    mirrorblob_body,
-    mirrorblob_start,
-    xscreensaver::hacks3d::mirrorblob::start
-);
-gl3d_saver!(
-    "maze3d",
-    maze3d_body,
-    maze3d_start,
-    xscreensaver::hacks3d::maze3d::start
-);
-gl3d_saver!(
-    "nakagin",
-    nakagin_body,
-    nakagin_start,
-    xscreensaver::hacks3d::nakagin::start
-);
-gl3d_saver!(
-    "menger",
-    menger_body,
-    menger_start,
-    xscreensaver::hacks3d::menger::start
-);
-gl3d_saver!(
-    "hypnowheel",
-    hypnowheel_body,
-    hypnowheel_start,
-    xscreensaver::hacks3d::hypnowheel::start
-);
-gl3d_saver!(
-    "cubestack",
-    cubestack_body,
-    cubestack_start,
-    xscreensaver::hacks3d::cubestack::start
-);
-gl3d_saver!(
-    "cubestorm",
-    cubestorm_body,
-    cubestorm_start,
-    xscreensaver::hacks3d::cubestorm::start
-);
-gl3d_saver!(
-    "vigilance",
-    vigilance_body,
-    vigilance_start,
-    xscreensaver::hacks3d::vigilance::start
-);
-gl3d_saver!(
-    "voronoi",
-    voronoi_body,
-    voronoi_start,
-    xscreensaver::hacks3d::voronoi::start
-);
-gl3d_saver!(
-    "antinspect",
-    antinspect_body,
-    antinspect_start,
-    xscreensaver::hacks3d::antinspect::start
-);
-gl3d_saver!(
-    "antmaze",
-    antmaze_body,
-    antmaze_start,
-    xscreensaver::hacks3d::antmaze::start
-);
-gl3d_saver!(
-    "antspotlight",
-    antspotlight_body,
-    antspotlight_start,
-    xscreensaver::hacks3d::antspotlight::start
-);
-gl3d_saver!(
-    "atunnel",
-    atunnel_body,
-    atunnel_start,
-    xscreensaver::hacks3d::atunnel::start
-);
-gl3d_saver!(
-    "beats",
-    beats_body,
-    beats_start,
-    xscreensaver::hacks3d::beats::start
-);
-gl3d_saver!(
-    "covid19",
-    covid19_body,
-    covid19_start,
-    xscreensaver::hacks3d::covid19::start
-);
-gl3d_saver!(
-    "co____9",
-    co_9_body,
-    co_9_start,
-    xscreensaver::hacks3d::covid19::renamed::start
-);
-gl3d_saver!(
-    "crumbler",
-    crumbler_body,
-    crumbler_start,
-    xscreensaver::hacks3d::crumbler::start
-);
-gl3d_saver!(
-    "cube21",
-    cube21_body,
-    cube21_start,
-    xscreensaver::hacks3d::cube21::start
-);
-gl3d_saver!(
-    "cubetwist",
-    cubetwist_body,
-    cubetwist_start,
-    xscreensaver::hacks3d::cubetwist::start
-);
-gl3d_saver!(
-    "cubocteversion",
-    cubocteversion_body,
-    cubocteversion_start,
-    xscreensaver::hacks3d::cubocteversion::start
-);
-gl3d_saver!(
-    "cubenetic",
-    cubenetic_body,
-    cubenetic_start,
-    xscreensaver::hacks3d::cubenetic::start
-);
-gl3d_saver!(
-    "raverhoop",
-    raverhoop_body,
-    raverhoop_start,
-    xscreensaver::hacks3d::raverhoop::start
-);
-gl3d_saver!(
-    "romanboy",
-    romanboy_body,
-    romanboy_start,
-    xscreensaver::hacks3d::romanboy::start
-);
-gl3d_saver!(
-    "razzledazzle",
-    razzledazzle_body,
-    razzledazzle_start,
-    xscreensaver::hacks3d::razzledazzle::start
-);
-gl3d_saver!(
-    "rubik",
-    rubik_body,
-    rubik_start,
-    xscreensaver::hacks3d::rubik::start
-);
-gl3d_saver!(
-    "rubikblocks",
-    rubikblocks_body,
-    rubikblocks_start,
-    xscreensaver::hacks3d::rubikblocks::start
-);
-gl3d_saver!(
-    "discoball",
-    discoball_body,
-    discoball_start,
-    xscreensaver::hacks3d::discoball::start
-);
-gl3d_saver!(
-    "dumpsterfire",
-    dumpsterfire_body,
-    dumpsterfire_start,
-    xscreensaver::hacks3d::dumpsterfire::start
-);
-gl3d_saver!(
-    "dymaxionmap",
-    dymaxionmap_body,
-    dymaxionmap_start,
-    xscreensaver::hacks3d::dymaxionmap::start
-);
-gl3d_saver!(
-    "endgame",
-    endgame_body,
-    endgame_start,
-    xscreensaver::hacks3d::endgame::start
-);
-gl3d_saver!(
-    "energystream",
-    energystream_body,
-    energystream_start,
-    xscreensaver::hacks3d::energystream::start
-);
-gl3d_saver!(
-    "pinion",
-    pinion_body,
-    pinion_start,
-    xscreensaver::hacks3d::pinion::start
-);
-gl3d_saver!(
-    "pipes",
-    pipes_body,
-    pipes_start,
-    xscreensaver::hacks3d::pipes::start
-);
-gl3d_saver!(
-    "platonicfolding",
-    platonicfolding_body,
-    platonicfolding_start,
-    xscreensaver::hacks3d::platonicfolding::start
-);
-gl3d_saver!(
-    "polyhedra",
-    polyhedra_body,
-    polyhedra_start,
-    xscreensaver::hacks3d::polyhedra::start
-);
-gl3d_saver!(
-    "providence",
-    providence_body,
-    providence_start,
-    xscreensaver::hacks3d::providence::start
-);
-gl3d_saver!(
-    "pulsar",
-    pulsar_body,
-    pulsar_start,
-    xscreensaver::hacks3d::pulsar::start
-);
-gl3d_saver!(
-    "quasicrystal",
-    quasicrystal_body,
-    quasicrystal_start,
-    xscreensaver::hacks3d::quasicrystal::start
-);
-gl3d_saver!(
-    "kallisti",
-    kallisti_body,
-    kallisti_start,
-    xscreensaver::hacks3d::kallisti::start
-);
-gl3d_saver!(
-    "klein",
-    klein_body,
-    klein_start,
-    xscreensaver::hacks3d::klein::start
-);
-gl3d_saver!(
-    "klondike",
-    klondike_body,
-    klondike_start,
-    xscreensaver::hacks3d::klondike::start
-);
-gl3d_saver!(
-    "lament",
-    lament_body,
-    lament_start,
-    xscreensaver::hacks3d::lament::start
-);
-gl3d_saver!(
-    "lavalite",
-    lavalite_body,
-    lavalite_start,
-    xscreensaver::hacks3d::lavalite::start
-);
-gl3d_saver!(
-    "lockward",
-    lockward_body,
-    lockward_start,
-    xscreensaver::hacks3d::lockward::start
-);
-gl3d_saver!(
-    "glsnake",
-    glsnake_body,
-    glsnake_start,
-    xscreensaver::hacks3d::glsnake::start
-);
-gl3d_saver!(
-    "gravitywell",
-    gravitywell_body,
-    gravitywell_start,
-    xscreensaver::hacks3d::gravitywell::start
-);
-gl3d_saver!(
-    "hextrail",
-    hextrail_body,
-    hextrail_start,
-    xscreensaver::hacks3d::hextrail::start
-);
-gl3d_saver!(
-    "bouncingcow",
-    bouncingcow_body,
-    bouncingcow_start,
-    xscreensaver::hacks3d::bouncingcow::start
-);
-gl3d_saver!(
-    "boxed",
-    boxed_body,
-    boxed_start,
-    xscreensaver::hacks3d::boxed::start
-);
-gl3d_saver!(
-    "bubble3d",
-    bubble3d_body,
-    bubble3d_start,
-    xscreensaver::hacks3d::bubble3d::start
-);
-gl3d_saver!(
-    "cage",
-    cage_body,
-    cage_start,
-    xscreensaver::hacks3d::cage::start
-);
-gl3d_saver!(
-    "circuit",
-    circuit_body,
-    circuit_start,
-    xscreensaver::hacks3d::circuit::start
-);
-gl3d_saver!(
-    "cityflow",
-    cityflow_body,
-    cityflow_start,
-    xscreensaver::hacks3d::cityflow::start
-);
-gl3d_saver!(
-    "blocktube",
-    blocktube_body,
-    blocktube_start,
-    xscreensaver::hacks3d::blocktube::start
-);
-gl3d_saver!(
-    "boing",
-    boing_body,
-    boing_start,
-    xscreensaver::hacks3d::boing::start
-);
-gl3d_saver!(
-    "blinkbox",
-    blinkbox_body,
-    blinkbox_start,
-    xscreensaver::hacks3d::blinkbox::start
-);
-gl3d_saver!(
-    "surfaces",
-    surfaces_body,
-    surfaces_start,
-    xscreensaver::hacks3d::surfaces::start
-);
-gl3d_saver!(
-    "tronbit",
-    tronbit_body,
-    tronbit_start,
-    xscreensaver::hacks3d::tronbit::start
-);
-gl3d_saver!(
-    "morph3d",
-    morph3d_body,
-    morph3d_start,
-    xscreensaver::hacks3d::morph3d::start
-);
-gl3d_saver!(
-    "hopffibration",
-    hopffibration_body,
-    hopffibration_start,
-    xscreensaver::hacks3d::hopffibration::start
-);
-gl3d_saver!(
-    "hydrostat",
-    hydrostat_body,
-    hydrostat_start,
-    xscreensaver::hacks3d::hydrostat::start
-);
-gl3d_saver!(
-    "topblock",
-    topblock_body,
-    topblock_start,
-    xscreensaver::hacks3d::topblock::start
-);
-gl3d_saver!(
-    "skulloop",
-    skulloop_body,
-    skulloop_start,
-    xscreensaver::hacks3d::skulloop::start
-);
-gl3d_saver!(
-    "sphereeversion",
-    sphereeversion_body,
-    sphereeversion_start,
-    xscreensaver::hacks3d::sphereeversion::start
-);
-gl3d_saver!(
-    "spheremonics",
-    spheremonics_body,
-    spheremonics_start,
-    xscreensaver::hacks3d::spheremonics::start
-);
-gl3d_saver!(
-    "hypertorus",
-    hypertorus_body,
-    hypertorus_start,
-    xscreensaver::hacks3d::hypertorus::start
-);
-gl3d_saver!(
-    "tangram",
-    tangram_body,
-    tangram_start,
-    xscreensaver::hacks3d::tangram::start
-);
-gl3d_saver!(
-    "timetunnel",
-    timetunnel_body,
-    timetunnel_start,
-    xscreensaver::hacks3d::timetunnel::start
-);
-gl3d_saver!(
-    "papercube",
-    papercube_body,
-    papercube_start,
-    xscreensaver::hacks3d::papercube::start
-);
-gl3d_saver!(
-    "engine",
-    engine_body,
-    engine_start,
-    xscreensaver::hacks3d::engine::start
-);
-gl3d_saver!(
-    "esper",
-    esper_body,
-    esper_start,
-    xscreensaver::hacks3d::esper::start
-);
-gl3d_saver!(
-    "etruscanvenus",
-    etruscanvenus_body,
-    etruscanvenus_start,
-    xscreensaver::hacks3d::etruscanvenus::start
-);
-gl3d_saver!(
-    "molecule",
-    molecule_body,
-    molecule_start,
-    xscreensaver::hacks3d::molecule::start
-);
-gl3d_saver!(
-    "projectiveplane",
-    projectiveplane_body,
-    projectiveplane_start,
-    xscreensaver::hacks3d::projectiveplane::start
-);
-gl3d_saver!(
-    "polytopes",
-    polytopes_body,
-    polytopes_start,
-    xscreensaver::hacks3d::polytopes::start
-);
-gl3d_saver!(
-    "queens",
-    queens_body,
-    queens_start,
-    xscreensaver::hacks3d::queens::start
-);
-gl3d_saver!(
-    "geodesic",
-    geodesic_body,
-    geodesic_start,
-    xscreensaver::hacks3d::geodesic::start
-);
-gl3d_saver!(
-    "geodesicgears",
-    geodesicgears_body,
-    geodesicgears_start,
-    xscreensaver::hacks3d::geodesicgears::start
-);
-gl3d_saver!(
-    "glforestfire",
-    glforestfire_body,
-    glforestfire_start,
-    xscreensaver::hacks3d::glforestfire::start
-);
-gl3d_saver!(
-    "gleidescope",
-    gleidescope_body,
-    gleidescope_start,
-    xscreensaver::hacks3d::gleidescope::start
-);
-gl3d_saver!(
-    "glslideshow",
-    glslideshow_body,
-    glslideshow_start,
-    xscreensaver::hacks3d::glslideshow::start
-);
-gl3d_saver!(
-    "hilbert",
-    hilbert_body,
-    hilbert_start,
-    xscreensaver::hacks3d::hilbert::start
-);
-gl3d_saver!(
-    "jigsaw",
-    jigsaw_body,
-    jigsaw_start,
-    xscreensaver::hacks3d::jigsaw::start
-);
-gl3d_saver!(
-    "superquadrics",
-    superquadrics_body,
-    superquadrics_start,
-    xscreensaver::hacks3d::superquadrics::start
-);
-gl3d_saver!(
-    "unknownpleasures",
-    unknownpleasures_body,
-    unknownpleasures_start,
-    xscreensaver::hacks3d::unknownpleasures::start
-);
-gl3d_saver!(
-    "sonar",
-    sonar_body,
-    sonar_start,
-    xscreensaver::hacks3d::sonar::start
-);
-gl3d_saver!(
-    "squirtorus",
-    squirtorus_body,
-    squirtorus_start,
-    xscreensaver::hacks3d::squirtorus::start
-);
-gl3d_saver!(
-    "stairs",
-    stairs_body,
-    stairs_start,
-    xscreensaver::hacks3d::stairs::start
-);
-gl3d_saver!(
-    "stonerview",
-    stonerview_body,
-    stonerview_start,
-    xscreensaver::hacks3d::stonerview::start
-);
-gl3d_saver!(
-    "splitflap",
-    splitflap_body,
-    splitflap_start,
-    xscreensaver::hacks3d::splitflap::start
-);
-gl3d_saver!(
-    "splodesic",
-    splodesic_body,
-    splodesic_start,
-    xscreensaver::hacks3d::splodesic::start
-);
-gl3d_saver!(
-    "jigglypuff",
-    jigglypuff_body,
-    jigglypuff_start,
-    xscreensaver::hacks3d::jigglypuff::start
-);
-gl3d_saver!(
-    "kaleidocycle",
-    kaleidocycle_body,
-    kaleidocycle_start,
-    xscreensaver::hacks3d::kaleidocycle::start
-);
-gl3d_saver!(
-    "glplanet",
-    glplanet_body,
-    glplanet_start,
-    xscreensaver::hacks3d::glplanet::start
-);
-gl3d_saver!(
-    "glschool",
-    glschool_body,
-    glschool_start,
-    xscreensaver::hacks3d::glschool::start
-);
-gl3d_saver!(
-    "flyingtoasters",
-    flyingtoasters_body,
-    flyingtoasters_start,
-    xscreensaver::hacks3d::flyingtoasters::start
-);
-gl3d_saver!(
-    "gears",
-    gears_body,
-    gears_start,
-    xscreensaver::hacks3d::gears::start
-);
-gl3d_saver!(
-    "gibson",
-    gibson_body,
-    gibson_start,
-    xscreensaver::hacks3d::gibson::start
-);
-gl3d_saver!(
-    "glcells",
-    glcells_body,
-    glcells_start,
-    xscreensaver::hacks3d::glcells::start
-);
-gl3d_saver!(
-    "glblur",
-    glblur_body,
-    glblur_start,
-    xscreensaver::hacks3d::glblur::start
-);
-gl3d_saver!(
-    "glhanoi",
-    glhanoi_body,
-    glhanoi_start,
-    xscreensaver::hacks3d::glhanoi::start
-);
-gl3d_saver!(
-    "glknots",
-    glknots_body,
-    glknots_start,
-    xscreensaver::hacks3d::glknots::start
-);
-gl3d_saver!(
-    "dangerball",
-    dangerball_body,
-    dangerball_start,
-    xscreensaver::hacks3d::dangerball::start
-);
-gl3d_saver!(
-    "deepstars",
-    deepstars_body,
-    deepstars_start,
-    xscreensaver::hacks3d::deepstars::start
-);
-gl_saver!(
-    "alienbeacon",
-    alienbeacon_body,
-    alienbeacon_start,
-    xscreensaver::shadertoy::alienbeacon::start
-);
-gl_saver!(
-    "batteredplanet",
-    batteredplanet_body,
-    batteredplanet_start,
-    xscreensaver::shadertoy::batteredplanet::start
-);
-gl_saver!(
-    "bestill",
-    bestill_body,
-    bestill_start,
-    xscreensaver::shadertoy::bestill::start
-);
-gl_saver!(
-    "bubblecolors",
-    bubblecolors_body,
-    bubblecolors_start,
-    xscreensaver::shadertoy::bubblecolors::start
-);
-gl_saver!(
-    "darktransit",
-    darktransit_body,
-    darktransit_start,
-    xscreensaver::shadertoy::darktransit::start
-);
-gl_saver!(
-    "downfall",
-    downfall_body,
-    downfall_start,
-    xscreensaver::shadertoy::downfall::start
-);
-gl_saver!(
-    "driftclouds",
-    driftclouds_body,
-    driftclouds_start,
-    xscreensaver::shadertoy::driftclouds::start
-);
-gl_saver!(
-    "elementalring",
-    elementalring_body,
-    elementalring_start,
-    xscreensaver::shadertoy::elementalring::start
-);
-gl_saver!(
-    "fluxcore",
-    fluxcore_body,
-    fluxcore_start,
-    xscreensaver::shadertoy::fluxcore::start
-);
-gl_saver!(
-    "gimbalharmonics",
-    gimbalharmonics_body,
-    gimbalharmonics_start,
-    xscreensaver::shadertoy::gimbalharmonics::start
-);
-gl_saver!(
-    "goldenapollian",
-    goldenapollian_body,
-    goldenapollian_start,
-    xscreensaver::shadertoy::goldenapollian::start
-);
-gl_saver!(
-    "hexplasma",
-    hexplasma_body,
-    hexplasma_start,
-    xscreensaver::shadertoy::hexplasma::start
-);
-gl_saver!(
-    "logarithmiccircles",
-    logarithmiccircles_body,
-    logarithmiccircles_start,
-    xscreensaver::shadertoy::logarithmiccircles::start
-);
-gl_saver!(
-    "neongravity",
-    neongravity_body,
-    neongravity_start,
-    xscreensaver::shadertoy::neongravity::start
-);
-gl_saver!(
-    "neontriangulator",
-    neontriangulator_body,
-    neontriangulator_start,
-    xscreensaver::shadertoy::neontriangulator::start
-);
-gl_saver!(
-    "noxfire",
-    noxfire_body,
-    noxfire_start,
-    xscreensaver::shadertoy::noxfire::start
-);
-gl_saver!(
-    "prococean",
-    prococean_body,
-    prococean_start,
-    xscreensaver::shadertoy::prococean::start
-);
-gl_saver!(
-    "protophore",
-    protophore_body,
-    protophore_start,
-    xscreensaver::shadertoy::protophore::start
-);
-gl_saver!(
-    "rigrekt",
-    rigrekt_body,
-    rigrekt_start,
-    xscreensaver::shadertoy::rigrekt::start
-);
-gl_saver!(
-    "selfreflect",
-    selfreflect_body,
-    selfreflect_start,
-    xscreensaver::shadertoy::selfreflect::start
-);
-gl_saver!(
-    "skyline",
-    skyline_body,
-    skyline_start,
-    xscreensaver::shadertoy::skyline::start
-);
-gl_saver!(
-    "stardome",
-    stardome_body,
-    stardome_start,
-    xscreensaver::shadertoy::stardome::start
-);
-gl_saver!(
-    "starnest",
-    starnest_body,
-    starnest_start,
-    xscreensaver::shadertoy::starnest::start
-);
-gl_saver!(
-    "stripeytorus",
-    stripeytorus_body,
-    stripeytorus_start,
-    xscreensaver::shadertoy::stripeytorus::start
-);
-gl_saver!(
-    "synthwavecity",
-    synthwavecity_body,
-    synthwavecity_start,
-    xscreensaver::shadertoy::synthwavecity::start
-);
-gl_saver!(
-    "topologica",
-    topologica_body,
-    topologica_start,
-    xscreensaver::shadertoy::topologica::start
-);
-gl_saver!(
-    "trainmandala",
-    trainmandala_body,
-    trainmandala_start,
-    xscreensaver::shadertoy::trainmandala::start
-);
-gl_saver!(
-    "trizm",
-    trizm_body,
-    trizm_start,
-    xscreensaver::shadertoy::trizm::start
-);
-gl_saver!(
-    "truchetzoom",
-    truchetzoom_body,
-    truchetzoom_start,
-    xscreensaver::shadertoy::truchetzoom::start
-);
-gl_saver!(
-    "universeball",
-    universeball_body,
-    universeball_start,
-    xscreensaver::shadertoy::universeball::start
-);
+#[cfg(not(feature = "split"))]
+fn abstractile_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(abstractile_body(args)) })
+}
+#[cfg(feature = "split")]
+fn anemone_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn anemone_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(anemone_body(args)) })
+}
+#[cfg(feature = "split")]
+fn anemotaxis_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn anemotaxis_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(anemotaxis_body(args)) })
+}
+#[cfg(feature = "split")]
+fn apollonian_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn apollonian_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(apollonian_body(args)) })
+}
+#[cfg(feature = "split")]
+fn apple2_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn apple2_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(apple2_body(args)) })
+}
+#[cfg(feature = "split")]
+fn attraction_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn attraction_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(attraction_body(args)) })
+}
+#[cfg(feature = "split")]
+fn barcode_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn barcode_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(barcode_body(args)) })
+}
+#[cfg(feature = "split")]
+fn binaryhorizon_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn binaryhorizon_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(binaryhorizon_body(args)) })
+}
+#[cfg(feature = "split")]
+fn binaryring_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_0.load().await {
+            return None;
+        }
+        match GROUP_0.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn binaryring_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(binaryring_body(args)) })
+}
+fn blaster_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::blaster::start(args)
+}
+fn blitspin_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::blitspin::start(args)
+}
+fn bsod_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::bsod::start(args)
+}
+fn bouboule_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::bouboule::start(args)
+}
+fn boxfit_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::boxfit::start(args)
+}
+fn braid_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::braid::start(args)
+}
+fn bubbles_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::bubbles::start(args)
+}
+fn bumps_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::bumps::start(args)
+}
+fn ccurve_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::ccurve::start(args)
+}
+fn celtic_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::celtic::start(args)
+}
+#[cfg(feature = "split")]
+fn group_1_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(blaster_body(a))),
+        1 => Some(Started::Fb(blitspin_body(a))),
+        2 => Some(Started::Fb(bsod_body(a))),
+        3 => Some(Started::Fb(bouboule_body(a))),
+        4 => Some(Started::Fb(boxfit_body(a))),
+        5 => Some(Started::Fb(braid_body(a))),
+        6 => Some(Started::Fb(bubbles_body(a))),
+        7 => Some(Started::Fb(bumps_body(a))),
+        8 => Some(Started::Fb(ccurve_body(a))),
+        9 => Some(Started::Fb(celtic_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_1: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_1" fn group_1_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn blaster_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn blaster_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(blaster_body(args)) })
+}
+#[cfg(feature = "split")]
+fn blitspin_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn blitspin_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(blitspin_body(args)) })
+}
+#[cfg(feature = "split")]
+fn bsod_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn bsod_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(bsod_body(args)) })
+}
+#[cfg(feature = "split")]
+fn bouboule_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn bouboule_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(bouboule_body(args)) })
+}
+#[cfg(feature = "split")]
+fn boxfit_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn boxfit_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(boxfit_body(args)) })
+}
+#[cfg(feature = "split")]
+fn braid_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn braid_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(braid_body(args)) })
+}
+#[cfg(feature = "split")]
+fn bubbles_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn bubbles_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(bubbles_body(args)) })
+}
+#[cfg(feature = "split")]
+fn bumps_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn bumps_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(bumps_body(args)) })
+}
+#[cfg(feature = "split")]
+fn ccurve_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn ccurve_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(ccurve_body(args)) })
+}
+#[cfg(feature = "split")]
+fn celtic_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_1.load().await {
+            return None;
+        }
+        match GROUP_1.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn celtic_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(celtic_body(args)) })
+}
+fn cloudlife_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::cloudlife::start(args)
+}
+fn compass_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::compass::start(args)
+}
+fn coral_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::coral::start(args)
+}
+fn critical_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::critical::start(args)
+}
+fn crystal_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::crystal::start(args)
+}
+fn cwaves_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::cwaves::start(args)
+}
+fn deco_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::deco::start(args)
+}
+fn cynosure_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::cynosure::start(args)
+}
+fn decayscreen_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::decayscreen::start(args)
+}
+fn deluxe_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::deluxe::start(args)
+}
+#[cfg(feature = "split")]
+fn group_2_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(cloudlife_body(a))),
+        1 => Some(Started::Fb(compass_body(a))),
+        2 => Some(Started::Fb(coral_body(a))),
+        3 => Some(Started::Fb(critical_body(a))),
+        4 => Some(Started::Fb(crystal_body(a))),
+        5 => Some(Started::Fb(cwaves_body(a))),
+        6 => Some(Started::Fb(deco_body(a))),
+        7 => Some(Started::Fb(cynosure_body(a))),
+        8 => Some(Started::Fb(decayscreen_body(a))),
+        9 => Some(Started::Fb(deluxe_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_2: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_2" fn group_2_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn cloudlife_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn cloudlife_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(cloudlife_body(args)) })
+}
+#[cfg(feature = "split")]
+fn compass_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn compass_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(compass_body(args)) })
+}
+#[cfg(feature = "split")]
+fn coral_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn coral_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(coral_body(args)) })
+}
+#[cfg(feature = "split")]
+fn critical_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn critical_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(critical_body(args)) })
+}
+#[cfg(feature = "split")]
+fn crystal_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn crystal_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(crystal_body(args)) })
+}
+#[cfg(feature = "split")]
+fn cwaves_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn cwaves_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(cwaves_body(args)) })
+}
+#[cfg(feature = "split")]
+fn deco_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn deco_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(deco_body(args)) })
+}
+#[cfg(feature = "split")]
+fn cynosure_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn cynosure_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(cynosure_body(args)) })
+}
+#[cfg(feature = "split")]
+fn decayscreen_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn decayscreen_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(decayscreen_body(args)) })
+}
+#[cfg(feature = "split")]
+fn deluxe_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_2.load().await {
+            return None;
+        }
+        match GROUP_2.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn deluxe_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(deluxe_body(args)) })
+}
+fn demon_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::demon::start(args)
+}
+fn discrete_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::discrete::start(args)
+}
+fn fuzzyflakes_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::fuzzyflakes::start(args)
+}
+fn galaxy_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::galaxy::start(args)
+}
+fn greynetic_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::greynetic::start(args)
+}
+fn distort_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::distort::start(args)
+}
+fn drift_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::drift::start(args)
+}
+fn droste_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::droste::start(args)
+}
+fn epicycle_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::epicycle::start(args)
+}
+fn euler2d_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::euler2d::start(args)
+}
+#[cfg(feature = "split")]
+fn group_3_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(demon_body(a))),
+        1 => Some(Started::Fb(discrete_body(a))),
+        2 => Some(Started::Fb(fuzzyflakes_body(a))),
+        3 => Some(Started::Fb(galaxy_body(a))),
+        4 => Some(Started::Fb(greynetic_body(a))),
+        5 => Some(Started::Fb(distort_body(a))),
+        6 => Some(Started::Fb(drift_body(a))),
+        7 => Some(Started::Fb(droste_body(a))),
+        8 => Some(Started::Fb(epicycle_body(a))),
+        9 => Some(Started::Fb(euler2d_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_3: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_3" fn group_3_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn demon_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn demon_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(demon_body(args)) })
+}
+#[cfg(feature = "split")]
+fn discrete_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn discrete_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(discrete_body(args)) })
+}
+#[cfg(feature = "split")]
+fn fuzzyflakes_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn fuzzyflakes_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(fuzzyflakes_body(args)) })
+}
+#[cfg(feature = "split")]
+fn galaxy_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn galaxy_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(galaxy_body(args)) })
+}
+#[cfg(feature = "split")]
+fn greynetic_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn greynetic_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(greynetic_body(args)) })
+}
+#[cfg(feature = "split")]
+fn distort_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn distort_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(distort_body(args)) })
+}
+#[cfg(feature = "split")]
+fn drift_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn drift_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(drift_body(args)) })
+}
+#[cfg(feature = "split")]
+fn droste_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn droste_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(droste_body(args)) })
+}
+#[cfg(feature = "split")]
+fn epicycle_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn epicycle_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(epicycle_body(args)) })
+}
+#[cfg(feature = "split")]
+fn euler2d_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_3.load().await {
+            return None;
+        }
+        match GROUP_3.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn euler2d_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(euler2d_body(args)) })
+}
+fn eruption_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::eruption::start(args)
+}
+fn fadeplot_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::fadeplot::start(args)
+}
+fn fiberlamp_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::fiberlamp::start(args)
+}
+fn filmleader_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::filmleader::start(args)
+}
+fn fireworkx_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::fireworkx::start(args)
+}
+fn flag_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::flag::start(args)
+}
+fn flame_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::flame::start(args)
+}
+fn flow_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::flow::start(args)
+}
+fn fluidballs_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::fluidballs::start(args)
+}
+fn fontglide_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::fontglide::start(args)
+}
+#[cfg(feature = "split")]
+fn group_4_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(eruption_body(a))),
+        1 => Some(Started::Fb(fadeplot_body(a))),
+        2 => Some(Started::Fb(fiberlamp_body(a))),
+        3 => Some(Started::Fb(filmleader_body(a))),
+        4 => Some(Started::Fb(fireworkx_body(a))),
+        5 => Some(Started::Fb(flag_body(a))),
+        6 => Some(Started::Fb(flame_body(a))),
+        7 => Some(Started::Fb(flow_body(a))),
+        8 => Some(Started::Fb(fluidballs_body(a))),
+        9 => Some(Started::Fb(fontglide_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_4: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_4" fn group_4_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn eruption_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn eruption_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(eruption_body(args)) })
+}
+#[cfg(feature = "split")]
+fn fadeplot_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn fadeplot_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(fadeplot_body(args)) })
+}
+#[cfg(feature = "split")]
+fn fiberlamp_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn fiberlamp_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(fiberlamp_body(args)) })
+}
+#[cfg(feature = "split")]
+fn filmleader_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn filmleader_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(filmleader_body(args)) })
+}
+#[cfg(feature = "split")]
+fn fireworkx_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn fireworkx_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(fireworkx_body(args)) })
+}
+#[cfg(feature = "split")]
+fn flag_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn flag_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(flag_body(args)) })
+}
+#[cfg(feature = "split")]
+fn flame_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn flame_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(flame_body(args)) })
+}
+#[cfg(feature = "split")]
+fn flow_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn flow_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(flow_body(args)) })
+}
+#[cfg(feature = "split")]
+fn fluidballs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn fluidballs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(fluidballs_body(args)) })
+}
+#[cfg(feature = "split")]
+fn fontglide_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_4.load().await {
+            return None;
+        }
+        match GROUP_4.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn fontglide_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(fontglide_body(args)) })
+}
+fn forest_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::forest::start(args)
+}
+fn glitchpeg_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::glitchpeg::start(args)
+}
+fn goop_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::goop::start(args)
+}
+fn grav_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::grav::start(args)
+}
+fn halo_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::halo::start(args)
+}
+fn halftone_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::halftone::start(args)
+}
+fn helix_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::helix::start(args)
+}
+fn hexadrop_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::hexadrop::start(args)
+}
+fn hopalong_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::hopalong::start(args)
+}
+fn hyperball_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::hyperball::start(args)
+}
+#[cfg(feature = "split")]
+fn group_5_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(forest_body(a))),
+        1 => Some(Started::Fb(glitchpeg_body(a))),
+        2 => Some(Started::Fb(goop_body(a))),
+        3 => Some(Started::Fb(grav_body(a))),
+        4 => Some(Started::Fb(halo_body(a))),
+        5 => Some(Started::Fb(halftone_body(a))),
+        6 => Some(Started::Fb(helix_body(a))),
+        7 => Some(Started::Fb(hexadrop_body(a))),
+        8 => Some(Started::Fb(hopalong_body(a))),
+        9 => Some(Started::Fb(hyperball_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_5: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_5" fn group_5_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn forest_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn forest_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(forest_body(args)) })
+}
+#[cfg(feature = "split")]
+fn glitchpeg_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn glitchpeg_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(glitchpeg_body(args)) })
+}
+#[cfg(feature = "split")]
+fn goop_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn goop_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(goop_body(args)) })
+}
+#[cfg(feature = "split")]
+fn grav_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn grav_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(grav_body(args)) })
+}
+#[cfg(feature = "split")]
+fn halo_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn halo_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(halo_body(args)) })
+}
+#[cfg(feature = "split")]
+fn halftone_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn halftone_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(halftone_body(args)) })
+}
+#[cfg(feature = "split")]
+fn helix_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn helix_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(helix_body(args)) })
+}
+#[cfg(feature = "split")]
+fn hexadrop_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn hexadrop_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(hexadrop_body(args)) })
+}
+#[cfg(feature = "split")]
+fn hopalong_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn hopalong_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(hopalong_body(args)) })
+}
+#[cfg(feature = "split")]
+fn hyperball_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_5.load().await {
+            return None;
+        }
+        match GROUP_5.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn hyperball_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(hyperball_body(args)) })
+}
+fn hypercube_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::hypercube::start(args)
+}
+fn ifs_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::ifs::start(args)
+}
+fn imsmap_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::imsmap::start(args)
+}
+fn interaggregate_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::interaggregate::start(args)
+}
+fn interference_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::interference::start(args)
+}
+fn intermomentary_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::intermomentary::start(args)
+}
+fn juggle_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::juggle::start(args)
+}
+fn julia_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::julia::start(args)
+}
+fn kaleidescope_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::kaleidescope::start(args)
+}
+fn laser_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::laser::start(args)
+}
+#[cfg(feature = "split")]
+fn group_6_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(hypercube_body(a))),
+        1 => Some(Started::Fb(ifs_body(a))),
+        2 => Some(Started::Fb(imsmap_body(a))),
+        3 => Some(Started::Fb(interaggregate_body(a))),
+        4 => Some(Started::Fb(interference_body(a))),
+        5 => Some(Started::Fb(intermomentary_body(a))),
+        6 => Some(Started::Fb(juggle_body(a))),
+        7 => Some(Started::Fb(julia_body(a))),
+        8 => Some(Started::Fb(kaleidescope_body(a))),
+        9 => Some(Started::Fb(laser_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_6: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_6" fn group_6_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn hypercube_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn hypercube_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(hypercube_body(args)) })
+}
+#[cfg(feature = "split")]
+fn ifs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn ifs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(ifs_body(args)) })
+}
+#[cfg(feature = "split")]
+fn imsmap_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn imsmap_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(imsmap_body(args)) })
+}
+#[cfg(feature = "split")]
+fn interaggregate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn interaggregate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(interaggregate_body(args)) })
+}
+#[cfg(feature = "split")]
+fn interference_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn interference_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(interference_body(args)) })
+}
+#[cfg(feature = "split")]
+fn intermomentary_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn intermomentary_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(intermomentary_body(args)) })
+}
+#[cfg(feature = "split")]
+fn juggle_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn juggle_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(juggle_body(args)) })
+}
+#[cfg(feature = "split")]
+fn julia_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn julia_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(julia_body(args)) })
+}
+#[cfg(feature = "split")]
+fn kaleidescope_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn kaleidescope_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(kaleidescope_body(args)) })
+}
+#[cfg(feature = "split")]
+fn laser_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_6.load().await {
+            return None;
+        }
+        match GROUP_6.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn laser_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(laser_body(args)) })
+}
+fn kumppa_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::kumppa::start(args)
+}
+fn lcdscrub_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::lcdscrub::start(args)
+}
+fn lightning_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::lightning::start(args)
+}
+fn lisa_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::lisa::start(args)
+}
+fn lissie_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::lissie::start(args)
+}
+fn mismunch_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::mismunch::start(args)
+}
+fn moire_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::moire::start(args)
+}
+fn lmorph_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::lmorph::start(args)
+}
+fn loop_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::r#loop::start(args)
+}
+fn m6502_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::m6502::start(args)
+}
+#[cfg(feature = "split")]
+fn group_7_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(kumppa_body(a))),
+        1 => Some(Started::Fb(lcdscrub_body(a))),
+        2 => Some(Started::Fb(lightning_body(a))),
+        3 => Some(Started::Fb(lisa_body(a))),
+        4 => Some(Started::Fb(lissie_body(a))),
+        5 => Some(Started::Fb(mismunch_body(a))),
+        6 => Some(Started::Fb(moire_body(a))),
+        7 => Some(Started::Fb(lmorph_body(a))),
+        8 => Some(Started::Fb(loop_body(a))),
+        9 => Some(Started::Fb(m6502_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_7: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_7" fn group_7_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn kumppa_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn kumppa_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(kumppa_body(args)) })
+}
+#[cfg(feature = "split")]
+fn lcdscrub_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn lcdscrub_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(lcdscrub_body(args)) })
+}
+#[cfg(feature = "split")]
+fn lightning_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn lightning_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(lightning_body(args)) })
+}
+#[cfg(feature = "split")]
+fn lisa_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn lisa_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(lisa_body(args)) })
+}
+#[cfg(feature = "split")]
+fn lissie_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn lissie_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(lissie_body(args)) })
+}
+#[cfg(feature = "split")]
+fn mismunch_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn mismunch_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(mismunch_body(args)) })
+}
+#[cfg(feature = "split")]
+fn moire_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn moire_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(moire_body(args)) })
+}
+#[cfg(feature = "split")]
+fn lmorph_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn lmorph_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(lmorph_body(args)) })
+}
+#[cfg(feature = "split")]
+fn loop_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn loop_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(loop_body(args)) })
+}
+#[cfg(feature = "split")]
+fn m6502_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_7.load().await {
+            return None;
+        }
+        match GROUP_7.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn m6502_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(m6502_body(args)) })
+}
+fn marbling_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::marbling::start(args)
+}
+fn maze_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::maze::start(args)
+}
+fn memscroller_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::memscroller::start(args)
+}
+fn metaballs_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::metaballs::start(args)
+}
+fn moire2_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::moire2::start(args)
+}
+fn mountain_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::mountain::start(args)
+}
+fn munch_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::munch::start(args)
+}
+fn nerverot_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::nerverot::start(args)
+}
+fn noseguy_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::noseguy::start(args)
+}
+fn pacman_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::pacman::start(args)
+}
+#[cfg(feature = "split")]
+fn group_8_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(marbling_body(a))),
+        1 => Some(Started::Fb(maze_body(a))),
+        2 => Some(Started::Fb(memscroller_body(a))),
+        3 => Some(Started::Fb(metaballs_body(a))),
+        4 => Some(Started::Fb(moire2_body(a))),
+        5 => Some(Started::Fb(mountain_body(a))),
+        6 => Some(Started::Fb(munch_body(a))),
+        7 => Some(Started::Fb(nerverot_body(a))),
+        8 => Some(Started::Fb(noseguy_body(a))),
+        9 => Some(Started::Fb(pacman_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_8: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_8" fn group_8_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn marbling_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn marbling_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(marbling_body(args)) })
+}
+#[cfg(feature = "split")]
+fn maze_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn maze_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(maze_body(args)) })
+}
+#[cfg(feature = "split")]
+fn memscroller_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn memscroller_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(memscroller_body(args)) })
+}
+#[cfg(feature = "split")]
+fn metaballs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn metaballs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(metaballs_body(args)) })
+}
+#[cfg(feature = "split")]
+fn moire2_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn moire2_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(moire2_body(args)) })
+}
+#[cfg(feature = "split")]
+fn mountain_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn mountain_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(mountain_body(args)) })
+}
+#[cfg(feature = "split")]
+fn munch_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn munch_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(munch_body(args)) })
+}
+#[cfg(feature = "split")]
+fn nerverot_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn nerverot_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(nerverot_body(args)) })
+}
+#[cfg(feature = "split")]
+fn noseguy_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn noseguy_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(noseguy_body(args)) })
+}
+#[cfg(feature = "split")]
+fn pacman_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_8.load().await {
+            return None;
+        }
+        match GROUP_8.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn pacman_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(pacman_body(args)) })
+}
+fn pedal_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::pedal::start(args)
+}
+fn penetrate_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::penetrate::start(args)
+}
+fn penrose_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::penrose::start(args)
+}
+fn petri_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::petri::start(args)
+}
+fn phosphor_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::phosphor::start(args)
+}
+fn piecewise_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::piecewise::start(args)
+}
+fn polyominoes_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::polyominoes::start(args)
+}
+fn pong_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::pong::start(args)
+}
+fn popsquares_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::popsquares::start(args)
+}
+fn pyro_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::pyro::start(args)
+}
+#[cfg(feature = "split")]
+fn group_9_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(pedal_body(a))),
+        1 => Some(Started::Fb(penetrate_body(a))),
+        2 => Some(Started::Fb(penrose_body(a))),
+        3 => Some(Started::Fb(petri_body(a))),
+        4 => Some(Started::Fb(phosphor_body(a))),
+        5 => Some(Started::Fb(piecewise_body(a))),
+        6 => Some(Started::Fb(polyominoes_body(a))),
+        7 => Some(Started::Fb(pong_body(a))),
+        8 => Some(Started::Fb(popsquares_body(a))),
+        9 => Some(Started::Fb(pyro_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_9: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_9" fn group_9_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn pedal_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn pedal_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(pedal_body(args)) })
+}
+#[cfg(feature = "split")]
+fn penetrate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn penetrate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(penetrate_body(args)) })
+}
+#[cfg(feature = "split")]
+fn penrose_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn penrose_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(penrose_body(args)) })
+}
+#[cfg(feature = "split")]
+fn petri_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn petri_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(petri_body(args)) })
+}
+#[cfg(feature = "split")]
+fn phosphor_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn phosphor_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(phosphor_body(args)) })
+}
+#[cfg(feature = "split")]
+fn piecewise_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn piecewise_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(piecewise_body(args)) })
+}
+#[cfg(feature = "split")]
+fn polyominoes_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn polyominoes_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(polyominoes_body(args)) })
+}
+#[cfg(feature = "split")]
+fn pong_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn pong_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(pong_body(args)) })
+}
+#[cfg(feature = "split")]
+fn popsquares_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn popsquares_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(popsquares_body(args)) })
+}
+#[cfg(feature = "split")]
+fn pyro_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_9.load().await {
+            return None;
+        }
+        match GROUP_9.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn pyro_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(pyro_body(args)) })
+}
+fn qix_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::qix::start(args)
+}
+fn rdbomb_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::rdbomb::start(args)
+}
+fn ripples_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::ripples::start(args)
+}
+fn rocks_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::rocks::start(args)
+}
+fn rorschach_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::rorschach::start(args)
+}
+fn rotor_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::rotor::start(args)
+}
+fn scooter_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::scooter::start(args)
+}
+fn shadebobs_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::shadebobs::start(args)
+}
+fn rotzoomer_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::rotzoomer::start(args)
+}
+fn sierpinski_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::sierpinski::start(args)
+}
+#[cfg(feature = "split")]
+fn group_10_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(qix_body(a))),
+        1 => Some(Started::Fb(rdbomb_body(a))),
+        2 => Some(Started::Fb(ripples_body(a))),
+        3 => Some(Started::Fb(rocks_body(a))),
+        4 => Some(Started::Fb(rorschach_body(a))),
+        5 => Some(Started::Fb(rotor_body(a))),
+        6 => Some(Started::Fb(scooter_body(a))),
+        7 => Some(Started::Fb(shadebobs_body(a))),
+        8 => Some(Started::Fb(rotzoomer_body(a))),
+        9 => Some(Started::Fb(sierpinski_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_10: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_10" fn group_10_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn qix_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn qix_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(qix_body(args)) })
+}
+#[cfg(feature = "split")]
+fn rdbomb_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn rdbomb_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(rdbomb_body(args)) })
+}
+#[cfg(feature = "split")]
+fn ripples_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn ripples_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(ripples_body(args)) })
+}
+#[cfg(feature = "split")]
+fn rocks_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn rocks_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(rocks_body(args)) })
+}
+#[cfg(feature = "split")]
+fn rorschach_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn rorschach_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(rorschach_body(args)) })
+}
+#[cfg(feature = "split")]
+fn rotor_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn rotor_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(rotor_body(args)) })
+}
+#[cfg(feature = "split")]
+fn scooter_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn scooter_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(scooter_body(args)) })
+}
+#[cfg(feature = "split")]
+fn shadebobs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn shadebobs_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(shadebobs_body(args)) })
+}
+#[cfg(feature = "split")]
+fn rotzoomer_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn rotzoomer_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(rotzoomer_body(args)) })
+}
+#[cfg(feature = "split")]
+fn sierpinski_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_10.load().await {
+            return None;
+        }
+        match GROUP_10.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn sierpinski_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(sierpinski_body(args)) })
+}
+fn slidescreen_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::slidescreen::start(args)
+}
+fn slip_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::slip::start(args)
+}
+fn speedmine_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::speedmine::start(args)
+}
+fn sphere_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::sphere::start(args)
+}
+fn spiral_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::spiral::start(args)
+}
+fn spotlight_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::spotlight::start(args)
+}
+fn squiral_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::squiral::start(args)
+}
+fn starfish_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::starfish::start(args)
+}
+fn strange_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::strange::start(args)
+}
+fn substrate_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::substrate::start(args)
+}
+#[cfg(feature = "split")]
+fn group_11_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(slidescreen_body(a))),
+        1 => Some(Started::Fb(slip_body(a))),
+        2 => Some(Started::Fb(speedmine_body(a))),
+        3 => Some(Started::Fb(sphere_body(a))),
+        4 => Some(Started::Fb(spiral_body(a))),
+        5 => Some(Started::Fb(spotlight_body(a))),
+        6 => Some(Started::Fb(squiral_body(a))),
+        7 => Some(Started::Fb(starfish_body(a))),
+        8 => Some(Started::Fb(strange_body(a))),
+        9 => Some(Started::Fb(substrate_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_11: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_11" fn group_11_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn slidescreen_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn slidescreen_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(slidescreen_body(args)) })
+}
+#[cfg(feature = "split")]
+fn slip_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn slip_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(slip_body(args)) })
+}
+#[cfg(feature = "split")]
+fn speedmine_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn speedmine_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(speedmine_body(args)) })
+}
+#[cfg(feature = "split")]
+fn sphere_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn sphere_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(sphere_body(args)) })
+}
+#[cfg(feature = "split")]
+fn spiral_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn spiral_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(spiral_body(args)) })
+}
+#[cfg(feature = "split")]
+fn spotlight_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn spotlight_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(spotlight_body(args)) })
+}
+#[cfg(feature = "split")]
+fn squiral_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn squiral_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(squiral_body(args)) })
+}
+#[cfg(feature = "split")]
+fn starfish_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn starfish_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(starfish_body(args)) })
+}
+#[cfg(feature = "split")]
+fn strange_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn strange_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(strange_body(args)) })
+}
+#[cfg(feature = "split")]
+fn substrate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_11.load().await {
+            return None;
+        }
+        match GROUP_11.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn substrate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(substrate_body(args)) })
+}
+fn swirl_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::swirl::start(args)
+}
+fn t3d_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::t3d::start(args)
+}
+fn tessellimage_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::tessellimage::start(args)
+}
+fn thornbird_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::thornbird::start(args)
+}
+fn triangle_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::triangle::start(args)
+}
+fn twang_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::twang::start(args)
+}
+fn vidwhacker_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::vidwhacker::start(args)
+}
+fn vines_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::vines::start(args)
+}
+fn truchet_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::truchet::start(args)
+}
+fn vermiculate_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::vermiculate::start(args)
+}
+#[cfg(feature = "split")]
+fn group_12_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(swirl_body(a))),
+        1 => Some(Started::Fb(t3d_body(a))),
+        2 => Some(Started::Fb(tessellimage_body(a))),
+        3 => Some(Started::Fb(thornbird_body(a))),
+        4 => Some(Started::Fb(triangle_body(a))),
+        5 => Some(Started::Fb(twang_body(a))),
+        6 => Some(Started::Fb(vidwhacker_body(a))),
+        7 => Some(Started::Fb(vines_body(a))),
+        8 => Some(Started::Fb(truchet_body(a))),
+        9 => Some(Started::Fb(vermiculate_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_12: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_12" fn group_12_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn swirl_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn swirl_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(swirl_body(args)) })
+}
+#[cfg(feature = "split")]
+fn t3d_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn t3d_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(t3d_body(args)) })
+}
+#[cfg(feature = "split")]
+fn tessellimage_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn tessellimage_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(tessellimage_body(args)) })
+}
+#[cfg(feature = "split")]
+fn thornbird_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn thornbird_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(thornbird_body(args)) })
+}
+#[cfg(feature = "split")]
+fn triangle_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn triangle_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(triangle_body(args)) })
+}
+#[cfg(feature = "split")]
+fn twang_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn twang_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(twang_body(args)) })
+}
+#[cfg(feature = "split")]
+fn vidwhacker_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn vidwhacker_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(vidwhacker_body(args)) })
+}
+#[cfg(feature = "split")]
+fn vines_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn vines_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(vines_body(args)) })
+}
+#[cfg(feature = "split")]
+fn truchet_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn truchet_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(truchet_body(args)) })
+}
+#[cfg(feature = "split")]
+fn vermiculate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_12.load().await {
+            return None;
+        }
+        match GROUP_12.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn vermiculate_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(vermiculate_body(args)) })
+}
+fn vfeedback_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::vfeedback::start(args)
+}
+fn wander_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::wander::start(args)
+}
+fn webcollage_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::webcollage::start(args)
+}
+fn whirlwindwarp_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::whirlwindwarp::start(args)
+}
+fn whirlygig_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::whirlygig::start(args)
+}
+fn worm_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::worm::start(args)
+}
+fn wormhole_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::wormhole::start(args)
+}
+fn zoom_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::zoom::start(args)
+}
+fn xanalogtv_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xanalogtv::start(args)
+}
+fn xflame_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xflame::start(args)
+}
+#[cfg(feature = "split")]
+fn group_13_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(vfeedback_body(a))),
+        1 => Some(Started::Fb(wander_body(a))),
+        2 => Some(Started::Fb(webcollage_body(a))),
+        3 => Some(Started::Fb(whirlwindwarp_body(a))),
+        4 => Some(Started::Fb(whirlygig_body(a))),
+        5 => Some(Started::Fb(worm_body(a))),
+        6 => Some(Started::Fb(wormhole_body(a))),
+        7 => Some(Started::Fb(zoom_body(a))),
+        8 => Some(Started::Fb(xanalogtv_body(a))),
+        9 => Some(Started::Fb(xflame_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_13: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_13" fn group_13_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn vfeedback_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn vfeedback_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(vfeedback_body(args)) })
+}
+#[cfg(feature = "split")]
+fn wander_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn wander_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(wander_body(args)) })
+}
+#[cfg(feature = "split")]
+fn webcollage_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn webcollage_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(webcollage_body(args)) })
+}
+#[cfg(feature = "split")]
+fn whirlwindwarp_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn whirlwindwarp_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(whirlwindwarp_body(args)) })
+}
+#[cfg(feature = "split")]
+fn whirlygig_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn whirlygig_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(whirlygig_body(args)) })
+}
+#[cfg(feature = "split")]
+fn worm_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((5, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn worm_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(worm_body(args)) })
+}
+#[cfg(feature = "split")]
+fn wormhole_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((6, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn wormhole_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(wormhole_body(args)) })
+}
+#[cfg(feature = "split")]
+fn zoom_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((7, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn zoom_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(zoom_body(args)) })
+}
+#[cfg(feature = "split")]
+fn xanalogtv_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((8, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xanalogtv_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xanalogtv_body(args)) })
+}
+#[cfg(feature = "split")]
+fn xflame_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_13.load().await {
+            return None;
+        }
+        match GROUP_13.call((9, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xflame_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xflame_body(args)) })
+}
+fn xjack_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xjack::start(args)
+}
+fn xlyap_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xlyap::start(args)
+}
+fn xmatrix_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xmatrix::start(args)
+}
+fn xrayswarm_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xrayswarm::start(args)
+}
+fn xspirograph_body(args: StartArgs) -> Runner {
+    xscreensaver::hacks2d::xspirograph::start(args)
+}
+fn dnalogo_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::dnalogo::start(args)
+}
+fn extrusion_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::extrusion::start(args)
+}
+fn juggler3d_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::juggler3d::start(args)
+}
+fn flurry_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::flurry::start(args)
+}
+fn atlantis_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::atlantis::start(args)
+}
+#[cfg(feature = "split")]
+fn group_14_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Fb(xjack_body(a))),
+        1 => Some(Started::Fb(xlyap_body(a))),
+        2 => Some(Started::Fb(xmatrix_body(a))),
+        3 => Some(Started::Fb(xrayswarm_body(a))),
+        4 => Some(Started::Fb(xspirograph_body(a))),
+        5 => Some(Started::Gl3d(dnalogo_body(a))),
+        6 => Some(Started::Gl3d(extrusion_body(a))),
+        7 => Some(Started::Gl3d(juggler3d_body(a))),
+        8 => Some(Started::Gl3d(flurry_body(a))),
+        9 => Some(Started::Gl3d(atlantis_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_14: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_14" fn group_14_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn xjack_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((0, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xjack_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xjack_body(args)) })
+}
+#[cfg(feature = "split")]
+fn xlyap_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((1, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xlyap_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xlyap_body(args)) })
+}
+#[cfg(feature = "split")]
+fn xmatrix_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((2, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xmatrix_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xmatrix_body(args)) })
+}
+#[cfg(feature = "split")]
+fn xrayswarm_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((3, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xrayswarm_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xrayswarm_body(args)) })
+}
+#[cfg(feature = "split")]
+fn xspirograph_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((4, args)).ok().flatten() {
+            Some(Started::Fb(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn xspirograph_start(args: StartArgs) -> RunnerFuture {
+    Box::pin(async { Some(xspirograph_body(args)) })
+}
+#[cfg(feature = "split")]
+fn dnalogo_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((5, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn dnalogo_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(dnalogo_body(args)) })
+}
+#[cfg(feature = "split")]
+fn extrusion_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((6, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn extrusion_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(extrusion_body(args)) })
+}
+#[cfg(feature = "split")]
+fn juggler3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((7, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn juggler3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(juggler3d_body(args)) })
+}
+#[cfg(feature = "split")]
+fn flurry_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((8, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn flurry_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(flurry_body(args)) })
+}
+#[cfg(feature = "split")]
+fn atlantis_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_14.load().await {
+            return None;
+        }
+        match GROUP_14.call((9, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn atlantis_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(atlantis_body(args)) })
+}
+fn companioncube_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::companioncube::start(args)
+}
+fn crackberg_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::crackberg::start(args)
+}
+fn cubicgrid_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cubicgrid::start(args)
+}
+fn handsy_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::handsy::start(args)
+}
+fn headroom_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::headroom::start(args)
+}
+fn highvoltage_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::highvoltage::start(args)
+}
+fn mapscroller_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::mapscroller::start(args)
+}
+fn unicrud_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::unicrud::start(args)
+}
+fn winduprobot_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::winduprobot::start(args)
+}
+fn sproingies_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::sproingies::start(args)
+}
+#[cfg(feature = "split")]
+fn group_15_body(args: (u16, StartArgs)) -> Option<Started> {
+    let (i, a) = args;
+    match i {
+        0 => Some(Started::Gl3d(companioncube_body(a))),
+        1 => Some(Started::Gl3d(crackberg_body(a))),
+        2 => Some(Started::Gl3d(cubicgrid_body(a))),
+        3 => Some(Started::Gl3d(handsy_body(a))),
+        4 => Some(Started::Gl3d(headroom_body(a))),
+        5 => Some(Started::Gl3d(highvoltage_body(a))),
+        6 => Some(Started::Gl3d(mapscroller_body(a))),
+        7 => Some(Started::Gl3d(unicrud_body(a))),
+        8 => Some(Started::Gl3d(winduprobot_body(a))),
+        9 => Some(Started::Gl3d(sproingies_body(a))),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "split")]
+static GROUP_15: wasm_split::LazyLoader<(u16, StartArgs), Option<Started>> = wasm_split::lazy_loader!(extern "group_15" fn group_15_body(props: (u16, StartArgs)) -> Option<Started>);
+#[cfg(feature = "split")]
+fn companioncube_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((0, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn companioncube_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(companioncube_body(args)) })
+}
+#[cfg(feature = "split")]
+fn crackberg_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((1, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn crackberg_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(crackberg_body(args)) })
+}
+#[cfg(feature = "split")]
+fn cubicgrid_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((2, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn cubicgrid_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cubicgrid_body(args)) })
+}
+#[cfg(feature = "split")]
+fn handsy_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((3, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn handsy_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(handsy_body(args)) })
+}
+#[cfg(feature = "split")]
+fn headroom_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((4, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn headroom_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(headroom_body(args)) })
+}
+#[cfg(feature = "split")]
+fn highvoltage_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((5, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn highvoltage_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(highvoltage_body(args)) })
+}
+#[cfg(feature = "split")]
+fn mapscroller_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((6, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn mapscroller_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(mapscroller_body(args)) })
+}
+#[cfg(feature = "split")]
+fn unicrud_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((7, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn unicrud_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(unicrud_body(args)) })
+}
+#[cfg(feature = "split")]
+fn winduprobot_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((8, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn winduprobot_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(winduprobot_body(args)) })
+}
+#[cfg(feature = "split")]
+fn sproingies_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async move {
+        if !GROUP_15.load().await {
+            return None;
+        }
+        match GROUP_15.call((9, args)).ok().flatten() {
+            Some(Started::Gl3d(r)) => Some(r),
+            _ => None,
+        }
+    })
+}
+
+#[cfg(not(feature = "split"))]
+fn sproingies_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(sproingies_body(args)) })
+}
+fn carousel_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::carousel::start(args)
+}
+fn chompytower_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::chompytower::start(args)
+}
+fn skytentacles_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::skytentacles::start(args)
+}
+fn gltext_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::gltext::start(args)
+}
+fn glmatrix_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glmatrix::start(args)
+}
+fn starwars_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::starwars::start(args)
+}
+fn fliptext_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::fliptext::start(args)
+}
+fn flipflop_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::flipflop::start(args)
+}
+fn flipscreen3d_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::flipscreen3d::start(args)
+}
+fn peepers_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::peepers::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn carousel_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(carousel_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn chompytower_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(chompytower_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn skytentacles_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(skytentacles_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gltext_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(gltext_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glmatrix_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glmatrix_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn starwars_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(starwars_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn fliptext_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(fliptext_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn flipflop_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(flipflop_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn flipscreen3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(flipscreen3d_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn peepers_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(peepers_body(args)) })
+}
+fn photopile_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::photopile::start(args)
+}
+fn gflux_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::gflux::start(args)
+}
+fn hexstrut_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hexstrut::start(args)
+}
+fn sballs_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::sballs::start(args)
+}
+fn sierpinski3d_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::sierpinski3d::start(args)
+}
+fn noof_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::noof::start(args)
+}
+fn moebius_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::moebius::start(args)
+}
+fn moebiusgears_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::moebiusgears::start(args)
+}
+fn mirrorblob_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::mirrorblob::start(args)
+}
+fn maze3d_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::maze3d::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn photopile_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(photopile_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gflux_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(gflux_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hexstrut_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hexstrut_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn sballs_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(sballs_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn sierpinski3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(sierpinski3d_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn noof_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(noof_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn moebius_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(moebius_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn moebiusgears_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(moebiusgears_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn mirrorblob_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(mirrorblob_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn maze3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(maze3d_body(args)) })
+}
+fn nakagin_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::nakagin::start(args)
+}
+fn menger_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::menger::start(args)
+}
+fn hypnowheel_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hypnowheel::start(args)
+}
+fn cubestack_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cubestack::start(args)
+}
+fn cubestorm_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cubestorm::start(args)
+}
+fn vigilance_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::vigilance::start(args)
+}
+fn voronoi_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::voronoi::start(args)
+}
+fn antinspect_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::antinspect::start(args)
+}
+fn antmaze_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::antmaze::start(args)
+}
+fn antspotlight_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::antspotlight::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn nakagin_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(nakagin_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn menger_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(menger_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hypnowheel_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hypnowheel_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cubestack_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cubestack_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cubestorm_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cubestorm_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn vigilance_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(vigilance_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn voronoi_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(voronoi_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn antinspect_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(antinspect_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn antmaze_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(antmaze_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn antspotlight_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(antspotlight_body(args)) })
+}
+fn atunnel_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::atunnel::start(args)
+}
+fn beats_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::beats::start(args)
+}
+fn covid19_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::covid19::start(args)
+}
+fn co_9_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::covid19::renamed::start(args)
+}
+fn crumbler_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::crumbler::start(args)
+}
+fn cube21_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cube21::start(args)
+}
+fn cubetwist_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cubetwist::start(args)
+}
+fn cubocteversion_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cubocteversion::start(args)
+}
+fn cubenetic_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cubenetic::start(args)
+}
+fn raverhoop_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::raverhoop::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn atunnel_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(atunnel_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn beats_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(beats_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn covid19_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(covid19_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn co_9_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(co_9_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn crumbler_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(crumbler_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cube21_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cube21_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cubetwist_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cubetwist_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cubocteversion_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cubocteversion_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cubenetic_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cubenetic_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn raverhoop_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(raverhoop_body(args)) })
+}
+fn romanboy_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::romanboy::start(args)
+}
+fn razzledazzle_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::razzledazzle::start(args)
+}
+fn rubik_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::rubik::start(args)
+}
+fn rubikblocks_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::rubikblocks::start(args)
+}
+fn discoball_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::discoball::start(args)
+}
+fn dumpsterfire_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::dumpsterfire::start(args)
+}
+fn dymaxionmap_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::dymaxionmap::start(args)
+}
+fn endgame_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::endgame::start(args)
+}
+fn energystream_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::energystream::start(args)
+}
+fn pinion_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::pinion::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn romanboy_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(romanboy_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn razzledazzle_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(razzledazzle_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn rubik_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(rubik_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn rubikblocks_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(rubikblocks_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn discoball_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(discoball_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn dumpsterfire_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(dumpsterfire_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn dymaxionmap_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(dymaxionmap_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn endgame_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(endgame_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn energystream_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(energystream_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn pinion_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(pinion_body(args)) })
+}
+fn pipes_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::pipes::start(args)
+}
+fn platonicfolding_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::platonicfolding::start(args)
+}
+fn polyhedra_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::polyhedra::start(args)
+}
+fn providence_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::providence::start(args)
+}
+fn pulsar_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::pulsar::start(args)
+}
+fn quasicrystal_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::quasicrystal::start(args)
+}
+fn kallisti_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::kallisti::start(args)
+}
+fn klein_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::klein::start(args)
+}
+fn klondike_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::klondike::start(args)
+}
+fn lament_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::lament::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn pipes_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(pipes_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn platonicfolding_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(platonicfolding_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn polyhedra_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(polyhedra_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn providence_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(providence_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn pulsar_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(pulsar_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn quasicrystal_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(quasicrystal_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn kallisti_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(kallisti_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn klein_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(klein_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn klondike_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(klondike_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn lament_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(lament_body(args)) })
+}
+fn lavalite_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::lavalite::start(args)
+}
+fn lockward_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::lockward::start(args)
+}
+fn glsnake_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glsnake::start(args)
+}
+fn gravitywell_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::gravitywell::start(args)
+}
+fn hextrail_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hextrail::start(args)
+}
+fn bouncingcow_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::bouncingcow::start(args)
+}
+fn boxed_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::boxed::start(args)
+}
+fn bubble3d_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::bubble3d::start(args)
+}
+fn cage_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cage::start(args)
+}
+fn circuit_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::circuit::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn lavalite_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(lavalite_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn lockward_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(lockward_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glsnake_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glsnake_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gravitywell_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(gravitywell_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hextrail_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hextrail_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn bouncingcow_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(bouncingcow_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn boxed_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(boxed_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn bubble3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(bubble3d_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn cage_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cage_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn circuit_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(circuit_body(args)) })
+}
+fn cityflow_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::cityflow::start(args)
+}
+fn blocktube_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::blocktube::start(args)
+}
+fn boing_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::boing::start(args)
+}
+fn blinkbox_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::blinkbox::start(args)
+}
+fn surfaces_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::surfaces::start(args)
+}
+fn tronbit_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::tronbit::start(args)
+}
+fn morph3d_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::morph3d::start(args)
+}
+fn hopffibration_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hopffibration::start(args)
+}
+fn hydrostat_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hydrostat::start(args)
+}
+fn topblock_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::topblock::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn cityflow_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(cityflow_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn blocktube_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(blocktube_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn boing_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(boing_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn blinkbox_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(blinkbox_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn surfaces_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(surfaces_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn tronbit_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(tronbit_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn morph3d_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(morph3d_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hopffibration_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hopffibration_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hydrostat_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hydrostat_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn topblock_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(topblock_body(args)) })
+}
+fn skulloop_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::skulloop::start(args)
+}
+fn sphereeversion_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::sphereeversion::start(args)
+}
+fn spheremonics_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::spheremonics::start(args)
+}
+fn hypertorus_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hypertorus::start(args)
+}
+fn tangram_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::tangram::start(args)
+}
+fn timetunnel_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::timetunnel::start(args)
+}
+fn papercube_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::papercube::start(args)
+}
+fn engine_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::engine::start(args)
+}
+fn esper_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::esper::start(args)
+}
+fn etruscanvenus_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::etruscanvenus::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn skulloop_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(skulloop_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn sphereeversion_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(sphereeversion_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn spheremonics_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(spheremonics_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hypertorus_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hypertorus_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn tangram_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(tangram_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn timetunnel_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(timetunnel_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn papercube_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(papercube_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn engine_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(engine_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn esper_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(esper_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn etruscanvenus_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(etruscanvenus_body(args)) })
+}
+fn molecule_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::molecule::start(args)
+}
+fn projectiveplane_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::projectiveplane::start(args)
+}
+fn polytopes_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::polytopes::start(args)
+}
+fn queens_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::queens::start(args)
+}
+fn geodesic_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::geodesic::start(args)
+}
+fn geodesicgears_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::geodesicgears::start(args)
+}
+fn glforestfire_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glforestfire::start(args)
+}
+fn gleidescope_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::gleidescope::start(args)
+}
+fn glslideshow_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glslideshow::start(args)
+}
+fn hilbert_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::hilbert::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn molecule_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(molecule_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn projectiveplane_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(projectiveplane_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn polytopes_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(polytopes_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn queens_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(queens_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn geodesic_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(geodesic_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn geodesicgears_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(geodesicgears_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glforestfire_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glforestfire_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gleidescope_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(gleidescope_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glslideshow_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glslideshow_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hilbert_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(hilbert_body(args)) })
+}
+fn jigsaw_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::jigsaw::start(args)
+}
+fn superquadrics_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::superquadrics::start(args)
+}
+fn unknownpleasures_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::unknownpleasures::start(args)
+}
+fn sonar_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::sonar::start(args)
+}
+fn squirtorus_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::squirtorus::start(args)
+}
+fn stairs_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::stairs::start(args)
+}
+fn stonerview_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::stonerview::start(args)
+}
+fn splitflap_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::splitflap::start(args)
+}
+fn splodesic_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::splodesic::start(args)
+}
+fn jigglypuff_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::jigglypuff::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn jigsaw_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(jigsaw_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn superquadrics_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(superquadrics_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn unknownpleasures_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(unknownpleasures_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn sonar_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(sonar_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn squirtorus_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(squirtorus_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn stairs_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(stairs_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn stonerview_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(stonerview_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn splitflap_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(splitflap_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn splodesic_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(splodesic_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn jigglypuff_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(jigglypuff_body(args)) })
+}
+fn kaleidocycle_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::kaleidocycle::start(args)
+}
+fn glplanet_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glplanet::start(args)
+}
+fn glschool_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glschool::start(args)
+}
+fn flyingtoasters_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::flyingtoasters::start(args)
+}
+fn gears_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::gears::start(args)
+}
+fn gibson_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::gibson::start(args)
+}
+fn glcells_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glcells::start(args)
+}
+fn glblur_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glblur::start(args)
+}
+fn glhanoi_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glhanoi::start(args)
+}
+fn glknots_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::glknots::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn kaleidocycle_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(kaleidocycle_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glplanet_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glplanet_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glschool_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glschool_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn flyingtoasters_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(flyingtoasters_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gears_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(gears_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gibson_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(gibson_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glcells_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glcells_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glblur_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glblur_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glhanoi_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glhanoi_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn glknots_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(glknots_body(args)) })
+}
+fn dangerball_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::dangerball::start(args)
+}
+fn deepstars_body(args: StartArgs) -> Runner3d {
+    xscreensaver::hacks3d::deepstars::start(args)
+}
+fn alienbeacon_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::alienbeacon::start(args)
+}
+fn batteredplanet_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::batteredplanet::start(args)
+}
+fn bestill_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::bestill::start(args)
+}
+fn bubblecolors_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::bubblecolors::start(args)
+}
+fn darktransit_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::darktransit::start(args)
+}
+fn downfall_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::downfall::start(args)
+}
+fn driftclouds_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::driftclouds::start(args)
+}
+fn elementalring_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::elementalring::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn dangerball_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(dangerball_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn deepstars_start(args: StartArgs) -> Runner3dFuture {
+    Box::pin(async { Some(deepstars_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn alienbeacon_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(alienbeacon_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn batteredplanet_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(batteredplanet_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn bestill_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(bestill_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn bubblecolors_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(bubblecolors_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn darktransit_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(darktransit_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn downfall_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(downfall_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn driftclouds_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(driftclouds_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn elementalring_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(elementalring_body(args)) })
+}
+fn fluxcore_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::fluxcore::start(args)
+}
+fn gimbalharmonics_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::gimbalharmonics::start(args)
+}
+fn goldenapollian_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::goldenapollian::start(args)
+}
+fn hexplasma_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::hexplasma::start(args)
+}
+fn logarithmiccircles_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::logarithmiccircles::start(args)
+}
+fn neongravity_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::neongravity::start(args)
+}
+fn neontriangulator_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::neontriangulator::start(args)
+}
+fn noxfire_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::noxfire::start(args)
+}
+fn prococean_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::prococean::start(args)
+}
+fn protophore_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::protophore::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn fluxcore_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(fluxcore_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn gimbalharmonics_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(gimbalharmonics_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn goldenapollian_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(goldenapollian_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn hexplasma_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(hexplasma_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn logarithmiccircles_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(logarithmiccircles_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn neongravity_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(neongravity_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn neontriangulator_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(neontriangulator_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn noxfire_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(noxfire_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn prococean_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(prococean_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn protophore_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(protophore_body(args)) })
+}
+fn rigrekt_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::rigrekt::start(args)
+}
+fn selfreflect_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::selfreflect::start(args)
+}
+fn skyline_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::skyline::start(args)
+}
+fn stardome_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::stardome::start(args)
+}
+fn starnest_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::starnest::start(args)
+}
+fn stripeytorus_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::stripeytorus::start(args)
+}
+fn synthwavecity_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::synthwavecity::start(args)
+}
+fn topologica_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::topologica::start(args)
+}
+fn trainmandala_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::trainmandala::start(args)
+}
+fn trizm_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::trizm::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn rigrekt_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(rigrekt_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn selfreflect_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(selfreflect_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn skyline_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(skyline_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn stardome_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(stardome_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn starnest_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(starnest_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn stripeytorus_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(stripeytorus_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn synthwavecity_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(synthwavecity_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn topologica_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(topologica_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn trainmandala_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(trainmandala_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn trizm_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(trizm_body(args)) })
+}
+fn truchetzoom_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::truchetzoom::start(args)
+}
+fn universeball_body(args: StartArgs) -> Shadertoy {
+    xscreensaver::shadertoy::universeball::start(args)
+}
+// Resident in the main module: see the note above on the split limit.
+fn truchetzoom_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(truchetzoom_body(args)) })
+}
+// Resident in the main module: see the note above on the split limit.
+fn universeball_start(args: StartArgs) -> ShadertoyFuture {
+    Box::pin(async { Some(universeball_body(args)) })
+}
 
 /// Every saver, by slug. Only the slug, the label and a function pointer live
 /// here; the code behind each one arrives on demand.
