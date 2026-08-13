@@ -99,6 +99,13 @@ struct Host {
     source: Source,
     /// A hack has asked for a picture and has not been given one yet.
     image_wanted: bool,
+    /// When it asked, so a picture that arrives after the runtime has given up
+    /// waiting can be told apart from one that arrives in time.
+    image_wanted_at: f64,
+    /// A picture that arrived too late for the hack that asked. It is kept so
+    /// that the hack can be restarted and handed it: the alternative is colour
+    /// bars until the hack next asks, which for `decayscreen` is two minutes.
+    late_picture: Option<(XImage, Option<String>)>,
     /// A fetch is in flight, so we do not start a second one.
     image_fetching: bool,
     /// Do not hammer a hashtag firehose that has not produced anything yet.
@@ -371,6 +378,7 @@ fn start_animation_loop(host: Rc<RefCell<Host>>, mut delivered: Signal<u32>) {
 
                 if h.wants_image() {
                     h.image_wanted = true;
+                    h.image_wanted_at = now;
                     h.image_retry_at = 0.0;
                 }
                 if h.image_wanted && !h.image_fetching && now >= h.image_retry_at {
@@ -419,6 +427,11 @@ fn start_animation_loop(host: Rc<RefCell<Host>>, mut delivered: Signal<u32>) {
                 match picture {
                     Some(p) => {
                         h.image_wanted = false;
+                        let late = now_seconds() - h.image_wanted_at
+                            > xscreensaver::runtime::image::PATIENCE;
+                        if late {
+                            h.late_picture = Some((p.image.clone(), p.title.clone()));
+                        }
                         h.deliver_image(p.image, p.title);
                         *delivered.write() += 1;
                     }
@@ -587,6 +600,9 @@ fn SaverStage(slug: String) -> Element {
         let query = to_query(&settings.read());
         let pictures = picture_source.read().clone();
         let words = text_source.read().clone();
+        // Reading this is what re-runs the effect when a picture lands, which
+        // is how a late one gets its restart.
+        let _ = pictures_delivered();
         replace_query(&shareable_query(&settings.read(), &pictures, &words));
         let Some(h) = host.read().clone() else { return };
         // Every borrow of the host is scoped to a single statement on purpose:
@@ -597,11 +613,17 @@ fn SaverStage(slug: String) -> Element {
         // A new picture source restarts the hack as an option change does.
         // Hacks read their picture in `init`, and whether there is a host to
         // ask at all is settled when they start.
+        // A picture that arrived after the hack gave up waiting is worth a
+        // restart on its own: a quiet hashtag can take minutes to produce one,
+        // and the alternative is colour bars until the hack next asks.
+        // Taken rather than read: the effect can run again before the restart
+        // it started has finished, and one late picture is worth one restart.
+        let late = h.borrow_mut().late_picture.take();
         let unchanged = {
             let h = h.borrow();
             h.query == query && h.source == pictures && h.text_source == words
         };
-        if unchanged {
+        if unchanged && late.is_none() {
             return;
         }
         spawn(async move {
@@ -642,6 +664,12 @@ fn SaverStage(slug: String) -> Element {
             let mut h = h.borrow_mut();
             h.query = query;
             h.announce_image_source();
+            // The restarted hack has no picture: the one that came too late
+            // for its predecessor is handed straight to it, so it asks and is
+            // answered on the same frame.
+            if let Some((image, title)) = late {
+                h.deliver_image(image, title);
+            }
         });
     });
 
@@ -710,6 +738,8 @@ fn SaverStage(slug: String) -> Element {
                     query,
                     source,
                     image_wanted: false,
+                    image_wanted_at: 0.0,
+                    late_picture: None,
                     image_fetching: false,
                     image_retry_at: 0.0,
                     text_source,

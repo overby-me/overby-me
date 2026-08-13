@@ -75,14 +75,21 @@ const TAG_QUEUE_MAX: usize = 32;
 /// one second, after 81 KB.
 const REPLAY_WINDOW_SECONDS: f64 = 300.0;
 
-/// Stop replaying once this many pictures are queued. The saver needs one to
-/// start with and the rest arrive live, so there is no reason to pull the
-/// whole backlog: five minutes of it is 14 MB.
-const REPLAY_ENOUGH: usize = 4;
+/// Stop replaying once this many pictures are queued: one to show now and one
+/// to show next. The rest arrive live.
+///
+/// Asking for more is what makes a quiet tag expensive. Replaying for `#cat`,
+/// the first picture cost 4.8 MB and the second 16 MB, because the cost is
+/// the whole firehose whatever you are looking for.
+const REPLAY_ENOUGH: usize = 2;
 
-/// ...or once the replay has cost this much, which is what happens for a tag
-/// nobody has posted under. About twenty seconds of firehose.
-const REPLAY_MAX_BYTES: usize = 1_000_000;
+/// ...or once the replay has cost this much, which is what stops a tag nobody
+/// posts under from reading the backlog to the end.
+///
+/// A busy tag never reaches this: `#art` had its two in about 100 KB. A quiet
+/// one spends it and takes what it found, which for `#cat` is one picture.
+/// Five minutes of backlog in full would be 14 MB.
+const REPLAY_MAX_BYTES: usize = 6_000_000;
 
 /// Where a saver's pictures come from.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -34,7 +34,10 @@ pub struct ImageLoad {
 /// In seconds rather than frames because hacks draw at wildly different rates,
 /// and this is a network timeout: long enough to fetch a photograph over a slow
 /// connection, short enough that a broken source does not look like a hang.
-const PATIENCE: f64 = 20.0;
+/// The host reads this too: a picture that arrives after it is a picture the
+/// hack has already given up on, and the page restarts the hack rather than
+/// leave the colour bars up until it next asks.
+pub const PATIENCE: f64 = 20.0;
 
 /// The runtime's half of the channel. Lives on [`crate::Dpy`].
 #[derive(Default)]
