@@ -41,9 +41,16 @@ self.addEventListener("activate", (event) =>
 	event.waitUntil(
 		(async () => {
 			// Drop old cache versions so a new deploy fully rolls out.
+			//
+			// Except the decoded HEICs (index.html): those are keyed by file id,
+			// not by build, and a photo decoded once is the same photo after a
+			// deploy. Sweeping them would have thrown away the expensive thing
+			// on every release and made the cache almost pointless.
 			const keys = await caches.keys();
 			await Promise.all(
-				keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)),
+				keys
+					.filter((k) => k !== CACHE && !k.startsWith("radikalwiki-heic"))
+					.map((k) => caches.delete(k)),
 			);
 			await self.clients.claim();
 		})(),

@@ -798,6 +798,14 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
             return;
         };
         spawn(async move {
+            // A HEIC decoded on some earlier visit is already a drawable JPEG,
+            // so ask before downloading anything: a hit skips the megabyte and
+            // the decode both. Every other kind of file misses, which costs one
+            // cache lookup.
+            if let Some(hit) = crate::components::file::heif_cached(&file_id).await {
+                blob_url.set(Some(hit));
+                return;
+            }
             // The file URL is built through the one seam (backend_api), so the
             // cutover blob-path swap is a change there. The token goes in the
             // Authorization header, which is the only place the storage service
@@ -834,7 +842,8 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
             // here is a real suspension -- the work is on another thread, and
             // this task resumes when it answers.
             if crate::components::file::looks_like_heif(&bytes) {
-                if let Some(url) = crate::components::file::heif_object_url(&bytes).await {
+                if let Some(url) = crate::components::file::heif_object_url(&file_id, &bytes).await
+                {
                     blob_url.set(Some(url));
                 }
                 return;

@@ -70,10 +70,13 @@
           # Path dependencies: the OOXML parsers and the patched dioxus-core.
           # Cargo cannot resolve the manifest without them.
           ./vendor
-          # `just build` ends in this script. Named on its own rather than the
+          # The scripts `just build` runs, named one by one rather than as the
           # whole scripts/ directory, so editing an unrelated script does not
-          # rebuild the frontend.
+          # rebuild the frontend. Every script the recipe calls has to be here:
+          # inject-wasm-size.nu was added to the recipe without being added
+          # here, and this build failed on it from then until it was noticed.
           ./scripts/split-symbols.nu
+          ./scripts/inject-wasm-size.nu
         ];
       };
 

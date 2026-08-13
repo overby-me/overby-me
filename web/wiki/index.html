@@ -277,33 +277,69 @@
         </script>
         <script>
             // Hands a HEIC to the worker and gives back an object URL for a
-            // JPEG the browser can draw (see assets/heic-worker.js).
+            // JPEG the browser can draw (see assets/heic-worker.js), keeping
+            // the result so the same photo is only ever decoded once.
             //
             // Here rather than in Rust because the worker, the request ids and
             // the promise that pairs them are all plain JS; the app calls this
-            // and awaits it (components/loader.rs). If this is missing -- an
-            // old shell still cached, say -- the caller falls back to decoding
-            // on the main thread, which is slow but correct.
+            // and awaits it (components/loader.rs, components/file.rs).
             (function () {
                 var worker = null;
                 var seq = 0;
                 var pending = new Map();
 
-                function settle(id, url) {
-                    var resolve = pending.get(id);
-                    if (!resolve) return;
-                    pending.delete(id);
-                    resolve(url);
+                // Keyed by file id and NOT by build, so a deploy does not throw
+                // away work that is still perfectly good. sw.js knows to leave
+                // this one alone when it sweeps old caches.
+                var CACHE = "radikalwiki-heic-v1";
+                // Enough for any feed or candidate list a reader will scroll,
+                // at a few hundred KB each. Cache.keys() comes back in
+                // insertion order, so the oldest go first.
+                var KEEP = 120;
+
+                function key(id) { return "/heic-cache/" + encodeURIComponent(id); }
+
+                // Every cache call is guarded: `caches` is absent in a Firefox
+                // private window and throws over quota, and neither is a reason
+                // to fail to show a picture.
+                function open() {
+                    try {
+                        return caches.open(CACHE).catch(function () { return null; });
+                    } catch (e) {
+                        return Promise.resolve(null);
+                    }
                 }
 
-                window.heicDecode = function (bytes) {
+                function trim(cache) {
+                    cache.keys().then(function (keys) {
+                        var over = keys.length - KEEP;
+                        for (var i = 0; i < over; i++) cache.delete(keys[i]);
+                    }).catch(function () {});
+                }
+
+                // A decoded copy if this file has been seen before, else null.
+                // Worth asking before the original is even downloaded: a hit
+                // saves both the megabyte and a second of decoding.
+                window.heicCached = function (id) {
+                    return open().then(function (cache) {
+                        if (!cache) return null;
+                        return cache.match(key(id)).then(function (hit) {
+                            return hit ? hit.blob().then(URL.createObjectURL) : null;
+                        });
+                    }).catch(function () { return null; });
+                };
+
+                window.heicDecode = function (id, bytes) {
                     return new Promise(function (resolve) {
                         if (!worker) {
                             // Started on first use, so a visitor who never meets
                             // a HEIC never fetches the decoder at all.
                             worker = new Worker("/heic-worker.js");
                             worker.onmessage = function (e) {
-                                settle(e.data.id, e.data.blob ? URL.createObjectURL(e.data.blob) : null);
+                                var settle = pending.get(e.data.id);
+                                if (!settle) return;
+                                pending.delete(e.data.id);
+                                settle(e.data.blob || null);
                             };
                             worker.onerror = function () {
                                 // The worker is gone; nothing pending can ever
@@ -314,13 +350,24 @@
                                 worker = null;
                             };
                         }
-                        var id = ++seq;
-                        pending.set(id, resolve);
+                        var seqId = ++seq;
+                        pending.set(seqId, resolve);
                         // A copy, because `bytes` is a view into the wasm heap:
                         // transferring it would detach the app's own memory, and
                         // not transferring it would copy anyway on the way out.
                         var copy = bytes.slice();
-                        worker.postMessage({ id: id, bytes: copy }, [copy.buffer]);
+                        worker.postMessage({ id: seqId, bytes: copy }, [copy.buffer]);
+                    }).then(function (blob) {
+                        if (!blob) return null;
+                        // Stored, but not waited on: the picture can be drawn now
+                        // and a full disk is no reason to hold it back.
+                        open().then(function (cache) {
+                            if (!cache) return;
+                            cache.put(key(id), new Response(blob)).then(function () {
+                                trim(cache);
+                            }).catch(function () {});
+                        });
+                        return URL.createObjectURL(blob);
                     });
                 };
             })();

@@ -1473,6 +1473,12 @@ pub fn use_heif_preview(file_id: String, mime: String) -> HeifPreview {
         };
         state.set(HeifPreview::Decoding);
         spawn(async move {
+            // Decoded on an earlier visit, most likely by the feed or the
+            // candidate page that led here: drawn straight away, no download.
+            if let Some(hit) = heif_cached(&file_id).await {
+                state.set(HeifPreview::Ready(hit));
+                return;
+            }
             let url = crate::backend_api::file_url(&file_id);
             let bytes = match reqwest::Client::new()
                 .get(&url)
@@ -1494,7 +1500,7 @@ pub fn use_heif_preview(file_id: String, mime: String) -> HeifPreview {
                 state.set(HeifPreview::NotHeif);
                 return;
             }
-            match heif_object_url(&bytes).await {
+            match heif_object_url(&file_id, &bytes).await {
                 Some(url) => state.set(HeifPreview::Ready(url)),
                 None => state.set(HeifPreview::Failed),
             }
@@ -1546,18 +1552,55 @@ pub fn looks_like_heif(bytes: &[u8]) -> bool {
 /// the one case where the worker glue is missing -- a shell cached from before
 /// this shipped, which revalidates on the next load anyway. Those get no picture
 /// for one load, exactly as they did before any of this existed.
-pub async fn heif_object_url(bytes: &[u8]) -> Option<String> {
+/// The result is kept under the file's id, so the same photo is decoded once
+/// and every later view of it is a cache read.
+pub async fn heif_object_url(file_id: &str, bytes: &[u8]) -> Option<String> {
+    let arg = js_sys::Uint8Array::from(bytes);
+    call_glue(
+        "heicDecode",
+        &wasm_bindgen::JsValue::from_str(file_id),
+        Some(&arg),
+    )
+    .await
+}
+
+/// A decoded copy of this file if one was kept, without downloading anything.
+///
+/// Worth asking before the fetch, not after: a photo already decoded costs a
+/// cache lookup here, against a megabyte off the network and a second of
+/// decoding otherwise. A miss is the normal answer for every other kind of
+/// file, and a miss is cheap.
+pub async fn heif_cached(file_id: &str) -> Option<String> {
+    call_glue(
+        "heicCached",
+        &wasm_bindgen::JsValue::from_str(file_id),
+        None,
+    )
+    .await
+}
+
+/// Call one of the `heic*` functions index.html puts on `window`, and await the
+/// URL it promises.
+///
+/// Absent rather than broken is the expected miss: a shell cached from before
+/// this shipped has no such function, and revalidates on the next load.
+async fn call_glue(
+    name: &str,
+    first: &wasm_bindgen::JsValue,
+    second: Option<&js_sys::Uint8Array>,
+) -> Option<String> {
     let window = web_sys::window()?;
-    let decode = js_sys::Reflect::get(&window, &wasm_bindgen::JsValue::from_str("heicDecode"))
+    let f = js_sys::Reflect::get(&window, &wasm_bindgen::JsValue::from_str(name))
         .ok()
         .and_then(|f| f.dyn_into::<js_sys::Function>().ok())?;
-    let arg = js_sys::Uint8Array::from(bytes);
-    let promise = decode
-        .call1(&wasm_bindgen::JsValue::NULL, &arg)
+    let called = match second {
+        Some(bytes) => f.call2(&wasm_bindgen::JsValue::NULL, first, bytes),
+        None => f.call1(&wasm_bindgen::JsValue::NULL, first),
+    };
+    let promise = called
         .ok()
         .and_then(|p| p.dyn_into::<js_sys::Promise>().ok())?;
     let value = wasm_bindgen_futures::JsFuture::from(promise).await.ok()?;
-    // Null is the worker reporting it could not read the file. Decoding again
-    // here would only reach the same decoder and block the page to do it.
+    // Null is a miss, or the worker reporting it could not read the file.
     value.as_string()
 }
