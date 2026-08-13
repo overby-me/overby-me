@@ -118,6 +118,29 @@ impl Gl {
         self.words.host_supplies = supplies;
     }
 
+    /// Host side: tell the runtime that pictures can be fetched. Without it
+    /// a request is answered on the spot with colour bars, which is what the
+    /// native tests get.
+    pub fn set_image_host(&mut self, supplies: bool) {
+        self.images.host_supplies = supplies;
+    }
+
+    /// Host side: has a hack asked for a picture since the last check?
+    pub fn take_image_request(&mut self) -> bool {
+        std::mem::take(&mut self.images.requested)
+    }
+
+    /// Host side: hand over a decoded picture, and optionally what to call it.
+    pub fn deliver_image(&mut self, image: super::XImage, title: Option<String>) {
+        self.images.ready = Some(image);
+        self.images.title = title;
+    }
+
+    /// The caption of the picture on screen, if the host gave one.
+    pub fn image_title(&self) -> Option<&str> {
+        self.images.title.as_deref()
+    }
+
     /// Host side: has a hack asked for text since the last check?
     pub fn take_text_request(&mut self) -> bool {
         std::mem::take(&mut self.words.requested)
@@ -211,6 +234,7 @@ impl Runner3d {
             image_pending: None,
         };
         gl.set_text_host(args.text_host);
+        gl.set_image_host(args.image_host);
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);
         Self {
@@ -220,6 +244,21 @@ impl Runner3d {
             next_due: 0.0,
             started: false,
         }
+    }
+
+    /// Host side: has the hack asked for a picture since the last check?
+    pub fn take_image_request(&mut self) -> bool {
+        self.gl.take_image_request()
+    }
+
+    /// Host side: hand the saver a decoded picture.
+    pub fn deliver_image(&mut self, image: super::XImage, title: Option<String>) {
+        self.gl.deliver_image(image, title);
+    }
+
+    /// The caption of the picture on screen, if the host gave one.
+    pub fn image_title(&self) -> Option<&str> {
+        self.gl.image_title()
     }
 
     /// Host side: has the hack asked for text since the last check?

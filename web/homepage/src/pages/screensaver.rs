@@ -218,21 +218,23 @@ impl Host {
     fn wants_image(&mut self) -> bool {
         match &mut self.engine {
             Engine::Fb(fb) => fb.runner.dpy.take_image_request(),
-            Engine::Gl3d(_) => false,
+            Engine::Gl3d(gl) => gl.take_image_request(),
             Engine::Gl(_) => false,
         }
     }
 
     fn deliver_image(&mut self, image: XImage, title: Option<String>) {
-        if let Engine::Fb(fb) = &mut self.engine {
-            fb.runner.dpy.deliver_image(image, title);
+        match &mut self.engine {
+            Engine::Fb(fb) => fb.runner.dpy.deliver_image(image, title),
+            Engine::Gl3d(gl) => gl.deliver_image(image, title),
+            Engine::Gl(_) => {}
         }
     }
 
     fn image_title(&self) -> Option<String> {
         match &self.engine {
             Engine::Fb(fb) => fb.runner.dpy.image_title().map(str::to_string),
-            Engine::Gl3d(_) => None,
+            Engine::Gl3d(gl) => gl.image_title(),
             Engine::Gl(_) => None,
         }
     }

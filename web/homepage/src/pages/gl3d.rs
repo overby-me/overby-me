@@ -21,6 +21,7 @@ use web_sys::{
 use xscreensaver::SaverDef;
 use xscreensaver::runtime::Runner3d;
 use xscreensaver::runtime::XEvent;
+use xscreensaver::runtime::XImage;
 use xscreensaver::runtime::gl::{
     Blend, DepthFunc, Fog, Frame, MAX_LIGHTS, Primitive, StencilFunc, StencilOp, TexEnv,
 };
@@ -371,6 +372,22 @@ impl Gl3dEngine {
 
     pub fn def(&self) -> &'static SaverDef {
         self.runner.def()
+    }
+
+    /// Host side: has the saver asked for a picture? Eleven of the 3D savers
+    /// do; `photopile` and `glslideshow` are nothing but photographs.
+    pub fn take_image_request(&mut self) -> bool {
+        self.runner.take_image_request()
+    }
+
+    /// Host side: hand the saver a decoded picture.
+    pub fn deliver_image(&mut self, image: XImage, title: Option<String>) {
+        self.runner.deliver_image(image, title);
+    }
+
+    /// The caption of the picture on screen, if the host gave one.
+    pub fn image_title(&self) -> Option<String> {
+        self.runner.image_title().map(str::to_string)
     }
 
     /// Host side: has the saver asked for words? `starwars` and `fliptext`
