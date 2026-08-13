@@ -43,7 +43,13 @@ self.onmessage = async (event) => {
 		// resamples into the canvas we actually encode. The large one is
 		// dropped as soon as this scope ends.
 		const full = new OffscreenCanvas(width, height);
-		full.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), width, height), 0, 0);
+		full
+			.getContext("2d")
+			.putImageData(
+				new ImageData(new Uint8ClampedArray(rgba.buffer), width, height),
+				0,
+				0,
+			);
 
 		let out = full;
 		if (scale < 1) {
