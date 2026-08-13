@@ -1563,5 +1563,37 @@ pub fn heif_to_data_url(bytes: &[u8]) -> Option<String> {
     )
     .ok()?;
     context.put_image_data(&data, 0.0, 0.0).ok()?;
+    // Down to something a screen can use, if it came off a modern phone.
+    //
+    // The portrait that prompted this is 2453x4362: eleven megapixels, which is
+    // 43 MB of RGBA before the canvas holds 43 MB more of its own, and then a
+    // base64 data URL of the whole thing on top. One is survivable; a list of
+    // candidates decoding a dozen at once is not, and a card a few hundred
+    // pixels wide had no use for any of it.
+    //
+    // Scaled by the browser through a second canvas rather than by hand: it
+    // filters properly, and the large canvas is dropped right after.
+    let longest = width.max(height);
+    if longest > HEIF_MAX_EDGE {
+        let scale = f64::from(HEIF_MAX_EDGE) / f64::from(longest);
+        let w = (f64::from(width) * scale).round().max(1.0);
+        let h = (f64::from(height) * scale).round().max(1.0);
+        let small: web_sys::HtmlCanvasElement =
+            document.create_element("canvas").ok()?.dyn_into().ok()?;
+        small.set_width(w as u32);
+        small.set_height(h as u32);
+        let ctx: web_sys::CanvasRenderingContext2d =
+            small.get_context("2d").ok()??.dyn_into().ok()?;
+        ctx.draw_image_with_html_canvas_element_and_dw_and_dh(&canvas, 0.0, 0.0, w, h)
+            .ok()?;
+        return small.to_data_url_with_type("image/jpeg").ok();
+    }
     canvas.to_data_url_with_type("image/jpeg").ok()
 }
+
+/// The longest edge a decoded HEIC is reduced to.
+///
+/// Above a retina phone's own screen, so opening the picture still shows more
+/// than the page did; far below the eleven megapixels a phone camera writes,
+/// which nothing here displays and which costs tens of megabytes to carry.
+const HEIF_MAX_EDGE: u32 = 2048;

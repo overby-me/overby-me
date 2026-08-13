@@ -817,6 +817,27 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
             let Ok(bytes) = resp.bytes().await else {
                 return;
             };
+            // A HEIC has to be decoded before anything will draw it: Firefox
+            // renders none, so a photo off an iPhone arrives here as a broken
+            // image. Done at this seam because it is the one every picture in the
+            // app comes through -- a candidate's portrait, a comment's
+            // attachment, a folder's cover -- and the reported case was a
+            // candidate, which never touches the file page where this started.
+            //
+            // Sniffed from the bytes, which are already in hand, rather than from
+            // the mime: these files were uploaded long before anything here knew
+            // to look, under whatever type the browser claimed at the time.
+            //
+            // A data URL rather than a blob, because the canvas hands back a data
+            // URL and wrapping it into a blob to match the shape below would be
+            // work for nothing. `revoke_object_url` on one is a harmless no-op,
+            // so the cleanup path needs no special case.
+            if crate::components::file::looks_like_heif(&bytes) {
+                if let Some(url) = crate::components::file::heif_to_data_url(&bytes) {
+                    blob_url.set(Some(url));
+                }
+                return;
+            }
             let arr = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
             arr.copy_from(&bytes);
             let parts = js_sys::Array::of1(&arr);
