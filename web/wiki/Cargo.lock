@@ -1673,8 +1673,6 @@ checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 [[package]]
 name = "heif-oxide"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e12acb6edcb3bb9227dc6a06dd375a221eafe397ae2de72a876d79313831e365"
 dependencies = [
  "rust_h265",
  "thiserror 2.0.18",

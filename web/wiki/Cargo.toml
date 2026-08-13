@@ -30,7 +30,10 @@ docx-parser = { path = "vendor/ooxml/docx-parser" }
 # adaptive WindowSizeClass signal from inside the Dioxus runtime.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
-heif-oxide = "0.1"
+# VENDORED for a wasm fix (vendor/heif-oxide, see its README-VENDOR.md): the
+# published crate spawns threads to decode tiles, which no browser can do, so
+# every HEIC took the app down instead of drawing.
+heif-oxide = { path = "vendor/heif-oxide" }
 js-sys = "0.3"
 log = "0.4"
 lopdf = { version = "0.44.0", default-features = false, features = ["wasm_js"] }
