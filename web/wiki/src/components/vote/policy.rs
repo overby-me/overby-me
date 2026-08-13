@@ -14,10 +14,6 @@ use super::*;
 /// amendment tree is browsable (#112).
 #[component]
 pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
-    /// The amendment "Show changes" word-diff is hidden for now: against the
-    /// current motion bodies it produces noisy, unhelpful diffs. Flip to
-    /// re-enable the toggle — the diff view and plumbing stay wired.
-    const AMENDMENT_DIFF_ENABLED: bool = false;
     let children = visible_sorted(&node.children);
     let children = &children;
 
@@ -30,11 +26,6 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let polls: Vec<_> = all_children
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/poll"))
-        .collect();
-
-    let amendments: Vec<_> = children
-        .iter()
-        .filter(|c| c.mime_id.as_deref() == Some("vote/change"))
         .collect();
 
     // Other children (questions etc.); comments now render in the nested
@@ -60,7 +51,6 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         .as_ref()
         .map(|d| crate::components::content::slate_plain_text(&d.0))
         .unwrap_or_default();
-    let mut diff_open = use_signal(|| Option::<String>::None);
     // Owned here so the sheet row and the dialog, which must render in different
     // parts of the tree, still open and close together.
     let poll_open = use_signal(|| false);
@@ -84,112 +74,14 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         }
         StartPollDialog { node: node.clone(), path: path.clone(), open: poll_open }
 
-        // Amendments — always shown so its create action (in the header) has a
-        // home; the body shows an empty state until the first amendment lands.
-        div { class: "card app-card mt-1",
-            div { class: "card-header",
-                div { class: "avatar small", {icon_el("vote/change")} }
-                h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
-                div { class: "flex-grow" }
-                // Propose a new amendment (redirects to its editor).
-                AddChangeButton { node: node.clone(), path: path.clone() }
-            }
-            if amendments.is_empty() {
-                // DESIGN: the expressive orb empty state, matching the other
-                // "no X" states, instead of a plain muted line.
-                div { class: "empty-state empty-state-sm",
-                    div { class: "empty-state-orb empty-state-orb-sm",
-                        span { class: "material-icons", "difference" }
-                    }
-                    p { class: "empty-state-body", "{t(\"vote.noAmendments\")}" }
-                }
-            } else {
-                div { class: "list",
-                    for (n , item) in amendments.iter().enumerate() {
-                        {
-                            let mut full = path.clone();
-                            full.push(item.key.clone());
-                            // Author byline: the creating user (a blank display name
-                            // means free-text, so it is treated as no identity).
-                            let owner = item.owner.as_ref().filter(|o| !o.display_name.is_empty());
-                            let author = owner.map(|o| o.display_name.clone());
-                            let author_id = owner.map(|o| o.id.0.clone());
-                            let author_avatar = owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
-                            // Inline body preview, so an amendment can be read (and
-                            // its author seen) without opening it — matching the old
-                            // wiki's expandable ChangeList row.
-                            let body = item.data.as_ref().map(|d| d.0.clone());
-                            let has_body = crate::components::content::has_rich_content(body.as_ref());
-                            // The amendment as plain text, for the diff against the
-                            // motion. Diff is offered only when both sides have text
-                            // and neither is too long (see `diffable`).
-                            let amendment_text = body
-                                .as_ref()
-                                .map(crate::components::content::slate_plain_text)
-                                .unwrap_or_default();
-                            let can_diff =
-                                AMENDMENT_DIFF_ENABLED && diffable(&motion_text, &amendment_text);
-                            let this_id = item.id.0.clone();
-                            let is_open = can_diff && diff_open() == Some(this_id.clone());
-                            rsx! {
-                                div { key: "{item.id.0}", class: "amendment-item",
-                                    div {
-                                        class: "stack stack-h",
-                                        div { class: "avatar small",
-                                            {crate::components::loader::node_avatar("vote/change", &item.name, Some(n))}
-                                        }
-                                        div { class: "list-item-text flex-grow",
-                                            Link {
-                                                to: Route::PathPage { segments: full, app: None },
-                                                div { class: "list-item-primary", "{item.name}" }
-                                            }
-                                            if let Some(a) = author.clone() {
-                                                crate::components::loader::UserPopover {
-                                                    name: a.clone(),
-                                                    avatar_url: author_avatar.clone(),
-                                                    user_id: author_id.clone(),
-                                                    div { class: "list-item-secondary", "{a}" }
-                                                }
-                                            }
-                                        }
-                                        // Toggle a word-level diff against the motion.
-                                        if can_diff {
-                                            button {
-                                                class: "btn btn-text btn-sm amendment-diff-toggle",
-                                                onclick: {
-                                                    let this_id = this_id.clone();
-                                                    move |_| {
-                                                        let open = diff_open() == Some(this_id.clone());
-                                                        diff_open.set(if open { None } else { Some(this_id.clone()) });
-                                                    }
-                                                },
-                                                span { class: "material-icons", "difference" }
-                                                if is_open {
-                                                    " {t(\"vote.hideDiff\")}"
-                                                } else {
-                                                    " {t(\"vote.showDiff\")}"
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if is_open {
-                                        div { class: "amendment-preview",
-                                            AmendmentDiffView {
-                                                original: motion_text.clone(),
-                                                proposed: amendment_text.clone(),
-                                            }
-                                        }
-                                    } else if has_body {
-                                        div { class: "amendment-preview",
-                                            crate::components::content::SlateRenderer { data: body }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // Amendments — the card is its own component so a file can carry
+        // one too (components/file.rs); a motion always shows it, so its
+        // create action has a home even before the first amendment lands.
+        AmendmentSection {
+            node: node.clone(),
+            path: path.clone(),
+            base_text: motion_text.clone(),
+            show_when_empty: true,
         }
 
         // Polls
@@ -343,6 +235,155 @@ fn AmendmentDiffView(original: String, proposed: String) -> Element {
                         DiffTag::Equal => "diff-eq",
                     },
                     "{word} "
+                }
+            }
+        }
+    }
+}
+
+/// The amendments on something: a motion, another amendment, or a file.
+///
+/// A file carries these too. The permission template has always listed
+/// `wiki/file` among the parents a `vote/change` may be created under
+/// (graphql/nodes.rs), and the insert rule would accept one -- but the card and
+/// its button lived inside PolicyApp, which only ever renders for `vote/policy`
+/// and `vote/change`. So proposing an amendment to a forretningsorden was
+/// permitted by the server and impossible in the app, which is how it was
+/// reported: "det er ikke muligt at lave ændringsforslag til forretningsordenen".
+///
+/// `base_text` is what an amendment is diffed against, and is empty for a file:
+/// there is no body to compare with. Nothing turns on that today, since the
+/// diff is off, and `diffable` would refuse an empty side in any case.
+///
+/// `show_when_empty` keeps a motion looking as it did -- the card is always
+/// there, so its create action has a home -- while a file shows it only where
+/// an amendment could actually be made or already has been. Every uploaded
+/// bilag would otherwise grow an empty amendments card.
+#[component]
+pub fn AmendmentSection(
+    node: NodeWithChildren,
+    path: Vec<String>,
+    base_text: String,
+    show_when_empty: bool,
+) -> Element {
+    /// The amendment "Show changes" word-diff is hidden for now: against the
+    /// current motion bodies it produces noisy, unhelpful diffs. Flip to
+    /// re-enable the toggle — the diff view and plumbing stay wired.
+    const AMENDMENT_DIFF_ENABLED: bool = false;
+    let children = visible_sorted(&node.children);
+    let children = &children;
+    let amendments: Vec<_> = children
+        .iter()
+        .filter(|c| c.mime_id.as_deref() == Some("vote/change"))
+        .collect();
+    let motion_text = base_text;
+    let mut diff_open = use_signal(|| Option::<String>::None);
+    if amendments.is_empty() && !show_when_empty {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "card app-card mt-1",
+            div { class: "card-header",
+                div { class: "avatar small", {icon_el("vote/change")} }
+                h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
+                div { class: "flex-grow" }
+                // Propose a new amendment (redirects to its editor).
+                AddChangeButton { node: node.clone(), path: path.clone() }
+            }
+            if amendments.is_empty() {
+                // DESIGN: the expressive orb empty state, matching the other
+                // "no X" states, instead of a plain muted line.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "difference" }
+                    }
+                    p { class: "empty-state-body", "{t(\"vote.noAmendments\")}" }
+                }
+            } else {
+                div { class: "list",
+                    for (n , item) in amendments.iter().enumerate() {
+                        {
+                            let mut full = path.clone();
+                            full.push(item.key.clone());
+                            // Author byline: the creating user (a blank display name
+                            // means free-text, so it is treated as no identity).
+                            let owner = item.owner.as_ref().filter(|o| !o.display_name.is_empty());
+                            let author = owner.map(|o| o.display_name.clone());
+                            let author_id = owner.map(|o| o.id.0.clone());
+                            let author_avatar = owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
+                            // Inline body preview, so an amendment can be read (and
+                            // its author seen) without opening it — matching the old
+                            // wiki's expandable ChangeList row.
+                            let body = item.data.as_ref().map(|d| d.0.clone());
+                            let has_body = crate::components::content::has_rich_content(body.as_ref());
+                            // The amendment as plain text, for the diff against the
+                            // motion. Diff is offered only when both sides have text
+                            // and neither is too long (see `diffable`).
+                            let amendment_text = body
+                                .as_ref()
+                                .map(crate::components::content::slate_plain_text)
+                                .unwrap_or_default();
+                            let can_diff =
+                                AMENDMENT_DIFF_ENABLED && diffable(&motion_text, &amendment_text);
+                            let this_id = item.id.0.clone();
+                            let is_open = can_diff && diff_open() == Some(this_id.clone());
+                            rsx! {
+                                div { key: "{item.id.0}", class: "amendment-item",
+                                    div {
+                                        class: "stack stack-h",
+                                        div { class: "avatar small",
+                                            {crate::components::loader::node_avatar("vote/change", &item.name, Some(n))}
+                                        }
+                                        div { class: "list-item-text flex-grow",
+                                            Link {
+                                                to: Route::PathPage { segments: full, app: None },
+                                                div { class: "list-item-primary", "{item.name}" }
+                                            }
+                                            if let Some(a) = author.clone() {
+                                                crate::components::loader::UserPopover {
+                                                    name: a.clone(),
+                                                    avatar_url: author_avatar.clone(),
+                                                    user_id: author_id.clone(),
+                                                    div { class: "list-item-secondary", "{a}" }
+                                                }
+                                            }
+                                        }
+                                        // Toggle a word-level diff against the motion.
+                                        if can_diff {
+                                            button {
+                                                class: "btn btn-text btn-sm amendment-diff-toggle",
+                                                onclick: {
+                                                    let this_id = this_id.clone();
+                                                    move |_| {
+                                                        let open = diff_open() == Some(this_id.clone());
+                                                        diff_open.set(if open { None } else { Some(this_id.clone()) });
+                                                    }
+                                                },
+                                                span { class: "material-icons", "difference" }
+                                                if is_open {
+                                                    " {t(\"vote.hideDiff\")}"
+                                                } else {
+                                                    " {t(\"vote.showDiff\")}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if is_open {
+                                        div { class: "amendment-preview",
+                                            AmendmentDiffView {
+                                                original: motion_text.clone(),
+                                                proposed: amendment_text.clone(),
+                                            }
+                                        }
+                                    } else if has_body {
+                                        div { class: "amendment-preview",
+                                            crate::components::content::SlateRenderer { data: body }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

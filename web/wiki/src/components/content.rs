@@ -111,7 +111,10 @@ pub fn ContentApp(
     // there is no lock row at all.
     let lock_labels: Option<(String, String)> = match node.mime_id.as_deref() {
         Some("vote/position") => Some((t("folder.lockCandidates"), t("folder.unlockCandidates"))),
-        Some("vote/policy") | Some("vote/change") => {
+        // A file takes amendments too (see `AmendmentSection`), so its owner gets
+        // the same lock. Without this a chair could open amendments on a
+        // forretningsorden and have no way to close them again.
+        Some("vote/policy") | Some("vote/change") | Some("wiki/file") => {
             Some((t("folder.lockAmendments"), t("folder.unlockAmendments")))
         }
         _ => None,

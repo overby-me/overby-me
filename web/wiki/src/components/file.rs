@@ -901,6 +901,27 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     let context_id = node.context_id.clone().map(|c| c.0);
     // Owners may delete the file (node/context owner); mirrors ContentApp gating.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
+    // Whether an amendment may be proposed on this file, asked of the server
+    // rather than assumed -- the same call the folder's add-content dropdown uses
+    // to decide what it offers.
+    //
+    // It has to be asked, because the permission rows that carry the answer are
+    // seeded once when a context is created and never revisited. A context made
+    // before `wiki/file` joined the parents a `vote/change` may hang from simply
+    // does not have it, and a button offered there would insert nothing and say
+    // so in a toast. Where the row is missing the card stays away, and its
+    // absence is the signal that the context wants re-seeding.
+    let amend_nid = node.id.0.clone();
+    let amend_tok = session.read().access_token.clone();
+    let insertable_res = crate::use_data_resource!(|(amend_nid, amend_tok)| async move {
+        crate::graphql::node_insert_mimes(amend_tok.as_deref(), &amend_nid).await
+    });
+    let may_amend = insertable_res
+        .read()
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .any(|m| m == "vote/change");
     let mut confirm_open = use_signal(|| false);
     // Deleting walks the file's comment subtree a request at a time.
     let mut deleting = use_signal(|| false);
@@ -913,7 +934,9 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     let can_submit = can_manage && is_mutable;
     let mut confirm_submit = use_signal(|| false);
 
-    let data = node.data.map(|d| d.0);
+    // Cloned, not moved out of: the amendments card below needs the whole node,
+    // and a file's `data` is the stored file's id and type, not its contents.
+    let data = node.data.clone().map(|d| d.0);
 
     let file_id = data
         .as_ref()
@@ -1429,6 +1452,14 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                     }
                 }
             }
+        }
+        // Amendments to the file, above the discussion, the way they sit above
+        // it on a motion.
+        super::vote::AmendmentSection {
+            node: node.clone(),
+            path: segments.clone(),
+            base_text: String::new(),
+            show_when_empty: may_amend,
         }
         super::comments::CommentSection {
             node_id: node_id.clone(),

@@ -12,7 +12,7 @@ mod policy;
 mod poll;
 mod position;
 
-pub use policy::PolicyApp;
+pub use policy::{AmendmentSection, PolicyApp};
 pub use poll::{option_label, PollApp};
 pub use position::PositionApp;
 
