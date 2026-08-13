@@ -40,6 +40,8 @@ pub struct Gl {
     /// Map tiles, which are the one thing a saver wants many of at once.
     /// Only `mapscroller` asks.
     tiles: super::tiles::TileChannel,
+    /// Letters the compiled-in font does not have. Only `unicrud` asks.
+    glyphs: super::glyph::GlyphChannel,
 }
 
 /// A picture for a saver to make a texture out of: `grab-ximage.c`'s
@@ -79,6 +81,7 @@ impl Gl {
             images: super::image::ImageChannel::default(),
             image_pending: None,
             tiles: super::tiles::TileChannel::default(),
+            glyphs: super::glyph::GlyphChannel::default(),
         }
     }
 
@@ -120,6 +123,38 @@ impl Gl {
     /// compiled-in passage is served, which is what the native tests get.
     pub fn set_text_host(&mut self, supplies: bool) {
         self.words.host_supplies = supplies;
+    }
+
+    /// Ask the host to draw one codepoint, about `size` pixels tall.
+    pub fn request_glyph(&mut self, codepoint: u32, size: i32) {
+        self.glyphs.request(codepoint, size);
+    }
+
+    /// The glyph the host drew, if it has. A `None` image means the host has
+    /// no glyph for that codepoint.
+    pub fn take_glyph(&mut self) -> Option<(u32, Option<super::XImage>)> {
+        self.glyphs.take()
+    }
+
+    /// Whether anything is going to draw a glyph at all.
+    pub fn glyphs_available(&self) -> bool {
+        self.glyphs.host_supplies
+    }
+
+    /// Host side: tell the runtime that glyphs can be drawn.
+    pub fn set_glyph_host(&mut self, supplies: bool) {
+        self.glyphs.host_supplies = supplies;
+    }
+
+    /// Host side: what codepoint the saver is waiting for.
+    pub fn take_glyph_request(&mut self) -> Option<(u32, i32)> {
+        self.glyphs.wanted.take()
+    }
+
+    /// Host side: hand back a drawn glyph, or `None` if there is no such
+    /// character in any font the host has.
+    pub fn deliver_glyph(&mut self, codepoint: u32, image: Option<super::XImage>) {
+        self.glyphs.ready = Some((codepoint, image));
     }
 
     /// `mapscroller`'s loader: ask for the image at `url`, to be called `key`.
@@ -268,10 +303,12 @@ impl Runner3d {
             images: super::image::ImageChannel::default(),
             image_pending: None,
             tiles: super::tiles::TileChannel::default(),
+            glyphs: super::glyph::GlyphChannel::default(),
         };
         gl.set_text_host(args.text_host);
         gl.set_image_host(args.image_host);
         gl.set_tile_host(args.tile_host);
+        gl.set_glyph_host(args.glyph_host);
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);
         Self {
@@ -291,6 +328,16 @@ impl Runner3d {
     /// Host side: what map tiles the saver is waiting for.
     pub fn take_tile_requests(&mut self) -> Vec<(u64, String)> {
         self.gl.take_tile_requests()
+    }
+
+    /// Host side: what codepoint the saver is waiting for.
+    pub fn take_glyph_request(&mut self) -> Option<(u32, i32)> {
+        self.gl.take_glyph_request()
+    }
+
+    /// Host side: hand back a drawn glyph.
+    pub fn deliver_glyph(&mut self, codepoint: u32, image: Option<super::XImage>) {
+        self.gl.deliver_glyph(codepoint, image);
     }
 
     /// Host side: hand back a fetched tile, or `None` if it could not be had.

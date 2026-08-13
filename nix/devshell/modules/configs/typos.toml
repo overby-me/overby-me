@@ -208,6 +208,10 @@ extrac25 = "extrac25"
 
 [files]
 extend-exclude = [
+  # The Unicode block names unicrud carries, straight from the standard. They
+  # are proper nouns in a hundred languages and several of them look like
+  # English misspellings: Tai Tham, Vai, Cham, Miao.
+  "web/homepage/xscreensaver/src/hacks3d/unicodeblocks.rs",
   # Euro-Office upstream patches (verbatim upstream code, incl. its own typos
   # like BUIDLER in build_3rdparty.py context lines).
   "pkgs/euro-office/patches/*",

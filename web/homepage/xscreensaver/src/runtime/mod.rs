@@ -32,6 +32,7 @@ pub mod font;
 pub mod gl;
 pub mod gllist;
 pub mod glutstroke;
+pub mod glyph;
 pub mod hack3d;
 pub mod hopf;
 pub mod image;
@@ -330,6 +331,8 @@ pub struct StartArgs {
     pub text_host: bool,
     /// Whether a host is going to fetch map tiles. Only `mapscroller` asks.
     pub tile_host: bool,
+    /// Whether a host is going to draw glyphs. Only `unicrud` asks.
+    pub glyph_host: bool,
     /// The local time of day when the saver starts, in seconds since midnight.
     /// Only the clocks read it, and the tests leave it at midnight.
     pub wall_clock: f64,
@@ -345,6 +348,7 @@ impl StartArgs {
             image_host: false,
             text_host: false,
             tile_host: false,
+            glyph_host: false,
             wall_clock: 0.0,
         }
     }
@@ -357,6 +361,11 @@ impl StartArgs {
 
     pub fn with_tile_host(mut self, tile_host: bool) -> Self {
         self.tile_host = tile_host;
+        self
+    }
+
+    pub fn with_glyph_host(mut self, glyph_host: bool) -> Self {
+        self.glyph_host = glyph_host;
         self
     }
 

@@ -157,6 +157,8 @@ pub mod tangram;
 pub mod timetunnel;
 pub mod topblock;
 pub mod tronbit;
+pub mod unicodeblocks;
+pub mod unicrud;
 pub mod unknownpleasures;
 pub mod vigilance;
 pub mod voronoi;
@@ -246,6 +248,7 @@ pub static ALL: &[&Saver3d] = &[
     &starwars::SAVER,
     &skytentacles::SAVER,
     &sproingies::SAVER,
+    &unicrud::SAVER,
     &winduprobot::SAVER,
     &glsnake::SAVER,
     &gravitywell::SAVER,

@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 145 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (145) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (135) |
+| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (136) |
 
 `webcollage` and `vidwhacker` are neither: upstream is a perl script and a C
 helper for the first and a shell script for the second, rather than a
@@ -24,9 +24,9 @@ at the same code with the resource nailed down.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
-a 6502 with an assembler. Three of the OpenGL tier are left, each waiting on
-something that is not a screensaver: a library, an algorithm, or a font. None
-of them is impossible; they are described at the end.
+a 6502 with an assembler. Two of the OpenGL tier are left, one waiting on a
+library and one on an algorithm. Neither is impossible; they are described at
+the end.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -819,6 +819,37 @@ the collage is a grid of hard rectangles.
 The one thing the framebuffer cannot do is upstream's alpha channel, so the
 bevel is folded into the per-pixel blend instead of being written into the
 image and composited afterwards. Same arithmetic, one pass.
+
+`unicrud` came off the blocked list by asking a different question. It picks a
+codepoint anywhere from 0 to 0x2F800 and draws it four inches high, and
+`runtime::font` is one compiled-in bitmap font of Latin glyphs, so it went in
+the bin. But that is only a blocker if the *crate* has to own the font. The
+saver draws its character as a texture on a quad rather than as an outline it
+manipulates, and the host is a browser, which has fonts: so `runtime::glyph` is
+another channel and the browser draws the codepoint. The coverage that gives is
+better than upstream's, not worse, since upstream can only use the fonts the X
+server was configured with.
+
+Telling a character the browser lacks from one it has needs care, because every
+browser draws something for a missing glyph rather than nothing. The test is to
+render a codepoint in a private use area, which is unassigned by definition and
+so always comes out as the missing-glyph box, and reject anything that draws
+identically to it. Upstream does the same test one step later: it draws the
+character and picks again if the result is blank. That path matters more than
+it sounds, because most of the range is unassigned.
+
+Its block table is carried across with a bug in it. Upstream lists `Tags` at
+0xE0020 after an `Unassigned` at 0xE0080, which is out of order, and upstream's
+own runtime check for exactly that never fires because the loop stops at the
+block holding the character and characters stop at 0x2F800. The disorder is
+left where it is and the test asserts the table is sorted only up to that
+ceiling, plus that the one bad pair is still above it, so this starts failing
+if a later table moves it down into range.
+
+The character's name is the one thing that cannot be had. Upstream shells out
+to perl for it and notes that the alternative is embedding the 943 KB of
+`NamesList.txt`; the line is left empty, which is exactly what upstream prints
+when its lookup fails.
 
 `mapscroller` was on the not-portable list for the worst reason of the lot:
 upstream's own comment. It forks a perl helper to fetch tiles and says "doing

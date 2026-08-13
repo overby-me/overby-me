@@ -25,6 +25,7 @@ use xscreensaver::SaverDef;
 use xscreensaver::runtime::{OptKind, Runner, StartArgs, XEvent, XImage};
 
 use crate::Route;
+use crate::glyphs;
 use crate::images::{self, Source};
 use crate::pages::gl::GlEngine;
 use crate::pages::gl3d::Gl3dEngine;
@@ -137,6 +138,20 @@ impl Host {
         }
     }
 
+    /// What codepoint the saver wants drawn. Only `unicrud` ever asks.
+    fn wanted_glyph(&mut self) -> Option<(u32, i32)> {
+        match &mut self.engine {
+            Engine::Gl3d(gl) => gl.take_glyph_request(),
+            _ => None,
+        }
+    }
+
+    fn deliver_glyph(&mut self, codepoint: u32, image: Option<XImage>) {
+        if let Engine::Gl3d(gl) = &mut self.engine {
+            gl.deliver_glyph(codepoint, image);
+        }
+    }
+
     /// What map tiles the saver wants. Only `mapscroller` ever asks.
     fn wanted_tiles(&mut self) -> Vec<(u64, String)> {
         match &mut self.engine {
@@ -164,6 +179,7 @@ impl Host {
             .with_image_host(self.source != Source::None)
             .with_text_host(true)
             .with_tile_host(true)
+            .with_glyph_host(true)
             .with_wall_clock(wall_clock_seconds())
     }
 
@@ -345,6 +361,13 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
 
                 // Tiles are many at once and keyed, so they do not go through
                 // the one-at-a-time picture bookkeeping.
+                // Drawing a glyph is synchronous and quick, so unlike a tile
+                // it is answered on the spot rather than spawned.
+                if let Some((codepoint, size)) = h.wanted_glyph() {
+                    let image = glyphs::render(codepoint, size);
+                    h.deliver_glyph(codepoint, image);
+                }
+
                 for (key, url) in h.wanted_tiles() {
                     if !tiles::can_start() {
                         break;
@@ -607,6 +630,7 @@ fn SaverStage(slug: String) -> Element {
                     .with_image_host(source != Source::None)
                     .with_text_host(true)
                     .with_tile_host(true)
+                    .with_glyph_host(true)
                     .with_wall_clock(wall_clock_seconds());
                 // The context has to match the saver: asking a canvas for "2d"
                 // after it has given out a "webgl2" (or the other way round)

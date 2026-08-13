@@ -374,6 +374,16 @@ impl Gl3dEngine {
         self.runner.def()
     }
 
+    /// Host side: what codepoint the saver is waiting for.
+    pub fn take_glyph_request(&mut self) -> Option<(u32, i32)> {
+        self.runner.take_glyph_request()
+    }
+
+    /// Host side: hand back a drawn glyph.
+    pub fn deliver_glyph(&mut self, codepoint: u32, image: Option<XImage>) {
+        self.runner.deliver_glyph(codepoint, image);
+    }
+
     /// Host side: what map tiles the saver is waiting for.
     pub fn take_tile_requests(&mut self) -> Vec<(u64, String)> {
         self.runner.take_tile_requests()

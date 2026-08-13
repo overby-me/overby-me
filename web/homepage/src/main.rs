@@ -1,5 +1,6 @@
 mod atproto;
 mod atproto_web;
+mod glyphs;
 mod graph;
 mod images;
 mod pages;

@@ -1090,6 +1090,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::mapscroller::start
 );
 gl3d_saver!(
+    "unicrud",
+    unicrud_body,
+    unicrud_start,
+    xscreensaver::hacks3d::unicrud::start
+);
+gl3d_saver!(
     "winduprobot",
     winduprobot_body,
     winduprobot_start,
@@ -2661,6 +2667,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "twang",
         label: "Twang",
         start: Start::Fb(twang_start),
+    },
+    Entry {
+        slug: "unicrud",
+        label: "Unicrud",
+        start: Start::Gl3d(unicrud_start),
     },
     Entry {
         slug: "vidwhacker",
