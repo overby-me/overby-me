@@ -907,6 +907,16 @@ html {
 	overflow-x: hidden;
 	scrollbar-width: none;
 	padding: 0 var(--md-sys-spacing-4) var(--md-sys-spacing-4);
+	/* Arriving at a page scrolls this box to the node you are on (drawer.rs).
+	   Gliding there shows it moved and roughly how far, where a jump would just
+	   present a differently-scrolled tree. Only scripted scrolling is affected:
+	   a wheel or a drag stays as direct as it was. */
+	scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+	.drawer-scroll {
+		scroll-behavior: auto;
+	}
 }
 .drawer-scroll::-webkit-scrollbar {
 	display: none;

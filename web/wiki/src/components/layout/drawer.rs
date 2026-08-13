@@ -1,5 +1,6 @@
 use crate::model;
 use dioxus::prelude::*;
+use wasm_bindgen::JsCast;
 
 use super::*;
 use crate::graphql::{self};
@@ -13,6 +14,55 @@ use crate::session::use_session;
 /// Global because the bar that toggles it lives in the compact drawer's own
 /// header, while the list it swaps sits in [`DrawerContent`] below.
 pub(super) static SWITCHER_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Scroll the tree so the node you are on is on screen.
+///
+/// Arriving at a page deep in a tree used to leave the drawer wherever it last
+/// was, so the row for the page you are actually reading could be well above or
+/// below the visible part of it.
+///
+/// Deliberately NOT `scrollIntoView`: that scrolls every scrollable ancestor,
+/// which here means the article the reader is looking at moves because a sidebar
+/// row was out of sight. Only `.drawer-scroll` is touched, and only when the row
+/// is not already visible, so an ordinary click inside the tree moves nothing.
+///
+/// Every open tree is handled, not just one: the compact drawer and the docked
+/// rail can both be mounted, and `closest` pairs each row with its own scroller.
+/// Smoothness is left to `scroll-behavior` in the stylesheet, where the reduced
+/// motion rule can reach it.
+fn reveal_current_node() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Ok(rows) = doc.query_selector_all("[data-drawer-current]") else {
+        return;
+    };
+    for i in 0..rows.length() {
+        let Some(row) = rows
+            .item(i)
+            .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+        else {
+            continue;
+        };
+        let Ok(Some(scroller)) = row.closest(".drawer-scroll") else {
+            continue;
+        };
+        let view = scroller.get_bounding_client_rect();
+        let rect = row.get_bounding_client_rect();
+        // A row of slack at either end, so the current node does not land flush
+        // against the edge with whatever surrounds it hidden just beyond.
+        let margin = rect.height();
+        let delta = if rect.top() < view.top() + margin {
+            rect.top() - view.top() - margin
+        } else if rect.bottom() > view.bottom() - margin {
+            rect.bottom() - view.bottom() + margin
+        } else {
+            continue;
+        };
+        let top = f64::from(scroller.scroll_top()) + delta;
+        scroller.set_scroll_top(top.round() as i32);
+    }
+}
 
 /// Drawer content — shows navigation tree
 #[component]
@@ -318,6 +368,15 @@ pub(super) fn DrawerNodeItem(
         }
     }));
 
+    // Bring this row into view when it becomes the current one -- which includes
+    // the row mounting already selected, since the level it is in is fetched and
+    // only appears once that lands.
+    use_effect(use_reactive!(|(selected,)| {
+        if selected {
+            reveal_current_node();
+        }
+    }));
+
     let node_id = node.id.0.clone();
     // Indent by depth from the spacing scale's base (so a global density change
     // retunes it) plus a fixed per-level step, rather than a hard-coded pixel sum.
@@ -337,6 +396,11 @@ pub(super) fn DrawerNodeItem(
                 "list-item"
             },
             style: "{indent}",
+            // What `reveal_current_node` looks for. A marked attribute rather
+            // than an id: the compact drawer and the docked rail can both be
+            // mounted, so there is more than one current row and an id would
+            // have to be duplicated to cover them.
+            "data-drawer-current": if selected { "true" },
             onclick: move |_| {
                 nav.push(Route::PathPage {
                     segments: nav_path.clone(),
