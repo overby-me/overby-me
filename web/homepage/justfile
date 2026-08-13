@@ -43,5 +43,11 @@ test:
 browser slug="--all":
     nu test-browser.nu {{slug}}
 
+# Upload the built bundle to statichost. Needs a fresh `just build` and the
+# API key in the environment; the key is never written into this repository:
+#   STATICHOST_APIKEY=... just deploy
+deploy site="overby-me":
+    nu deploy.nu {{site}} target/dx/homepage/release/web/public
+
 clean:
     {{dx}} clean
