@@ -374,6 +374,16 @@ impl Gl3dEngine {
         self.runner.def()
     }
 
+    /// Host side: what map tiles the saver is waiting for.
+    pub fn take_tile_requests(&mut self) -> Vec<(u64, String)> {
+        self.runner.take_tile_requests()
+    }
+
+    /// Host side: hand back a fetched tile, or `None` if it could not be had.
+    pub fn deliver_tile(&mut self, key: u64, image: Option<XImage>) {
+        self.runner.deliver_tile(key, image);
+    }
+
     /// Host side: has the saver asked for a picture? Eleven of the 3D savers
     /// do; `photopile` and `glslideshow` are nothing but photographs.
     pub fn take_image_request(&mut self) -> bool {

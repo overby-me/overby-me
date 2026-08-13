@@ -1084,6 +1084,12 @@ gl3d_saver!(
     xscreensaver::hacks3d::highvoltage::start
 );
 gl3d_saver!(
+    "mapscroller",
+    mapscroller_body,
+    mapscroller_start,
+    xscreensaver::hacks3d::mapscroller::start
+);
+gl3d_saver!(
     "winduprobot",
     winduprobot_body,
     winduprobot_start,
@@ -2400,6 +2406,11 @@ pub static SAVERS: &[Entry] = &[
         slug: "lissie",
         label: "Lissie",
         start: Start::Fb(lissie_start),
+    },
+    Entry {
+        slug: "mapscroller",
+        label: "Map Scroller",
+        start: Start::Gl3d(mapscroller_start),
     },
     Entry {
         slug: "moire",

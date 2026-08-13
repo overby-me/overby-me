@@ -31,6 +31,7 @@ use crate::pages::gl3d::Gl3dEngine;
 use crate::pages::savers::{self, Start};
 use crate::pages::ui::{Choice, Details, Slider, Toggle};
 use crate::text::{self, Source as TextSource};
+use crate::tiles;
 use crate::url::{captured_query, replace_query};
 
 /// How long to wait before asking an image source again after it came up
@@ -136,6 +137,20 @@ impl Host {
         }
     }
 
+    /// What map tiles the saver wants. Only `mapscroller` ever asks.
+    fn wanted_tiles(&mut self) -> Vec<(u64, String)> {
+        match &mut self.engine {
+            Engine::Gl3d(gl) => gl.take_tile_requests(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn deliver_tile(&mut self, key: u64, image: Option<XImage>) {
+        if let Engine::Gl3d(gl) = &mut self.engine {
+            gl.deliver_tile(key, image);
+        }
+    }
+
     fn deliver_text(&mut self, s: &str) {
         match &mut self.engine {
             Engine::Fb(fb) => fb.runner.dpy.deliver_text(s),
@@ -148,6 +163,7 @@ impl Host {
         StartArgs::new(self.buf_w, self.buf_h, query, seed())
             .with_image_host(self.source != Source::None)
             .with_text_host(true)
+            .with_tile_host(true)
             .with_wall_clock(wall_clock_seconds())
     }
 
@@ -305,6 +321,7 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
         let mut fetch: Option<(Source, i32, i32)> = None;
         let mut fetch_text: Option<TextSource> = None;
+        let mut wanted_tiles: Vec<(u64, String)> = Vec::new();
         let connected = {
             let mut h = host.borrow_mut();
             if h.canvas.is_connected() {
@@ -324,6 +341,15 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                 if h.wants_text() {
                     h.text_wanted = true;
                     h.reads_text = true;
+                }
+
+                // Tiles are many at once and keyed, so they do not go through
+                // the one-at-a-time picture bookkeeping.
+                for (key, url) in h.wanted_tiles() {
+                    if !tiles::can_start() {
+                        break;
+                    }
+                    wanted_tiles.push((key, url));
                 }
                 if h.text_wanted && !h.text_fetching && now >= h.text_retry_at {
                     h.text_fetching = true;
@@ -352,6 +378,13 @@ fn start_animation_loop(host: Rc<RefCell<Host>>) {
                     // since we started listening. Ask again shortly.
                     None => h.image_retry_at = now_seconds() + IMAGE_RETRY_SECONDS,
                 }
+            });
+        }
+        for (key, url) in wanted_tiles {
+            let host = Rc::clone(&host);
+            wasm_bindgen_futures::spawn_local(async move {
+                let image = tiles::fetch(url).await;
+                host.borrow_mut().deliver_tile(key, image);
             });
         }
         if let Some(source) = fetch_text {
@@ -573,6 +606,7 @@ fn SaverStage(slug: String) -> Element {
                 let args = StartArgs::new(w, h, &query, seed())
                     .with_image_host(source != Source::None)
                     .with_text_host(true)
+                    .with_tile_host(true)
                     .with_wall_clock(wall_clock_seconds());
                 // The context has to match the saver: asking a canvas for "2d"
                 // after it has given out a "webgl2" (or the other way round)

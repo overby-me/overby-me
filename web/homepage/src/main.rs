@@ -4,6 +4,7 @@ mod graph;
 mod images;
 mod pages;
 mod text;
+mod tiles;
 mod url;
 
 use dioxus::prelude::*;

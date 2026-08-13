@@ -108,6 +108,8 @@ pub mod klondike;
 pub mod lament;
 pub mod lavalite;
 pub mod lockward;
+pub mod mapcities;
+pub mod mapscroller;
 pub mod maze3d;
 pub mod menger;
 pub mod mirrorblob;
@@ -232,6 +234,7 @@ pub static ALL: &[&Saver3d] = &[
     &glplanet::SAVER,
     &hilbert::SAVER,
     &jigsaw::SAVER,
+    &mapscroller::SAVER,
     &maze3d::SAVER,
     &mirrorblob::SAVER,
     &nakagin::SAVER,

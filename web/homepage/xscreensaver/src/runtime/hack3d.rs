@@ -37,6 +37,9 @@ pub struct Gl {
     images: super::image::ImageChannel,
     /// The load in flight, if any. One at a time is all any saver asks for.
     image_pending: Option<super::image::ImageLoad>,
+    /// Map tiles, which are the one thing a saver wants many of at once.
+    /// Only `mapscroller` asks.
+    tiles: super::tiles::TileChannel,
 }
 
 /// A picture for a saver to make a texture out of: `grab-ximage.c`'s
@@ -75,6 +78,7 @@ impl Gl {
             words: super::text::TextChannel::default(),
             images: super::image::ImageChannel::default(),
             image_pending: None,
+            tiles: super::tiles::TileChannel::default(),
         }
     }
 
@@ -116,6 +120,37 @@ impl Gl {
     /// compiled-in passage is served, which is what the native tests get.
     pub fn set_text_host(&mut self, supplies: bool) {
         self.words.host_supplies = supplies;
+    }
+
+    /// `mapscroller`'s loader: ask for the image at `url`, to be called `key`.
+    pub fn request_tile(&mut self, key: u64, url: String) {
+        self.tiles.request(key, url);
+    }
+
+    /// The next tile the host has answered with, if any. A `None` image means
+    /// the fetch failed.
+    pub fn take_tile(&mut self) -> Option<(u64, Option<super::XImage>)> {
+        self.tiles.take()
+    }
+
+    /// Whether anything is going to answer a tile request at all.
+    pub fn tiles_available(&self) -> bool {
+        self.tiles.host_supplies
+    }
+
+    /// Host side: tell the runtime that tiles can be fetched.
+    pub fn set_tile_host(&mut self, supplies: bool) {
+        self.tiles.host_supplies = supplies;
+    }
+
+    /// Host side: what the saver is waiting for, taken off the queue.
+    pub fn take_tile_requests(&mut self) -> Vec<(u64, String)> {
+        std::mem::take(&mut self.tiles.wanted)
+    }
+
+    /// Host side: hand back a fetched tile, or `None` if it could not be had.
+    pub fn deliver_tile(&mut self, key: u64, image: Option<super::XImage>) {
+        self.tiles.ready.push((key, image));
     }
 
     /// Host side: tell the runtime that pictures can be fetched. Without it
@@ -232,9 +267,11 @@ impl Runner3d {
             words: super::text::TextChannel::default(),
             images: super::image::ImageChannel::default(),
             image_pending: None,
+            tiles: super::tiles::TileChannel::default(),
         };
         gl.set_text_host(args.text_host);
         gl.set_image_host(args.image_host);
+        gl.set_tile_host(args.tile_host);
         gl.glx.start_frame(gl.width, gl.height);
         let hack = new(&mut gl);
         Self {
@@ -249,6 +286,16 @@ impl Runner3d {
     /// Host side: has the hack asked for a picture since the last check?
     pub fn take_image_request(&mut self) -> bool {
         self.gl.take_image_request()
+    }
+
+    /// Host side: what map tiles the saver is waiting for.
+    pub fn take_tile_requests(&mut self) -> Vec<(u64, String)> {
+        self.gl.take_tile_requests()
+    }
+
+    /// Host side: hand back a fetched tile, or `None` if it could not be had.
+    pub fn deliver_tile(&mut self, key: u64, image: Option<super::XImage>) {
+        self.gl.deliver_tile(key, image);
     }
 
     /// Host side: hand the saver a decoded picture.

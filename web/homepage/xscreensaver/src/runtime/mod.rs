@@ -52,6 +52,7 @@ pub mod teapot;
 pub mod tess;
 pub mod texfont;
 pub mod text;
+pub mod tiles;
 pub mod tty;
 pub mod tube;
 pub mod xlockmore;
@@ -327,6 +328,8 @@ pub struct StartArgs {
     /// Whether a host is going to supply text. Same contract as
     /// `image_host`: without it the compiled-in passage is served.
     pub text_host: bool,
+    /// Whether a host is going to fetch map tiles. Only `mapscroller` asks.
+    pub tile_host: bool,
     /// The local time of day when the saver starts, in seconds since midnight.
     /// Only the clocks read it, and the tests leave it at midnight.
     pub wall_clock: f64,
@@ -341,6 +344,7 @@ impl StartArgs {
             seed,
             image_host: false,
             text_host: false,
+            tile_host: false,
             wall_clock: 0.0,
         }
     }
@@ -348,6 +352,11 @@ impl StartArgs {
     /// Declare that the host will answer image requests.
     pub fn with_text_host(mut self, text_host: bool) -> Self {
         self.text_host = text_host;
+        self
+    }
+
+    pub fn with_tile_host(mut self, tile_host: bool) -> Self {
+        self.tile_host = tile_host;
         self
     }
 

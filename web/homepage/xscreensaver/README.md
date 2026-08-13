@@ -10,7 +10,7 @@ different runtime:
 |-|-|-|-|-|
 | 2D | 145 | `hacks/*.c`, Xlib | software framebuffer + Xlib façade | done (145) |
 | Shadertoy | 30 | `hacks/glx/glsl/*.glsl` | WebGL2 multi-pass runner | done (30) |
-| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (134) |
+| OpenGL | 138 | `hacks/glx/*.c`, GL 1.x | immediate-mode emulation over WebGL2 | in progress (135) |
 
 `webcollage` and `vidwhacker` are neither: upstream is a perl script and a C
 helper for the first and a shell script for the second, rather than a
@@ -24,8 +24,9 @@ at the same code with the resource nailed down.
 
 The 2D and Shadertoy tiers are finished. `bsod` is all thirty-nine of its
 computers, each one a little program for the same command queue, and `m6502` is
-a 6502 with an assembler. Four of the OpenGL tier are left and all four are
-blocked on something that is not a screensaver; they are described at the end.
+a 6502 with an assembler. Three of the OpenGL tier are left, each waiting on
+something that is not a screensaver: a library, an algorithm, or a font. None
+of them is impossible; they are described at the end.
 
 `testx11` also has a config file and a `hacks/*.c`, but it is upstream's test
 harness for the Xlib layer rather than a screen saver, so it is not counted
@@ -818,6 +819,40 @@ the collage is a grid of hard rectangles.
 The one thing the framebuffer cannot do is upstream's alpha channel, so the
 bevel is folded into the per-pixel blend instead of being written into the
 image and composited afterwards. Same arithmetic, one pass.
+
+`mapscroller` was on the not-portable list for the worst reason of the lot:
+upstream's own comment. It forks a perl helper to fetch tiles and says "doing
+https from C code is untenable... this program won't work on iOS or Android",
+and that was taken at face value. But a browser is the one place where that
+sentence is false, and the only real question was whether the tiles can be read
+cross-origin. They can: openstreetmap.org sends
+`access-control-allow-origin: *`. The whole helper, cache and all, reduces to a
+`fetch`, because the browser already has an HTTP cache.
+
+Its tiles needed a channel of their own. `runtime::image` answers "give me a
+picture" one at a time, which is all any other saver wanted; this one wants
+thirty specific images at once, each named by where it goes, arriving in
+whatever order the network manages, while it keeps scrolling. So
+`runtime::tiles` is the same idea with a key on it.
+
+The sea map is the part worth reading about. Upstream carries
+`oceantiles_12.png`, one two-bit pixel for each of 4096 by 4096 level-12 tiles,
+blue where there is open water, and calls `XGetPixel` on it to avoid starting
+in the middle of the Pacific and to turn around on reaching it. Decoded the
+ordinary way that image is 67 MB of framebuffer, eight times the largest
+picture this port decodes for anything else, to answer a yes-or-no question. So
+`runtime::png::decode_mask` stops at the defiltered scanlines, where a two-bit
+image is only four megabytes, and returns two megabytes of bits.
+
+The tempting shortcut was to skip the map: the cities table is already here for
+the caption, so call a position "sea" when the nearest city is far enough away.
+Measured against that table, land reaches 1,273 km from a city (central
+Australia) and sea comes as close as 1,072 km (the Coral Sea). The ranges
+overlap, so no threshold exists, and the map has to be carried.
+
+One city in the table is in the sea, and the data is right: Funafuti is an
+atoll narrower than a level-12 tile. Upstream copes by giving up after a
+thousand tries, and so does this.
 
 `sonar` was on the not-portable list for years of this document's life and
 should not have been, which is worth writing down as a way of being wrong. It

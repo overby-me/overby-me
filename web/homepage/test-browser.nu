@@ -97,7 +97,11 @@ ws.onmessage = (e) => {
   } else if (msg.method === "Runtime.consoleAPICalled") {
     console_lines.push(msg.params.args.map((a) => a.value ?? a.description).join(" "));
   } else if (msg.method === "Runtime.exceptionThrown") {
-    console_lines.push("EXCEPTION " + JSON.stringify(msg.params.exceptionDetails.text));
+    {
+      const d = msg.params.exceptionDetails;
+      const desc = d.exception?.description ?? d.exception?.value ?? "";
+      console_lines.push("EXCEPTION " + d.text + (desc ? ": " + String(desc).split("\n")[0] : ""));
+    }
   }
 };
 const send = (method, params = {}) =>

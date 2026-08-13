@@ -28,6 +28,39 @@ use super::fb::{Fb, XImage};
 /// compiled-in data means a mistake made once at the desk rather than something
 /// to handle at runtime.
 pub fn decode(bytes: &[u8]) -> Option<(XImage, Option<Fb>)> {
+    let (header, palette, scanlines) = parse(bytes)?;
+    header.to_image(&scanlines, &palette)
+}
+
+/// Decode a PNG into one bit per pixel: whether that pixel is `wanted`.
+///
+/// [`decode`] expands every pixel to a 32-bit `Fb`, which for the 4096 by 4096
+/// map of which tiles are open sea that `mapscroller` consults is 67 MB to
+/// answer a yes-or-no question. This stops at the defiltered scanlines
+/// instead, so the peak is the four megabytes those two-bit samples occupy and
+/// what is kept afterwards is a two-megabyte bitset.
+///
+/// Bit `y * width + x`, counting from the top row as PNG stores it.
+pub fn decode_mask(bytes: &[u8], wanted: Pixel) -> Option<(i32, i32, Vec<u64>)> {
+    let (header, palette, scanlines) = parse(bytes)?;
+    let (w, h) = (header.width as usize, header.height as usize);
+    let mut bits = vec![0u64; w.checked_mul(h)?.div_ceil(64)];
+    let stride = header.stride();
+    for y in 0..h {
+        let row = scanlines.get(y * stride..(y + 1) * stride)?;
+        for x in 0..w {
+            let px = header.pixel_at(row, x, &palette)?;
+            if px & RGB_MASK == wanted & RGB_MASK {
+                let i = y * w + x;
+                bits[i / 64] |= 1 << (i % 64);
+            }
+        }
+    }
+    Some((header.width, header.height, bits))
+}
+
+/// The chunk walk and inflate both entry points share.
+fn parse(bytes: &[u8]) -> Option<(Header, Vec<Pixel>, Vec<u8>)> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
     if bytes.len() < 8 || bytes[..8] != SIGNATURE {
         return None;
@@ -67,7 +100,7 @@ pub fn decode(bytes: &[u8]) -> Option<(XImage, Option<Fb>)> {
     }
     let raw = inflate(&compressed)?;
     let scanlines = defilter(&header, &raw)?;
-    header.to_image(&scanlines, &palette)
+    Some((header, palette, scanlines))
 }
 
 /// What IHDR says.
@@ -118,37 +151,42 @@ impl Header {
     }
 
     /// Turn defiltered scanlines into pixels, and into the mask beside them.
+    /// One pixel out of a defiltered scanline, whatever the colour type.
+    fn pixel_at(&self, row: &[u8], x: usize, palette: &[Pixel]) -> Option<Pixel> {
+        // Samples below eight bits are stretched to fill the byte, so a
+        // two-bit 0b10 becomes 0xAA rather than 0x80 and white stays white.
+        let scale = (255 / ((1u32 << self.depth) - 1)) as u8;
+        Some(match self.colour {
+            0 => {
+                let g = sample(row, self.depth, x)? * scale;
+                rgb(g, g, g)
+            }
+            2 => {
+                let p = row.get(x * 3..x * 3 + 3)?;
+                rgb(p[0], p[1], p[2])
+            }
+            3 => *palette.get(sample(row, self.depth, x)? as usize)?,
+            4 => {
+                let p = row.get(x * 2..x * 2 + 2)?;
+                (rgb(p[0], p[0], p[0]) & RGB_MASK) | u32::from(p[1]) << 24
+            }
+            6 => {
+                let p = row.get(x * 4..x * 4 + 4)?;
+                (rgb(p[0], p[1], p[2]) & RGB_MASK) | u32::from(p[3]) << 24
+            }
+            _ => return None,
+        })
+    }
+
     fn to_image(&self, rows: &[u8], palette: &[Pixel]) -> Option<(XImage, Option<Fb>)> {
         let mut img = Fb::new(self.width, self.height);
         let mut mask = Fb::new_bitmap(self.width, self.height);
         let mut any_clear = false;
         let stride = self.stride();
-        // Samples below eight bits are stretched to fill the byte, so a two-bit
-        // 0b10 becomes 0xAA rather than 0x80 and white stays white.
-        let scale = (255 / ((1u32 << self.depth) - 1)) as u8;
         for y in 0..self.height as usize {
             let row = rows.get(y * stride..(y + 1) * stride)?;
             for x in 0..self.width as usize {
-                let px = match self.colour {
-                    0 => {
-                        let g = sample(row, self.depth, x)? * scale;
-                        rgb(g, g, g)
-                    }
-                    2 => {
-                        let p = row.get(x * 3..x * 3 + 3)?;
-                        rgb(p[0], p[1], p[2])
-                    }
-                    3 => *palette.get(sample(row, self.depth, x)? as usize)?,
-                    4 => {
-                        let p = row.get(x * 2..x * 2 + 2)?;
-                        (rgb(p[0], p[0], p[0]) & RGB_MASK) | u32::from(p[1]) << 24
-                    }
-                    6 => {
-                        let p = row.get(x * 4..x * 4 + 4)?;
-                        (rgb(p[0], p[1], p[2]) & RGB_MASK) | u32::from(p[3]) << 24
-                    }
-                    _ => return None,
-                };
+                let px = self.pixel_at(row, x, palette)?;
                 // Upstream thresholds at half, because X can only say yes or no.
                 let opaque = (px >> 24) >= 0x80;
                 any_clear |= !opaque;
@@ -593,6 +631,49 @@ mod tests {
     /// Grey, palette and alpha take different routes out of the same scanline,
     /// and a sub-byte sample is read out of the middle of a byte, so each is a
     /// separate chance to be off by a shift.
+    #[test]
+    #[test]
+    fn the_ocean_map_decodes_to_a_bitset() {
+        let bytes = include_bytes!("../../images/oceantiles_12.png");
+        let (w, h, bits) = decode_mask(bytes, rgb(0, 0, 255)).expect("ocean map");
+        assert_eq!((w, h), (4096, 4096));
+        assert_eq!(bits.len(), (4096 * 4096usize).div_ceil(64));
+
+        // Slippy-map tile coordinates at level 12, PNG row order: row zero is
+        // the north edge, which is the same convention lat2tiley uses.
+        let at = |lat: f64, lon: f64| {
+            let z = 12;
+            let n = f64::from(1 << z);
+            let x = ((lon + 180.0) / 360.0 * n).floor() as usize;
+            let latrad = lat.to_radians();
+            let y =
+                ((1.0 - latrad.tan().asinh() / std::f64::consts::PI) / 2.0 * n).floor() as usize;
+            let i = y * 4096 + x;
+            bits[i / 64] >> (i % 64) & 1 == 1
+        };
+
+        for (name, lat, lon) in [
+            ("mid Pacific", -10.0, -140.0),
+            ("south Atlantic", -35.0, -20.0),
+            ("Indian Ocean", -30.0, 80.0),
+        ] {
+            assert!(at(lat, lon), "{name} should be open sea");
+        }
+        for (name, lat, lon) in [
+            ("Sahara", 23.0, 13.0),
+            ("central Australia", -25.0, 132.0),
+            ("Siberia", 66.0, 100.0),
+            ("Kansas", 38.5, -98.0),
+        ] {
+            assert!(!at(lat, lon), "{name} should be dry land");
+        }
+        // And the whole thing is mostly sea, as the Earth is: about seven
+        // tenths, less the coastline tiles that are neither.
+        let sea = bits.iter().map(|w| w.count_ones() as usize).sum::<usize>();
+        let frac = sea as f64 / (4096.0 * 4096.0);
+        assert!((0.6..0.8).contains(&frac), "the map is {frac:.2} sea");
+    }
+
     #[test]
     fn every_colour_type_and_bit_depth_survives() {
         let palette: Vec<u8> = (0..16u8)
