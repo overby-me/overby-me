@@ -269,6 +269,10 @@ where
 {
     let first =
         retry_offline_reads(&operation.query, || execute_once(access_token, &operation)).await;
+    // Set when the token had lapsed AND the refresh could not replace it, so the
+    // query was never actually retried. See the logging below for why that is
+    // treated as the network rather than as a fault.
+    let mut lapsed = false;
     let result = match first {
         Err(msg) if is_jwt_error(&msg) => {
             // The token likely lapsed (e.g. the tab was backgrounded past expiry).
@@ -278,7 +282,10 @@ where
                 Some(fresh) if Some(fresh.as_str()) != access_token => {
                     execute_once(Some(&fresh), &operation).await
                 }
-                _ => Err(msg),
+                _ => {
+                    lapsed = true;
+                    Err(msg)
+                }
             }
         }
         other => other,
@@ -290,6 +297,24 @@ where
         // Every caller of this swallows the error into an empty list, so this is
         // the last place that knows anything went wrong.
         let failure = crate::errors::classify(e);
+        // A lapsed session is the network, not a fault -- the same congress wifi
+        // the refusal/offline note below is about, arriving by another door.
+        //
+        // `classify` cannot see it: "Could not verify JWT: JWTExpired" reads as
+        // Broken, so a token that expired while the refresh happened to fail on a
+        // 4g dip filed an error, with a stack, per query in flight. The refresh
+        // itself already says so once (`session refresh failed (will retry)`, a
+        // warn from session.rs), and the loop there retries every 45s, so these
+        // are duplicates of a thing already reported and not separately
+        // actionable. Reaching here at all means the query was never retried:
+        // either no fresh token could be had, or there is no session to refresh.
+        if lapsed {
+            log::info!(
+                "graphql [{}] on a lapsed session: {e}",
+                short_type_name::<Q>()
+            );
+            return result;
+        }
         // A failure the caller expects and handles stays on the console: no
         // toast, no auto-filed report, nothing shipped. See `execute_quiet`.
         if !report {
@@ -397,6 +422,14 @@ fn report_raw_failure(
     let Err(e) = result else {
         return;
     };
+    // Still a JWT error after the refresh-and-retry above means the retry never
+    // happened: no fresh token could be had, or there was no session to refresh.
+    // That is the network, not a fault -- see the long note in
+    // `execute_reporting`, which does the same for typed operations.
+    if is_jwt_error(e) {
+        log::info!("graphql ({what}) on a lapsed session: {e}");
+        return;
+    }
     let failure = crate::errors::classify(e);
     match failure {
         crate::errors::Failure::Broken => {
@@ -628,6 +661,37 @@ mod tests {
         // Unrelated errors must NOT trigger a pointless refresh + retry.
         assert!(!is_jwt_error("permission denied on nodes"));
         assert!(!is_jwt_error("No data returned"));
+    }
+
+    /// A lapsed session must not be filed as a bug.
+    ///
+    /// `classify` reads the JWT message as Broken, which is the level that
+    /// leaves the device and opens a feedback report. One reader on 4g, whose
+    /// token expired while the refresh happened to fail, filed exactly that --
+    /// for a dropped connection the code beside it already refuses to report.
+    /// Both paths now check `is_jwt_error` before classifying, and this pins the
+    /// pair apart.
+    #[test]
+    fn a_lapsed_session_is_not_a_bug_the_way_a_real_failure_is() {
+        let lapsed = "Could not verify JWT: JWTExpired";
+        assert!(is_jwt_error(lapsed));
+        assert!(matches!(
+            crate::errors::classify(lapsed),
+            crate::errors::Failure::Broken
+        ));
+        // ...which is precisely why the JWT check has to come first: left to
+        // classify alone, this is indistinguishable from a genuine fault.
+        //
+        // A malformed variable, which is a real bug and must keep reporting as
+        // one. NOT "field 'x' not found in type", which reads like a bug and is
+        // classified as a refusal on purpose: that is the schema hiding a column
+        // from a role.
+        let real = "expected an object for type 'String_comparison_exp', but found null";
+        assert!(!is_jwt_error(real));
+        assert!(matches!(
+            crate::errors::classify(real),
+            crate::errors::Failure::Broken
+        ));
     }
 
     /// The Hasura API rejects `null` for a comparison expression
