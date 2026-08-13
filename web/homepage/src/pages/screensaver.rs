@@ -35,6 +35,15 @@ use crate::text::{self, Source as TextSource};
 use crate::tiles;
 use crate::url::{captured_query, replace_query};
 
+/// Whether the options panel is open.
+///
+/// Global rather than a `use_signal`, because 🎲 leaves for `/screensaver` and
+/// comes back on a different slug, which unmounts and remounts this page. A
+/// local signal would reset, so the panel would slam shut under the pointer on
+/// every roll. A fresh page load still starts closed: a screensaver should open
+/// as full-bleed art.
+static PANEL_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+
 /// How long to wait before asking an image source again after it came up
 /// empty. A live hashtag can be quiet for a while.
 const IMAGE_RETRY_SECONDS: f64 = 2.0;
@@ -540,7 +549,6 @@ fn SaverStage(slug: String) -> Element {
     // Only the knobs the user actually moved, so a shared link stays short and
     // an unset option keeps following the hack's own default.
     let mut settings = use_signal(|| initial_settings(&captured_query()));
-    let mut panel_open = use_signal(|| false);
     let mut paused = use_signal(|| false);
     let host: Signal<Option<Rc<RefCell<Host>>>> = use_signal(|| None);
     let mut failed = use_signal(|| false);
@@ -768,21 +776,33 @@ fn SaverStage(slug: String) -> Element {
             }
 
             {def.map(|def| rsx! {
-            if !panel_open() {
-                button {
-                    id: "screensaver-panel-toggle",
+            if !PANEL_OPEN() {
+                div {
                     // Top right, not top left: several savers print a label in
                     // the top left corner and this would sit on top of it.
-                    style: "position:absolute;top:16px;right:16px;padding:8px 14px;border:1px solid #555;\
-                            border-radius:10px;background:rgba(20,20,20,.6);backdrop-filter:blur(4px);\
-                            box-shadow:0 4px 24px rgba(0,0,0,.5);color:#eee;cursor:pointer;\
-                            font:inherit;font-size:14px;",
-                    onclick: move |_| panel_open.set(true),
-                    "\u{2699} Options"
+                    style: "position:absolute;top:16px;right:16px;display:flex;gap:8px;",
+                    Link {
+                        to: Route::ScreensaverRandom {},
+                        title: "Another screensaver, at random",
+                        style: "padding:8px 12px;border:1px solid #7a4bbf;border-radius:10px;\
+                                background:rgba(58,42,85,.6);backdrop-filter:blur(4px);\
+                                box-shadow:0 4px 24px rgba(0,0,0,.5);color:#e0c8ff;cursor:pointer;\
+                                font:inherit;font-size:14px;text-decoration:none;",
+                        "\u{1F3B2}"
+                    }
+                    button {
+                        id: "screensaver-panel-toggle",
+                        style: "padding:8px 14px;border:1px solid #555;\
+                                border-radius:10px;background:rgba(20,20,20,.6);backdrop-filter:blur(4px);\
+                                box-shadow:0 4px 24px rgba(0,0,0,.5);color:#eee;cursor:pointer;\
+                                font:inherit;font-size:14px;",
+                        onclick: move |_| *PANEL_OPEN.write() = true,
+                        "\u{2699} Options"
+                    }
                 }
             }
 
-            if panel_open() {
+            if PANEL_OPEN() {
                 div {
                     id: "screensaver-panel",
                     style: "position:absolute;top:16px;left:16px;max-height:calc(100vh - 32px);\
@@ -791,14 +811,29 @@ fn SaverStage(slug: String) -> Element {
                             box-shadow:0 4px 24px rgba(0,0,0,.5);user-select:none;\
                             width:min(300px,calc(100vw - 32px));",
 
+                    // The header is the one part of the panel that is the same
+                    // height for every saver, so 🎲 lives here: rolling again
+                    // does not move the button out from under the pointer.
                     div {
-                        style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;",
-                        div { style: "font-weight:700;font-size:18px;color:#ff4d8d;", "{def.label}" }
+                        style: "display:flex;align-items:flex-start;gap:8px;margin-bottom:2px;",
+                        div {
+                            style: "flex:1;min-width:0;font-weight:700;font-size:18px;color:#ff4d8d;",
+                            "{def.label}"
+                        }
+                        Link {
+                            to: Route::ScreensaverRandom {},
+                            title: "Another screensaver, at random",
+                            style: "padding:2px 9px;border:1px solid #7a4bbf;border-radius:6px;\
+                                    background:#3a2a55;color:#e0c8ff;cursor:pointer;font:inherit;\
+                                    font-size:13px;text-decoration:none;",
+                            "\u{1F3B2}"
+                        }
                         button {
+                            title: "Hide the options",
                             style: "padding:2px 9px;border:1px solid #555;border-radius:6px;background:#333;\
                                     color:#bbb;cursor:pointer;font:inherit;font-size:13px;",
-                            onclick: move |_| panel_open.set(false),
-                            "\u{2715} Hide"
+                            onclick: move |_| *PANEL_OPEN.write() = false,
+                            "\u{2715}"
                         }
                     }
                     div {
@@ -824,13 +859,6 @@ fn SaverStage(slug: String) -> Element {
 
                     div {
                         style: "display:flex;gap:8px;margin-top:12px;",
-                        Link {
-                            to: Route::ScreensaverRandom {},
-                            style: "flex:1;padding:6px;border:1px solid #7a4bbf;border-radius:6px;\
-                                    background:#3a2a55;color:#e0c8ff;cursor:pointer;font:inherit;\
-                                    font-size:13px;text-align:center;text-decoration:none;",
-                            "\u{1F3B2} Random"
-                        }
                         button {
                             style: "flex:1;padding:6px;border:1px solid #555;border-radius:6px;\
                                     background:#203a30;color:#9dffc0;cursor:pointer;font:inherit;font-size:13px;",

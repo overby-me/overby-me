@@ -21,7 +21,7 @@ const SPINNER_CSS: &str = ".atp-spinner{width:2.6rem;height:2.6rem;border:3px so
 /// delegates to [`AtProtoGraph`] (which owns the async hooks), while anything
 /// else shows the landing prompt.
 #[component]
-pub fn AtProtoInner(handle: String) -> Element {
+pub fn AtProto(handle: String) -> Element {
     let target = handle.trim_start_matches('@').trim().to_string();
     if handle.starts_with('@') && !target.is_empty() {
         rsx! { AtProtoGraph { target } }

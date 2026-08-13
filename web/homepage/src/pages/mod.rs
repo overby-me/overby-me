@@ -11,8 +11,9 @@ mod x;
 mod yt;
 
 pub mod lazy;
+pub use atproto::AtProto;
 pub use index::Index;
-pub use lazy::{AtProto, Cardioid};
+pub use lazy::Cardioid;
 pub use screensaver::{Screensaver, ScreensaverRandom};
 pub use search::Search;
 pub use x::X;

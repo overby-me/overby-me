@@ -71,7 +71,7 @@ xscreensaver = { path = "xscreensaver" }
 # macro split every route, which is both more than we want and enough to crash
 # dioxus-cli 0.7.9's splitter ("Failed to find data symbol", reproducible with
 # no screensaver code involved). This way the only split points in the module
-# are the ones declared in `src/pages/savers.rs`.
+# are the ones declared in `src/pages/savers.rs` and `src/pages/lazy.rs`.
 split = ["dep:wasm_split"]
 
 [profile.release]
