@@ -2971,9 +2971,16 @@ select:focus {
    was a photo banging into place mid-scroll, shoving the text below it down.
 
    The shove cannot be avoided without knowing the picture's shape before it
-   arrives, which nothing here does — but the bang can. This is the entrance MD3
-   gives an element the reader did not ask for: a fade with a small rise, on
-   emphasized-decelerate, arriving rather than snapping.
+   arrives, which nothing here does — but the bang can.
+
+   SHORT, and a fade only. The first version of this was 400ms with a rise and a
+   scale, which is the entrance MD3 describes for an element the reader did not
+   ask for — and it was reported as "images load slowly now, and they are not
+   instantly on pages you already visited". Both halves were this: a picture
+   already in hand still spent four tenths of a second sliding into place, so a
+   cached image could never look instant no matter how fast it was fetched.
+   Movement is what reads as waiting. A fade at 200ms takes the bang off without
+   ever being the reason a picture is not there yet.
 
    `backwards`, not `both`: the end state is the element's natural one, so there
    is nothing to hold afterwards, and holding it would outrank any later
@@ -2984,18 +2991,16 @@ select:focus {
 @keyframes image-arrive {
 	from {
 		opacity: 0;
-		transform: translateY(var(--md-sys-spacing-2)) scale(0.985);
 	}
 	to {
 		opacity: 1;
-		transform: none;
 	}
 }
 .recent-cover,
 .m3-carousel-img,
 .comment-image img {
-	animation: image-arrive var(--md-sys-motion-duration-long1)
-		var(--md-sys-motion-easing-emphasized-decelerate) backwards;
+	animation: image-arrive var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard-decelerate) backwards;
 }
 /* Reduced motion: still arrive, just without the movement. */
 @media (prefers-reduced-motion: reduce) {

@@ -798,11 +798,9 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
             return;
         };
         spawn(async move {
-            // A HEIC decoded on some earlier visit is already a drawable JPEG,
-            // so ask before downloading anything: a hit skips the megabyte and
-            // the decode both. Every other kind of file misses, which costs one
-            // cache lookup.
-            if let Some(hit) = crate::components::file::heif_cached(&file_id).await {
+            // Anything seen on an earlier visit is already here, so ask before
+            // downloading: coming back to a page you have read costs no network.
+            if let Some(hit) = crate::components::file::cached_image_url(&file_id).await {
                 blob_url.set(Some(hit));
                 return;
             }
@@ -848,6 +846,14 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
                 }
                 return;
             }
+            // Kept on the way past, so the next visit to this page draws it
+            // without asking the network again.
+            if let Some(url) = crate::components::file::store_image_url(&file_id, &bytes).await {
+                blob_url.set(Some(url));
+                return;
+            }
+            // No glue to keep it with (an older shell): the blob is built here
+            // exactly as it always was, just without being remembered.
             let arr = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
             arr.copy_from(&bytes);
             let parts = js_sys::Array::of1(&arr);

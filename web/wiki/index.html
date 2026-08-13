@@ -297,17 +297,54 @@
                 // insertion order, so the oldest go first.
                 var KEEP = 120;
 
-                function key(id) { return "/heic-cache/" + encodeURIComponent(id); }
+                // Two kinds of entry, kept apart on purpose. A decoded HEIC is a
+                // JPEG anything will draw; a raw one is the file exactly as it
+                // was uploaded. The file page asks for the first specifically,
+                // and handing it the second would have it show the undecodable
+                // original -- or, for an application/octet-stream that is not an
+                // image at all, present a zip as a picture.
+                function decodedKey(id) { return "/heic-cache/" + encodeURIComponent(id); }
+                function rawKey(id) { return "/img-cache/" + encodeURIComponent(id); }
 
-                // Every cache call is guarded: `caches` is absent in a Firefox
-                // private window and throws over quota, and neither is a reason
-                // to fail to show a picture.
+                // ONE handle, opened once. Opening per lookup meant every image
+                // on a page waited for its own caches.open() before its download
+                // could start, and for the ordinary images that always miss that
+                // was pure delay -- which is exactly what "images load slowly
+                // now" was.
+                //
+                // Guarded because `caches` is absent in a Firefox private window
+                // and throws over quota, and neither is a reason not to show a
+                // picture. A failure resolves null once and stays null.
+                var handle = null;
                 function open() {
-                    try {
-                        return caches.open(CACHE).catch(function () { return null; });
-                    } catch (e) {
-                        return Promise.resolve(null);
+                    if (!handle) {
+                        try {
+                            handle = caches.open(CACHE).catch(function () { return null; });
+                        } catch (e) {
+                            handle = Promise.resolve(null);
+                        }
                     }
+                    return handle;
+                }
+
+                function read(cacheKey) {
+                    return open().then(function (cache) {
+                        if (!cache) return null;
+                        return cache.match(cacheKey).then(function (hit) {
+                            return hit ? hit.blob().then(URL.createObjectURL) : null;
+                        });
+                    }).catch(function () { return null; });
+                }
+
+                // Stored, but not waited on: the picture can be drawn now and a
+                // full disk is no reason to hold it back.
+                function write(cacheKey, blob) {
+                    open().then(function (cache) {
+                        if (!cache) return;
+                        cache.put(cacheKey, new Response(blob)).then(function () {
+                            trim(cache);
+                        }).catch(function () {});
+                    });
                 }
 
                 function trim(cache) {
@@ -317,16 +354,30 @@
                     }).catch(function () {});
                 }
 
-                // A decoded copy if this file has been seen before, else null.
-                // Worth asking before the original is even downloaded: a hit
-                // saves both the megabyte and a second of decoding.
+                // A drawable copy of this file if it has been seen before, of
+                // either kind. Asked before the original is downloaded, so a
+                // second visit to a page costs no network at all -- which is the
+                // point: images were re-fetched in full every time you came back
+                // to a page you had already read.
+                window.imageCached = function (id) {
+                    return read(decodedKey(id)).then(function (hit) {
+                        return hit || read(rawKey(id));
+                    });
+                };
+
+                // The decoded kind only, for the file page: see the note on the
+                // two key spaces above.
                 window.heicCached = function (id) {
-                    return open().then(function (cache) {
-                        if (!cache) return null;
-                        return cache.match(key(id)).then(function (hit) {
-                            return hit ? hit.blob().then(URL.createObjectURL) : null;
-                        });
-                    }).catch(function () { return null; });
+                    return read(decodedKey(id));
+                };
+
+                // Keep an ordinary image as it arrived, and hand back a URL for
+                // it. The blob is deliberately typeless, matching the one the app
+                // used to build inline -- an <img> sniffs the content either way.
+                window.imageStore = function (id, bytes) {
+                    var blob = new Blob([bytes.slice()]);
+                    write(rawKey(id), blob);
+                    return URL.createObjectURL(blob);
                 };
 
                 window.heicDecode = function (id, bytes) {
@@ -359,14 +410,7 @@
                         worker.postMessage({ id: seqId, bytes: copy }, [copy.buffer]);
                     }).then(function (blob) {
                         if (!blob) return null;
-                        // Stored, but not waited on: the picture can be drawn now
-                        // and a full disk is no reason to hold it back.
-                        open().then(function (cache) {
-                            if (!cache) return;
-                            cache.put(key(id), new Response(blob)).then(function () {
-                                trim(cache);
-                            }).catch(function () {});
-                        });
+                        write(decodedKey(id), blob);
                         return URL.createObjectURL(blob);
                     });
                 };

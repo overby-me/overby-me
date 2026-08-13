@@ -1564,12 +1564,12 @@ pub async fn heif_object_url(file_id: &str, bytes: &[u8]) -> Option<String> {
     .await
 }
 
-/// A decoded copy of this file if one was kept, without downloading anything.
+/// A DECODED copy of this file if one was kept, without downloading anything.
 ///
-/// Worth asking before the fetch, not after: a photo already decoded costs a
-/// cache lookup here, against a megabyte off the network and a second of
-/// decoding otherwise. A miss is the normal answer for every other kind of
-/// file, and a miss is cheap.
+/// Only the decoded kind, because the caller shows whatever comes back as the
+/// picture: the original would be a HEIC no browser draws, and an
+/// `application/octet-stream` that is not an image at all would be presented as
+/// one. `cached_image_url` is the version that takes either.
 pub async fn heif_cached(file_id: &str) -> Option<String> {
     call_glue(
         "heicCached",
@@ -1579,7 +1579,36 @@ pub async fn heif_cached(file_id: &str) -> Option<String> {
     .await
 }
 
-/// Call one of the `heic*` functions index.html puts on `window`, and await the
+/// A drawable copy of this file if it has been seen before, of either kind.
+///
+/// Asked before the fetch, so returning to a page you have already read costs no
+/// network at all. Every image was downloaded again in full on every visit
+/// before this, which is what made a second look no faster than the first.
+pub async fn cached_image_url(file_id: &str) -> Option<String> {
+    call_glue(
+        "imageCached",
+        &wasm_bindgen::JsValue::from_str(file_id),
+        None,
+    )
+    .await
+}
+
+/// Keep an ordinary image as it arrived, and hand back a URL for it.
+///
+/// `None` only when the glue is missing, which a shell cached from before this
+/// shipped would be. The caller then builds its own blob as it always did and
+/// simply gets no caching.
+pub async fn store_image_url(file_id: &str, bytes: &[u8]) -> Option<String> {
+    let arg = js_sys::Uint8Array::from(bytes);
+    call_glue(
+        "imageStore",
+        &wasm_bindgen::JsValue::from_str(file_id),
+        Some(&arg),
+    )
+    .await
+}
+
+/// Call one of the image functions index.html puts on `window`, and await the
 /// URL it promises.
 ///
 /// Absent rather than broken is the expected miss: a shell cached from before
