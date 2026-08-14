@@ -373,6 +373,9 @@ struct HubState {
     /// exactly the condition [`Hub::ensure_connected`] treats as its cue to open
     /// one. A view mounting during the refresh would open a second connection.
     connecting: bool,
+    /// Handle of the scheduled pre-emptive reconnect, so it can be cancelled
+    /// when the socket goes down for any other reason.
+    renew: Option<i32>,
     subs: Registry<Signal<Option<serde_json::Value>>>,
     runtime: Option<Rc<Runtime>>,
 }
@@ -533,18 +536,29 @@ impl Hub {
         let on_open = {
             let ws = ws.clone();
             Closure::<dyn FnMut()>::new(move || {
-                let token = Self::with(|st| st.runtime.clone()).map(|runtime| {
+                let creds = Self::with(|st| st.runtime.clone()).map(|runtime| {
                     // The callback runs outside the Dioxus runtime; the guard
                     // makes reading the SESSION global legal here.
                     let _guard = RuntimeGuard::new(runtime);
-                    crate::session::SESSION.peek().access_token.clone()
+                    let session = crate::session::SESSION.peek();
+                    (
+                        session.access_token.clone(),
+                        session.access_token_expires_at,
+                    )
                 });
-                let payload = match token.flatten() {
+                let (token, expires_at) = creds.unwrap_or((None, None));
+                let payload = match token {
                     Some(t) => json!({ "headers": { "Authorization": format!("Bearer {t}") } }),
                     None => json!({}),
                 };
                 let init = json!({ "type": "connection_init", "payload": payload });
                 let _ = ws.send_with_str(&init.to_string());
+                // THE SOCKET'S EXPIRY, NOT THE SESSION'S. Hasura pins the
+                // connection to the token presented right here: refreshing later
+                // does the socket no good, because there is no way to hand it the
+                // new one. So the moment the token goes in, its deadline is
+                // recorded and the connection is replaced before it arrives.
+                Self::schedule_renew(expires_at);
             })
         };
         ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
@@ -635,6 +649,9 @@ impl Hub {
         // onclose -> reconnect while anything still wants data. Errors also end
         // in onclose, so scheduling only here avoids double reconnects.
         let on_close = Closure::<dyn FnMut()>::new(move || {
+            // Whether this close was the renewal's doing or the network's, the
+            // timer belongs to a socket that no longer exists.
+            Self::cancel_renew();
             let wanted = Self::with(|st| {
                 st.acked = false;
                 st.ws = None;
@@ -651,6 +668,58 @@ impl Hub {
         on_open.forget();
         on_message.forget();
         on_close.forget();
+    }
+
+    /// Replace the connection shortly before the token it was opened with runs
+    /// out, instead of waiting to be closed on.
+    ///
+    /// Hasura evicts a socket the moment its token expires, and the client
+    /// cannot re-authenticate one in place: `graphql-transport-ws` has no frame
+    /// for it, and the credential is fixed at `connection_init`. Everything the
+    /// client could do until now happened AFTER the eviction, so every reader
+    /// produced one `conn_err` plus one reconnect per token lifetime. At a
+    /// congress that is several hundred of them every fifteen minutes, each
+    /// costing up to a backoff of stale tally, all of it avoidable by moving
+    /// first.
+    ///
+    /// Closing is the whole action: `on_close` schedules the reconnect, and
+    /// `connect` refreshes the token because [`past_use`] uses this same lead
+    /// time. The two constants have to agree, or the reconnect would re-present
+    /// the nearly-dead token and be back here immediately.
+    fn schedule_renew(expires_at: Option<f64>) {
+        Self::cancel_renew();
+        let Some(expires_at) = expires_at else {
+            return; // Anonymous connection: nothing expires, nothing to renew.
+        };
+        // Floored, so a token that could not be refreshed retries at a sane
+        // pace instead of spinning: without it an already-stale expiry gives a
+        // delay of zero and the socket reconnects as fast as it can.
+        let delay = (expires_at - js_sys::Date::now() - RENEW_LEAD_MS).max(RENEW_MIN_MS);
+        let cb = Closure::once_into_js(move || {
+            Self::with(|st| st.renew = None);
+            let ws = Self::with(|st| st.ws.clone());
+            if let Some(ws) = ws {
+                log::info!("subscription hub: renewing the connection before its token expires");
+                // `on_close` takes it from here, which keeps one path for every
+                // way a socket ends.
+                let _ = ws.close();
+            }
+        });
+        if let Some(win) = web_sys::window() {
+            if let Ok(id) = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.unchecked_ref(),
+                delay as i32,
+            ) {
+                Self::with(|st| st.renew = Some(id));
+            }
+        }
+    }
+
+    fn cancel_renew() {
+        let old = Self::with(|st| st.renew.take());
+        if let (Some(win), Some(id)) = (web_sys::window(), old) {
+            win.clear_timeout_with_handle(id);
+        }
     }
 
     /// Schedule the next [`Self::connect`] with capped exponential backoff plus
@@ -680,14 +749,24 @@ impl Hub {
     }
 }
 
-/// How much life a token must have left to be worth opening a socket with.
+/// How much life a token must have left to be worth opening a socket with, and
+/// equally how long before expiry a live connection is replaced.
 ///
-/// A token with a second on it is as good as dead here: it lapses during the
-/// handshake and the connection is closed before a single row arrives. Five
-/// seconds covers `connection_init` and the ack on a bad connection, and costs
-/// nothing when it is wrong, since refreshing early is what the background loop
-/// does anyway.
-const HANDSHAKE_BUFFER_MS: f64 = 5_000.0;
+/// ONE CONSTANT FOR BOTH, deliberately. [`Hub::schedule_renew`] closes the
+/// socket this far ahead of its token's expiry, and the reconnect that follows
+/// asks [`past_use`] whether to refresh first. If the renewal fired earlier than
+/// this threshold, the reconnect would decide the token was still fine, present
+/// the same nearly-dead credential, and be closed on again a minute later. Two
+/// numbers drifting apart would turn the fix into the loop it removes.
+///
+/// A minute is long next to the handshake it must cover and short next to the
+/// ~15 minutes a token lives, so it costs one extra refresh per token at most.
+const RENEW_LEAD_MS: f64 = 60_000.0;
+
+/// Never schedule a renewal sooner than this. A token that could not be
+/// refreshed has an expiry already in the past, which would otherwise compute a
+/// delay of zero and spin the socket as fast as the browser allows.
+const RENEW_MIN_MS: f64 = 30_000.0;
 
 /// Whether a token expiring at `expires_at` is too far gone to open a socket
 /// with.
@@ -696,7 +775,7 @@ const HANDSHAKE_BUFFER_MS: f64 = 5_000.0;
 /// move is to try the token rather than refresh on every single connect, which
 /// would put an auth round trip in front of every reconnect in a dropout.
 fn past_use(expires_at: Option<f64>, now: f64) -> bool {
-    expires_at.is_some_and(|exp| now + HANDSHAKE_BUFFER_MS >= exp)
+    expires_at.is_some_and(|exp| now + RENEW_LEAD_MS >= exp)
 }
 
 /// Backoff for the nth consecutive failure: 1s, 2s, 4s … capped at 30s, spread
@@ -718,7 +797,7 @@ fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
 mod tests {
     use super::{
         backoff_delay_ms, past_use, push_is_a_change, Coalescer, Registry, COALESCE_MS,
-        HANDSHAKE_BUFFER_MS, SPREAD_MS,
+        RENEW_LEAD_MS, SPREAD_MS,
     };
 
     /// The reconnect loop this exists to break: a token that expired while the
@@ -729,8 +808,29 @@ mod tests {
 
         assert!(past_use(Some(now - 1.0), now), "expired a moment ago");
         assert!(past_use(Some(now), now), "expiring exactly now");
-        // Still nominally alive, but not for long enough to finish a handshake.
-        assert!(past_use(Some(now + HANDSHAKE_BUFFER_MS - 1.0), now));
+        // Still nominally alive, but not for long enough to be worth a socket.
+        assert!(past_use(Some(now + RENEW_LEAD_MS - 1.0), now));
+    }
+
+    /// The renewal and the connect check must read the same threshold.
+    ///
+    /// `schedule_renew` closes the socket `RENEW_LEAD_MS` before its token
+    /// expires, and the reconnect that follows asks `past_use` whether to
+    /// refresh first. Were the renewal to fire while `past_use` still called the
+    /// token good, the reconnect would present the same dying credential and be
+    /// evicted again a minute later: the exact loop this replaced, rebuilt out
+    /// of two constants that disagree.
+    #[test]
+    fn a_renewed_connection_always_refreshes_before_it_reconnects() {
+        let now = 1_000_000.0;
+        let expires_at = now + 900_000.0;
+        // The instant the renewal fires for a token expiring at `expires_at`.
+        let at_renewal = expires_at - RENEW_LEAD_MS;
+
+        assert!(
+            past_use(Some(expires_at), at_renewal),
+            "the renewal must hand the reconnect a token it considers spent"
+        );
     }
 
     /// The other half: refreshing when there is no need would put an auth round
@@ -739,7 +839,7 @@ mod tests {
     fn a_token_with_life_left_is_used_as_it_is() {
         let now = 1_000_000.0;
 
-        assert!(!past_use(Some(now + HANDSHAKE_BUFFER_MS + 1.0), now));
+        assert!(!past_use(Some(now + RENEW_LEAD_MS + 1.0), now));
         assert!(
             !past_use(Some(now + 900_000.0), now),
             "fresh from a refresh"
