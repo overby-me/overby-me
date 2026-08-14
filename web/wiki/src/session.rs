@@ -284,6 +284,15 @@ const ROTATION_POLL_MS: u32 = 50;
 /// people out, because it could run before the winner had written anything.
 const ROTATION_ATTEMPTS: u32 = ROTATION_GRACE_MS / ROTATION_POLL_MS;
 
+/// How soon after the page loads a dead refresh token counts as "it was already
+/// dead when we got here" rather than "it died under someone".
+///
+/// The startup refresh happens within seconds of launch; the background loop
+/// (`run_token_refresh`) waits `CHUNK_MS` between passes and only refreshes
+/// within `BUFFER_MS` of expiry, so its first opportunity is minutes away. A
+/// minute is comfortably clear of the first and comfortably short of the second.
+const DEAD_ON_ARRIVAL_MS: f64 = 60_000.0;
+
 /// Whether storage now holds a DIFFERENT refresh token than the one just
 /// rejected — i.e. another tab rotated it and this one should adopt rather than
 /// sign out.
@@ -490,10 +499,37 @@ async fn refresh_access_token() -> RefreshOutcome {
             // Nobody rotated it in all that time, so the refresh token itself is
             // dead: clear the session and let the UI fall back to the login
             // screen instead of looping on a bad token.
-            // This one stays a warning whatever its wording: the refresh token is
-            // dead and the person has just been signed out mid-session, which is
-            // rare, consequential, and worth having in the record.
-            log::warn!("session refresh rejected, signing out: {err}");
+            //
+            // TWO DIFFERENT EVENTS ARRIVE HERE, and only one of them is worth
+            // reporting.
+            //
+            // A reader who has been away longer than the refresh token lives
+            // opens the app, the stored token is already dead, and they are
+            // shown the login screen seconds after launch. That is how a session
+            // is MEANT to end. There is nothing to re-authenticate with -- the
+            // refresh token is the credential -- so signing out is not a
+            // fallback, it is the correct outcome. Filing it as a warning ships
+            // one record per returning reader; at a congress that is a few
+            // hundred, all saying the same uninteresting thing.
+            //
+            // The other is a session that was working and then stopped, under
+            // someone who was using it. That is rare and consequential and does
+            // belong in the record: it is the shape a broken auth service, a
+            // revoked token or a clock problem would take.
+            //
+            // Time since the page loaded tells them apart. The first refresh
+            // happens within seconds of launch; the background loop only comes
+            // back around minutes later, so anything past the first minute
+            // means the session had already been working.
+            let since_load = web_sys::window()
+                .and_then(|w| w.performance())
+                .map(|p| p.now())
+                .unwrap_or(f64::MAX);
+            if since_load < DEAD_ON_ARRIVAL_MS {
+                log::info!("stored session was already expired on arrival: {err}");
+            } else {
+                log::warn!("session refresh rejected mid-session, signing out: {err}");
+            }
             *SESSION.write() = Session::default();
             save_session(&Session::default());
             RefreshOutcome::Expired
@@ -594,11 +630,11 @@ mod tests {
     /// every view on screen emptied while it fetched the same thing again.
     #[test]
     fn a_rotation_does_not_rename_what_is_cached() {
-        let deps = "(\"node-7\", Some(\"eyJhbGciOi.OLD-TOKEN.signature\"), 3)";
-        let after = "(\"node-7\", Some(\"eyJhbGciOi.NEW-TOKEN.signature\"), 3)";
+        let deps = "(\"node-7\", Some(\"header.OLD-TOKEN.signature\"), 3)";
+        let after = "(\"node-7\", Some(\"header.NEW-TOKEN.signature\"), 3)";
         assert_eq!(
-            scope_of("user-1", Some("eyJhbGciOi.OLD-TOKEN.signature"), deps),
-            scope_of("user-1", Some("eyJhbGciOi.NEW-TOKEN.signature"), after),
+            scope_of("user-1", Some("header.OLD-TOKEN.signature"), deps),
+            scope_of("user-1", Some("header.NEW-TOKEN.signature"), after),
             "same person, same question, same answer"
         );
     }
@@ -609,13 +645,13 @@ mod tests {
     fn two_people_do_not_share_an_answer() {
         let deps = "(\"node-7\",)";
         assert_ne!(
-            scope_of("user-1", Some("eyJhbGciOi.A.sig"), deps),
-            scope_of("user-2", Some("eyJhbGciOi.B.sig"), deps)
+            scope_of("user-1", Some("header.A.sig"), deps),
+            scope_of("user-2", Some("header.B.sig"), deps)
         );
         // A signed-out visitor is a who of their own.
         assert_ne!(
             scope_of("", None, deps),
-            scope_of("user-1", Some("eyJhbGciOi.A.sig"), deps)
+            scope_of("user-1", Some("header.A.sig"), deps)
         );
     }
 
