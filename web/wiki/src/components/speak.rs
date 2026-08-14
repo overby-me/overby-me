@@ -259,9 +259,10 @@ fn SpeakList(
     let access_token = session.read().access_token.clone();
     let list_for_query = list_id.clone();
     let rev = *refresh.read();
-    let state = crate::use_data_resource!(|(list_for_query, access_token, rev)| async move {
+    let who = session.read().identity();
+    let state = crate::use_data_resource!(|(list_for_query, access_token, rev, who)| async move {
         let _ = rev;
-        let n = graphql::query_node_by_id(access_token.as_deref(), &list_for_query).await?;
+        let n = graphql::query_node_by_id(access_token.as_deref(), &list_for_query, &who).await?;
         let Some(n) = n else { return Ok(None) };
         {
             let speakers = sorted_speakers(&n.children);

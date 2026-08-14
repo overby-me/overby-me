@@ -57,16 +57,18 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
 
     let active_ctx = context_id.clone();
     let active_token = access_token.clone();
-    let active = crate::use_data_resource!(|(active_ctx, active_token, rev)| async move {
-        let _ = rev;
-        let id = graphql::active_node_id(active_token.as_deref(), &active_ctx)
-            .await
-            .ok()
-            .flatten()?;
-        graphql::query_node_by_id(active_token.as_deref(), &id)
-            .await
-            .ok()?
-    });
+    let active_who = session.read().identity();
+    let active =
+        crate::use_data_resource!(|(active_ctx, active_token, rev, active_who)| async move {
+            let _ = rev;
+            let id = graphql::active_node_id(active_token.as_deref(), &active_ctx)
+                .await
+                .ok()
+                .flatten()?;
+            graphql::query_node_by_id(active_token.as_deref(), &id, &active_who)
+                .await
+                .ok()?
+        });
     let active = active.read().clone().flatten();
 
     let comments_ctx = context_id.clone();
@@ -261,16 +263,18 @@ pub fn FollowApp(node: NodeWithChildren) -> Element {
     );
     let rev = *refresh.read();
 
-    let active = crate::use_data_resource!(|(context_id, access_token, rev)| async move {
-        let _ = rev;
-        let id = graphql::active_node_id(access_token.as_deref(), &context_id)
-            .await
-            .ok()
-            .flatten()?;
-        graphql::query_node_by_id(access_token.as_deref(), &id)
-            .await
-            .ok()?
-    });
+    let active_who = session.read().identity();
+    let active =
+        crate::use_data_resource!(|(context_id, access_token, rev, active_who)| async move {
+            let _ = rev;
+            let id = graphql::active_node_id(access_token.as_deref(), &context_id)
+                .await
+                .ok()
+                .flatten()?;
+            graphql::query_node_by_id(access_token.as_deref(), &id, &active_who)
+                .await
+                .ok()?
+        });
     let active = active.read().clone().flatten();
 
     rsx! {

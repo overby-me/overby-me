@@ -13,8 +13,9 @@ pub fn HomeApp() -> Element {
     // The welcome text is the root node's content, editable by its owner. It
     // refetches after an edit (use_data_resource tracks the global data version).
     let token = session.read().access_token.clone();
-    let root = crate::use_data_resource!(|(token)| async move {
-        graphql::query_root_node(token.as_deref())
+    let who = session.read().identity();
+    let root = crate::use_data_resource!(|(token, who)| async move {
+        graphql::query_root_node(token.as_deref(), &who)
             .await
             .ok()
             .flatten()

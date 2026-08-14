@@ -61,13 +61,16 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     );
     let rev = *refresh.read();
 
-    let active = crate::use_data_resource!(|(context_id, access_token, rev)| async move {
+    // Keyed on WHO: which children come back depends on the reader, and a
+    // token rotation is not a change of reader.
+    let av_who = user_id.clone().unwrap_or_default();
+    let active = crate::use_data_resource!(|(context_id, access_token, rev, av_who)| async move {
         let _ = rev;
         let id = graphql::active_node_id(access_token.as_deref(), &context_id)
             .await
             .ok()
             .flatten()?;
-        graphql::query_node_by_id(access_token.as_deref(), &id)
+        graphql::query_node_by_id(access_token.as_deref(), &id, &av_who)
             .await
             .ok()?
     });

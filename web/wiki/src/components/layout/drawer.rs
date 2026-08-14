@@ -257,7 +257,7 @@ pub(super) fn MenuList(segments: Vec<String>) -> Element {
     let context = use_resource(use_reactive!(|(cpath, who)| async move {
         let _ = &who;
         let access_token = crate::session::current_token();
-        graphql::resolve_path(access_token.as_deref(), &cpath)
+        graphql::resolve_path(access_token.as_deref(), &cpath, &who)
             .await
             .ok()
             .flatten()

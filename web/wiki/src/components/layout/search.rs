@@ -67,7 +67,7 @@ pub(super) fn SearchBar(
             return None;
         }
         let ctx_token = crate::session::current_token();
-        graphql::resolve_path(ctx_token.as_deref(), &cp)
+        graphql::resolve_path(ctx_token.as_deref(), &cp, &who)
             .await
             .ok()
             .flatten()

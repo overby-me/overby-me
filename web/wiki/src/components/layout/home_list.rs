@@ -83,8 +83,9 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     // there. Non-owners get an empty mime list (server-side `inserts` gate), so
     // the buttons never appear.
     let root_token = session.read().access_token.clone();
-    let root = crate::use_data_resource!(|(root_token)| async move {
-        let Some(node) = graphql::query_root_node(root_token.as_deref())
+    let root_who = session.read().identity();
+    let root = crate::use_data_resource!(|(root_token, root_who)| async move {
+        let Some(node) = graphql::query_root_node(root_token.as_deref(), &root_who)
             .await
             .ok()
             .flatten()

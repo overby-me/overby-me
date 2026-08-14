@@ -94,14 +94,17 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // token are unchanged, so without this the resolver would serve the stale
     // pre-edit node until a full reload.
     let segs = segments.clone();
-    let node_future = crate::use_data_resource!(|(segs, access_token)| async move {
+    // Keyed on WHO as well: the page carries its children, and which children
+    // depends on the reader (their own drafts are theirs to see).
+    let who = session.read().identity();
+    let node_future = crate::use_data_resource!(|(segs, access_token, who)| async move {
         // Empty segments is `/?app=editor` (the root editor): the root has no path
         // row, so `resolve_path(&[])` is `None`; fetch it by id instead. The
         // plain `/` welcome below does not depend on this succeeding.
         if segs.is_empty() {
-            graphql::query_root_node(access_token.as_deref()).await
+            graphql::query_root_node(access_token.as_deref(), &who).await
         } else {
-            graphql::resolve_path(access_token.as_deref(), &segs).await
+            graphql::resolve_path(access_token.as_deref(), &segs, &who).await
         }
     });
 

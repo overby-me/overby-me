@@ -759,9 +759,14 @@ fn build_body(
     level: usize,
     prefix: String,
     pics: Rc<RefCell<Vec<Picture>>>,
+    // Threaded down the recursion rather than read here: this is a plain
+    // function with no component around it, and an export must hold exactly what
+    // its reader can see, their own unsubmitted work included and nobody else's.
+    who: String,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = String>>> {
     Box::pin(async move {
-        let Ok(Some(node)) = crate::graphql::query_node_by_id(token.as_deref(), &node_id).await
+        let Ok(Some(node)) =
+            crate::graphql::query_node_by_id(token.as_deref(), &node_id, &who).await
         else {
             return String::new();
         };
@@ -811,6 +816,7 @@ fn build_body(
                     level + 1,
                     child_prefix,
                     pics.clone(),
+                    who.clone(),
                 )
                 .await,
             );
@@ -821,9 +827,9 @@ fn build_body(
 
 /// Recursively export a node (document, policy or whole folder) and everything
 /// nested under it to a single `.odt`, then start the download.
-pub async fn export_tree(token: Option<String>, node_id: String, name: String) {
+pub async fn export_tree(token: Option<String>, node_id: String, name: String, who: String) {
     let pics = Rc::new(RefCell::new(Vec::new()));
-    let body = build_body(token, node_id, 1, String::new(), pics.clone()).await;
+    let body = build_body(token, node_id, 1, String::new(), pics.clone(), who).await;
     let odt = odt_from_content_xml(wrap_content(&body), &pics.borrow());
     let filename = format!("{}.odt", sanitize_filename(&name));
     download_bytes(&filename, "application/vnd.oasis.opendocument.text", &odt);

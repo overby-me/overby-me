@@ -139,8 +139,9 @@ pub fn FeedbackApp() -> Element {
 
     // Whether the caller owns the home context (→ sees all feedback + can delete).
     let owner_token = session.read().access_token.clone();
-    let owner_res = crate::use_data_resource!(|(owner_token)| async move {
-        graphql::query_root_node(owner_token.as_deref())
+    let owner_who = session.read().identity();
+    let owner_res = crate::use_data_resource!(|(owner_token, owner_who)| async move {
+        graphql::query_root_node(owner_token.as_deref(), &owner_who)
             .await
             .ok()
             .flatten()

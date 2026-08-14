@@ -89,12 +89,13 @@ pub fn ExportAction(node_id: String, name: String) -> Element {
                     return;
                 }
                 let token = session.read().access_token.clone();
+                let who = session.read().identity();
                 let id = node_id.clone();
                 let name = name.clone();
                 exporting.set(true);
                 crate::snackbar::show_snackbar(&crate::i18n::t("folder.downloading"));
                 spawn(async move {
-                    crate::export::export_tree(token, id, name).await;
+                    crate::export::export_tree(token, id, name, who).await;
                     exporting.set(false);
                 });
             },

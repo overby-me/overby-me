@@ -761,13 +761,36 @@ pub struct DeleteNodeMutation {
 
 // --- High-level query functions ---
 
+/// A node and its children, with the SAME visibility rule the drawer uses.
+///
+/// This asked only that a child not be a canvas cell, so it listed everybody's
+/// unsubmitted drafts. The drawer has filtered them all along through
+/// `visible_to_user`; this path never did, and it is the one behind a poll. One
+/// resolution showed three amendments with the same title (one submitted, one
+/// superseded draft, one entirely EMPTY) and all three counted toward the total
+/// on a page people vote from.
+///
+/// `visible_to_user` rather than a rule of its own, because it is the same
+/// question and already answered: submitted, or mine, or somewhere I am a
+/// member. The middle branch is not a nicety. An author who cannot see their own
+/// unfinished work has no route back to finish it, and that failure is on
+/// record: a candidature was posted as a COMMENT because its author could not
+/// get back to the draft to submit it.
+///
+/// `user_id` is empty for a signed-out reader, which leaves the owner branch
+/// matching nothing and the filter reading "submitted only" -- the right answer
+/// for someone with no drafts of their own.
 pub async fn query_node_by_id(
     access_token: Option<&str>,
     id: &str,
+    user_id: &str,
 ) -> Result<Option<model::NodeWithChildren>, String> {
     let operation = NodeWithChildrenQuery::build(NodeWithChildrenVariables {
         id: Uuid(id.to_string()),
-        children_where: not_a_canvas_cell(),
+        children_where: NodesBoolExp {
+            and: Some(vec![not_a_canvas_cell(), visible_to_user(user_id)]),
+            ..Default::default()
+        },
     });
     let result = execute(access_token, operation).await?;
     Ok(result.node.map(Into::into))
@@ -813,16 +836,18 @@ pub(crate) async fn query_root_id(access_token: Option<&str>) -> Result<Option<S
 /// segment), so fetch it via the root id directly.
 pub async fn query_root_node(
     access_token: Option<&str>,
+    user_id: &str,
 ) -> Result<Option<model::NodeWithChildren>, String> {
     let Some(root_id) = query_root_id(access_token).await? else {
         return Ok(None);
     };
-    query_node_by_id(access_token, &root_id).await
+    query_node_by_id(access_token, &root_id, user_id).await
 }
 
 pub async fn resolve_path(
     access_token: Option<&str>,
     segments: &[String],
+    user_id: &str,
 ) -> Result<Option<model::NodeWithChildren>, String> {
     if segments.is_empty() {
         return Ok(None);
@@ -841,12 +866,12 @@ pub async fn resolve_path(
         where_clause,
         limit: None,
     });
-    let key = format!("node:{}", segments.join("/"));
+    let key = format!("node:{user_id}:{}", segments.join("/"));
     let live = async {
         let Some(found) = execute(access_token, op).await?.nodes.into_iter().next() else {
             return Ok(None);
         };
-        query_node_by_id(access_token, &found.id.0).await
+        query_node_by_id(access_token, &found.id.0, user_id).await
     }
     .await;
     // The page a reader opened before the tunnel is the page they meant to read
@@ -1270,9 +1295,12 @@ pub fn deep_copy_node(
     parent_id: String,
     context_id: Option<String>,
     is_root: bool,
+    // Whoever is doing the copying. A subtree copy takes what that person can
+    // see, which includes their own unsubmitted work and nobody else's.
+    user_id: String,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>> {
     Box::pin(async move {
-        let node = match query_node_by_id(access_token.as_deref(), &copy_id).await? {
+        let node = match query_node_by_id(access_token.as_deref(), &copy_id, &user_id).await? {
             Some(n) => n,
             None => return Ok(()),
         };
@@ -1323,6 +1351,7 @@ pub fn deep_copy_node(
                 new_id.clone(),
                 context_id.clone(),
                 false,
+                user_id.clone(),
             )
             .await?;
         }
@@ -1572,7 +1601,9 @@ pub async fn node_path(access_token: Option<&str>, node_id: &str) -> Vec<String>
     let mut current = Some(node_id.to_string());
     for _ in 0..MAX_DEPTH {
         let Some(id) = current.take() else { break };
-        let Ok(Some(node)) = query_node_by_id(access_token, &id).await else {
+        // No reader: this walks UPWARD and reads only `parent_id` and `key`,
+        // so the children filter has nothing to act on either way.
+        let Ok(Some(node)) = query_node_by_id(access_token, &id, "").await else {
             break;
         };
         // The root is the path's origin, not a step in it.
@@ -1782,6 +1813,56 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The page behind a poll must not list other people's drafts, and must
+    /// still list the reader's own.
+    ///
+    /// Asserted on the operation as actually built, because the filter is one
+    /// argument and exactly what a refactor drops: it was missing here for as
+    /// long as this query has existed, while the drawer had it all along.
+    #[test]
+    fn a_nodes_children_are_filtered_the_way_the_drawer_filters_them() {
+        use cynic::QueryBuilder;
+        let me = "a6308333-4a8e-4306-acb1-5d3e21128cd8";
+        let op = NodeWithChildrenQuery::build(NodeWithChildrenVariables {
+            id: Uuid("node-1".into()),
+            children_where: NodesBoolExp {
+                and: Some(vec![not_a_canvas_cell(), visible_to_user(me)]),
+                ..Default::default()
+            },
+        });
+        let json = serde_json::to_string(&op.variables).unwrap();
+
+        assert!(
+            json.contains(r#""mutable":{"_eq":false}"#),
+            "submitted-only branch missing: {json}"
+        );
+        assert!(
+            json.contains(me),
+            "an author must keep seeing their own drafts: {json}"
+        );
+    }
+
+    /// An unfinished draft belongs to its author on EVERY surface.
+    ///
+    /// The drawer and the page are two different queries, and the reason this
+    /// bug existed is that they disagreed. They are built from the same helper
+    /// now, so the thing worth asserting is that the helper says the same thing
+    /// to both: submitted, or mine, or somewhere I am a member.
+    #[test]
+    fn the_tree_and_the_page_agree_about_whose_drafts_are_whose() {
+        let me = "a6308333-4a8e-4306-acb1-5d3e21128cd8";
+        let in_the_tree = serde_json::to_string(&children_where_clause("parent-1", me)).unwrap();
+        let on_the_page = serde_json::to_string(&visible_to_user(me)).unwrap();
+
+        for json in [&in_the_tree, &on_the_page] {
+            assert!(json.contains(r#""mutable":{"_eq":false}"#), "{json}");
+            assert!(
+                json.contains(me),
+                "the author's own id must be in it: {json}"
+            );
+        }
+    }
 
     /// The rows that only draw an icon must ask for the icon, not the document.
     ///

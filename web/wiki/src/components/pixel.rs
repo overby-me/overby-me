@@ -1339,9 +1339,10 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
     // board never loaded and an owner saw an empty app with a list under it.
     let board_dep = showing.clone();
     let board_token = session.read().access_token.clone();
-    let board = crate::use_data_resource!(|(board_dep, board_token)| async move {
+    let board_who = session.read().identity();
+    let board = crate::use_data_resource!(|(board_dep, board_token, board_who)| async move {
         let id = board_dep?;
-        graphql::query_node_by_id(board_token.as_deref(), &id)
+        graphql::query_node_by_id(board_token.as_deref(), &id, &board_who)
             .await
             .ok()
             .flatten()

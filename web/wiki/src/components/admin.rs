@@ -116,12 +116,13 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     // of a document too long to show whole on the projector (#projector-focus).
     let hn_id = active_id.clone().unwrap_or_default();
     let hn_token = access_token.clone();
-    let active_headings = crate::use_data_resource!(|(hn_id, hn_token, rev)| async move {
+    let hn_who = session.read().identity();
+    let active_headings = crate::use_data_resource!(|(hn_id, hn_token, rev, hn_who)| async move {
         let _ = rev;
         if hn_id.is_empty() {
             return Vec::new();
         }
-        match graphql::query_node_by_id(hn_token.as_deref(), &hn_id).await {
+        match graphql::query_node_by_id(hn_token.as_deref(), &hn_id, &hn_who).await {
             Ok(Some(n)) => {
                 crate::components::content::content_headings(n.data.as_ref().map(|d| &d.0))
             }

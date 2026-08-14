@@ -548,6 +548,7 @@ pub fn FolderApp(
                                             return;
                                         }
                                         let token = session.read().access_token.clone();
+                                        let who = session.read().identity();
                                         let target = target.clone();
                                         let ctx = ctx.clone();
                                         pasting.set(true);
@@ -567,6 +568,7 @@ pub fn FolderApp(
                                                     target.clone(),
                                                     ctx.clone(),
                                                     true,
+                                                    who.clone(),
                                                 )
                                                 .await
                                                 .is_err()
