@@ -372,7 +372,12 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 spawn(async move {
                                     match nhost::send_verification_email(&em).await {
                                         Ok(()) => crate::snackbar::show_snackbar(&t("auth.verificationResent")),
-                                        Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                        Err(e) => {
+                                            // The call site is the label: a generic toast tells the reader
+                                            // nothing, so the log has to say at least where it came from.
+                                            crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"))
+                                        }
                                     }
                                 });
                             },

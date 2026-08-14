@@ -327,7 +327,12 @@ pub fn ContentApp(
                                 spawn(async move {
                                     match crate::graphql::set_active_relation(token.as_deref(), &ctx, Some(&target)).await {
                                         Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
-                                        Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                        Err(e) => {
+                                            // The call site is the label: a generic toast tells the reader
+                                            // nothing, so the log has to say at least where it came from.
+                                            crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"))
+                                        }
                                     }
                                 });
                             }
@@ -354,7 +359,12 @@ pub fn ContentApp(
                                                 "content.commentsOffScreen"
                                             }));
                                         }
-                                        Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                        Err(e) => {
+                                            // The call site is the label: a generic toast tells the reader
+                                            // nothing, so the log has to say at least where it came from.
+                                            crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"))
+                                        }
                                     }
                                 });
                             }

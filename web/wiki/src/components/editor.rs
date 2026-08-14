@@ -764,7 +764,12 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         Err(e) => show_snackbar(&format!("{}: {e}", t("error.somethingWentWrong"))),
                     }
                 }
-                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                Err(e) => {
+                    // The call site is the label: a generic toast tells the reader
+                    // nothing, so the log has to say at least where it came from.
+                    crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                    show_snackbar(&t("error.somethingWentWrong"))
+                }
             }
             image_uploading.set(false);
         });
@@ -808,7 +813,12 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     dirty.set(true);
                     set_editor_dirty(true);
                 }
-                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                Err(e) => {
+                    // The call site is the label: a generic toast tells the reader
+                    // nothing, so the log has to say at least where it came from.
+                    crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                    show_snackbar(&t("error.somethingWentWrong"))
+                }
             }
         });
     };

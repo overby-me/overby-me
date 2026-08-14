@@ -83,7 +83,12 @@ pub fn FeedbackDialog() -> Element {
                         }
                     }
                 }
-                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                Err(e) => {
+                    // The call site is the label: a generic toast tells the reader
+                    // nothing, so the log has to say at least where it came from.
+                    crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                    show_snackbar(&t("error.somethingWentWrong"))
+                }
             }
             image_uploading.set(false);
         });

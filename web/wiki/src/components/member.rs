@@ -730,7 +730,12 @@ fn MemberTableRow(
                                                     }
                                                     show_snackbar(&t("invite.claimLinkCopied"));
                                                 }
-                                                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                                                Err(e) => {
+                                                    // The call site is the label: a generic toast tells the reader
+                                                    // nothing, so the log has to say at least where it came from.
+                                                    crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                                                    show_snackbar(&t("error.somethingWentWrong"))
+                                                }
                                             }
                                         });
                                     }
@@ -767,7 +772,12 @@ fn MemberTableRow(
                                                     open_mailto(&email, &subject, &body);
                                                     show_snackbar(&t("invite.sent"));
                                                 }
-                                                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                                                Err(e) => {
+                                                    // The call site is the label: a generic toast tells the reader
+                                                    // nothing, so the log has to say at least where it came from.
+                                                    crate::errors::log_handled(concat!(file!(), ":", line!()), e);
+                                                    show_snackbar(&t("error.somethingWentWrong"))
+                                                }
                                             }
                                         });
                                     }

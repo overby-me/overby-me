@@ -43,14 +43,22 @@ pub fn show_snackbar(text: &str) {
     // Reported one report earlier: a reader who is blind hit this twice while
     // adding content, and the record said "error toast shown to user: Noget gik
     // galt!" and nothing else.
+    // ERROR, not warn. This message is the app admitting it has nothing to tell
+    // the reader: whatever failed, it could not be turned into a sentence about
+    // what to do next. That is always a fault, in the same sense
+    // `errors::Failure::Broken` is -- and warn is the level people filter OUT
+    // when looking for faults, so filing it there hid it among the dropped
+    // connections and lapsed sessions that are deliberately kept quiet.
     let urgent = text == crate::i18n::t("error.somethingWentWrong");
     if urgent {
         match crate::errors::recent_failure() {
-            Some(cause) => log::warn!("error toast shown to user: {text} -- caused by {cause}"),
+            Some(cause) => log::error!("error toast shown to user: {text} -- caused by {cause}"),
             // Nothing recent enough to blame. Said plainly rather than left to
             // look like a failure with no cause: it means the toast came from
-            // somewhere that never went through the classifier.
-            None => log::warn!("error toast shown to user: {text} -- no failure recorded"),
+            // somewhere that never went through the classifier -- which is how
+            // the resend-verification button was found, calling the auth API
+            // directly and throwing its error away.
+            None => log::error!("error toast shown to user: {text} -- no failure recorded"),
         }
     }
     // preventDuplicate: don't queue the same text twice in a row.
