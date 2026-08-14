@@ -278,7 +278,20 @@ static REFRESHING: AtomicBool = AtomicBool::new(false);
 ///
 /// Generous next to the gap it covers (two responses and a synchronous write),
 /// and it costs nothing except delaying a sign-out that is genuinely due.
-const ROTATION_GRACE_MS: u32 = 1200;
+///
+/// EIGHT SECONDS, NOT 1.2. The gap this waits out is the winning tab's auth
+/// round trip, and 1.2s was measured against a desk. A reader was signed out
+/// mid-session after thirteen minutes of ordinary browsing, on 4g, where a
+/// single auth request can take longer than the whole budget on its own: the
+/// winner was still waiting for its answer when the loser gave up on it and
+/// cleared the session they were both using.
+///
+/// It is the wrong thing to be thrifty about. Waiting costs a reader nothing
+/// they can see -- the page they are on keeps working, since the access token
+/// is still valid for minutes yet -- while giving up early costs them their
+/// session and everything they had not submitted. A congress is exactly where
+/// the network is worst and being signed out hurts most.
+const ROTATION_GRACE_MS: u32 = 8_000;
 const ROTATION_POLL_MS: u32 = 50;
 /// Looking more than ONCE is the whole fix — a single check is what signed
 /// people out, because it could run before the winner had written anything.
@@ -558,8 +571,17 @@ pub async fn ensure_fresh_token() -> Option<String> {
         RefreshOutcome::InFlight => {
             // The background loop (or a sibling query) is already refreshing; wait
             // for it to land rather than starting a second, racing refresh.
-            for _ in 0..50 {
-                TimeoutFuture::new(100).await;
+            //
+            // Long enough to outlast the refresh it is waiting for, which in the
+            // worst case is a request plus the whole rotation grace. Derived from
+            // that grace rather than written as its own number, because giving up
+            // first would mean carrying on with the stale token while the answer
+            // was seconds away -- and the two budgets drifting apart is exactly
+            // the sort of thing nobody notices until a reader is signed out.
+            const WAIT_POLL_MS: u32 = 100;
+            let attempts = (ROTATION_GRACE_MS / WAIT_POLL_MS) + 30;
+            for _ in 0..attempts {
+                TimeoutFuture::new(WAIT_POLL_MS).await;
                 if !REFRESHING.load(Ordering::SeqCst) {
                     break;
                 }
@@ -717,6 +739,12 @@ mod tests {
             ROTATION_ATTEMPTS > 1,
             "a single look is the bug, not the fix"
         );
-        assert!(ROTATION_GRACE_MS >= 1000, "too tight to cover the race");
+        // Wide enough for a bad mobile connection, not just a desk. 1200ms was
+        // the old figure and it signed a reader out mid-session on 4g, where one
+        // auth round trip can exceed it on its own.
+        assert!(
+            ROTATION_GRACE_MS >= 5_000,
+            "too tight to cover an auth round trip on a congress network"
+        );
     }
 }
