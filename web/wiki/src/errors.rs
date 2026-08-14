@@ -111,6 +111,7 @@ const THROTTLE_MS: f64 = 8000.0;
 /// classification. This is the caller's own note, at a level that matches.
 pub fn log_handled(what: &str, msg: impl std::fmt::Display) {
     let msg = msg.to_string();
+    note_failure(format!("{what}: {msg}"));
     match classify(&msg) {
         Failure::Broken => log::error!("{what}: {msg}"),
         failure => log::info!("{what} ({}): {msg}", failure.label()),
@@ -119,6 +120,60 @@ pub fn log_handled(what: &str, msg: impl std::fmt::Display) {
 
 thread_local! {
     static LAST_SHOWN: std::cell::Cell<f64> = const { std::cell::Cell::new(f64::NEG_INFINITY) };
+    /// The last failure anyone classified, and when: `(summary, ms since load)`.
+    static LAST_FAILURE: std::cell::RefCell<Option<(String, f64)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Milliseconds since the page loaded, for pairing a failure with the toast it
+/// produced. `performance.now()`, the same clock `up_ms` in a report uses.
+fn now_ms() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(f64::NAN)
+}
+
+/// Remember what just went wrong, so that if it ends up as a shrug on screen the
+/// shrug can say what it was.
+///
+/// Every classified failure is noted here, including the quiet ones. A refusal
+/// or a dropped connection is deliberately not reported on its own -- at a
+/// congress that would be thousands of records saying the hall has bad
+/// reception -- but the same failure becomes worth reporting the moment it
+/// reaches the reader as "Noget gik galt!", because then nobody knows anything:
+/// not the reader, who is told only that something did, and not us.
+pub fn note_failure(summary: impl std::fmt::Display) {
+    let summary = summary.to_string();
+    LAST_FAILURE.with(|c| *c.borrow_mut() = Some((summary, now_ms())));
+}
+
+/// What went wrong just before now, if anything did recently enough to be the
+/// cause of it.
+///
+/// The window is short on purpose. A failure from a minute ago is not the reason
+/// for a message on screen now, and guessing that it is would file a plausible
+/// wrong answer -- which is worse than filing none, because it reads as evidence.
+pub fn recent_failure() -> Option<String> {
+    let now = now_ms();
+    LAST_FAILURE.with(|c| {
+        c.borrow()
+            .as_ref()
+            .and_then(|(summary, at)| still_the_cause(*at, now).then(|| summary.clone()))
+    })
+}
+
+/// Whether a failure noted at `noted_at` is recent enough to be the cause of
+/// something happening at `now`. Pure, so the window is testable off-wasm.
+fn still_the_cause(noted_at: f64, now: f64) -> bool {
+    const STILL_THE_CAUSE_MS: f64 = 10_000.0;
+    // A NaN clock (no `window`, i.e. not a browser) must blame nothing rather
+    // than everything: every comparison against NaN is false, which is the
+    // answer wanted here, but saying so is better than relying on it.
+    if !now.is_finite() || !noted_at.is_finite() {
+        return false;
+    }
+    (0.0..STILL_THE_CAUSE_MS).contains(&(now - noted_at))
 }
 
 /// Tell the user about a failed call, if it is one of the kinds worth telling
@@ -216,5 +271,28 @@ mod tests {
     fn classification_is_case_insensitive() {
         assert_eq!(classify("PERMISSION DENIED"), Failure::Refused);
         assert_eq!(classify("Network Error"), Failure::Offline);
+    }
+
+    /// What a generic "something went wrong" toast is allowed to blame.
+    ///
+    /// The point of the window is that a wrong cause is worse than none: it
+    /// reads as evidence, and someone will act on it. A failure from a minute
+    /// ago did not produce the message on screen now.
+    #[test]
+    fn only_a_failure_from_just_now_may_be_blamed() {
+        assert!(super::still_the_cause(1_000.0, 1_000.0), "the same instant");
+        assert!(
+            super::still_the_cause(1_000.0, 9_000.0),
+            "8s later, still it"
+        );
+        assert!(!super::still_the_cause(1_000.0, 61_000.0), "a minute later");
+        // Time cannot run backwards; a note from the future is a bug, not a cause.
+        assert!(
+            !super::still_the_cause(9_000.0, 1_000.0),
+            "noted after the toast"
+        );
+        // No clock at all (not a browser) blames nothing rather than everything.
+        assert!(!super::still_the_cause(f64::NAN, 1_000.0));
+        assert!(!super::still_the_cause(1_000.0, f64::NAN));
     }
 }

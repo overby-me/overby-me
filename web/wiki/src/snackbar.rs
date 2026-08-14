@@ -29,13 +29,29 @@ const DISMISS_URGENT_MS: u32 = 9_000;
 /// skips a message identical to the newest one still showing (Notistack's
 /// `preventDuplicate`).
 pub fn show_snackbar(text: &str) {
-    // A generic-failure toast shown to the user is also recorded for the logger
-    // (shipped in remote-logging builds), so "something went wrong" leaves a trace
-    // even at the many call sites that discard the underlying error. The specific
-    // detail, when there is one, is logged separately (e.g. the GraphQL layer).
+    // A generic-failure toast is the one case where NOBODY knows what happened:
+    // the reader is told only that something did, and the call sites that raise
+    // it are exactly the ones that threw the error away.
+    //
+    // So it carries the cause out with it. Every classified failure is noted as
+    // it passes (`errors::note_failure`), including the ones deliberately kept
+    // off the wire -- a refusal, a dropped connection -- because the reasoning
+    // that keeps those quiet does not survive them reaching the screen as a
+    // shrug. A refusal nobody sees is routine; a refusal a reader walks into is
+    // a wall with no sign on it.
+    //
+    // Reported one report earlier: a reader who is blind hit this twice while
+    // adding content, and the record said "error toast shown to user: Noget gik
+    // galt!" and nothing else.
     let urgent = text == crate::i18n::t("error.somethingWentWrong");
     if urgent {
-        log::warn!("error toast shown to user: {text}");
+        match crate::errors::recent_failure() {
+            Some(cause) => log::warn!("error toast shown to user: {text} -- caused by {cause}"),
+            // Nothing recent enough to blame. Said plainly rather than left to
+            // look like a failure with no cause: it means the toast came from
+            // somewhere that never went through the classifier.
+            None => log::warn!("error toast shown to user: {text} -- no failure recorded"),
+        }
     }
     // preventDuplicate: don't queue the same text twice in a row.
     if SNACKBAR.read().last().is_some_and(|m| m.text == text) {

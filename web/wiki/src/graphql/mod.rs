@@ -296,6 +296,10 @@ where
     if let Err(e) = &result {
         // Every caller of this swallows the error into an empty list, so this is
         // the last place that knows anything went wrong.
+        // Noted whatever its class, including the quiet ones: if this ends up
+        // as "Noget gik galt!" on screen, that shrug is the only thing the
+        // reader gets and this is the only record of why.
+        crate::errors::note_failure(format!("[{}] {e}", short_type_name::<Q>()));
         let failure = crate::errors::classify(e);
         // A lapsed session is the network, not a fault -- the same congress wifi
         // the refusal/offline note below is about, arriving by another door.
@@ -430,6 +434,8 @@ fn report_raw_failure(
         log::info!("graphql ({what}) on a lapsed session: {e}");
         return;
     }
+    // As above: noted whatever its class, so a generic toast can say what it was.
+    crate::errors::note_failure(format!("({what}) {e}"));
     let failure = crate::errors::classify(e);
     match failure {
         crate::errors::Failure::Broken => {
