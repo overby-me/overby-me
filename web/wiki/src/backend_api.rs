@@ -59,19 +59,59 @@ pub async fn file_bytes(file_id: &str, token: &str) -> Result<Vec<u8>, String> {
     if file_id.is_empty() {
         return Err("no file".into());
     }
-    let resp = reqwest::Client::new()
-        .get(file_url(file_id))
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = storage_get(file_id, token).await?;
     if !resp.status().is_success() {
-        return Err(format!("storage said {}", resp.status()));
+        // Said plainly, because storage's own word for it is misleading: it
+        // answers 404 for a file you may not read as well as for one that is not
+        // there, so "Not Found" reads as data loss when it usually is not.
+        let status = resp.status();
+        return Err(match status.as_u16() {
+            401 | 403 | 404 => format!("storage said {status} (missing, or not ours to read)"),
+            _ => format!("storage said {status}"),
+        });
     }
     resp.bytes()
         .await
         .map(|b| b.to_vec())
         .map_err(|e| e.to_string())
+}
+
+/// GET a file from storage, refreshing the session once if it is refused.
+///
+/// The same recovery `graphql::execute` has had all along, which storage never
+/// got. A token lapses -- a tab left open over lunch, a phone asleep in a pocket
+/// -- and every GraphQL read quietly refreshes and carries on while every FILE
+/// read fails: the pictures, the Word documents, the PDF of the agenda. The
+/// reader sees a broken page and the log fills with `storage said 404`, which
+/// says the file is gone when the session is what expired.
+///
+/// Reported that way: a reader opened the agenda after being bounced to the
+/// login screen mid-session, and it was filed as `pdf render failed: storage
+/// said 404 Not Found` -- for a PDF that is present, uploaded, and 79 kB.
+///
+/// Retried on 401 and 403, which mean this plainly, and on 404, which means it
+/// here: nhost storage answers 404 for a file you may not read. A genuinely
+/// missing file therefore costs one extra round trip to confirm it is missing,
+/// which is worth it to stop showing a lapsed session as data loss.
+async fn storage_get(file_id: &str, token: &str) -> Result<reqwest::Response, String> {
+    let send = |token: String| async move {
+        reqwest::Client::new()
+            .get(file_url(file_id))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())
+    };
+    let first = send(token.to_string()).await?;
+    if !matches!(first.status().as_u16(), 401 | 403 | 404) {
+        return Ok(first);
+    }
+    // Only worth a second attempt if the refresh actually produced a different
+    // token; otherwise this is the same request with the same credential.
+    match crate::session::ensure_fresh_token().await {
+        Some(fresh) if fresh != token => send(fresh).await,
+        _ => Ok(first),
+    }
 }
 
 /// Render one Windows metafile (EMF/EMF+/WMF) to PNG.

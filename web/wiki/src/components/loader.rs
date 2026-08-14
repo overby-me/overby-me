@@ -804,23 +804,11 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
                 blob_url.set(Some(hit));
                 return;
             }
-            // The file URL is built through the one seam (backend_api), so the
-            // cutover blob-path swap is a change there. The token goes in the
-            // Authorization header, which is the only place the storage service
-            // reads it — as this function's own description always claimed.
-            let url = crate::backend_api::file_url(&file_id);
-            let Ok(resp) = reqwest::Client::new()
-                .get(&url)
-                .bearer_auth(&token)
-                .send()
-                .await
-            else {
-                return;
-            };
-            if !resp.status().is_success() {
-                return;
-            }
-            let Ok(bytes) = resp.bytes().await else {
+            // Through `file_bytes` rather than fetching here, so this shares the
+            // refresh-and-retry that a lapsed session needs (see `storage_get`).
+            // Fetching directly meant every picture in the app broke the moment a
+            // token expired, while every GraphQL read beside it quietly recovered.
+            let Ok(bytes) = crate::backend_api::file_bytes(&file_id, &token).await else {
                 return;
             };
             // A HEIC has to be decoded before anything will draw it: Firefox
