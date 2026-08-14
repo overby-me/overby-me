@@ -28,11 +28,18 @@
       };
       biome = {
         enable = true;
-        # web/wiki is a Rust/Dioxus/WASM app, not a JS/TS project. Its incidental
-        # JS/CSS/JSON (service worker, theme + test scripts, lexicon docs) is
-        # hand-authored to its own conventions and governed by the app's own gates
-        # (rustfmt/clippy/cargo test/check-css-spacing.nu), not by biome.
-        excludes = ["^web/wiki/"];
+        # web/wiki used to be excluded here, on the grounds that its incidental
+        # JS is hand-authored and governed by the app's own gates rather than by
+        # biome. That was not true of the whole toolchain: `nix fmt` maps *.js to
+        # biome (nix/formatters.nix) for every path in the tree, and biome
+        # formats a file handed to it explicitly whatever `files.includes` says.
+        # So checks.formatting DID format these, this hook did not, and a new .js
+        # under web/wiki passed every local gate and then failed CI -- which is
+        # exactly how assets/heic-worker.js reached main unformatted.
+        #
+        # The hook now sees what the check sees. Whichever way that disagreement
+        # is resolved they have to agree; this is the direction that finds out
+        # before pushing rather than after.
       };
       alejandra.enable = true;
       deadnix.enable = true;
