@@ -1,0 +1,37 @@
+-- 0019: remove `select2`, which has not been able to run for a long time.
+--
+-- It came up while auditing the permission functions for the unbound-`subnode`
+-- shape that 0018 was about. `select2` matched the shape, which made it look
+-- like a second copy of the same bug -- but it is older than that. Its body is
+--
+--     SELECT EXISTS(
+--         SELECT role.id
+--         FROM roles AS role, node_roles AS node_role, nodes AS parent,
+--              members AS member
+--         WHERE parent.id = node.parent_id
+--           AND node.mime = ANY (role.children)
+--           AND parent.mime = ANY (role.parents)
+--           AND node_role.context_id = node.context_id
+--           AND node_role.role_id = role.id
+--           AND role.select = true)
+--
+-- which is written against a schema this database has not had in a long time:
+-- there are no `roles` or `node_roles` tables, and `nodes` has `mime_id` rather
+-- than `mime`. Calling it does not return a wrong answer, it raises
+-- `relation "roles" does not exist`. PostgreSQL does not check a SQL function's
+-- body against the schema until it runs, which is why it survived the migration
+-- that removed those tables.
+--
+-- Checked before dropping, rather than assumed:
+--
+--   * nothing else in the database mentions it -- no function, no view, no
+--     constraint
+--   * pg_stat_statements recorded no call to it across 39 hours of ordinary
+--     traffic (measured before the database restarted and reset the counters)
+--   * it cannot be called successfully in any case, per the error above
+--
+-- Dropped rather than fixed. A dead function whose name reads like a live
+-- permission check is worse than no function: the next person auditing these
+-- has to work out, as this one did, whether it guards anything.
+
+DROP FUNCTION IF EXISTS public.select2(nodes);
