@@ -277,14 +277,20 @@ pub async fn send_verification_email(email: &str) -> Result<(), NhostError> {
         })?;
 
     if !resp.status().is_success() {
+        // The HTTP status, kept whatever the body says. It is parsed out of the
+        // body below, and a 429 from this endpoint carries none -- so the one
+        // fact that explains the failure was the one being dropped, and a reader
+        // being rate limited was told "something went wrong" and pressed the
+        // button again, which is the worst possible response to a rate limit.
+        let status = resp.status().as_u16();
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
-        return Err(
-            serde_json::from_value::<NhostError>(body).unwrap_or(NhostError {
-                status: None,
-                error: Some("unknown".to_string()),
-                message: Some("Failed to send verification email".to_string()),
-            }),
-        );
+        let mut err = serde_json::from_value::<NhostError>(body).unwrap_or(NhostError {
+            status: None,
+            error: Some("unknown".to_string()),
+            message: Some("Failed to send verification email".to_string()),
+        });
+        err.status.get_or_insert(status);
+        return Err(err);
     }
 
     Ok(())

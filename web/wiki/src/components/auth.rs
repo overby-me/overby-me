@@ -372,6 +372,15 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 spawn(async move {
                                     match nhost::send_verification_email(&em).await {
                                         Ok(()) => crate::snackbar::show_snackbar(&t("auth.verificationResent")),
+                                        // Rate limited, which is a sentence this
+                                        // button can actually say. A reader who
+                                        // is told "something went wrong" presses
+                                        // it again -- one pressed four times,
+                                        // and every press was another 429 -- so
+                                        // the shrug turned a wait into a wall.
+                                        Err(e) if e.status == Some(429) => {
+                                            crate::snackbar::show_snackbar(&t("auth.verificationTooSoon"))
+                                        }
                                         Err(e) => {
                                             // The call site is the label: a generic toast tells the reader
                                             // nothing, so the log has to say at least where it came from.
