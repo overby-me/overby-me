@@ -1644,13 +1644,32 @@ pub async fn node_insert_mimes(access_token: Option<&str>, node_id: &str) -> Vec
 /// A node is "visible" to the user when it is published, owned by them, or one
 /// they are a member of. Shared by the drawer's child query and its per-row
 /// `children_aggregate` count.
+///
+/// NO READER, NO IDENTITY CLAUSES. An empty `user_id` used to be compiled into
+/// `ownerId: {_eq: ""}`, and an empty string is not a uuid: Hasura rejects the
+/// WHOLE query rather than matching nothing, so every page a signed-out visitor
+/// opened failed outright. It took production down for six minutes, and only for
+/// people with no account, which is exactly who a signed-in test cannot see.
+///
+/// The drawer never met this because its caller returns early when nobody is
+/// signed in. That is luck sitting in one call site, not a property of this
+/// function, and the next caller does not inherit it. So the guard lives HERE,
+/// where the malformed comparison would otherwise be built.
+///
+/// What is left for a signed-out reader is the whole truth for them: submitted
+/// content only. They own nothing and belong to nothing, so the two branches
+/// being dropped could never have matched anything anyway.
 pub(crate) fn visible_to_user(user_id: &str) -> NodesBoolExp {
+    let submitted = NodesBoolExp {
+        mutable: Some(BooleanComparisonExp { eq: Some(false) }),
+        ..Default::default()
+    };
+    if user_id.is_empty() {
+        return submitted;
+    }
     NodesBoolExp {
         or: Some(vec![
-            NodesBoolExp {
-                mutable: Some(BooleanComparisonExp { eq: Some(false) }),
-                ..Default::default()
-            },
+            submitted,
             NodesBoolExp {
                 owner_id: Some(UuidComparisonExp {
                     in_: None,
@@ -1841,6 +1860,60 @@ mod tests {
             json.contains(me),
             "an author must keep seeing their own drafts: {json}"
         );
+    }
+
+    /// A signed-out visitor must never be compared against an owner.
+    ///
+    /// THIS TEST EXISTED AND I DELETED IT. It was written against an earlier
+    /// version of this filter, dropped when the logic moved into
+    /// `visible_to_user`, and six minutes of production downtime followed:
+    /// `ownerId: {_eq: ""}` is not "match nobody", it is a malformed uuid, and
+    /// Hasura answers a malformed comparison by refusing the entire query. Every
+    /// page failed, for signed-out readers only, which no signed-in test can see.
+    ///
+    /// It asserts on the serialised filter rather than on behaviour because the
+    /// wrong version is not detectably wrong in Rust: `Uuid("")` builds fine and
+    /// only the server objects.
+    #[test]
+    fn a_signed_out_reader_is_never_compared_against_an_owner() {
+        let json = serde_json::to_string(&visible_to_user("")).unwrap();
+
+        assert!(
+            !json.contains("owner"),
+            "no owner comparison may be built without a reader: {json}"
+        );
+        assert!(
+            !json.contains("members"),
+            "nor a membership one, same malformed uuid: {json}"
+        );
+        assert!(
+            !json.contains(r#""_eq":"""#),
+            "an empty uuid must never reach the wire: {json}"
+        );
+        // What remains is right for someone with no account: submitted only.
+        assert_eq!(json, r#"{"mutable":{"_eq":false}}"#);
+    }
+
+    /// The same guarantee through every filter built on top of it, since the
+    /// page and the drawer both compose this and a signed-out reader opens both.
+    #[test]
+    fn no_query_built_for_a_signed_out_reader_carries_an_empty_uuid() {
+        let built = [
+            serde_json::to_string(&visible_to_user("")).unwrap(),
+            serde_json::to_string(&children_where_clause("parent-1", "")).unwrap(),
+            serde_json::to_string(&child_visibility_clause("")).unwrap(),
+            serde_json::to_string(&NodesBoolExp {
+                and: Some(vec![not_a_canvas_cell(), visible_to_user("")]),
+                ..Default::default()
+            })
+            .unwrap(),
+        ];
+        for json in built {
+            assert!(
+                !json.contains(r#""_eq":"""#),
+                "empty uuid reached a query: {json}"
+            );
+        }
     }
 
     /// An unfinished draft belongs to its author on EVERY surface.
