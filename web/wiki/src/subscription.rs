@@ -366,6 +366,13 @@ struct HubState {
     attempts: u32,
     /// Handle of a scheduled reconnect, so it can be cancelled.
     timeout: Option<i32>,
+    /// Set while a connect is waiting on a token refresh, i.e. after it has
+    /// committed to opening a socket but before the socket exists.
+    ///
+    /// Without it that gap reads as "no socket, no reconnect pending", which is
+    /// exactly the condition [`Hub::ensure_connected`] treats as its cue to open
+    /// one. A view mounting during the refresh would open a second connection.
+    connecting: bool,
     subs: Registry<Signal<Option<serde_json::Value>>>,
     runtime: Option<Rc<Runtime>>,
 }
@@ -448,15 +455,66 @@ impl Hub {
         }));
     }
 
-    /// Open the socket unless one is already open or a reconnect is pending.
+    /// Open the socket unless one is already open, a reconnect is pending, or a
+    /// connect is mid-refresh.
     fn ensure_connected() {
-        let needed = Self::with(|st| st.ws.is_none() && st.timeout.is_none());
+        let needed = Self::with(|st| st.ws.is_none() && st.timeout.is_none() && !st.connecting);
         if needed {
             Self::connect();
         }
     }
 
+    /// The stored access token, when it is too near expiry to open a socket
+    /// with. `None` means go ahead: either it is good for a while yet, or there
+    /// is no session and this connection is anonymous.
+    fn token_past_use() -> Option<String> {
+        let runtime = Self::with(|st| st.runtime.clone())?;
+        // Sync, so the guard never spans an await.
+        let _guard = RuntimeGuard::new(runtime);
+        let session = crate::session::SESSION.peek();
+        let token = session.access_token.clone()?;
+        past_use(session.access_token_expires_at, js_sys::Date::now()).then_some(token)
+    }
+
+    /// Connect, replacing the access token first if it has nothing left.
+    ///
+    /// NEVER PRESENT A TOKEN THAT HAS ALREADY LAPSED. Hasura answers one with
+    /// `conn_err: JWTExpired` and closes; `on_close` schedules another attempt;
+    /// that attempt re-reads the SAME dead token from the session and is closed
+    /// on in turn. The socket then retries on backoff until something entirely
+    /// unrelated (a failed query, or the background loop's next pass up to 45s
+    /// later) happens to refresh it. In the server log this is a `conn_err` four
+    /// seconds ahead of the HTTP queries that eventually fixed it.
+    ///
+    /// EXACTLY ONE REFRESH PER ATTEMPT, by construction: the refreshed path goes
+    /// straight to `open_socket`, which never looks again. A refresh that fails
+    /// still opens the socket, and a rejected handshake is then handled the way
+    /// it always was, with backoff. So this cannot spin even if the refresh
+    /// never produces a usable token.
     fn connect() {
+        let Some(stale) = Self::token_past_use() else {
+            Self::open_socket();
+            return;
+        };
+        let Some(runtime) = Self::with(|st| st.runtime.clone()) else {
+            Self::open_socket();
+            return;
+        };
+        Self::with(|st| st.connecting = true);
+        log::info!("subscription hub: refreshing a lapsed token before connecting");
+        // The guard covers the SPAWN, not the await. `spawn_forever` hands the
+        // future to Dioxus, which polls it with the runtime already entered, so
+        // the SESSION reads and writes inside `ensure_fresh_token` are legal
+        // without a guard being held across a suspension point.
+        let _guard = RuntimeGuard::new(runtime);
+        dioxus::core::spawn_forever(async move {
+            crate::session::ensure_fresh_token(Some(&stale)).await;
+            Self::open_socket();
+        });
+    }
+
+    fn open_socket() {
+        Self::with(|st| st.connecting = false);
         let ws_url = graphql_url()
             .replacen("https://", "wss://", 1)
             .replacen("http://", "ws://", 1);
@@ -622,6 +680,25 @@ impl Hub {
     }
 }
 
+/// How much life a token must have left to be worth opening a socket with.
+///
+/// A token with a second on it is as good as dead here: it lapses during the
+/// handshake and the connection is closed before a single row arrives. Five
+/// seconds covers `connection_init` and the ack on a bad connection, and costs
+/// nothing when it is wrong, since refreshing early is what the background loop
+/// does anyway.
+const HANDSHAKE_BUFFER_MS: f64 = 5_000.0;
+
+/// Whether a token expiring at `expires_at` is too far gone to open a socket
+/// with.
+///
+/// No recorded expiry is NOT past use. It means nobody knows, and the honest
+/// move is to try the token rather than refresh on every single connect, which
+/// would put an auth round trip in front of every reconnect in a dropout.
+fn past_use(expires_at: Option<f64>, now: f64) -> bool {
+    expires_at.is_some_and(|exp| now + HANDSHAKE_BUFFER_MS >= exp)
+}
+
 /// Backoff for the nth consecutive failure: 1s, 2s, 4s … capped at 30s, spread
 /// by ±25%.
 ///
@@ -639,7 +716,37 @@ fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff_delay_ms, push_is_a_change, Coalescer, Registry, COALESCE_MS, SPREAD_MS};
+    use super::{
+        backoff_delay_ms, past_use, push_is_a_change, Coalescer, Registry, COALESCE_MS,
+        HANDSHAKE_BUFFER_MS, SPREAD_MS,
+    };
+
+    /// The reconnect loop this exists to break: a token that expired while the
+    /// socket was open must not be presented to the next attempt.
+    #[test]
+    fn a_token_that_has_already_lapsed_is_never_worth_connecting_with() {
+        let now = 1_000_000.0;
+
+        assert!(past_use(Some(now - 1.0), now), "expired a moment ago");
+        assert!(past_use(Some(now), now), "expiring exactly now");
+        // Still nominally alive, but not for long enough to finish a handshake.
+        assert!(past_use(Some(now + HANDSHAKE_BUFFER_MS - 1.0), now));
+    }
+
+    /// The other half: refreshing when there is no need would put an auth round
+    /// trip in front of every reconnect, and a dropout is many reconnects.
+    #[test]
+    fn a_token_with_life_left_is_used_as_it_is() {
+        let now = 1_000_000.0;
+
+        assert!(!past_use(Some(now + HANDSHAKE_BUFFER_MS + 1.0), now));
+        assert!(
+            !past_use(Some(now + 900_000.0), now),
+            "fresh from a refresh"
+        );
+        // Nobody recorded an expiry, so nobody knows it is dead. Try it.
+        assert!(!past_use(None, now));
+    }
 
     /// The state on arrival is not a change to it.
     ///
