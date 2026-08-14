@@ -135,6 +135,75 @@ fn split_link_word(word: &str) -> Option<(String, String, String, String)> {
     Some((pre.to_string(), core.to_string(), href, post.to_string()))
 }
 
+/// Tags that separate what is on either side of them, whether or not this
+/// editor keeps them.
+///
+/// Unwrapping one of these inline is how a candidature arrived reading
+/// "Kære venner,Jeg stiller op som ... ordfører.For mig er KRoL ...": the
+/// source wrote a `div` per paragraph, every `div` was unwrapped to its text
+/// because `div` is not in the allowed list, and the text of one paragraph
+/// was spliced directly onto the end of the last. No character was lost or
+/// changed -- the break between them simply stopped existing.
+///
+/// So an unknown BLOCK becomes a paragraph rather than vanishing, and only
+/// unknown INLINE elements (`span`, `font`, Office's own markup) are still
+/// unwrapped in place, which is what unwrapping is for.
+#[cfg(any(target_arch = "wasm32", test))]
+const PASTE_BLOCK_TAGS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "dd",
+    "details",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "header",
+    "hgroup",
+    "main",
+    "nav",
+    "pre",
+    "section",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+];
+
+/// Whether unwrapping `tag` would run the text on either side of it
+/// together, given what it directly contains.
+///
+/// A block that already holds blocks (`div` wrapping `p`s, which is most of
+/// what an office suite emits) is only a container: its children carry the
+/// structure, so unwrapping it changes nothing and wrapping it in a
+/// paragraph would nest a paragraph inside a paragraph. A block holding only
+/// words is the one that has to become a paragraph, because after it is gone
+/// nothing marks where it ended.
+///
+/// Pure, so the rule is testable without a DOM.
+#[cfg(any(target_arch = "wasm32", test))]
+fn block_needs_a_paragraph(tag: &str, child_tags: &[String]) -> bool {
+    if !PASTE_BLOCK_TAGS.contains(&tag) {
+        return false;
+    }
+    !child_tags.iter().any(|c| {
+        PASTE_BLOCK_TAGS.contains(&c.as_str())
+            || matches!(
+                c.as_str(),
+                "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "li" | "blockquote"
+            )
+    })
+}
+
 /// Plain text as the editor's HTML: escaped, newlines as `<br>`, and any URL or
 /// email as a real anchor.
 ///
@@ -820,6 +889,27 @@ mod dom {
                         let _ = parent.remove_child(el_node);
                     }
                 } else if let Some(parent) = el.parent_node() {
+                    // A block holding only words becomes a paragraph, so the
+                    // break it stood for survives it. Anything else is unwrapped
+                    // in place as before.
+                    let child_tags: Vec<String> = {
+                        let kids = el.child_nodes();
+                        (0..kids.length())
+                            .filter_map(|i| kids.item(i))
+                            .filter_map(|c| c.dyn_into::<Element>().ok())
+                            .map(|c| c.tag_name().to_lowercase())
+                            .collect()
+                    };
+                    if block_needs_a_paragraph(&tag, &child_tags) {
+                        if let Ok(p) = doc.create_element("p") {
+                            while let Some(child) = el.first_child() {
+                                let _ = p.append_child(&child);
+                            }
+                            let _ = parent.insert_before(p.unchecked_ref(), Some(el_node));
+                            let _ = parent.remove_child(el_node);
+                            continue;
+                        }
+                    }
                     // Unwrap: move children out, then drop the wrapper.
                     while let Some(child) = el.first_child() {
                         let _ = parent.insert_before(&child, Some(el_node));
@@ -1159,5 +1249,35 @@ mod tests {
             link_segments("just main.rs here"),
             vec![("just main.rs here".to_string(), None)]
         );
+    }
+
+    /// What went wrong on a candidature that arrived as one run-on paragraph.
+    ///
+    /// The source wrote a `div` per paragraph. `div` is not a tag this editor
+    /// keeps, so each one was unwrapped to its text -- and unwrapping put the
+    /// text of one paragraph directly against the end of the last, which is how
+    /// it came to read "Kære venner,Jeg stiller op". Nothing was lost
+    /// except the boundary, which is the part that cannot be recovered later.
+    #[test]
+    fn a_block_that_only_holds_words_must_not_be_unwrapped_into_its_neighbour() {
+        // The reported case: a div of words. It has to become a paragraph.
+        assert!(block_needs_a_paragraph("div", &[]));
+        assert!(block_needs_a_paragraph(
+            "div",
+            &["b".to_string(), "a".to_string()]
+        ));
+        // A div that already wraps blocks is only a container: its children
+        // carry the structure, and wrapping it would nest a paragraph inside a
+        // paragraph.
+        assert!(!block_needs_a_paragraph("div", &["p".to_string()]));
+        assert!(!block_needs_a_paragraph(
+            "div",
+            &["h2".to_string(), "ul".to_string()]
+        ));
+        assert!(!block_needs_a_paragraph("section", &["div".to_string()]));
+        // Inline elements are what unwrapping is for, and must stay unwrapped:
+        // turning a span into a paragraph would break a sentence in half.
+        assert!(!block_needs_a_paragraph("span", &[]));
+        assert!(!block_needs_a_paragraph("font", &["b".to_string()]));
     }
 }
