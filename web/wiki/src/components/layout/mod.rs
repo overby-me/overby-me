@@ -350,24 +350,36 @@ pub fn Layout() -> Element {
 
     // Pending-invitation count for the nav badge.
     //
-    // Live, not just session-stable: the badge is the ONLY way an invitation
+    // Still not session-stable: the badge is the ONLY way an invitation
     // announces itself, and one arriving while the tab sits open used to stay
-    // invisible until a reload or an unrelated mutation. It watches the same
-    // rows `HomeList` does — the member rows keyed to this user — which is
-    // exactly what an invitation creates. Riding the shared socket, so this
-    // costs a subscription and not a connection.
+    // invisible until a reload or an unrelated mutation.
+    //
+    // ON A TIMER, NOT A SUBSCRIPTION, and that is about the hall rather than
+    // about this badge. Hasura batches live queries into cohorts by query AND
+    // variables, so subscribers asking the same question share one evaluation
+    // per poll. This one asks about the reader's OWN member rows, which puts
+    // every reader in a cohort of one: at a congress of three hundred that is
+    // three hundred evaluations per poll, where a shared question would be one.
+    // Each of those runs the row-level permission check over every membership
+    // the reader has, and one real reader with 206 of them measured at 8.1
+    // SECONDS for a single evaluation before migration 0018.
+    //
+    // So the cost of the badge scaled with the number of people in the room
+    // rather than with anything happening. A minute and a half late is not late
+    // for an invitation, and a poll costs one query per reader per interval
+    // instead of one evaluation per reader per second.
+    const INVITE_POLL_MS: u32 = 90_000;
     {
         let uid = SESSION.read().user.as_ref().map(|u| u.id.clone());
         let email = SESSION.read().user.as_ref().map(|u| u.email.clone());
         let token = SESSION.read().access_token.clone();
-        let invite_refresh = use_signal(|| 0u32);
-        let sub_uid = uid
-            .clone()
-            .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
-        crate::subscription::use_live(
-            crate::graphql::members_changed(crate::graphql::memberships_of(&sub_uid)),
-            invite_refresh,
-        );
+        let mut invite_refresh = use_signal(|| 0u32);
+        use_future(move || async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(INVITE_POLL_MS).await;
+                invite_refresh += 1;
+            }
+        });
         let rev = *invite_refresh.read();
         // Delivered by side effect on purpose, unlike the crumbs above: this
         // lives in the Layout, which never remounts, and its dependencies do

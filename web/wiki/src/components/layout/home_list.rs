@@ -34,16 +34,25 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
         .unwrap_or_default();
     let access_token = session.read().access_token.clone();
 
-    // Live home list: accepting an invitation or a membership change re-fetches
-    // the user's groups and events.
-    let refresh = use_signal(|| 0u32);
-    let sub_uid = user_id
-        .clone()
-        .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
-    crate::subscription::use_live(
-        crate::graphql::members_changed(crate::graphql::memberships_of(&sub_uid)),
-        refresh,
-    );
+    // The home list follows membership changes, on a timer rather than a live
+    // query -- the same question, and for the same reason, as the invitation
+    // badge in layout/mod.rs. It asks about the reader's OWN member rows, so
+    // Hasura can share no work between readers and every one of them is a
+    // cohort of one; at a congress that is a cost that grows with the number of
+    // people in the room rather than with anything changing.
+    //
+    // Your own actions do not wait for this. Accepting an invitation is a
+    // mutation, and a mutation bumps DATA_VERSION, which `use_data_resource!`
+    // already re-runs on -- so the list is immediate for the person who changed
+    // it. The timer is only for being added to something by somebody else while
+    // you happen to be looking at the list.
+    let mut refresh = use_signal(|| 0u32);
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(90_000).await;
+            refresh += 1;
+        }
+    });
 
     let contexts = crate::use_data_resource!(move || {
         let token = access_token.clone();
