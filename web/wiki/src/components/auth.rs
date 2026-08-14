@@ -53,6 +53,45 @@ fn auth_error_message(err: &nhost::NhostError) -> String {
     }
 }
 
+/// Whether a failed auth attempt is one the person can get themselves out of.
+///
+/// A mistyped password is the system working, and at a congress there will be
+/// hundreds of them; shipping each one buries the record in noise. Being
+/// unverified, disabled or rate limited is different: the person is stuck behind
+/// something only somebody with access to the backend can clear, and nothing
+/// they do at the keyboard will help.
+fn auth_failure_is_stuck(err: &nhost::NhostError) -> bool {
+    err.status == Some(429)
+        || matches!(
+            err.error.as_deref(),
+            Some("unverified-user") | Some("disabled-user")
+        )
+}
+
+/// Record a failed auth attempt against the address it was for.
+///
+/// THE ONE PLACE AN EMAIL BELONGS IN A LOG. Everywhere else the reader is either
+/// signed in (and carries `user_id`) or is nobody in particular. Here they are
+/// neither: they are trying to become someone, failing, and the address they
+/// typed is the only thing that says who they are. Without it a lockout reads as
+/// "an anonymous browser had a problem", which is exactly what it read as when
+/// two people could not get in and the only way to find them was the server's
+/// own logs.
+///
+/// Nothing else from the form is recorded, and never the password.
+fn note_auth_failure(what: &str, email: &str, err: &nhost::NhostError) {
+    let kind = err.error.as_deref().unwrap_or("unknown");
+    let status = err
+        .status
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "-".into());
+    if auth_failure_is_stuck(err) {
+        log::warn!("{what} failed for {email}: {kind} (status {status}), they cannot clear this themselves");
+    } else {
+        log::info!("{what} failed for {email}: {kind} (status {status})");
+    }
+}
+
 /// Whether a failure is about the password rather than the address, so its
 /// message lands under the box it is actually about. Everything else a sign-up
 /// or a reset rejects is about the address.
@@ -168,24 +207,29 @@ fn AuthForm(mode: AuthMode) -> Element {
                             crate::session::bump_data_version();
                             back_to_where_they_were();
                         }
-                        Err(err) => match err.error.as_deref() {
-                            Some("unverified-user") => {
-                                error_email.set(t("auth.emailNotVerified"));
-                                unverified.set(true);
+                        Err(err) => {
+                            note_auth_failure("sign-in", &em, &err);
+                            match err.error.as_deref() {
+                                Some("unverified-user") => {
+                                    error_email.set(t("auth.emailNotVerified"));
+                                    unverified.set(true);
+                                }
+                                // Not about the credentials typed, so they say so on
+                                // their own rather than reddening both boxes.
+                                Some("disabled-user")
+                                | Some("network_error")
+                                | Some("parse_error") => {
+                                    error_email.set(auth_error_message(&err));
+                                }
+                                // Anything else a sign-in can fail with is a rejected
+                                // pair, and the service will not say which half was
+                                // wrong, so both boxes carry the same message.
+                                _ => {
+                                    error_email.set(t("auth.wrongCredentials"));
+                                    error_password.set(t("auth.wrongCredentials"));
+                                }
                             }
-                            // Not about the credentials typed, so they say so on
-                            // their own rather than reddening both boxes.
-                            Some("disabled-user") | Some("network_error") | Some("parse_error") => {
-                                error_email.set(auth_error_message(&err));
-                            }
-                            // Anything else a sign-in can fail with is a rejected
-                            // pair, and the service will not say which half was
-                            // wrong, so both boxes carry the same message.
-                            _ => {
-                                error_email.set(t("auth.wrongCredentials"));
-                                error_password.set(t("auth.wrongCredentials"));
-                            }
-                        },
+                        }
                     }
                 }
                 AuthMode::Register => {
@@ -231,6 +275,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                             nav.push(Route::Unverified {});
                         }
                         Err(err) => {
+                            note_auth_failure("sign-up", &em, &err);
                             // Under the box it is about: a rejected password
                             // is not a complaint about the address.
                             let msg = auth_error_message(&err);
@@ -261,7 +306,10 @@ fn AuthForm(mode: AuthMode) -> Element {
                         }
                         // This screen is the address alone: it renders no password
                         // box for a message to land under.
-                        Err(err) => error_email.set(auth_error_message(&err)),
+                        Err(err) => {
+                            note_auth_failure("password-reset", &em, &err);
+                            error_email.set(auth_error_message(&err));
+                        }
                     }
                 }
                 AuthMode::SetPassword => {
@@ -379,9 +427,11 @@ fn AuthForm(mode: AuthMode) -> Element {
                                         // and every press was another 429 -- so
                                         // the shrug turned a wait into a wall.
                                         Err(e) if e.status == Some(429) => {
+                                            note_auth_failure("verification-resend", &em, &e);
                                             crate::snackbar::show_snackbar(&t("auth.verificationTooSoon"))
                                         }
                                         Err(e) => {
+                                            note_auth_failure("verification-resend", &em, &e);
                                             // The call site is the label: a generic toast tells the reader
                                             // nothing, so the log has to say at least where it came from.
                                             crate::errors::log_handled(concat!(file!(), ":", line!()), e);
@@ -565,5 +615,47 @@ pub fn Unverified() -> Element {
                 p { class: "body-medium", "{t(\"auth.checkSpam\")}" }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn err(code: Option<&str>, status: Option<u16>) -> nhost::NhostError {
+        nhost::NhostError {
+            status,
+            error: code.map(str::to_string),
+            message: None,
+        }
+    }
+
+    /// Loud only for the failures the person cannot walk out of.
+    ///
+    /// These are the ones worth a record: an unverified account and a rate
+    /// limited resend are what locked two people out on the eve of a congress,
+    /// and both needed somebody with database access to clear.
+    #[test]
+    fn a_reader_who_is_stuck_is_the_one_worth_recording() {
+        assert!(auth_failure_is_stuck(&err(Some("unverified-user"), None)));
+        assert!(auth_failure_is_stuck(&err(Some("disabled-user"), None)));
+        // The resend button, pressed again because the app said nothing useful.
+        assert!(auth_failure_is_stuck(&err(None, Some(429))));
+    }
+
+    /// And quiet for the ones that are simply someone typing.
+    ///
+    /// A congress means hundreds of mistyped passwords. Shipping each one buries
+    /// the handful that matter, which is the same reason a lapsed session and a
+    /// dropped connection are kept off the wire.
+    #[test]
+    fn a_mistyped_password_is_not_an_incident() {
+        assert!(!auth_failure_is_stuck(&err(
+            Some("invalid-email-password"),
+            Some(401)
+        )));
+        assert!(!auth_failure_is_stuck(&err(Some("user-not-found"), None)));
+        assert!(!auth_failure_is_stuck(&err(Some("invalid-email"), None)));
+        assert!(!auth_failure_is_stuck(&err(None, None)));
     }
 }

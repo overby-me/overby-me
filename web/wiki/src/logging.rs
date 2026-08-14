@@ -33,6 +33,9 @@ thread_local! {
     /// The rolling trail of recent DOM interactions.
     /// A random id identifying this browser tab/session.
     static SESSION_ID: RefCell<String> = const { RefCell::new(String::new()) };
+    /// A random id identifying this BROWSER, across loads and visits. Read once
+    /// at init rather than per entry, so the storage hit is not on every log.
+    static DEVICE_ID: RefCell<String> = const { RefCell::new(String::new()) };
     /// Which build the service worker serving this page came from, once it has
     /// been asked. See [`ask_the_worker_which_build`].
     static SW_BUILD: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -57,6 +60,51 @@ fn current_path() -> String {
     web_sys::window()
         .and_then(|w| w.location().pathname().ok())
         .unwrap_or_default()
+}
+
+/// Where the persistent per-browser id lives.
+const DEVICE_KEY: &str = "wiki_device";
+
+/// A stable id for this browser, so a reader with no account is still one
+/// reader rather than a fresh stranger on every page load.
+///
+/// `session_id` is minted per load and answers "were these twelve errors one
+/// crash?". It cannot answer "is this the same person as an hour ago?", and for
+/// someone signed out there was nothing that could: `user_id` is null, and every
+/// reload started a new identity. A report from an anonymous reader was a report
+/// from nobody in particular, which is exactly the case that needed following.
+///
+/// Random and opaque. It says two records came from one browser and nothing else
+/// -- no name, no address, nothing derived from the device. It lives in
+/// localStorage, so clearing site data clears it, which is the property that
+/// makes it honest.
+///
+/// Falls back to a per-load id where storage throws (private-mode Safari), which
+/// simply leaves that reader as they are today rather than failing the log.
+fn device_id() -> String {
+    let stored = || -> Option<String> {
+        let storage = web_sys::window()?.local_storage().ok()??;
+        if let Some(existing) = storage.get_item(DEVICE_KEY).ok()? {
+            if !existing.is_empty() {
+                return Some(existing);
+            }
+        }
+        let fresh = random_id();
+        // Best effort: a browser that refuses the write still gets an id for
+        // this load, it just will not be the same one next time.
+        let _ = storage.set_item(DEVICE_KEY, &fresh);
+        Some(fresh)
+    };
+    stored().unwrap_or_else(random_id)
+}
+
+/// Two draws rather than one: `Math::random` carries 53 bits of mantissa, and a
+/// single draw scaled into a u64 leaves an id short enough that a congress-sized
+/// crowd would start sharing them.
+fn random_id() -> String {
+    let hi = (js_sys::Math::random() * 1e18) as u64;
+    let lo = (js_sys::Math::random() * 1e18) as u64;
+    format!("{hi:x}{lo:x}")
 }
 
 /// The current user's `(id, name)`, read from the persisted session in
@@ -148,7 +196,8 @@ fn stack_frames(stack: Option<String>) -> Value {
 
 /// One structured log entry with the standard enrichment, so Logtail can filter
 /// and group by any field:
-/// - who: `user_id` / `user_name`, plus a per-tab `session_id`
+/// - who: `user_id` / `user_name`, a per-load `session_id`, and a `device_id`
+///   that persists across loads (the only handle on a signed-out reader)
 /// - where: the current URL `path`, the app `app_version` + `commit`, and a JS
 ///   `stack`
 /// - what they did: `breadcrumbs` (the recent navigation + click/change/submit
@@ -165,6 +214,7 @@ fn make_entry(level: &str, message: String) -> Value {
 fn make_entry_with_stack(level: &str, message: String, stack: Option<String>) -> Value {
     let (user_id, user_name) = current_user();
     let session_id = SESSION_ID.with(|s| s.borrow().clone());
+    let device_id = DEVICE_ID.with(|d| d.borrow().clone());
     json!({
         "dt": now_iso(),
         "level": level,
@@ -172,6 +222,9 @@ fn make_entry_with_stack(level: &str, message: String, stack: Option<String>) ->
         "user_id": user_id,
         "user_name": user_name,
         "session_id": session_id,
+        // Groups a signed-out reader's records across loads; `session_id` still
+        // separates one load from the next within that.
+        "device_id": device_id,
         "path": current_path(),
         "app_version": env!("CARGO_PKG_VERSION"),
         // Which build, so a stack can be read against the code that produced it
@@ -613,8 +666,10 @@ fn queue(entry: Value) {
 
 /// Install the remote logger, breadcrumb listeners, panic hook and flush loop.
 pub fn init() {
-    let sid = format!("{:x}", (js_sys::Math::random() * 1e18) as u64);
+    let sid = random_id();
     SESSION_ID.with(|s| *s.borrow_mut() = sid);
+    let did = device_id();
+    DEVICE_ID.with(|d| *d.borrow_mut() = did);
 
     let _ = log::set_boxed_logger(Box::new(RemoteLogger));
     log::set_max_level(LevelFilter::Info);
