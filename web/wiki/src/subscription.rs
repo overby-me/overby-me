@@ -549,7 +549,25 @@ impl Hub {
                     // does. One shipped double-wrapped and every reader of the
                     // feed lost live updates; it surfaced only because somebody
                     // pasted a warning nobody was filtering for.
-                    log::error!("subscription {id} refused: {detail}");
+                    //
+                    // EXCEPT the duplicate, which is the one refusal that costs
+                    // the reader nothing. "an operation already exists with this
+                    // id" says the server is ALREADY running that subscription,
+                    // so what it turned down is the second copy and the first is
+                    // still delivering. The view is live; only the extra frame
+                    // was refused.
+                    //
+                    // It reached the log as an error with a stack, from a reader
+                    // on 3g moving between two pages. Worth keeping on the
+                    // console, because sending a subscribe twice for one id is a
+                    // client-side race and this is the only sign of it -- but it
+                    // is not the thing the level above was written for, which is
+                    // a view that has gone dead.
+                    if detail.contains("already exists with this id") {
+                        log::info!("subscription {id} already running, duplicate refused");
+                    } else {
+                        log::error!("subscription {id} refused: {detail}");
+                    }
                 }
                 _ => {}
             }
