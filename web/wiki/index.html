@@ -292,10 +292,22 @@
                 // away work that is still perfectly good. sw.js knows to leave
                 // this one alone when it sweeps old caches.
                 var CACHE = "radikalwiki-heic-v1";
-                // Enough for any feed or candidate list a reader will scroll,
-                // at a few hundred KB each. Cache.keys() comes back in
-                // insertion order, so the oldest go first.
-                var KEEP = 120;
+                // Cache.keys() comes back in insertion order, so the oldest go
+                // first.
+                //
+                // 120 was chosen when only decoded HEICs were kept: a few
+                // hundred KB each, downscaled to 2048px, so the whole cache was
+                // tens of megabytes. It then started holding ORDINARY images
+                // too, and those are stored exactly as uploaded -- an unresized
+                // camera JPEG is several MB, so the same count could now be most
+                // of a gigabyte on a phone. Nothing breaks (a quota failure is
+                // caught, and the browser evicts under pressure), but a cache
+                // that large is taking space from the reader to save a fetch
+                // they will probably never make.
+                //
+                // 60 still covers a feed and a candidate list, which is what
+                // this is for: coming back to the page you just left.
+                var KEEP = 60;
 
                 // Two kinds of entry, kept apart on purpose. A decoded HEIC is a
                 // JPEG anything will draw; a raw one is the file exactly as it
