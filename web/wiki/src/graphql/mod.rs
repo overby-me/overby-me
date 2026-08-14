@@ -278,7 +278,7 @@ where
             // The token likely lapsed (e.g. the tab was backgrounded past expiry).
             // Refresh once and retry with the new token before surfacing the error
             // so a returning tab recovers instead of showing a JWT error.
-            match crate::session::ensure_fresh_token().await {
+            match crate::session::ensure_fresh_token(access_token).await {
                 Some(fresh) if Some(fresh.as_str()) != access_token => {
                     execute_once(Some(&fresh), &operation).await
                 }
@@ -399,12 +399,14 @@ pub async fn execute_raw(
 ) -> Result<serde_json::Value, String> {
     let first = retry_offline_reads(query, || execute_raw_once(access_token, query)).await;
     let result = match first {
-        Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
-            Some(fresh) if Some(fresh.as_str()) != access_token => {
-                execute_raw_once(Some(&fresh), query).await
+        Err(msg) if is_jwt_error(&msg) => {
+            match crate::session::ensure_fresh_token(access_token).await {
+                Some(fresh) if Some(fresh.as_str()) != access_token => {
+                    execute_raw_once(Some(&fresh), query).await
+                }
+                _ => Err(msg),
             }
-            _ => Err(msg),
-        },
+        }
         other => other,
     };
     report_raw_failure(access_token, &result, "raw");
@@ -505,12 +507,14 @@ async fn execute_raw_vars_inner(
     })
     .await;
     let result = match first {
-        Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
-            Some(fresh) if Some(fresh.as_str()) != access_token => {
-                execute_raw_vars_once(Some(&fresh), query, &variables).await
+        Err(msg) if is_jwt_error(&msg) => {
+            match crate::session::ensure_fresh_token(access_token).await {
+                Some(fresh) if Some(fresh.as_str()) != access_token => {
+                    execute_raw_vars_once(Some(&fresh), query, &variables).await
+                }
+                _ => Err(msg),
             }
-            _ => Err(msg),
-        },
+        }
         other => other,
     };
     if report {

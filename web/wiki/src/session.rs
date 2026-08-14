@@ -560,12 +560,62 @@ async fn refresh_access_token() -> RefreshOutcome {
     }
 }
 
+/// Whether the session already holds a usable token that is NOT the one the
+/// caller failed with, i.e. somebody else's refresh has already fixed this and
+/// there is nothing left to do.
+///
+/// Both halves matter. A DIFFERENT token means a refresh landed after this
+/// caller read theirs; an UNEXPIRED one means that refresh actually helped. A
+/// token that differs but is itself expired is a caller holding something very
+/// stale, and that does need the real thing.
+fn already_replaced(
+    stale: Option<&str>,
+    current: Option<&str>,
+    expires_at: Option<f64>,
+    now: f64,
+) -> bool {
+    let (Some(stale), Some(current)) = (stale, current) else {
+        return false;
+    };
+    current != stale && expires_at.is_some_and(|exp| now < exp)
+}
+
 /// Ensure a fresh access token for retrying a request that failed with an expired
 /// JWT (e.g. a tab returning after its token lapsed while backgrounded). Refreshes
 /// now, or waits for a refresh already in flight, then returns the current access
 /// token. `None` when signed out or the refresh token itself is dead.
-pub async fn ensure_fresh_token() -> Option<String> {
+///
+/// `stale` is the token the caller just failed with, and it is what makes this
+/// cheap for everyone after the first.
+///
+/// ASK WHETHER IT IS ALREADY DONE, NOT ONLY WHETHER IT IS HAPPENING. The
+/// single-flight flag below answers "is a refresh running?", which is the wrong
+/// question once refreshes are fast. A tab whose token lapses fails EVERY query
+/// it has in the air at that moment, together, and each one arrives here wanting
+/// the token replaced. The first replaces it in about four milliseconds, long
+/// finished before the second one's error handler runs, so the second finds no
+/// refresh in flight, takes the flag itself, and asks again. So does the third.
+///
+/// Seen in the server log as six `/v1/token` calls in 715ms, one after another,
+/// behind seven queries that failed in the same millisecond. Every one after the
+/// first was redundant, and worse than redundant: NHost rotates the refresh
+/// token on use, so each extra call invalidates the token the next caller is
+/// about to present. That is the race `ROTATION_GRACE_MS` exists to survive, and
+/// this was manufacturing it, on the one evening of the year when several
+/// hundred people open the app at once.
+pub async fn ensure_fresh_token(stale: Option<&str>) -> Option<String> {
     use gloo_timers::future::TimeoutFuture;
+    {
+        let session = SESSION.peek();
+        if already_replaced(
+            stale,
+            session.access_token.as_deref(),
+            session.access_token_expires_at,
+            now_ms(),
+        ) {
+            return session.access_token.clone();
+        }
+    }
     match refresh_access_token().await {
         RefreshOutcome::Renewed | RefreshOutcome::Transient => SESSION.peek().access_token.clone(),
         RefreshOutcome::InFlight => {
@@ -644,8 +694,43 @@ pub async fn run_token_refresh() {
 #[cfg(test)]
 mod tests {
     use super::{
-        b64url_decode, is_rotation, jwt_exp_ms, scope_of, ROTATION_ATTEMPTS, ROTATION_GRACE_MS,
+        already_replaced, b64url_decode, is_rotation, jwt_exp_ms, scope_of, ROTATION_ATTEMPTS,
+        ROTATION_GRACE_MS,
     };
+
+    /// The whole point of passing the failed token in: of seven queries that
+    /// lapse together, only the first should reach the auth server.
+    #[test]
+    fn only_the_first_of_a_lapsed_batch_asks_for_a_new_token() {
+        let (stale, fresh, now) = (Some("header.OLD.sig"), Some("header.NEW.sig"), 1_000.0);
+        let alive = Some(now + 900_000.0);
+
+        // The first caller: the session still holds exactly what it failed with,
+        // so there is nothing to adopt and it must do the real refresh.
+        assert!(!already_replaced(stale, stale, alive, now));
+        // Everyone after it: the token on the session is not theirs any more,
+        // which IS the answer they came for.
+        assert!(already_replaced(stale, fresh, alive, now));
+    }
+
+    /// Adopting whatever happens to be there would swap one expired token for
+    /// another and report success. Different is not the same as usable.
+    #[test]
+    fn a_replacement_that_has_itself_expired_is_no_replacement() {
+        let (stale, fresh, now) = (Some("header.OLD.sig"), Some("header.NEWER.sig"), 1_000.0);
+
+        assert!(!already_replaced(stale, fresh, Some(now - 1.0), now));
+        // No recorded expiry means no evidence it is good, so do the real work.
+        assert!(!already_replaced(stale, fresh, None, now));
+        // Signed out entirely: nothing to short-circuit to.
+        assert!(!already_replaced(stale, None, alive_far(now), now));
+        // A caller with no token of its own cannot tell us anything changed.
+        assert!(!already_replaced(None, fresh, alive_far(now), now));
+    }
+
+    fn alive_far(now: f64) -> Option<f64> {
+        Some(now + 900_000.0)
+    }
 
     /// A cached answer must survive its reader's token being rotated. Filed
     /// under the token, an hourly rotation renamed every answer at once and

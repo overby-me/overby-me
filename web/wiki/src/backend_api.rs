@@ -108,7 +108,7 @@ async fn storage_get(file_id: &str, token: &str) -> Result<reqwest::Response, St
     }
     // Only worth a second attempt if the refresh actually produced a different
     // token; otherwise this is the same request with the same credential.
-    match crate::session::ensure_fresh_token().await {
+    match crate::session::ensure_fresh_token(Some(token)).await {
         Some(fresh) if fresh != token => send(fresh).await,
         _ => Ok(first),
     }
