@@ -214,3 +214,85 @@ mod tests {
         assert_eq!(item.comment_count, 3);
     }
 }
+
+/// Full-text search across indexed records: `sh.tangled.search.query`.
+pub const SEARCH_QUERY: &str = "sh.tangled.search.query";
+
+/// One search hit. `value` stays raw because a hit can be any record type,
+/// and the nsid says which.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchHit {
+    pub uri: String,
+    #[serde(default)]
+    pub cid: Option<String>,
+    #[serde(default)]
+    pub nsid: String,
+    #[serde(default)]
+    pub score: f64,
+    #[serde(default)]
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchResult {
+    #[serde(default = "Vec::new")]
+    pub hits: Vec<SearchHit>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+impl SearchHit {
+    /// A one-line label for a hit, whatever kind of record it is.
+    pub fn title(&self) -> String {
+        for key in ["name", "title", "description"] {
+            if let Some(v) = self.value.get(key).and_then(|v| v.as_str()) {
+                if !v.is_empty() {
+                    return v.chars().take(72).collect();
+                }
+            }
+        }
+        // Nothing human-readable: the record key is at least an identifier.
+        self.uri.rsplit('/').next().unwrap_or("").to_string()
+    }
+
+    /// The record type without the `sh.tangled.` prefix, for display.
+    pub fn kind(&self) -> &str {
+        self.nsid.strip_prefix("sh.tangled.").unwrap_or(&self.nsid)
+    }
+}
+
+impl TangledClient {
+    pub async fn search(&self, query: &str, limit: usize) -> Result<SearchResult> {
+        let params = [("q", query.to_string()), ("limit", limit.to_string())];
+        self.get_json(SEARCH_QUERY, &params, None).await
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn labels_a_hit_by_whatever_field_it_has() {
+        let repo: SearchHit = serde_json::from_str(
+            r#"{"uri":"x/y/z","nsid":"sh.tangled.repo","value":{"name":"rust-awk"}}"#,
+        )
+        .unwrap();
+        assert_eq!(repo.title(), "rust-awk");
+        assert_eq!(repo.kind(), "repo");
+
+        let issue: SearchHit = serde_json::from_str(
+            r#"{"uri":"x/y/z","nsid":"sh.tangled.repo.issue","value":{"title":"a bug"}}"#,
+        )
+        .unwrap();
+        assert_eq!(issue.title(), "a bug");
+    }
+
+    #[test]
+    fn falls_back_to_the_record_key() {
+        let hit: SearchHit =
+            serde_json::from_str(r#"{"uri":"at://x/coll/3abc","nsid":"other","value":{}}"#)
+                .unwrap();
+        assert_eq!(hit.title(), "3abc");
+    }
+}

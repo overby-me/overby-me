@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use crate::cli::{
     Cli, OutputFormat, RepoCloneArgs, RepoCommand, RepoCreateArgs, RepoDeleteArgs, RepoEditArgs,
-    RepoForkArgs, RepoInfoArgs, RepoListArgs, RepoRefArgs,
+    RepoForkArgs, RepoInfoArgs, RepoListArgs, RepoRefArgs, RepoSearchArgs,
+    RepoSetDefaultBranchArgs,
 };
 
 pub async fn run(cli: &Cli, cmd: RepoCommand) -> Result<()> {
@@ -19,6 +20,8 @@ pub async fn run(cli: &Cli, cmd: RepoCommand) -> Result<()> {
         RepoCommand::Star(args) => star(args).await,
         RepoCommand::Unstar(args) => unstar(args).await,
         RepoCommand::Fork(args) => fork(args).await,
+        RepoCommand::SetDefaultBranch(args) => set_default_branch(args).await,
+        RepoCommand::Search(args) => search(args).await,
     }
 }
 
@@ -382,4 +385,53 @@ fn parse_repo_ref<'a>(spec: &'a str, default_owner: &'a str) -> (&'a str, String
     } else {
         (default_owner, spec.to_string())
     }
+}
+
+async fn set_default_branch(args: RepoSetDefaultBranchArgs) -> Result<()> {
+    let session = crate::util::load_session_with_refresh().await?;
+    let pds = crate::util::pds_of(&session);
+    let client = crate::util::make_client(&pds);
+    let (owner, name) = parse_repo_ref(&args.repo, &session.handle);
+    let (owner, name) = (owner.to_string(), name.to_string());
+    let info = client
+        .get_repo_info(&owner, &name, Some(session.access_jwt.as_str()))
+        .await?;
+    // The knot keys this on the repo's own DID, as it does for a push.
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("{owner}/{name} has no repoDid; recreate it"))?;
+    client
+        .set_default_branch(
+            &info.knot,
+            &repo_did,
+            &args.branch,
+            &pds,
+            &session.access_jwt,
+        )
+        .await?;
+    println!("Default branch of {owner}/{name} is now {}", args.branch);
+    Ok(())
+}
+
+async fn search(args: RepoSearchArgs) -> Result<()> {
+    let appview = crate::util::make_client(&tangled_api::appview::appview_base());
+    let result = appview.search(&args.query, args.limit).await?;
+    let hits: Vec<_> = result
+        .hits
+        .iter()
+        .filter(|h| match args.kind.as_deref() {
+            Some(k) => h.kind() == k || h.nsid == k,
+            None => true,
+        })
+        .collect();
+    if hits.is_empty() {
+        println!("No matches");
+        return Ok(());
+    }
+    println!("KIND\tSCORE\tTITLE");
+    for h in hits {
+        println!("{}\t{:.1}\t{}", h.kind(), h.score, h.title());
+    }
+    Ok(())
 }

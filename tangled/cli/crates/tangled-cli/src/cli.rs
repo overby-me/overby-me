@@ -166,6 +166,31 @@ pub enum RepoCommand {
     Unstar(RepoRefArgs),
     /// Fork a repository
     Fork(RepoForkArgs),
+    /// Repoint the default branch
+    #[command(name = "set-default-branch")]
+    SetDefaultBranch(RepoSetDefaultBranchArgs),
+    /// Search indexed records
+    Search(RepoSearchArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RepoSetDefaultBranchArgs {
+    /// Repo: <owner>/<name>
+    pub repo: String,
+    /// Branch to point HEAD at
+    pub branch: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RepoSearchArgs {
+    /// What to search for
+    pub query: String,
+    /// Maximum hits
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+    /// Only this record type, e.g. repo, repo.issue, repo.pull
+    #[arg(long)]
+    pub kind: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]

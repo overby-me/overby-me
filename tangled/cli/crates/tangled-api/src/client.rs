@@ -1480,6 +1480,34 @@ impl TangledClient {
         }
     }
 
+    /// Repoint a repo's default branch (the bare repo's HEAD) on its knot.
+    pub async fn set_default_branch(
+        &self,
+        knot_host: &str,
+        repo_did: &str,
+        branch: &str,
+        pds_base: &str,
+        access_jwt: &str,
+    ) -> Result<()> {
+        const SET_DEFAULT_BRANCH: &str = "sh.tangled.repo.setDefaultBranch";
+        #[derive(Serialize)]
+        struct Req<'a> {
+            repo: &'a str,
+            #[serde(rename = "defaultBranch")]
+            default_branch: &'a str,
+        }
+        let sa = self
+            .knot_push_token(pds_base, access_jwt, knot_host, SET_DEFAULT_BRANCH, 240)
+            .await?;
+        let req = Req {
+            repo: repo_did,
+            default_branch: branch,
+        };
+        self.derive(format!("https://{knot_host}"))
+            .post(SET_DEFAULT_BRANCH, &req, Some(&sa))
+            .await
+    }
+
     /// Resolve a handle to a DID.
     pub async fn resolve_handle(&self, handle: &str, bearer: Option<&str>) -> Result<String> {
         if handle.starts_with("did:") {
