@@ -307,6 +307,56 @@ def "main ingest" [
   print ""
   git-ok $mirror ["log" "--oneline" "--stat" $"($base)..($tip)"] | print
   print ""
+  let tip = (run-post-ingest $mirror $entry $review $tip)
+
   print $"fetch it with:  git fetch ($mirror) ($review)"
   git-ok $mirror ["update-ref" $marker $incoming] | ignore
+}
+
+# Run a project's post_ingest commands over the review branch.
+#
+# The mirror is bare, so there is nothing to run them in: check the branch out
+# into a throwaway worktree, run them there, and fold any resulting change
+# back onto the branch. rust-lang's josh-sync does the same thing after a pull
+# (its example is `cargo fmt`), which only works because it operates inside a
+# real checkout.
+def run-post-ingest [mirror: path, entry: record, review: string, tip: string]: nothing -> string {
+  let hooks = ($entry | get post_ingest? | default [])
+  if ($hooks | is-empty) { return $tip }
+
+  let work = ($mirror | path dirname | path join $"ingest-work-($entry.name)")
+  rm -rf $work
+  git-ok $mirror ["worktree" "add" "--quiet" "--detach" $work $review] | ignore
+
+  # Run inside the project's own directory, not the monorepo root: a
+  # formatter invoked at the root would reformat the entire tree rather than
+  # the contribution.
+  let run_in = ($work | path join $entry.path)
+  let run_in = if ($run_in | path exists) { $run_in } else { $work }
+
+  mut current = $tip
+  for hook in $hooks {
+    print $"  post-ingest [($entry.path)]: ($hook.cmd | str join ' ')"
+    let out = (do { cd $run_in; ^($hook.cmd | first) ...($hook.cmd | skip 1) | complete })
+    if $out.exit_code != 0 {
+      git-in $mirror ["worktree" "remove" "--force" $work] | ignore
+      error make {msg: $"post_ingest ($hook.cmd | str join ' ') failed: ($out.stderr | str trim)"}
+    }
+    let dirty = (git-ok $work ["status" "--porcelain"])
+    if ($dirty | is-empty) {
+      print "    no change"
+      continue
+    }
+    git-ok $work ["add" "-A"] | ignore
+    git-ok $work ["commit" "--quiet" "-m" $hook.message] | ignore
+    $current = (git-ok $work ["rev-parse" "HEAD"])
+    print $"    committed ($hook.message)"
+  }
+
+  # The worktree is detached, so the branch has to be moved onto its result.
+  if $current != $tip {
+    git-ok $mirror ["update-ref" $"refs/heads/($review)" $current] | ignore
+  }
+  git-in $mirror ["worktree" "remove" "--force" $work] | ignore
+  $current
 }

@@ -24,6 +24,12 @@
 # Keep the shared surface empty. Nothing here maps a path from outside its
 # own directory, so a commit reaches a published repo only if it touched
 # that project.
+# An optional post_ingest list runs after a contribution is reverse-filtered,
+# in a temporary worktree checked out from the review branch. Anything it
+# changes is committed onto that branch, so a contribution can be normalised
+# (a formatter, a lockfile refresh) before you read it:
+#
+#   post_ingest: [{ cmd: ["cargo" "fmt"], message: "style: cargo fmt" }]
 [
   {
     name: "rust-awk"
