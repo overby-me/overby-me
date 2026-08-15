@@ -2274,6 +2274,82 @@ actually asks for and leaves the module declarations where a reader looks
 for them; the other two are recorded in `.deslop.toml` with reasons, a
 sixty-line crate root not being an oversized file and a doc comment that
 records how a rule was measured not being a tutorial.
+The next pass took `DIExpression`, which was recorded as measured and not
+written, wanting "the stack discipline of a DWARF expression, which is a
+small interpreter rather than a table". That was wrong, and the way it was
+got wrong is worth keeping: three probe designs had each measured something
+other than arity, and the pair that settled it was `DIExpression(DW_OP_swap)`
+refused against `DIExpression(DW_OP_swap, DW_OP_deref)` accepted, which no
+arity explains. What no arity explains is one rule beside the table rather
+than the absence of a table, and asking every opcode the same questions is
+what shows that where asking one opcode many questions did not.
+It is a table of 103 operations upstream reads, out of 189 codes it has a
+word for, and four rules. An opcode may not stand alone, which is
+`DW_OP_swap` and only it. Two have to be last, `DW_OP_stack_value` and
+`DW_OP_LLVM_fragment`. Sixty-four end the checking: `DW_OP_reg0` through
+`DW_OP_breg31` accept anything at all after them, where `DW_OP_regx` and
+`DW_OP_bregx` do not, which is why that is a range rather than a notion.
+Not quite anything: an operation written short of its operands after one of
+those is where `opt` segfaults rather than answering, `DW_OP_reg0,
+DW_OP_constu` among them, which is another crash upstream and so no verdict
+at all. The walk stops at the register operation rather than reading on,
+which agrees with every shape that does have one.
+The fourth is the entry value, and it needed a dozen modules of its own.
+`DW_OP_LLVM_entry_value` covers exactly one operation, whatever follows it,
+so its operand is one and nothing else; and it has to be the first operation
+or the one directly after a leading `DW_OP_LLVM_arg 0`. Like a register
+operation it then ends the checking, which is what makes
+`DW_OP_LLVM_entry_value, 1, DW_OP_deref, DW_OP_LLVM_entry_value, 2,
+DW_OP_deref` a module upstream reads: the second entry value is never asked
+about. Reading that as "an entry value may appear anywhere once one is
+first" was the wrong shape and cost four more probes to correct.
+Two questions per opcode rather than one, and the first is what the second
+needs. Upstream writes an opcode as a word only for an expression it finds
+valid, and a register operation ends the checking, so `DW_OP_reg0` in front
+of any code makes it answer: the word comes back, and the elements written
+after it come back as numbers where they are operands and as words where
+they are the next opcode. That reaches every code upstream can write rather
+than only the ones it verifies, which is what the printer needs and what no
+validity probe can give: `DW_OP_LLVM_entry_value` is refused by every shape
+the validity questions ask and still has an arity to print with.
+The filler written after each code has to be an opcode with a word of its
+own. Filling with nought could not tell an operand from the next opcode,
+both coming back as nothing, and that made `DW_OP_LLVM_convert` look like it
+takes one operand where it takes two. Which is a rule of its own: what a
+conversion converts to is an encoding, so `DW_OP_LLVM_convert, 8, 5` comes
+back `DW_OP_LLVM_convert, 8, DW_ATE_signed`, and it is the one operand
+anywhere in an expression that upstream writes as a word.
+With the words measured, the elements are stored as numbers, the way the
+`tag:` fields have been since the eighty-second pass and for the same
+reason: upstream's own error dump prints them as numbers, so that is what it
+holds, and two nodes that differ only in the spelling are one node. A word
+upstream does not know is a parse error now rather than something carried,
+and which words it knows is not a guess: every `DW_OP_*` in the whole of
+`llvm/test` is either in the table or one the assembler refuses, which the
+generator checks by asking it. Reading an encoding's word anywhere in an
+expression came out of that audit rather than out of the convert rule.
+An element is unsigned, which came out of comparing the printing rather
+than the accepting: `!DIExpression(DW_OP_reg0, -1)` printed here and did not
+upstream, and the reason is that upstream refuses a signed element wherever
+one is written.
+Assembler 480 to 481 and Verifier 320 to 323, the ceilings staying at
+nought, and the eleven trees unmoved.
+Three more verifier rules went in beside it, each a module upstream was
+asked about in both directions. A `range` on an `immarg` parameter
+constrains the literal the call writes, half-open and unsigned, so
+`range(i32 -3, 4)` refuses -4 and 4 while `range(i32 4, -3)` is the wrap
+round the end and refuses nought. `llvm.stepvector` counts lanes, so it
+counts into lanes wide enough to hold a count: integers of at least eight
+bits, which makes `<vscale x 16 x i1>` too narrow where `<4 x i8>` is fine.
+And a `!DILocation` says where in the source something came from, so an
+attachment may be one and may not reach one through a plain node, on an
+instruction or on a function; `llvm.loop` is exempt with its whole subtree,
+and a global's attachments and a named list are not asked at all. That last
+was recorded as unmeasurable because `llvm-as` aborts on `!prof` and
+`!annotation` holding a location. It aborts on those two and answers for
+every other kind, and a crash is not a verdict either way, so the rule is
+written for all of them.
+Assembler 481 to 482 and Verifier 323 to 325.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*
@@ -2355,4 +2431,10 @@ is `[todo]`.
   `cargo clippy --workspace --all-targets -- -D warnings`. The pre-commit hooks
   run both and the abort-retry cycle is slower than doing it first.
 - `deslop scan rust/llvm` catches AI-slop patterns; `.deslop.toml` records the
-  rules that are disabled and why.
+  rules that are disabled and why. Run it *before* the nix checks rather than
+  at commit time: a finding blocks the commit, and the fix for one is a source
+  change, which invalidates every check derivation and costs the whole run
+  again. The scanner indexes one file at a time, so a call through a sibling
+  module reads as unresolved: prefer rewriting the call to disabling the rule,
+  which is what `for (code, spelling) in dwarf::ENCODING` is doing in
+  `metadata/expression.rs`.

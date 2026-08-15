@@ -107,11 +107,24 @@ impl Printer<'_> {
                         }
                     }
                     SpecializedArgs::Positional(fields) => {
+                        // An expression holds numbers, and upstream writes
+                        // each one back as the word it stands for, so long as
+                        // it reads the expression at all. One it does not is
+                        // written out as the numbers it holds.
+                        let written = (tag == "DIExpression")
+                            .then(|| llvm_ir::metadata::expression::elements(fields))
+                            .flatten()
+                            .and_then(|elements| {
+                                llvm_ir::metadata::expression::written_words(&elements)
+                            });
                         for (index, value) in fields.iter().enumerate() {
                             if index > 0 {
                                 self.push(", ");
                             }
-                            self.metadata_field(value);
+                            match written.as_ref().and_then(|written| written[index]) {
+                                Some(word) => self.push(word),
+                                None => self.metadata_field(value),
+                            }
                         }
                     }
                 }

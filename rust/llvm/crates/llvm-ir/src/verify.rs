@@ -93,6 +93,49 @@ impl Verifier<'_> {
         }
     }
 
+    /// A `!DILocation` says where in the source something came from, so it
+    /// belongs on the instruction rather than inside a node the instruction
+    /// carries. Upstream refuses one an attachment reaches through a plain
+    /// node, on an instruction or on a function, while an attachment that is
+    /// a location itself is what `!dbg` is.
+    ///
+    /// `llvm.loop` is exempt, its whole subtree with it, that being where the
+    /// locations of a loop's own boundaries are kept. A global's attachments
+    /// and a named list are not asked at all, and neither is a specialized
+    /// node's field, which is where debug info reaches its own locations.
+    ///
+    /// Two kinds abort llvm-as rather than answering, `!prof` and
+    /// `!annotation`, so there is no verdict for either and this refuses them
+    /// the way it refuses every other kind.
+    fn attachment_keeps_locations_out(&mut self, attachment: &MdAttachment, what: &str) {
+        if attachment.kind == "llvm.loop" {
+            return;
+        }
+        let Some(node) = self.resolve(&attachment.node) else {
+            return;
+        };
+        let mut pending = match node.as_tuple() {
+            Some(operands) => operands.to_vec(),
+            None => return,
+        };
+        let mut seen: HashSet<MdId> = HashSet::new();
+        while let Some(operand) = pending.pop() {
+            let node = match operand {
+                MdOperand::Ref(id) if seen.insert(id) => self.module.metadata_node(id).cloned(),
+                MdOperand::Inline(node) => Some(*node),
+                _ => None,
+            };
+            let Some(node) = node else { continue };
+            if matches!(&node, Metadata::Specialized { tag, .. } if tag == "DILocation") {
+                self.report(format!("{what} reaches a !DILocation through a plain node"));
+                return;
+            }
+            if let Some(operands) = node.as_tuple() {
+                pending.extend(operands.iter().cloned());
+            }
+        }
+    }
+
     fn metadata_exists(&mut self, id: MdId, what: &str) {
         if self.module.metadata_node(id).is_none() {
             self.report(format!("{what} refers to undefined metadata !{}", id.0));
@@ -333,6 +376,19 @@ impl Verifier<'_> {
                 }
             }
         }
+        // A `!DIExpression` is a flat list of numbers that has to read as an
+        // opcode, its operands, the next opcode and so on.
+        // `crates/llvm-ir/src/metadata/expression.rs` is what upstream takes,
+        // measured a module at a time.
+        let invalid: Vec<MdId> = self
+            .module
+            .metadata_nodes()
+            .filter(|(_, node)| !expression_is_valid(node))
+            .map(|(id, _)| id)
+            .collect();
+        for id in invalid {
+            self.report(format!("invalid expression in !{}", id.0));
+        }
     }
 
     /// The globals whose names upstream reserves, and the shapes it insists
@@ -515,6 +571,19 @@ impl Verifier<'_> {
                 ) =>
             {
                 self.report(format!("{where_} produces a mask that is not made of i1"));
+            }
+            // It counts the lanes, so what it counts into is a lane wide
+            // enough to hold a count: an integer, and one of at least eight
+            // bits, which is what makes `<vscale x 16 x i1>` too narrow where
+            // `<4 x i8>` is fine.
+            "llvm.stepvector"
+                if !matches!(
+                    TypeKind::as_vector(self.module.ctx.type_kind(result))
+                        .map(|(element, _, _)| self.module.ctx.type_kind(element)),
+                    Some(TypeKind::Integer(bits)) if *bits >= 8
+                ) =>
+            {
+                self.report(format!("{where_} steps through lanes narrower than an i8"));
             }
             // It masks a pointer, so it takes one and returns one.
             "llvm.ptrmask" => {
@@ -1484,6 +1553,7 @@ impl Verifier<'_> {
 
         for attachment in function.metadata.clone() {
             self.attachment_resolves(&attachment.node, "the function");
+            self.attachment_keeps_locations_out(&attachment, "the function");
         }
 
         let profiles = function
@@ -1863,6 +1933,10 @@ impl Verifier<'_> {
             }
             for attachment in instruction.metadata.clone() {
                 self.attachment_resolves(&attachment.node, &format!("an instruction in {label}"));
+                self.attachment_keeps_locations_out(
+                    &attachment,
+                    &format!("an instruction in {label}"),
+                );
             }
             self.instruction(function, id, inst_id);
         }
@@ -2915,6 +2989,25 @@ impl Verifier<'_> {
                         .iter()
                         .map(|param| param.attrs.has(EnumAttr::ImmArg))
                         .collect();
+                    // An `immarg` parameter is written as a literal at the
+                    // call, so a `range` on it is something the call itself
+                    // can be held to rather than a promise about a value
+                    // nobody here can see.
+                    let ranges: Vec<Option<(ApInt, ApInt)>> =
+                        callee
+                            .params
+                            .iter()
+                            .map(|param| {
+                                param.attrs.attributes.iter().find_map(
+                                    |attribute| match attribute {
+                                        Attribute::Range { lower, upper, .. } => {
+                                            Some((lower.clone(), upper.clone()))
+                                        }
+                                        _ => None,
+                                    },
+                                )
+                            })
+                            .collect();
                     // The other half of the same reading: positions whose
                     // types vary together across LangRef's instantiations
                     // are one overloaded type, so a call giving two of them
@@ -3079,6 +3172,19 @@ impl Verifier<'_> {
                         if immediate.get(position) == Some(&true) && !immediate_value {
                             self.report(format!(
                                 "{where_} passes a non-immediate to an immarg parameter"
+                            ));
+                        }
+                        if immediate.get(position) == Some(&true)
+                            && let Some(Some((lower, upper))) = ranges.get(position)
+                            && let Value::Constant(id) = arg.value
+                            && let Constant::Integer { value, .. } = self.module.ctx.constant(id)
+                            && !range_holds(lower, upper, value)
+                        {
+                            self.report(format!(
+                                "{where_} passes {} to an immarg parameter ranged [{}, {})",
+                                value.to_string_signed(),
+                                lower.to_string_signed(),
+                                upper.to_string_signed()
                             ));
                         }
                     }
@@ -5099,3 +5205,47 @@ static STRING_VALUED: &[(&str, &str)] = &[
     ("DIStringType", "stringLocationExpression"),
     ("DITemplateValueParameter", "value"),
 ];
+
+/// Whether a `range(T lower, upper)` holds a value.
+///
+/// The interval is half-open and the comparison is unsigned, so a range whose
+/// lower bound is above its upper one is the wrap round the end rather than an
+/// empty one: `range(i32 -3, 4)` holds -3 and 3 and neither -4 nor 4, while
+/// `range(i32 4, -3)` holds 5 and not nought. Both were measured, an empty
+/// range being refused elsewhere.
+fn range_holds(lower: &ApInt, upper: &ApInt, value: &ApInt) -> bool {
+    if lower.bits() != value.bits() || upper.bits() != value.bits() {
+        return true;
+    }
+    let above_lower = value.cmp_unsigned(lower).is_ge();
+    let below_upper = value.cmp_unsigned(upper).is_lt();
+    if lower.cmp_unsigned(upper).is_gt() {
+        above_lower || below_upper
+    } else {
+        above_lower && below_upper
+    }
+}
+
+/// Whether a node that is a `!DIExpression` holds something upstream reads.
+///
+/// Anything that is not one answers yes, there being nothing to say about it.
+/// The elements are numbers by the time they are here, a word having been
+/// read as the number it stands for, so `DW_OP_deref` and `6` are one node
+/// and one question.
+fn expression_is_valid(node: &Metadata) -> bool {
+    let Metadata::Specialized { tag, args, .. } = node else {
+        return true;
+    };
+    if tag != "DIExpression" {
+        return true;
+    }
+    let SpecializedArgs::Positional(fields) = args else {
+        return true;
+    };
+    // An element that is neither a number nor one is an expression upstream
+    // never built, a word having been read into its number as the node was.
+    let Some(elements) = crate::metadata::expression::elements(fields) else {
+        return false;
+    };
+    crate::metadata::expression::is_valid(&elements)
+}

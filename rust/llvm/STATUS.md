@@ -58,6 +58,7 @@ and each row names the check that backs it.
 | A `DIMacroFile`'s `type` read and never written back | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | One written intrinsic name implying a declaration per instantiation it is called at | done | `llvm-upstream-assembler`, `llvm-roundtrip` |
 | A call read as an instruction rather than as a call | done for the four `llvm.nvvm.atomic.load.*` upstream's tests exercise | `llvm-upstream-assembler`, `llvm-roundtrip` |
+| `!DIExpression` opcodes held as numbers, checked against what upstream reads, and written back as the words it writes | done for the 103 operations it reads, out of the 189 codes it has a word for | `llvm-upstream-verifier`, `llvm-upstream-assembler`, `llvm-roundtrip` |
 
 ## The round trip
 
@@ -100,8 +101,8 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 480 | 483 | 0 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 320 | 328 | 0 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 482 | 483 | 0 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 325 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -162,8 +163,8 @@ matches the list.
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse nothing llvm-as reads**. That count is the failure that
 matters and it is a ceiling that may only fall; it is at nought in both
-suites now. We **read 11 modules llvm-as refuses**, three in Assembler and
-eight in Verifier, which is a missing verifier rule each, and agreement is a
+suites now. We **read 4 modules llvm-as refuses**, one in Assembler and
+three in Verifier, which is a missing verifier rule each, and agreement is a
 floor that may only rise. Everything left in these two suites is on that
 side.
 
@@ -225,13 +226,14 @@ the call matches its own declaration and only LangRef knows better;
 upstream's suites contain no such module and a compiler reading real IR
 will meet one. What it cannot reach is the rest of the gap, because those rules are prose
 rather than types. Those are being written one at a time instead, keyed on the base name the
-table knows how to find. Nine so far: `llvm.bswap` swapping a whole number
+table knows how to find: `llvm.bswap` swapping a whole number
 of byte pairs, a masked access taking an alignment that is one,
 `get_active_lane_mask` producing a mask of `i1`, `llvm.ptrmask` masking a
 pointer, `get.vector.length` asking for a factor above zero,
 `get.dynamic.area.offset` producing a scalar integer, `vector.splice`
 indexing inside its own vector, `vector.extract` and `vector.insert`
-starting at a multiple of the subvector's length, and the intrinsics that
+starting at a multiple of the subvector's length, `llvm.stepvector`
+stepping through lanes of at least eight bits, and the intrinsics that
 reach through a pointer needing an `elementtype` to say what they reach. Checking the argument *count* was
 tried and reverted, since upstream auto-upgrades the older spelling of an
 intrinsic and demanding LangRef's arity cost two files.
@@ -254,6 +256,17 @@ Two derivations feed the metadata schema, both measured against upstream
 rather than reasoned about: `corpus/md-required-fields.nu` says which fields
 a node cannot be written without, and `corpus/md-field-defaults.nu` says
 which are dropped when written at their default.
+
+`corpus/dwarf-expression.nu` does the same for what a `!DIExpression` holds,
+and it asks two kinds of question. Validity is the exit code of
+`opt -S -passes=verify` on a two-line module. The word and the arity come
+off upstream's own output instead, because it writes an opcode as a word
+only for an expression it finds valid: a register operation ends its
+checking, so `DW_OP_reg0` in front of any code makes that code answer
+whether or not it would verify. Every `DW_OP_*` word written anywhere in
+`llvm/test` is either in the table or one the assembler refuses, which the
+script checks by asking it rather than by assuming its sweep went far
+enough.
 
 A third asks the assembler about the intrinsics rather than the metadata.
 `corpus/intrinsic-attributes.nu` writes out every `declare` line LangRef
@@ -342,10 +355,14 @@ a compiler project's README:
   narrower than it was: which fields drop at their default, which are stored
   even when they drop, the order they print in and the DWARF vocabularies
   behind them are all measured against upstream rather than reasoned about,
-  so the nodes print back the way upstream prints them. What is still
-  missing is everything that needs the semantics: rewriting `DIExpression`
-  opcode sequences, and filling a compile unit's file in from a subprogram
-  that names it. Both want the `llvm-debuginfo` crate at T1.
+  so the nodes print back the way upstream prints them. A `DIExpression`'s
+  opcodes are measured the same way: which numbers upstream reads as
+  operations, how many elements each takes, and the four rules beside that
+  table, so an expression it refuses we refuse and one it writes back as
+  words we write the same. What is still missing is everything that needs
+  the semantics: rewriting an expression written for an older dialect, and
+  filling a compile unit's file in from a subprogram that names it. Both
+  want the `llvm-debuginfo` crate at T1.
 - **No unwinding, no LTO, no PGO, no coverage.**
 - **No C ABI.** `llvm-c-abi` is T5.
 

@@ -61,6 +61,7 @@ impl Parser {
                 // vocabulary has is a number by the time its range is asked
                 // about and one it does not have is what is left over.
                 let args = read_vocabulary_words(&tag, args);
+                let args = self.read_expression_words(&tag, args)?;
                 self.check_specialized(schema, &tag, distinct, &args)?;
                 let args = drop_defaulted_fields(schema, &tag, args);
                 let args = fill_compile_unit_defaults(&tag, args);
@@ -88,6 +89,45 @@ impl Parser {
                 other.describe()
             )),
         }
+    }
+
+    /// An element of a `!DIExpression` written as a word, holding the number
+    /// the word stands for, so that `DW_OP_deref` and `6` are one element.
+    ///
+    /// Upstream reads an operation's word and an encoding's and refuses any
+    /// other, which is where `!DIExpression(DW_OP_bogus)` is caught.
+    fn read_expression_words(
+        &mut self,
+        tag: &str,
+        args: SpecializedArgs,
+    ) -> Result<SpecializedArgs, ParseError> {
+        if tag != "DIExpression" {
+            return Ok(args);
+        }
+        let SpecializedArgs::Positional(elements) = args else {
+            return Ok(args);
+        };
+        let mut read = Vec::with_capacity(elements.len());
+        for element in elements {
+            // An element is an opcode or one of its operands, and neither is
+            // ever negative: upstream reads the list as unsigned numbers and
+            // says so where one is written with a sign.
+            if matches!(element, MdField::Signed(_)) {
+                return self.error("expected unsigned integer");
+            }
+            let MdField::Words(words) = &element else {
+                read.push(element);
+                continue;
+            };
+            let [word] = words.as_slice() else {
+                return self.error("expected one DWARF operation");
+            };
+            match llvm_ir::metadata::expression::code_for_element_word(word) {
+                Some(code) => read.push(MdField::Unsigned(u128::from(code))),
+                None => return self.error(format!("invalid DWARF op '{word}'")),
+            }
+        }
+        Ok(SpecializedArgs::Positional(read))
     }
 
     /// Checks a specialized node against its grammar: field names, repeats,

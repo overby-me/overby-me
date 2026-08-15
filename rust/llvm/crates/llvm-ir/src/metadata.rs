@@ -13,6 +13,7 @@
 
 /// The DWARF vocabulary a specialized node's word-valued fields take.
 pub mod dwarf;
+pub mod expression;
 
 use crate::ByteString;
 use crate::types::TypeId;
