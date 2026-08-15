@@ -537,6 +537,12 @@ pub enum SpindleCommand {
     Config(SpindleConfigArgs),
     Run(SpindleRunArgs),
     Logs(SpindleLogsArgs),
+    /// Cancel a pipeline, or only some of its workflows
+    Cancel(SpindleCancelArgs),
+    /// Show the latest pipeline's status for a repo
+    Status(SpindleStatusArgs),
+    /// Show one pipeline in detail
+    View(SpindleViewArgs),
     /// Secrets management
     #[command(subcommand)]
     Secret(SpindleSecretCommand),
@@ -586,6 +592,34 @@ pub struct SpindleRunArgs {
     /// Stream the logs once it starts
     #[arg(long, default_value_t = false)]
     pub wait: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SpindleCancelArgs {
+    /// Pipeline id, as shown by `spindle runs`
+    pub pipeline: String,
+    /// Cancel only this workflow; repeatable
+    #[arg(long)]
+    pub workflow: Vec<String>,
+    /// Repo: <owner>/<name>
+    #[arg(long)]
+    pub repo: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SpindleStatusArgs {
+    /// Repo: <owner>/<name>
+    #[arg(long)]
+    pub repo: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SpindleViewArgs {
+    /// Pipeline id, as shown by `spindle runs`
+    pub pipeline: String,
+    /// Repo: <owner>/<name>
+    #[arg(long)]
+    pub repo: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]

@@ -1,7 +1,7 @@
 use crate::cli::{
-    Cli, SpindleCommand, SpindleConfigArgs, SpindleListArgs, SpindleLogsArgs, SpindleRunArgs,
-    SpindleRunsArgs, SpindleSecretAddArgs, SpindleSecretCommand, SpindleSecretListArgs,
-    SpindleSecretRemoveArgs,
+    Cli, SpindleCancelArgs, SpindleCommand, SpindleConfigArgs, SpindleListArgs, SpindleLogsArgs,
+    SpindleRunArgs, SpindleRunsArgs, SpindleSecretAddArgs, SpindleSecretCommand,
+    SpindleSecretListArgs, SpindleSecretRemoveArgs, SpindleStatusArgs, SpindleViewArgs,
 };
 use anyhow::{anyhow, Result};
 
@@ -12,6 +12,9 @@ pub async fn run(_cli: &Cli, cmd: SpindleCommand) -> Result<()> {
         SpindleCommand::Config(args) => config(args).await,
         SpindleCommand::Run(args) => run_pipeline(args).await,
         SpindleCommand::Logs(args) => logs(args).await,
+        SpindleCommand::Cancel(args) => cancel(args).await,
+        SpindleCommand::Status(args) => status(args).await,
+        SpindleCommand::View(args) => view(args).await,
         SpindleCommand::Secret(cmd) => secret(cmd).await,
     }
 }
@@ -460,5 +463,81 @@ fn parse_repo_ref<'a>(spec: &'a str, default_owner: &'a str) -> (&'a str, &'a st
         (owner, name)
     } else {
         (default_owner, spec)
+    }
+}
+
+async fn cancel(args: SpindleCancelArgs) -> Result<()> {
+    let (ctx, api) = spindle_context(args.repo.as_deref()).await?;
+    api.cancel_pipeline(
+        &ctx.pds,
+        &ctx.session.access_jwt,
+        &args.pipeline,
+        &ctx.repo_did,
+        &args.workflow,
+    )
+    .await?;
+    if args.workflow.is_empty() {
+        println!("Cancelled pipeline {}", args.pipeline);
+    } else {
+        println!(
+            "Cancelled {} in pipeline {}",
+            args.workflow.join(", "),
+            args.pipeline
+        );
+    }
+    Ok(())
+}
+
+async fn status(args: SpindleStatusArgs) -> Result<()> {
+    let (ctx, api) = spindle_context(args.repo.as_deref()).await?;
+    let res = api.query_pipelines(&ctx.repo_did, 1, None).await?;
+    let Some(pipeline) = res.pipelines.first() else {
+        println!("No pipelines yet");
+        return Ok(());
+    };
+    render_pipeline(pipeline);
+    Ok(())
+}
+
+async fn view(args: SpindleViewArgs) -> Result<()> {
+    let (_, api) = spindle_context(args.repo.as_deref()).await?;
+    let pipeline = api.get_pipeline(&args.pipeline).await?;
+    render_pipeline(&pipeline);
+    Ok(())
+}
+
+fn render_pipeline(p: &tangled_api::ci::Pipeline) {
+    println!("PIPELINE:  {}", p.id);
+    println!("COMMIT:    {}", p.commit);
+    if let Some(git_ref) = p.trigger_ref() {
+        println!("REF:       {git_ref}");
+    }
+    if let Some(created) = &p.created_at {
+        println!("CREATED:   {created}");
+    }
+    println!();
+    if p.workflows.is_empty() {
+        println!("No workflows");
+        return;
+    }
+    let headers = ["WORKFLOW", "STATUS", "STARTED", "FINISHED"];
+    let rows: Vec<[String; 4]> = p
+        .workflows
+        .iter()
+        .map(|w| {
+            [
+                w.name.clone(),
+                w.status.clone(),
+                w.started_at.clone().unwrap_or_else(|| "-".into()),
+                w.finished_at.clone().unwrap_or_else(|| "-".into()),
+            ]
+        })
+        .collect();
+    print_table(&headers, &rows);
+    // A status alone does not say why something failed; the error does.
+    for w in &p.workflows {
+        if let Some(err) = w.error.as_deref().filter(|e| !e.is_empty()) {
+            println!("\n{}: {}", w.name, err);
+        }
     }
 }

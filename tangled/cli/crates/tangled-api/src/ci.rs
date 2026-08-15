@@ -159,7 +159,9 @@ impl TangledClient {
             repo: repo_did,
             workflows,
         };
-        let _: serde_json::Value = self.post_json_pub(CANCEL_PIPELINE, &req, Some(&sa)).await?;
+        // The spindle answers a cancel with an empty body, so this must not
+        // try to parse one.
+        self.post(CANCEL_PIPELINE, &req, Some(&sa)).await?;
         Ok(())
     }
 

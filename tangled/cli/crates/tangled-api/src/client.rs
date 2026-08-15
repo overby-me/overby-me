@@ -112,7 +112,7 @@ impl TangledClient {
         Ok(res.json::<TRes>().await?)
     }
 
-    async fn post<TReq: Serialize>(
+    pub(crate) async fn post<TReq: Serialize>(
         &self,
         method: &str,
         req: &TReq,
