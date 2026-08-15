@@ -60,7 +60,11 @@
 
       # flakelight turns this into packages.default, a check, and an overlay,
       # so `nix flake check` builds it and the CI workflow needs nothing else.
-      package = {rustPlatform}:
+      package = {
+        rustPlatform,
+        srcOnly,
+        perl,
+      }:
         rustPlatform.buildRustPackage {
           pname = name;
           version = cargoPackage.version or "0.1.0";
@@ -69,6 +73,7 @@
             lockFile = ./Cargo.lock;
             allowBuiltinFetchGit = true;
           };
+          PERL_SRC = "${srcOnly perl}";
 
           meta = {
             description = "A Perl interpreter written in Rust";

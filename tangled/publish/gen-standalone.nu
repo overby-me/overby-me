@@ -19,10 +19,6 @@
 # repo root. A project with a sibling path dependency is published as several
 # directories instead, so that `path = "../pcre2"` still resolves, and then
 # the crate to build is one level down.
-# subdir is "" for the usual one-directory project, whose crate sits at the
-# repo root. A project with a sibling path dependency is published as several
-# directories instead, so that `path = "../pcre2"` still resolves, and then
-# the crate to build is one level down.
 def flake-text [
     name: string
     description: string
@@ -31,7 +27,25 @@ def flake-text [
     native: list<string> = []
     build: list<string> = []
     check: bool = true
+    test_flags: list<string> = []
+    toolchain: bool = false
+    extra_args: list<string> = []
+    build_env: record = {}
 ]: nothing -> string {
+    # A project that is a compiler plugin links against rustc's own internals,
+    # so it needs the exact nightly it was written for rather than whatever
+    # rustc nixpkgs ships. Its rust-toolchain.toml is published with it and
+    # stays the single source of truth for the pin, as it is in the monorepo.
+    let toolchain_input = if not $toolchain { "" } else {
+        "\n\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay = {\n      url = \"github:oxalica/rust-overlay\";\n      inputs.nixpkgs.follows = \"nixpkgs\";\n    };"
+    }
+    let toolchain_overlay = if not $toolchain { "" } else {
+        "\n      withOverlays = [inputs.rust-overlay.overlays.default];\n"
+    }
+    let platform = if $toolchain { "platform" } else { "rustPlatform" }
+    let toolchain_let = if not $toolchain { "" } else {
+        "let\n          toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;\n          platform = makeRustPlatform {\n            cargo = toolchain;\n            rustc = toolchain;\n          };\n        in\n          "
+    }
     # Most projects are pure Rust and need none of this. The few that link
     # against a C library declare it in projects.nuon, because parsing it out
     # of default.nix would mean telling the main package apart from the test
@@ -39,7 +53,11 @@ def flake-text [
     #
     # flakelight callPackages the package function, so a dependency is named
     # once, as an argument, and used from there.
-    let pkg_args = (["rustPlatform"] | append $native | append $build | uniq)
+    let base_args = if $toolchain { ["makeRustPlatform" "rust-bin"] } else { ["rustPlatform"] }
+    let pkg_args = ($base_args | append $native | append $build | append $extra_args | uniq)
+    let env_lines = if ($build_env | is-empty) { "" } else {
+        $build_env | items {|k, v| $"\n          ($k) = \"($v)\";" } | str join ""
+    }
     let native_line = if ($native | is-empty) { "" } else {
         $"\n          nativeBuildInputs = [($native | str join ' ')];"
     }
@@ -49,8 +67,17 @@ def flake-text [
     let check_line = if $check { "" } else {
         "\n          # Tests need network access or a running server.\n          doCheck = false;"
     }
+    let test_flags_line = if ($test_flags | is-empty) { "" } else {
+        let quoted = ($test_flags | each {|f| $"\"($f)\"" } | str join " ")
+        $"\n          cargoTestFlags = [($quoted)];"
+    }
     let extra_shell = if (($native | append $build) | is-empty) { "" } else {
         $"\n          ++ \(with pkgs; [(($native | append $build) | str join ' ')]\)"
+    }
+    let shell_rust = if $toolchain {
+        "[\(pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml\) pkgs.rust-analyzer]"
+    } else {
+        "\(with pkgs; [cargo rustc rust-analyzer clippy rustfmt]\)"
     }
     let at = if ($subdir | is-empty) { "." } else { $"./($subdir)" }
     let in_subdir = if ($subdir | is-empty) { "" } else {
@@ -84,7 +111,7 @@ def flake-text [
     git-hooks = {
       url = \"github:cachix/git-hooks.nix\";
       inputs.nixpkgs.follows = \"nixpkgs\";
-    };
+    };($toolchain_input)
   };
 
   outputs = inputs: let
@@ -119,18 +146,19 @@ def flake-text [
       inherit inputs;
       systems = [\"x86_64-linux\" \"aarch64-linux\" \"aarch64-darwin\"];
       pname = name;
+($toolchain_overlay)
 
       # flakelight turns this into packages.default, a check, and an overlay,
       # so `nix flake check` builds it and the CI workflow needs nothing else.
       package = {($pkg_args | str join ', ')}:
-        rustPlatform.buildRustPackage {
+        ($toolchain_let)($platform).buildRustPackage {
           pname = name;
           version = cargoPackage.version or \"0.1.0\";
           src = ./.;
           cargoLock = {
             lockFile = ($at)/Cargo.lock;
             allowBuiltinFetchGit = true;
-          };($native_line)($build_line)($check_line)($in_subdir)
+          };($native_line)($build_line)($env_lines)($check_line)($test_flags_line)($in_subdir)
 
           meta = {
             description = \"($description)\";
@@ -140,7 +168,7 @@ def flake-text [
 
       devShell = {
         packages = pkgs:
-          \(with pkgs; [cargo rustc rust-analyzer clippy rustfmt]\)($extra_shell)
+          ($shell_rust)($extra_shell)
           ++ \(hooksFor pkgs\).enabledPackages;
         shellHook = pkgs: \(hooksFor pkgs\).shellHook;
       };
@@ -270,6 +298,10 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
                 ($p | get -o doCheck | default true)
+                ($p | get -o cargoTestFlags | default [])
+                ($p | get -o toolchain | default false)
+                ($p | get -o extraArgs | default [])
+                ($p | get -o env | default {})
         )
         if $check {
             if not ($flake | path exists) { $missing = ($missing | append $p.name) }

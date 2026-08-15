@@ -69,6 +69,8 @@
             lockFile = ./Cargo.lock;
             allowBuiltinFetchGit = true;
           };
+          # Tests need network access or a running server.
+          doCheck = false;
 
           meta = {
             description = "A service manager that is able to run \"traditional\" systemd services, written in rust";

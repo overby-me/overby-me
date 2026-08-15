@@ -23,6 +23,12 @@
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # This project pins rustc through its own rust-toolchain.toml.
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs: let
@@ -58,10 +64,21 @@
       systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
       pname = name;
 
+      withOverlays = [inputs.rust-overlay.overlays.default];
+
       # flakelight turns this into packages.default, a check, and an overlay,
       # so `nix flake check` builds it and the CI workflow needs nothing else.
-      package = {rustPlatform}:
-        rustPlatform.buildRustPackage {
+      package = {
+        makeRustPlatform,
+        rust-bin,
+      }: let
+        toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        platform = makeRustPlatform {
+          cargo = toolchain;
+          rustc = toolchain;
+        };
+      in
+        platform.buildRustPackage {
           pname = name;
           version = cargoPackage.version or "0.1.0";
           src = ./.;
@@ -78,7 +95,7 @@
 
       devShell = {
         packages = pkgs:
-          (with pkgs; [cargo rustc rust-analyzer clippy rustfmt])
+          [(pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml) pkgs.rust-analyzer]
           ++ (hooksFor pkgs).enabledPackages;
         shellHook = pkgs: (hooksFor pkgs).shellHook;
       };

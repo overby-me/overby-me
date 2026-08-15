@@ -1,6 +1,10 @@
 {lib, ...}: {
   packages = {
-    rust-perl = {lib, ...}:
+    rust-perl = {
+      lib,
+      srcOnly,
+      perl,
+    }:
       lib.buildCargoProject {
         pname = "rust-perl";
 
@@ -16,6 +20,13 @@
 
         index = ../../nix/lib/cargo/index;
 
+        # build.rs includes perl_siphash.h and sbox32_hash.h, which ship only
+        # in Perl's source distribution. Without this it fell back to a
+        # hand-unpacked directory under /tmp, so this package did not build.
+        crateOverrides = {
+          rust-perl.PERL_SRC = "${srcOnly perl}";
+        };
+
         meta = {
           description = "A Perl interpreter written in Rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/perl";
@@ -25,7 +36,11 @@
         };
       };
 
-    rust-perl-dev = {lib, ...}:
+    rust-perl-dev = {
+      lib,
+      srcOnly,
+      perl,
+    }:
       lib.buildCargoProject {
         pname = "rust-perl-dev";
 
@@ -40,6 +55,13 @@
         };
 
         index = ../../nix/lib/cargo/index;
+
+        # build.rs includes perl_siphash.h and sbox32_hash.h, which ship only
+        # in Perl's source distribution. Without this it fell back to a
+        # hand-unpacked directory under /tmp, so this package did not build.
+        crateOverrides = {
+          rust-perl.PERL_SRC = "${srcOnly perl}";
+        };
 
         release = false;
 

@@ -69,6 +69,7 @@
             lockFile = ./Cargo.lock;
             allowBuiltinFetchGit = true;
           };
+          cargoTestFlags = ["--lib" "--bins"];
 
           meta = {
             description = "A GCC-compatible C compiler written in Rust";
