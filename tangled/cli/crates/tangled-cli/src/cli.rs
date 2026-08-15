@@ -70,6 +70,58 @@ pub enum Command {
     /// Manage the SSH keys a knot will accept a push from
     #[command(subcommand, name = "ssh-key")]
     SshKey(SshKeyCommand),
+    /// Tangled strings: named blobs of text on your PDS
+    #[command(subcommand)]
+    String(StringCommand),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum StringCommand {
+    /// List strings
+    List(StringListArgs),
+    /// Print one string
+    View(StringViewArgs),
+    /// Create a string from a file or stdin
+    Create(StringCreateArgs),
+    /// Delete a string
+    Delete(StringDeleteArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct StringListArgs {
+    /// Whose strings (handle or DID); defaults to you
+    #[arg(long)]
+    pub user: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct StringViewArgs {
+    /// Record key, as shown by `string list`
+    pub rkey: String,
+    /// Whose string (handle or DID); defaults to you
+    #[arg(long)]
+    pub user: Option<String>,
+    /// Print only the contents, for piping
+    #[arg(long)]
+    pub raw: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct StringCreateArgs {
+    /// File to read, or - for stdin
+    pub file: Option<String>,
+    /// Name to store it under (default: the file's name)
+    #[arg(long)]
+    pub filename: Option<String>,
+    /// One-line description
+    #[arg(long)]
+    pub description: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct StringDeleteArgs {
+    /// Record key, as shown by `string list`
+    pub rkey: String,
 }
 
 #[derive(Subcommand, Debug, Clone)]

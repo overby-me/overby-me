@@ -9,6 +9,7 @@ pub mod repo;
 pub mod spindle;
 pub mod ssh_key;
 pub mod status;
+pub mod string;
 
 use anyhow::Result;
 
@@ -27,5 +28,6 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::Status => status::run(&cli).await,
         Command::GitCredential(args) => git_credential::run(&cli, args.clone()).await,
         Command::SshKey(cmd) => ssh_key::run(&cli, cmd.clone()).await,
+        Command::String(cmd) => string::run(&cli, cmd.clone()).await,
     }
 }
