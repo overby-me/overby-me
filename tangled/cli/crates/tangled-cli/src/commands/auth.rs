@@ -7,7 +7,7 @@ pub async fn run(cli: &Cli, cmd: AuthCommand) -> Result<()> {
     match cmd {
         AuthCommand::Login(args) => login(cli, args).await,
         AuthCommand::LoginBrowser(args) => login_browser(cli, args).await,
-        AuthCommand::Status => status(cli).await,
+        AuthCommand::Status(args) => status(cli, args.clone()).await,
         AuthCommand::Logout => logout(cli).await,
         AuthCommand::List => list(cli).await,
         AuthCommand::Switch(args) => switch(cli, args.clone()).await,
@@ -72,7 +72,7 @@ async fn login_browser(_cli: &Cli, args: AuthLoginBrowserArgs) -> Result<()> {
     Ok(())
 }
 
-async fn status(_cli: &Cli) -> Result<()> {
+async fn status(_cli: &Cli, args: crate::cli::AuthStatusArgs) -> Result<()> {
     let mgr = crate::util::session_manager();
     match mgr.load()? {
         Some(s) => {
@@ -82,6 +82,24 @@ async fn status(_cli: &Cli) -> Result<()> {
             }
         }
         None => println!("Not logged in. Run: tangled auth login"),
+    }
+    if args.verify {
+        // What is stored says nothing about whether the PDS still accepts it.
+        let session = crate::util::load_session_with_refresh().await?;
+        let pds = crate::util::pds_of(&session);
+        let client = crate::util::make_client(&pds);
+        match client.get_session(&session.access_jwt).await {
+            Ok(info) => println!(
+                "Verified: session is live for {} ({}){}",
+                info.handle,
+                info.did,
+                match info.active {
+                    Some(false) => ", account INACTIVE",
+                    _ => "",
+                }
+            ),
+            Err(e) => println!("Verify failed: {e}"),
+        }
     }
     Ok(())
 }

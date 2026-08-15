@@ -71,7 +71,10 @@ impl TangledClient {
             ("collection", PUBLIC_KEY.to_string()),
             ("limit", "100".to_string()),
         ];
+        // Another account's keys live on their PDS, not ours.
         let res: Res = self
+            .for_did(did)
+            .await?
             .get_json("com.atproto.repo.listRecords", &params, bearer)
             .await?;
         Ok(res

@@ -1545,6 +1545,99 @@ impl TangledClient {
         Ok(String::from_utf8_lossy(&bytes).to_string())
     }
 
+    /// Knots an account has registered. The record key is the hostname.
+    pub async fn list_knots(
+        &self,
+        did: &str,
+        bearer: Option<&str>,
+    ) -> Result<Vec<(String, String)>> {
+        #[derive(Deserialize)]
+        struct Value {
+            #[serde(rename = "createdAt", default)]
+            created_at: String,
+        }
+        #[derive(Deserialize)]
+        struct Item {
+            uri: String,
+            value: Value,
+        }
+        #[derive(Deserialize)]
+        struct Res {
+            #[serde(default)]
+            records: Vec<Item>,
+        }
+        let params = vec![
+            ("repo", did.to_string()),
+            ("collection", "sh.tangled.knot".to_string()),
+            ("limit", "100".to_string()),
+        ];
+        let res: Res = self
+            .for_did(did)
+            .await?
+            .get_json("com.atproto.repo.listRecords", &params, bearer)
+            .await?;
+        Ok(res
+            .records
+            .into_iter()
+            .map(|i| {
+                (
+                    Self::uri_rkey(&i.uri).unwrap_or_default(),
+                    i.value.created_at,
+                )
+            })
+            .collect())
+    }
+
+    /// Ask the PDS whether a session is still live, rather than trusting what
+    /// is stored locally.
+    pub async fn get_session(&self, access_jwt: &str) -> Result<SessionInfo> {
+        self.get_json("com.atproto.server.getSession", &[], Some(access_jwt))
+            .await
+    }
+
+    /// Where an account's records live.
+    ///
+    /// Records are held by the account's own PDS, not by whichever one this
+    /// client happens to point at, so reading someone else's records means
+    /// resolving their DID document first. Without this, any `--user` lookup
+    /// fails with "Could not find repo" for anyone on a different PDS.
+    pub async fn pds_for_did(&self, did: &str) -> Result<String> {
+        #[derive(Deserialize)]
+        struct Service {
+            id: String,
+            #[serde(rename = "serviceEndpoint")]
+            endpoint: String,
+        }
+        #[derive(Deserialize)]
+        struct DidDoc {
+            #[serde(default)]
+            service: Vec<Service>,
+        }
+        let url = match did.strip_prefix("did:web:") {
+            Some(host) => format!("https://{host}/.well-known/did.json"),
+            None => format!("https://plc.directory/{did}"),
+        };
+        let body = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await?
+            .text()
+            .await?;
+        // plc.directory answers with a did+ld+json content type, so this is
+        // parsed explicitly rather than through .json().
+        let doc: DidDoc = serde_json::from_str(&body).map_err(|e| anyhow!("resolve {did}: {e}"))?;
+        doc.service
+            .into_iter()
+            .find(|s| s.id == "#atproto_pds")
+            .map(|s| s.endpoint)
+            .ok_or_else(|| anyhow!("{did} publishes no PDS"))
+    }
+
+    /// A client pointed at the PDS that holds `did`'s records.
+    pub async fn for_did(&self, did: &str) -> Result<Self> {
+        Ok(self.derive(self.pds_for_did(did).await?))
+    }
+
     /// Resolve a handle to a DID.
     pub async fn resolve_handle(&self, handle: &str, bearer: Option<&str>) -> Result<String> {
         if handle.starts_with("did:") {
@@ -1880,6 +1973,17 @@ impl TangledClient {
             .await?;
         Ok(())
     }
+}
+
+/// What the PDS says about a session.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionInfo {
+    pub did: String,
+    pub handle: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub active: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

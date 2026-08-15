@@ -6,6 +6,7 @@ use std::path::Path;
 
 pub async fn run(_cli: &Cli, cmd: KnotCommand) -> Result<()> {
     match cmd {
+        KnotCommand::List(args) => list(args).await,
         KnotCommand::Migrate(args) => migrate(args).await,
     }
 }
@@ -188,4 +189,28 @@ fn parse_remote_url(url: &str) -> Option<(String, String, String)> {
         }
     }
     None
+}
+
+async fn list(args: crate::cli::KnotListArgs) -> Result<()> {
+    let session = crate::util::load_session_with_refresh().await?;
+    let pds = crate::util::pds_of(&session);
+    let client = crate::util::make_client(&pds);
+    let did = match args.user.as_deref() {
+        None => session.did.clone(),
+        Some(u) => client.resolve_handle(u, None).await?,
+    };
+    let knots = client
+        .list_knots(&did, Some(session.access_jwt.as_str()))
+        .await?;
+    if knots.is_empty() {
+        // Registering a knot means running one; using the shared knot needs
+        // no record at all.
+        println!("No knots registered (this account uses a shared knot)");
+        return Ok(());
+    }
+    println!("KNOT\tREGISTERED");
+    for (host, created) in knots {
+        println!("{host}\t{created}");
+    }
+    Ok(())
 }

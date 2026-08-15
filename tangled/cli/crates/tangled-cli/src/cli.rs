@@ -202,9 +202,23 @@ pub enum AuthCommand {
     /// Login via browser (OAuth)
     LoginBrowser(AuthLoginBrowserArgs),
     /// Show authentication status
-    Status,
+    Status(AuthStatusArgs),
     /// Logout and clear session
     Logout,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct KnotListArgs {
+    /// Whose knots (handle or DID); defaults to you
+    #[arg(long)]
+    pub user: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AuthStatusArgs {
+    /// Ask the PDS whether the stored session is still valid
+    #[arg(long)]
+    pub verify: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -619,6 +633,8 @@ pub struct ApiPostArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum KnotCommand {
+    /// List knots registered by an account
+    List(KnotListArgs),
     /// Migrate a repository to another knot
     Migrate(KnotMigrateArgs),
 }
