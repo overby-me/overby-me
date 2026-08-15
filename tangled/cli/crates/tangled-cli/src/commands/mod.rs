@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod browse;
+pub mod generate;
 pub mod git_credential;
 pub mod issue;
 pub mod knot;
@@ -29,5 +30,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::GitCredential(args) => git_credential::run(&cli, args.clone()).await,
         Command::SshKey(cmd) => ssh_key::run(&cli, cmd.clone()).await,
         Command::String(cmd) => string::run(&cli, cmd.clone()).await,
+        Command::Completion(args) => generate::completion(args.clone()),
+        Command::Man => generate::man(),
     }
 }

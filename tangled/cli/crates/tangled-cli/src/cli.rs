@@ -73,6 +73,28 @@ pub enum Command {
     /// Tangled strings: named blobs of text on your PDS
     #[command(subcommand)]
     String(StringCommand),
+    /// Print a shell completion script
+    Completion(CompletionArgs),
+    /// Print a man page
+    Man,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CompletionArgs {
+    /// Shell to generate for
+    #[arg(value_enum)]
+    pub shell: Shell,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+    Elvish,
+    #[value(name = "powershell")]
+    Pwsh,
+    Nushell,
 }
 
 #[derive(Subcommand, Debug, Clone)]
