@@ -388,79 +388,23 @@ impl TangledClient {
         Ok(repos)
     }
 
+    /// Register a repo on its knot, then record it on the PDS.
     pub async fn create_repo(&self, opts: CreateRepoOptions<'_>) -> Result<()> {
-        // 1) Create the sh.tangled.repo record on the user's PDS
-        #[derive(Serialize)]
-        struct Record<'a> {
-            name: &'a str,
-            knot: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            description: Option<&'a str>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            source: Option<&'a str>,
-            #[serde(rename = "createdAt")]
-            created_at: String,
-            // The knot mints a DID for the repo itself and hosts it. The
-            // appview resolves a repo through that DID, so a record without
-            // one indexes as nothing: the repo is pushable over SSH but
-            // invisible on the web. It is only known after step 3, so the
-            // record is written twice.
-            #[serde(rename = "repoDid", skip_serializing_if = "Option::is_none")]
-            repo_did: Option<&'a str>,
-        }
-        #[derive(Serialize)]
-        struct CreateRecordReq<'a> {
-            repo: &'a str,
-            collection: &'a str,
-            validate: bool,
-            record: Record<'a>,
-        }
-        #[derive(Deserialize)]
-        struct CreateRecordRes {
-            uri: String,
-        }
-
-        let now = chrono::Utc::now().to_rfc3339();
-        let rec = Record {
-            name: opts.name,
-            knot: opts.knot,
-            description: opts.description,
-            source: opts.source_at,
-            created_at: now.clone(),
-            repo_did: None,
-        };
-        let create_req = CreateRecordReq {
-            repo: opts.did,
-            collection: "sh.tangled.repo",
-            validate: false,
-            record: rec,
-        };
-
         let pds_client = self.derive(opts.pds_base);
-        let created: CreateRecordRes = pds_client
-            .post_json(
-                "com.atproto.repo.createRecord",
-                &create_req,
-                Some(opts.access_jwt),
-            )
-            .await?;
+        // The record key identifies the repo: sh.tangled.repo declares
+        // `key: "any"` and `name` is only "Cosmetic name of the repo", so the
+        // appview addresses it as <handle>/<rkey>. A PDS-assigned TID yields a
+        // repo that pushes over SSH and 404s on the web.
+        let rkey = opts.name;
 
-        // Extract rkey from at-uri: at://did/collection/rkey
-        let rkey = created
-            .uri
-            .rsplit('/')
-            .next()
-            .ok_or_else(|| anyhow!("failed to parse rkey from uri"))?;
-
-        // 2) Obtain a service auth token for the knot server (aud = did:web:<knot>)
-        let audience = format!("did:web:{}", opts.knot);
-
+        // 1) Service auth for the knot. `lxm` binds the token to the method:
+        //    without it the knot answers `method binding mismatch`.
         #[derive(Deserialize)]
         struct GetSARes {
             token: String,
         }
         let params = [
-            ("aud", audience),
+            ("aud", format!("did:web:{}", opts.knot)),
             ("exp", (chrono::Utc::now().timestamp() + 60).to_string()),
             ("lxm", REPO_CREATE.to_string()),
         ];
@@ -472,9 +416,9 @@ impl TangledClient {
             )
             .await?;
 
-        // 3) Call sh.tangled.repo.create on the knot. `name` is required: the
-        // knot names the directory it creates, and cannot read it back out of
-        // the PDS record from the rkey alone.
+        // 2) Create it on the knot first: it mints the repo's own DID, which
+        //    the record must carry, and a failure here leaves nothing behind
+        //    rather than a record for a repo that does not exist.
         #[derive(Serialize)]
         struct CreateRepoReq<'a> {
             rkey: &'a str,
@@ -485,24 +429,45 @@ impl TangledClient {
             #[serde(skip_serializing_if = "Option::is_none")]
             source: Option<&'a str>,
         }
+        #[derive(Deserialize)]
+        struct CreateRepoRes {
+            #[serde(rename = "repoDid")]
+            repo_did: Option<String>,
+        }
         let req = CreateRepoReq {
             rkey,
             name: opts.name,
             default_branch: opts.default_branch,
             source: opts.source,
         };
-        #[derive(Deserialize)]
-        struct CreateRepoRes {
-            #[serde(rename = "repoDid")]
-            repo_did: String,
-        }
         let knot_client = self.derive(format!("https://{}", opts.knot));
         let knot_res: CreateRepoRes = knot_client
             .post_json(REPO_CREATE, &req, Some(&sa.token))
             .await?;
+        let repo_did = knot_res
+            .repo_did
+            .filter(|d| !d.is_empty())
+            .ok_or_else(|| anyhow!("knot did not return a repoDid"))?;
 
-        // 4) Write the knot's repo DID back into the record, so the appview
-        //    can resolve the repo and show it.
+        // 3) Record it on the PDS, at the same rkey. `knot` and `createdAt`
+        //    are the only required fields; the appview resolves the repo
+        //    itself through `repoDid`.
+        #[derive(Serialize)]
+        struct Record<'a> {
+            #[serde(rename = "$type")]
+            lexicon_type: &'a str,
+            knot: &'a str,
+            #[serde(rename = "createdAt")]
+            created_at: String,
+            #[serde(rename = "repoDid")]
+            repo_did: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            name: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            description: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            source: Option<&'a str>,
+        }
         #[derive(Serialize)]
         struct PutRecordReq<'a> {
             repo: &'a str,
@@ -517,12 +482,13 @@ impl TangledClient {
             rkey,
             validate: false,
             record: Record {
-                name: opts.name,
+                lexicon_type: "sh.tangled.repo",
                 knot: opts.knot,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                repo_did: &repo_did,
+                name: Some(opts.name),
                 description: opts.description,
                 source: opts.source_at,
-                created_at: now,
-                repo_did: Some(&knot_res.repo_did),
             },
         };
         let _: serde_json::Value = pds_client
