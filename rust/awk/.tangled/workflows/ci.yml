@@ -1,0 +1,24 @@
+# CI for the published rust-awk repo.
+#
+# This file only does anything once it has been filtered out of the monorepo:
+# Tangled reads .tangled/workflows from a repo's root, and in the monorepo
+# this sits under rust/awk/. The monorepo's own pipelines are defined in the
+# root .tangled/workflows.ncl and are unaffected by it.
+clone:
+  depth: 1
+  skip: false
+  submodules: false
+dependencies:
+  - git
+  - nix
+engine: microvm
+image: nixos
+steps:
+  - command: |-
+      nix --extra-experimental-features "nix-command flakes" \
+        flake check --print-build-logs
+    name: nix flake check
+when:
+  - branch: '**'
+    event:
+      - push
