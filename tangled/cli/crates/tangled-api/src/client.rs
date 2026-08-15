@@ -370,6 +370,11 @@ impl TangledClient {
                         val.did = Some(d);
                     }
                 }
+                if val.name.is_empty() {
+                    if let Some(k) = val.rkey.clone() {
+                        val.name = k;
+                    }
+                }
                 val
             })
             .collect();
@@ -518,9 +523,15 @@ impl TangledClient {
             .get_json("com.atproto.repo.listRecords", &params, bearer)
             .await?;
         for item in res.records {
-            if item.value.name == name {
-                let rkey =
-                    Self::uri_rkey(&item.uri).ok_or_else(|| anyhow!("missing rkey in uri"))?;
+            let rkey = Self::uri_rkey(&item.uri);
+            // A record with no `name` is named by its record key.
+            let record_name = if item.value.name.is_empty() {
+                rkey.clone().unwrap_or_default()
+            } else {
+                item.value.name.clone()
+            };
+            if record_name == name {
+                let rkey = rkey.ok_or_else(|| anyhow!("missing rkey in uri"))?;
                 let knot = item.value.knot.unwrap_or_default();
                 return Ok(RepoRecord {
                     did: did.clone(),
@@ -610,7 +621,11 @@ impl TangledClient {
         let pds_client = self.derive(pds_base);
         #[derive(Deserialize, Serialize, Clone)]
         struct Rec {
-            name: String,
+            // Absent on older records, where the record key is the name.
+            // Optional both ways, so a record without one does not gain an
+            // empty `name` when it is written back.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            name: Option<String>,
             knot: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             description: Option<String>,
@@ -662,7 +677,9 @@ impl TangledClient {
     ) -> Result<()> {
         #[derive(Deserialize, Serialize, Clone)]
         struct Rec {
-            name: String,
+            // Absent on older records; see update_repo_knot.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            name: Option<String>,
             knot: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             description: Option<String>,
@@ -1610,7 +1627,9 @@ impl TangledClient {
         let pds_client = self.derive(pds_base);
         #[derive(Deserialize, Serialize, Clone)]
         struct Rec {
-            name: String,
+            // Absent on older records; see update_repo_knot.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            name: Option<String>,
             knot: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             description: Option<String>,
@@ -1726,6 +1745,10 @@ pub struct WorkflowRun {
 pub struct Repository {
     pub did: Option<String>,
     pub rkey: Option<String>,
+    // Older sh.tangled.repo records carry no `name`: the record key is the
+    // name. Default to empty here and backfill from the record's rkey, so one
+    // legacy record does not fail the whole listing.
+    #[serde(default)]
     pub name: String,
     pub knot: Option<String>,
     pub description: Option<String>,
