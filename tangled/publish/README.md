@@ -91,6 +91,24 @@ josh-filter ':/rust/awk' HEAD --update refs/josh/awk --reverse --check-roundtrip
 Note the forward run must come first: `--reverse` reads the ref it is told to
 update, and panics if it does not exist yet.
 
+## Creating the repo
+
+Use `tangled-cli repo create <name> --knot knot1.tangled.sh`. Two things about
+that flow are load-bearing, and getting either wrong produces a repo that
+pushes fine over SSH and 404s on the web:
+
+- **The record key is the repo's identity.** `sh.tangled.repo` declares
+  `key: "any"` and describes `name` as only a "Cosmetic name of the repo", so
+  the appview addresses a repo as `<handle>/<rkey>`. The rkey must be the
+  name; a PDS-assigned TID is invisible.
+- **The knot mints the repo's own DID** and returns it from
+  `sh.tangled.repo.create`. The record has to carry it as `repoDid`, so the
+  knot is called before the record is written.
+
+Re-running `repo create` for an existing name mints a *new* repo DID and a
+fresh empty repo on the knot, orphaning the old one. Re-run `publish.nu`
+afterwards to refill it.
+
 ## Authentication
 
 Tangled push is **SSH only**. There are no deploy keys, no per-repo tokens and
