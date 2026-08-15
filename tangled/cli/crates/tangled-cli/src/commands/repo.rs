@@ -306,9 +306,12 @@ async fn star(args: RepoRefArgs) -> Result<()> {
     let info = pds_client
         .get_repo_info(owner, &name, Some(session.access_jwt.as_str()))
         .await?;
-    let subject = format!("at://{}/sh.tangled.repo/{}", info.did, info.rkey);
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("{owner}/{name} has no repoDid; recreate it"))?;
     let api = crate::util::make_default_client();
-    api.star_repo(&pds, &session.access_jwt, &subject, &session.did)
+    api.star_repo(&pds, &session.access_jwt, &repo_did, &session.did)
         .await?;
     println!("Starred {}/{}", owner, name);
     Ok(())
@@ -326,10 +329,19 @@ async fn unstar(args: RepoRefArgs) -> Result<()> {
     let info = pds_client
         .get_repo_info(owner, &name, Some(session.access_jwt.as_str()))
         .await?;
-    let subject = format!("at://{}/sh.tangled.repo/{}", info.did, info.rkey);
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("{owner}/{name} has no repoDid; recreate it"))?;
     let api = crate::util::make_default_client();
-    api.unstar_repo(&pds, &session.access_jwt, &subject, &session.did)
-        .await?;
+    api.unstar_repo(
+        &pds,
+        &session.access_jwt,
+        &repo_did,
+        &format!("at://{}/sh.tangled.repo/{}", info.did, info.rkey),
+        &session.did,
+    )
+    .await?;
     println!("Unstarred {}/{}", owner, name);
     Ok(())
 }

@@ -19,50 +19,18 @@ pub async fn run(_cli: &Cli, cmd: SpindleCommand) -> Result<()> {
     }
 }
 
+/// `list` and `runs` are the same question now. It used to read a
+/// sh.tangled.pipeline record collection, which no longer exists: an account
+/// that has run hundreds of pipelines has zero such records, and the
+/// collection is absent from describeRepo entirely. Pipelines live on the
+/// spindle, not on a PDS.
 async fn list(args: SpindleListArgs) -> Result<()> {
-    let session = crate::util::load_session_with_refresh().await?;
-
-    let pds = session
-        .pds
-        .clone()
-        .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
-        .unwrap_or_else(|| "https://bsky.social".into());
-    let pds_client = crate::util::make_client(&pds);
-
-    let (owner, name) = parse_repo_ref(
-        args.repo.as_deref().unwrap_or(&session.handle),
-        &session.handle,
-    );
-    let info = pds_client
-        .get_repo_info(owner, name, Some(session.access_jwt.as_str()))
-        .await?;
-
-    let pipelines = pds_client
-        .list_pipelines(&info.did, Some(session.access_jwt.as_str()))
-        .await?;
-
-    if pipelines.is_empty() {
-        println!("No pipelines found for {}/{}", owner, name);
-    } else {
-        println!("RKEY\tKIND\tREPO\tWORKFLOWS");
-        for p in pipelines {
-            let workflows = p
-                .pipeline
-                .workflows
-                .iter()
-                .map(|w| w.name.as_str())
-                .collect::<Vec<_>>()
-                .join(",");
-            println!(
-                "{}\t{}\t{}\t{}",
-                p.rkey,
-                p.pipeline.trigger_metadata.kind,
-                p.pipeline.trigger_metadata.repo.repo,
-                workflows
-            );
-        }
-    }
-    Ok(())
+    runs(crate::cli::SpindleRunsArgs {
+        repo: args.repo,
+        status: None,
+        limit: 20,
+    })
+    .await
 }
 
 async fn runs(args: SpindleRunsArgs) -> Result<()> {

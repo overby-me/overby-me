@@ -22,6 +22,8 @@ pub struct TangledClient {
 }
 
 const REPO_CREATE: &str = "sh.tangled.repo.create";
+const FEED_STAR: &str = "sh.tangled.feed.star";
+const FEED_STAR_REPO: &str = "sh.tangled.feed.star#repo";
 /// Pull status. Renamed from `...pull.state`, and it gained `merged`.
 pub const PULL_STATUS: &str = "sh.tangled.repo.pull.status";
 pub const PULL_STATUS_OPEN: &str = "sh.tangled.repo.pull.status.open";
@@ -809,12 +811,23 @@ impl TangledClient {
         &self,
         pds_base: &str,
         access_jwt: &str,
-        subject_at_uri: &str,
+        repo_did: &str,
         user_did: &str,
     ) -> Result<String> {
+        // A star's subject is an object, not an at-uri: it names the repo's
+        // own DID and tags itself with the #repo variant. Written flat, the
+        // record is stored but never counted.
+        #[derive(Serialize)]
+        struct Subject<'a> {
+            #[serde(rename = "$type")]
+            lexicon_type: &'a str,
+            did: &'a str,
+        }
         #[derive(Serialize)]
         struct Rec<'a> {
-            subject: &'a str,
+            #[serde(rename = "$type")]
+            lexicon_type: &'a str,
+            subject: Subject<'a>,
             #[serde(rename = "createdAt")]
             created_at: String,
         }
@@ -831,12 +844,16 @@ impl TangledClient {
         }
         let now = chrono::Utc::now().to_rfc3339();
         let rec = Rec {
-            subject: subject_at_uri,
+            lexicon_type: FEED_STAR,
+            subject: Subject {
+                lexicon_type: FEED_STAR_REPO,
+                did: repo_did,
+            },
             created_at: now,
         };
         let req = Req {
             repo: user_did,
-            collection: "sh.tangled.feed.star",
+            collection: FEED_STAR,
             validate: false,
             record: rec,
         };
@@ -852,7 +869,8 @@ impl TangledClient {
         &self,
         pds_base: &str,
         access_jwt: &str,
-        subject_at_uri: &str,
+        repo_did: &str,
+        legacy_at: &str,
         user_did: &str,
     ) -> Result<()> {
         #[derive(Deserialize)]
@@ -868,7 +886,7 @@ impl TangledClient {
         let pds_client = self.derive(pds_base);
         let params = vec![
             ("repo", user_did.to_string()),
-            ("collection", "sh.tangled.feed.star".to_string()),
+            ("collection", FEED_STAR.to_string()),
             ("limit", "100".to_string()),
         ];
         let res: ListRes = pds_client
@@ -876,7 +894,9 @@ impl TangledClient {
             .await?;
         let mut rkey = None;
         for item in res.records {
-            if item.value.subject == subject_at_uri {
+            let matches = item.value.subject.did() == Some(repo_did)
+                || item.value.subject.legacy_uri() == Some(legacy_at);
+            if matches {
                 rkey = Self::uri_rkey(&item.uri);
                 if rkey.is_some() {
                     break;
@@ -892,7 +912,7 @@ impl TangledClient {
         }
         let del = Del {
             repo: user_did,
-            collection: "sh.tangled.feed.star",
+            collection: FEED_STAR,
             rkey: &rkey,
         };
         let _: serde_json::Value = pds_client
@@ -1843,40 +1863,6 @@ impl TangledClient {
             .await?;
         Ok(())
     }
-
-    pub async fn list_pipelines(
-        &self,
-        repo_did: &str,
-        bearer: Option<&str>,
-    ) -> Result<Vec<PipelineRecord>> {
-        #[derive(Deserialize)]
-        struct Item {
-            uri: String,
-            value: Pipeline,
-        }
-        #[derive(Deserialize)]
-        struct ListRes {
-            #[serde(default)]
-            records: Vec<Item>,
-        }
-        let params = vec![
-            ("repo", repo_did.to_string()),
-            ("collection", "sh.tangled.pipeline".to_string()),
-            ("limit", "100".to_string()),
-        ];
-        let res: ListRes = self
-            .get_json("com.atproto.repo.listRecords", &params, bearer)
-            .await?;
-        let mut out = vec![];
-        for it in res.records {
-            let rkey = Self::uri_rkey(&it.uri).unwrap_or_default();
-            out.push(PipelineRecord {
-                rkey,
-                pipeline: it.value,
-            });
-        }
-        Ok(out)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2022,11 +2008,31 @@ pub struct Languages {
     pub total_files: Option<u64>,
 }
 
+/// A star's subject, in either shape it can be found in.
+///
+/// Current records nest an object naming the repo's own DID. Records written
+/// by older clients hold a bare at-uri string instead, and a PDS that has both
+/// must still deserialise, so this accepts either.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct StarSubject(pub serde_json::Value);
+
+impl StarSubject {
+    /// The repo DID, for the current shape.
+    pub fn did(&self) -> Option<&str> {
+        self.0.get("did").and_then(|v| v.as_str())
+    }
+
+    /// The at-uri, for the legacy shape.
+    pub fn legacy_uri(&self) -> Option<&str> {
+        self.0.as_str()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StarRecord {
-    pub subject: String,
-    #[serde(rename = "createdAt")]
-    pub created_at: String,
+    #[serde(default)]
+    pub subject: StarSubject,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2072,17 +2078,4 @@ pub struct TriggerRepo {
 pub struct Workflow {
     pub name: String,
     pub engine: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pipeline {
-    #[serde(rename = "triggerMetadata")]
-    pub trigger_metadata: TriggerMetadata,
-    pub workflows: Vec<Workflow>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PipelineRecord {
-    pub rkey: String,
-    pub pipeline: Pipeline,
 }
