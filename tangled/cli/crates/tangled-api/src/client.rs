@@ -643,6 +643,12 @@ impl TangledClient {
             description: Option<String>,
             #[serde(rename = "createdAt")]
             created_at: String,
+            // putRecord replaces the whole record, so every field this struct
+            // does not name would be dropped by writing it back. That is not
+            // cosmetic: repoDid is what the appview addresses the repo by, and
+            // a record that loses it still accepts pushes but 404s on the web.
+            #[serde(flatten)]
+            rest: serde_json::Map<String, serde_json::Value>,
         }
         #[derive(Deserialize)]
         struct GetRes {
@@ -1978,6 +1984,10 @@ impl TangledClient {
             spindle: Option<String>,
             #[serde(rename = "createdAt")]
             created_at: String,
+            // See update_repo_knot: putRecord replaces the record, so anything
+            // not named here would be dropped, repoDid included.
+            #[serde(flatten)]
+            rest: serde_json::Map<String, serde_json::Value>,
         }
         #[derive(Deserialize)]
         struct GetRes {

@@ -33,6 +33,14 @@ disabled_rules = [
   # is the compatibility mechanism, not an oversight.
   "rust_serde_default_on_required_field",
 
+  # The same openness, on the write side. putRecord replaces a whole record,
+  # so a struct that reads one, changes a field and writes it back must carry
+  # the fields it does not name, or it destroys them: dropping repoDid leaves
+  # a repo that still accepts pushes and 404s on the web. A flattened
+  # catch-all is what makes that round-trip safe, so this rule fires on the
+  # fix for that bug rather than on the bug.
+  "rust_serde_flatten_catchall",
+
   # Repository derives Default so callers can build one field-by-field before
   # a create call; the "invalid state" it flags is the pre-populated struct.
   "rust_domain_default_produces_invalid",

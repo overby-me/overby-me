@@ -57,9 +57,21 @@ impl Pipeline {
     }
 }
 
+/// `#[serde(default)]` covers a field the spindle omits, but not one it sends
+/// as an explicit null, which is what it answers with for a repo that has no
+/// pipelines yet. Without this, asking a fresh repo for its CI status fails to
+/// decode rather than reporting that there is nothing to show.
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct QueryPipelines {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub pipelines: Vec<Pipeline>,
     #[serde(default)]
     pub cursor: Option<String>,
