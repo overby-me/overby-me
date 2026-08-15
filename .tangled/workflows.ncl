@@ -92,13 +92,24 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
         "%%,
       },
       {
+        # Each project is mirrored to GitHub as well, reusing the same
+        # secret the monorepo's own mirror uses. Without it the Tangled
+        # publish still runs: a missing secret should not stop the forge
+        # that is the actual home of these repos.
         name = "Publish subprojects",
         command = m%%"
+          export GITHUB_TOKEN="${GITHUB_MIRROR_TOKEN}"
+          github="--github overby-me"
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "no GITHUB_MIRROR_TOKEN: publishing to Tangled only"
+            github="--no-github"
+          fi
           nu tangled/publish/publish.nu \
             --source "$PWD" \
             --work-dir "$PWD/.publish-cache" \
             --ssh-user agent.overby.me \
-            --ssh-key "$HOME/.ssh/publish_key"
+            --ssh-key "$HOME/.ssh/publish_key" \
+            $github
         "%%,
       },
     ],

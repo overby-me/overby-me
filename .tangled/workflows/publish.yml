@@ -22,11 +22,18 @@ steps:
       chmod 600 $HOME/.ssh/publish_key
     name: Install the publish key
   - command: |-
+      export GITHUB_TOKEN="${GITHUB_MIRROR_TOKEN}"
+      github="--github overby-me"
+      if [ -z "$GITHUB_TOKEN" ]; then
+        echo "no GITHUB_MIRROR_TOKEN: publishing to Tangled only"
+        github="--no-github"
+      fi
       nu tangled/publish/publish.nu \
         --source "$PWD" \
         --work-dir "$PWD/.publish-cache" \
         --ssh-user agent.overby.me \
-        --ssh-key "$HOME/.ssh/publish_key"
+        --ssh-key "$HOME/.ssh/publish_key" \
+        $github
     name: Publish subprojects
 when:
   - branch: main
