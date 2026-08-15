@@ -40,13 +40,34 @@ def git-in [repo: path, args: list<string>]: nothing -> record {
   ^git -C $repo ...$GIT_CONFIG ...$args | complete
 }
 
+# Strip credentials out of anything that might be shown or logged. The GitHub
+# remote carries a token in its URL, and both the failing command and git's own
+# stderr would otherwise reproduce it in CI output.
+def redact []: string -> string {
+  $in | str replace -r -a '://[^@/]+@' '://***@'
+}
+
 # Run git and fail loudly, returning trimmed stdout.
 def git-ok [repo: path, args: list<string>]: nothing -> string {
   let out = (git-in $repo $args)
   if $out.exit_code != 0 {
-    error make {msg: $"git ($args | str join ' ') failed: ($out.stderr | str trim)"}
+    let what = ($args | str join ' ' | redact)
+    error make {msg: $"git ($what) failed: ($out.stderr | str trim | redact)"}
   }
   $out.stdout | str trim
+}
+
+# The GitHub mirror pushes over HTTPS with a token rather than over SSH,
+# because --ssh-key forces IdentitiesOnly for the knot: that same key would
+# then be the only one offered to GitHub too.
+def github-token []: nothing -> string {
+  let from_env = ($env.GITHUB_TOKEN? | default "")
+  if not ($from_env | is-empty) { return $from_env }
+  let gh = (^gh auth token | complete)
+  if $gh.exit_code != 0 {
+    error make {msg: "no GitHub token: set $GITHUB_TOKEN or run `gh auth login` (or pass --no-github)"}
+  }
+  $gh.stdout | str trim
 }
 
 def check-josh []: nothing -> nothing {
@@ -142,6 +163,8 @@ def main [
   --ssh-key: path             # private key to push with
   --branch: string = "main"   # branch to read from, and to publish as
   --only: string              # only this project
+  --github: string = "overby-me" # GitHub account to mirror to as well
+  --no-github                 # publish to Tangled only
   --dry-run                   # filter and report, push nothing
 ]: nothing -> nothing {
   check-josh
@@ -177,26 +200,42 @@ def main [
   print $"monorepo ($branch) at ($input)"
   print ""
 
+  # Fetched once rather than per project, and never printed.
+  let gh_token = if $no_github or $dry_run { "" } else { github-token }
+  if not $no_github { print $"mirroring to github.com/($github)" }
+
   let ssh_login = ($ssh_user | default $owner)
   let results = (
     $projects | each {|p|
       let remote = $"($ssh_login)@tangled.org:($owner)/($p.name)"
+      # Each mirror is pushed the same filtered commit, so the two forges
+      # cannot drift apart, and each is reported on its own: a GitHub outage
+      # should be visible rather than hide a good Tangled publish.
+      let gh_remote = $"https://x-access-token:($gh_token)@github.com/($github)/($p.name)"
       try {
         let sha = (filter-project $mirror $p.name $p.filter $input)
         let published = (remote-head $mirror $remote $branch)
         let commits = (git-ok $mirror ["rev-list" "--count" $"refs/josh/($p.name)"])
+        let short = ($sha | str substring 0..9)
 
-        if $published == $sha {
-          {project: $p.name, output: ($sha | str substring 0..9), commits: $commits, action: "skipped"}
-        } else if $dry_run {
-          {project: $p.name, output: ($sha | str substring 0..9), commits: $commits, action: "would push"}
-        } else {
+        let tangled = if $published == $sha { "skipped" } else if $dry_run { "would push" } else {
           # Force: rewriting monorepo history rewrites every filtered commit.
           git-ok $mirror ["push" "--force" $remote $"($sha):refs/heads/($branch)"] | ignore
-          {project: $p.name, output: ($sha | str substring 0..9), commits: $commits, action: "pushed"}
+          "pushed"
         }
+
+        let gh = if $no_github { "-" } else if $dry_run { "would push" } else {
+          try {
+            if (remote-head $mirror $gh_remote $branch) == $sha { "skipped" } else {
+              git-ok $mirror ["push" "--force" $gh_remote $"($sha):refs/heads/($branch)"] | ignore
+              "pushed"
+            }
+          } catch {|e| $"FAILED: ($e.msg)" }
+        }
+
+        {project: $p.name, output: $short, commits: $commits, tangled: $tangled, github: $gh}
       } catch {|e|
-        {project: $p.name, output: "-", commits: "-", action: $"FAILED: ($e.msg)"}
+        {project: $p.name, output: "-", commits: "-", tangled: $"FAILED: ($e.msg)", github: "-"}
       }
     }
   )
@@ -205,10 +244,60 @@ def main [
   print $"input ($input | str substring 0..9) -> ($projects | length) projects"
   $results | table | print
 
-  let failed = ($results | where {|r| $r.action | str starts-with "FAILED" })
+  let failed = (
+    $results | where {|r|
+      ($r.tangled | str starts-with "FAILED") or ($r.github | str starts-with "FAILED")
+    }
+  )
   if not ($failed | is-empty) {
     # A publish pipeline that fails silently is the failure mode here.
     error make {msg: $"($failed | length) projects failed to publish"}
+  }
+}
+
+# Create the GitHub mirrors that do not exist yet. Kept out of `main` on
+# purpose: publishing should push to repos, not bring them into being, and a
+# typo in a project name would otherwise quietly create a repo rather than
+# fail. Run it once when adding a project.
+def "main setup-github" [
+  --github: string = "overby-me" # GitHub account to create the mirrors under
+  --only: string              # only this project
+  --private                   # create them private instead of public
+  --dry-run                   # report what is missing, create nothing
+]: nothing -> nothing {
+  let here = ($env.FILE_PWD | default ".")
+  let projects = (
+    open ($here | path join "projects.nuon")
+    | where {|p| $only == null or $p.name == $only }
+  )
+
+  let results = (
+    $projects | each {|p|
+      let slug = $"($github)/($p.name)"
+      let exists = (^gh repo view $slug --json name | complete | get exit_code) == 0
+      if $exists {
+        {repo: $slug, action: "exists"}
+      } else if $dry_run {
+        {repo: $slug, action: "would create"}
+      } else {
+        # The description points home, so the repo says what it is from the
+        # search results, before anyone opens the README.
+        let desc = $"Read-only mirror of overby.me/overby.me ($p.path), published with josh"
+        let vis = if $private { "--private" } else { "--public" }
+        let made = (^gh repo create $slug $vis --description $desc | complete)
+        if $made.exit_code == 0 {
+          {repo: $slug, action: "created"}
+        } else {
+          {repo: $slug, action: $"FAILED: ($made.stderr | str trim)"}
+        }
+      }
+    }
+  )
+  $results | table | print
+
+  let failed = ($results | where {|r| $r.action | str starts-with "FAILED" })
+  if not ($failed | is-empty) {
+    error make {msg: $"($failed | length) repos could not be created"}
   }
 }
 
