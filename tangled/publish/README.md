@@ -111,10 +111,25 @@ afterwards to refill it.
 
 ## Authentication
 
-Tangled push is **SSH only**. There are no deploy keys, no per-repo tokens and
-no HTTPS push: a knot authorises a push by matching the offered SSH key
-against keys registered to accounts that may write to that repo. So CI needs a
-private key in a Spindle secret, belonging to an account with push rights.
+A knot authorises a push in one of two ways. There are no deploy keys and no
+branch protection in either case: authorisation is per repo, not per ref, and
+a force-push is always accepted.
 
-`--ssh-key` is passed with `IdentitiesOnly=yes`, because offered several keys
-a knot rejects on the first non-matching one and gives up.
+**SSH**, which this script uses: the offered key must be published by an
+account allowed to write to that repo (a `sh.tangled.publicKey` record on that
+account's PDS). `--ssh-key` is passed with `IdentitiesOnly=yes`, because
+offered several keys a knot rejects on the first non-matching one and gives
+up. CI therefore needs a private key in a Spindle secret, belonging to such an
+account.
+
+**HTTP**, which an automated client or a josh-proxy would use: pass an atproto
+service-auth JWT, either as `Authorization: Bearer <jwt>` or as the *password*
+of a basic credential whose user is `x-tangled-token`. Mint it with
+`com.atproto.server.getServiceAuth` using `aud=did:web:<knot>` and
+`lxm=sh.tangled.repo.push`. The knot caps the token's lifetime at **300
+seconds**, though it may be reused until it expires. Repos are addressed by
+their own DID over HTTP: `https://<knot>/<repoDid>`.
+
+(Older Go knotservers refuse HTTP push outright with "Pushes are only
+supported over SSH". `knot1.tangled.sh` runs the newer Rust knot, which does
+not.)
