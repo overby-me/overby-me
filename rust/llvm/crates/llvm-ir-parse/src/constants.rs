@@ -136,9 +136,8 @@ impl Parser {
 
         // An intrinsic needs no declaration: upstream builds one from the
         // call when it recognises the name, and appends it after everything
-        // the module writes, in the order the names were first used. Its id
-        // has to be reserved here so that the pre-scan and the parse agree
-        // about which function is which.
+        // the module writes. Its id has to be reserved here so that the
+        // pre-scan and the parse agree about which function is which.
         let mut implied = Vec::new();
         for spanned in &self.tokens {
             let Token::GlobalName(text) = &spanned.token else {
@@ -163,6 +162,18 @@ impl Parser {
                 implied.push(name);
             }
         }
+        // Sorted by the name the module wrote, which is not the order the
+        // calls come in and not the order the finished names sort in either.
+        // Five intrinsics called in reverse alphabetical order come back
+        // alphabetical, so it is a sort; and `@llvm.umax` called at `i8`
+        // prints before `@llvm.umax.i32` though `llvm.umax.i8` sorts after
+        // it, so the key is what was written. That is the shape of a
+        // forward reference held in a map until the module is finished
+        // rather than a declaration built where the call was read.
+        implied.sort_by(|left, right| match (left, right) {
+            (Name::Named(left), Name::Named(right)) => left.cmp(right),
+            _ => std::cmp::Ordering::Equal,
+        });
         for name in implied {
             symbols.insert(name.clone(), GlobalRef::Function(FunctionId(functions)));
             functions += 1;

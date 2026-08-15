@@ -50,6 +50,8 @@ and each row names the check that backs it.
 | A `DICompositeType` with an identifier made `distinct` and uniqued under that identifier | done | `llvm-opt-differential`, `llvm-opt-differential-linker`, `llvm-roundtrip` |
 | The data layout a triple implies, filled in when a module writes none | done for the 679 triples upstream's tests name that imply one | `llvm-opt-differential-linker`, `llvm-opt-differential` |
 | The ThinLTO summary index read, verified against the module, and not written back | done, which is what upstream's `opt -S` does with one | `llvm-opt-differential`, `llvm-verify-corpus` |
+| An intrinsic read under an older name and written under the current one | done for the 120 renames upstream's own tests show | `llvm-opt-differential` |
+| Implied declarations printed in upstream's order, sorted by the name as written | done | `llvm-opt-differential` |
 
 ## The round trip
 

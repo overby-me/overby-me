@@ -32,6 +32,7 @@ pub mod names;
 pub mod overloads;
 pub mod recognised;
 pub mod reduce;
+pub mod renames;
 pub mod table;
 
 pub use reduce::{base_name, candidates, is_documented, is_known};

@@ -2135,6 +2135,38 @@ the verifier still checks them, and none of them prints.
 Differential Assembler 198 to 207, nine files rather than the four the
 histogram attributed to it, the rest having been counted under whatever
 differed in them first.
+The renames came next and turned up an ordering rule on the way in. Two of
+the files filed under renaming were not renames at all: an implied
+declaration prints in a different place than we put it. Ours were appended
+in the order the calls first named them, which the comment in the pre-scan
+said in so many words, and it is not what upstream does. Five intrinsics
+called in reverse alphabetical order come back alphabetical, so it is a
+sort; and `@llvm.umax` called at `i8` prints before `@llvm.umax.i32` though
+`llvm.umax.i8` sorts after it, so the key is the name as written rather than
+the name it ends up with. That is the shape of a forward reference held in a
+map until the module is finished rather than a declaration built where the
+call was read.
+The renames themselves are `corpus/intrinsic-renames.nu`:
+`llvm.wasm.laneselect` is read as `llvm.wasm.relaxed.laneselect`,
+`llvm.arm.thread.pointer` as `llvm.thread.pointer`,
+`llvm.arm.neon.vclz` as `llvm.ctlz`. 120 of them.
+The sweep needed telling what a rename is. A batch of declarations goes in
+and a batch of names comes out, and a renamed one cannot be matched by name,
+so the two are compared as sets and the odd one out is paired with the odd
+one in. The first run found 2,958 renames and 2,719 conflicts, which is a
+measurement of the wrong thing: a *remangling* looks exactly the same from
+outside, one name in and another out, and `llvm.smax.v4i32` was recorded as
+renamed twice and differently. Comparing the two names with their
+instantiation types dropped is what tells them apart, and it leaves 311
+pairs and no conflicts at all.
+Two files stay open and are recorded as tasks rather than worked around.
+One declares both `llvm.aarch64.thread.pointer` and
+`llvm.arm.thread.pointer`, which rename to the same thing; upstream merges
+them into one function and we rename the first and leave the second, because
+renaming it on top would leave two functions sharing a name. The other is an
+argument count rather than a name: `declare i8 @llvm.ctlz.i8(i8)` is the
+one-argument spelling of an intrinsic that now takes two.
+Differential Assembler 207 to 209.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

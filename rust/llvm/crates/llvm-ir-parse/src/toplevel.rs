@@ -884,6 +884,25 @@ impl Parser {
         self.module.function_order = order;
     }
 
+    /// The name upstream reads this one as, when it reads it as another.
+    ///
+    /// Some intrinsics are read under an older spelling and written under
+    /// the current one: `llvm.aarch64.thread.pointer` becomes
+    /// `llvm.thread.pointer` and `llvm.arm.neon.vclz` becomes `llvm.ctlz`.
+    /// The components the name was written with come along, the rename being
+    /// of the intrinsic rather than of the instantiation.
+    ///
+    /// `corpus/intrinsic-renames.nu` measures it, and had to be told the
+    /// difference between a rename and a remangling: both look the same from
+    /// outside, one name going in and another coming out, so it compares the
+    /// two names with their instantiation types dropped. Before it did,
+    /// `llvm.smax.v4i32` counted as renamed, twice and differently.
+    fn upgraded_intrinsic_name(&self, name: &str) -> Option<String> {
+        let base = llvm_ir::intrinsic::base_name(name);
+        let upgraded = llvm_ir::intrinsic::renames::renamed(base)?;
+        Some(format!("{upgraded}{}", &name[base.len()..]))
+    }
+
     /// The name the mangling table builds for this declaration, or `None`
     /// when nothing measured says what it should be.
     pub(crate) fn canonical_intrinsic_name(&self, index: usize) -> Option<String> {
@@ -892,18 +911,30 @@ impl Parser {
         if function.is_var_arg || function.blocks().next().is_some() {
             return None;
         }
-        let Name::Named(written) = &function.name else {
+        let Name::Named(name) = &function.name else {
             return None;
         };
-        let (base, arity, positions) = llvm_ir::intrinsic::mangling::positions(written)?;
+        // An older spelling becomes the current one first, the components
+        // hanging off whatever the intrinsic ends up being called.
+        // `llvm.wasm.laneselect.v16i8` is `llvm.wasm.relaxed.laneselect`
+        // instantiated at `v16i8`, and asking the mangling table about the
+        // name as written would be asking about an intrinsic that no longer
+        // exists under it.
+        let upgraded = self.upgraded_intrinsic_name(name);
+        let written = upgraded.as_deref().unwrap_or(name);
+        let Some((base, arity, positions)) = llvm_ir::intrinsic::mangling::positions(written)
+        else {
+            // A rename with no mangling row still stands on its own.
+            return upgraded;
+        };
         if arity != function.params.len() + 1 {
-            return None;
+            return upgraded;
         }
         // The same gate the attributes go through: a declaration whose types
         // do not fit the documented ones is not the intrinsic upstream would
         // recognise, and upstream leaves what it does not recognise alone.
         if !self.intrinsic_declaration_fits(index, function.params.len()) {
-            return None;
+            return upgraded;
         }
         let mut name = base.to_string();
         for position in positions {
