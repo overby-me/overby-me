@@ -188,6 +188,12 @@ async fn info(args: RepoInfoArgs) -> Result<()> {
         .await?;
 
     println!("NAME:        {}", info.name);
+    if let Some(repo_did) = info.repo_did.as_deref() {
+        let appview = crate::util::make_client(&tangled_api::appview::appview_base());
+        if let Ok(stars) = appview.count_stars(repo_did).await {
+            println!("STARS:       {}", stars.count);
+        }
+    }
     println!("OWNER DID:   {}", info.did);
     println!("KNOT:        {}", info.knot);
     if let Some(spindle) = info.spindle.as_deref() {

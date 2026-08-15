@@ -296,3 +296,22 @@ mod search_tests {
         assert_eq!(hit.title(), "3abc");
     }
 }
+
+/// How many accounts have starred something: `sh.tangled.feed.countStars`.
+pub const COUNT_STARS: &str = "sh.tangled.feed.countStars";
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct StarCount {
+    #[serde(default)]
+    pub count: i64,
+    #[serde(rename = "distinctAuthors", default)]
+    pub distinct_authors: i64,
+}
+
+impl TangledClient {
+    /// Star count for a repo, keyed by the repo's own DID.
+    pub async fn count_stars(&self, repo_did: &str) -> Result<StarCount> {
+        self.get_json(COUNT_STARS, &[("subject", repo_did.to_string())], None)
+            .await
+    }
+}

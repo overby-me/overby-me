@@ -1500,6 +1500,37 @@ impl TangledClient {
             .await
     }
 
+    /// Fetch a blob and, if it is gzipped, decompress it.
+    ///
+    /// A pull's patch is stored as a gzipped blob rather than inline, so
+    /// reading the record alone yields no diff at all.
+    pub async fn get_patch_blob(&self, pds_base: &str, did: &str, cid: &str) -> Result<String> {
+        let url = format!(
+            "{}/xrpc/com.atproto.sync.getBlob?did={did}&cid={cid}",
+            pds_base.trim_end_matches('/')
+        );
+        let res = reqwest::Client::new().get(&url).send().await?;
+        let status = res.status();
+        let bytes = res.bytes().await?;
+        if !status.is_success() {
+            return Err(anyhow!(
+                "{status}: {}",
+                String::from_utf8_lossy(&bytes)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            ));
+        }
+        // gzip starts 1f 8b; anything else is already plain text.
+        if bytes.len() > 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+            use std::io::Read;
+            let mut out = String::new();
+            flate2::read::GzDecoder::new(&bytes[..]).read_to_string(&mut out)?;
+            return Ok(out);
+        }
+        Ok(String::from_utf8_lossy(&bytes).to_string())
+    }
+
     /// Resolve a handle to a DID.
     pub async fn resolve_handle(&self, handle: &str, bearer: Option<&str>) -> Result<String> {
         if handle.starts_with("did:") {
@@ -1893,8 +1924,16 @@ pub struct Pull {
     pub title: String,
     #[serde(default)]
     pub body: String,
+    /// Older records inlined the patch here. Current ones do not: see
+    /// `patch_blob`.
     #[serde(default)]
     pub patch: Option<String>,
+    /// The patch as a gzipped blob. A pull carries it directly, or inside
+    /// the last of its `rounds` when it has been revised.
+    #[serde(rename = "patchBlob", default)]
+    pub patch_blob: Option<BlobRef>,
+    #[serde(default)]
+    pub rounds: Vec<PullRound>,
     #[serde(default)]
     pub source: Option<PullSource>,
     #[serde(rename = "createdAt")]
@@ -1906,6 +1945,40 @@ pub struct Pull {
     pub change_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_change_id: Option<String>,
+}
+
+/// A blob reference: the CID lives at `ref.$link`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobRef {
+    #[serde(rename = "ref", default)]
+    pub reference: BlobLink,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BlobLink {
+    #[serde(rename = "$link", default)]
+    pub link: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRound {
+    #[serde(rename = "patchBlob", default)]
+    pub patch_blob: Option<BlobRef>,
+}
+
+impl Pull {
+    /// The CID of the patch to show: the newest round's, else the pull's own.
+    pub fn patch_cid(&self) -> Option<&str> {
+        self.rounds
+            .iter()
+            .rev()
+            .find_map(|r| r.patch_blob.as_ref())
+            .or(self.patch_blob.as_ref())
+            .map(|b| b.reference.link.as_str())
+            .filter(|c| !c.is_empty())
+    }
 }
 
 #[derive(Debug, Clone)]

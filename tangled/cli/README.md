@@ -186,6 +186,44 @@ Check for issues:
 cargo clippy
 ```
 
+## Lexicon audit
+
+This tree is a vendored fork, and Tangled's lexicons move. Auditing it against
+[`aly.codes/tg`](https://tangled.org/aly.codes/tg), which tracks them closely,
+found **nine** defects that all looked like working code:
+
+| What | Symptom |
+|-|-|
+| `sh.tangled.spindle.listRuns` no longer exists | `spindle runs`/`logs` died with a bare 404; the namespace is `sh.tangled.ci` |
+| `sh.tangled.repo.pull.state` renamed to `.status` | closing a pull wrote a record nothing reads; `merged` was inexpressible |
+| Records missing required `createdAt`/`$type` | written with `validate: false`, so the PDS accepted them and the appview ignored them |
+| Listing by scanning a PDS | one undeserialisable record failed the whole response; capped at 100; could not see another account's repos |
+| `cancel` parsed an empty body as JSON | every cancel failed with `EOF while parsing a value` |
+| `sh.tangled.pipeline` is dead | `spindle list` read a collection with zero records |
+| Star subject written flat | `repo star` wrote records `countStars` never counted |
+| `get_repo_info` scanned the caller's PDS | another owner's repo was `Could not find repo` |
+| `pr diff` read a `patch` field | the field does not exist: the patch is a gzipped blob CID under `rounds[]`, so every diff printed "(no patch attached)" |
+
+Re-run the audit by diffing both surfaces:
+
+```sh
+# every lexicon each side calls
+grep -rhoE '"(sh\.tangled|com\.atproto)[a-zA-Z.#]+"' <tg>  --include='*.go' | tr -d '"' | sort -u
+grep -rhoE '"(sh\.tangled|com\.atproto)[a-zA-Z.#]+"' crates --include='*.rs' | tr -d '"' | sort -u
+```
+
+Known differences that are deliberate, as of the last audit:
+
+- `com.atproto.sync.getBlob` is used, but built into a URL rather than named
+  as a literal, so the grep above will not see it. Do not "re-add" it.
+- `sh.tangled.ci.trigger#push` and `#pullRequest` are match arms in tg for
+  display. Triggers are kept as raw JSON here, so an unknown trigger kind
+  cannot fail a response.
+- `com.atproto.server.getSession` is unused: `auth status` reports the stored
+  session without a round trip.
+- `sh.tangled.knot` records are unused: only `knot migrate` exists, not a
+  listing of registered knots.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.

@@ -204,8 +204,14 @@ async fn diff(args: PrDiffArgs) -> Result<()> {
     let pr = client
         .get_pull_record(&did, &rkey, Some(session.access_jwt.as_str()))
         .await?;
-    match pr.patch.as_deref() {
-        Some(patch) if !patch.is_empty() => print!("{}", patch),
+    // The patch is a gzipped blob referenced by CID, not a field on the
+    // record. Older records inlined it, so try that first.
+    match (pr.patch.as_deref(), pr.patch_cid()) {
+        (Some(patch), _) if !patch.is_empty() => print!("{patch}"),
+        (_, Some(cid)) => {
+            let patch = client.get_patch_blob(&pds, &did, cid).await?;
+            print!("{patch}");
+        }
         _ => println!("(no patch attached to this PR)"),
     }
     Ok(())
