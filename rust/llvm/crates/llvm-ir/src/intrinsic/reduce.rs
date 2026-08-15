@@ -6,31 +6,65 @@
 //! reduction, kept beside the tables rather than inside one of them so that
 //! regenerating a table cannot take it away.
 
-use super::{names, table};
+use super::{names, recognised, table};
 
 /// Whether a component of a name is a mangled type rather than part of the
 /// name itself.
 ///
-/// A mangled type usually carries the width or the count of what it
-/// describes, so it has a digit in it: `i32`, `v4i32`, `nxv2i64`, `p0`,
-/// `bf16`, `fp128`, `ppcf128`, `a4i32`. The ones that do not are the type
-/// keywords the IR spells out, and those are a closed set rather than a
-/// guess: every digit-free type spelling that appears after a documented
-/// name across `llvm/test` is here, `half` on twenty-three names and the
-/// rest on fewer.
+/// This is the grammar [`super::mangle`] measured, read backwards: an
+/// integer is `i` and its width, a pointer `p` and its address space, a
+/// vector or an array a prefix, a count and the element's own spelling, a
+/// literal struct `sl_` and its fields and `s`. The rest are the spellings
+/// that carry no number, which is a closed set.
 ///
-/// Anything else with no digit in it is a word, and a word belongs to the
-/// name: `elts` in `llvm.vp.cttz.elts` is not a type.
-///
-/// This was a list of prefixes before, which is the same idea stated in a
-/// form that has to be kept up to date and was not: it knew `f128` and not
-/// `fp128`, and no spelling of `bfloat` at all, which cost fifty-four
-/// modules across three trees before the tree ratchets said so.
+/// It was "has a digit in it" before, which is the same idea stated loosely,
+/// and loosely is wrong in both directions. `interleave4` in
+/// `llvm.vector.interleave4` has a digit and is not a type, and reducing
+/// through it left `llvm.vector`; worse, `llvm.amdgcn.fdot2` reduced to
+/// `llvm.amdgcn`, and a table keyed on that answers for every name the
+/// target has. Nothing here strips a component that is not a type upstream
+/// would have written.
 fn mangled(part: &str) -> bool {
+    // The spellings that carry no count of their own, including the two the
+    // IR writes as words.
+    // `fp128` beside `f128`: the second is what upstream mangles a `fp128`
+    // to now, and the first is what the older names in its own tests carry.
     const SPELLED: &[&str] = &[
-        "bfloat", "double", "float", "half", "isVoid", "metadata", "ptr", "token", "void",
+        "Metadata", "bf16", "bfloat", "double", "f128", "f16", "f32", "f64", "f80", "float",
+        "fp128", "half", "isVoid", "label", "metadata", "ppcf128", "ptr", "token", "void",
+        "x86amx",
     ];
-    part.bytes().any(|byte| byte.is_ascii_digit()) || SPELLED.contains(&part)
+    if SPELLED.contains(&part) {
+        return true;
+    }
+    // A literal struct writes its fields between `sl_` and `s`.
+    if let Some(fields) = part.strip_prefix("sl_") {
+        return fields.ends_with('s');
+    }
+    // An integer or a pointer: the letter, then nothing but its number.
+    for prefix in ["i", "p"] {
+        if let Some(number) = part.strip_prefix(prefix)
+            && !number.is_empty()
+            && number.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    // A vector or an array: the prefix, the count, then whatever one element
+    // spells. `nxv` before `v`, being the longer of the two.
+    for prefix in ["nxv", "v", "a"] {
+        let Some(rest) = part.strip_prefix(prefix) else {
+            continue;
+        };
+        let count = rest
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        if count > 0 && count < rest.len() && mangled(&rest[count..]) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The names a lookup tries: the whole name, then the whole name with its
@@ -70,6 +104,18 @@ pub fn is_documented(name: &str) -> bool {
     })
 }
 
+/// Whether upstream would recognise this name, which is a wider question
+/// than whether LangRef documents it: the coroutine and exception-handling
+/// intrinsics are documented in other files, `llvm.vector.interleave4` in
+/// none, and every target's in the target backend.
+///
+/// This is what decides whether an undeclared call is an intrinsic upstream
+/// builds a declaration for, and whether a name prints with upstream's
+/// `; Unknown intrinsic` comment above it.
+pub fn is_known(name: &str) -> bool {
+    is_documented(name) || recognised::is_recognised(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{base_name, is_documented};
@@ -107,6 +153,39 @@ mod tests {
         assert!(attributes::attributes("llvm.vp.cttz.elts.i32.nxv16i1").is_some());
         assert!(table::signature("llvm.aarch64.made.up.p0").is_none());
         assert!(overloads::tied("llvm.aarch64.made.up.p0").is_none());
+    }
+
+    /// Upstream knows names LangRef does not document, and the two questions
+    /// are asked separately because only the second decides whether an
+    /// undeclared call resolves.
+    ///
+    /// Each of these was measured. `llvm.vector.interleave4` and
+    /// `llvm.vector.interleave9` are the pair that shows it is a fact about
+    /// upstream and not about the spelling: the same call shape at four
+    /// operands assembles and at nine does not, and LangRef documents
+    /// neither, stopping at three.
+    #[test]
+    fn upstream_knows_names_langref_does_not_document() {
+        use super::is_known;
+        for name in [
+            // Documented in Coroutines.rst rather than LangRef.
+            "llvm.coro.id",
+            "llvm.coro.save",
+            // In ExceptionHandling.rst.
+            "llvm.eh.typeid.for",
+            // Documented nowhere at all.
+            "llvm.vector.interleave4",
+            // Documented only in the target backend, and reached through the
+            // instantiation a module actually writes.
+            "llvm.amdgcn.ds.append.p3",
+            "llvm.aarch64.neon.vsli",
+        ] {
+            assert!(!is_documented(name), "{name} is not in LangRef");
+            assert!(is_known(name), "{name} is one upstream recognises");
+        }
+        for name in ["llvm.vector.interleave9", "llvm.completely.invented.name"] {
+            assert!(!is_known(name), "{name} is not an intrinsic upstream knows");
+        }
     }
 
     /// A whole name wins over the one it reduces to, which is what keeps an

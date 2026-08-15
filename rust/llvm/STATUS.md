@@ -4,7 +4,7 @@ What exists, what is a stub, and what claim is *not* being made yet. Written in
 the register [rust/fe-c](../fe-c/STATUS.md) uses: a sentence here is either
 backed by a check that passes or is marked unmeasured.
 
-**Last updated:** 2026-08-02.
+**Last updated:** 2026-08-15.
 **Tier:** T0 (PLAN.md §8), in progress.
 
 ## Pins
@@ -46,6 +46,7 @@ and each row names the check that backs it.
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
 | Intrinsic names carrying the types they were instantiated at | done for the 239 LangRef documents, name and print position both | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
+| Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names upstream's own tests show it recognising | the eleven tree checks, `llvm-upstream-assembler` |
 
 ## The round trip
 
@@ -81,13 +82,13 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 477 | 483 | 3 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 478 | 483 | 2 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 320 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
 Those two suites are written to exercise a parser, which makes them a good
-oracle and a poor sample. The rest of `llvm/test` is the opposite: thirty-six
+oracle and a poor sample. The rest of `llvm/test` is the opposite: thirty-eight
 thousand modules written to exercise passes, backends, linkers and debuggers,
 in whatever syntax was convenient at the time. Each bound is one-sided,
 because there is nothing to trade against: reading a module upstream reads is
@@ -95,11 +96,11 @@ right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/CodeGen` | 22,385 | 22,785 | `llvm-tree-codegen` |
-| `llvm/test/Transforms` | 10,232 | 10,305 | `llvm-tree-transforms` |
-| `llvm/test/Analysis` | 1,396 | 1,403 | `llvm-tree-analysis` |
+| `llvm/test/CodeGen` | 22,785 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/Transforms` | 10,305 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Analysis` | 1,403 | 1,403 | `llvm-tree-analysis` |
 | `llvm/test/DebugInfo` | 1,101 | 1,101 | `llvm-tree-debuginfo` |
-| `llvm/test/Instrumentation` | 505 | 508 | `llvm-tree-instrumentation` |
+| `llvm/test/Instrumentation` | 508 | 508 | `llvm-tree-instrumentation` |
 | `llvm/test/Linker` | 338 | 338 | `llvm-tree-linker` |
 | `llvm/test/ThinLTO` | 260 | 260 | `llvm-tree-thinlto` |
 | `llvm/test/Other` | 160 | 160 | `llvm-tree-other` |
@@ -107,14 +108,11 @@ right in every case.
 | `llvm/test/Bitcode` | 232 | 232 | `llvm-tree-bitcode` |
 | `llvm/test/Feature` | 82 | 82 | `llvm-tree-feature` |
 
-That is 36,851 of the 37,334 modules llvm-as reads across eleven trees.
-What is left is dominated by one thing: a target intrinsic no LangRef line
-names cannot be auto-declared, which is most of what CodeGen still refuses.
-The intrinsic name table is honest about why, and the number moves only if
-a specification of that set becomes readable.
-
-Seven trees are read whole: Bitcode, DebugInfo, Linker, ThinLTO, Other, MC
-and Feature.
+That is every one of the 37,817 modules llvm-as reads across eleven trees.
+The last gap was 483 modules and one error, a call to an intrinsic whose
+name we did not recognise, which is what `corpus/intrinsic-recognised.nu`
+closed. Each of these stays a ratchet at its full count, so a change that
+loses a module fails rather than passing quietly.
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute
@@ -144,13 +142,19 @@ off the assembler, which takes a directive only when its index count
 matches the list.
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 3 modules llvm-as reads**, all of them in Assembler,
-which is the failure that matters: a target intrinsic no LangRef line names,
-and two calls upstream upgrades to a signature we check against the
-documented one. That count is a ceiling that may only fall. We
-**read 11 modules llvm-as refuses**, three in Assembler and eight in
-Verifier, which is a missing verifier rule each, and agreement is a floor
-that may only rise.
+bounds. We **refuse 2 modules llvm-as reads**, both of them in Assembler,
+which is the failure that matters: two calls upstream upgrades to a
+signature we check against the documented one. That count is a ceiling that
+may only fall. We **read 11 modules llvm-as refuses**, three in Assembler
+and eight in Verifier, which is a missing verifier rule each, and agreement
+is a floor that may only rise.
+
+**The eleven tree ratchets are at 100%**: every module `llvm-as` reads
+across `Transforms`, `Analysis`, `CodeGen`, `DebugInfo`, `Instrumentation`,
+`Linker`, `ThinLTO`, `Other`, `MC`, `Feature` and `Bitcode`, which is 37,817
+of them, we read too. The last gap was 483 modules failing at one thing, a
+call to an intrinsic whose name we did not recognise, and
+`corpus/intrinsic-recognised.nu` closed it.
 
 Most of what is left on the second count is one thing: upstream knows what
 each intrinsic means and we know only what LangRef's `declare` lines say
@@ -160,7 +164,13 @@ that were built and measured.
 auto-declaring an undeclared intrinsic on that basis fixes three of the
 modules we refuse and costs eight new wrong acceptances, because the parse
 error it removes was standing in for the signature check, so it is a
-script and not a table. `corpus/intrinsic-signatures.nu` harvests the
+script and not a table. `corpus/intrinsic-recognised.nu` answers the same
+question where LangRef cannot, upstream knowing 1,790 names that it does
+not document: the coroutine and exception-handling intrinsics are
+documented in other files, `llvm.vector.interleave4` in none, and every
+target's in its backend. A name used in a file `llvm-as` reads, where the
+file itself never gives it a body, is a name upstream recognised, which
+makes the exit code the whole oracle and needs no probing. `corpus/intrinsic-signatures.nu` harvests the
 signatures from the same lines, 314 intrinsics, recording a position only
 where its type is the same in every documented instantiation.
 `corpus/intrinsic-attributes.nu` asks the assembler rather than LangRef,

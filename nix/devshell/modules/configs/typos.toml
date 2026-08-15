@@ -140,5 +140,10 @@ extend-exclude = [
   # The LLVM IR conformance corpus. Its comparison predicates are LangRef
   # keywords rather than English: olt, oge, une, uno and friends.
   "rust/llvm/corpus/",
+  # The generated intrinsic tables. Every string in them is a name upstream
+  # chose, measured from its own tests, so a spelling here is a fact rather
+  # than a choice: `llvm.aarch64.sve.ld1.pn.x2` names SVE's predicate-as-
+  # counter register and cannot be corrected to `on`.
+  "rust/llvm/crates/llvm-ir/src/intrinsic/",
 ]
 ignore-hidden = false

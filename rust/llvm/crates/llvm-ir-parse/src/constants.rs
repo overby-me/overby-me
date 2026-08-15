@@ -151,12 +151,15 @@ impl Parser {
             if symbols.contains_key(&name) || implied.contains(&name) {
                 continue;
             }
-            // Either table will do: LangRef names 419 intrinsics in its
-            // `declare` lines and gives a usable signature for fewer, and
-            // recognising the name is all that is needed to build the
-            // declaration from the call. `is_documented` asks both, at the
-            // whole name and at the one it instantiates.
-            if llvm_ir::intrinsic::is_documented(text) {
+            // Recognising the name is all that is needed to build the
+            // declaration from the call, and upstream recognises far more
+            // names than LangRef documents: the coroutine and
+            // exception-handling intrinsics are documented in other files,
+            // `llvm.vector.interleave4` in none, and every target's in the
+            // target backend. `is_known` asks the documented tables and the
+            // set measured from the modules upstream reads, at the whole
+            // name and at the one it instantiates.
+            if llvm_ir::intrinsic::is_known(text) {
                 implied.push(name);
             }
         }

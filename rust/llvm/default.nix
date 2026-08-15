@@ -136,7 +136,7 @@ in {
     # not build. Refusing every such module scored as agreement for a reason
     # that had nothing to do with what those files test, which is what the
     # second bound is for. Folding typed pointers took it back to 449.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 477 3;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 478 2;
     llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 320 0;
 
     # Not whether we accept the same files, but whether we print the same
@@ -154,11 +154,17 @@ in {
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use
     # the implicit numbering more.
-    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10232;
-    llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1396;
-    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22385;
+    #
+    # All eleven now read every module `llvm-as` reads. The last gap was one
+    # error in every one of them, a call to an intrinsic whose name we did
+    # not recognise, and it closed when the recognised-name table landed.
+    # A number here that equals the module count is a suite with nothing
+    # left to win, and it stays a ratchet so that it cannot be lost.
+    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10305;
+    llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1403;
+    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22785;
     llvm-tree-debuginfo = pkgs: treeCheck pkgs "DebugInfo" 1101;
-    llvm-tree-instrumentation = pkgs: treeCheck pkgs "Instrumentation" 505;
+    llvm-tree-instrumentation = pkgs: treeCheck pkgs "Instrumentation" 508;
     llvm-tree-linker = pkgs: treeCheck pkgs "Linker" 338;
     llvm-tree-thinlto = pkgs: treeCheck pkgs "ThinLTO" 260;
     llvm-tree-other = pkgs: treeCheck pkgs "Other" 160;

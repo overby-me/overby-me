@@ -1976,6 +1976,69 @@ it out of the move.
 Feature 67 to 70 and Other 141 to 143, each suite down to a single file
 that differs for a reason that is not the name: one wants the attributes of
 an nvvm intrinsic, the other a pass-timing report.
+Then the eleven trees, all at once, because they were all failing at the
+same thing. Recording our own error for every module upstream reads and we
+refuse, and grouping by the shape of the message rather than its text, gives
+one line: 483 refusals, 483 of them "reference to undefined symbol @llvm.*".
+Three hundred and thirty names, and the namespaces say what they are:
+amdgcn 132, dx 95, aarch64 90, spirv and riscv 30 each, x86 27, nvvm 22,
+then coro 16, vector 15, experimental 9, eh and dbg 4.
+An intrinsic needs no declaration, upstream recognising the name at the call
+and building one from the call's own signature, and our name set was
+LangRef's 421. Upstream knows far more. The coroutine, exception-handling
+and debug-info intrinsics are documented in other files entirely;
+`llvm.vector.interleave4` is documented nowhere, LangRef stopping at three;
+and a target's intrinsics are documented only in its backend.
+No probe was needed, which took a wrong turn to find out. The first oracle
+built read the assembler's message, "invalid intrinsic signature" for a name
+it knows against "use of undefined value" for one it does not, which is the
+message and not the exit code. The exit code answers on its own: a name used
+in a file `llvm-as` reads, where that file never gives the name a body, is a
+name upstream recognised, because nothing else would let the module resolve.
+So the derivation is a scan of the files it accepts and no probing at all.
+Three things had to come out of that scan before it measured the right thing.
+`@llvm.used` and `@llvm.global_ctors` are reserved globals rather than
+intrinsics, and a filter that only looked at `declare` lines counted a global
+definition as not giving the name a body. Half these files are FileCheck
+lines quoting IR, where a name upstream never parsed says nothing about what
+it recognises. And a symbol has to be read exactly as written rather than
+trimmed to what a name may end with: `CodeGen/AMDGPU/wmma-gfx12-w32.ll`
+declares `@llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32.` with a trailing
+dot and calls the name without it, so the call is undeclared and upstream
+materialises it, while a scan that trimmed the dot read the typo as the
+declaration and dropped the name. Two CodeGen modules said so, which is what
+a ratchet at the full count is for.
+The order of the two steps is what makes it finish: scan first, and ask the
+assembler only about a file that offers a name nothing has offered yet.
+Nearly every file offers nothing new, and running `llvm-as` on all
+thirty-seven thousand of them was most of an hour; 435 files answer for all
+1,790 names. Names are stored with their instantiation types dropped, which
+is what a lookup reduces to and collapses the cost-model tests' thousands of
+spellings into the names behind them.
+`; Unknown intrinsic` came along with it. Upstream prints that above an
+`llvm.` name it does not know, and we were printing it above every target
+intrinsic, which upstream knows perfectly well. The printer asks the same
+question the parser's gate asks now.
+The reduction had to be rewritten before any of it was safe, and a unit test
+found that rather than a ratchet. "A component with a digit in it is a
+mangled type" is the loose statement of the rule, and loosely is wrong both
+ways: `interleave4` is not a type, so `llvm.vector.interleave4` reduced to
+`llvm.vector`, and `llvm.amdgcn.fdot2` reduced to `llvm.amdgcn`, which as a
+stored key answers for every name that target has. What replaced it is the
+grammar `mangle.rs` had already measured, read backwards: `i` and a width,
+`p` and an address space, `v`/`nxv`/`a` and a count and then the element's
+own spelling, `sl_` and fields and `s`, and a closed set for the rest. The
+pair that pins it is `llvm.vector.interleave4` against
+`llvm.vector.interleave9`: the same call shape assembles at four operands
+and is refused at nine, and LangRef documents neither.
+Every one of the eleven trees now reads every module `llvm-as` reads:
+Transforms 10,232 to 10,305, Analysis 1,396 to 1,403, CodeGen 22,385 to
+22,785, Instrumentation 505 to 508, and the other seven were already there.
+Assembler 477 to 478 with the ceiling 3 to 2, which is the count that
+matters, and it took sweeping every directory of `llvm/test` rather than the
+eleven the tree ratchets cover: `llvm.amdgcn.ds.append` is named only in
+`Assembler`, and a name is recognised or it is not whatever suite it appears
+in. Verifier and the four differentials are where they were.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

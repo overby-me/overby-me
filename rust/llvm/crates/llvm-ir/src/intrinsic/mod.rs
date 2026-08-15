@@ -29,7 +29,8 @@ pub mod mangle;
 pub mod mangling;
 pub mod names;
 pub mod overloads;
+pub mod recognised;
 pub mod reduce;
 pub mod table;
 
-pub use reduce::{base_name, candidates, is_documented};
+pub use reduce::{base_name, candidates, is_documented, is_known};

@@ -695,7 +695,13 @@ impl Printer<'_> {
 }
 
 /// Whether a function's name starts with `llvm.` and names no intrinsic
-/// LangRef documents. `corpus/intrinsic-names.nu` harvested the names.
+/// upstream knows.
+///
+/// The same question the parser's gate asks, and it has to be the same
+/// answer: a name upstream recognises is one it builds a declaration for and
+/// one it prints no comment above. Asking only what LangRef documents put
+/// the comment above every target intrinsic, which upstream knows perfectly
+/// well.
 pub(crate) fn unknown_intrinsic(function: &Function) -> bool {
     let Name::Named(name) = &function.name else {
         return false;
@@ -703,6 +709,5 @@ pub(crate) fn unknown_intrinsic(function: &Function) -> bool {
     if !name.starts_with("llvm.") {
         return false;
     }
-    // Either table will do, the same way the parser's gate takes either.
-    !llvm_ir::intrinsic::is_documented(name)
+    !llvm_ir::intrinsic::is_known(name)
 }
