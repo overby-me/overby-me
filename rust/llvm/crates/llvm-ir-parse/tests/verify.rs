@@ -2034,18 +2034,36 @@ const SUMMARY_SPACING: &str = r#"^0 = module: (path: "a.o", hash: (0, 0, 0, 0, 0
 #[test]
 fn a_summary_index_tolerates_upstream_spacing() {
     let module = llvm_ir_parse::parse_module(SUMMARY_SPACING).expect("upstream accepts this");
-    let printed = llvm_ir_print::print_module(&module);
-    assert!(
-        printed.contains("refs: (writeonly ^1, readonly ^1, ^1)"),
-        "{printed}"
+    assert_eq!(
+        module.summary.len(),
+        2,
+        "both entries should have been read"
     );
+    assert!(llvm_ir::verify_module(&module).is_empty());
 }
 
+/// A summary index is read and not written back, which is what upstream's
+/// `opt -S` does with one: a module carrying `^0 = module: (...)` comes back
+/// without it and with everything else intact.
+///
+/// This test asserted the opposite until the question was put to upstream.
+/// The index is a thing beside the module rather than part of it, and the
+/// only tool that writes one is `llvm-dis`, which writes the index the
+/// bitcode reader built rather than the text that was read.
 #[test]
-fn a_summary_index_round_trips() {
+fn a_summary_index_is_read_and_not_written_back() {
     let module = llvm_ir_parse::parse_module(SUMMARY).expect("upstream accepts this");
     assert!(llvm_ir::verify_module(&module).is_empty());
-    assert_eq!(llvm_ir_print::print_module(&module), SUMMARY);
+    assert_eq!(module.summary.len(), 5, "every entry should have been read");
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        !printed.contains('^'),
+        "no summary entry should print\n--- printed ---\n{printed}"
+    );
+    assert!(
+        printed.contains("define void @f() {") && printed.contains("  ret void"),
+        "the module itself is untouched\n--- printed ---\n{printed}"
+    );
 }
 
 #[test]

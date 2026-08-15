@@ -6,7 +6,6 @@ use std::fmt::Write as _;
 use llvm_ir::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr};
 use llvm_ir::function::Function;
 use llvm_ir::instruction::{CallData, InstKind};
-use llvm_ir::summary::SummaryValue;
 use llvm_ir::value::{Name, escape_name, needs_quotes};
 use llvm_ir::{BlockId, Module, StructId, TypeId, TypeKind};
 use llvm_support::Align;
@@ -221,17 +220,17 @@ impl<'m> Printer<'m> {
             }
         }
 
-        // Upstream writes the summary index between the attribute groups and
-        // the named metadata.
-        if !self.module.summary.is_empty() {
-            self.push("\n");
-            for index in 0..self.module.summary.len() {
-                let entry = self.module.summary[index].clone();
-                let _ = write!(self.out, "^{} = {}: ", entry.id, entry.kind);
-                self.summary_value(&entry.value);
-                self.push("\n");
-            }
-        }
+        // The summary index is read and not written back, which is what
+        // upstream's `opt -S` does with one: a module carrying `^0 = module:
+        // (...)` comes back without it, body and all else intact. The index
+        // is a thing beside the module rather than part of it, and the
+        // textual writer does not hold it.
+        //
+        // `llvm-dis` is the tool that does write one, and it writes the index
+        // the bitcode reader built rather than the text that was read: the
+        // path and hash come from the file it opened and a `; guid = N`
+        // comment is appended. Printing back what the module wrote was
+        // neither of those, and it was ours rather than measured.
 
         if !self.module.named_metadata.is_empty() {
             self.push("\n");
@@ -464,40 +463,6 @@ fn struct_name(def: &llvm_ir::types::StructDef) -> String {
         def.name.clone()
     } else {
         identifier(&def.name)
-    }
-}
-
-impl Printer<'_> {
-    fn summary_value(&mut self, value: &SummaryValue) {
-        match value {
-            SummaryValue::Number(number) => {
-                let _ = write!(self.out, "{number}");
-            }
-            SummaryValue::String(text) => {
-                let _ = write!(self.out, "\"{}\"", escape_string(text));
-            }
-            SummaryValue::Ref(id) => {
-                let _ = write!(self.out, "^{id}");
-            }
-            SummaryValue::Word(word) => self.push(word),
-            SummaryValue::Qualified(word, value) => {
-                let _ = write!(self.out, "{word} ");
-                self.summary_value(value);
-            }
-            SummaryValue::Tuple(fields) => {
-                self.push("(");
-                for (position, field) in fields.iter().enumerate() {
-                    if position > 0 {
-                        self.push(", ");
-                    }
-                    if let Some(key) = &field.key {
-                        let _ = write!(self.out, "{key}: ");
-                    }
-                    self.summary_value(&field.value);
-                }
-                self.push(")");
-            }
-        }
     }
 }
 

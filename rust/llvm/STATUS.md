@@ -49,6 +49,7 @@ and each row names the check that backs it.
 | Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names used undeclared, plus the 11,865 upstream recognises in a declaration | the eleven tree checks, `llvm-upstream-assembler` |
 | A `DICompositeType` with an identifier made `distinct` and uniqued under that identifier | done | `llvm-opt-differential`, `llvm-opt-differential-linker`, `llvm-roundtrip` |
 | The data layout a triple implies, filled in when a module writes none | done for the 679 triples upstream's tests name that imply one | `llvm-opt-differential-linker`, `llvm-opt-differential` |
+| The ThinLTO summary index read, verified against the module, and not written back | done, which is what upstream's `opt -S` does with one | `llvm-opt-differential`, `llvm-verify-corpus` |
 
 ## The round trip
 

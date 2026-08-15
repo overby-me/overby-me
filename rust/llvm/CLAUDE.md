@@ -2120,6 +2120,21 @@ plain about: a triple no test names gets nothing. Deriving a layout from a
 triple's parts instead means reimplementing every backend, and there is no
 specification of that outside them.
 Differential Assembler 197 to 198 and Linker 215 to 219 of 220.
+The summary index turned out to be the opposite of what was recorded. Four
+files looked like a trailing blank line, and what upstream actually does with
+a `^0 = module: (...)` is drop it: `opt -S` reads the index and prints the
+module without it, body and all else intact. The index is a thing beside the
+module rather than part of it, and the only tool that writes one is
+`llvm-dis`, which writes what the bitcode reader built rather than what was
+read, path and hash from the file it opened and a `; guid` comment appended.
+Printing back what the module wrote was neither, and a unit test had pinned
+it: that test said so in its own comment, that the property was "ours"
+because the corpus could not hold it. It was never put to upstream. It is
+now, and it asserts the measured behaviour instead: the entries are read,
+the verifier still checks them, and none of them prints.
+Differential Assembler 198 to 207, nine files rather than the four the
+histogram attributed to it, the rest having been counted under whatever
+differed in them first.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes
