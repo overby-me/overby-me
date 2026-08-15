@@ -6,7 +6,7 @@
 //! reduction, kept beside the tables rather than inside one of them so that
 //! regenerating a table cannot take it away.
 
-use super::{names, recognised, table};
+use super::{declared, names, recognised, table};
 
 /// Whether a component of a name is a mangled type rather than part of the
 /// name itself.
@@ -113,7 +113,7 @@ pub fn is_documented(name: &str) -> bool {
 /// builds a declaration for, and whether a name prints with upstream's
 /// `; Unknown intrinsic` comment above it.
 pub fn is_known(name: &str) -> bool {
-    is_documented(name) || recognised::is_recognised(name)
+    is_documented(name) || recognised::is_recognised(name) || declared::is_declared_intrinsic(name)
 }
 
 #[cfg(test)]

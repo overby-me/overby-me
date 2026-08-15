@@ -63,8 +63,12 @@ def argument-attributes [argument: string]: nothing -> string {
   mut index = 0
   mut split_at = ($text | str length)
   for char in ($text | split chars) {
-    if $char in ["<" "[" "{"] { $depth = $depth + 1 }
-    if $char in [">" "]" "}"] { $depth = $depth - 1 }
+    # Round brackets count too. A target extension type writes its
+    # parameters in them, spaces and all, and leaving them out of the depth
+    # split `target("dx.Layout", { float }, 4, 0)` after its first space and
+    # called the rest of the type an attribute.
+    if $char in ["<" "[" "{" "("] { $depth = $depth + 1 }
+    if $char in [">" "]" "}" ")"] { $depth = $depth - 1 }
     if $char == " " and $depth == 0 {
       $split_at = $index
       break
@@ -122,6 +126,35 @@ def clean-declare [line: string]: nothing -> string {
   | str replace --all --regex ' ,' ','
   | str replace --all --regex ' \)' ')'
   | str replace --all --regex '\( ' '('
+  | str trim
+}
+
+# A string on its way into a Rust literal. Nothing here should carry a quote
+# or a backslash, and a generator that assumes so writes a source file that
+# does not compile rather than a wrong table, which is the better failure but
+# a slow one to read: a target extension type's name is quoted, and one that
+# leaked through the argument splitter once did exactly that.
+def escape-rust [text: string]: nothing -> string {
+  $text | str replace --all "\\" "\\\\" | str replace --all '"' '\"'
+}
+
+# The same job for a line upstream's own tests wrote, which is IR rather than
+# documentation and needs a different, smaller cleaning.
+#
+# `clean-declare` must not be used on one. Its rule for LangRef's operand
+# placeholders strips an angle-bracketed word, and a scalable vector type is
+# an angle-bracketed word: it turned
+# `@llvm.masked.load.nxv4i1.p0(ptr, i32, <vscale x 4 x i1>, <vscale x 4 x i8>)`
+# into `(ptr, i32,,)`. What a written line needs is its attributes off, the
+# types left exactly as they are.
+def clean-written [line: string]: nothing -> string {
+  trim-after-arguments $line
+  | str replace --all --regex '\b(immarg|readonly|writeonly|readnone|nocapture|noalias|inreg|zeroext|signext|noext|noundef|nonnull|returned|writable|allocptr|allocalign|dead_on_unwind|swiftself|swifterror|nofree|nest|inalloca)\b' ''
+  | str replace --all --regex '\b(captures|byval|byref|sret|elementtype|preallocated|nofpclass|range|initializes|dereferenceable|dereferenceable_or_null|alignstack)\([^)]*\)' ''
+  | str replace --all --regex '\balign\s+[0-9]+' ''
+  | str replace --all --regex '  +' ' '
+  | str replace --all --regex ' ,' ','
+  | str replace --all --regex ' \)' ')'
   | str trim
 }
 
@@ -263,17 +296,44 @@ def read-declares [text: string]: nothing -> list {
     | parse --regex '^attributes #(?P<number>[0-9]+) = \{ (?P<body>.*) \}$'
     | reduce --fold {} {|row, acc| $acc | insert $row.number $row.body}
   )
-  $text | lines
-  | parse --regex '^declare (?P<before>[^@]*)@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\((?P<arguments>.*)\)(?: #(?P<group>[0-9]+))?$'
-  | each {|row|
-    {
+  # Upstream writes `; Unknown intrinsic` above an `llvm.` name it does not
+  # know, which is the readback saying so in its own words. It matters twice
+  # over. The attributes on such a declaration are whatever the probe wrote,
+  # not the intrinsic's, so recording them would put a test file's own
+  # attributes into this table. And a name it does *not* say that about is a
+  # name upstream knows, which is the other half of what this sweep is for:
+  # `corpus/intrinsic-recognised.nu` can only see names used without a
+  # declaration, and one every test declares never reaches it.
+  let lines = ($text | lines)
+  mut rows = []
+  mut unknown = false
+  for line in $lines {
+    if ($line | str trim) == "; Unknown intrinsic" {
+      $unknown = true
+      continue
+    }
+    let parsed = (
+      $line
+      | parse --regex '^declare (?P<before>[^@]*)@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\((?P<arguments>.*)\)(?: #(?P<group>[0-9]+))?$'
+    )
+    if ($parsed | is-empty) {
+      if ($line | str trim) != "" and not ($line | str starts-with "; Function Attrs:") {
+        $unknown = false
+      }
+      continue
+    }
+    let row = ($parsed | first)
+    $rows = ($rows | append {
       base: (strip-mangling $row.name)
       instantiation: $row.name
+      known: (not $unknown)
       ret: (return-attributes ($row.before | str trim))
       params: (split-arguments $row.arguments | each {|a| argument-attributes $a})
       function: (if ($row.group | is-empty) { "" } else { $groups | get --optional $row.group | default "" })
-    }
+    })
+    $unknown = false
   }
+  $rows
 }
 
 # Assembles the batch, dropping whatever llvm-as objects to until it reads.
@@ -315,7 +375,7 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
   }
   let work = (mktemp --directory --tmpdir "intrinsic-attributes-XXXXXX")
 
-  let harvested = (
+  let documented = (
     harvest (open --raw $langref | lines)
     | each {|line| clean-declare $line}
     | each {|line| instantiate $line}
@@ -323,7 +383,28 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
     | where ($it | str ends-with ")")
     | uniq
   )
-  print $"($harvested | length) declare lines harvested from LangRef"
+  print $"($documented | length) declare lines harvested from LangRef"
+
+  # And every intrinsic declaration upstream's own tests write. LangRef
+  # documents 421 names and upstream knows thousands, every target's among
+  # them, so a sweep that reads only the documentation leaves a print
+  # difference on every module that names one: no attributes where upstream
+  # writes some, and `; Unknown intrinsic` above a name it knows perfectly
+  # well. These lines need none of the cleaning LangRef's do, being IR that
+  # upstream already read, but they carry attributes of their own and those
+  # come off: what is being asked is what upstream puts there instead.
+  let written = (
+    ^grep -rhE '^declare .*@llvm\.' --include='*.ll' ([$tree "llvm" "test"] | path join)
+    | lines
+    | uniq
+    | each {|line| clean-written $line}
+    | where ($it | str ends-with ")")
+    | uniq
+  )
+  print $"($written | length) declare lines harvested from llvm/test"
+
+  let harvested = ($documented ++ $written | uniq)
+  print $"($harvested | length) together"
 
   # A module holds one declaration per name, and the candidate
   # instantiations of a schematic line all share theirs, LangRef writing no
@@ -372,6 +453,7 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
     # missed, so they are dropped before the answers are compared.
     let answered = (
       $group.rows
+      | where known
       | where {|row| $row.function != "" or $row.ret != "" or ($row.params | any {|p| $p != ""})}
     )
     if ($answered | is-empty) {
@@ -403,12 +485,51 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
   }
   print $"($entries | length) intrinsics with attributes, ($conflicts | length) conflicting"
 
+  # The other half of the readback: which names upstream knew. A name it
+  # printed `; Unknown intrinsic` above is one it does not, and every other
+  # one it does, whether or not the intrinsic carries any attributes. This
+  # goes beside the table rather than into it, because the two answer
+  # different questions and an intrinsic with no attributes still has to be
+  # recognised.
+  let known = (
+    $declares
+    | where known
+    | get base
+    | uniq
+    | sort
+  )
+  print $"($known | length) names upstream recognised"
+  let known_body = ($known | each {|name| $"    \"($name)\","} | str join "\n")
+  let known_header = "//! The intrinsic names upstream recognises in a declaration.
+//!
+//! Generated by `corpus/intrinsic-attributes.nu` beside the attribute table,
+//! from the same readback. Upstream writes `; Unknown intrinsic` above an
+//! `llvm.` name it does not know, so a declaration it does not say that
+//! about is one it does.
+//!
+//! This is the half `corpus/intrinsic-recognised.nu` cannot see. That one
+//! reads names used *without* a declaration, which is what proves upstream
+//! built one; a name every test declares for itself never appears that way,
+//! and it is still a name upstream knows.
+
+/// Whether upstream recognised this name in a declaration.
+pub fn is_declared_intrinsic(name: &str) -> bool {
+    super::candidates(name).any(|candidate| DECLARED.binary_search(&candidate).is_ok())
+}
+
+/// Sorted, so the lookup can be a binary search.
+static DECLARED: &[&str] = &["
+  let known_out = ($out | path dirname | path join "declared.rs")
+  [$known_header, $known_body, "];", ""] | str join "\n" | save --force $known_out
+  ^rustfmt --edition 2021 $known_out
+  print $"  into ($known_out)"
+
   let body = (
     $entries
     | sort-by name
     | each {|entry|
-      let params = ($entry.params | each {|p| $'"($p)"'} | str join ", ")
-      $"    \(\"($entry.name)\", Attributes { function: \"($entry.function)\", ret: \"($entry.ret)\", params: &[($params)] }\),"
+      let params = ($entry.params | each {|p| $'"(escape-rust $p)"'} | str join ", ")
+      $"    \(\"(escape-rust $entry.name)\", Attributes { function: \"(escape-rust $entry.function)\", ret: \"(escape-rust $entry.ret)\", params: &[($params)] }\),"
     }
     | str join "\n"
   )

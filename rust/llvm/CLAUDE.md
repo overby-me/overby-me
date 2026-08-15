@@ -2069,6 +2069,41 @@ now, for the same reason `check-differential.nu` already compares against
 `opt -S`: that is the transformation this project implements. Across the
 whole corpus it is twelve lines in one file, all of them this rule.
 Its differential Assembler 191 to 192 and Linker 207 to 214.
+Then the attributes, which is the same sweep pointed at a wider source. It
+read LangRef's `declare` lines and got 370 intrinsics; upstream knows
+thousands, so every module naming a target intrinsic printed no attributes
+where upstream prints some. Reading the 40,636 `declare` lines upstream's own
+tests write, as well as the 1,803 from LangRef, gives 11,842.
+The readback answers a second question at the same time. Upstream writes
+`; Unknown intrinsic` above an `llvm.` name it does not know, so a
+declaration it does not say that about is one it does. That is the half
+`corpus/intrinsic-recognised.nu` cannot see: it reads names used *without* a
+declaration, which is what proves upstream built one, and a name every test
+declares for itself never appears that way. 11,865 names, into
+`intrinsic/declared.rs` beside the attributes, and `is_known` asks it too.
+It also stops a test file's own attributes being recorded as an intrinsic's,
+which is what an unrecognised declaration would otherwise have contributed.
+Two bugs in the harvest, both from reusing LangRef's cleaner on real IR.
+`clean-declare` strips an angle-bracketed word, that being how LangRef writes
+an operand placeholder, and a scalable vector type is an angle-bracketed
+word: `@llvm.masked.load.nxv4i1.p0(ptr, i32, <vscale x 4 x i1>, ...)` became
+`(ptr, i32,,)`. And harvesting with `\([^)]*\)` stops at the first bracket,
+so `ptr addrspace(1)` cut the line in half. A written line gets its own
+cleaning now, which takes the attributes off and leaves the types alone.
+A third was in the argument splitter and had been there all along, waiting
+for a type that could reach it: the depth count knew `<`, `[` and `{` and not
+`(`, so `target("dx.Layout", { float }, 4, 0)` split at its first space and
+the rest of the type was recorded as an attribute. It reached the generated
+file as an unquoted string and rustc refused it, which is the good failure;
+the strings are escaped on the way out now so that the bad one stays
+impossible.
+Nine intrinsics disagree with themselves across instantiations and are left
+out rather than guessed at, `llvm.ucmp` among them: its `range` attribute is
+a property of the instantiation, `range(i8 -1, 2)` at one width and
+`range(i32 -1, 2)` at another, so there is no one answer for the base name.
+Differential Assembler 192 to 197, Linker 214 to 215, and Feature and Other
+to 71 of 71 and 144 of 144, which is every module we both accept printed
+exactly as upstream prints it. Those two are held rather than raised now.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

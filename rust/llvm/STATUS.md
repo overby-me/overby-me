@@ -42,11 +42,11 @@ and each row names the check that backs it.
 | Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 | Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
-| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 370 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
+| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 11,842 intrinsics upstream answers about, swept from LangRef and from its own tests | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
 | Intrinsic names carrying the types they were instantiated at | done for the 239 LangRef documents, name and print position both | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
-| Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names upstream's own tests show it recognising | the eleven tree checks, `llvm-upstream-assembler` |
+| Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names used undeclared, plus the 11,865 upstream recognises in a declaration | the eleven tree checks, `llvm-upstream-assembler` |
 | A `DICompositeType` with an identifier made `distinct` and uniqued under that identifier | done | `llvm-opt-differential`, `llvm-opt-differential-linker`, `llvm-roundtrip` |
 
 ## The round trip
@@ -182,8 +182,14 @@ makes the exit code the whole oracle and needs no probing. `corpus/intrinsic-sig
 signatures from the same lines, 314 intrinsics, recording a position only
 where its type is the same in every documented instantiation.
 `corpus/intrinsic-attributes.nu` asks the assembler rather than LangRef,
-writing each of those `declare` lines out and reading back the attributes
-upstream replaced them with, 370 intrinsics.
+writing each `declare` line out and reading back the attributes upstream
+replaced them with. It reads LangRef's 1,803 lines and the 40,636 that
+upstream's own tests write, which is 11,842 intrinsics: LangRef documents
+370 of them and every target's are documented only in its backend. The same
+readback says which names upstream knew, `; Unknown intrinsic` being what it
+writes above one it does not, and that is the half
+`corpus/intrinsic-recognised.nu` cannot see, since a name every test declares
+for itself is never used undeclared.
 `corpus/intrinsic-overloads.nu` reads the same lines a fourth way, comparing
 the positions to each other rather than to a fixed type: two whose types
 vary *together* across every documented instantiation are one overloaded
