@@ -24,8 +24,11 @@ open = { workspace = true }
 # Optionally depend on ATrium XRPC client (wired later as endpoints solidify)
 atrium-xrpc-client = { workspace = true, optional = true }
 
+ciborium = { workspace = true }
 flate2 = "1"
+futures-util = { workspace = true }
 serde_urlencoded = "0.7"
+tokio-tungstenite = { workspace = true }
 url = { workspace = true }
 
 tangled-config = { path = "../tangled-config" }

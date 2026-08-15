@@ -1,3 +1,5 @@
+pub mod ci;
+pub mod ci_logs;
 pub mod client;
 pub mod oauth;
 

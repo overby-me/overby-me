@@ -528,19 +528,27 @@ pub struct SpindleConfigArgs {
 pub struct SpindleRunArgs {
     #[arg(long)]
     pub repo: Option<String>,
+    /// Branch to run for (default: main)
     #[arg(long)]
     pub branch: Option<String>,
+    /// Commit to run. Defaults to the branch tip on the knot.
+    #[arg(long)]
+    pub sha: Option<String>,
+    /// Stream the logs once it starts
     #[arg(long, default_value_t = false)]
     pub wait: bool,
 }
 
 #[derive(Args, Debug, Clone)]
 pub struct SpindleLogsArgs {
-    pub job_id: String,
-    #[arg(long, default_value_t = false)]
-    pub follow: bool,
+    /// Pipeline id, as shown by `spindle runs`
+    pub pipeline: String,
+    /// Only this workflow (e.g. publish.yml); repeatable
     #[arg(long)]
-    pub lines: Option<usize>,
+    pub workflow: Vec<String>,
+    /// Repo: <owner>/<name>
+    #[arg(long)]
+    pub repo: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]

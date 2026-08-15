@@ -60,20 +60,34 @@ def check-josh []: nothing -> nothing {
   }
 }
 
-# Create the mirror clone if absent, otherwise fetch it. Single-branch: only
-# the published branch's history is ever filtered.
+# Create the mirror if absent, then fetch the published branch into it.
+#
+# Deliberately not `clone --branch <branch>`: a CI checkout is a detached HEAD
+# with the branch present only as refs/remotes/origin/<branch>, and cloning
+# such a source fails with "Remote branch main not found in upstream origin".
+# Fetching an explicit refspec, with the remote-tracking ref as a fallback,
+# works for a normal checkout and a CI one alike.
 def sync-mirror [work_dir: path, source: string, branch: string]: nothing -> path {
   let mirror = ($work_dir | path join "monorepo.git")
   if not ($mirror | path exists) {
     mkdir $work_dir
-    print $"cloning ($source) -> ($mirror)"
-    let out = (^git ...$GIT_CONFIG clone --bare --single-branch --branch $branch $source $mirror | complete)
+    print $"creating ($mirror)"
+    let out = (^git ...$GIT_CONFIG init --bare --quiet $mirror | complete)
     if $out.exit_code != 0 {
-      error make {msg: $"clone failed: ($out.stderr | str trim)"}
+      error make {msg: $"init failed: ($out.stderr | str trim)"}
     }
-  } else {
-    print $"fetching ($source)"
-    git-ok $mirror ["fetch" "--force" "origin" $"($branch):($branch)"] | ignore
+  }
+  # Re-point origin every run: the source differs between a laptop and CI.
+  git-in $mirror ["remote" "remove" "origin"] | ignore
+  git-ok $mirror ["remote" "add" "origin" $source] | ignore
+
+  print $"fetching ($branch) from ($source)"
+  let local = (git-in $mirror ["fetch" "--force" "origin" $"+refs/heads/($branch):refs/heads/($branch)"])
+  if $local.exit_code != 0 {
+    let tracked = (git-in $mirror ["fetch" "--force" "origin" $"+refs/remotes/origin/($branch):refs/heads/($branch)"])
+    if $tracked.exit_code != 0 {
+      error make {msg: $"cannot fetch ($branch) from ($source): ($local.stderr | str trim)"}
+    }
   }
   $mirror
 }

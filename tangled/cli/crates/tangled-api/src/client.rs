@@ -557,6 +557,7 @@ impl TangledClient {
                     knot,
                     description: item.value.description,
                     spindle: item.value.spindle,
+                    repo_did: item.value.repo_did,
                 });
             }
         }
@@ -1455,6 +1456,28 @@ impl TangledClient {
             .unwrap_or(base)
     }
 
+    /// The base URL with a scheme, defaulting to https when the configured
+    /// host is a bare name.
+    pub(crate) fn base_url_with_scheme(&self) -> String {
+        let base = self.base_url.trim_end_matches('/');
+        if base.starts_with("http://") || base.starts_with("https://") {
+            base.to_string()
+        } else {
+            format!("https://{base}")
+        }
+    }
+
+    /// Service auth for the spindle this client points at, bound to `lxm`.
+    pub(crate) async fn spindle_auth(
+        &self,
+        pds_base: &str,
+        access_jwt: &str,
+        lxm: &str,
+    ) -> Result<String> {
+        self.service_auth_token(self.base_host(), pds_base, access_jwt, lxm)
+            .await
+    }
+
     /// Mint an inter-service auth token for `target_host`.
     ///
     /// `lxm` is the lexicon method the token will be spent on. It is not
@@ -1751,44 +1774,6 @@ impl TangledClient {
         }
         Ok(out)
     }
-
-    pub async fn list_runs(
-        &self,
-        pds_base: &str,
-        access_jwt: &str,
-        params: &[(&str, String)],
-    ) -> Result<Vec<WorkflowRun>> {
-        let sa = self
-            .service_auth_token(
-                self.base_host(),
-                pds_base,
-                access_jwt,
-                "sh.tangled.spindle.listRuns",
-            )
-            .await?;
-        #[derive(Deserialize)]
-        struct Res {
-            runs: Vec<WorkflowRun>,
-        }
-        let res: Res = self
-            .get_json("sh.tangled.spindle.listRuns", params, Some(&sa))
-            .await?;
-        Ok(res.runs)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowRun {
-    pub workflow_id: String,
-    pub pipeline_knot: String,
-    pub pipeline_rkey: String,
-    #[serde(default)]
-    pub repo_did: String,
-    pub workflow_name: String,
-    pub status: String,
-    pub started_at: Option<String>,
-    pub finished_at: Option<String>,
-    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1803,6 +1788,8 @@ pub struct Repository {
     pub knot: Option<String>,
     pub description: Option<String>,
     pub spindle: Option<String>,
+    #[serde(rename = "repoDid", default)]
+    pub repo_did: Option<String>,
     #[serde(default)]
     pub private: bool,
 }
@@ -1901,6 +1888,8 @@ pub struct RepoRecord {
     pub knot: String,
     pub description: Option<String>,
     pub spindle: Option<String>,
+    /// The repo's own DID, minted by the knot. Pipelines are keyed by it.
+    pub repo_did: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -4,8 +4,6 @@ use crate::cli::{
     SpindleSecretRemoveArgs,
 };
 use anyhow::{anyhow, Result};
-use futures_util::StreamExt;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 pub async fn run(_cli: &Cli, cmd: SpindleCommand) -> Result<()> {
     match cmd {
@@ -65,92 +63,136 @@ async fn list(args: SpindleListArgs) -> Result<()> {
 }
 
 async fn runs(args: SpindleRunsArgs) -> Result<()> {
-    let session = crate::util::load_session_with_refresh().await?;
+    let (ctx, api) = spindle_context(args.repo.as_deref()).await?;
+    let res = api.query_pipelines(&ctx.repo_did, args.limit, None).await?;
 
+    let pipelines: Vec<_> = res
+        .pipelines
+        .into_iter()
+        .filter(|p| match args.status.as_deref() {
+            Some(want) => p.workflows.iter().any(|w| w.status == want),
+            None => true,
+        })
+        .collect();
+
+    if pipelines.is_empty() {
+        println!("No pipelines found");
+        return Ok(());
+    }
+
+    let headers = ["PIPELINE", "WORKFLOW", "STATUS", "REF", "COMMIT", "STARTED"];
+    let mut rows: Vec<[String; 6]> = Vec::new();
+    for p in &pipelines {
+        let git_ref = p.trigger_ref().unwrap_or("-").to_string();
+        let commit = p.commit.chars().take(10).collect::<String>();
+        for w in &p.workflows {
+            rows.push([
+                p.id.clone(),
+                w.name.clone(),
+                w.status.clone(),
+                git_ref.clone(),
+                commit.clone(),
+                w.started_at.clone().unwrap_or_else(|| "-".into()),
+            ]);
+        }
+    }
+    print_table(&headers, &rows);
+
+    // The status is a summary; the reason a workflow failed is in its error.
+    for p in &pipelines {
+        for w in &p.workflows {
+            if let Some(err) = w.error.as_deref().filter(|e| !e.is_empty()) {
+                println!("\n{} {}: {}", p.id, w.name, err);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_table<const N: usize>(headers: &[&str; N], rows: &[[String; N]]) {
+    let widths: [usize; N] = std::array::from_fn(|i| {
+        headers[i]
+            .len()
+            .max(rows.iter().map(|r| r[i].len()).max().unwrap_or(0))
+    });
+    let line = |cells: &[String; N]| {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{:<w$}", c, w = widths[i]))
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+    let head: [String; N] = std::array::from_fn(|i| headers[i].to_string());
+    println!("{}", line(&head).trim_end());
+    for row in rows {
+        println!("{}", line(row).trim_end());
+    }
+}
+
+/// Everything a spindle call needs: which spindle, and the repo's own DID.
+struct SpindleContext {
+    session: tangled_config::session::Session,
+    pds: String,
+    repo_did: String,
+    owner: String,
+    name: String,
+}
+
+/// The branch tip on the knot. Tangled serves git over https, so this needs
+/// no ssh key.
+fn remote_branch_sha(owner: &str, name: &str, branch: &str) -> Result<String> {
+    let url = format!("https://tangled.org/{owner}/{name}");
+    let mut remote = git2::Remote::create_detached(url.as_str())?;
+    remote.connect(git2::Direction::Fetch)?;
+    let want = format!("refs/heads/{branch}");
+    let sha = remote
+        .list()?
+        .iter()
+        .find(|h| h.name() == want)
+        .map(|h| h.oid().to_string())
+        .ok_or_else(|| anyhow!("no {want} on {url}"))?;
+    remote.disconnect().ok();
+    Ok(sha)
+}
+
+async fn spindle_context(
+    repo: Option<&str>,
+) -> Result<(SpindleContext, tangled_api::TangledClient)> {
+    let session = crate::util::load_session_with_refresh().await?;
     let pds = session
         .pds
         .clone()
         .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
         .unwrap_or_else(|| "https://bsky.social".into());
     let pds_client = crate::util::make_client(&pds);
-
-    let (owner, name) = parse_repo_ref(
-        args.repo.as_deref().unwrap_or(&session.handle),
-        &session.handle,
-    );
+    let repo_ref = repo.unwrap_or(&session.handle).to_string();
+    let (owner, name) = parse_repo_ref(&repo_ref, &session.handle);
+    let (owner, name) = (owner.to_string(), name.to_string());
     let info = pds_client
-        .get_repo_info(owner, name, Some(session.access_jwt.as_str()))
+        .get_repo_info(&owner, &name, Some(session.access_jwt.as_str()))
         .await?;
-
     let spindle_base = info
         .spindle
         .clone()
         .or_else(|| std::env::var("TANGLED_SPINDLE_BASE").ok())
         .unwrap_or_else(|| "https://spindle.tangled.sh".to_string());
-    let api = crate::util::make_client(&spindle_base);
-
-    let mut params: Vec<(&str, String)> = vec![
-        ("repo_did", info.did.clone()),
-        ("limit", args.limit.to_string()),
-    ];
-    if let Some(ref status) = args.status {
-        params.push(("status", status.clone()));
-    }
-
-    let runs = api.list_runs(&pds, &session.access_jwt, &params).await?;
-
-    if runs.is_empty() {
-        println!("No pipeline runs found");
-    } else {
-        let headers = [
-            "WORKFLOW_ID",
-            "NAME",
-            "STATUS",
-            "CREATED",
-            "STARTED",
-            "FINISHED",
-        ];
-        let rows: Vec<[String; 6]> = runs
-            .iter()
-            .map(|r| {
-                [
-                    r.workflow_id.clone(),
-                    r.workflow_name.clone(),
-                    r.status.clone(),
-                    r.created_at.clone(),
-                    r.started_at.clone().unwrap_or_else(|| "-".into()),
-                    r.finished_at.clone().unwrap_or_else(|| "-".into()),
-                ]
-            })
-            .collect();
-        let widths: [usize; 6] = std::array::from_fn(|i| {
-            headers[i]
-                .len()
-                .max(rows.iter().map(|r| r[i].len()).max().unwrap_or(0))
-        });
-        println!(
-            "{}",
-            headers
-                .iter()
-                .enumerate()
-                .map(|(i, h)| format!("{:<w$}", h, w = widths[i]))
-                .collect::<Vec<_>>()
-                .join("  ")
-        );
-        for row in &rows {
-            println!(
-                "{}",
-                row.iter()
-                    .enumerate()
-                    .map(|(i, v)| format!("{:<w$}", v, w = widths[i]))
-                    .collect::<Vec<_>>()
-                    .join("  ")
-            );
-        }
-    }
-    Ok(())
+    // Pipelines are keyed by the repo's own DID, not the owner's.
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("repo {owner}/{name} has no repoDid; recreate it"))?;
+    Ok((
+        SpindleContext {
+            session,
+            pds,
+            repo_did,
+            owner,
+            name,
+        },
+        crate::util::make_client(&spindle_base),
+    ))
 }
-
 async fn config(args: SpindleConfigArgs) -> Result<()> {
     let session = crate::util::load_session_with_refresh().await?;
 
@@ -212,89 +254,82 @@ async fn config(args: SpindleConfigArgs) -> Result<()> {
 }
 
 async fn run_pipeline(args: SpindleRunArgs) -> Result<()> {
+    let (ctx, api) = spindle_context(args.repo.as_deref()).await?;
+    let branch = args.branch.as_deref().unwrap_or("main");
+    let sha = match args.sha.clone() {
+        Some(s) => s,
+        None => remote_branch_sha(&ctx.owner, &ctx.name, branch)?,
+    };
+    let git_ref = format!("refs/heads/{branch}");
+    let id = api
+        .trigger_pipeline(
+            &ctx.pds,
+            &ctx.session.access_jwt,
+            &ctx.repo_did,
+            &sha,
+            Some(&git_ref),
+            &[],
+        )
+        .await?;
     println!(
-        "Spindle run (stub) repo={:?} branch={:?} wait={}",
-        args.repo, args.branch, args.wait
+        "Triggered pipeline {id} for {git_ref} at {}",
+        &sha[..10.min(sha.len())]
     );
+    if args.wait {
+        stream_logs(&api, &id, &[]).await?;
+    }
     Ok(())
 }
 
 async fn logs(args: SpindleLogsArgs) -> Result<()> {
-    // Parse job_id: format is "knot:rkey:name" or just "name" (use repo context)
-    let parts: Vec<&str> = args.job_id.split(':').collect();
-    let (knot, rkey, name) = if parts.len() == 3 {
-        (
-            parts[0].to_string(),
-            parts[1].to_string(),
-            parts[2].to_string(),
-        )
-    } else if parts.len() == 1 {
-        // Use repo context - need to get repo info
-        let session = crate::util::load_session_with_refresh().await?;
-        let pds = session
-            .pds
-            .clone()
-            .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
-            .unwrap_or_else(|| "https://bsky.social".into());
-        let pds_client = crate::util::make_client(&pds);
-        // Get repo info from current directory context or default to user's handle
-        let info = pds_client
-            .get_repo_info(
-                &session.handle,
-                &session.handle,
-                Some(session.access_jwt.as_str()),
-            )
-            .await?;
-        (info.knot, info.rkey, parts[0].to_string())
-    } else {
-        return Err(anyhow!(
-            "Invalid job_id format. Expected 'knot:rkey:name' or 'name'"
-        ));
-    };
-
-    // Build WebSocket URL - spindle base is typically https://spindle.tangled.sh
-    let spindle_base = std::env::var("TANGLED_SPINDLE_BASE")
-        .unwrap_or_else(|_| "wss://spindle.tangled.sh".to_string());
-    let ws_url = format!("{}/spindle/logs/{}/{}/{}", spindle_base, knot, rkey, name);
-
-    println!(
-        "Connecting to logs stream for {}:{}:{}...",
-        knot, rkey, name
-    );
-
-    // Connect to WebSocket
-    let (ws_stream, _) = connect_async(&ws_url)
-        .await
-        .map_err(|e| anyhow!("Failed to connect to log stream: {}", e))?;
-
-    let (mut _write, mut read) = ws_stream.split();
-
-    // Stream log messages
-    let mut line_count = 0;
-    let max_lines = args.lines.unwrap_or(usize::MAX);
-
-    while let Some(msg) = read.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                println!("{}", text);
-                line_count += 1;
-                if line_count >= max_lines {
-                    break;
-                }
-            }
-            Ok(Message::Close(_)) => {
-                break;
-            }
-            Err(e) => {
-                return Err(anyhow!("WebSocket error: {}", e));
-            }
-            _ => {}
-        }
-    }
-
-    Ok(())
+    // The argument is a pipeline id. A pipeline runs several workflows, so an
+    // optional --workflow narrows the stream to one of them.
+    let (_, api) = spindle_context(args.repo.as_deref()).await?;
+    let workflows: Vec<String> = args.workflow.clone().into_iter().collect();
+    stream_logs(&api, &args.pipeline, &workflows).await
 }
 
+/// Print a pipeline's logs. A finished pipeline replays in full and the
+/// spindle then closes the stream, so this terminates on its own.
+async fn stream_logs(
+    api: &tangled_api::TangledClient,
+    pipeline_id: &str,
+    workflows: &[String],
+) -> Result<()> {
+    use tangled_api::ci_logs::{subscribe_pipeline_logs, LogEvent};
+
+    let url = api.pipeline_logs_url(pipeline_id, workflows)?;
+    let mut current = String::new();
+    subscribe_pipeline_logs(&url, |event| {
+        match event {
+            LogEvent::Control(c) => {
+                if c.workflow != current {
+                    println!("\n=== {} ===", c.workflow);
+                    current = c.workflow.clone();
+                }
+                match c.command.as_deref() {
+                    Some(cmd) => println!("--- step {} [{}] $ {}", c.step, c.kind, cmd),
+                    None if !c.status.is_empty() => {
+                        println!("--- step {} [{}] {}", c.step, c.kind, c.status)
+                    }
+                    None => println!("--- step {} [{}]", c.step, c.kind),
+                }
+            }
+            LogEvent::Data(d) => {
+                if d.workflow != current {
+                    println!("\n=== {} ===", d.workflow);
+                    current = d.workflow.clone();
+                }
+                print!("{}", d.content);
+                if !d.content.ends_with('\n') {
+                    println!();
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+}
 async fn secret(cmd: SpindleSecretCommand) -> Result<()> {
     match cmd {
         SpindleSecretCommand::List(args) => secret_list(args).await,
