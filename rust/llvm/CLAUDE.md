@@ -2039,6 +2039,36 @@ matters, and it took sweeping every directory of `llvm/test` rather than the
 eleven the tree ratchets cover: `llvm.amdgcn.ds.append` is named only in
 `Assembler`, and a name is recognised or it is not whatever suite it appears
 in. Verifier and the four differentials are where they were.
+With the trees full, the print differences are what is left, and the same
+histogram picked the next piece: 48 files, and the largest group is eleven
+that want a `DICompositeType` carrying an `identifier` to be `distinct`. A
+type with one is a type the language gives a single definition across every
+translation unit, so upstream keeps one node per identifier.
+Four measurements make the rule. An identifier is enough on its own, at
+every tag, class through variant part. `identifier: ""` is dropped from the
+output and buys nothing. Two nodes under one identifier are one node and the
+first written wins, the survivor keeping its own name and both references
+pointing at it. And a second node writing that identifier under a different
+tag claims nothing at all: it neither merges nor becomes distinct, so the
+lookup is keyed on the identifier alone with the tag checked against
+whatever already holds it. Keying on the pair would have let that node claim
+an identifier of its own, which is what the first attempt did.
+A fifth was a wrong probe rather than a rule. `DW_TAG_array_type` seemed to
+answer without needing a `baseType`, and what was being read was the
+verifier's error dump, which prints the offending node and reads like output.
+Same shape as the alias-scope and zeroinitializer probes: a module that
+failed for a reason other than the one being asked about.
+The rule then broke the corpus round trip, which is worth recording because
+the two checks genuinely disagreed. `debug.ll` is `llvm-dis` output and holds
+six identified composite types that are not distinct; upstream's own
+`opt -S` on that very file makes all six distinct. So `llvm-dis` output is
+not a fixed point of the textual reader, and the corpus was asking our
+printer to reproduce something upstream's `opt -S` does not.
+`corpus/regen.nu` canonicalises with `opt -S` after the bitcode round trip
+now, for the same reason `check-differential.nu` already compares against
+`opt -S`: that is the transformation this project implements. Across the
+whole corpus it is twelve lines in one file, all of them this rule.
+Its differential Assembler 191 to 192 and Linker 207 to 214.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

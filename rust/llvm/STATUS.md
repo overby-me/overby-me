@@ -29,7 +29,7 @@ and each row names the check that backs it.
 | DataLayout: parsing, alignment queries, verbatim printing | done | `llvm-unit` |
 | Triple: component parsing, verbatim printing | done | `llvm-unit` |
 | IR data model: types, constants, instructions, attributes, metadata | done | `llvm-unit`, and the round trip below, which cannot pass without it |
-| Textual printer | done, byte-identical to `llvm-dis` over the corpus | `llvm-roundtrip` |
+| Textual printer | done, byte-identical to upstream's `opt -S` over the corpus | `llvm-roundtrip` |
 | Textual parser | done for everything the corpus contains | `llvm-roundtrip` |
 | Type layout: sizes, alignments, struct offsets | done | `llvm-unit` |
 | Verifier: structure, types, flags, call signatures, dominance | done for the modelled subset | `llvm-verify-corpus` |
@@ -47,10 +47,11 @@ and each row names the check that backs it.
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
 | Intrinsic names carrying the types they were instantiated at | done for the 239 LangRef documents, name and print position both | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
 | Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names upstream's own tests show it recognising | the eleven tree checks, `llvm-upstream-assembler` |
+| A `DICompositeType` with an identifier made `distinct` and uniqued under that identifier | done | `llvm-opt-differential`, `llvm-opt-differential-linker`, `llvm-roundtrip` |
 
 ## The round trip
 
-Every file in `corpus/` is canonical `llvm-dis` output, and parsing one and
+Every file in `corpus/` is canonical upstream output, and parsing one and
 printing it back reproduces it byte for byte. As of 2026-07-27 that is 14
 files and roughly 4,200 lines: 11 generated from real `rustc --emit=llvm-ir`
 (arithmetic, control flow, memory, atomics, calls, unwinding, debug info,
@@ -62,6 +63,13 @@ This is a stronger property than "the parser accepted it". It says we agree
 with upstream about slot numbering, predecessor order, blank lines, label
 padding, which defaults print as nothing, and the several places where the
 same attribute is spelled differently depending on where it sits.
+
+The files are `llvm-as` then `llvm-dis` then `opt -S`, and the last step is
+not decoration. `llvm-dis` output is not a fixed point of the *textual*
+reader, which is what this project implements: upstream's own `opt -S` on a
+corpus file changes it, in twelve lines across the whole corpus, all of them
+one rule about `DICompositeType`. Canonicalising without that step would ask
+our printer to reproduce output upstream's `opt -S` does not produce.
 
 The debug-info seed is the one that took work. Every other seed is built with
 `-Cdebuginfo=0`, and switching it on found three printer bugs at once: a

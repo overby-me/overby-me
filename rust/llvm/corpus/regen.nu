@@ -32,15 +32,27 @@ def tool-version [name: string] {
   }
 }
 
-# `llvm-as` then `llvm-dis`, with the ModuleID comment normalised to the name
-# the corpus file will have. Upstream sets that comment from whatever path it
-# read, which would otherwise make the output depend on a temporary filename.
+# `llvm-as` then `llvm-dis` then `opt -S`, with the ModuleID comment
+# normalised to the name the corpus file will have. Upstream sets that comment
+# from whatever path it read, which would otherwise make the output depend on
+# a temporary filename.
+#
+# The first two give the seed the compatibility upgrades the bitcode reader
+# owes it, which is what a real pipeline would apply. The third is there
+# because `llvm-dis` output is not a fixed point of the textual reader, and
+# the textual reader is what this project implements: `opt -S` on a corpus
+# file that came out of `llvm-dis` changes it. Across the whole corpus it
+# changes twelve lines, all of them one rule, a `DICompositeType` with an
+# identifier being made `distinct` as it is read. Leaving that out would ask
+# our printer to reproduce output upstream's own `opt -S` does not.
 def canonicalise [source: path, target: path, module_id: string] {
   let work = (mktemp -d)
   let bitcode = ([$work "module.bc"] | path join)
-  let printed = ([$work "module.ll"] | path join)
+  let disassembled = ([$work "module.ll"] | path join)
+  let printed = ([$work "fixed.ll"] | path join)
   ^llvm-as $source -o $bitcode
-  ^llvm-dis $bitcode -o $printed
+  ^llvm-dis $bitcode -o $disassembled
+  ^opt -S $disassembled -o $printed
   let body = (open --raw $printed | lines)
   let head = $"; ModuleID = '($module_id)'"
   let rest = if ($body | first | str starts-with "; ModuleID") { $body | skip 1 } else { $body }

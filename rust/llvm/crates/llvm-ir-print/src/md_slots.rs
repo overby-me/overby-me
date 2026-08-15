@@ -29,16 +29,32 @@ pub(crate) struct MetadataSlots {
     numbers: HashMap<MdId, u32>,
     /// Canonical nodes in printing order.
     pub(crate) order: Vec<MdId>,
+    /// The composite types that took an identifier for themselves, which are
+    /// the ones that print `distinct`.
+    claimed: HashSet<MdId>,
 }
 
 impl MetadataSlots {
     pub(crate) fn compute(module: &Module) -> MetadataSlots {
+        let (canonical, claimed) = unique_nodes(module);
         let mut slots = MetadataSlots {
-            canonical: unique_nodes(module),
+            canonical,
+            claimed,
             ..MetadataSlots::default()
         };
         slots.assign_numbers(module);
         slots
+    }
+
+    /// Whether this node is the one that took its identifier, which is what
+    /// upstream makes `distinct`.
+    ///
+    /// Having an identifier is not enough. A second node writing the same
+    /// identifier under a different tag finds the first already there, fails
+    /// to claim it, and is left an ordinary uniqued node, which is measured:
+    /// upstream prints the first `distinct` and the second plain.
+    pub(crate) fn claimed_an_identifier(&self, id: MdId) -> bool {
+        self.claimed.contains(&id)
     }
 
     /// The number an id prints as, or `None` when the node prints in place.
@@ -151,9 +167,46 @@ pub(crate) fn prints_in_place(node: &Metadata) -> bool {
 /// Whether two nodes are the same depends on whether their operands are, so
 /// this runs to a fixpoint rather than in one pass: `!{!1}` and `!{!2}` become
 /// the same node once `!1` and `!2` do.
-fn unique_nodes(module: &Module) -> HashMap<MdId, MdId> {
+fn unique_nodes(module: &Module) -> (HashMap<MdId, MdId>, HashSet<MdId>) {
     let ids: Vec<MdId> = module.metadata_nodes().map(|(id, _)| id).collect();
     let mut canonical: HashMap<MdId, MdId> = HashMap::new();
+
+    // A `DICompositeType` carrying an identifier is uniqued under that
+    // identifier rather than under what it holds, so two of them merge when
+    // nothing else about them agrees, and the first written wins. This runs
+    // before the structural pass and outside it: the node that claims an
+    // identifier prints `distinct`, so the pass below skips it and would
+    // otherwise leave two where upstream has one.
+    //
+    // The identifier alone is the key, and the tag is checked against
+    // whatever holds it. A second node writing the identifier under a
+    // different tag therefore claims nothing: it does not merge onto the
+    // first, and it is not made distinct either, which is the one case where
+    // an identifier buys a node nothing at all. Keying on the pair instead
+    // would let it claim an identifier of its own and print `distinct`, which
+    // upstream does not do.
+    let mut by_identifier: HashMap<&str, (u128, MdId)> = HashMap::new();
+    let mut claimed: HashSet<MdId> = HashSet::new();
+    for id in &ids {
+        let Some(node) = module.metadata_node(*id) else {
+            continue;
+        };
+        let Some((tag, identifier)) = node.odr_key() else {
+            continue;
+        };
+        match by_identifier.get(identifier) {
+            Some((holder, first)) => {
+                if *holder == tag {
+                    canonical.insert(*id, *first);
+                }
+            }
+            None => {
+                by_identifier.insert(identifier, (tag, *id));
+                claimed.insert(*id);
+            }
+        }
+    }
+
     loop {
         let mut representatives: HashMap<Metadata, MdId> = HashMap::new();
         let mut changed = false;
@@ -161,7 +214,7 @@ fn unique_nodes(module: &Module) -> HashMap<MdId, MdId> {
             let Some(node) = module.metadata_node(*id) else {
                 continue;
             };
-            if node.is_distinct() {
+            if node.is_distinct() || claimed.contains(id) {
                 continue;
             }
             let key = substitute(node, &canonical);
@@ -180,7 +233,7 @@ fn unique_nodes(module: &Module) -> HashMap<MdId, MdId> {
             }
         }
         if !changed {
-            return canonical;
+            return (canonical, claimed);
         }
     }
 }

@@ -260,6 +260,14 @@ impl<'m> Printer<'m> {
                     .expect("id came from the traversal")
                     .clone();
                 let _ = write!(self.out, "!{number} = ");
+                // A composite type that claimed an identifier prints
+                // `distinct` whether or not the module wrote it, and only the
+                // one that claimed it does, so the slots answer rather than
+                // the node. A node that wrote the keyword itself prints it
+                // below, hence the guard: the two answers overlap.
+                if !node.is_distinct() && self.metadata.claimed_an_identifier(id) {
+                    self.push("distinct ");
+                }
                 self.metadata_definition(&node);
                 self.push("\n");
             }

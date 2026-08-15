@@ -104,7 +104,7 @@ in {
         cargo test --workspace --offline --locked
       '';
 
-    # The T0 headline: every corpus file is canonical llvm-dis output, and
+    # The T0 headline: every corpus file is canonical upstream output, and
     # parsing one and printing it back reproduces it byte for byte.
     llvm-roundtrip = pkgs:
       cargoCheck pkgs "roundtrip" ''
@@ -146,9 +146,9 @@ in {
     # performs. Measuring against `llvm-as | llvm-dis` instead counted the
     # bitcode reader's compatibility upgrades as print differences, which is
     # what thirteen of them were.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 191;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 192;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 70;
-    llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 207;
+    llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 214;
     llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 143;
 
     # Ten thousand pass tests, none of them written with a parser in mind,

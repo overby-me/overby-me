@@ -104,6 +104,49 @@ impl Metadata {
         }
     }
 
+    /// The tag and identifier of a `DICompositeType` that carries one, which
+    /// is the key upstream uniques it under rather than its contents.
+    ///
+    /// A type with an identifier is one the language gives a single
+    /// definition across every translation unit, so upstream keeps one node
+    /// per identifier and makes it `distinct` so that nothing merges two
+    /// definitions that only happen to look alike. Measured one module at a
+    /// time: with an identifier it comes back `distinct`, without one it does
+    /// not, and `identifier: ""` comes back with the field gone and the node
+    /// ordinary. Every tag behaves the same way, class, structure,
+    /// enumeration, union, array and variant part alike.
+    ///
+    /// The tag is part of the key. Two nodes sharing an identifier merge when
+    /// their tags agree, and when the tags differ the second is left where it
+    /// is and not even made distinct, which is the one case where an
+    /// identifier buys nothing.
+    pub fn odr_key(&self) -> Option<(u128, &str)> {
+        let Metadata::Specialized { tag, args, .. } = self else {
+            return None;
+        };
+        if tag != "DICompositeType" {
+            return None;
+        }
+        let SpecializedArgs::Named(fields) = args else {
+            return None;
+        };
+        let identifier = fields.iter().find_map(|(name, value)| match value {
+            MdField::Str(text) if name == "identifier" => text.as_str(),
+            _ => None,
+        })?;
+        if identifier.is_empty() {
+            return None;
+        }
+        // The tag is held as the number its word stands for, so two nodes
+        // that spell it differently key the same way, which is the same
+        // reason they unique the same way.
+        let tag = fields.iter().find_map(|(name, value)| match value {
+            MdField::Unsigned(number) if name == "tag" => Some(*number),
+            _ => None,
+        })?;
+        Some((tag, identifier))
+    }
+
     pub fn as_tuple(&self) -> Option<&[MdOperand]> {
         match self {
             Metadata::Tuple { operands, .. } => Some(operands),

@@ -1,6 +1,6 @@
 //! Round-trip fidelity over the corpus.
 //!
-//! Every file in `corpus/` is canonical `llvm-dis` output, so parsing one and
+//! Every file in `corpus/` is canonical upstream output, so parsing one and
 //! printing it back has to reproduce the input byte for byte. That is a much
 //! stronger property than "the parser accepted it": it says we agree with
 //! upstream about numbering, ordering, spacing and every default that prints
@@ -1113,6 +1113,78 @@ fn an_attribute_group_is_numbered_where_it_prints() {
     assert!(
         printed.contains("attributes #0 = { noinline }")
             && printed.contains("attributes #1 = { nounwind }"),
+        "\n--- printed ---\n{printed}"
+    );
+}
+
+/// What upstream does with a `DICompositeType` that carries an identifier.
+///
+/// A type with one is a type the language gives a single definition across
+/// every translation unit, so upstream keeps one node per identifier and
+/// makes it `distinct` so that nothing merges two definitions that only
+/// happen to look alike. Every pair here is one module `opt -S` answered.
+const ODR: &[(&str, &str)] = &[
+    // An identifier is enough on its own.
+    (
+        "!named = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\", identifier: \"T\")\n",
+        "!0 = distinct !DICompositeType(tag: DW_TAG_class_type, name: \"A\", identifier: \"T\")",
+    ),
+    // Without one it is an ordinary uniqued node.
+    (
+        "!named = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\")\n",
+        "!0 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\")",
+    ),
+    // An empty identifier is dropped and buys nothing.
+    (
+        "!named = !{!1}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\", identifier: \"\")\n",
+        "!0 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\")",
+    ),
+    // Two under one identifier are one node, and the first written wins:
+    // the survivor is named "A", and both references point at it.
+    (
+        "!named = !{!1, !2}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\", identifier: \"T\")\n!2 = !DICompositeType(tag: DW_TAG_class_type, name: \"B\", identifier: \"T\")\n",
+        "!named = !{!0, !0}",
+    ),
+    // The tag is held as the number its word stands for, so a node that
+    // spells it differently still merges.
+    (
+        "!named = !{!1, !2}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\", identifier: \"T\")\n!2 = !DICompositeType(tag: 2, name: \"B\", identifier: \"T\")\n",
+        "!named = !{!0, !0}",
+    ),
+];
+
+#[test]
+fn an_identified_composite_type_is_distinct_and_uniqued_by_its_identifier() {
+    for (written, expected) in ODR {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains(expected),
+            "\nfrom:     {written}wanted:   {expected}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
+/// The one case where an identifier buys nothing: a second node writing it
+/// under a different tag finds the first already holding it, so it neither
+/// merges nor becomes distinct. Keying the lookup on the tag as well as the
+/// identifier would have let it claim one of its own.
+#[test]
+fn an_identifier_already_held_under_another_tag_claims_nothing() {
+    let text = concat!(
+        "!named = !{!1, !2}\n",
+        "!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"A\", identifier: \"T\")\n",
+        "!2 = !DICompositeType(tag: DW_TAG_structure_type, name: \"B\", identifier: \"T\")\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("!named = !{!0, !1}")
+            && printed
+                .contains("!0 = distinct !DICompositeType(tag: DW_TAG_class_type, name: \"A\"")
+            && printed.contains("!1 = !DICompositeType(tag: DW_TAG_structure_type, name: \"B\""),
         "\n--- printed ---\n{printed}"
     );
 }
