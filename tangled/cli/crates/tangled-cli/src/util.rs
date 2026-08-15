@@ -2,9 +2,38 @@ use anyhow::{anyhow, Result};
 use tangled_api::oauth::PersistedOAuthSession;
 use tangled_config::session::{Session, SessionManager};
 
+/// The profile chosen on the command line, if any. Set once from main so the
+/// whole process agrees, since sessions are keyed per profile in the keyring.
+static PROFILE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Default profile name, and the keyring account used before profiles existed.
+pub const DEFAULT_PROFILE: &str = "default";
+
+pub fn set_profile(profile: Option<String>) {
+    let _ = PROFILE.set(profile);
+}
+
+/// The profile in force: --profile, else the config's active one, else the
+/// original account name so an existing login keeps working untouched.
+pub fn active_profile() -> String {
+    if let Some(Some(p)) = PROFILE.get() {
+        return p.clone();
+    }
+    tangled_config::config::load_config(None)
+        .ok()
+        .flatten()
+        .and_then(|c| c.profiles.active)
+        .unwrap_or_else(|| DEFAULT_PROFILE.to_string())
+}
+
+/// Session store for the profile in force.
+pub fn session_manager() -> SessionManager {
+    SessionManager::new("tangled-cli", &active_profile())
+}
+
 /// Load session and automatically refresh if expired
 pub async fn load_session() -> Result<Session> {
-    let mgr = SessionManager::default();
+    let mgr = session_manager();
     let session = mgr
         .load()?
         .ok_or_else(|| anyhow!("Please login first: tangled auth login"))?;
@@ -61,7 +90,7 @@ pub async fn refresh_session(session: &Session) -> Result<Session> {
     new_session.pds = session.pds.clone();
 
     // Save the refreshed session
-    let mgr = SessionManager::default();
+    let mgr = session_manager();
     mgr.save(&new_session)?;
 
     Ok(new_session)

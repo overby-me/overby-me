@@ -169,6 +169,12 @@ pub struct GitCredentialArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AuthCommand {
+    /// List the accounts this CLI knows about
+    List,
+    /// Make a profile the active one
+    Switch(AuthSwitchArgs),
+    /// Print the active session's access token
+    Token,
     /// Login with Bluesky credentials
     Login(AuthLoginArgs),
     /// Login via browser (OAuth)
@@ -177,6 +183,12 @@ pub enum AuthCommand {
     Status,
     /// Logout and clear session
     Logout,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AuthSwitchArgs {
+    /// Profile name, as shown by `auth list`
+    pub profile: String,
 }
 
 #[derive(Args, Debug, Clone)]

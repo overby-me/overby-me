@@ -15,6 +15,38 @@ pub struct RootConfig {
     pub knots: KnotsSection,
     #[serde(default)]
     pub ui: UiSection,
+    #[serde(default)]
+    pub profiles: ProfilesSection,
+}
+
+/// Which accounts this CLI knows about, and which one is in use.
+///
+/// The sessions themselves live in the keyring, one entry per profile, and a
+/// keyring cannot be enumerated: without this list `auth list` would have
+/// nothing to list.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProfilesSection {
+    /// Profile used when --profile is not given.
+    pub active: Option<String>,
+    /// Every profile that has been logged into.
+    #[serde(default)]
+    pub known: Vec<String>,
+}
+
+impl ProfilesSection {
+    pub fn remember(&mut self, name: &str) {
+        if !self.known.iter().any(|k| k == name) {
+            self.known.push(name.to_string());
+        }
+        self.active = Some(name.to_string());
+    }
+
+    pub fn forget(&mut self, name: &str) {
+        self.known.retain(|k| k != name);
+        if self.active.as_deref() == Some(name) {
+            self.active = self.known.first().cloned();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

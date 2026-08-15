@@ -1,8 +1,7 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use dialoguer::{Input, Password};
-use tangled_config::session::SessionManager;
 
-use crate::cli::{AuthCommand, AuthLoginArgs, AuthLoginBrowserArgs, Cli};
+use crate::cli::{AuthCommand, AuthLoginArgs, AuthLoginBrowserArgs, AuthSwitchArgs, Cli};
 
 pub async fn run(cli: &Cli, cmd: AuthCommand) -> Result<()> {
     match cmd {
@@ -10,6 +9,9 @@ pub async fn run(cli: &Cli, cmd: AuthCommand) -> Result<()> {
         AuthCommand::LoginBrowser(args) => login_browser(cli, args).await,
         AuthCommand::Status => status(cli).await,
         AuthCommand::Logout => logout(cli).await,
+        AuthCommand::List => list(cli).await,
+        AuthCommand::Switch(args) => switch(cli, args.clone()).await,
+        AuthCommand::Token => token(cli).await,
     }
 }
 
@@ -35,7 +37,8 @@ async fn login(_cli: &Cli, mut args: AuthLoginArgs) -> Result<()> {
         }
     };
     session.pds = Some(pds.clone());
-    SessionManager::default().save(&session)?;
+    crate::util::session_manager().save(&session)?;
+    remember_profile()?;
     println!("Logged in as '{}' ({})", session.handle, session.did);
     Ok(())
 }
@@ -63,13 +66,14 @@ async fn login_browser(_cli: &Cli, args: AuthLoginBrowserArgs) -> Result<()> {
         pds: result.pds.clone(),
         created_at: chrono::Utc::now(),
     };
-    SessionManager::default().save(&session)?;
+    crate::util::session_manager().save(&session)?;
+    remember_profile()?;
     println!("Logged in as '{}' ({})", result.handle, result.did);
     Ok(())
 }
 
 async fn status(_cli: &Cli) -> Result<()> {
-    let mgr = SessionManager::default();
+    let mgr = crate::util::session_manager();
     match mgr.load()? {
         Some(s) => {
             println!("Logged in as '{}' ({})", s.handle, s.did);
@@ -83,7 +87,7 @@ async fn status(_cli: &Cli) -> Result<()> {
 }
 
 async fn logout(_cli: &Cli) -> Result<()> {
-    let mgr = SessionManager::default();
+    let mgr = crate::util::session_manager();
     let had_session = mgr.load()?.is_some();
     if had_session {
         mgr.clear()?;
@@ -104,5 +108,71 @@ async fn logout(_cli: &Cli) -> Result<()> {
     } else {
         println!("No session found");
     }
+    Ok(())
+}
+
+/// Record the profile just logged into, and make it active. The keyring
+/// cannot be enumerated, so without this list nothing could find it again.
+fn remember_profile() -> Result<()> {
+    let name = crate::util::active_profile();
+    let mut cfg = tangled_config::config::load_config(None)?.unwrap_or_default();
+    cfg.profiles.remember(&name);
+    tangled_config::config::save_config(&cfg, None)?;
+    Ok(())
+}
+
+async fn list(_cli: &Cli) -> Result<()> {
+    let cfg = tangled_config::config::load_config(None)?.unwrap_or_default();
+    let active = crate::util::active_profile();
+
+    // Always include the profile in force: a login made before profiles
+    // existed is in the keyring but not in the config.
+    let mut names = cfg.profiles.known.clone();
+    if !names.iter().any(|n| n == &active) {
+        names.insert(0, active.clone());
+    }
+    if names.is_empty() {
+        println!("No accounts. Run: tangled auth login");
+        return Ok(());
+    }
+
+    println!("ACTIVE\tPROFILE\tHANDLE\tDID");
+    for name in names {
+        let session = tangled_config::session::SessionManager::new("tangled-cli", &name).load()?;
+        let (handle, did) = match session {
+            Some(s) => (s.handle, s.did),
+            None => ("(no session)".into(), String::new()),
+        };
+        let marker = if name == active { "*" } else { " " };
+        println!("{marker}\t{name}\t{handle}\t{did}");
+    }
+    Ok(())
+}
+
+async fn switch(_cli: &Cli, args: AuthSwitchArgs) -> Result<()> {
+    let session =
+        tangled_config::session::SessionManager::new("tangled-cli", &args.profile).load()?;
+    let Some(session) = session else {
+        return Err(anyhow!(
+            "profile '{}' has no session; log into it with: tangled auth login --profile {}",
+            args.profile,
+            args.profile
+        ));
+    };
+    let mut cfg = tangled_config::config::load_config(None)?.unwrap_or_default();
+    cfg.profiles.remember(&args.profile);
+    tangled_config::config::save_config(&cfg, None)?;
+    println!("Switched to '{}' ({})", session.handle, args.profile);
+    Ok(())
+}
+
+async fn token(_cli: &Cli) -> Result<()> {
+    let session = crate::util::load_session_with_refresh().await?;
+    if session.access_jwt.is_empty() {
+        return Err(anyhow!(
+            "this session has no access token: it was created by `auth login-browser`, which stores an OAuth session instead"
+        ));
+    }
+    println!("{}", session.access_jwt);
     Ok(())
 }
