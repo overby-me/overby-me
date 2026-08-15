@@ -694,9 +694,31 @@ impl Hub {
         // Floored, so a token that could not be refreshed retries at a sane
         // pace instead of spinning: without it an already-stale expiry gives a
         // delay of zero and the socket reconnects as fast as it can.
-        let delay = (expires_at - js_sys::Date::now() - RENEW_LEAD_MS).max(RENEW_MIN_MS);
+        Self::schedule_renew_in(
+            (expires_at - js_sys::Date::now() - RENEW_LEAD_MS).max(RENEW_MIN_MS),
+        );
+    }
+
+    /// Arm the renewal timer `delay` ms from now.
+    fn schedule_renew_in(delay: f64) {
         let cb = Closure::once_into_js(move || {
             Self::with(|st| st.renew = None);
+            // NOT WHILE THE PAGE IS HIDDEN. Renewing ends in a token refresh,
+            // and `run_token_refresh` refuses to start one on the way into the
+            // background for a reason it states plainly: NHost rotates the token
+            // server-side BEFORE it answers, so a request iOS kills in flight
+            // leaves this tab holding a dead one and the next attempt signs a
+            // perfectly good session out. This timer was a second way in with no
+            // such guard, and a phone is exactly where it fires unseen.
+            //
+            // Nothing is lost by waiting. A socket nobody is watching carries
+            // rows to a screen nobody is looking at; the reconnect that follows
+            // the tab coming back delivers the current state anyway. So try
+            // again shortly rather than closing now.
+            if page_hidden() {
+                Self::schedule_renew_in(RENEW_MIN_MS);
+                return;
+            }
             let ws = Self::with(|st| st.ws.clone());
             if let Some(ws) = ws {
                 log::info!("subscription hub: renewing the connection before its token expires");
@@ -747,6 +769,16 @@ impl Hub {
             }
         }
     }
+}
+
+/// Whether the page is backgrounded.
+///
+/// `session.rs` keeps its own copy for the same purpose; this is the second
+/// place that must not start a token refresh on the way into the background.
+fn page_hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| d.hidden())
 }
 
 /// How much life a token must have left to be worth opening a socket with, and
