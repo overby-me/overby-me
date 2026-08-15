@@ -93,6 +93,10 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         );
     }
     parser.add_implied_intrinsics();
+    // After the declarations the calls implied, so that a name a call wrote
+    // without its components is filled in the same way one a declaration
+    // wrote is.
+    parser.remangle_intrinsics();
     // After the declarations the calls implied, so that those get the
     // attributes too: upstream materialises one with them already on.
     parser.apply_intrinsic_attributes()?;

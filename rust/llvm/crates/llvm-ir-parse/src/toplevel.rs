@@ -13,6 +13,7 @@ use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
 use llvm_ir::types::TypeKind;
 use llvm_ir::value::{GlobalRef, MdId, Name, Value};
 use llvm_support::{ApInt, DataLayout, Triple};
+use std::collections::HashSet;
 
 /// What upstream says about a use list and the indexes written for it, or
 /// `None` when it says nothing.
@@ -790,6 +791,84 @@ impl Parser {
             }
         }
         Ok(())
+    }
+
+    /// Gives an intrinsic declaration the name upstream gives it.
+    ///
+    /// An overloaded intrinsic carries the types it was instantiated at in
+    /// its own name, and a module may write the name without them: upstream
+    /// reads `declare void @llvm.lifetime.start(i64, ptr)` and prints
+    /// `@llvm.lifetime.start.p0`. The ones written before opaque pointers are
+    /// the common case, those names carrying every component except the ones
+    /// a typed pointer used to imply, which is why this rebuilds the whole
+    /// suffix rather than only filling an empty one in.
+    ///
+    /// `corpus/intrinsic-mangling.nu` measures which positions go in, one
+    /// intrinsic at a time, and holds every row against the thirty-seven
+    /// thousand intrinsic declarations in upstream's own tests. A name with
+    /// no row keeps whatever the module wrote.
+    pub(crate) fn remangle_intrinsics(&mut self) {
+        let mut taken: HashSet<Name> = self
+            .module
+            .functions
+            .iter()
+            .map(|function| function.name.clone())
+            .collect();
+        for index in 0..self.module.functions.len() {
+            let Some(canonical) = self.canonical_intrinsic_name(index) else {
+                continue;
+            };
+            let canonical = Name::Named(canonical);
+            if canonical == self.module.functions[index].name {
+                continue;
+            }
+            // A module that writes both spellings has two functions where
+            // upstream would have merged them, and renaming one onto the
+            // other would leave two functions with one name. Leaving the
+            // written name is the smaller difference.
+            if taken.contains(&canonical) {
+                continue;
+            }
+            taken.remove(&self.module.functions[index].name);
+            taken.insert(canonical.clone());
+            self.module.functions[index].name = canonical;
+        }
+    }
+
+    /// The name the mangling table builds for this declaration, or `None`
+    /// when nothing measured says what it should be.
+    fn canonical_intrinsic_name(&self, index: usize) -> Option<String> {
+        let function = &self.module.functions[index];
+        // A definition is not an intrinsic: upstream refuses a body on one.
+        if function.is_var_arg || function.blocks().next().is_some() {
+            return None;
+        }
+        let Name::Named(written) = &function.name else {
+            return None;
+        };
+        let (base, arity, positions) = llvm_ir::intrinsic::mangling::positions(written)?;
+        if arity != function.params.len() + 1 {
+            return None;
+        }
+        // The same gate the attributes go through: a declaration whose types
+        // do not fit the documented ones is not the intrinsic upstream would
+        // recognise, and upstream leaves what it does not recognise alone.
+        if !self.intrinsic_declaration_fits(index, function.params.len()) {
+            return None;
+        }
+        let mut name = base.to_string();
+        for position in positions {
+            let ty = match position {
+                0 => function.return_type,
+                other => function.params.get(other - 1)?.ty,
+            };
+            name.push('.');
+            name.push_str(&llvm_ir::intrinsic::mangle::mangled_type(
+                &self.module.ctx,
+                ty,
+            )?);
+        }
+        Some(name)
     }
 
     /// Whether a declaration is one upstream would recognise as the

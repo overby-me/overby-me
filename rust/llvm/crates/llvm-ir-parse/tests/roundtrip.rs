@@ -948,3 +948,88 @@ fn uniform_aggregates_fold_the_way_upstream_folds_them() {
         );
     }
 }
+
+/// What a module wrote against what upstream prints for it, for the names
+/// that carry the types the intrinsic was instantiated at.
+///
+/// Every pair is one the assembler answered: the module on the left went
+/// through `llvm-as` and `llvm-dis`, and the name on the right is what came
+/// back. The interesting half is the third and fourth, which are not names
+/// missing their components but names carrying the wrong ones, written when
+/// a pointer still said what it pointed at.
+const REMANGLED: &[(&str, &str)] = &[
+    // The plain case: no components at all, and upstream fills them in.
+    (
+        "declare i8 @llvm.umax(i8, i8)\n",
+        "declare i8 @llvm.umax.i8(i8, i8)",
+    ),
+    (
+        "declare ptr @llvm.stacksave()\n",
+        "declare ptr @llvm.stacksave.p0()",
+    ),
+    // Three components from three arguments, and none from the result.
+    (
+        "declare void @llvm.memcpy(ptr, ptr, i64, i1)\n",
+        "declare void @llvm.memcpy.p0.p0.i64(ptr",
+    ),
+    // The address space is the argument's, not the result's: this is the one
+    // the documented signature alone could not decide, because both spell
+    // `p0` at the only instantiation LangRef writes down.
+    (
+        "declare ptr @llvm.invariant.start(i64, ptr addrspace(1))\n",
+        "declare ptr @llvm.invariant.start.p1(i64",
+    ),
+    // A name that already carries components still gets the whole suffix
+    // rebuilt, which is what an older module needs: this one is written the
+    // way a typed pointer would have implied the rest.
+    (
+        "declare <2 x double> @llvm.masked.load.v2f64(ptr, i32, <2 x i1>, <2 x double>)\n",
+        "declare <2 x double> @llvm.masked.load.v2f64.p0(ptr",
+    ),
+    // An intrinsic that is not overloaded keeps its name, components or not.
+    (
+        "declare void @llvm.assume(i1)\n",
+        "declare void @llvm.assume(i1",
+    ),
+    // A name no table answers for keeps whatever the module wrote, which is
+    // the answer for every target intrinsic.
+    (
+        "declare ptr @llvm.made.up.nonsense(i32)\n",
+        "declare ptr @llvm.made.up.nonsense(i32)",
+    ),
+    // The arity has to be the one the row was measured at. Upstream leaves a
+    // declaration it does not recognise alone, and so do we.
+    (
+        "declare i8 @llvm.umax(i8, i8, i8)\n",
+        "declare i8 @llvm.umax(i8, i8, i8)",
+    ),
+];
+
+#[test]
+fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
+    for (written, expected) in REMANGLED {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains(expected),
+            "\nfrom:     {written}wanted:   {expected}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
+/// A module that writes both spellings keeps both: upstream would have had
+/// one function where this has two, and renaming one onto the other would
+/// leave two functions sharing a name, which is worse.
+#[test]
+fn a_name_already_taken_is_not_renamed_onto() {
+    let text = "declare ptr @llvm.stacksave()\ndeclare ptr @llvm.stacksave.p0()\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("declare ptr @llvm.stacksave()")
+            && printed.contains("declare ptr @llvm.stacksave.p0()"),
+        "both should still be there\n--- printed ---\n{printed}"
+    );
+}

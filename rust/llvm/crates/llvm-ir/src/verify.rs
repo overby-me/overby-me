@@ -670,10 +670,19 @@ impl Verifier<'_> {
         let Value::Constant(callee) = call.callee else {
             return false;
         };
+        // The name an instantiation reduces to, not the name itself: an
+        // overloaded intrinsic carries its types, so `llvm.va_start.p0` is
+        // `llvm.va_start` called on a flat pointer and the rule is the same
+        // one. Comparing the whole name missed every module that wrote the
+        // components out, which is most of them.
         matches!(
             self.module.ctx.constant(callee).as_global(),
             Some(GlobalRef::Function(id))
-                if matches!(&self.module.function(id).name, Name::Named(name) if name == wanted)
+                if matches!(
+                    &self.module.function(id).name,
+                    Name::Named(name)
+                        if crate::intrinsic::candidates(name).any(|candidate| candidate == wanted)
+                )
         )
     }
 

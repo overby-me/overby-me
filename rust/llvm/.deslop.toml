@@ -93,4 +93,18 @@ disabled_rules = [
   # `Lexer::new` fills every field it has; the heuristic reads the borrowed
   # input plus the running position as a half-built value.
   "rust_partial_init_escape",
+
+  # A doc comment here records how a rule was measured against the assembler:
+  # which module was written, what came back, and which probe designs were
+  # wrong first. That is the only specification this crate has for the
+  # behaviour, LangRef being silent on most of it, and a reader who has to
+  # change a table needs the derivation more than they need brevity. The
+  # heuristic reads any doc comment of that length as tutorial prose.
+  "comment_style_tutorial",
+
+  # `crates/llvm-ir/src/lib.rs` is sixty lines: a doc comment, the module
+  # declarations and the re-exports callers use. The heuristic is measuring
+  # the crate behind it rather than the file, and the split it asks for has
+  # already happened into the modules that file names.
+  "rust_oversized_module_file",
 ]

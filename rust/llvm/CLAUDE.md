@@ -1905,6 +1905,79 @@ the same thing three times.
 Assembler 464 to 465 and Verifier 314 to 316, with the modules we wrongly
 accept fourteen to thirteen and seventeen to twelve. The eleven trees are
 back where they were.
+Then the names themselves. An overloaded intrinsic carries the types it was
+instantiated at in its own name, and a module may write the name without
+them: upstream reads `declare void @llvm.lifetime.start(i64, ptr)` and
+prints `@llvm.lifetime.start.p0`. We printed what the module wrote, which is
+a difference on every such module, and there are many, most of them written
+before opaque pointers when the pointer said what it pointed at and the
+name did not have to.
+Two halves, both measured. What a type spells is asked of `llvm.ssa.copy`,
+which is overloaded on a single position that takes any first class type, so
+`declare T @llvm.ssa.copy(T)` comes back named with the spelling of `T` and
+one module answers one question. Three answers are not what the spelling
+suggests: `token` and `label` are both `i0`, `metadata` is `Metadata` with a
+capital, and a packed struct spells exactly like the unpacked one. `void` is
+`isVoid` and cannot be asked directly, `declare void @llvm.ssa.copy(void)`
+being refused, so every type goes inside a `target("w", T)` wrapper instead
+and the spelling is read out of the middle. That is
+`crates/llvm-ir/src/intrinsic/mangle.rs`, whose unit tests are the answers.
+Which positions go in is `corpus/intrinsic-mangling.nu`: write a bare
+`declare` of the base name with a documented signature, read back the name
+upstream gave it, and match its components against the spellings of the
+signature's own types. It is not a rule a signature yields.
+`llvm.masked.load` is `<2 x double> (ptr, i32, <2 x i1>, <2 x double>)` and
+its name is `llvm.masked.load.v2f64.p0`: the result and the pointer go in
+and the mask does not, though the mask varies with the result as surely as
+the passthrough does.
+Where one instantiation leaves two positions spelling the same thing, the
+answer is a signature LangRef does not document: the same one with a single
+position moved to a neighbouring width or address space.
+`llvm.invariant.start` takes a `ptr` and returns one, and only its answer at
+`ptr addrspace(1)` says the name carries the argument's space and not the
+result's. That mutation corrected two rows that were otherwise wrong, and
+136 of the 239 rows have positions nothing measured tells apart, which for
+tied positions is a distinction without a difference.
+The rows are then held against upstream's own tests, all 37,134 intrinsic
+declarations in `llvm/test`: apply a row and the name it builds should be
+the one the test wrote. 1,066 disagree, which is expected, those being the
+stale names this exists for, so each is put to the assembler. 986 come back
+as names upstream rewrites exactly as we would, and three come back
+contradicted and are dropped. That is what the drop is for: a row that
+renames a function upstream leaves alone is worse than no row.
+The parser rewrites a declaration's name after the calls have implied
+theirs, using the same fit gate the attributes go through, and leaves the
+written name alone where the canonical one is already taken. The verifier
+needed one fix for it: `calls_intrinsic` compared whole names, so renaming
+`llvm.va_start` to `llvm.va_start.p0` walked the "va_start in a non-varargs
+function" rule past its own case. It compares the reduced name now, which
+it should always have done, every module writing the components out having
+been missed before.
+What is measured and not done is the order. Upstream does not rename a
+declaration in place: it builds a new function and erases the old, so the
+remangled ones print after everything the module wrote, and after the ones
+the calls implied. Three of the four print differences this was for are
+now differences of position rather than of name. Moving a function means
+moving its id, which every constant that names it holds, so it wants a
+print order beside the arena and a pass of its own. Attribute groups are
+numbered by first use in print order, which that pass has to move with it;
+the module-scope slots are not, an intrinsic being named and the numbering
+counting only the unnamed.
+The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
+rather than of the method: LangRef documents a four-argument form the
+assembler does not recognise, and the one upstream's own tests call takes
+five. Deriving the rows from the tests instead of the documentation would
+reach it, and every target intrinsic with it, at the cost of a table three
+orders of magnitude wider.
+Its differential Other 140 to 141, everything else where it was.
+The slop scanner had moved on under the tree meanwhile, and its new
+findings were on code the last three commits had already passed it with,
+which the parent commit's own tree confirms. The name reduction moved out
+of `intrinsic/mod.rs` into `intrinsic/reduce.rs`, which is what that rule
+actually asks for and leaves the module declarations where a reader looks
+for them; the other two are recorded in `.deslop.toml` with reasons, a
+sixty-line crate root not being an oversized file and a doc comment that
+records how a rule was measured not being a tutorial.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

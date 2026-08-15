@@ -45,6 +45,7 @@ and each row names the check that backs it.
 | Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 370 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
+| Intrinsic names carrying the types they were instantiated at | names done for the 239 LangRef documents; the order upstream prints a renamed one in is not | `llvm-opt-differential-other`, `llvm-roundtrip` |
 
 ## The round trip
 
@@ -169,6 +170,17 @@ upstream replaced them with, 370 intrinsics.
 the positions to each other rather than to a fixed type: two whose types
 vary *together* across every documented instantiation are one overloaded
 type, so 161 intrinsics know which of their positions have to agree.
+`corpus/intrinsic-mangling.nu` asks a fifth question, which is about the
+name rather than the signature: an overloaded intrinsic carries the types
+it was instantiated at, so `llvm.umax` at `i8` is `llvm.umax.i8` and a
+module that writes the shorter name is one upstream renames. Writing a bare
+`declare` and reading back the name upstream gave it says which positions
+go in, for 239 intrinsics, and every row is held against the 37,134
+intrinsic declarations in `llvm/test`: 986 of the names those write are
+ones upstream rewrites the way we would, and the three rows a test
+contradicted are dropped. What a type spells is measured separately,
+through the one intrinsic overloaded on any type at all, and is
+`crates/llvm-ir/src/intrinsic/mangle.rs`.
 
 That table moves neither ratchet and is in the tree anyway. What it
 catches is a module that declares an intrinsic *consistently* wrongly, so
