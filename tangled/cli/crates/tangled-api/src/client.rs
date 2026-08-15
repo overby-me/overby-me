@@ -543,10 +543,23 @@ impl TangledClient {
         })
     }
 
+    /// Delete a repo: the PDS record first, then the knot.
+    ///
+    /// The order is the knot's choice, not ours. It refuses to delete while
+    /// the record still exists — "sh.tangled.repo record still exists on the
+    /// owner's PDS. Remove it there first or force the delete." — and `force`
+    /// is admin-only, answering everyone else with "only knot admin may force
+    /// a delete past the PDS record check".
+    ///
+    /// The cost of that order is that a knot failure after the record is gone
+    /// leaves a repo nothing can address, since every knot call is keyed on a
+    /// repoDid only the record carries. Read the info before deleting
+    /// anything, so at least the identifiers are in hand.
     pub async fn delete_repo(
         &self,
         did: &str,
         name: &str,
+        force: bool,
         pds_base: &str,
         access_jwt: &str,
     ) -> Result<()> {
@@ -554,56 +567,57 @@ impl TangledClient {
         let info = pds_client
             .get_repo_info(did, name, Some(access_jwt))
             .await?;
+        let repo_did = info
+            .repo_did
+            .as_deref()
+            .ok_or_else(|| anyhow!("{name} has no repoDid; it cannot be deleted from the knot"))?;
 
+        // 1) the record, which the knot checks for
         #[derive(Serialize)]
         struct DeleteRecordReq<'a> {
             repo: &'a str,
             collection: &'a str,
             rkey: &'a str,
         }
-        let del = DeleteRecordReq {
-            repo: did,
-            collection: "sh.tangled.repo",
-            rkey: &info.rkey,
-        };
-        let _: serde_json::Value = pds_client
-            .post_json("com.atproto.repo.deleteRecord", &del, Some(access_jwt))
-            .await?;
-
-        // Delete the repo on the knot server
-        let knot = &info.knot;
-        let audience = format!("did:web:{}", knot);
-        #[derive(Deserialize)]
-        struct GetSARes {
-            token: String,
-        }
-        let params = [
-            ("aud", audience),
-            ("exp", (chrono::Utc::now().timestamp() + 60).to_string()),
-            ("lxm", "sh.tangled.repo.delete".to_string()),
-        ];
-        let sa: GetSARes = pds_client
-            .get_json(
-                "com.atproto.server.getServiceAuth",
-                &params,
+        pds_client
+            .post(
+                "com.atproto.repo.deleteRecord",
+                &DeleteRecordReq {
+                    repo: did,
+                    collection: "sh.tangled.repo",
+                    rkey: &info.rkey,
+                },
                 Some(access_jwt),
             )
             .await?;
 
+        // 2) the knot. Its DeleteInput is { repo: RepoDid, force: bool }: the
+        // repo's own DID, not the owner DID plus name plus rkey. The older
+        // shape fails with "missing field `repo`", and tg still sends it, so
+        // tg is not a reliable oracle here; the knot's source is.
         #[derive(Serialize)]
         struct DeleteReq<'a> {
-            did: &'a str,
-            name: &'a str,
-            rkey: &'a str,
+            repo: &'a str,
+            force: bool,
         }
-        let body = DeleteReq {
-            did,
-            name,
-            rkey: &info.rkey,
-        };
-        let knot_client = self.derive(format!("https://{}", knot));
-        knot_client
-            .post("sh.tangled.repo.delete", &body, Some(&sa.token))
+        let sa = self
+            .knot_push_token(
+                pds_base,
+                access_jwt,
+                &info.knot,
+                "sh.tangled.repo.delete",
+                240,
+            )
+            .await?;
+        self.derive(format!("https://{}", info.knot))
+            .post(
+                "sh.tangled.repo.delete",
+                &DeleteReq {
+                    repo: repo_did,
+                    force,
+                },
+                Some(&sa),
+            )
             .await?;
         Ok(())
     }

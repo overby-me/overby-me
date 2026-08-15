@@ -294,7 +294,7 @@ async fn delete(args: RepoDeleteArgs) -> Result<()> {
         .await?;
     let did = record.did;
     let api = crate::util::make_default_client();
-    api.delete_repo(&did, &name, &pds, &session.access_jwt)
+    api.delete_repo(&did, &name, args.force, &pds, &session.access_jwt)
         .await?;
     println!("Deleted repo '{}'", name);
     Ok(())
