@@ -52,6 +52,8 @@ and each row names the check that backs it.
 | The ThinLTO summary index read, verified against the module, and not written back | done, which is what upstream's `opt -S` does with one | `llvm-opt-differential`, `llvm-verify-corpus` |
 | An intrinsic read under an older name and written under the current one | done for the 120 renames upstream's own tests show | `llvm-opt-differential` |
 | Implied declarations printed in upstream's order, sorted by the name as written | done | `llvm-opt-differential` |
+| `DIObjCProperty` holding its setter under `getter` and its getter under `setter` | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| `memory(...)` in one shape however it was written: fixed location order, defaults dropped | done | `llvm-opt-differential`, `llvm-roundtrip` |
 
 ## The round trip
 

@@ -2167,6 +2167,25 @@ renaming it on top would leave two functions sharing a name. The other is an
 argument count rather than a name: `declare i8 @llvm.ctlz.i8(i8)` is the
 one-argument spelling of an intrinsic that now takes two.
 Differential Assembler 207 to 209.
+Two singletons after that, one rule each, gated together.
+A `DIObjCProperty` keeps the name written as its setter under `getter` and
+the one written as its getter under `setter`. It is exactly a swap: a lone
+`setter: "S"` comes back as `getter: "S"`, and writing the two the other way
+round changes nothing. Whatever upstream's reason, a module read through it
+has them exchanged, so one read through us has to as well; it is done at
+parse time because it is what the node holds rather than how it is written.
+And `memory(...)` prints in one shape however it was written. The locations
+go in a fixed order, `argmem` then `inaccessiblemem` then `errnomem`,
+whatever order they came in. A location saying what the default already says
+is dropped, the default being `none` when nothing states it. The default is
+written only when it is not `none` or when nothing else is left to write,
+which is what keeps `memory(none)` from printing as `memory()`.
+A probe read the wrong thing again on the way, for the third time in this
+tree and always the same way: `memory(argmem: write, read)` seemed to print
+unchanged, and what was being read was the error saying the default has to
+come first. Checking the exit code before reading the output is the whole
+fix, and it is now how every probe here is written.
+Differential Assembler 209 to 211.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

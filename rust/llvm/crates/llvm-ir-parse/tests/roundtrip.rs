@@ -1188,3 +1188,82 @@ fn an_identifier_already_held_under_another_tag_claims_nothing() {
         "\n--- printed ---\n{printed}"
     );
 }
+
+/// A `DIObjCProperty` keeps the name written as its setter under `getter`
+/// and the one written as its getter under `setter`.
+///
+/// Measured rather than deduced, and it is exactly a swap: a lone
+/// `setter: "S"` comes back as `getter: "S"`, and writing the two the other
+/// way round changes nothing.
+#[test]
+fn an_objc_property_exchanges_its_setter_and_getter() {
+    let head = "!named = !{!3}\n!0 = !DIFile(filename: \"a.m\", directory: \"/\")\n";
+    for (written, expected) in [
+        (
+            "setter: \"S\", getter: \"G\"",
+            "setter: \"G\", getter: \"S\"",
+        ),
+        ("setter: \"S\"", "getter: \"S\""),
+        ("getter: \"G\"", "setter: \"G\""),
+        (
+            "getter: \"G\", setter: \"S\"",
+            "setter: \"G\", getter: \"S\"",
+        ),
+    ] {
+        let text = format!("{head}!3 = !DIObjCProperty(name: \"foo\", file: !0, {written})\n");
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains(expected),
+            "\nfrom:     {written}\nwanted:   {expected}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
+/// What `memory(...)` prints as, whatever order it was written in.
+///
+/// The locations print in a fixed order, a location saying what the default
+/// already says is dropped, and the default itself is written only when it is
+/// not `none` or when nothing else is left to write. Every pair is one module
+/// `opt -S` answered.
+const MEMORY: &[(&str, &str)] = &[
+    (
+        "inaccessiblemem: write, argmem: read",
+        "memory(argmem: read, inaccessiblemem: write)",
+    ),
+    ("read, argmem: read", "memory(read)"),
+    (
+        "readwrite, argmem: readwrite, errnomem: readwrite",
+        "memory(readwrite)",
+    ),
+    ("none, argmem: none", "memory(none)"),
+    (
+        "inaccessiblemem: readwrite, argmem: none",
+        "memory(inaccessiblemem: readwrite)",
+    ),
+    (
+        "write, inaccessiblemem: read, argmem: none",
+        "memory(write, argmem: none, inaccessiblemem: read)",
+    ),
+    (
+        "errnomem: write, inaccessiblemem: read, argmem: readwrite",
+        "memory(argmem: readwrite, inaccessiblemem: read, errnomem: write)",
+    ),
+    ("none", "memory(none)"),
+    ("argmem: read", "memory(argmem: read)"),
+];
+
+#[test]
+fn a_memory_attribute_prints_in_one_shape_however_it_was_written() {
+    for (written, expected) in MEMORY {
+        let text = format!("define void @f() memory({written}) {{\n  ret void\n}}\n");
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains(expected),
+            "\nfrom:     memory({written})\nwanted:   {expected}\n--- printed ---\n{printed}"
+        );
+    }
+}

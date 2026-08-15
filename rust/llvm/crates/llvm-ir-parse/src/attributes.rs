@@ -177,6 +177,7 @@ impl Parser {
             let arguments = match kind {
                 StructuredAttr::Captures => canonical_captures(&arguments),
                 StructuredAttr::NoFpClass => float_classes(&arguments),
+                StructuredAttr::Memory => canonical_memory(&arguments),
                 _ => arguments,
             };
             return Ok(Attribute::Structured { kind, arguments });
@@ -523,6 +524,60 @@ fn float_classes(arguments: &str) -> String {
         return mask.to_string();
     }
     words.join(" ")
+}
+
+/// A `memory(...)` written any way upstream accepts, in the one shape it
+/// writes back.
+///
+/// Three rules, each measured a module at a time. The locations print in a
+/// fixed order whatever order they were written in, `argmem` then
+/// `inaccessiblemem` then `errnomem`:
+/// `memory(inaccessiblemem: write, argmem: read)` comes back
+/// `memory(argmem: read, inaccessiblemem: write)`. A location saying what the
+/// default already says is dropped, so `memory(read, argmem: read)` is
+/// `memory(read)` and `memory(inaccessiblemem: readwrite, argmem: none)` is
+/// `memory(inaccessiblemem: readwrite)`, the default being `none` when
+/// nothing states it. And the default itself is written only when it is not
+/// `none` or when nothing else is left to write, which is what keeps
+/// `memory(none)` from printing as `memory()`.
+///
+/// Done here rather than at print time because two functions that wrote the
+/// same thing in different orders carry one attribute set between them, and
+/// the numbered group they share is found by comparing what is stored.
+fn canonical_memory(arguments: &str) -> String {
+    const LOCATIONS: [&str; 3] = ["argmem", "inaccessiblemem", "errnomem"];
+    let mut default = "none";
+    let mut stated: Vec<(&str, &str)> = Vec::new();
+    for part in arguments.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        match part.split_once(':') {
+            Some((location, kind)) => stated.push((location.trim(), kind.trim())),
+            // A bare access kind is the default for whatever is not named.
+            // Upstream refuses one written after a location, so the last is
+            // as good as the first and there is only ever one.
+            None => default = part,
+        }
+    }
+    let mut written: Vec<String> = Vec::new();
+    if default != "none" {
+        written.push(default.to_string());
+    }
+    for location in LOCATIONS {
+        let Some((_, kind)) = stated.iter().find(|(name, _)| *name == location) else {
+            continue;
+        };
+        if *kind == default {
+            continue;
+        }
+        written.push(format!("{location}: {kind}"));
+    }
+    if written.is_empty() {
+        return default.to_string();
+    }
+    written.join(", ")
 }
 
 fn canonical_captures(arguments: &str) -> String {

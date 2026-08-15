@@ -65,6 +65,7 @@ impl Parser {
                 let args = drop_defaulted_fields(schema, &tag, args);
                 let args = fill_compile_unit_defaults(&tag, args);
                 let args = upgrade_subprogram_flags(&tag, args);
+                let args = swap_objc_accessors(&tag, args);
                 // Sorted here rather than at print time, because two nodes
                 // that differ only in the order their fields were written are
                 // one node upstream, and uniquing compares what is stored.
@@ -859,6 +860,38 @@ fn fill_compile_unit_defaults(tag: &str, args: SpecializedArgs) -> SpecializedAr
 /// `isDefinition` is the one whose absence does not mean false: a subprogram
 /// written in the old format is a definition unless it says otherwise, which
 /// is why `isLocal: true` alone comes back as a definition too.
+/// A `DIObjCProperty` keeps the name written as its setter under `getter`
+/// and the one written as its getter under `setter`.
+///
+/// Measured rather than deduced, and it is exactly a swap: `setter: "S",
+/// getter: "G"` comes back `setter: "G", getter: "S"`, a lone `setter: "S"`
+/// comes back as `getter: "S"`, and writing the two the other way round
+/// changes nothing. Whatever upstream's reason, a module read through it and
+/// printed has them exchanged, so a module read through us has to as well.
+///
+/// Done here rather than at print time because it is what the node holds,
+/// not how it is written: two nodes that differ only in which of the two
+/// names each wrote are one node afterwards, and uniquing compares what is
+/// stored.
+fn swap_objc_accessors(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
+    if tag != "DIObjCProperty" {
+        return args;
+    }
+    let SpecializedArgs::Named(fields) = args else {
+        return args;
+    };
+    SpecializedArgs::Named(
+        fields
+            .into_iter()
+            .map(|(name, value)| match name.as_str() {
+                "setter" => ("getter".to_string(), value),
+                "getter" => ("setter".to_string(), value),
+                _ => (name, value),
+            })
+            .collect(),
+    )
+}
+
 fn upgrade_subprogram_flags(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
     if tag != "DISubprogram" {
         return args;

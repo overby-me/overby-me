@@ -148,7 +148,7 @@ in {
     # what thirteen of them were.
     # Feature and Other print every module we both accept exactly as upstream
     # does, so those two are held rather than raised from here.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 209;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 211;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 71;
     llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 219;
     llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 144;
