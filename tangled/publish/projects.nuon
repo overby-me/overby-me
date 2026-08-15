@@ -1,0 +1,38 @@
+# Subprojects published from this monorepo as standalone Tangled repos.
+#
+# Each entry drives one josh-filter run and one force-push. Add projects in
+# small batches and watch the first run of each: a filter that maps in a
+# shared path makes the published repo pick up every commit touching that
+# path, forever.
+#
+#   name    repo name on the knot, under `owner`
+#   path    directory in the monorepo (documentation; the filter is what runs)
+#   filter  josh filter expression, applied to the monorepo tip
+#
+# Filter conventions, decided in the pilot:
+#
+#   :/<path>                   take the subdirectory as the repo root
+#   :exclude[::default.nix]    drop the flakelight module: it is meaningless
+#                              outside the monorepo (it is imported by the
+#                              root flake and reaches for ../../nix/lib)
+#   :exclude[::testsuite.nix]  drop the nix check helper that default.nix
+#                              called; dead weight once default.nix is gone
+#   :unsign                    strip commit signatures. These are read-only
+#                              mirrors, so a perfect reverse-filter is not
+#                              worth publishing invalid signatures for.
+#
+# Keep the shared surface empty. Nothing here maps a path from outside its
+# own directory, so a commit reaches a published repo only if it touched
+# that project.
+[
+  {
+    name: "rust-awk"
+    path: "rust/awk"
+    filter: ":/rust/awk:exclude[::default.nix]:exclude[::testsuite.nix]:unsign"
+  }
+  {
+    name: "rust-bash"
+    path: "rust/bash"
+    filter: ":/rust/bash:exclude[::default.nix]:exclude[::testsuite.nix]:unsign"
+  }
+]
