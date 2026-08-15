@@ -1,0 +1,36 @@
+clone:
+  depth: 1
+  skip: false
+  submodules: false
+dependencies:
+  - git
+  - openssh
+  - nushell
+  - josh
+engine: microvm
+image: nixos
+steps:
+  - command: |-
+      ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+          -o ConnectTimeout=15 -T git@tangled.org || true
+    name: Probe knot SSH reachability
+  - command: git fetch --unshallow origin main || git fetch origin main
+    name: Fetch full main history
+  - command: |-
+      mkdir -p $HOME/.ssh
+      printf '%s\n' "${TANGLED_PUBLISH_KEY}" > $HOME/.ssh/publish_key
+      chmod 600 $HOME/.ssh/publish_key
+    name: Install the publish key
+  - command: |-
+      nu tangled/publish/publish.nu \
+        --source "$PWD" \
+        --work-dir "$PWD/.publish-cache" \
+        --ssh-user agent-overby-me.eurosky.social \
+        --ssh-key "$HOME/.ssh/publish_key"
+    name: Publish subprojects
+when:
+  - branch: main
+    event:
+      - push
+  - event:
+      - manual

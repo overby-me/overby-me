@@ -51,6 +51,59 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
     ],
   },
 
+  publish | WorkflowConfig = {
+    # Spindle has no scheduled trigger: the only events are push,
+    # pull_request and manual. Running on every push to main is fresher than
+    # the hourly cadence a cron would give, and the script skips a project
+    # whose filtered SHA already matches the remote, so a push that touches
+    # nothing published costs two ls-remote calls.
+    when = [{ event = ["push"], branch = "main" }, { event = ["manual"] }],
+    engine = "microvm",
+    image = "nixos",
+    dependencies = ["git", "openssh", "nushell", "josh"],
+    steps = [
+      {
+        # Tangled push is SSH-only, so the whole pipeline depends on the
+        # microVM being allowed to open port 22 to the knot. Probe it first
+        # and never fail on it, so a networking regression is legible in the
+        # log instead of surfacing as an opaque push failure below.
+        name = "Probe knot SSH reachability",
+        command = m%%"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=15 -T git@tangled.org || true
+        "%%,
+      },
+      {
+        # The default clone is depth 1; josh filters the whole history.
+        name = "Fetch full main history",
+        command = m%%"
+          git fetch --unshallow origin main || git fetch origin main
+        "%%,
+      },
+      {
+        # The key belongs to a bot account that is a collaborator on the
+        # published repos, not to the repo owner: a leak must not be able to
+        # write to this monorepo.
+        name = "Install the publish key",
+        command = m%%"
+          mkdir -p $HOME/.ssh
+          printf '%s\n' "${TANGLED_PUBLISH_KEY}" > $HOME/.ssh/publish_key
+          chmod 600 $HOME/.ssh/publish_key
+        "%%,
+      },
+      {
+        name = "Publish subprojects",
+        command = m%%"
+          nu tangled/publish/publish.nu \
+            --source "$PWD" \
+            --work-dir "$PWD/.publish-cache" \
+            --ssh-user agent-overby-me.eurosky.social \
+            --ssh-key "$HOME/.ssh/publish_key"
+        "%%,
+      },
+    ],
+  },
+
   mirror | WorkflowConfig = {
     when = [{ event = ["push"], branch = "main" }],
     engine = "microvm",
