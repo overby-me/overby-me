@@ -61,9 +61,18 @@ pub async fn refresh_session(session: &Session) -> Result<Session> {
 pub async fn load_session_with_refresh() -> Result<Session> {
     let session = load_session().await?;
 
-    // If we have an OAuth session, skip JWT refresh (OAuth handles its own tokens)
+    // With an OAuth session the JWTs in the stored session are dead weight:
+    // `login-browser` writes an empty pair, and a password login that happened
+    // earlier leaves a stale one behind. Callers pass `session.access_jwt` as
+    // the bearer, and a non-empty bearer makes the client skip OAuth
+    // (`should_use_oauth`), so a stale JWT silently shadows a working OAuth
+    // session and every request comes back 401. Blank it and let DPoP run.
     if load_oauth_session().is_some() {
-        return Ok(session);
+        return Ok(Session {
+            access_jwt: String::new(),
+            refresh_jwt: String::new(),
+            ..session
+        });
     }
 
     // Check if session is older than 30 minutes - if so, proactively refresh
@@ -72,12 +81,17 @@ pub async fn load_session_with_refresh() -> Result<Session> {
         .num_minutes();
 
     if age > 30 {
-        // Session is old, proactively refresh
+        // Session is old, proactively refresh. A failure here used to fall
+        // through and send the stale token anyway, so every command reported
+        // the server's opaque `"exp" claim timestamp check failed` instead of
+        // the actual reason the refresh did not happen.
         match refresh_session(&session).await {
             Ok(new_session) => return Ok(new_session),
-            Err(_) => {
-                // If refresh fails, try with the old session anyway
-                // It might still work
+            Err(e) => {
+                return Err(anyhow!(
+                    "stored session is expired and refreshing it failed: {e}\n\
+                     Run: tangled auth login --handle <handle> --pds <pds>"
+                ));
             }
         }
     }

@@ -84,8 +84,22 @@ async fn status(_cli: &Cli) -> Result<()> {
 
 async fn logout(_cli: &Cli) -> Result<()> {
     let mgr = SessionManager::default();
-    if mgr.load()?.is_some() {
+    let had_session = mgr.load()?.is_some();
+    if had_session {
         mgr.clear()?;
+    }
+
+    // `login-browser` writes a second keychain entry. Leaving it behind meant
+    // "logout, then log in again with a password" still ran every request
+    // through the stale OAuth session, because an OAuth session takes
+    // precedence over the password JWTs.
+    let oauth = tangled_config::keychain::Keychain::new("tangled-cli-oauth", "default");
+    let had_oauth = oauth.get_password().is_ok();
+    if had_oauth {
+        oauth.delete_password()?;
+    }
+
+    if had_session || had_oauth {
         println!("Logged out");
     } else {
         println!("No session found");
