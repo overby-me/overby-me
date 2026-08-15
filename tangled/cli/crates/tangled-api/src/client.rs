@@ -508,67 +508,39 @@ impl TangledClient {
         Ok(())
     }
 
+    /// Look up one repo by owner and name.
+    ///
+    /// This asks the appview, not a PDS. Scanning a PDS only works for repos
+    /// whose records live on the PDS this client happens to point at, so
+    /// looking up somebody else's repo failed with "Could not find repo".
     pub async fn get_repo_info(
         &self,
         owner: &str,
         name: &str,
         bearer: Option<&str>,
     ) -> Result<RepoRecord> {
-        let did = if owner.starts_with("did:") {
-            owner.to_string()
-        } else {
-            #[derive(Deserialize)]
-            struct Res {
-                did: String,
-            }
-            let params = [("handle", owner.to_string())];
-            let res: Res = self
-                .get_json("com.atproto.identity.resolveHandle", &params, bearer)
-                .await?;
-            res.did
-        };
-
-        #[derive(Deserialize)]
-        struct RecordItem {
-            uri: String,
-            value: Repository,
-        }
-        #[derive(Deserialize)]
-        struct ListRes {
-            #[serde(default)]
-            records: Vec<RecordItem>,
-        }
-        let params = vec![
-            ("repo", did.clone()),
-            ("collection", "sh.tangled.repo".to_string()),
-            ("limit", "100".to_string()),
-        ];
-        let res: ListRes = self
-            .get_json("com.atproto.repo.listRecords", &params, bearer)
-            .await?;
-        for item in res.records {
-            let rkey = Self::uri_rkey(&item.uri);
-            // A record with no `name` is named by its record key.
-            let record_name = if item.value.name.is_empty() {
-                rkey.clone().unwrap_or_default()
-            } else {
-                item.value.name.clone()
-            };
-            if record_name == name {
-                let rkey = rkey.ok_or_else(|| anyhow!("missing rkey in uri"))?;
-                let knot = item.value.knot.unwrap_or_default();
-                return Ok(RepoRecord {
-                    did: did.clone(),
-                    name: name.to_string(),
-                    rkey,
-                    knot,
-                    description: item.value.description,
-                    spindle: item.value.spindle,
-                    repo_did: item.value.repo_did,
-                });
-            }
-        }
-        Err(anyhow!("repo not found for owner/name"))
+        let did = self.resolve_handle(owner, bearer).await?;
+        let appview = self.derive(crate::appview::appview_base());
+        let repos = appview.list_repos_indexed(&did, 1000).await?;
+        let found = repos
+            .into_iter()
+            // The record key is the repo's identity; `name` is cosmetic and
+            // absent on older records, so match either.
+            .find(|r| r.rkey() == name || r.value.name.as_deref() == Some(name))
+            .ok_or_else(|| anyhow!("no repo {owner}/{name}"))?;
+        Ok(RepoRecord {
+            rkey: found.rkey().to_string(),
+            did,
+            name: found
+                .value
+                .name
+                .clone()
+                .unwrap_or_else(|| found.rkey().to_string()),
+            knot: found.value.knot.clone().unwrap_or_default(),
+            description: found.value.description.clone(),
+            spindle: found.value.spindle.clone(),
+            repo_did: found.value.repo_did.clone(),
+        })
     }
 
     pub async fn delete_repo(

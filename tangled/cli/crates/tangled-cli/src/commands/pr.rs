@@ -28,7 +28,8 @@ async fn list(args: PrListArgs) -> Result<()> {
     // As with issues: the appview indexes the whole repo, and reports merged
     // as a state of its own. Without a repo we can only scan your own PDS,
     // which shows pulls you opened and nothing else.
-    let Some(repo) = args.repo.as_deref() else {
+    let inferred = args.repo.clone().or_else(crate::target::repo_from_cwd);
+    let Some(repo) = inferred.as_deref() else {
         let pulls = client
             .list_pulls(&session.did, None, Some(session.access_jwt.as_str()))
             .await?;

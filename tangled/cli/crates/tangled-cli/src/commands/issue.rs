@@ -27,7 +27,8 @@ async fn list(args: IssueListArgs) -> Result<()> {
     // regardless of who filed it, paginates, and carries the state and
     // comment count that the raw record does not have. Without one, fall back
     // to scanning your own PDS, which can only ever show issues you filed.
-    let Some(repo) = args.repo.as_deref() else {
+    let inferred = args.repo.clone().or_else(crate::target::repo_from_cwd);
+    let Some(repo) = inferred.as_deref() else {
         let items = client
             .list_issues(&session.did, None, Some(session.access_jwt.as_str()))
             .await?;

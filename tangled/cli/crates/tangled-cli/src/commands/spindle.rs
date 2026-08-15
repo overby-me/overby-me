@@ -137,7 +137,11 @@ async fn spindle_context(
         .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
         .unwrap_or_else(|| "https://bsky.social".into());
     let pds_client = crate::util::make_client(&pds);
-    let repo_ref = repo.unwrap_or(&session.handle).to_string();
+    // No --repo: infer it from the checkout we are standing in.
+    let repo_ref = match repo {
+        Some(r) => r.to_string(),
+        None => crate::target::repo_from_cwd().unwrap_or_else(|| session.handle.clone()),
+    };
     let (owner, name) = parse_repo_ref(&repo_ref, &session.handle);
     let (owner, name) = (owner.to_string(), name.to_string());
     let info = pds_client
