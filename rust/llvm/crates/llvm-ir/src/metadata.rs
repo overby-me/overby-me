@@ -240,10 +240,14 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
         &[
             "tag",
             "name",
-            "baseType",
             "scope",
             "file",
             "line",
+            // After `line`, which took a third probe to learn: the structure
+            // probe carries no `baseType` and the array probe no `file`, so
+            // between them nothing said where it goes and it sat next to
+            // `name`. An enumeration carries both.
+            "baseType",
             "size",
             "align",
             "offset",
@@ -418,6 +422,11 @@ pub fn vocabulary(tag: &str, field: &str) -> Option<&'static [(u64, &'static str
         "tag" => Some(dwarf::TAG),
         "encoding" => Some(dwarf::ENCODING),
         "language" => Some(dwarf::LANGUAGE),
+        // A composite type's `runtimeLang` is a language too, and takes the
+        // same words. It was missing here, so a number written for it came
+        // back a number where upstream writes the word: `runtimeLang: 6` is
+        // `runtimeLang: DW_LANG_Cobol85`.
+        "runtimeLang" => Some(dwarf::LANGUAGE),
         "emissionKind" => Some(dwarf::EMISSIONKIND),
         "nameTableKind" => Some(dwarf::NAMETABLEKIND),
         "virtuality" => Some(dwarf::VIRTUALITY),
@@ -442,7 +451,9 @@ pub fn vocabulary(tag: &str, field: &str) -> Option<&'static [(u64, &'static str
 pub fn vocabulary_name(tag: &str, field: &str) -> Option<&'static str> {
     match field {
         "tag" => Some("DWARF tag"),
-        "language" => Some("DWARF language"),
+        // Both of these are languages and upstream refuses a word neither
+        // knows with the same message, "invalid DWARF language '...'".
+        "language" | "runtimeLang" => Some("DWARF language"),
         "encoding" => Some("DWARF type attribute encoding"),
         "cc" => Some("DWARF calling convention"),
         "emissionKind" => Some("emission kind"),

@@ -54,6 +54,8 @@ and each row names the check that backs it.
 | Implied declarations printed in upstream's order, sorted by the name as written | done | `llvm-opt-differential` |
 | `DIObjCProperty` holding its setter under `getter` and its getter under `setter` | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | `memory(...)` in one shape however it was written: fixed location order, defaults dropped | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| A composite type's `baseType` written after `line`, and its `runtimeLang` as a language word | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| A `DIMacroFile`'s `type` read and never written back | done | `llvm-opt-differential`, `llvm-roundtrip` |
 
 ## The round trip
 

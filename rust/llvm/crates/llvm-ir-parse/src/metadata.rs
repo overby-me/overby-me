@@ -66,6 +66,7 @@ impl Parser {
                 let args = fill_compile_unit_defaults(&tag, args);
                 let args = upgrade_subprogram_flags(&tag, args);
                 let args = swap_objc_accessors(&tag, args);
+                let args = drop_implied_fields(&tag, args);
                 // Sorted here rather than at print time, because two nodes
                 // that differ only in the order their fields were written are
                 // one node upstream, and uniquing compares what is stored.
@@ -860,6 +861,28 @@ fn fill_compile_unit_defaults(tag: &str, args: SpecializedArgs) -> SpecializedAr
 /// `isDefinition` is the one whose absence does not mean false: a subprogram
 /// written in the old format is a definition unless it says otherwise, which
 /// is why `isLocal: true` alone comes back as a definition too.
+/// A field whose value the node kind already decides, which upstream reads
+/// and never writes back.
+///
+/// `DIMacroFile`'s `type` is the only one: a `DIMacroFile` is the start of a
+/// file by being a `DIMacroFile`, so upstream prints
+/// `!DIMacroFile(line: 11, file: !1)` whether the module wrote
+/// `DW_MACINFO_start_file`, `DW_MACINFO_end_file`, or nothing at all. Not a
+/// default that survives comparison: all three spellings come back the same,
+/// so the field is dropped rather than compared.
+fn drop_implied_fields(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
+    const IMPLIED: &[(&str, &str)] = &[("DIMacroFile", "type")];
+    let SpecializedArgs::Named(fields) = args else {
+        return args;
+    };
+    SpecializedArgs::Named(
+        fields
+            .into_iter()
+            .filter(|(name, _)| !IMPLIED.contains(&(tag, name.as_str())))
+            .collect(),
+    )
+}
+
 /// A `DIObjCProperty` keeps the name written as its setter under `getter`
 /// and the one written as its getter under `setter`.
 ///

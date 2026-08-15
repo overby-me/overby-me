@@ -23,6 +23,12 @@ const PROBES = [
   ["DIBasicType" [[field, value]; [tag 'DW_TAG_unspecified_type'] [name '"n"'] [size '8'] [align '8'] [encoding 'DW_ATE_signed'] [flags 'DIFlagPublic'] [num_extra_inhabitants '1']]]
   ["DIDerivedType" [[field, value]; [tag 'DW_TAG_member'] [name '"n"'] [scope '!14'] [file '!10'] [line '1'] [baseType '!11'] [size '8'] [align '8'] [offset '8'] [flags 'DIFlagPublic'] [extraData '!11'] [annotations '!18']]]
   ["DICompositeType" [[field, value]; [tag 'DW_TAG_structure_type'] [name '"c"'] [scope '!14'] [file '!10'] [line '1'] [size '8'] [align '8'] [offset '8'] [flags 'DIFlagPublic'] [elements '!18'] [templateParams '!18'] [vtableHolder '!11'] [annotations '!18'] [runtimeLang 'DW_LANG_ObjC'] [identifier '"id"']]]
+  # An enumeration is the composite type that carries a `baseType` beside a
+  # `scope`, a `file` and a `line`. Without it nothing said where `baseType`
+  # goes: the structure probe above has no `baseType` and the array probe
+  # below has no `file`, so the table put it next to `name`, where the array
+  # probe alone suggested, and upstream writes it after `line`.
+  ["DICompositeType/enum" [[field, value]; [tag 'DW_TAG_enumeration_type'] [name '"e"'] [scope '!14'] [file '!10'] [line '1'] [baseType '!11'] [size '8'] [align '8'] [elements '!18'] [identifier '"eid"']]]
   ["DISubroutineType" [[field, value]; [flags 'DIFlagPublic'] [cc 'DW_CC_normal'] [types '!13']]]
   ["DISubrange" [[field, value]; [count '2'] [lowerBound '1'] [stride '2']]]
   ["DIEnumerator" [[field, value]; [name '"e"'] [value '1'] [isUnsigned 'true']]]

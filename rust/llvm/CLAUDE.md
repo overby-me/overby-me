@@ -2186,6 +2186,30 @@ unchanged, and what was being read was the error saying the default has to
 come first. Checking the exit code before reading the output is the whole
 fix, and it is now how every probe here is written.
 Differential Assembler 209 to 211.
+Three more debug-info rules after that, and the first is a gap in how the
+tables are kept rather than in what was measured. `corpus/md-field-order.nu`
+prints the order it finds and the table in `metadata.rs` is transcribed from
+that by hand, so a field no probe covers has no entry and no way to notice.
+`baseType` was one: the structure probe carries no `baseType` and the array
+probe no `file`, so between them nothing said where it goes and it sat next
+to `name` where the array probe alone suggested. Upstream writes it after
+`line`. An enumeration carries both and is a third probe now.
+A composite type's `runtimeLang` takes a compile unit's language vocabulary
+and was not wired to it, so `runtimeLang: 6` printed as a number where
+upstream writes `DW_LANG_Cobol85`. Wiring it fixed the printing and one
+acceptance case with it: upstream refuses a word the vocabulary has no
+number for, "invalid DWARF language", and we had been taking any word.
+And a `DIMacroFile` is the start of a file by being a `DIMacroFile`, so its
+`type` is read and never written back, `DW_MACINFO_end_file` included.
+`debug-info.ll` wanted a fourth and does not get it here. Upstream prints
+the three ptrauth booleans of a `DW_TAG_LLVM_ptrauth_type` whether or not
+they are false, which is easy, but the five ptrauth fields share storage
+with other fields in a way that a table of defaults cannot express:
+`ptrAuthIsaPointer: true` written alone comes back false, the same field
+written beside `ptrAuthKey` comes back true, and `ptrAuthKey: 2` on a
+`DW_TAG_pointer_type` comes back as `align: 2`. That wants a sweep of its
+own and is recorded as one.
+Differential Assembler 211 to 212.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

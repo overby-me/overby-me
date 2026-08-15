@@ -1267,3 +1267,61 @@ fn a_memory_attribute_prints_in_one_shape_however_it_was_written() {
         );
     }
 }
+
+/// Three rules about how a debug-info node is written back, each one module
+/// upstream answered.
+#[test]
+fn a_debug_node_writes_the_fields_upstream_writes() {
+    // `baseType` goes after `line`, not after `name`. Nothing said so until
+    // a probe carried both: the structure probe has no `baseType` and the
+    // array probe no `file`.
+    let text = concat!(
+        "!named = !{!5}\n",
+        "!1 = !DIFile(filename: \"a.c\", directory: \"/\")\n",
+        "!2 = !DIBasicType(name: \"int\", size: 32)\n",
+        "!5 = !DICompositeType(tag: DW_TAG_enumeration_type, name: \"E\", scope: !1, file: !1, line: 1, baseType: !2, size: 32)\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("scope: !1, file: !1, line: 1, baseType: !2, size: 32"),
+        "\n--- printed ---\n{printed}"
+    );
+
+    // A `runtimeLang` written as a number prints as its word, the same
+    // vocabulary a compile unit's `language` takes.
+    for (written, expected) in [
+        ("6", "runtimeLang: DW_LANG_Cobol85"),
+        ("DW_LANG_Cobol85", "runtimeLang: DW_LANG_Cobol85"),
+        // A number the vocabulary has no word for stays a number.
+        ("999", "runtimeLang: 999"),
+    ] {
+        let text = format!(
+            "!named = !{{!5}}\n!5 = !DICompositeType(tag: DW_TAG_structure_type, runtimeLang: {written})\n"
+        );
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(printed.contains(expected), "\n--- printed ---\n{printed}");
+    }
+
+    // A `DIMacroFile` is the start of a file by being one, so its `type` is
+    // read and never written back, whichever of the two words it carried.
+    for written in [
+        "",
+        ", type: DW_MACINFO_start_file",
+        ", type: DW_MACINFO_end_file",
+    ] {
+        let text = format!(
+            "!named = !{{!5}}\n!1 = !DIFile(filename: \"a.c\", directory: \"/\")\n!5 = !DIMacroFile(line: 11, file: !1{written})\n"
+        );
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains("!DIMacroFile(line: 11, file: !1)"),
+            "\nfrom: {written}\n--- printed ---\n{printed}"
+        );
+    }
+}
