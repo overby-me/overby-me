@@ -41,8 +41,11 @@ pub async fn run(_cli: &Cli, args: GitCredentialArgs) -> Result<()> {
     }
 
     let input = read_request()?;
-    let host = match input.get("host") {
-        Some(h) if !h.is_empty() => h.clone(),
+    // A token's audience is the knot that will verify it. That is usually the
+    // host git asked about, but not when the push goes through something else
+    // (a local josh-proxy on localhost), so --knot overrides it.
+    let host = match args.knot.clone().or_else(|| input.get("host").cloned()) {
+        Some(h) if !h.is_empty() => h,
         // No host means nothing to mint against. Staying quiet lets git fall
         // through to another helper rather than failing the push.
         _ => return Ok(()),

@@ -236,6 +236,7 @@ def "main ingest" [
   --ssh-user: string
   --ssh-key: path
   --branch: string = "main"   # monorepo branch the work lands on
+  --force                     # re-ingest a tip that was ingested before
 ]: nothing -> nothing {
   check-josh
 
@@ -267,6 +268,19 @@ def "main ingest" [
   git-ok $mirror ["fetch" "--force" $remote $"+refs/heads/($from_ref):refs/josh/($project)"] | ignore
   let incoming = (git-ok $mirror ["rev-parse" $"refs/josh/($project)"])
 
+  # A marker of the last downstream tip taken, so a repeated run says so
+  # instead of silently rebuilding the same review branch. rust-lang's
+  # josh-sync keeps the same thing in a `rust-version` file; a ref is the
+  # equivalent in a bare mirror. It records what was *seen*, not what was
+  # merged: that decision is yours and this cannot observe it.
+  let marker = $"refs/josh-ingested/($project)"
+  let seen = (git-in $mirror ["rev-parse" "--verify" "--quiet" $marker])
+  if $seen.exit_code == 0 and ($seen.stdout | str trim) == $incoming and not $force {
+    print $"($project) ($from_ref) is already ingested at ($incoming | str substring 0..9)"
+    print "  pass --force to build the review branch again"
+    return
+  }
+
   # Reverse updates the *input* ref, so point it at a review branch rather
   # than at the monorepo branch itself. Nothing lands on ($branch) here.
   git-ok $mirror ["update-ref" $"refs/heads/($review)" $base] | ignore
@@ -281,6 +295,7 @@ def "main ingest" [
   let tip = (git-ok $mirror ["rev-parse" $"refs/heads/($review)"])
   if $tip == $base {
     print $"nothing to ingest: ($project) ($from_ref) holds no commits the monorepo lacks"
+    git-ok $mirror ["update-ref" $marker $incoming] | ignore
     return
   }
 
@@ -293,4 +308,5 @@ def "main ingest" [
   git-ok $mirror ["log" "--oneline" "--stat" $"($base)..($tip)"] | print
   print ""
   print $"fetch it with:  git fetch ($mirror) ($review)"
+  git-ok $mirror ["update-ref" $marker $incoming] | ignore
 }

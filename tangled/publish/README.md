@@ -54,13 +54,27 @@ A proxy serves filtered *views* at URLs. Those are not repos on the forge: no
 issues, no pulls, no discoverability. We want real Tangled repos, so we filter
 locally and push.
 
-A proxy is nonetheless possible against Tangled: it forwards a client's HTTP
-basic credential upstream, and a knot's push credential is exactly that (see
-Authentication). It just answers a different question. Publishing and taking
-contributions back are both served without one, and a proxy is stateful and
-single-writer, so it wants a host that publishing does not. Where it would
-earn its keep is working *in* a single project as a slice day to day, rather
-than distributing them.
+A proxy would answer a different question anyway: working *in* one project as
+a slice day to day, rather than distributing projects. rust-lang's josh-sync
+does exactly that, and notably runs josh-proxy as a local subprocess rather
+than hosting it, so wanting a slice would not mean running a service.
+
+**It does not currently work against Tangled**, for two independent reasons,
+both measured:
+
+- josh addresses a filtered view as `<upstream-path>.git:<filter>.git`, so it
+  splits the URL on `:`. A knot addresses repos by DID over HTTP
+  (`did:plc:...`), which is full of colons, and josh parses the DID as part of
+  the path: asked for `did:plc:….git:/rust/awk.git` it fetched the knot's
+  `/rust/awk.git`, which is nothing. Percent-encoding does not help.
+- The appview (`tangled.org/<owner>/<repo>`) has colon-free URLs and clones
+  fine, but does not carry git's auth challenge through to the knot, so a push
+  through it fails with `missing authorization header`. Clone-only is useless
+  for a workflow whose whole point is pushing back.
+
+So a slice workflow needs either josh to accept an escaped path, or the
+appview to pass auth through. Until one of those, filter-and-push is not just
+the simpler option, it is the only one.
 
 ## Design notes
 

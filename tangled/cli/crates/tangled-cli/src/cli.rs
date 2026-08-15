@@ -73,6 +73,11 @@ pub enum Command {
 pub struct GitCredentialArgs {
     /// git passes one of: get, store, erase
     pub operation: String,
+    /// Mint the token for this knot instead of the host git asked about.
+    /// Needed when pushing through something that is not the knot itself,
+    /// such as a local josh-proxy on localhost.
+    #[arg(long)]
+    pub knot: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
