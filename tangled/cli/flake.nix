@@ -5,7 +5,7 @@
 # too, but the root flake imports it and it reaches for ../../nix/lib, so it
 # means nothing in a clone. This is the same shape, standing on its own.
 {
-  description = "GNU binutils-compatible binary utilities written in Rust";
+  description = "Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol";
 
   inputs = {
     # Pinned to the same revision the monorepo resolves, so every published
@@ -31,7 +31,7 @@
     # the repo name is baked in as the fallback.
     cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
     cargoPackage = cargoToml.package or {};
-    name = cargoPackage.name or "rust-binutils";
+    name = cargoPackage.name or "tangled-cli";
 
     # The same gates in every published repo, so a contributor who has only
     # this one is held to what the monorepo holds it to. Generated from a
@@ -60,7 +60,12 @@
 
       # flakelight turns this into packages.default, a check, and an overlay,
       # so `nix flake check` builds it and the CI workflow needs nothing else.
-      package = {rustPlatform}:
+      package = {
+        rustPlatform,
+        pkg-config,
+        openssl,
+        dbus,
+      }:
         rustPlatform.buildRustPackage {
           pname = name;
           version = cargoPackage.version or "0.1.0";
@@ -69,9 +74,13 @@
             lockFile = ./Cargo.lock;
             allowBuiltinFetchGit = true;
           };
+          nativeBuildInputs = [pkg-config];
+          buildInputs = [openssl dbus];
+          # Tests need network access or a running server.
+          doCheck = false;
 
           meta = {
-            description = "GNU binutils-compatible binary utilities written in Rust";
+            description = "Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol";
             mainProgram = name;
           };
         };
@@ -79,6 +88,7 @@
       devShell = {
         packages = pkgs:
           (with pkgs; [cargo rustc rust-analyzer clippy rustfmt])
+          ++ (with pkgs; [pkg-config openssl dbus])
           ++ (hooksFor pkgs).enabledPackages;
         shellHook = pkgs: (hooksFor pkgs).shellHook;
       };

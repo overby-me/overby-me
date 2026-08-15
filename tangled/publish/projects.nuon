@@ -29,6 +29,17 @@
 #                              mirrors, so a perfect reverse-filter is not
 #                              worth publishing invalid signatures for.
 #
+# Optional per-project build settings, for the few that are not pure Rust:
+#
+#   nativeBuildInputs  build-time tools, e.g. ["pkg-config"]
+#   buildInputs        libraries linked against, e.g. ["openssl" "dbus"]
+#   doCheck            set false where the tests need network or a server
+#
+# Stated here rather than read out of default.nix, because telling that file's
+# main package apart from the test fixtures beside it is guesswork: most of
+# what those files declare belongs to a differential-testing derivation, not to
+# the thing being published.
+#
 # An optional `deps` list names sibling projects whose directories must ship
 # alongside, for a crate whose Cargo.toml has a path dependency on one
 # (rust/grep needs ../pcre2). Cargo resolves a path dependency on the
@@ -147,6 +158,17 @@
     name: "rust-gcc"
     path: "rust/gcc"
     filter: ":[:/rust/gcc:exclude[::*.nix],:/rust/gcc::flake.nix]:unsign"
+  }
+  # Not a rust/ rewrite: the client this publisher itself uses to create and
+  # authorise the repos it publishes to. Its path dependencies all point
+  # inside crates/, so it needs no `deps`.
+  {
+    name: "tangled-cli"
+    path: "tangled/cli"
+    nativeBuildInputs: ["pkg-config"]
+    buildInputs: ["openssl" "dbus"]
+    doCheck: false
+    filter: ":[:/tangled/cli:exclude[::*.nix],:/tangled/cli::flake.nix]:unsign"
   }
   # The two multi-directory projects. Each dependency keeps its own name at
   # the root, because that is what the depending Cargo.toml already says.
