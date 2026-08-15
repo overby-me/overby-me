@@ -1638,6 +1638,46 @@ impl TangledClient {
         Ok(self.derive(self.pds_for_did(did).await?))
     }
 
+    /// Add or remove a repo collaborator on its knot.
+    ///
+    /// Collaborators live on the knot, not as records on the owner's PDS, so
+    /// this is the only way to grant push access without the web UI. Without
+    /// it, every newly published repo needs a manual visit before CI can push
+    /// to it, which does not scale past a handful.
+    pub async fn set_collaborator(
+        &self,
+        knot_host: &str,
+        repo_did: &str,
+        subject_did: &str,
+        add: bool,
+        pds_base: &str,
+        access_jwt: &str,
+    ) -> Result<()> {
+        let method = if add {
+            "sh.tangled.repo.addCollaborator"
+        } else {
+            "sh.tangled.repo.removeCollaborator"
+        };
+        #[derive(Serialize)]
+        struct Req<'a> {
+            repo: &'a str,
+            subject: &'a str,
+        }
+        let sa = self
+            .knot_push_token(pds_base, access_jwt, knot_host, method, 240)
+            .await?;
+        self.derive(format!("https://{knot_host}"))
+            .post(
+                method,
+                &Req {
+                    repo: repo_did,
+                    subject: subject_did,
+                },
+                Some(&sa),
+            )
+            .await
+    }
+
     /// Resolve a handle to a DID.
     pub async fn resolve_handle(&self, handle: &str, bearer: Option<&str>) -> Result<String> {
         if handle.starts_with("did:") {

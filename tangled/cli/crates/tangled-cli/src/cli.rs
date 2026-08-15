@@ -271,6 +271,20 @@ pub enum RepoCommand {
     SetDefaultBranch(RepoSetDefaultBranchArgs),
     /// Search indexed records
     Search(RepoSearchArgs),
+    /// Grant a collaborator push access
+    #[command(name = "add-collaborator")]
+    AddCollaborator(RepoCollaboratorArgs),
+    /// Revoke a collaborator's push access
+    #[command(name = "remove-collaborator")]
+    RemoveCollaborator(RepoCollaboratorArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RepoCollaboratorArgs {
+    /// Repo: <owner>/<name>
+    pub repo: String,
+    /// Handle or DID to grant or revoke
+    pub subject: String,
 }
 
 #[derive(Args, Debug, Clone)]

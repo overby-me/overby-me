@@ -4,9 +4,9 @@ use serde_json;
 use std::path::PathBuf;
 
 use crate::cli::{
-    Cli, OutputFormat, RepoCloneArgs, RepoCommand, RepoCreateArgs, RepoDeleteArgs, RepoEditArgs,
-    RepoForkArgs, RepoInfoArgs, RepoListArgs, RepoRefArgs, RepoSearchArgs,
-    RepoSetDefaultBranchArgs,
+    Cli, OutputFormat, RepoCloneArgs, RepoCollaboratorArgs, RepoCommand, RepoCreateArgs,
+    RepoDeleteArgs, RepoEditArgs, RepoForkArgs, RepoInfoArgs, RepoListArgs, RepoRefArgs,
+    RepoSearchArgs, RepoSetDefaultBranchArgs,
 };
 
 pub async fn run(cli: &Cli, cmd: RepoCommand) -> Result<()> {
@@ -22,6 +22,8 @@ pub async fn run(cli: &Cli, cmd: RepoCommand) -> Result<()> {
         RepoCommand::Fork(args) => fork(args).await,
         RepoCommand::SetDefaultBranch(args) => set_default_branch(args).await,
         RepoCommand::Search(args) => search(args).await,
+        RepoCommand::AddCollaborator(args) => collaborator(args, true).await,
+        RepoCommand::RemoveCollaborator(args) => collaborator(args, false).await,
     }
 }
 
@@ -450,6 +452,39 @@ async fn search(args: RepoSearchArgs) -> Result<()> {
     println!("KIND\tSCORE\tTITLE");
     for h in hits {
         println!("{}\t{:.1}\t{}", h.kind(), h.score, h.title());
+    }
+    Ok(())
+}
+
+async fn collaborator(args: RepoCollaboratorArgs, add: bool) -> Result<()> {
+    let session = crate::util::load_session_with_refresh().await?;
+    let pds = crate::util::pds_of(&session);
+    let client = crate::util::make_client(&pds);
+    let (owner, name) = parse_repo_ref(&args.repo, &session.handle);
+    let (owner, name) = (owner.to_string(), name.to_string());
+    let info = client
+        .get_repo_info(&owner, &name, Some(session.access_jwt.as_str()))
+        .await?;
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("{owner}/{name} has no repoDid; recreate it"))?;
+    let subject = client.resolve_handle(&args.subject, None).await?;
+
+    client
+        .set_collaborator(
+            &info.knot,
+            &repo_did,
+            &subject,
+            add,
+            &pds,
+            &session.access_jwt,
+        )
+        .await?;
+    if add {
+        println!("{} can now push to {owner}/{name}", args.subject);
+    } else {
+        println!("{} can no longer push to {owner}/{name}", args.subject);
     }
     Ok(())
 }

@@ -12,14 +12,21 @@
 # Filter conventions, decided in the pilot:
 #
 #   :/<path>                   take the subdirectory as the repo root
-#   :exclude[::default.nix]    drop the flakelight module: it is meaningless
-#                              outside the monorepo (it is imported by the
-#                              root flake and reaches for ../../nix/lib)
-#   :exclude[::testsuite.nix]  drop the nix check helper that default.nix
-#                              called; dead weight once default.nix is gone
+#   :exclude[::*.nix]          drop every top-level nix file. default.nix is
+#                              a flakelight module, meaningless outside the
+#                              monorepo (the root flake imports it and it
+#                              reaches for ../../nix/lib), and the testsuite
+#                              helpers it calls are dead weight without it.
+#                              A glob rather than a list: several projects
+#                              carry more than two, and new ones appear.
 #   :unsign                    strip commit signatures. These are read-only
 #                              mirrors, so a perfect reverse-filter is not
 #                              worth publishing invalid signatures for.
+#
+# rust/grep and rust/h26xtoav1 are deliberately absent: their Cargo.toml
+# carries a path dependency on a sibling project (../pcre2, ../h264-decoder),
+# so a filtered copy of either would not build on its own. Publishing them
+# means vendoring or releasing the dependency first.
 #
 # Keep the shared surface empty. Nothing here maps a path from outside its
 # own directory, so a commit reaches a published repo only if it touched
@@ -34,11 +41,96 @@
   {
     name: "rust-awk"
     path: "rust/awk"
-    filter: ":/rust/awk:exclude[::default.nix]:exclude[::testsuite.nix]:unsign"
+    filter: ":/rust/awk:exclude[::*.nix]:unsign"
   }
   {
     name: "rust-bash"
     path: "rust/bash"
-    filter: ":/rust/bash:exclude[::default.nix]:exclude[::testsuite.nix]:unsign"
+    filter: ":/rust/bash:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-systemd"
+    path: "rust/systemd"
+    filter: ":/rust/systemd:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-perl"
+    path: "rust/perl"
+    filter: ":/rust/perl:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-make"
+    path: "rust/make"
+    filter: ":/rust/make:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-sed"
+    path: "rust/sed"
+    filter: ":/rust/sed:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-tar"
+    path: "rust/tar"
+    filter: ":/rust/tar:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-binutils"
+    path: "rust/binutils"
+    filter: ":/rust/binutils:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-pipewire"
+    path: "rust/pipewire"
+    filter: ":/rust/pipewire:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-fe-c"
+    path: "rust/fe-c"
+    filter: ":/rust/fe-c:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-flatpak"
+    path: "rust/flatpak"
+    filter: ":/rust/flatpak:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-ninja"
+    path: "rust/ninja"
+    filter: ":/rust/ninja:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-meson"
+    path: "rust/meson"
+    filter: ":/rust/meson:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-gzip"
+    path: "rust/gzip"
+    filter: ":/rust/gzip:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-pcre2"
+    path: "rust/pcre2"
+    filter: ":/rust/pcre2:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-patch"
+    path: "rust/patch"
+    filter: ":/rust/patch:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-xz"
+    path: "rust/xz"
+    filter: ":/rust/xz:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-patchelf"
+    path: "rust/patchelf"
+    filter: ":/rust/patchelf:exclude[::*.nix]:unsign"
+  }
+  {
+    name: "rust-gcc"
+    path: "rust/gcc"
+    filter: ":/rust/gcc:exclude[::*.nix]:unsign"
   }
 ]

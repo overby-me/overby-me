@@ -17,6 +17,24 @@ nu publish.nu --ssh-key ~/.ssh/id_ed25519  # filter and push what changed
 ```
 
 Projects and their filters live in [`projects.nuon`](./projects.nuon).
+Nineteen are published today; adding one is three steps:
+
+```sh
+tangled-cli repo create rust-foo --knot knot1.tangled.sh --description "..."
+tangled-cli repo add-collaborator overby.me/rust-foo agent.overby.me   # so CI can push
+# add the entry to projects.nuon, then:
+nu publish.nu
+```
+
+The collaborator step is not optional and is easy to forget: without it the
+push fails with "you aren't authorized to push to this repository". A repo's
+collaborators live on the knot rather than as records on the owner's PDS, so
+before `repo add-collaborator` existed this needed the web UI once per repo,
+which is what made scaling out awkward.
+
+Filtering all nineteen takes about 13 seconds cold, and re-running with
+nothing to do costs two `ls-remote` calls per project. No knot rate limiting
+has been observed at this size.
 
 ## Taking a contribution back
 
@@ -105,13 +123,18 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 ## Filter conventions
 
 ```text
-:/<path>                   subdirectory becomes the repo root
-:exclude[::default.nix]    drop the flakelight module (meaningless outside
-                           the monorepo: the root flake imports it and it
-                           reaches for ../../nix/lib/cargo/index)
-:exclude[::testsuite.nix]  drop the nix check helper default.nix called
-:unsign                    strip signatures; these are publish-only mirrors
+:/<path>            subdirectory becomes the repo root
+:exclude[::*.nix]   drop every top-level nix file: default.nix is a
+                    flakelight module the root flake imports, reaching for
+                    ../../nix/lib/cargo/index, and the testsuite helpers it
+                    calls are dead weight without it. A glob rather than a
+                    list, because several projects carry more than two
+                    (rust/pipewire has six) and new ones appear.
+:unsign             strip signatures; these are publish-only mirrors
 ```
+
+Switching the pilots from two explicit excludes to the glob produced byte
+identical output, so it rewrote no published history.
 
 **Keep the shared surface empty.** Every path mapped into a published repo
 makes it pick up commits touching that path. Map `flake.lock` into N projects
