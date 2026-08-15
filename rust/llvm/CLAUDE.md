@@ -2350,6 +2350,19 @@ was recorded as unmeasurable because `llvm-as` aborts on `!prof` and
 every other kind, and a crash is not a verdict either way, so the rule is
 written for all of them.
 Assembler 481 to 482 and Verifier 323 to 325.
+Measured and not done: interning the attribute table.
+`crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
+one row per intrinsic with its attribute strings written out in full, and
+11,842 rows carry only 540 distinct sets between them. Emitting the sets
+once and rows of `(name, index)` makes it 582 KB, and a clean
+`cargo build -p llvm-ir` goes from 4.1 seconds to 3.3; with the table
+removed altogether it is 3.0, so eight tenths of a second is what the
+indirection would buy and one and a tenth is all the table costs. That is
+under half a minute across the whole twenty-three-check gate, which runs
+for over an hour, against a permanent indirection in the one artifact a
+reader consults to see what an intrinsic carries. Not worth it, and the
+numbers are here so it stays a decision rather than a thing nobody
+measured.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*
