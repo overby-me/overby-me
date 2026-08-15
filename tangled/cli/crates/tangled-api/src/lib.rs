@@ -1,6 +1,7 @@
 pub mod ci;
 pub mod ci_logs;
 pub mod client;
+pub mod keys;
 pub mod oauth;
 
 pub use client::TangledClient;

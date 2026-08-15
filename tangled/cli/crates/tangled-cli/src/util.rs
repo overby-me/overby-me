@@ -19,6 +19,16 @@ pub fn load_oauth_session() -> Option<PersistedOAuthSession> {
     serde_json::from_str(&json).ok()
 }
 
+/// The PDS a session belongs to. Every command needs this and each one was
+/// spelling out the same three-step fallback.
+pub fn pds_of(session: &Session) -> String {
+    session
+        .pds
+        .clone()
+        .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
+        .unwrap_or_else(|| "https://bsky.social".into())
+}
+
 /// Create a TangledClient for the given base URL, with OAuth if available.
 pub fn make_client(base_url: &str) -> tangled_api::TangledClient {
     let client = tangled_api::TangledClient::new(base_url);

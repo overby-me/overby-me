@@ -67,6 +67,41 @@ pub enum Command {
     /// git credential helper: mints a short-lived knot push token
     #[command(name = "git-credential")]
     GitCredential(GitCredentialArgs),
+    /// Manage the SSH keys a knot will accept a push from
+    #[command(subcommand, name = "ssh-key")]
+    SshKey(SshKeyCommand),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum SshKeyCommand {
+    /// List published keys
+    List(SshKeyListArgs),
+    /// Publish a key
+    Add(SshKeyAddArgs),
+    /// Remove a published key
+    Delete(SshKeyDeleteArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SshKeyListArgs {
+    /// Whose keys to list (handle or DID); defaults to you
+    #[arg(long)]
+    pub user: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SshKeyAddArgs {
+    /// Public key file (default: ~/.ssh/id_ed25519.pub)
+    pub file: Option<std::path::PathBuf>,
+    /// Name for the key (default: the file's name)
+    #[arg(long)]
+    pub name: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SshKeyDeleteArgs {
+    /// Key name or record key, as shown by `ssh-key list`
+    pub key: String,
 }
 
 #[derive(Args, Debug, Clone)]

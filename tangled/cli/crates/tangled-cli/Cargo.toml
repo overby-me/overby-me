@@ -16,6 +16,7 @@ clap = { workspace = true, features = [
 ] }
 colored = { workspace = true }
 dialoguer = { workspace = true }
+dirs = { workspace = true }
 futures-util = { workspace = true }
 git2 = { workspace = true }
 indicatif = { workspace = true }

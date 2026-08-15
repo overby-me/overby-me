@@ -2646,6 +2646,7 @@ dependencies = [
  "clap",
  "colored",
  "dialoguer",
+ "dirs",
  "futures-util",
  "git2",
  "indicatif",

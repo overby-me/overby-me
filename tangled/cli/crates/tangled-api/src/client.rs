@@ -48,7 +48,7 @@ impl TangledClient {
     }
 
     /// Create a new client with a different base URL but the same OAuth context.
-    fn derive(&self, base_url: impl Into<String>) -> Self {
+    pub(crate) fn derive(&self, base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
             oauth: self.oauth.clone(),
@@ -901,7 +901,7 @@ impl TangledClient {
         Ok(())
     }
 
-    fn uri_rkey(uri: &str) -> Option<String> {
+    pub(crate) fn uri_rkey(uri: &str) -> Option<String> {
         uri.rsplit('/').next().map(|s| s.to_string())
     }
     fn uri_did(uri: &str) -> Option<String> {
@@ -1478,6 +1478,22 @@ impl TangledClient {
         } else {
             format!("https://{base}")
         }
+    }
+
+    /// Resolve a handle to a DID.
+    pub async fn resolve_handle(&self, handle: &str, bearer: Option<&str>) -> Result<String> {
+        if handle.starts_with("did:") {
+            return Ok(handle.to_string());
+        }
+        #[derive(Deserialize)]
+        struct Res {
+            did: String,
+        }
+        let params = [("handle", handle.to_string())];
+        let res: Res = self
+            .get_json("com.atproto.identity.resolveHandle", &params, bearer)
+            .await?;
+        Ok(res.did)
     }
 
     /// A service-auth token for a knot, bound to `lxm`. A knot caps the
