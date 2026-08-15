@@ -25,11 +25,14 @@ steps:
       nu tangled/publish/publish.nu \
         --source "$PWD" \
         --work-dir "$PWD/.publish-cache" \
-        --ssh-user agent-overby-me.eurosky.social \
+        --ssh-user agent.overby.me \
         --ssh-key "$HOME/.ssh/publish_key"
     name: Publish subprojects
 when:
   - branch: main
+    event:
+      - push
+  - branch: josh
     event:
       - push
   - event:
