@@ -454,6 +454,7 @@ impl TangledClient {
         let params = [
             ("aud", audience),
             ("exp", (chrono::Utc::now().timestamp() + 60).to_string()),
+            ("lxm", REPO_CREATE.to_string()),
         ];
         let sa: GetSARes = pds_client
             .get_json(
@@ -463,10 +464,13 @@ impl TangledClient {
             )
             .await?;
 
-        // 3) Call sh.tangled.repo.create on the knot
+        // 3) Call sh.tangled.repo.create on the knot. `name` is required: the
+        // knot names the directory it creates, and cannot read it back out of
+        // the PDS record from the rkey alone.
         #[derive(Serialize)]
         struct CreateRepoReq<'a> {
             rkey: &'a str,
+            name: &'a str,
             #[serde(skip_serializing_if = "Option::is_none")]
             #[serde(rename = "defaultBranch")]
             default_branch: Option<&'a str>,
@@ -475,6 +479,7 @@ impl TangledClient {
         }
         let req = CreateRepoReq {
             rkey,
+            name: opts.name,
             default_branch: opts.default_branch,
             source: opts.source,
         };
@@ -583,6 +588,7 @@ impl TangledClient {
         let params = [
             ("aud", audience),
             ("exp", (chrono::Utc::now().timestamp() + 60).to_string()),
+            ("lxm", "sh.tangled.repo.delete".to_string()),
         ];
         let sa: GetSARes = pds_client
             .get_json(
@@ -1356,7 +1362,12 @@ impl TangledClient {
         repo_at: &str,
     ) -> Result<Vec<Secret>> {
         let sa = self
-            .service_auth_token(self.base_host(), pds_base, access_jwt)
+            .service_auth_token(
+                self.base_host(),
+                pds_base,
+                access_jwt,
+                "sh.tangled.repo.listSecrets",
+            )
             .await?;
         #[derive(Deserialize)]
         struct Res {
@@ -1378,7 +1389,12 @@ impl TangledClient {
         value: &str,
     ) -> Result<()> {
         let sa = self
-            .service_auth_token(self.base_host(), pds_base, access_jwt)
+            .service_auth_token(
+                self.base_host(),
+                pds_base,
+                access_jwt,
+                "sh.tangled.repo.addSecret",
+            )
             .await?;
         #[derive(Serialize)]
         struct Req<'a> {
@@ -1403,7 +1419,12 @@ impl TangledClient {
         key: &str,
     ) -> Result<()> {
         let sa = self
-            .service_auth_token(self.base_host(), pds_base, access_jwt)
+            .service_auth_token(
+                self.base_host(),
+                pds_base,
+                access_jwt,
+                "sh.tangled.repo.removeSecret",
+            )
             .await?;
         #[derive(Serialize)]
         struct Req<'a> {
@@ -1422,11 +1443,18 @@ impl TangledClient {
             .unwrap_or(base)
     }
 
+    /// Mint an inter-service auth token for `target_host`.
+    ///
+    /// `lxm` is the lexicon method the token will be spent on. It is not
+    /// optional in practice: a knot checks the token's `lxm` claim against the
+    /// method being called and rejects a mismatch with
+    /// `method binding mismatch: token bound to None, expected <method>`.
     async fn service_auth_token(
         &self,
         target_host: &str,
         pds_base: &str,
         access_jwt: &str,
+        lxm: &str,
     ) -> Result<String> {
         let audience = format!("did:web:{}", target_host);
         #[derive(Deserialize)]
@@ -1437,6 +1465,7 @@ impl TangledClient {
         let params = [
             ("aud", audience),
             ("exp", (chrono::Utc::now().timestamp() + 60).to_string()),
+            ("lxm", lxm.to_string()),
         ];
         let sa: GetSARes = pds
             .get_json(
@@ -1552,7 +1581,9 @@ impl TangledClient {
             .await?;
 
         // Get service auth token for the knot
-        let sa = self.service_auth_token(knot, pds_base, access_jwt).await?;
+        let sa = self
+            .service_auth_token(knot, pds_base, access_jwt, "sh.tangled.repo.merge")
+            .await?;
 
         #[derive(Serialize)]
         struct MergeReq<'a> {
@@ -1601,7 +1632,9 @@ impl TangledClient {
         pds_base: &str,
         access_jwt: &str,
     ) -> Result<MergeCheckResponse> {
-        let sa = self.service_auth_token(knot, pds_base, access_jwt).await?;
+        let sa = self
+            .service_auth_token(knot, pds_base, access_jwt, "sh.tangled.repo.mergeCheck")
+            .await?;
 
         let req = MergeCheckRequest {
             did: repo_did.to_string(),
@@ -1714,7 +1747,12 @@ impl TangledClient {
         params: &[(&str, String)],
     ) -> Result<Vec<WorkflowRun>> {
         let sa = self
-            .service_auth_token(self.base_host(), pds_base, access_jwt)
+            .service_auth_token(
+                self.base_host(),
+                pds_base,
+                access_jwt,
+                "sh.tangled.spindle.listRuns",
+            )
             .await?;
         #[derive(Deserialize)]
         struct Res {
