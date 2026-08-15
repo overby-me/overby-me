@@ -807,6 +807,12 @@ impl Parser {
     /// intrinsic at a time, and holds every row against the thirty-seven
     /// thousand intrinsic declarations in upstream's own tests. A name with
     /// no row keeps whatever the module wrote.
+    ///
+    /// A renamed declaration also moves: upstream builds a new function and
+    /// erases the old, so it prints after everything the module wrote and
+    /// after the declarations the calls implied, which is measured. The move
+    /// is recorded as a print order rather than performed on the arena,
+    /// because an id is what every constant naming the function holds.
     pub(crate) fn remangle_intrinsics(&mut self) {
         let mut taken: HashSet<Name> = self
             .module
@@ -814,6 +820,7 @@ impl Parser {
             .iter()
             .map(|function| function.name.clone())
             .collect();
+        let mut moved = Vec::new();
         for index in 0..self.module.functions.len() {
             let Some(canonical) = self.canonical_intrinsic_name(index) else {
                 continue;
@@ -832,12 +839,22 @@ impl Parser {
             taken.remove(&self.module.functions[index].name);
             taken.insert(canonical.clone());
             self.module.functions[index].name = canonical;
+            moved.push(llvm_ir::value::FunctionId(index as u32));
         }
+        if moved.is_empty() {
+            return;
+        }
+        let mut order: Vec<llvm_ir::value::FunctionId> = (0..self.module.functions.len())
+            .map(|index| llvm_ir::value::FunctionId(index as u32))
+            .filter(|id| !moved.contains(id))
+            .collect();
+        order.extend(moved);
+        self.module.function_order = order;
     }
 
     /// The name the mangling table builds for this declaration, or `None`
     /// when nothing measured says what it should be.
-    fn canonical_intrinsic_name(&self, index: usize) -> Option<String> {
+    pub(crate) fn canonical_intrinsic_name(&self, index: usize) -> Option<String> {
         let function = &self.module.functions[index];
         // A definition is not an intrinsic: upstream refuses a body on one.
         if function.is_var_arg || function.blocks().next().is_some() {

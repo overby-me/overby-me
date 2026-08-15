@@ -76,13 +76,21 @@ impl<'m> Printer<'m> {
     /// Numbers every function-attribute set, in upstream's discovery order:
     /// globals, aliases and ifuncs first, then each function, then the call
     /// sites of each function body in turn.
+    ///
+    /// "Each function" is in print order rather than arena order, a group's
+    /// number being its first use as printed. A renamed intrinsic
+    /// declaration prints last and takes the last number with it, which is
+    /// measured: `declare void @llvm.lifetime.start(i64, ptr)` written above
+    /// a definition comes back below it and numbered after it.
     fn assign_attribute_groups(&mut self) {
         let module = self.module;
+        let order = module.function_print_order();
         let mut sets: Vec<Vec<Attribute>> = Vec::new();
         for global in &module.globals {
             sets.push(self.resolved_attributes(&global.attrs));
         }
-        for function in &module.functions {
+        for index in &order {
+            let function = &module.functions[*index];
             // A debug-info intrinsic's declaration is not printed, so the
             // group it names has one fewer user, and a group with none is
             // not printed either.
@@ -91,7 +99,8 @@ impl<'m> Printer<'m> {
             }
             sets.push(self.resolved_attributes(&function.attrs));
         }
-        for function in &module.functions {
+        for index in &order {
+            let function = &module.functions[*index];
             for (id, _) in function.blocks() {
                 for (_, instruction) in function.block_instructions(id) {
                     if let Some(call) = call_data(&instruction.kind) {
@@ -184,7 +193,7 @@ impl<'m> Printer<'m> {
             }
         }
 
-        for index in 0..self.module.functions.len() {
+        for index in self.module.function_print_order() {
             // The four debug-info intrinsics are the older spelling of the
             // debug records, and upstream's reader replaces every call to
             // one and drops the declaration, whether it was called or not.

@@ -1033,3 +1033,86 @@ fn a_name_already_taken_is_not_renamed_onto() {
         "both should still be there\n--- printed ---\n{printed}"
     );
 }
+
+/// Where a renamed intrinsic declaration prints, which is not where it was
+/// written.
+///
+/// Upstream does not rename one in place: it builds a new function and
+/// erases the old, so the renamed one lands after everything the module
+/// wrote. A declaration the calls implied lands earlier still, upstream
+/// materialising that where the call is read rather than at the end. Both
+/// halves of this are what `opt -S` printed for the same module.
+#[test]
+fn a_renamed_intrinsic_prints_after_what_the_module_wrote() {
+    let text = concat!(
+        "declare void @llvm.lifetime.start(i64, ptr)\n",
+        "declare void @other()\n\n",
+        "define void @f(ptr %p, i8 %x) {\n",
+        "  call void @llvm.lifetime.start(i64 4, ptr %p)\n",
+        "  %m = call i8 @llvm.smax(i8 %x, i8 %x)\n",
+        "  call void @other()\n",
+        "  ret void\n",
+        "}\n\n",
+        "declare ptr @llvm.stacksave()\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    let order: Vec<&str> = printed
+        .lines()
+        .filter(|line| line.starts_with("declare ") || line.starts_with("define "))
+        .collect();
+    let names: Vec<&str> = order
+        .iter()
+        .map(|line| {
+            line.split('@')
+                .nth(1)
+                .unwrap_or("")
+                .split('(')
+                .next()
+                .unwrap_or("")
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "other",
+            "f",
+            // Implied by a call, so upstream builds it where the call is.
+            "llvm.smax.i8",
+            // Renamed, so upstream builds it at the end, in module order.
+            "llvm.lifetime.start.p0",
+            "llvm.stacksave.p0",
+        ],
+        "\n--- printed ---\n{printed}"
+    );
+}
+
+/// An attribute group's number is its first use in print order, so a renamed
+/// declaration that moved to the end takes the last number with it.
+#[test]
+fn an_attribute_group_is_numbered_where_it_prints() {
+    let text = concat!(
+        "declare void @llvm.lifetime.start(i64, ptr)\n\n",
+        "define void @f() #7 {\n  ret void\n}\n\n",
+        "declare void @g() #8\n\n",
+        "attributes #7 = { noinline }\n",
+        "attributes #8 = { nounwind }\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("define void @f() #0 {")
+            && printed.contains("declare void @g() #1")
+            && printed.contains(
+                "declare void @llvm.lifetime.start.p0(i64 immarg, ptr captures(none)) #2"
+            ),
+        "\n--- printed ---\n{printed}"
+    );
+    assert!(
+        printed.contains("attributes #0 = { noinline }")
+            && printed.contains("attributes #1 = { nounwind }"),
+        "\n--- printed ---\n{printed}"
+    );
+}

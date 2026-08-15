@@ -45,7 +45,7 @@ and each row names the check that backs it.
 | Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 370 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
-| Intrinsic names carrying the types they were instantiated at | names done for the 239 LangRef documents; the order upstream prints a renamed one in is not | `llvm-opt-differential-other`, `llvm-roundtrip` |
+| Intrinsic names carrying the types they were instantiated at | done for the 239 LangRef documents, name and print position both | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
 
 ## The round trip
 
@@ -180,7 +180,10 @@ intrinsic declarations in `llvm/test`: 986 of the names those write are
 ones upstream rewrites the way we would, and the three rows a test
 contradicted are dropped. What a type spells is measured separately,
 through the one intrinsic overloaded on any type at all, and is
-`crates/llvm-ir/src/intrinsic/mangle.rs`.
+`crates/llvm-ir/src/intrinsic/mangle.rs`. Where a renamed declaration
+prints is measured too: upstream builds a new function and erases the old,
+so it lands after everything the module wrote and after the declarations
+the calls implied, and the attribute groups follow it.
 
 That table moves neither ratchet and is in the tree anyway. What it
 catches is a module that declares an intrinsic *consistently* wrongly, so

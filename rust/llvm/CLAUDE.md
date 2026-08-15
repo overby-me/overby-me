@@ -1953,16 +1953,29 @@ needed one fix for it: `calls_intrinsic` compared whole names, so renaming
 function" rule past its own case. It compares the reduced name now, which
 it should always have done, every module writing the components out having
 been missed before.
-What is measured and not done is the order. Upstream does not rename a
-declaration in place: it builds a new function and erases the old, so the
-remangled ones print after everything the module wrote, and after the ones
-the calls implied. Three of the four print differences this was for are
-now differences of position rather than of name. Moving a function means
-moving its id, which every constant that names it holds, so it wants a
-print order beside the arena and a pass of its own. Attribute groups are
-numbered by first use in print order, which that pass has to move with it;
-the module-scope slots are not, an intrinsic being named and the numbering
+Then the order, which the names alone left wrong. Upstream does not rename
+a declaration in place: it builds a new function and erases the old, so a
+renamed one prints after everything the module wrote. Renaming in place got
+the name right and left the position wrong, which is still a difference, so
+three of the four files this was for only moved from one kind of difference
+to the other until this landed.
+Moving a function means moving its id, which every constant naming it
+holds, so `Module::function_order` records the order instead and the arena
+keeps the ids. Attribute groups follow it, a group's number being its first
+use as printed: a renamed declaration that moves to the end takes the last
+number with it, which upstream does too. The module-scope slots do not
+follow it and do not need to, an intrinsic being named and that numbering
 counting only the unnamed.
+Where the two kinds of declaration land is a third measurement.
+`declare i8 @llvm.smax(i8, i8)` implied by a call prints *before* a renamed
+`@llvm.lifetime.start.p0` even when the module wrote the second one first,
+because upstream materialises an implied declaration where the call is read
+and rewrites a written one at the end. So an implied one is given its
+canonical name as it is built rather than renamed afterwards, which keeps
+it out of the move.
+Feature 67 to 70 and Other 141 to 143, each suite down to a single file
+that differs for a reason that is not the name: one wants the attributes of
+an nvvm intrinsic, the other a pass-timing report.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

@@ -147,9 +147,9 @@ in {
     # bitcode reader's compatibility upgrades as print differences, which is
     # what thirteen of them were.
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 191;
-    llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 67;
+    llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 70;
     llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 207;
-    llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 141;
+    llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 143;
 
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use

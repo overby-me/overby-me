@@ -1575,6 +1575,14 @@ impl Parser {
     /// gives an intrinsic go on afterwards, in `apply_intrinsic_attributes`,
     /// which is the same pass that puts them on a declaration the module
     /// wrote out itself.
+    ///
+    /// One of these is named the way upstream names it as it is built, and
+    /// not renamed afterwards by `remangle_intrinsics`, because the two land
+    /// in different places. Upstream materialises a declaration where the
+    /// call is read and rewrites a written one at the end of the module, so
+    /// an implied `llvm.smax.i8` prints before a renamed
+    /// `llvm.lifetime.start.p0` even when the module wrote the second one
+    /// first, which is measured.
     pub(crate) fn add_implied_intrinsics(&mut self) {
         for name in self.implied_intrinsics.clone() {
             let Some((return_type, params)) = self.implied_signatures.get(&name).cloned() else {
@@ -1589,7 +1597,11 @@ impl Parser {
                     name: None,
                 })
                 .collect();
-            self.module.add_function(declaration);
+            let id = self.module.add_function(declaration);
+            let index = id.0 as usize;
+            if let Some(canonical) = self.canonical_intrinsic_name(index) {
+                self.module.functions[index].name = llvm_ir::value::Name::Named(canonical);
+            }
         }
     }
 

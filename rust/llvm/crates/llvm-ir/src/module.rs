@@ -30,6 +30,17 @@ pub struct Module {
     pub aliases: Vec<Alias>,
     pub ifuncs: Vec<IFunc>,
     pub functions: Vec<Function>,
+    /// The order the functions print in, when it is not the order they were
+    /// built in. Empty means the arena order, which is what a module read
+    /// straight through has.
+    ///
+    /// Only one thing moves a function: upstream does not rename an intrinsic
+    /// declaration in place, it builds a new function and erases the old, so
+    /// a declaration whose name gained the types it was instantiated at
+    /// prints after everything the module wrote. Moving it in the arena would
+    /// move its id, which every constant naming it holds, so the order is
+    /// recorded here instead.
+    pub function_order: Vec<FunctionId>,
     /// `attributes #0 = { ... }`, kept with its number so that references to
     /// it print unchanged.
     pub attribute_groups: Vec<(u32, Vec<Attribute>)>,
@@ -63,12 +74,29 @@ impl Module {
             aliases: Vec::new(),
             ifuncs: Vec::new(),
             functions: Vec::new(),
+            function_order: Vec::new(),
             attribute_groups: Vec::new(),
             named_metadata: Vec::new(),
             metadata: Vec::new(),
             summary: Vec::new(),
             symbols: HashMap::new(),
         }
+    }
+
+    /// The functions in the order they print, as indexes into the arena.
+    ///
+    /// A recorded order that does not name every function is ignored rather
+    /// than trusted: printing a module with one of its functions missing
+    /// would be a worse failure than printing them in the order they were
+    /// built.
+    pub fn function_print_order(&self) -> Vec<usize> {
+        if self.function_order.len() != self.functions.len() {
+            return (0..self.functions.len()).collect();
+        }
+        self.function_order
+            .iter()
+            .map(|FunctionId(id)| *id as usize)
+            .collect()
     }
 
     pub fn add_function(&mut self, function: Function) -> FunctionId {
