@@ -30,7 +30,7 @@ mod types;
 use std::collections::{HashMap, HashSet};
 
 use lexer::{Lexer, Position, Spanned};
-use llvm_ir::value::{BlockId, GlobalRef, InstId, Name};
+use llvm_ir::value::{BlockId, FunctionId, GlobalRef, InstId, Name};
 use llvm_ir::{Module, TypeId};
 
 pub use lexer::LexError;
@@ -69,6 +69,10 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         symbols: HashMap::new(),
         implied_intrinsics: Vec::new(),
         implied_signatures: HashMap::new(),
+        first_implied_id: FunctionId(0),
+        extra_implied_ids: FunctionId(0),
+        extra_implied_room: 0,
+        extra_implied: Vec::new(),
         next_inline_metadata: 0,
         wrote_debug_record: false,
         wrote_debug_intrinsic: false,
@@ -97,6 +101,9 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
     // without its components is filled in the same way one a declaration
     // wrote is.
     parser.remangle_intrinsics();
+    // After the renaming, which moves what it renames to the end: the two
+    // sets never overlap, so the implied ones sort where they already sit.
+    parser.sort_implied_declarations();
     // After the declarations the calls implied, so that those get the
     // attributes too: upstream materialises one with them already on.
     parser.apply_intrinsic_attributes()?;
@@ -118,11 +125,22 @@ pub(crate) struct Parser {
     /// Every global-scope name and the id it will get, worked out before
     /// parsing so that forward references resolve without placeholders.
     pub(crate) symbols: HashMap<Name, GlobalRef>,
-    /// The `llvm.*` names nothing declares, in the order they are first used,
-    /// which is the order upstream appends their declarations in.
+    /// The `llvm.*` names nothing declares, sorted by the name the module
+    /// wrote, which is the order upstream appends their declarations in.
     pub(crate) implied_intrinsics: Vec<Name>,
     /// What the first call to each of them says its signature is.
     pub(crate) implied_signatures: HashMap<Name, (TypeId, Vec<TypeId>)>,
+    /// The id the first implied declaration took, the rest running on from
+    /// it in the order `implied_intrinsics` holds.
+    pub(crate) first_implied_id: FunctionId,
+    /// The first id of the block reserved for the names that stand for more
+    /// than one function, and how many ids that block holds.
+    pub(crate) extra_implied_ids: FunctionId,
+    pub(crate) extra_implied_room: usize,
+    /// The further declarations those names asked for, in the order the calls
+    /// asked, which is the order their ids run in. Each is the written name,
+    /// the id it took, and the signature the call gave it.
+    pub(crate) extra_implied: Vec<(Name, FunctionId, TypeId, Vec<TypeId>)>,
     /// The next number to give a node written in place. Upstream has no such
     /// thing: it numbers every node and refers to it, so a node written
     /// inside another is hoisted out and numbered. Starting past every

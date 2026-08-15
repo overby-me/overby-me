@@ -139,6 +139,7 @@ impl Parser {
         // the module writes. Its id has to be reserved here so that the
         // pre-scan and the parse agree about which function is which.
         let mut implied = Vec::new();
+        let mut mentions = 0usize;
         for spanned in &self.tokens {
             let Token::GlobalName(text) = &spanned.token else {
                 continue;
@@ -147,7 +148,16 @@ impl Parser {
                 continue;
             }
             let name = Name::Named(text.clone());
-            if symbols.contains_key(&name) || implied.contains(&name) {
+            if symbols.contains_key(&name) {
+                continue;
+            }
+            if implied.contains(&name) {
+                // Counted again: one written name can stand for more than
+                // one function, `@llvm.umax` called at `i8` and at `i16`
+                // being two of them, and each needs an id of its own.
+                if llvm_ir::intrinsic::is_known(text) {
+                    mentions += 1;
+                }
                 continue;
             }
             // Recognising the name is all that is needed to build the
@@ -174,11 +184,24 @@ impl Parser {
             (Name::Named(left), Name::Named(right)) => left.cmp(right),
             _ => std::cmp::Ordering::Equal,
         });
+        self.first_implied_id = FunctionId(functions);
         for name in implied {
             symbols.insert(name.clone(), GlobalRef::Function(FunctionId(functions)));
             functions += 1;
             self.implied_intrinsics.push(name);
         }
+        // And a block after those for the names that stand for more than one
+        // function. A call site names an instantiation, so `@llvm.umax` at
+        // `i8` and at `i16` are two declarations from one written name, and
+        // the second cannot have the first's id.
+        //
+        // The block is sized by how many times such a name is mentioned
+        // beyond its first, which is an upper bound rather than a count: two
+        // calls at the same type want one function between them. What is
+        // left over is never referred to and never built, and sits past the
+        // end of the arena where nothing looks.
+        self.extra_implied_ids = FunctionId(functions);
+        self.extra_implied_room = mentions;
 
         self.symbols = symbols;
         Ok(())

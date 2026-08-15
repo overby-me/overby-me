@@ -1325,3 +1325,79 @@ fn a_debug_node_writes_the_fields_upstream_writes() {
         );
     }
 }
+
+/// One written name can stand for more than one declaration.
+///
+/// A call site names an instantiation, so `@llvm.umax` at `i8` and at `i16`
+/// are two functions rather than one that has to fit both, which is what
+/// upstream's own `implicit-intrinsic-declaration.ll` is about. The order is
+/// measured too: by the name the module wrote, and among the ones that wrote
+/// the same name, by the name each ended up with. So `i16` before `i8`,
+/// both before the one that wrote `llvm.umax.i32`.
+#[test]
+fn one_written_intrinsic_name_can_imply_two_declarations() {
+    let text = concat!(
+        "define i32 @test(i8 %x, i8 %y) {\n",
+        "  %max1 = call i8 @llvm.umax(i8 %x, i8 %y)\n",
+        "  %x.ext = zext i8 %x to i16\n",
+        "  %y.ext = zext i8 %y to i16\n",
+        "  %max2 = call i16 @llvm.umax(i16 %x.ext, i16 %y.ext)\n",
+        "  %x.ext2 = zext i8 %x to i32\n",
+        "  %y.ext2 = zext i8 %y to i32\n",
+        "  %max3 = call i32 @llvm.umax.i32(i32 %x.ext2, i32 %y.ext2)\n",
+        "  ret i32 %max3\n",
+        "}\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    assert!(llvm_ir::verify_module(&module).is_empty());
+    let printed = llvm_ir_print::print_module(&module);
+    let declared: Vec<&str> = printed
+        .lines()
+        .filter(|line| line.starts_with("declare "))
+        .map(|line| {
+            line.split('@')
+                .nth(1)
+                .unwrap_or("")
+                .split('(')
+                .next()
+                .unwrap_or("")
+        })
+        .collect();
+    assert_eq!(
+        declared,
+        vec!["llvm.umax.i16", "llvm.umax.i8", "llvm.umax.i32"],
+        "\n--- printed ---\n{printed}"
+    );
+    // Each call names its own instantiation.
+    for wanted in [
+        "call i8 @llvm.umax.i8(i8 %x, i8 %y)",
+        "call i16 @llvm.umax.i16(i16 %x.ext, i16 %y.ext)",
+        "call i32 @llvm.umax.i32(i32 %x.ext2, i32 %y.ext2)",
+    ] {
+        assert!(printed.contains(wanted), "\n--- printed ---\n{printed}");
+    }
+}
+
+/// The same signature twice is one declaration, not two.
+#[test]
+fn the_same_instantiation_twice_implies_one_declaration() {
+    let text = concat!(
+        "define void @f(i8 %x) {\n",
+        "  %a = call i8 @llvm.umax(i8 %x, i8 %x)\n",
+        "  %b = call i8 @llvm.umax(i8 %x, i8 %x)\n",
+        "  ret void\n",
+        "}\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert_eq!(
+        printed
+            .lines()
+            .filter(|line| line.starts_with("declare "))
+            .count(),
+        1,
+        "\n--- printed ---\n{printed}"
+    );
+}

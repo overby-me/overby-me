@@ -136,7 +136,7 @@ in {
     # not build. Refusing every such module scored as agreement for a reason
     # that had nothing to do with what those files test, which is what the
     # second bound is for. Folding typed pointers took it back to 449.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 478 2;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 479 1;
     llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 320 0;
 
     # Not whether we accept the same files, but whether we print the same
@@ -148,7 +148,7 @@ in {
     # what thirteen of them were.
     # Feature and Other print every module we both accept exactly as upstream
     # does, so those two are held rather than raised from here.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 212;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 213;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 71;
     llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 219;
     llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 144;

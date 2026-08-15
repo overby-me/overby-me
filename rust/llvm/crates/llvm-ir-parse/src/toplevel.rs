@@ -884,6 +884,69 @@ impl Parser {
         self.module.function_order = order;
     }
 
+    /// Puts the declarations the calls implied in the order upstream prints
+    /// them: by the name the module wrote, and among the ones that wrote the
+    /// same name, by the name each ended up with.
+    ///
+    /// Both halves are measured. Five intrinsics called in reverse
+    /// alphabetical order come back alphabetical, which is the first. And
+    /// `@llvm.umax` called at `i8` and at `i16` beside `@llvm.umax.i32`
+    /// comes back `i16`, `i8`, `i32`: the two that wrote `llvm.umax` sort
+    /// before the one that wrote `llvm.umax.i32`, and between themselves
+    /// `llvm.umax.i16` sorts before `llvm.umax.i8`.
+    ///
+    /// This runs after the renaming, which moves what it renames to the end.
+    /// The two sets never overlap, an implied declaration being built with
+    /// the name it will keep, so the implied ones are sorted where they
+    /// already sit rather than moved.
+    pub(crate) fn sort_implied_declarations(&mut self) {
+        let mut written: Vec<(llvm_ir::value::FunctionId, Name)> = self
+            .implied_intrinsics
+            .iter()
+            .enumerate()
+            .map(|(offset, name)| {
+                (
+                    llvm_ir::value::FunctionId(self.first_implied_id.0 + offset as u32),
+                    name.clone(),
+                )
+            })
+            .collect();
+        written.extend(
+            self.extra_implied
+                .iter()
+                .map(|(name, id, _, _)| (*id, name.clone())),
+        );
+        if written.len() < 2 {
+            return;
+        }
+        let mut order = self.module.function_print_order();
+        let mut places: Vec<usize> = Vec::new();
+        for (place, index) in order.iter().enumerate() {
+            if written.iter().any(|(id, _)| id.0 as usize == *index) {
+                places.push(place);
+            }
+        }
+        if places.len() < 2 {
+            return;
+        }
+        let mut sorted: Vec<usize> = places.iter().map(|place| order[*place]).collect();
+        sorted.sort_by_cached_key(|index| {
+            let wrote = written
+                .iter()
+                .find(|(id, _)| id.0 as usize == *index)
+                .map(|(_, name)| name.clone());
+            let ended = self.module.functions[*index].name.clone();
+            (name_text(wrote), name_text(Some(ended)))
+        });
+        for (place, index) in places.into_iter().zip(sorted) {
+            order[place] = index;
+        }
+        self.module.function_order = order
+            .into_iter()
+            .map(|index| llvm_ir::value::FunctionId(index as u32))
+            .collect();
+    }
+
     /// The name upstream reads this one as, when it reads it as another.
     ///
     /// Some intrinsics are read under an older spelling and written under
@@ -1318,5 +1381,16 @@ fn defined(known: &[bool], node: &llvm_ir::metadata::MdRef) -> bool {
     match node {
         llvm_ir::metadata::MdRef::Inline(_) => true,
         llvm_ir::metadata::MdRef::Id(id) => known.get(id.0 as usize).copied().unwrap_or(false),
+    }
+}
+
+/// A name as text, for sorting. An unnamed function sorts before every named
+/// one, which is where nothing puts it in practice: an implied declaration
+/// always has a name.
+fn name_text(name: Option<Name>) -> String {
+    match name {
+        Some(Name::Named(text)) => text,
+        Some(Name::Number(number)) => number.to_string(),
+        None => String::new(),
     }
 }

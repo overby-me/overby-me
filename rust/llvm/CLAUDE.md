@@ -2210,6 +2210,33 @@ written beside `ptrAuthKey` comes back true, and `ptrAuthKey: 2` on a
 `DW_TAG_pointer_type` comes back as `align: 2`. That wants a sweep of its
 own and is recorded as one.
 Differential Assembler 211 to 212.
+Then the ceiling, which is the count that matters, and half of it came down.
+A call site names an instantiation, so one written name can stand for more
+than one declaration: `@llvm.umax` called at `i8` and at `i16` is two
+functions and not one that has to fit both. We recorded the first call's
+signature and checked every later call against it, so the second was "calls
+an intrinsic with an incompatible signature", which is upstream's own
+`implicit-intrinsic-declaration.ll`.
+The awkward part is that a `FunctionId` is an index into the arena, so an
+extra declaration cannot be conjured while parsing: the pre-scan reserves
+every id before the first token is read, and everything after depends on
+that count. So the pre-scan counts how often an implied name is mentioned
+beyond its first and reserves a block that size, an upper bound rather than
+a count, and a call whose signature is new takes the next id from it. What is
+left over is never referred to and never built, and sits past the end of the
+arena where nothing looks.
+The order is measured as well, and it is two keys rather than one: by the
+name the module wrote, and among the ones that wrote the same name, by the
+name each ended up with. `@llvm.umax` at `i8` and at `i16` beside
+`@llvm.umax.i32` comes back `i16`, `i8`, `i32`, which no single key gives.
+Assembler 478 to 479 with the ceiling 2 to 1, and its differential 212 to
+213. The one left is `auto_upgrade_nvvm_intrinsics.ll`, and it is a
+different kind of work: that module's own declarations disagree with its
+calls, `declare i32 @llvm.nvvm.atomic.load.add.f32.p0(ptr, float)` against
+`call float @llvm.nvvm.atomic.load.add.f32.p0(...)`, and upstream never
+minds because it rewrites those calls into `atomicrmw` before anything
+verifies them. Rewriting a call into another instruction is a capability
+this parser does not have yet, so it is recorded rather than half-built.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

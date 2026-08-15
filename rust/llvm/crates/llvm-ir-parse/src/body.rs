@@ -1570,6 +1570,39 @@ impl Parser {
         Ok(())
     }
 
+    /// The id of a further declaration for a name that already has one,
+    /// taken from the block the pre-scan reserved.
+    ///
+    /// A call site names an instantiation, and two instantiations of one
+    /// written name are two functions: `@llvm.umax` at `i8` and at `i16`
+    /// come back `@llvm.umax.i8` and `@llvm.umax.i16`, which is what
+    /// upstream's own `implicit-intrinsic-declaration.ll` is about. The
+    /// same signature twice wants one function and never reaches here.
+    ///
+    /// The block is sized by how often such a name is mentioned beyond its
+    /// first, so running out means the pre-scan and the parse disagree about
+    /// what a mention is rather than that a module is too large. Saying so is
+    /// better than handing back an id that belongs to something else.
+    fn another_implied_intrinsic(
+        &mut self,
+        name: &Name,
+        result: TypeId,
+        params: Vec<TypeId>,
+    ) -> Result<llvm_ir::value::FunctionId, ParseError> {
+        for (known, id, known_result, known_params) in &self.extra_implied {
+            if known == name && *known_result == result && *known_params == params {
+                return Ok(*id);
+            }
+        }
+        if self.extra_implied.len() >= self.extra_implied_room {
+            return self.error("more instantiations of an intrinsic than the module mentions");
+        }
+        let id =
+            llvm_ir::value::FunctionId(self.extra_implied_ids.0 + self.extra_implied.len() as u32);
+        self.extra_implied.push((name.clone(), id, result, params));
+        Ok(id)
+    }
+
     /// Adds the declarations the calls implied, after everything the module
     /// writes, which is where upstream puts them. The attributes upstream
     /// gives an intrinsic go on afterwards, in `apply_intrinsic_attributes`,
@@ -1599,6 +1632,26 @@ impl Parser {
                 .collect();
             let id = self.module.add_function(declaration);
             let index = id.0 as usize;
+            if let Some(canonical) = self.canonical_intrinsic_name(index) {
+                self.module.functions[index].name = llvm_ir::value::Name::Named(canonical);
+            }
+        }
+        // Then the further declarations, in the order their ids run, which is
+        // the order the calls asked for them. Their place in the printed
+        // module is decided afterwards, not here.
+        for (name, id, return_type, params) in self.extra_implied.clone() {
+            let mut declaration = Function::new(name, return_type);
+            declaration.params = params
+                .into_iter()
+                .map(|ty| Param {
+                    ty,
+                    attrs: AttributeSet::default(),
+                    name: None,
+                })
+                .collect();
+            let added = self.module.add_function(declaration);
+            debug_assert_eq!(added, id, "the pre-scan reserved this id for this call");
+            let index = added.0 as usize;
             if let Some(canonical) = self.canonical_intrinsic_name(index) {
                 self.module.functions[index].name = llvm_ir::value::Name::Named(canonical);
             }
@@ -1694,11 +1747,12 @@ impl Parser {
             );
         }
 
-        // The declaration upstream builds takes its shape from the first
-        // call, so the first one to arrive is the one recorded.
-        if let Some(name) = undeclared
-            && !self.implied_signatures.contains_key(&name)
-        {
+        // The declaration upstream builds takes its shape from the call, and
+        // one written name can need more than one: a call site names an
+        // instantiation, so `@llvm.umax` at `i8` and at `i16` are two
+        // declarations rather than one that has to fit both.
+        let mut callee = callee;
+        if let Some(name) = undeclared {
             let result = match self.module.ctx.type_kind(written_type) {
                 TypeKind::Function { result, .. } => *result,
                 _ => written_type,
@@ -1709,7 +1763,23 @@ impl Parser {
             // none: `llvm.umax(i8, i16)` names no instantiation of
             // `llvm.umax`, which upstream reports here rather than later.
             self.check_tied_positions(&name, result, &params)?;
-            self.implied_signatures.insert(name, (result, params));
+            match self.implied_signatures.get(&name) {
+                None => {
+                    self.implied_signatures.insert(name, (result, params));
+                }
+                // The same signature again wants the same function, and the
+                // callee already points at it.
+                Some((first_result, first_params))
+                    if *first_result == result && *first_params == params => {}
+                Some(_) => {
+                    let id = self.another_implied_intrinsic(&name, result, params)?;
+                    let constant = self.module.ctx.intern_constant(Constant::Global {
+                        target: llvm_ir::value::GlobalRef::Function(id),
+                        ty: callee_type,
+                    });
+                    callee = Value::Constant(constant);
+                }
+            }
         }
 
         let fn_attrs = self.parse_function_attribute_set()?;

@@ -56,6 +56,7 @@ and each row names the check that backs it.
 | `memory(...)` in one shape however it was written: fixed location order, defaults dropped | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | A composite type's `baseType` written after `line`, and its `runtimeLang` as a language word | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | A `DIMacroFile`'s `type` read and never written back | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| One written intrinsic name implying a declaration per instantiation it is called at | done | `llvm-upstream-assembler`, `llvm-roundtrip` |
 
 ## The round trip
 
@@ -98,7 +99,7 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 478 | 483 | 2 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 479 | 483 | 1 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 320 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
@@ -158,12 +159,14 @@ off the assembler, which takes a directive only when its index count
 matches the list.
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 2 modules llvm-as reads**, both of them in Assembler,
-which is the failure that matters: two calls upstream upgrades to a
-signature we check against the documented one. That count is a ceiling that
-may only fall. We **read 11 modules llvm-as refuses**, three in Assembler
-and eight in Verifier, which is a missing verifier rule each, and agreement
-is a floor that may only rise.
+bounds. We **refuse 1 module llvm-as reads**, in Assembler, which is the
+failure that matters: `auto_upgrade_nvvm_intrinsics.ll`, whose own
+declarations disagree with its calls because upstream rewrites those calls
+into `atomicrmw` before anything verifies them. Rewriting a call into
+another instruction is a capability this parser does not have. That count is
+a ceiling that may only fall. We **read 11 modules llvm-as refuses**, three
+in Assembler and eight in Verifier, which is a missing verifier rule each,
+and agreement is a floor that may only rise.
 
 **The eleven tree ratchets are at 100%**: every module `llvm-as` reads
 across `Transforms`, `Analysis`, `CodeGen`, `DebugInfo`, `Instrumentation`,
