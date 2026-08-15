@@ -208,10 +208,10 @@ async fn close(args: PrCloseArgs) -> Result<()> {
             .await?;
     }
     client
-        .set_pull_state(
+        .set_pull_status(
             &session.did,
             &pr_at,
-            "sh.tangled.repo.pull.state.closed",
+            tangled_api::client::PULL_STATUS_CLOSED,
             &pds,
             &session.access_jwt,
         )
@@ -237,10 +237,10 @@ async fn reopen(args: PrReopenArgs) -> Result<()> {
             .await?;
     }
     client
-        .set_pull_state(
+        .set_pull_status(
             &session.did,
             &pr_at,
-            "sh.tangled.repo.pull.state.open",
+            tangled_api::client::PULL_STATUS_OPEN,
             &pds,
             &session.access_jwt,
         )

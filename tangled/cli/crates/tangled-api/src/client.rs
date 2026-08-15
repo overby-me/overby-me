@@ -22,6 +22,11 @@ pub struct TangledClient {
 }
 
 const REPO_CREATE: &str = "sh.tangled.repo.create";
+/// Pull status. Renamed from `...pull.state`, and it gained `merged`.
+pub const PULL_STATUS: &str = "sh.tangled.repo.pull.status";
+pub const PULL_STATUS_OPEN: &str = "sh.tangled.repo.pull.status.open";
+pub const PULL_STATUS_CLOSED: &str = "sh.tangled.repo.pull.status.closed";
+pub const PULL_STATUS_MERGED: &str = "sh.tangled.repo.pull.status.merged";
 
 impl Default for TangledClient {
     fn default() -> Self {
@@ -1106,8 +1111,14 @@ impl TangledClient {
     ) -> Result<String> {
         #[derive(Serialize)]
         struct Rec<'a> {
+            // `createdAt` is required by sh.tangled.repo.issue.state; a
+            // record without it is written but never read.
+            #[serde(rename = "$type")]
+            lexicon_type: &'a str,
             issue: &'a str,
             state: &'a str,
+            #[serde(rename = "createdAt")]
+            created_at: String,
         }
         #[derive(Serialize)]
         struct Req<'a> {
@@ -1121,8 +1132,10 @@ impl TangledClient {
             uri: String,
         }
         let rec = Rec {
+            lexicon_type: "sh.tangled.repo.issue.state",
             issue: issue_at,
             state: state_nsid,
+            created_at: chrono::Utc::now().to_rfc3339(),
         };
         let req = Req {
             repo: author_did,
@@ -1591,18 +1604,28 @@ impl TangledClient {
         Self::uri_rkey(&res.uri).ok_or_else(|| anyhow!("missing rkey in pull comment uri"))
     }
 
-    pub async fn set_pull_state(
+    /// Record a pull request's status.
+    ///
+    /// The collection is `sh.tangled.repo.pull.status`, not `...pull.state`:
+    /// pulls were renamed and gained a third value, `merged`. The lexicon
+    /// requires `createdAt`, so a record without one is written but never
+    /// read.
+    pub async fn set_pull_status(
         &self,
         author_did: &str,
         pull_at: &str,
-        state_nsid: &str,
+        status_nsid: &str,
         pds_base: &str,
         access_jwt: &str,
     ) -> Result<String> {
         #[derive(Serialize)]
         struct Rec<'a> {
+            #[serde(rename = "$type")]
+            lexicon_type: &'a str,
             pull: &'a str,
-            state: &'a str,
+            status: &'a str,
+            #[serde(rename = "createdAt")]
+            created_at: String,
         }
         #[derive(Serialize)]
         struct Req<'a> {
@@ -1616,12 +1639,14 @@ impl TangledClient {
             uri: String,
         }
         let rec = Rec {
+            lexicon_type: PULL_STATUS,
             pull: pull_at,
-            state: state_nsid,
+            status: status_nsid,
+            created_at: chrono::Utc::now().to_rfc3339(),
         };
         let req = Req {
             repo: author_did,
-            collection: "sh.tangled.repo.pull.state",
+            collection: PULL_STATUS,
             validate: false,
             record: rec,
         };
@@ -1629,7 +1654,7 @@ impl TangledClient {
         let res: Res = pds_client
             .post_json("com.atproto.repo.createRecord", &req, Some(access_jwt))
             .await?;
-        Self::uri_rkey(&res.uri).ok_or_else(|| anyhow!("missing rkey in pull state uri"))
+        Self::uri_rkey(&res.uri).ok_or_else(|| anyhow!("missing rkey in pull status uri"))
     }
 
     #[allow(clippy::too_many_arguments)]
