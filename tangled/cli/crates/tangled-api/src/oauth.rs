@@ -75,6 +75,14 @@ pub struct PersistedOAuthSession {
     pub handle: String,
     pub pds: Option<String>,
     pub oauth_session: OAuthSession,
+    /// The client_id this session was issued to.
+    ///
+    /// A loopback client's id encodes its redirect_uri, and login uses a
+    /// random port, so the id cannot be reconstructed later. Refreshing the
+    /// token requires presenting the same one, so it has to be kept. Sessions
+    /// stored before this field existed have None and cannot be refreshed.
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 /// Result of a successful browser-based OAuth login.
@@ -158,6 +166,108 @@ macro_rules! oauth_client_config {
             session_store: $session_store,
         }
     };
+}
+
+/// The client_id a loopback client gets for a given callback port.
+/// Built by hand: atrium does not export the trait that computes it.
+fn client_id_for(port: u16) -> Option<String> {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("redirect_uri", &format!("http://127.0.0.1:{port}/callback"))
+        .append_pair("scope", "atproto transition:generic")
+        .finish();
+    Some(format!("http://localhost?{query}"))
+}
+
+/// Whether a session's access token has expired.
+pub fn is_expired(persisted: &PersistedOAuthSession) -> bool {
+    match &persisted.oauth_session.token_set.expires_at {
+        Some(expires_at) => {
+            expires_at.as_str() <= atrium_api::types::string::Datetime::now().as_str()
+        }
+        // No expiry recorded: assume it is still good and let the server say.
+        None => false,
+    }
+}
+
+/// Exchange the refresh token for a new access token, and persist it.
+///
+/// atrium only refreshes from inside its own XRPC client, on a 401, so a CLI
+/// making raw requests never reaches it. This does the exchange directly
+/// against the authorization server, using atrium's DpopClient so the proof
+/// and nonce handling stay its problem rather than ours.
+pub async fn refresh(persisted: &PersistedOAuthSession) -> Result<PersistedOAuthSession> {
+    let token_set = &persisted.oauth_session.token_set;
+    let refresh_token = token_set
+        .refresh_token
+        .as_deref()
+        .context("this session has no refresh token; log in again")?;
+    let client_id = persisted
+        .client_id
+        .as_deref()
+        .context("this session predates client_id being stored; log in again")?;
+
+    #[derive(serde::Deserialize)]
+    struct ServerMetadata {
+        token_endpoint: String,
+    }
+    let metadata: ServerMetadata = reqwest::Client::new()
+        .get(format!(
+            "{}/.well-known/oauth-authorization-server",
+            token_set.iss.trim_end_matches('/')
+        ))
+        .send()
+        .await?
+        .json()
+        .await
+        .context("read authorization server metadata")?;
+
+    let body = serde_urlencoded::to_string([
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("client_id", client_id),
+    ])?;
+    let request = atrium_xrpc::http::Request::builder()
+        .method("POST")
+        .uri(&metadata.token_endpoint)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(body.into_bytes())
+        .context("build refresh request")?;
+
+    let dpop_client = make_dpop_client(persisted)?;
+    let response = dpop_client
+        .send_http(request)
+        .await
+        .map_err(|e| anyhow::anyhow!("refresh request failed: {e}"))?;
+    let status = response.status();
+    let bytes = response.into_body();
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "refresh rejected ({status}): {}",
+            String::from_utf8_lossy(&bytes)
+        ));
+    }
+
+    #[derive(serde::Deserialize)]
+    struct TokenResponse {
+        access_token: String,
+        #[serde(default)]
+        refresh_token: Option<String>,
+        #[serde(default)]
+        expires_in: Option<i64>,
+    }
+    let fresh: TokenResponse = serde_json::from_slice(&bytes).context("decode refreshed token")?;
+
+    let mut updated = persisted.clone();
+    updated.oauth_session.token_set.access_token = fresh.access_token;
+    if let Some(rt) = fresh.refresh_token {
+        updated.oauth_session.token_set.refresh_token = Some(rt);
+    }
+    if let Some(secs) = fresh.expires_in {
+        let expiry = chrono::Utc::now() + chrono::Duration::seconds(secs);
+        updated.oauth_session.token_set.expires_at =
+            Some(atrium_api::types::string::Datetime::new(expiry.into()));
+    }
+    Ok(updated)
 }
 
 /// Run the full browser-based OAuth login flow.
@@ -258,6 +368,7 @@ pub async fn login_browser(handle: &str) -> Result<OAuthLoginResult> {
     let resolved_handle = did_info.handle.unwrap_or_else(|| handle.to_string());
 
     let persisted = PersistedOAuthSession {
+        client_id: client_id_for(port),
         did: did_str.clone(),
         handle: resolved_handle.clone(),
         pds: did_info.pds.clone(),

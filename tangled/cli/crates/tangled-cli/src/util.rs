@@ -100,6 +100,28 @@ pub async fn refresh_session(session: &Session) -> Result<Session> {
 pub async fn load_session_with_refresh() -> Result<Session> {
     let session = load_session().await?;
 
+    // An OAuth access token expires; refresh it before anything tries to use
+    // it, and persist the result so the next process starts fresh.
+    if let Some(oauth) = load_oauth_session() {
+        if tangled_api::oauth::is_expired(&oauth) {
+            match tangled_api::oauth::refresh(&oauth).await {
+                Ok(refreshed) => {
+                    if let Ok(json) = serde_json::to_string(&refreshed) {
+                        let keychain =
+                            tangled_config::keychain::Keychain::new("tangled-cli-oauth", "default");
+                        let _ = keychain.set_password(&json);
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow!(
+                        "OAuth session expired and could not be refreshed: {e}\n\
+                         Log in again: tangled auth login-browser"
+                    ))
+                }
+            }
+        }
+    }
+
     // With an OAuth session the JWTs in the stored session are dead weight:
     // `login-browser` writes an empty pair, and a password login that happened
     // earlier leaves a stale one behind. Callers pass `session.access_jwt` as
