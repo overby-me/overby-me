@@ -788,7 +788,7 @@ pub async fn query_node_by_id(
     let operation = NodeWithChildrenQuery::build(NodeWithChildrenVariables {
         id: Uuid(id.to_string()),
         children_where: NodesBoolExp {
-            and: Some(vec![not_a_canvas_cell(), visible_to_user(user_id)]),
+            and: Some(vec![not_a_canvas_cell(), drafts_are_private(user_id)]),
             ..Default::default()
         },
     });
@@ -1711,6 +1711,44 @@ pub(crate) fn not_a_canvas_cell() -> NodesBoolExp {
     }
 }
 
+/// The kinds of node that HAVE a submit step, and so have a draft state at all.
+///
+/// `mutable` does not mean one thing. On these three it means "not submitted
+/// yet". On a canvas it means the board is OPEN FOR PAINTING (`pixel.rs` reads
+/// it as `is_open`), and on a folder it means the node has not been locked into
+/// being its own context. Same column, three unrelated questions.
+const HAS_A_DRAFT_STATE: [&str; 3] = ["vote/candidate", "vote/policy", "vote/change"];
+
+/// Other people's unsubmitted work is theirs alone -- but only where
+/// "unsubmitted" is a thing that exists.
+///
+/// Reading `mutable` as "draft" across every mime hid every OPEN canvas from
+/// everyone but its owner, which is the exact inverse of what an open canvas is
+/// for: a board the room paints on together. It shipped, and the congress
+/// canvas went blank for all but one person. The filter now names the mimes it
+/// understands and lets everything else past untouched.
+///
+/// Phrased as "not one of these, OR visible to me" so a new mime is admitted by
+/// default. The failure mode of forgetting to add one is a draft showing up
+/// where it need not; the failure mode of the reverse is content vanishing
+/// mid-congress, and only one of those is recoverable by the person looking at
+/// the screen.
+pub(crate) fn drafts_are_private(user_id: &str) -> NodesBoolExp {
+    NodesBoolExp {
+        or: Some(vec![
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    nin: Some(HAS_A_DRAFT_STATE.iter().map(|s| s.to_string()).collect()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            visible_to_user(user_id),
+        ]),
+        ..Default::default()
+    }
+}
+
 /// Filter excluding nodes whose mime type is marked hidden.
 pub(crate) fn mime_not_hidden() -> NodesBoolExp {
     NodesBoolExp {
@@ -1860,6 +1898,31 @@ mod tests {
             json.contains(me),
             "an author must keep seeing their own drafts: {json}"
         );
+    }
+
+    /// `mutable` is not one question, and a canvas is the proof.
+    ///
+    /// On a candidature it means "not submitted"; on a canvas it means the board
+    /// is OPEN FOR PAINTING; on a folder it means the node has not been locked
+    /// into being its own context. Reading it as "draft" everywhere hid every
+    /// open canvas from everyone except its owner, which is the exact inverse of
+    /// what an open canvas is for, and the congress board went blank for the
+    /// room while staying visible to one person.
+    ///
+    /// So the filter must NAME the mimes it understands. This asserts the shape
+    /// that makes anything else exempt.
+    #[test]
+    fn a_kind_of_node_with_no_submit_step_is_never_treated_as_a_draft() {
+        let json = serde_json::to_string(&drafts_are_private("someone")).unwrap();
+
+        // The escape hatch every other mime rides out on.
+        assert!(json.contains("_nin"), "{json}");
+        for named in HAS_A_DRAFT_STATE {
+            assert!(json.contains(named), "{named} must be named: {json}");
+        }
+        // The two whose `mutable` means something entirely different.
+        assert!(!json.contains("canvas/canvas"), "{json}");
+        assert!(!json.contains("wiki/folder"), "{json}");
     }
 
     /// A signed-out visitor must never be compared against an owner.

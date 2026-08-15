@@ -334,6 +334,10 @@ pub struct StringComparisonExp {
     pub in_: Option<Vec<String>>,
     #[cynic(rename = "_neq", skip_serializing_if = "Option::is_none")]
     pub neq: Option<String>,
+    /// "none of these", for naming the few mimes a rule understands and letting
+    /// every other one past (see `drafts_are_private`).
+    #[cynic(rename = "_nin", skip_serializing_if = "Option::is_none")]
+    pub nin: Option<Vec<String>>,
     #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
 }
