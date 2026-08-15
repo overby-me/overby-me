@@ -20,37 +20,55 @@ pub async fn run(_cli: &Cli, cmd: IssueCommand) -> Result<()> {
 
 async fn list(args: IssueListArgs) -> Result<()> {
     let session = crate::util::load_session_with_refresh().await?;
-    let pds = session
-        .pds
-        .clone()
-        .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
-        .unwrap_or_else(|| "https://bsky.social".into());
+    let pds = crate::util::pds_of(&session);
     let client = crate::util::make_client(&pds);
 
-    let repo_filter_at = if let Some(repo) = &args.repo {
-        let (owner, name) = parse_repo_ref(repo, &session.handle);
-        let info = client
-            .get_repo_info(owner, name, Some(session.access_jwt.as_str()))
+    // With a repo named, ask the appview: it indexes every issue in the repo
+    // regardless of who filed it, paginates, and carries the state and
+    // comment count that the raw record does not have. Without one, fall back
+    // to scanning your own PDS, which can only ever show issues you filed.
+    let Some(repo) = args.repo.as_deref() else {
+        let items = client
+            .list_issues(&session.did, None, Some(session.access_jwt.as_str()))
             .await?;
-        Some(format!("at://{}/sh.tangled.repo/{}", info.did, info.rkey))
-    } else {
-        None
+        if items.is_empty() {
+            println!("No issues found (showing only issues you created)");
+        } else {
+            println!("RKEY\tTITLE\tREPO");
+            for it in items {
+                println!("{}\t{}\t{}", it.rkey, it.issue.title, it.issue.repo);
+            }
+            println!("\nShowing only issues you created; pass --repo to list a repo's issues.");
+        }
+        return Ok(());
     };
 
-    let items = client
-        .list_issues(
-            &session.did,
-            repo_filter_at.as_deref(),
-            Some(session.access_jwt.as_str()),
-        )
+    let (owner, name) = parse_repo_ref(repo, &session.handle);
+    let info = client
+        .get_repo_info(owner, name, Some(session.access_jwt.as_str()))
+        .await?;
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("{owner}/{name} has no repoDid; recreate it"))?;
+
+    let appview = crate::util::make_client(&tangled_api::appview::appview_base());
+    let items = appview
+        .list_issues_indexed(&repo_did, args.state.as_deref(), 1000)
         .await?;
     if items.is_empty() {
-        println!("No issues found (showing only issues you created)");
-    } else {
-        println!("RKEY\tTITLE\tREPO");
-        for it in items {
-            println!("{}\t{}\t{}", it.rkey, it.issue.title, it.issue.repo);
-        }
+        println!("No issues");
+        return Ok(());
+    }
+    println!("RKEY\tSTATE\tCOMMENTS\tTITLE");
+    for it in &items {
+        println!(
+            "{}\t{}\t{}\t{}",
+            it.rkey(),
+            it.state.clone().unwrap_or_default(),
+            it.comment_count,
+            it.value.title
+        );
     }
     Ok(())
 }

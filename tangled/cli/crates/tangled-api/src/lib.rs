@@ -1,3 +1,4 @@
+pub mod appview;
 pub mod ci;
 pub mod ci_logs;
 pub mod client;

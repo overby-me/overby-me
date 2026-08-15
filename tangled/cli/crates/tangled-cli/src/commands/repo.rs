@@ -25,33 +25,50 @@ pub async fn run(cli: &Cli, cmd: RepoCommand) -> Result<()> {
 async fn list(cli: &Cli, args: RepoListArgs) -> Result<()> {
     let session = crate::util::load_session_with_refresh().await?;
 
-    // Use the PDS to list repo records for the user
-    let pds = session
-        .pds
-        .clone()
-        .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
-        .unwrap_or_else(|| "https://bsky.social".into());
+    // The appview indexes every repo an account owns, wherever the records
+    // live, and paginates. Scanning a single PDS with listRecords saw only
+    // what that PDS held, stopped at 100, and failed the whole response on
+    // one record that would not deserialise.
+    let pds = crate::util::pds_of(&session);
     let pds_client = crate::util::make_client(&pds);
-    // Default to the logged-in user handle if --user is not provided
     let effective_user = args.user.as_deref().unwrap_or(session.handle.as_str());
-    let repos = pds_client
-        .list_repos(
-            Some(effective_user),
-            args.knot.as_deref(),
-            args.starred,
-            Some(session.access_jwt.as_str()),
-        )
+    let owner_did = pds_client
+        .resolve_handle(effective_user, Some(session.access_jwt.as_str()))
         .await?;
+
+    let appview = crate::util::make_client(&tangled_api::appview::appview_base());
+    let mut repos = appview.list_repos_indexed(&owner_did, 1000).await?;
+    if let Some(knot) = args.knot.as_deref() {
+        repos.retain(|r| r.value.knot.as_deref() == Some(knot));
+    }
 
     match cli.format {
         OutputFormat::Json => {
-            let json = serde_json::to_string_pretty(&repos)?;
-            println!("{}", json);
+            println!("{}", serde_json::to_string_pretty(&repos.iter().map(|r| {
+                serde_json::json!({
+                    "uri": r.uri,
+                    "name": r.value.name.clone().unwrap_or_else(|| r.rkey().to_string()),
+                    "knot": r.value.knot,
+                    "description": r.value.description,
+                    "repoDid": r.value.repo_did,
+                })
+            }).collect::<Vec<_>>())?);
         }
         OutputFormat::Table => {
-            println!("NAME\tKNOT\tPRIVATE");
-            for r in repos {
-                println!("{}\t{}\t{}", r.name, r.knot.unwrap_or_default(), r.private);
+            if repos.is_empty() {
+                println!("No repositories");
+                return Ok(());
+            }
+            println!("NAME\tKNOT\tDESCRIPTION");
+            for r in &repos {
+                // A record from before the name field is named by its rkey.
+                let name = r.value.name.clone().unwrap_or_else(|| r.rkey().to_string());
+                println!(
+                    "{}\t{}\t{}",
+                    name,
+                    r.value.knot.clone().unwrap_or_default(),
+                    r.value.description.clone().unwrap_or_default()
+                );
             }
         }
     }

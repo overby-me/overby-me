@@ -22,35 +22,54 @@ pub async fn run(_cli: &Cli, cmd: PrCommand) -> Result<()> {
 
 async fn list(args: PrListArgs) -> Result<()> {
     let session = crate::util::load_session_with_refresh().await?;
-    let pds = session
-        .pds
-        .clone()
-        .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
-        .unwrap_or_else(|| "https://bsky.social".into());
+    let pds = crate::util::pds_of(&session);
     let client = crate::util::make_client(&pds);
-    let target_repo_at = if let Some(repo) = &args.repo {
-        let (owner, name) = parse_repo_ref(repo, &session.handle);
-        let info = client
-            .get_repo_info(owner, name, Some(session.access_jwt.as_str()))
+
+    // As with issues: the appview indexes the whole repo, and reports merged
+    // as a state of its own. Without a repo we can only scan your own PDS,
+    // which shows pulls you opened and nothing else.
+    let Some(repo) = args.repo.as_deref() else {
+        let pulls = client
+            .list_pulls(&session.did, None, Some(session.access_jwt.as_str()))
             .await?;
-        Some(format!("at://{}/sh.tangled.repo/{}", info.did, info.rkey))
-    } else {
-        None
-    };
-    let pulls = client
-        .list_pulls(
-            &session.did,
-            target_repo_at.as_deref(),
-            Some(session.access_jwt.as_str()),
-        )
-        .await?;
-    if pulls.is_empty() {
-        println!("No pull requests found (showing only those you created)");
-    } else {
-        println!("RKEY\tTITLE\tTARGET");
-        for pr in pulls {
-            println!("{}\t{}\t{}", pr.rkey, pr.pull.title, pr.pull.target.repo);
+        if pulls.is_empty() {
+            println!("No pull requests found (showing only those you created)");
+        } else {
+            println!("RKEY\tTITLE\tTARGET");
+            for pr in pulls {
+                println!("{}\t{}\t{}", pr.rkey, pr.pull.title, pr.pull.target.repo);
+            }
+            println!("\nShowing only pulls you opened; pass --repo to list a repo's pulls.");
         }
+        return Ok(());
+    };
+
+    let (owner, name) = parse_repo_ref(repo, &session.handle);
+    let info = client
+        .get_repo_info(owner, name, Some(session.access_jwt.as_str()))
+        .await?;
+    let repo_did = info
+        .repo_did
+        .clone()
+        .ok_or_else(|| anyhow!("{owner}/{name} has no repoDid; recreate it"))?;
+
+    let appview = crate::util::make_client(&tangled_api::appview::appview_base());
+    let items = appview
+        .list_pulls_indexed(&repo_did, args.state.as_deref(), 1000)
+        .await?;
+    if items.is_empty() {
+        println!("No pull requests");
+        return Ok(());
+    }
+    println!("RKEY\tSTATE\tCOMMENTS\tTITLE");
+    for it in &items {
+        println!(
+            "{}\t{}\t{}\t{}",
+            it.rkey(),
+            it.state.clone().unwrap_or_default(),
+            it.comment_count,
+            it.value.title
+        );
     }
     Ok(())
 }
