@@ -2230,13 +2230,35 @@ name the module wrote, and among the ones that wrote the same name, by the
 name each ended up with. `@llvm.umax` at `i8` and at `i16` beside
 `@llvm.umax.i32` comes back `i16`, `i8`, `i32`, which no single key gives.
 Assembler 478 to 479 with the ceiling 2 to 1, and its differential 212 to
-213. The one left is `auto_upgrade_nvvm_intrinsics.ll`, and it is a
-different kind of work: that module's own declarations disagree with its
-calls, `declare i32 @llvm.nvvm.atomic.load.add.f32.p0(ptr, float)` against
-`call float @llvm.nvvm.atomic.load.add.f32.p0(...)`, and upstream never
-minds because it rewrites those calls into `atomicrmw` before anything
-verifies them. Rewriting a call into another instruction is a capability
-this parser does not have yet, so it is recorded rather than half-built.
+213.
+The last one was `auto_upgrade_nvvm_intrinsics.ll`, and it wanted a
+capability rather than a table: that module's own declarations disagree with
+its calls, `declare i32 @llvm.nvvm.atomic.load.add.f32.p0(ptr, float)`
+against `call float @llvm.nvvm.atomic.load.add.f32.p0(...)`, and upstream
+never minds because by the time anything checks, the call is not a call.
+`@llvm.nvvm.atomic.load.inc.32.p0(ptr %p, i32 %v)` is read as
+`atomicrmw uinc_wrap ptr %p, i32 %v seq_cst, align 4`, and the type comes
+from the value the call was given rather than from anything the declaration
+claimed. Four of them, each measured a module at a time.
+Three things about it had to be asked separately rather than assumed. The
+declaration is dropped, and a declaration nothing calls is dropped too, so
+the second is not a consequence of the first. The result loses its name,
+upstream building a fresh instruction rather than editing the one that was
+there, so `%r = call` comes back `%1 = atomicrmw`. And the alignment is
+written out rather than left to the reader.
+The declaration is kept in the model and left unprinted, which is what the
+four debug-info intrinsics already do: removing a function would move every
+id after it, and an id is what every constant naming one holds.
+This is a table of four and not a sweep, which is worth saying plainly.
+A rewrite is a fact about what an intrinsic means rather than about how it
+is spelled, and there is no oracle that lists them: these are what upstream's
+own tests exercise. The same file wants three other kinds of upgrade that are
+not written, an added argument and a multi-instruction expansion among them,
+and it prints differently for want of them. It is read, which is what the
+ceiling counts.
+Assembler 479 to 480 and the ceiling 1 to 0. Nothing upstream reads is
+refused now. Its differential holds at 213 with the denominator one larger,
+that file having joined the modules we both accept.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

@@ -884,6 +884,100 @@ impl Parser {
         self.module.function_order = order;
     }
 
+    /// Reads the calls upstream reads as an instruction rather than as a
+    /// call.
+    ///
+    /// `@llvm.nvvm.atomic.load.inc.32.p0(ptr %p, i32 %v)` is
+    /// `atomicrmw uinc_wrap ptr %p, i32 %v seq_cst`, and the declaration goes
+    /// with it. `crates/llvm-ir/src/intrinsic/rewrites.rs` holds the four and
+    /// how each was measured.
+    ///
+    /// The declaration's own types are not consulted, which is the whole
+    /// point: `auto_upgrade_nvvm_intrinsics.ll` declares
+    /// `i32 @llvm.nvvm.atomic.load.add.f32.p0(ptr, float)` and calls it
+    /// returning `float`, and by the time anything checks, the call is an
+    /// `atomicrmw` whose type came from the value it was given. That module
+    /// was the last one upstream reads and we refused.
+    ///
+    /// The result loses its name, upstream building a fresh instruction
+    /// rather than editing the one that was there, so `%r = call ...` comes
+    /// back as `%1 = atomicrmw ...`.
+    pub(crate) fn rewrite_intrinsic_calls(&mut self) {
+        let layout = self.module.data_layout.clone().unwrap_or_default();
+        for index in 0..self.module.functions.len() {
+            let blocks: Vec<llvm_ir::BlockId> = self.module.functions[index]
+                .blocks()
+                .map(|(id, _)| id)
+                .collect();
+            for block in blocks {
+                let instructions = self.module.functions[index]
+                    .block(block)
+                    .instructions
+                    .clone();
+                for id in instructions {
+                    let Some((op, pointer, value, value_type)) = self.rewritten_call(index, id)
+                    else {
+                        continue;
+                    };
+                    // Upstream writes the alignment out rather than leaving it to
+                    // the reader, and it is the value type's own.
+                    let align = llvm_ir::layout::abi_align(&self.module.ctx, &layout, value_type)
+                        .unwrap_or(llvm_support::Align::ONE);
+                    let instruction = self.module.functions[index].instruction_mut(id);
+                    instruction.name = None;
+                    instruction.ty = value_type;
+                    instruction.kind = llvm_ir::instruction::InstKind::AtomicRmw {
+                        op,
+                        pointer,
+                        value_type,
+                        value,
+                        volatile: false,
+                        scope: llvm_ir::instruction::SyncScope::system(),
+                        ordering: llvm_ir::instruction::AtomicOrdering::SeqCst,
+                        align: Some(align),
+                    };
+                }
+            }
+        }
+    }
+
+    /// What one call is read as, when it is read as a read-modify-write.
+    fn rewritten_call(
+        &self,
+        index: usize,
+        id: llvm_ir::InstId,
+    ) -> Option<(
+        llvm_ir::instruction::AtomicRmwOp,
+        Value,
+        Value,
+        llvm_ir::TypeId,
+    )> {
+        let instruction = self.module.functions[index].instruction(id);
+        let call = match &instruction.kind {
+            llvm_ir::instruction::InstKind::Call(call) => call,
+            _ => return None,
+        };
+        let Value::Constant(callee) = call.callee else {
+            return None;
+        };
+        let Constant::Global { target, .. } = self.module.ctx.constant(callee) else {
+            return None;
+        };
+        let GlobalRef::Function(function) = target else {
+            return None;
+        };
+        let Name::Named(name) = &self.module.function(*function).name else {
+            return None;
+        };
+        let op = llvm_ir::intrinsic::rewrites::atomic_rmw_op(name)?;
+        // A pointer and the value to combine with what it holds, and nothing
+        // else. A call written with any other shape is not one of these.
+        let [pointer, value] = call.args.as_slice() else {
+            return None;
+        };
+        Some((op, pointer.value, value.value, value.ty))
+    }
+
     /// Puts the declarations the calls implied in the order upstream prints
     /// them: by the name the module wrote, and among the ones that wrote the
     /// same name, by the name each ended up with.

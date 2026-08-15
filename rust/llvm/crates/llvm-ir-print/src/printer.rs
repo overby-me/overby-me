@@ -580,15 +580,30 @@ fn call_data(kind: &InstKind) -> Option<&CallData> {
     }
 }
 
-/// Whether a function is one of the four debug-info intrinsics, which are
-/// read as records and never written back.
+/// Whether a function is one of the declarations upstream reads and never
+/// writes back.
+///
+/// Two kinds. The four debug-info intrinsics are read as records, and the
+/// handful that are read as an instruction rather than as a call go the same
+/// way: upstream drops
+/// `declare i32 @llvm.nvvm.atomic.load.inc.32.p0(ptr, i32)` whether or not
+/// anything called it, which was measured on its own because it is not the
+/// same question as what a call becomes.
+///
+/// Both are kept in the model rather than removed from it, so that a
+/// constant built while parsing still resolves and an id still means what it
+/// meant. Leaving them unwritten is what upstream's output shows.
 fn is_debug_intrinsic(function: &llvm_ir::function::Function) -> bool {
-    function.block_order.is_empty()
-        && matches!(&function.name, llvm_ir::value::Name::Named(name)
-        if matches!(
-            name.as_str(),
-            "llvm.dbg.declare" | "llvm.dbg.value" | "llvm.dbg.assign" | "llvm.dbg.label"
-        ))
+    if !function.block_order.is_empty() {
+        return false;
+    }
+    let llvm_ir::value::Name::Named(name) = &function.name else {
+        return false;
+    };
+    matches!(
+        name.as_str(),
+        "llvm.dbg.declare" | "llvm.dbg.value" | "llvm.dbg.assign" | "llvm.dbg.label"
+    ) || llvm_ir::intrinsic::rewrites::is_rewritten(name)
 }
 
 /// The order upstream writes a set in: plain keywords, then the ones taking

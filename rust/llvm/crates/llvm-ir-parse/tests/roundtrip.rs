@@ -1401,3 +1401,61 @@ fn the_same_instantiation_twice_implies_one_declaration() {
         "\n--- printed ---\n{printed}"
     );
 }
+
+/// A call upstream reads as an instruction rather than as a call, and the
+/// declaration that goes with it.
+///
+/// Both halves were measured on their own: the call becomes
+/// `atomicrmw uinc_wrap ptr %p, i32 %v seq_cst, align 4`, and a declaration
+/// nothing calls is dropped too, so the second is not a consequence of the
+/// first. The result loses its name, upstream building a fresh instruction
+/// rather than editing the one that was there.
+#[test]
+fn an_nvvm_atomic_call_is_read_as_a_read_modify_write() {
+    let text = concat!(
+        "declare i32 @llvm.nvvm.atomic.load.inc.32.p0(ptr, i32)\n",
+        "define void @f(ptr %p, i32 %v) {\n",
+        "  %r = call i32 @llvm.nvvm.atomic.load.inc.32.p0(ptr %p, i32 %v)\n",
+        "  ret void\n",
+        "}\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("%1 = atomicrmw uinc_wrap ptr %p, i32 %v seq_cst, align 4"),
+        "\n--- printed ---\n{printed}"
+    );
+    assert!(
+        !printed.contains("llvm.nvvm"),
+        "the declaration goes with it\n--- printed ---\n{printed}"
+    );
+
+    // The declaration's own types are not consulted: this one says it returns
+    // `i32` and the call says `float`, which is the shape upstream's
+    // auto_upgrade_nvvm_intrinsics.ll writes and the reason it parses at all.
+    let mismatched = concat!(
+        "declare i32 @llvm.nvvm.atomic.load.add.f32.p0(ptr, float)\n",
+        "define void @f(ptr %p, float %v) {\n",
+        "  %r = call float @llvm.nvvm.atomic.load.add.f32.p0(ptr %p, float %v)\n",
+        "  ret void\n",
+        "}\n",
+    );
+    let module = llvm_ir_parse::parse_module(mismatched)
+        .unwrap_or_else(|error| panic!("did not parse: {error}"));
+    assert!(llvm_ir::verify_module(&module).is_empty());
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("%1 = atomicrmw fadd ptr %p, float %v seq_cst, align 4"),
+        "\n--- printed ---\n{printed}"
+    );
+
+    // And a declaration nothing calls is dropped just the same.
+    let alone = "declare i32 @llvm.nvvm.atomic.load.inc.32.p0(ptr, i32)\n";
+    let module =
+        llvm_ir_parse::parse_module(alone).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    assert!(
+        !llvm_ir_print::print_module(&module).contains("llvm.nvvm"),
+        "an uncalled one goes too"
+    );
+}

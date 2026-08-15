@@ -104,6 +104,9 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
     // After the renaming, which moves what it renames to the end: the two
     // sets never overlap, so the implied ones sort where they already sit.
     parser.sort_implied_declarations();
+    // After the names are settled, so that a rewrite asks about the name the
+    // intrinsic ended up with.
+    parser.rewrite_intrinsic_calls();
     // After the declarations the calls implied, so that those get the
     // attributes too: upstream materialises one with them already on.
     parser.apply_intrinsic_attributes()?;
