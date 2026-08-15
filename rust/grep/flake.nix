@@ -5,7 +5,7 @@
 # the root flake imports and which reaches for ../../nix/lib, so it means
 # nothing in a clone. This builds from plain nixpkgs instead.
 {
-  description = "A GNU awk-compatible text processing tool written in Rust";
+  description = "A GNU grep-compatible pattern matching tool written in Rust";
 
   # Pinned to the same revision the monorepo resolves, so every published
   # repo builds against identical nixpkgs and they cannot drift apart. Change
@@ -22,9 +22,9 @@
     # Read the crate's own manifest rather than restating it here. A workspace
     # root has no [package], and baseNameOf ./. would give the store path, so
     # the repo name is baked in as the fallback.
-    cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+    cargoToml = builtins.fromTOML (builtins.readFile ./grep/Cargo.toml);
     package = cargoToml.package or {};
-    pname = package.name or "rust-awk";
+    pname = package.name or "rust-grep";
     version = package.version or "0.1.0";
   in {
     packages = forAllSystems (pkgs: {
@@ -32,12 +32,16 @@
         inherit pname version;
         src = ./.;
         cargoLock = {
-          lockFile = ./Cargo.lock;
+          lockFile = ./grep/Cargo.lock;
           allowBuiltinFetchGit = true;
         };
 
+        # The repo root holds several directories so the crate's sibling path
+        # dependencies resolve; the crate itself is one level down.
+        buildAndTestSubdir = "grep";
+
         meta = {
-          description = "A GNU awk-compatible text processing tool written in Rust";
+          description = "A GNU grep-compatible pattern matching tool written in Rust";
           license = pkgs.lib.licenses.mit;
         };
       };

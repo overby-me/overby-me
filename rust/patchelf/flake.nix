@@ -5,7 +5,7 @@
 # the root flake imports and which reaches for ../../nix/lib, so it means
 # nothing in a clone. This builds from plain nixpkgs instead.
 {
-  description = "A GNU awk-compatible text processing tool written in Rust";
+  description = "A patchelf-compatible ELF binary patching tool written in Rust";
 
   # Pinned to the same revision the monorepo resolves, so every published
   # repo builds against identical nixpkgs and they cannot drift apart. Change
@@ -24,7 +24,7 @@
     # the repo name is baked in as the fallback.
     cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
     package = cargoToml.package or {};
-    pname = package.name or "rust-awk";
+    pname = package.name or "rust-patchelf";
     version = package.version or "0.1.0";
   in {
     packages = forAllSystems (pkgs: {
@@ -37,7 +37,7 @@
         };
 
         meta = {
-          description = "A GNU awk-compatible text processing tool written in Rust";
+          description = "A patchelf-compatible ELF binary patching tool written in Rust";
           license = pkgs.lib.licenses.mit;
         };
       };
