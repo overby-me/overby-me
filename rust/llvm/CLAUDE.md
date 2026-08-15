@@ -2104,6 +2104,22 @@ a property of the instantiation, `range(i8 -1, 2)` at one width and
 Differential Assembler 192 to 197, Linker 214 to 215, and Feature and Other
 to 71 of 71 and 144 of 144, which is every module we both accept printed
 exactly as upstream prints it. Those two are held rather than raised now.
+Then the data layout, which a module naming a target gets whether it wrote
+one or not: `target triple = "x86_64-unknown-linux-gnu"` alone comes back
+carrying `target datalayout = "e-m:e-p270:32:32-..."`. That counts twice,
+the layout being where the default alignments are read from, so a module
+without one printed different alignments as well as a missing line.
+`corpus/target-data-layouts.nu` writes each triple alone and reads back what
+upstream put beside it, which is one module per question again. 719 triples
+appear in upstream's tests, 679 imply a layout and 39 imply none, and there
+are only 55 distinct layouts behind the 679. A triple with no row is left
+alone, and so is a module that wrote a layout of its own, upstream replacing
+neither.
+This is coverage of what appears rather than of what could, and worth being
+plain about: a triple no test names gets nothing. Deriving a layout from a
+triple's parts instead means reimplementing every backend, and there is no
+specification of that outside them.
+Differential Assembler 197 to 198 and Linker 215 to 219 of 220.
 The fourth is `llvm.ptr.annotation`, and it is a limit of reading LangRef
 rather than of the method: LangRef documents a four-argument form the
 assembler does not recognise, and the one upstream's own tests call takes

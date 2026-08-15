@@ -793,6 +793,38 @@ impl Parser {
         Ok(())
     }
 
+    /// Gives a module that names a target the data layout that target uses.
+    ///
+    /// A module writing a triple and no layout gets one anyway: upstream
+    /// fills in the target's, so `target triple = "x86_64-unknown-linux-gnu"`
+    /// alone comes back carrying `target datalayout = "e-m:e-p270:32:32-..."`.
+    /// That matters twice over, because the layout is also what the default
+    /// alignments are read from, so a module without one prints different
+    /// alignments as well as a missing line.
+    ///
+    /// `corpus/target-data-layouts.nu` measures which layout each triple
+    /// implies, one module per triple. A triple with no row is left alone,
+    /// as is a module that wrote a layout of its own: upstream does not
+    /// replace one that is already there, which is what the differential
+    /// check records about `target datalayout = "e"` surviving `opt -S`.
+    pub(crate) fn fill_data_layout_from_triple(&mut self) {
+        if self.module.data_layout.is_some() {
+            return;
+        }
+        let Some(triple) = &self.module.triple else {
+            return;
+        };
+        let Some(text) = llvm_ir::target_layout::layout_for(triple.as_str()) else {
+            return;
+        };
+        // A layout that came out of upstream and will not parse is a bug in
+        // the reader rather than in the module, and dropping it leaves the
+        // module exactly as it was rather than refusing it.
+        if let Ok(layout) = DataLayout::parse(text) {
+            self.module.data_layout = Some(layout);
+        }
+    }
+
     /// Gives an intrinsic declaration the name upstream gives it.
     ///
     /// An overloaded intrinsic carries the types it was instantiated at in

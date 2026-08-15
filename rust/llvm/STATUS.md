@@ -48,6 +48,7 @@ and each row names the check that backs it.
 | Intrinsic names carrying the types they were instantiated at | done for the 239 LangRef documents, name and print position both | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
 | Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names used undeclared, plus the 11,865 upstream recognises in a declaration | the eleven tree checks, `llvm-upstream-assembler` |
 | A `DICompositeType` with an identifier made `distinct` and uniqued under that identifier | done | `llvm-opt-differential`, `llvm-opt-differential-linker`, `llvm-roundtrip` |
+| The data layout a triple implies, filled in when a module writes none | done for the 679 triples upstream's tests name that imply one | `llvm-opt-differential-linker`, `llvm-opt-differential` |
 
 ## The round trip
 
