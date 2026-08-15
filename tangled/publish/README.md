@@ -21,7 +21,7 @@ nu publish.nu --no-github                  # Tangled only
 ```
 
 Projects and their filters live in [`projects.nuon`](./projects.nuon).
-Twenty-one are published today; adding one is four steps:
+Twenty-two are published today; adding one is four steps:
 
 ```sh
 tangled-cli repo create rust-foo --knot knot1.tangled.sh --description "..."
@@ -44,22 +44,59 @@ limiting has been observed at this size.
 
 ## Standing alone
 
-A filtered directory on its own is cargo-only: the monorepo's `default.nix` is
-a flakelight module the root flake imports, and it reaches for `../../nix/lib`,
-so the filter drops it. `gen-standalone.nu` gives every project the three
-things it needs to be a real repo, all of them inert in the monorepo:
+A filtered directory on its own is cargo-only. Every project's `default.nix`
+is a flakelight module, but the root flake imports it and all but one reach for
+`../../nix/lib`, so the filter drops it. `gen-standalone.nu` gives every
+project the three things it needs to be a real repo, all of them inert in the
+monorepo:
 
-- `flake.nix`, a plain-nixpkgs build. It reads its own `Cargo.toml` with
-  `builtins.fromTOML`, so one template covers every project.
+- `flake.nix`, a flakelight flake, the same shape as the monorepo and as the
+  `default.nix` it replaces. It reads its own `Cargo.toml` with
+  `builtins.fromTOML`, so one template covers every project. flakelight derives
+  packages, checks and the overlay from a single package definition, so
+  `nix flake check` builds the package and checks formatting with nothing
+  further declared.
 - `.tangled/workflows/ci.yml`, which runs `nix flake check`. Tangled reads
   workflows from a repo root, so under `rust/<name>/` it does nothing here.
 - the README banner pointing back here.
+
+The generator runs `alejandra` over what it writes, because flakelight gives
+every repo a formatting check and an unformatted generated flake fails the CI
+of the repo it was generated for.
 
 nixpkgs is pinned to the exact revision this monorepo's own `flake.lock`
 resolves, read out of it at generation time, so every published repo builds
 against identical nixpkgs and they cannot drift. Mapping the monorepo's lock
 into each repo would achieve the same, but it would reintroduce shared surface:
 one `nix flake update` would become one commit in every published repo, forever.
+
+### The devshell
+
+`nix develop` in a published repo installs the same pre-commit hooks
+everywhere: `rustfmt`, `clippy`, `typos`, `ripsecrets`, `alejandra`, `deadnix`
+and `statix`. A contributor who has only that repo is then held to what the
+monorepo holds it to.
+
+They come from this generator's template rather than from a shared flake of
+ours. Sharing them as an input would make entering the shell of every published
+repo depend on a second repo of ours, and the point of these repos is that they
+stand alone. The template is the single source of truth; regenerating
+propagates a change to all of them at once.
+
+### Projects that are not pure Rust
+
+A project can declare in `projects.nuon` what its build needs:
+
+```text
+nativeBuildInputs: ["pkg-config"]
+buildInputs: ["openssl" "dbus"]
+doCheck: false
+```
+
+Stated there rather than read out of `default.nix`, because telling that file's
+main package apart from the test fixtures beside it is guesswork: most of what
+those files declare belongs to a differential-testing derivation rather than to
+the thing being published.
 
 ## Projects that depend on a sibling
 
