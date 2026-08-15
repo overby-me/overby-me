@@ -32,8 +32,5 @@ when:
   - branch: main
     event:
       - push
-  - branch: josh
-    event:
-      - push
   - event:
       - manual

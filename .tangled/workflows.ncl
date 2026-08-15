@@ -57,13 +57,7 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
     # the hourly cadence a cron would give, and the script skips a project
     # whose filtered SHA already matches the remote, so a push that touches
     # nothing published costs two ls-remote calls.
-    # TEMPORARY: the `josh` entry exists only to exercise this pipeline before
-    # it reaches main. Remove it once the first CI run has been observed.
-    when = [
-      { event = ["push"], branch = "main" },
-      { event = ["push"], branch = "josh" },
-      { event = ["manual"] },
-    ],
+    when = [{ event = ["push"], branch = "main" }, { event = ["manual"] }],
     engine = "microvm",
     image = "nixos",
     dependencies = ["git", "openssh", "nushell", "josh"],

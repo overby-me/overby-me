@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod browse;
+pub mod git_credential;
 pub mod issue;
 pub mod knot;
 pub mod pr;
@@ -23,5 +24,6 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::Browse(args) => browse::run(&cli, args.clone()).await,
         Command::Api(cmd) => api::run(&cli, cmd.clone()).await,
         Command::Status => status::run(&cli).await,
+        Command::GitCredential(args) => git_credential::run(&cli, args.clone()).await,
     }
 }

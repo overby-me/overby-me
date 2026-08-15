@@ -18,11 +18,49 @@ nu publish.nu --ssh-key ~/.ssh/id_ed25519  # filter and push what changed
 
 Projects and their filters live in [`projects.nuon`](./projects.nuon).
 
+## Taking a contribution back
+
+Published repos are read-only mirrors, so a contribution arrives as a branch
+on one of them (typically a pull request's source branch). `ingest`
+reverse-filters that branch back through the project's filter and lands it on
+a local review branch, re-prefixed into the project's directory:
+
+```sh
+nu publish.nu ingest rust-awk --from-ref some-contribution
+```
+
+```text
+ingested 1 commit(s) from rust-awk some-contribution
+  downstream tip: e64e13d767
+  review branch:  ingest/rust-awk at 6e07883c84
+
+6e07883c8 doc: add a contributing guide
+ rust/awk/CONTRIBUTING.md | 3 +++
+```
+
+Nothing is pushed and nothing lands on `main`: the review branch is built in
+the mirror for you to fetch, read, and merge yourself. It is parented on the
+current monorepo branch, so it merges as a fast-forward, and josh rebases it
+if the monorepo moved on in the meantime.
+
+This is why the mirrors can stay read-only and force-pushed. The alternative,
+letting the sync job write to the monorepo, would need the CI bot to hold
+write access to `main` — and Tangled has no branch protection to contain the
+damage if that went wrong.
+
 ## Why josh-filter and not josh-proxy
 
 A proxy serves filtered *views* at URLs. Those are not repos on the forge: no
 issues, no pulls, no discoverability. We want real Tangled repos, so we filter
 locally and push.
+
+A proxy is nonetheless possible against Tangled: it forwards a client's HTTP
+basic credential upstream, and a knot's push credential is exactly that (see
+Authentication). It just answers a different question. Publishing and taking
+contributions back are both served without one, and a proxy is stateful and
+single-writer, so it wants a host that publishing does not. Where it would
+earn its keep is working *in* a single project as a slice day to day, rather
+than distributing them.
 
 ## Design notes
 
@@ -133,3 +171,15 @@ their own DID over HTTP: `https://<knot>/<repoDid>`.
 (Older Go knotservers refuse HTTP push outright with "Pushes are only
 supported over SSH". `knot1.tangled.sh` runs the newer Rust knot, which does
 not.)
+
+300 seconds is too short to paste by hand, so `tangled-cli` ships a git
+credential helper that mints one per push. The empty value first is
+load-bearing: it resets the inherited helper list for that URL, without which
+a global helper such as `store` writes the token to `~/.git-credentials` in
+plaintext and then replays it after it has expired.
+
+```sh
+git config --global credential.https://knot1.tangled.sh.helper ''
+git config --global --add credential.https://knot1.tangled.sh.helper \
+    '!tangled-cli git-credential'
+```

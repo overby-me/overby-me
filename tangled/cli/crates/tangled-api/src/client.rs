@@ -1467,6 +1467,40 @@ impl TangledClient {
         }
     }
 
+    /// A service-auth token for a knot, bound to `lxm`. A knot caps the
+    /// lifetime it will accept, so the caller chooses it.
+    pub async fn knot_push_token(
+        &self,
+        pds_base: &str,
+        access_jwt: &str,
+        knot_host: &str,
+        lxm: &str,
+        lifetime_secs: i64,
+    ) -> Result<String> {
+        let audience = format!("did:web:{knot_host}");
+        #[derive(Deserialize)]
+        struct GetSARes {
+            token: String,
+        }
+        let pds = self.derive(pds_base);
+        let params = [
+            ("aud", audience),
+            (
+                "exp",
+                (chrono::Utc::now().timestamp() + lifetime_secs).to_string(),
+            ),
+            ("lxm", lxm.to_string()),
+        ];
+        let sa: GetSARes = pds
+            .get_json(
+                "com.atproto.server.getServiceAuth",
+                &params,
+                Some(access_jwt),
+            )
+            .await?;
+        Ok(sa.token)
+    }
+
     /// Service auth for the spindle this client points at, bound to `lxm`.
     pub(crate) async fn spindle_auth(
         &self,

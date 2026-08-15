@@ -129,10 +129,11 @@ def remote-head [mirror: path, remote: string, branch: string]: nothing -> any {
 # per-repo local state and successive filters share it, so one clone for all
 # projects is far cheaper than one clone each, and it does not hammer the knot.
 #
-# --ssh-user exists because Tangled push is SSH-only and keyed to an
-# account-registered public key. In CI that is the bot account's handle, not
-# the owner's. The key is forced with IdentitiesOnly: offered several keys, a
-# knot rejects on the first non-matching one and gives up.
+# --ssh-user exists because this pushes over SSH, where a knot matches the
+# offered key against keys published by accounts allowed to write. In CI that
+# is the bot account's handle, not the owner's. The key is forced with
+# IdentitiesOnly: offered several keys, a knot rejects on the first
+# non-matching one and gives up.
 def main [
   --source: string            # monorepo to filter (default: this checkout's origin)
   --work-dir: path            # where the mirror clone and josh cache live
@@ -209,4 +210,87 @@ def main [
     # A publish pipeline that fails silently is the failure mode here.
     error make {msg: $"($failed | length) projects failed to publish"}
   }
+}
+
+# Reverse-filter downstream work back into the monorepo.
+#
+# Published repos are read-only mirrors, so a contribution arrives as a branch
+# on one of them (typically a pull request's source branch). This maps that
+# branch's commits back through the project's filter and lands them on a local
+# review branch in the mirror, re-prefixed into the project's directory.
+# Nothing is pushed anywhere: you fetch the branch, read it, and merge it
+# yourself.
+#
+#   nu publish.nu ingest rust-awk --from-ref some-contribution
+#
+# Then, in your working repo:
+#
+#   jj git fetch --remote <work-dir>/monorepo.git   # or: git fetch <...> ingest/rust-awk
+def "main ingest" [
+  project: string             # project name, as in projects.nuon
+  --from-ref: string = "main" # branch on the published repo to ingest
+  --into: string              # local branch to build (default: ingest/<project>)
+  --source: string            # monorepo to filter (default: this checkout's origin)
+  --work-dir: path            # where the mirror lives
+  --owner: string = "overby.me"
+  --ssh-user: string
+  --ssh-key: path
+  --branch: string = "main"   # monorepo branch the work lands on
+]: nothing -> nothing {
+  check-josh
+
+  let here = ($env.FILE_PWD | default ".")
+  let config = ($here | path join "projects.nuon")
+  let entry = (open $config | where {|p| $p.name == $project })
+  if ($entry | is-empty) {
+    error make {msg: $"no project named ($project) in ($config)"}
+  }
+  let entry = ($entry | first)
+
+  let source = if $source != null { $source } else { ^git remote get-url origin | str trim }
+  let work_dir = if $work_dir != null { $work_dir } else {
+    ($env.XDG_CACHE_HOME? | default ($env.HOME | path join ".cache")) | path join "tangled-publish"
+  }
+  let review = if $into != null { $into } else { $"ingest/($project)" }
+
+  if $ssh_key != null {
+    $env.GIT_SSH_COMMAND = $"ssh -i ($ssh_key) -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  }
+  let ssh_login = ($ssh_user | default $owner)
+  let remote = $"($ssh_login)@tangled.org:($owner)/($entry.name)"
+
+  let mirror = (sync-mirror $work_dir $source $branch)
+  let base = (git-ok $mirror ["rev-parse" $branch])
+
+  # Pull the contribution in as the filtered ref josh will reverse from.
+  print $"fetching ($from_ref) from ($remote)"
+  git-ok $mirror ["fetch" "--force" $remote $"+refs/heads/($from_ref):refs/josh/($project)"] | ignore
+  let incoming = (git-ok $mirror ["rev-parse" $"refs/josh/($project)"])
+
+  # Reverse updates the *input* ref, so point it at a review branch rather
+  # than at the monorepo branch itself. Nothing lands on ($branch) here.
+  git-ok $mirror ["update-ref" $"refs/heads/($review)" $base] | ignore
+  let out = (do {
+    cd $mirror
+    ^josh-filter $entry.filter $"refs/heads/($review)" --update $"refs/josh/($project)" --reverse | complete
+  })
+  if $out.exit_code != 0 {
+    error make {msg: $"reverse filter failed: ($out.stderr | str trim)"}
+  }
+
+  let tip = (git-ok $mirror ["rev-parse" $"refs/heads/($review)"])
+  if $tip == $base {
+    print $"nothing to ingest: ($project) ($from_ref) holds no commits the monorepo lacks"
+    return
+  }
+
+  let landed = (git-ok $mirror ["rev-list" "--count" $"($base)..($tip)"])
+  print ""
+  print $"ingested ($landed) commit\(s\) from ($project) ($from_ref | str trim)"
+  print $"  downstream tip: ($incoming | str substring 0..9)"
+  print $"  review branch:  ($review) at ($tip | str substring 0..9)"
+  print ""
+  git-ok $mirror ["log" "--oneline" "--stat" $"($base)..($tip)"] | print
+  print ""
+  print $"fetch it with:  git fetch ($mirror) ($review)"
 }

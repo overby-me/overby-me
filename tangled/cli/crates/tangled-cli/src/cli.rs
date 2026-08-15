@@ -64,6 +64,15 @@ pub enum Command {
     Api(ApiCommand),
     /// Show cross-repo dashboard of issues and PRs needing attention
     Status,
+    /// git credential helper: mints a short-lived knot push token
+    #[command(name = "git-credential")]
+    GitCredential(GitCredentialArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct GitCredentialArgs {
+    /// git passes one of: get, store, erase
+    pub operation: String,
 }
 
 #[derive(Subcommand, Debug, Clone)]
