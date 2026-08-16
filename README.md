@@ -80,94 +80,94 @@
 
 | Project | Description |
 |-|-|
-| [Awk-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/awk) | GNU awk-compatible pattern processing tool |
-| [Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bash) | Bash-compatible shell written in Rust |
-| [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | GNU binutils-compatible binary utilities |
-| [Bison-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bison) | POSIX yacc/bison-compatible parser generator |
-| [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bubblewrap) | Bubblewrap-compatible unprivileged sandboxing tool |
-| [Bzip2-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bzip2) | bzip2-compatible compression tool |
-| [Cachix-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/cachix) | Cachix CLI reimplementation |
-| [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | curl-compatible HTTP client using Rustls |
-| [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/diffutils) | GNU diffutils-compatible file comparison tools |
-| [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/direnv) | Direnv reimplementation |
-| [File-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/file) | GNU file-compatible file type detection tool |
-| [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
-| [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | GCC-compatible C compiler written in Rust |
-| [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/grep) | GNU grep-compatible pattern matching tool |
-| [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gzip) | gzip-compatible compression tool |
-| [Help2man-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/help2man) | GNU help2man-compatible man page generator |
-| [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) | GNU Make-compatible build system driver |
-| [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | Meson build system compatible implementation |
-| [Patch-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patch) | GNU patch-compatible patch application tool |
-| [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patchelf) | patchelf-compatible ELF binary patching tool |
-| [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pipewire) | PipeWire-compatible multimedia tools and protocol client |
-| [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) | pkg-config reimplementation |
-| [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/sed) | GNU sed-compatible stream editor |
-| [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
-| [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | GNU tar-compatible tape archive tool |
-| [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/texinfo) | GNU makeinfo-compatible Texinfo processor |
-| [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | xz-compatible compression tool |
+| [Awk-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/awk) | GNU awk-compatible pattern processing tool |
+| [Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bash) | Bash-compatible shell written in Rust |
+| [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/binutils) | GNU binutils-compatible binary utilities |
+| [Bison-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bison) | POSIX yacc/bison-compatible parser generator |
+| [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bubblewrap) | Bubblewrap-compatible unprivileged sandboxing tool |
+| [Bzip2-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bzip2) | bzip2-compatible compression tool |
+| [Cachix-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/cachix) | Cachix CLI reimplementation |
+| [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/curl) | curl-compatible HTTP client using Rustls |
+| [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/diffutils) | GNU diffutils-compatible file comparison tools |
+| [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/direnv) | Direnv reimplementation |
+| [File-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/file) | GNU file-compatible file type detection tool |
+| [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
+| [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gcc) | GCC-compatible C compiler written in Rust |
+| [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/grep) | GNU grep-compatible pattern matching tool |
+| [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gzip) | gzip-compatible compression tool |
+| [Help2man-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/help2man) | GNU help2man-compatible man page generator |
+| [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/make) | GNU Make-compatible build system driver |
+| [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/meson) | Meson build system compatible implementation |
+| [Patch-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/patch) | GNU patch-compatible patch application tool |
+| [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/patchelf) | patchelf-compatible ELF binary patching tool |
+| [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pipewire) | PipeWire-compatible multimedia tools and protocol client |
+| [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pkg-config) | pkg-config reimplementation |
+| [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/sed) | GNU sed-compatible stream editor |
+| [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/systemd) | Systemd replacement |
+| [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/tar) | GNU tar-compatible tape archive tool |
+| [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/texinfo) | GNU makeinfo-compatible Texinfo processor |
+| [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/xz) | xz-compatible compression tool |
 
 ##### New
 
 | Project | Description |
 |-|-|
-| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
-| [H264-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264-decoder) | Pure Rust H.264 decoder library and CLI |
-| [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h265-decoder) | Pure Rust H.265/HEVC decoder library |
-| [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
-| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
-| [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixos) | NixOS distribution with Rust user space |
-| [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
-| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/wclip) | Wayland clipboard tool with an xclip-style CLI |
+| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
+| [H264-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h264-decoder) | Pure Rust H.264 decoder library and CLI |
+| [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h265-decoder) | Pure Rust H.265/HEVC decoder library |
+| [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
+| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
+| [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixos) | NixOS distribution with Rust user space |
+| [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
+| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/wclip) | Wayland clipboard tool with an xclip-style CLI |
 
 #### Mojo
 
 | Project | Description |
 |-|-|
-| [Mojo-wasm 🔥](https://tangled.org/@overby.me/overby.me/tree/main/mojo/wasm) | WebAssembly interop layer for Mojo |
-| [Mojo-wasmtime 🔥](https://tangled.org/@overby.me/overby.me/tree/main/mojo/wasmtime) | Wasmtime WebAssembly runtime bindings for Mojo |
-| [Mojo-zed 🔥](https://tangled.org/@overby.me/overby.me/tree/main/mojo/zed) | Mojo language extension for Zed |
+| [Mojo-wasm 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasm) | WebAssembly interop layer for Mojo |
+| [Mojo-wasmtime 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasmtime) | Wasmtime WebAssembly runtime bindings for Mojo |
+| [Mojo-zed 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/zed) | Mojo language extension for Zed |
 
 #### Web
 
 | Project | Description |
 |-|-|
-| [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/homepage) | Personal website and portfolio |
-| [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki) | Political conference and discussion platform |
+| [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
+| [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
 
 #### Nix & Nickel
 
 | Project | Description |
 |-|-|
-| [Nickel-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nickel/workspace) | Nickel-powered workspace manager for Nix flakes |
-| [Nickel-zed ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nickel/zed) | Nickel language extension for Zed |
+| [Nickel-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | Nickel-powered workspace manager for Nix flakes |
+| [Nickel-zed ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/zed) | Nickel language extension for Zed |
 
 #### Nushell
 
 | Project | Description |
 |-|-|
-| [Nushell-plugin-tramp 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nushell/plugin-tramp) | TRAMP-inspired remote filesystem plugin for Nushell |
+| [Nushell-plugin-tramp 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/nushell/plugin-tramp) | TRAMP-inspired remote filesystem plugin for Nushell |
 
 #### IronClaw
 
 | Project | Description |
 |-|-|
-| [IronClaw Bluesky Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/bluesky) | Bluesky/AT Protocol channel for IronClaw AI assistant |
-| [IronClaw Calendar Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/calendar) | Calendar channel for IronClaw AI assistant via CalDAV |
-| [IronClaw Contacts Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/contacts) | Contacts channel for IronClaw AI assistant via CardDAV |
-| [IronClaw Mail Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/mail) | Email channel for IronClaw AI assistant via JMAP |
-| [IronClaw Matrix Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/matrix) | Matrix channel for IronClaw AI assistant |
-| [IronClaw Pixtral Tool 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/pixtral) | Pixtral AI image generation tool for IronClaw AI assistant |
-| [IronClaw SearXNG Tool 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/searxng) | SearXNG web search tool for IronClaw AI assistant |
-| [IronClaw Signal Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ironclaw/signal) | Signal channel for IronClaw AI assistant |
+| [IronClaw Bluesky Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/bluesky) | Bluesky/AT Protocol channel for IronClaw AI assistant |
+| [IronClaw Calendar Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/calendar) | Calendar channel for IronClaw AI assistant via CalDAV |
+| [IronClaw Contacts Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/contacts) | Contacts channel for IronClaw AI assistant via CardDAV |
+| [IronClaw Mail Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/mail) | Email channel for IronClaw AI assistant via JMAP |
+| [IronClaw Matrix Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/matrix) | Matrix channel for IronClaw AI assistant |
+| [IronClaw Pixtral Tool 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/pixtral) | Pixtral AI image generation tool for IronClaw AI assistant |
+| [IronClaw SearXNG Tool 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/searxng) | SearXNG web search tool for IronClaw AI assistant |
+| [IronClaw Signal Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/signal) | Signal channel for IronClaw AI assistant |
 
 #### Tangled
 
 | Project | Description |
 |-|-|
-| [Tangled-cli 🦀](https://tangled.org/@overby.me/overby.me/tree/main/tangled/cli) | Tangled git collaboration CLI |
-| [Spindle-nix-engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
+| [Tangled-cli 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
+| [Spindle-nix-engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
 
 </details>
 
@@ -181,68 +181,68 @@
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Deslop 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/deslop.nix) | [GitHub](https://github.com/chinmay-sawant/deslop) | Lightning-fast best practice analyzer for AI-generated code |
-| [IronClaw 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/ironclaw.nix) | [IronClaw](https://www.ironclaw.com) | OpenClaw-inspired secure personal AI assistant |
-| [Pi Agent 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/pi-agent-rust.nix) | [pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | High-performance AI coding agent CLI written in Rust |
+| [Deslop 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/deslop.nix) | [GitHub](https://github.com/chinmay-sawant/deslop) | Lightning-fast best practice analyzer for AI-generated code |
+| [IronClaw 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/ironclaw.nix) | [IronClaw](https://www.ironclaw.com) | OpenClaw-inspired secure personal AI assistant |
+| [Pi Agent 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/pi-agent-rust.nix) | [pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | High-performance AI coding agent CLI written in Rust |
 
 #### Development
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
-| [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
-| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
-| [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
+| [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
+| [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
+| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
+| [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
 
 #### Desktop
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
-| [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
-| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
-| [Non-spatial-input 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/non-spatial-input.nix) | [GitHub](https://github.com/StardustXR/non-spatial-input) | Non-spatial input drivers (eclipse/manifold) for Stardust XR |
-| [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
-| [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
+| [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
+| [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
+| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
+| [Non-spatial-input 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/non-spatial-input.nix) | [GitHub](https://github.com/StardustXR/non-spatial-input) | Non-spatial input drivers (eclipse/manifold) for Stardust XR |
+| [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
+| [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
 
 #### Jupyter
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
-| [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
-| [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
-| [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/Rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
-| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
+| [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
+| [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
+| [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
+| [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
+| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
 
 #### Media
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
-| [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
-| [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
+| [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
+| [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
+| [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
 
 #### Security
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
-| [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
+| [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
+| [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
 
 #### Social
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
-| [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
+| [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
+| [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
 
 #### System
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
-| [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/nix/pkgs/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
+| [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
+| [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/pkgs/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
 
 </details>
 
@@ -254,10 +254,10 @@
 
 | Configuration | Homepage | Description |
 |-|-|-|
-| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/home-manager/config) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager configurations |
-| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/nixos/config) | [NixOS](https://nixos.org) | NixOS configurations |
-| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/darwin/config) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin configurations |
-| [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/devshell/lib/mkDevShell.nix) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Default devshell |
+| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/home-manager/config) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager configurations |
+| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixos/config) | [NixOS](https://nixos.org) | NixOS configurations |
+| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwin/config) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin configurations |
+| [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/devshell/lib/mkDevShell.nix) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Default devshell |
 
 </details>
 
@@ -269,11 +269,11 @@
 
 | Module | Homepage | Description |
 |-|-|-|
-| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/flake/modules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
-| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/home-manager/modules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
-| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/nixos/modules) | [NixOS](https://nixos.org) | NixOS modules |
-| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/darwin/modules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |
-| [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/devshell/modules) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Devshell modules |
+| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/flake/modules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
+| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/home-manager/modules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
+| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixos/modules) | [NixOS](https://nixos.org) | NixOS modules |
+| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwin/modules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |
+| [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/devshell/modules) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Devshell modules |
 
 </details>
 
@@ -285,13 +285,13 @@
 
 | Library | Homepage | Description |
 |-|-|-|
-| [Buck2 ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/buck2) | [Buck2](https://buck2.build) | Pure-eval Buck2 builds, each action lowered to its own derivation |
-| [Cargo ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/cargo) | [Cargo](https://doc.rust-lang.org/cargo/) | Pure-eval Rust builds, resolved from `Cargo.lock` without import-from-derivation |
-| [Deno 🦕❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/deno) | [Deno](https://deno.com) | Nix builder for Deno projects with npm dependencies |
-| [Mobile ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/mobile) | [nixos-fairphone-fp5](https://github.com/gian-reto/nixos-fairphone-fp5) | Boot and ext4 rootfs images for flashing NixOS to an Android-bootloader device |
-| [Ninja ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/ninja) | [Ninja](https://ninja-build.org) | Pure-eval Ninja builds, each edge lowered to its own derivation |
-| [Skylark ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/skylark) | [Starlark](https://github.com/bazelbuild/starlark) | Starlark interpreter written in pure Nix, used by the Buck2 builder |
-| [YAML ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/lib/yaml) | [YAML](https://yaml.org) | YAML reader and writer in pure Nix |
+| [Buck2 ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/buck2) | [Buck2](https://buck2.build) | Pure-eval Buck2 builds, each action lowered to its own derivation |
+| [Cargo ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/cargo) | [Cargo](https://doc.rust-lang.org/cargo/) | Pure-eval Rust builds, resolved from `Cargo.lock` without import-from-derivation |
+| [Deno 🦕❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/deno) | [Deno](https://deno.com) | Nix builder for Deno projects with npm dependencies |
+| [Mobile ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/mobile) | [nixos-fairphone-fp5](https://github.com/gian-reto/nixos-fairphone-fp5) | Boot and ext4 rootfs images for flashing NixOS to an Android-bootloader device |
+| [Ninja ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/ninja) | [Ninja](https://ninja-build.org) | Pure-eval Ninja builds, each edge lowered to its own derivation |
+| [Skylark ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/skylark) | [Starlark](https://github.com/bazelbuild/starlark) | Starlark interpreter written in pure Nix, used by the Buck2 builder |
+| [YAML ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/yaml) | [YAML](https://yaml.org) | YAML reader and writer in pure Nix |
 
 </details>
 
@@ -366,7 +366,7 @@
 | ✅ | Image Codec (Lossless) | [PNG 📖](https://en.wikipedia.org/wiki/Portable_Network_Graphics) | [AVIF (lossless) 📖](https://en.wikipedia.org/wiki/AVIF) | [cavif 🦀](https://github.com/kornelski/cavif-rs) | |
 | ✅ | Media Container | [Matroska/WebM 📖](https://www.matroska.org) | | 🆗 | [MP4 📖](https://en.wikipedia.org/wiki/MPEG-4_Part_14) |
 | ✅ | Audio Codec | [Opus 📖](https://opus-codec.org) | | [Symphonia 🦀](https://github.com/pdeljanov/Symphonia) | [MP3 📖](https://en.wikipedia.org/wiki/MP3) |
-| ✅ | Video Codec | [AV1 📖](https://aomedia.org/av1-features/get-started) | | [rav1d 🦀](https://github.com/memorysafety/rav1d), [h26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | [H.264 🔒](https://en.wikipedia.org/wiki/Advanced_Video_Coding) |
+| ✅ | Video Codec | [AV1 📖](https://aomedia.org/av1-features/get-started) | | [rav1d 🦀](https://github.com/memorysafety/rav1d), [h26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h26xtoav1) | [H.264 🔒](https://en.wikipedia.org/wiki/Advanced_Video_Coding) |
 | 🚧 | 3D Model Format | [glTF 📖](https://www.khronos.org/gltf/) | [OpenUSD](https://openusd.org) | 🆗 | |
 
 #### Text & Object Notation
@@ -465,13 +465,13 @@
 | ✅ | Distro | [NixOS 🌐❄️](https://github.com/NixOS/nixpkgs) | [Spectrum OS ❄️](https://spectrum-os.org), [CTRL-OS 🇪🇺❄️](https://www.cyberus-technology.de/ctrl-os) | [OCI 📖](https://github.com/opencontainers/runtime-spec), [Distrobox](https://github.com/89luca89/distrobox) | [Fedora Silverblue](https://fedoraproject.org/silverblue) |
 | ✅ | Kernel | [Zen Linux Kernel 🌐💣🦀](https://github.com/zen-kernel/zen-kernel) | [Asterinas 🦀](https://github.com/asterinas/asterinas), [Redox OS 🦀](https://gitlab.redox-os.org/redox-os/redox) | [Wine 💣](https://www.winehq.org), [Darling 💣](https://www.darlinghq.org) | [Microsoft NT 🔒🇺🇸](https://en.wikipedia.org/wiki/Architecture_of_Windows_NT), [Apple XNU 💣🇺🇸](https://github.com/apple-oss-distributions/xnu) |
 | 🚧 | Libc | [Glibc 💣](https://en.wikipedia.org/wiki/Glibc) | [Musl 💣](https://www.musl-libc.org), [Relibc 🦀](https://github.com/redox-os/relibc) | [Gcompat 💣](https://git.adelielinux.org/adelie/gcompat) | |
-| 🚧 | Init System | [Systemd 💣](https://github.com/systemd/systemd) | [Redox Init 🦀](https://gitlab.redox-os.org/redox-os/init), [Synit 🦀](https://git.syndicate-lang.org/synit/synit), [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | ⬅️ | |
+| 🚧 | Init System | [Systemd 💣](https://github.com/systemd/systemd) | [Redox Init 🦀](https://gitlab.redox-os.org/redox-os/init), [Synit 🦀](https://git.syndicate-lang.org/synit/synit), [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/systemd) | ⬅️ | |
 | 🚧 | Inter-process Communication | [Dbus 💣](https://gitlab.freedesktop.org/dbus/dbus) | [Zlink 🦀](https://github.com/z-galaxy/zlink) | [Zbus 🦀](https://github.com/dbus2/zbus), [Busd 🦀](https://github.com/dbus2/busd) | |
-| 🚧 | Multimedia Server | [Pipewire 💣](https://gitlab.freedesktop.org/pipewire/pipewire) | [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pipewire), [Pipewire-native-rs 🦀](https://gitlab.freedesktop.org/pipewire/pipewire-native-rs) | ⬅️ | [Pulseaudio 💣](https://gitlab.freedesktop.org/pulseaudio/pulseaudio) |
+| 🚧 | Multimedia Server | [Pipewire 💣](https://gitlab.freedesktop.org/pipewire/pipewire) | [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pipewire), [Pipewire-native-rs 🦀](https://gitlab.freedesktop.org/pipewire/pipewire-native-rs) | ⬅️ | [Pulseaudio 💣](https://gitlab.freedesktop.org/pulseaudio/pulseaudio) |
 | 🚫 | XR Runtime | [Monado 💣](https://gitlab.freedesktop.org/monado/monado) | | [OpenXR 📖](https://www.khronos.org/openxr) | [Arcan 💣](https://github.com/letoram/arcan) |
 | ✅ | Filesystem | [Btrfs 📖💣](https://btrfs.wiki.kernel.org/index.php/Main_Page) | [Fxfs 🦀](https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/src/storage/fxfs), [Redoxfs 🦀](https://gitlab.redox-os.org/redox-os/redoxfs) | 🆗 | [Ext4 📖💣](https://docs.kernel.org/filesystems/ext4/) |
-| ✅ | Sandboxing | [Hakoniwa 🦀](https://github.com/souk4711/hakoniwa) | | [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bubblewrap) | [Bubblewrap 💣](https://github.com/containers/bubblewrap) |
-| 🚧 | Bootloader | [systemd-boot 💣](https://www.freedesktop.org/wiki/Software/systemd/systemd-boot/) | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | 🆗 | [GRUB 💣](https://www.gnu.org/software/grub/) |
+| ✅ | Sandboxing | [Hakoniwa 🦀](https://github.com/souk4711/hakoniwa) | | [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bubblewrap) | [Bubblewrap 💣](https://github.com/containers/bubblewrap) |
+| 🚧 | Bootloader | [systemd-boot 💣](https://www.freedesktop.org/wiki/Software/systemd/systemd-boot/) | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/systemd) | 🆗 | [GRUB 💣](https://www.gnu.org/software/grub/) |
 | ✅ | Display Manager | [cosmic-greeter 🦀](https://github.com/pop-os/cosmic-greeter) | | 🆗 | [GDM 💣](https://wiki.gnome.org/Projects/GDM) |
 | 🚧 | Mandatory Access Control | [SELinux 💣](https://github.com/SELinuxProject/selinux) | | 🆗 | [AppArmor 💣](https://apparmor.net) |
 | 🚧 | Time Synchronization | [systemd-timesyncd 💣](https://www.freedesktop.org/software/systemd/man/latest/systemd-timesyncd.service.html) | [ntpd-rs 🦀](https://github.com/pendulum-project/ntpd-rs) | [NTP 📖](https://en.wikipedia.org/wiki/Network_Time_Protocol) | |
@@ -486,11 +486,11 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| 🚧 | Archive Format | [GNU Tar 💣](https://www.gnu.org/software/tar/) | [Tar-rs 🦀](https://github.com/alexcrichton/tar-rs) | [Tar 📖](https://en.wikipedia.org/wiki/Tar_(computing)), [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | |
-| 🚧 | Compression | [Zstd 💣](https://github.com/facebook/zstd) | [Zstd-rs 🦀](https://github.com/KillingSpark/zstd-rs) | [Zlib-rs 🦀](https://github.com/memorysafety/zlib-rs), [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gzip), [Bzip2-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bzip2), [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | [Zlib 💣](https://github.com/madler/zlib) |
+| 🚧 | Archive Format | [GNU Tar 💣](https://www.gnu.org/software/tar/) | [Tar-rs 🦀](https://github.com/alexcrichton/tar-rs) | [Tar 📖](https://en.wikipedia.org/wiki/Tar_(computing)), [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/tar) | |
+| 🚧 | Compression | [Zstd 💣](https://github.com/facebook/zstd) | [Zstd-rs 🦀](https://github.com/KillingSpark/zstd-rs) | [Zlib-rs 🦀](https://github.com/memorysafety/zlib-rs), [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gzip), [Bzip2-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bzip2), [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/xz) | [Zlib 💣](https://github.com/madler/zlib) |
 | ✅ | TLS Protocol | [Rustls 🦀](https://github.com/rustls/rustls) | | 🆗 | [Openssl 💣](https://github.com/openssl/openssl) |
 | ✅ | HTTP Protocol | [Hyper 🦀](https://github.com/hyperium/hyper) | | 🆗 | [Nghttp2 💣](https://github.com/nghttp2/nghttp2), [Nghttp3 💣](https://github.com/ngtcp2/nghttp3) |
-| ✅ | HTTP Client | [Reqwest 🦀](https://github.com/seanmonstar/reqwest) | | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | [Curl 💣](https://github.com/curl/curl) |
+| ✅ | HTTP Client | [Reqwest 🦀](https://github.com/seanmonstar/reqwest) | | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/curl) | [Curl 💣](https://github.com/curl/curl) |
 | ✅ | Web Framework | [Axum 🦀](https://github.com/tokio-rs/axum) | | 🆗 | |
 | 🚧 | atproto SDK | [Atrium 🦀🌀](https://github.com/atrium-rs/atrium) | | 🆗 | |
 | ✅ | SSH Protocol | [Russh 🦀](https://github.com/Eugeny/russh) | | 🆗 | [OpenSSH 💣](https://github.com/openssh/openssh-portable) |
@@ -499,7 +499,7 @@
 | ✅ | 3D Renderer | [Wgpu 🦀](https://github.com/gfx-rs/wgpu) | | [Vulkan 📖](https://www.vulkan.org) | |
 | ✅ | Compositor Framework | [Smithay 🦀](https://github.com/Smithay/smithay) | | 🆗 | [Mutter 💣](https://gitlab.gnome.org/GNOME/mutter) |
 | ✅ | UI Toolkit | [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | | [Web Component 📖](https://www.webcomponents.org/) | [React 🐒](https://react.dev) |
-| ✅ | UI Components | [MD 3 Expressive Components 🦀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki/src/components/ui) | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | 🆗 | [MUI 🐒](https://mui.com) |
+| ✅ | UI Components | [MD 3 Expressive Components 🦀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki/src/components/ui) | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | 🆗 | [MUI 🐒](https://mui.com) |
 | 🚫 | XR Toolkit | [Stereokit 💣](https://github.com/StereoKit/StereoKit) | | 🆗 | |
 | 🚧 | Browser Engine | [Gecko 🦀💣](https://en.wikipedia.org/wiki/Gecko_(software)) | [Servo 🦀](https://github.com/servo/servo) | ⬅️ | |
 | 🚫 | ECMAScript Engine | [V8 💣](https://v8.dev) | [Boa 🦀](https://github.com/boa-dev/boa), [Nova 🦀](https://github.com/trynova/nova) | 🆗 | |
@@ -542,16 +542,16 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Build Script | [Just 🦀](https://github.com/casey/just) | | [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) ([Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bash)) | [GNU Make 💣](https://en.wikipedia.org/wiki/Make_(software)) |
-| ✅ | Build System | [Buck2 🦀](https://github.com/facebook/buck2) | | [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | [Bazel 🐷](https://github.com/bazelbuild/bazel), [Pants 🐍](https://github.com/pantsbuild/pants), [Meson 🐍](https://github.com/mesonbuild/meson), [CMake 💣](https://github.com/Kitware/CMake) |
+| ✅ | Build Script | [Just 🦀](https://github.com/casey/just) | | [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/make) ([Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bash)) | [GNU Make 💣](https://en.wikipedia.org/wiki/Make_(software)) |
+| ✅ | Build System | [Buck2 🦀](https://github.com/facebook/buck2) | | [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/meson) | [Bazel 🐷](https://github.com/bazelbuild/bazel), [Pants 🐍](https://github.com/pantsbuild/pants), [Meson 🐍](https://github.com/mesonbuild/meson), [CMake 💣](https://github.com/Kitware/CMake) |
 | ✅ | Editor | [Helix 🦀](https://github.com/helix-editor/helix) | | 🆗 | [Neovim 💣](https://github.com/neovim/neovim) |
 | ✅ | IDE | [Zed 🦀](https://github.com/zed-industries/zed) | | [LSP 📖](https://github.com/microsoft/language-server-protocol), [DAP 📖](https://github.com/Microsoft/debug-adapter-protocol), [BSP 📖](https://github.com/build-server-protocol/build-server-protocol) | [VS Codium 🐒💣](https://github.com/VSCodium/vscodium) |
 | ✅ | System Call Tracing | [Lurk 🦀](https://github.com/JakWai01/lurk) | | 🆗 | [Tracexec 🦀🇨🇳](https://github.com/kxxt/tracexec), [Strace 💣](https://github.com/strace/strace) |
-| ✅ | Environment Loader | [Direnv 🐹](https://github.com/direnv/direnv) | [Envy 🦀](https://github.com/mre/envy), [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/direnv) | ⬅️ | |
+| ✅ | Environment Loader | [Direnv 🐹](https://github.com/direnv/direnv) | [Envy 🦀](https://github.com/mre/envy), [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/direnv) | ⬅️ | |
 | ✅ | Pager | [Tailspin 🦀](https://github.com/bensadeh/tailspin) | | 🆗 | [Less 💣](https://github.com/gwsw/less) |
 | ✅ | Performance Profiler | [Samply 🦀](https://github.com/mstange/samply) | | 🆗 | [Perf 💣](https://perf.wiki.kernel.org/) |
 | ✅ | TCP Tunnel | [Bore 🦀](https://github.com/ekzhang/bore) | | 🆗 | |
-| ✅ | Clipboard | [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/wclip) | | 🆗 | [wl-clipboard 💣🇷🇺](https://github.com/bugaevc/wl-clipboard), [wl-clipboard-rs 🦀🇷🇺](https://github.com/YaLTeR/wl-clipboard-rs) |
+| ✅ | Clipboard | [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/wclip) | | 🆗 | [wl-clipboard 💣🇷🇺](https://github.com/bugaevc/wl-clipboard), [wl-clipboard-rs 🦀🇷🇺](https://github.com/YaLTeR/wl-clipboard-rs) |
 | ✅ | Keymapper | [Kanata 🦀](https://github.com/jtroo/kanata) | | 🆗 | [Keyd 💣](https://github.com/rvaiya/keyd) |
 
 #### Version Control
@@ -585,13 +585,13 @@
 | ✅ | Static Analyzer | [Statix 🦀](https://github.com/oppiliappan/statix), [Deadnix 🦀](https://github.com/astro/deadnix), [Nixpkgs-Lint 🦀](https://github.com/nix-community/nixpkgs-lint) | | 🆗 | |
 | ✅ | Language Server | [Nil 🦀](https://github.com/oxalica/nil) | | [LSP 📖](https://github.com/microsoft/language-server-protocol) | [Nixd 💣🇨🇳](https://github.com/nix-community/nixd) |
 | ✅ | TOML Formatter | [Tombi 🦀](https://github.com/tombi-toml/tombi) | | 🆗 | [Taplo 🦀💀](https://github.com/tamasfe/taplo) |
-| ✅ | Binary Cache | [Harmonia 🦀](https://github.com/nix-community/harmonia) | [Attic 🦀](https://github.com/zhaofengli/attic) | [Cachix-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/cachix) | [Cachix 🔒λ](https://github.com/cachix/cachix) |
+| ✅ | Binary Cache | [Harmonia 🦀](https://github.com/nix-community/harmonia) | [Attic 🦀](https://github.com/zhaofengli/attic) | [Cachix-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/cachix) | [Cachix 🔒λ](https://github.com/cachix/cachix) |
 | ✅ | Config Manager | [Home Manager 🌐❄️](https://github.com/nix-community/home-manager) | | 🆗 | |
 | ✅ | Repository Secrets | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix) | | 🆗 | [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
 | 🚧 | Developer Secrets | | [SecretSpec 🦀](https://github.com/cachix/secretspec) | 🆗 | |
 | ✅ | Deployment | [Colmena 🦀️❄️](https://github.com/zhaofengli/colmena) | [Navi 🦀❄️](https://github.com/cafkafk/navi) | 🆗 | |
 | ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | [Devenv 🦀️❄️](https://github.com/cachix/devenv) |
-| 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [Nix-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
+| 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [Nix-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
 | ✅ | File Locator | [Nix-index 🦀](https://github.com/nix-community/nix-index), [Comma 🦀](https://github.com/nix-community/comma) | | 🆗 | |
 | ✅ | Rust Integration | [Crate2nix 🦀❄️](https://github.com/nix-community/crate2nix) | | 🆗 | [Crane ❄️](https://github.com/ipetkov/crane) |
 | ✅ | Python Integration | [Uv2nix ❄️](https://github.com/pyproject-nix/uv2nix) | | 🆗 | |
@@ -610,9 +610,9 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Language | [Rust 🦀](https://github.com/rust-lang/rust) | | [cxx 🦀](https://github.com/dtolnay/cxx), [bindgen 🦀](https://github.com/rust-lang/rust-bindgen), [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | [C 💣](https://en.wikipedia.org/wiki/C_(programming_language)), [C++ 💣](https://en.wikipedia.org/wiki/C%2B%2B) |
+| ✅ | Language | [Rust 🦀](https://github.com/rust-lang/rust) | | [cxx 🦀](https://github.com/dtolnay/cxx), [bindgen 🦀](https://github.com/rust-lang/rust-bindgen), [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gcc) | [C 💣](https://en.wikipedia.org/wiki/C_(programming_language)), [C++ 💣](https://en.wikipedia.org/wiki/C%2B%2B) |
 | 🚧 | Compiler Framework | [Mlir 💣](https://github.com/llvm/llvm-project/tree/main/mlir), [LLVM 💣](https://github.com/llvm/llvm-project) | [Cranelift 🦀](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift), [Krabby 🦀](https://codeberg.org/bal-e/krabby) | ⬅️ | |
-| ✅ | Linker | [Wild 🦀](https://github.com/davidlattimore/wild) | | [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | [Mold 💣](https://github.com/rui314/mold), [GNU ld 💣](https://sourceware.org/binutils) |
+| ✅ | Linker | [Wild 🦀](https://github.com/davidlattimore/wild) | | [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/binutils) | [Mold 💣](https://github.com/rui314/mold), [GNU ld 💣](https://sourceware.org/binutils) |
 | ✅ | Formatter | [Rustfmt 🦀](https://github.com/rust-lang/rustfmt) | | 🆗 | |
 | ✅ | Linter | [Clippy 🦀](https://github.com/rust-lang/rust-clippy) | | 🆗 | |
 | ✅ | Language Server | [Rust-analyzer 🦀](https://github.com/rust-lang/rust-analyzer) | | [LSP 📖](https://github.com/microsoft/language-server-protocol) | |
@@ -791,7 +791,7 @@
 | ✅ | Bare Metal Hosting | [Hetzner 🇪🇺](https://hetzner.com) | | 🆗 | |
 | ✅ | Static Host | [Statichost 🇪🇺](https://statichost.eu) | [FastFront 🇪🇺](https://www.fastfront.io) | 🆗 | [Vercel 🇺🇸](https://vercel.com) |
 | ✅ | Domain Registrar | [Simply 🇪🇺](https://simply.com) | | 🆗 | |
-| 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | [AT Protocol AppView (axum) 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki/backend) | 🆗 | |
+| 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | [AT Protocol AppView (axum) 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki/backend) | 🆗 | |
 | ✅ | Logging | [Better Stack 🇪🇺](https://betterstack.com) | | 🆗 | [Bugfender 🇪🇺](https://bugfender.com), [Sentry 🇺🇸](https://sentry.io) |
 | ✅ | Analytics | [Counter.dev 🇪🇺](https://counter.dev) | | 🆗 | [Vercel Analytics 🇺🇸](https://vercel.com/analytics) |
 | ✅ | Content Delivery Network | [Bunny.net 🇪🇺](https://bunny.net) | | 🆗 | |
@@ -816,9 +816,9 @@
 | ✅ | Copy | [Nushell Cp 🦪🦀](https://github.com/nushell/nushell) | [Cpx 🦀](https://github.com/11happy/cpx) | ⬅️ | [Bash Cp 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
 | ✅ | Directory Usage | [Dust 🦀](https://github.com/bootandy/dust) | | [Uutils 🦀](https://github.com/uutils/coreutils) | [Coreutils 💣](https://en.wikipedia.org/wiki/GNU_Core_Utilities) |
 | ✅ | Find Files | [Fd 🦀](https://github.com/sharkdp/fd) | | [Uutils Findutils 🦀](https://github.com/uutils/findutils) | [Findutils 💣](https://en.wikipedia.org/wiki/List_of_GNU_packages#Base_system) |
-| ✅ | Find Patterns | [Ripgrep 🦀](https://github.com/BurntSushi/ripgrep) | | [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/grep) | [Grep 💣](https://en.wikipedia.org/wiki/Grep) |
-| ✅ | Find & Replace | [Ast-grep 🦀](https://github.com/ast-grep/ast-grep) | | [Uutils Sed 🦀](https://github.com/uutils/sed), [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/sed) | [Sed 💣](https://en.wikipedia.org/wiki/Sed) |
-| ✅ | File Differences | [Batdiff 🦀](https://github.com/eth-p/bat-extras) + [Delta 🦀](https://github.com/dandavison/delta) | [Difftastic 🦀](https://github.com/wilfred/difftastic) | [Uutils Diffutils 🦀](https://github.com/uutils/diffutils), [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/diffutils) | [Diffutils 💣](https://en.wikipedia.org/wiki/List_of_GNU_packages#Base_system) |
+| ✅ | Find Patterns | [Ripgrep 🦀](https://github.com/BurntSushi/ripgrep) | | [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/grep) | [Grep 💣](https://en.wikipedia.org/wiki/Grep) |
+| ✅ | Find & Replace | [Ast-grep 🦀](https://github.com/ast-grep/ast-grep) | | [Uutils Sed 🦀](https://github.com/uutils/sed), [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/sed) | [Sed 💣](https://en.wikipedia.org/wiki/Sed) |
+| ✅ | File Differences | [Batdiff 🦀](https://github.com/eth-p/bat-extras) + [Delta 🦀](https://github.com/dandavison/delta) | [Difftastic 🦀](https://github.com/wilfred/difftastic) | [Uutils Diffutils 🦀](https://github.com/uutils/diffutils), [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/diffutils) | [Diffutils 💣](https://en.wikipedia.org/wiki/List_of_GNU_packages#Base_system) |
 | ✅ | Hex Viewer | [Hyxel 🦀](https://github.com/hyxel/hyxel) | | [Uutils Util-linux 🦀](https://github.com/uutils/util-linux) | [Util Linux Hexdump 💣](https://github.com/util-linux/util-linux) |
 | ✅ | Tree Viewer | [Tre 🦀](https://github.com/dduan/tre) | | 🆗 | [Tree 💣](https://oldmanprogrammer.net/source.php?dir=projects/tree) |
 
@@ -826,7 +826,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Network Client | [Xh 🦀](https://github.com/ducaale/xh) | | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | [Curl 💣](https://github.com/curl/curl) |
+| ✅ | Network Client | [Xh 🦀](https://github.com/ducaale/xh) | | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/curl) | [Curl 💣](https://github.com/curl/curl) |
 | ✅ | Ping | [Gping 🦀](https://github.com/orf/gping) | | 🆗 | [Ping 💣](https://en.wikipedia.org/wiki/Ping_(networking_utility)) |
 | ✅ | Port Scanner | [RustScan 🦀](https://github.com/rustscan/rustscan) | | 🆗 | [Nmap 💣](https://github.com/nmap/nmap) |
 | 🚧 | PGP | [GnuPG 💣](https://gnupg.org) | [Sequoia-PGP 🦀](https://gitlab.com/sequoia-pgp/sequoia) | 🆗 | |
@@ -846,7 +846,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Shell | [Nushell 🦪🦀](https://github.com/nushell/nushell) | | [Brush 🦀](https://github.com/reubeno/brush), [Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bash) | [Bash 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
+| ✅ | Shell | [Nushell 🦪🦀](https://github.com/nushell/nushell) | | [Brush 🦀](https://github.com/reubeno/brush), [Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bash) | [Bash 💣](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) |
 | ✅ | Prompt | [Starship 🦀](https://github.com/starship/starship) | | 🆗 | |
 | ✅ | Completion | [Carapace 🐹](https://github.com/carapace-sh/carapace-bin) | | 🆗 | |
 | ✅ | Core Utilities | [Nushell Builtins 🦪🦀](https://github.com/nushell/nushell) | | [Uutils 🦀](https://github.com/uutils/coreutils) | [Coreutils 💣](https://en.wikipedia.org/wiki/GNU_Core_Utilities) |
@@ -886,7 +886,7 @@
 | ✅ | Terminal | [Cosmic Term 🦀](https://github.com/pop-os/cosmic-term) | | 🆗 | [Wezterm 🦀](https://github.com/wez/wezterm), [GNOME Console 💣](https://gitlab.gnome.org/GNOME/console) |
 | ✅ | Web Browser | [Zen Browser 💣🦀](https://zen-browser.app) | [Verso 🦀](https://github.com/versotile-org/verso) | [Chrome Extension API 🔒](https://developer.chrome.com/docs/extensions/reference) | [Firefox 💣🦀](https://github.com/mozilla/gecko-dev), [Unbraved Brave 💣🦀](https://github.com/MulesGaming/brave-debullshitinator) |
 | ✅ | Application Store Frontend | [Cosmic Store 🦀](https://github.com/pop-os/cosmic-store) | | 🆗 | [GNOME Software 💣](https://gitlab.gnome.org/GNOME/gnome-software) |
-| 🚫 | Application Store Backend | [Flatpak 💣](https://github.com/flatpak/flatpak) | [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/flatpak) | ⬅️ | [Snap 🔒](https://github.com/canonical/snapd), [AppImage 💣](https://github.com/AppImage) |
+| 🚫 | Application Store Backend | [Flatpak 💣](https://github.com/flatpak/flatpak) | [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | ⬅️ | [Snap 🔒](https://github.com/canonical/snapd), [AppImage 💣](https://github.com/AppImage) |
 | ✅ | Office Suite | [Euro-Office 🐒🇪🇺](https://github.com/Euro-Office) | | [OpenDocument Format 📖](https://en.wikipedia.org/wiki/OpenDocument) | [OnlyOffice 🐒🇷🇺](https://www.onlyoffice.com), [LibreOffice 💣🐷](https://www.libreoffice.org) |
 | ✅ | Remote Desktop | [Rustdesk 🦀](https://github.com/rustdesk/rustdesk) | | [VNC](https://en.wikipedia.org/wiki/VNC) | [GNOME Remote Desktop 💣](https://gitlab.gnome.org/GNOME/gnome-remote-desktop) |
 

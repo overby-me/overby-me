@@ -85,5 +85,5 @@ phases.
 Monorepo table row:
 
 ```markdown
-| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
+| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
 ```

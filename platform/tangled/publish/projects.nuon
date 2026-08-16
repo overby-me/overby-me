@@ -191,7 +191,7 @@
   {
     name: "nix-standalone"
     path: "platform/nix/standalone"
-    filter: ":[:/nix/standalone,:/safety/fe-c]:unsign"
+    filter: ":[:/nix/standalone,:/platform/nix/standalone]:unsign"
   }
   # Not a rust/ rewrite: the client this publisher itself uses to create and
   # authorise the repos it publishes to. Its path dependencies all point
@@ -202,7 +202,7 @@
     nativeBuildInputs: ["pkg-config"]
     buildInputs: ["openssl" "dbus"]
     doCheck: false
-    filter: ":[:/tangled/cli:exclude[::*.nix],:/tangled/cli::flake.nix,:/safety/fe-c:exclude[::*.nix],:/safety/fe-c::flake.nix]:unsign"
+    filter: ":[:/tangled/cli:exclude[::*.nix],:/tangled/cli::flake.nix,:/platform/tangled/cli:exclude[::*.nix],:/platform/tangled/cli::flake.nix]:unsign"
   }
   # The two multi-directory projects. Each dependency keeps its own name at
   # the root, because that is what the depending Cargo.toml already says.
@@ -216,6 +216,6 @@
     name: "h26xtoav1"
     path: "media/h26xtoav1"
     deps: ["media/h264-decoder" "media/h265-decoder"]
-    filter: ":[:/rust/h26xtoav1:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=h26xtoav1,:/rust/h264-decoder:exclude[::*.nix]:prefix=h264-decoder,:/rust/h265-decoder:exclude[::*.nix]:prefix=h265-decoder,:/rust/h26xtoav1::flake.nix,:/rust/h26xtoav1::flake.lock,:/rust/h26xtoav1::README.md,:/rust/h26xtoav1::.tangled/,:/safety/fe-c:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=h26xtoav1,:/rust/h264-decoder:exclude[::*.nix]:prefix=h264-decoder,:/rust/h265-decoder:exclude[::*.nix]:prefix=h265-decoder,:/safety/fe-c::flake.nix,:/safety/fe-c::flake.lock,:/safety/fe-c::README.md,:/safety/fe-c::.tangled/]:unsign"
+    filter: ":[:/rust/h26xtoav1:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=h26xtoav1,:/rust/h264-decoder:exclude[::*.nix]:prefix=h264-decoder,:/rust/h265-decoder:exclude[::*.nix]:prefix=h265-decoder,:/rust/h26xtoav1::flake.nix,:/rust/h26xtoav1::flake.lock,:/rust/h26xtoav1::README.md,:/rust/h26xtoav1::.tangled/,:/media/h26xtoav1:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=h26xtoav1,:/media/h264-decoder:exclude[::*.nix]:prefix=h264-decoder,:/media/h265-decoder:exclude[::*.nix]:prefix=h265-decoder,:/media/h26xtoav1::flake.nix,:/media/h26xtoav1::flake.lock,:/media/h26xtoav1::README.md,:/media/h26xtoav1::.tangled/]:unsign"
   }
 ]

@@ -478,7 +478,7 @@ forbidden repo-wide as usual.
   tier-gating checks (`llvm-t0-hello`, `llvm-ui-ratchet`, …) are the pipeline.
 - Root `README.md`, two edits:
   - Projects → Rust table row:
-    `| [LLVM-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/llvm) | LLVM-compatible compiler infrastructure written in Rust |`
+    `| [LLVM-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/llvm) | LLVM-compatible compiler infrastructure written in Rust |`
   - 🦀 Systems → Compiler Framework row: add
     `[LLVM-rs 🦀](…/rust/llvm)` under Research & Development next to Cranelift
     and Krabby; move to Current when T2 lands.

@@ -151,7 +151,7 @@ Working checker, no security claim yet, no performance data.
 Monorepo table row:
 
 ```markdown
-| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
+| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 ```
 
 ## Prior art
