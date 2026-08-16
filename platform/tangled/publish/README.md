@@ -20,7 +20,23 @@ nu publish.nu --ssh-key ~/.ssh/id_ed25519  # filter and push what changed
 nu publish.nu --no-github                  # Tangled only
 ```
 
-Projects and their filters live in [`projects.nuon`](./projects.nuon).
+Projects live in [`projects.nuon`](./projects.nuon). Their josh filters do
+not: `derive-filter` computes each one from what the project is and where it
+has been, because a stored filter is a second copy of facts the entry already
+carries, and keeping thirty-nine of them right by hand went wrong twice.
+
+`formerPaths` is the part that cannot be derived. josh reconstructs history,
+so a filter naming only today's path publishes a repo whose history begins at
+the last move, and that had happened to five projects here - `wiki` was
+publishing 633 of its 1163 commits. Git does record the moves, but recovering
+them from rename detection is unreliable in a tree like this one: these are
+near-identical Rust rewrites of GNU tools, so rename detection matches files
+*across* projects, and the corroboration that filters that out also discards
+the moves of small directories. Use it to propose the list, not to trust it.
+
+When adding a `formerPaths` entry, check that the filtered tree at HEAD does
+not change. History should grow; content should not.
+
 Thirty-eight are published today; adding one is four steps:
 
 ```sh
