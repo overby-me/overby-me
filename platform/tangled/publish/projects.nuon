@@ -190,6 +190,78 @@
     cargoTestFlags: ["--lib" "--bins"]
     filter: ":[:/rust/gcc:exclude[::*.nix],:/rust/gcc::flake.nix,:/safety/oxidized/gcc:exclude[::*.nix],:/safety/oxidized/gcc::flake.nix]:unsign"
   }
+  {
+    name: "oxidized-bison"
+    path: "safety/oxidized/bison"
+    description: "A POSIX yacc/bison-compatible parser generator written in Rust"
+    filter: ":[:/rust/bison:exclude[::*.nix],:/rust/bison::flake.nix,:/safety/oxidized/bison:exclude[::*.nix],:/safety/oxidized/bison::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-bubblewrap"
+    path: "safety/oxidized/bubblewrap"
+    description: "A bubblewrap-compatible unprivileged sandboxing tool written in Rust"
+    filter: ":[:/rust/bubblewrap:exclude[::*.nix],:/rust/bubblewrap::flake.nix,:/safety/oxidized/bubblewrap:exclude[::*.nix],:/safety/oxidized/bubblewrap::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-bzip2"
+    path: "safety/oxidized/bzip2"
+    description: "A bzip2-compatible compression tool written in Rust"
+    filter: ":[:/rust/bzip2:exclude[::*.nix],:/rust/bzip2::flake.nix,:/safety/oxidized/bzip2:exclude[::*.nix],:/safety/oxidized/bzip2::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-cachix"
+    path: "safety/oxidized/cachix"
+    description: "A Cachix-compatible CLI for Nix binary cache hosting written in Rust"
+    filter: ":[:/rust/cachix:exclude[::*.nix],:/rust/cachix::flake.nix,:/safety/oxidized/cachix:exclude[::*.nix],:/safety/oxidized/cachix::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-curl"
+    path: "safety/oxidized/curl"
+    description: "A curl-compatible HTTP client written in Rust"
+    filter: ":[:/rust/curl:exclude[::*.nix],:/rust/curl::flake.nix,:/safety/oxidized/curl:exclude[::*.nix],:/safety/oxidized/curl::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-diffutils"
+    path: "safety/oxidized/diffutils"
+    description: "A GNU diffutils-compatible suite of file comparison tools written in Rust"
+    filter: ":[:/rust/diffutils:exclude[::*.nix],:/rust/diffutils::flake.nix,:/safety/oxidized/diffutils:exclude[::*.nix],:/safety/oxidized/diffutils::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-direnv"
+    path: "safety/oxidized/direnv"
+    description: "A direnv-compatible environment loader written in Rust"
+    filter: ":[:/rust/direnv:exclude[::*.nix],:/rust/direnv::flake.nix,:/safety/oxidized/direnv:exclude[::*.nix],:/safety/oxidized/direnv::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-file"
+    path: "safety/oxidized/file"
+    description: "A GNU file-compatible file type detection tool written in Rust"
+    filter: ":[:/rust/file:exclude[::*.nix],:/rust/file::flake.nix,:/safety/oxidized/file:exclude[::*.nix],:/safety/oxidized/file::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-help2man"
+    path: "safety/oxidized/help2man"
+    description: "A GNU help2man-compatible man page generator written in Rust"
+    filter: ":[:/rust/help2man:exclude[::*.nix],:/rust/help2man::flake.nix,:/safety/oxidized/help2man:exclude[::*.nix],:/safety/oxidized/help2man::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-llvm"
+    path: "safety/oxidized/llvm"
+    description: "An LLVM-compatible compiler infrastructure written in Rust"
+    filter: ":[:/rust/llvm:exclude[::*.nix],:/rust/llvm::flake.nix,:/safety/oxidized/llvm:exclude[::*.nix],:/safety/oxidized/llvm::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-pkg-config"
+    path: "safety/oxidized/pkg-config"
+    description: "A pkg-config-compatible build metadata tool written in Rust"
+    filter: ":[:/rust/pkg-config:exclude[::*.nix],:/rust/pkg-config::flake.nix,:/safety/oxidized/pkg-config:exclude[::*.nix],:/safety/oxidized/pkg-config::flake.nix]:unsign"
+  }
+  {
+    name: "oxidized-texinfo"
+    path: "safety/oxidized/texinfo"
+    description: "A GNU makeinfo-compatible Texinfo processor written in Rust"
+    filter: ":[:/rust/texinfo:exclude[::*.nix],:/rust/texinfo::flake.nix,:/safety/oxidized/texinfo:exclude[::*.nix],:/safety/oxidized/texinfo::flake.nix]:unsign"
+  }
   # Not a rust/ rewrite: the flakelight module every other published repo
   # imports. It has to be published for them to resolve it, and it is
   # deliberately first in this list so a run that adds a project pushes the
