@@ -13,6 +13,7 @@ use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
 use llvm_ir::types::TypeKind;
 use llvm_ir::value::{GlobalRef, MdId, Name, Value};
 use llvm_support::{ApInt, DataLayout, Triple};
+use std::collections::HashSet;
 
 /// What upstream says about a use list and the indexes written for it, or
 /// `None` when it says nothing.
@@ -1499,21 +1500,31 @@ impl Parser {
 
     /// Applies that rewrite, after the whole module, `!llvm.module.flags`
     /// being able to name a node the text has not reached yet.
-    /// Debug info a reader of this version cannot make sense of, taken out.
+    /// Debug info a reader cannot make sense of, taken out.
     ///
-    /// A module says which debug-info format it holds with a module flag, and
-    /// upstream drops the lot rather than reading an older one: the `!dbg`
-    /// attachments, the debug records and the `llvm.dbg.cu` list. What is
+    /// Upstream's verifier has two halves and this is the second. One refuses
+    /// the module. The other says what is wrong, takes every bit of debug
+    /// info out and reads what is left, which is why
+    /// `DebugInfo/pr34186.ll` comes back as a module with no debug info at
+    /// all rather than as an error. `llvm-as` does the same, so this is not
+    /// one tool's habit.
+    ///
+    /// Two things make a module's debug info invalid. The format it says it
+    /// is in, which is a module flag, and the nodes themselves, which
+    /// `debug_info_is_broken` asks about. Either way the whole module's
+    /// debug info goes, not the part that is wrong: one broken subprogram
+    /// takes the other function's line numbers with it, which one probe with
+    /// two functions settled.
+    ///
+    /// What goes is the `!dbg` attachments on globals, functions and
+    /// instructions, the debug records and the `llvm.dbg.cu` list. What is
     /// left is ordinary metadata, so a node some other list still names
     /// survives and one only the debug info reached does not.
     pub(crate) fn drop_invalid_debug_info(&mut self) {
         const CURRENT: u64 = 3;
-        if self.debug_info_version() == Some(CURRENT) {
+        if self.debug_info_version() == Some(CURRENT) && !self.debug_info_is_broken() {
             return;
         }
-        // An attachment naming a node the module never defines is left
-        // where it is, because that is a reference upstream refuses rather
-        // than debug info it drops.
         self.module
             .named_metadata
             .retain(|named| named.name != "llvm.dbg.cu");
@@ -1527,6 +1538,11 @@ impl Parser {
             .map(|node| node.is_some())
             .collect();
         let module = known.as_slice();
+        for global in &mut self.module.globals {
+            global.metadata.retain(|attachment| {
+                attachment.kind != "dbg" || !defined(module, &attachment.node)
+            });
+        }
         for function in &mut self.module.functions {
             function.metadata.retain(|attachment| {
                 attachment.kind != "dbg" || !defined(module, &attachment.node)
@@ -1564,6 +1580,154 @@ impl Parser {
                 });
             }
         }
+    }
+
+    /// Whether the debug info this module reaches breaks one of the rules
+    /// upstream strips for rather than refuses.
+    ///
+    /// The reach is the debug info itself: what a `!dbg` attachment, a debug
+    /// record or `llvm.dbg.cu` leads to. A broken node only an ordinary
+    /// named list leads to is one stripping would not remove, and upstream
+    /// refuses the module rather than reading it, so it is not asked about
+    /// here: this never turns a refusal into an acceptance.
+    ///
+    /// Four rules, each measured with the shape that passes beside the one
+    /// that fails. `corpus`-style probes are in the commit that added them.
+    fn debug_info_is_broken(&self) -> bool {
+        let mut seen: HashSet<MdId> = HashSet::new();
+        let mut pending = self.debug_info_roots();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(node) = self.module.metadata_node(id) else {
+                continue;
+            };
+            if self.node_breaks_debug_info(node) {
+                return true;
+            }
+            pending.extend(node.references());
+        }
+        false
+    }
+
+    /// Where the debug info starts: the `!dbg` attachments, the operands of
+    /// every debug record, and the compile units.
+    fn debug_info_roots(&self) -> Vec<MdId> {
+        let mut roots = Vec::new();
+        let attached = |metadata: &[llvm_ir::metadata::MdAttachment]| {
+            metadata
+                .iter()
+                .filter(|attachment| attachment.kind == "dbg")
+                .filter_map(|attachment| match attachment.node {
+                    llvm_ir::metadata::MdRef::Id(id) => Some(id),
+                    llvm_ir::metadata::MdRef::Inline(_) => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        for global in &self.module.globals {
+            roots.extend(attached(&global.metadata));
+        }
+        for function in &self.module.functions {
+            roots.extend(attached(&function.metadata));
+            for (block, _) in function.blocks() {
+                for (_, instruction) in function.block_instructions(block) {
+                    roots.extend(attached(&instruction.metadata));
+                    if let llvm_ir::instruction::InstKind::DebugRecord { operands, .. } =
+                        &instruction.kind
+                    {
+                        roots.extend(operands.iter().filter_map(|operand| match operand {
+                            MdOperand::Ref(id) => Some(*id),
+                            _ => None,
+                        }));
+                    }
+                }
+            }
+        }
+        for named in &self.module.named_metadata {
+            if named.name == "llvm.dbg.cu" {
+                roots.extend(named.operands.iter().copied());
+            }
+        }
+        roots
+    }
+
+    /// The rules themselves, one node at a time.
+    fn node_breaks_debug_info(&self, node: &Metadata) -> bool {
+        let Metadata::Specialized { tag, .. } = node else {
+            return false;
+        };
+        match tag.as_str() {
+            // "missing global variable type", which `pr34186.ll` is, and
+            // "invalid type ref", which `pr34672.ll` is: a global variable
+            // that is a definition has to have a type, and whatever names a
+            // type has to name one. A declaration may leave it out, which is
+            // how `BPF/extern-void.ll` describes a variable it only knows
+            // the name of, and `isDefinition:` defaults to a definition.
+            "DIGlobalVariable" => {
+                self.type_ref_is_wrong(node.field("type"))
+                    || (!matches!(node.field("isDefinition"), Some(MdField::Bool(false)))
+                        && !self.names_a_type(node.field("type")))
+            }
+            // The same question where the field may be left out. A local
+            // variable with no type is read, and so is `baseType: null`,
+            // which is how a pointer to void is written and is why this asks
+            // about a reference rather than about the field being there.
+            "DILocalVariable" => self.type_ref_is_wrong(node.field("type")),
+            "DIDerivedType" => self.type_ref_is_wrong(node.field("baseType")),
+            // "definition subprograms cannot be nested within
+            // DICompositeType when enabling ODR", which `cross-cu-scope.ll`
+            // is. A composite type with an identifier is one the language
+            // gives a single definition, so a definition written inside one
+            // would be duplicated by the uniquing unless it says which
+            // declaration it defines. Four shapes were asked: the plain one
+            // strips, marking the type `distinct` does not save it, and
+            // either way a `declaration:` does.
+            "DISubprogram" => {
+                subprogram_is_a_definition(node)
+                    && node.field("declaration").is_none()
+                    && self.scope_is_an_odr_type(node.field("scope"))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether a field names something that is not a type. A field that is
+    /// absent or `null` names nothing and is not wrong here.
+    fn type_ref_is_wrong(&self, field: Option<&MdField>) -> bool {
+        matches!(field, Some(MdField::Ref(_))) && !self.names_a_type(field)
+    }
+
+    /// Whether a field names a node that is a type.
+    fn names_a_type(&self, field: Option<&MdField>) -> bool {
+        const TYPES: [&str; 5] = [
+            "DIBasicType",
+            "DICompositeType",
+            "DIDerivedType",
+            "DIStringType",
+            "DISubroutineType",
+        ];
+        let Some(MdField::Ref(id)) = field else {
+            return false;
+        };
+        let Some(Metadata::Specialized { tag, .. }) = self.module.metadata_node(*id) else {
+            return false;
+        };
+        TYPES.contains(&tag.as_str())
+    }
+
+    /// Whether a scope field names a composite type carrying an identifier.
+    fn scope_is_an_odr_type(&self, field: Option<&MdField>) -> bool {
+        let Some(MdField::Ref(id)) = field else {
+            return false;
+        };
+        let Some(node) = self.module.metadata_node(*id) else {
+            return false;
+        };
+        let Metadata::Specialized { tag, .. } = node else {
+            return false;
+        };
+        tag == "DICompositeType" && node.field("identifier").is_some()
     }
 
     /// The version the `Debug Info Version` module flag names, if it names one.
@@ -1930,6 +2094,28 @@ fn names_itself(node: &Metadata, id: MdId) -> bool {
                 .any(|field| matches!(field, MdField::Ref(named) if *named == id))
         }
         Metadata::String(_) => false,
+    }
+}
+
+/// Whether a subprogram is a definition rather than a declaration.
+///
+/// The parser has already turned the older `isDefinition:` spelling into
+/// `spFlags:`, so there are three shapes left. Words, where the flag is
+/// there or it is not. A number, which is how a subprogram with no flags at
+/// all comes out and is the shape a C++ member declaration is written in.
+/// And nothing, which is a modern spelling that wrote no flags and is a
+/// definition all the same: upstream refuses one that is not `distinct`,
+/// "required for !DISubprogram that is a Definition".
+///
+/// The bit is 8, measured by writing `spFlags: 8` and reading back
+/// `spFlags: DISPFlagDefinition`.
+fn subprogram_is_a_definition(node: &Metadata) -> bool {
+    const DEFINITION: u128 = 8;
+    match node.field("spFlags") {
+        Some(MdField::Words(words)) => words.iter().any(|word| word == "DISPFlagDefinition"),
+        Some(MdField::Unsigned(bits)) => bits & DEFINITION != 0,
+        Some(_) => false,
+        None => true,
     }
 }
 

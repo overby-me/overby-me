@@ -319,10 +319,10 @@ files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
 against upstream's own `opt -S`, and **220 of 226** are identical, with
 four more suites measured the same way: **71 of 71** in `Feature`, **220 of
-220** in `Linker`, **144 of 144** in `Other` and **50 of 57** in
+220** in `Linker`, **144 of 144** in `Other` and **54 of 57** in
 `DebugInfo`. Three of the five print every module both tools accept exactly
 as upstream prints it; the two that do not have their remaining files
-sorted by cause in CLAUDE.md, six in one and seven in the other. Some of the
+sorted by cause in CLAUDE.md, six in one and three in the other. Some of the
 remaining differences are ones where we already match
 `llvm-as | llvm-dis` and `opt -S` does something else. ODR type uniquing is most of them; the
 clearest is `!DIObjCProperty`, where `opt -S` prints the setter and the
@@ -385,6 +385,12 @@ a compiler project's README:
   the semantics: rewriting an expression written for an older dialect, and
   filling a compile unit's file in from a subprogram that names it. Both
   want the `llvm-debuginfo` crate at T1.
+  Four rules of the half of the verifier that strips debug info rather than
+  refusing a module are here, measured with the passing shape beside the
+  failing one, and ten more that upstream applies in that tree are not: over
+  the 1,093 modules of `llvm/test/DebugInfo` we and upstream both read,
+  there is no module we strip that upstream keeps, and ten we keep that it
+  strips.
 - **No unwinding, no LTO, no PGO, no coverage.**
 - **No C ABI.** `llvm-c-abi` is T5.
 

@@ -79,6 +79,24 @@ pub enum SpecializedArgs {
     Positional(Vec<MdField>),
 }
 
+impl SpecializedArgs {
+    /// The values, whichever way they are written.
+    pub fn fields(&self) -> impl Iterator<Item = &MdField> {
+        let named: &[(String, MdField)] = match self {
+            SpecializedArgs::Named(fields) => fields,
+            SpecializedArgs::Positional(_) => &[],
+        };
+        let positional: &[MdField] = match self {
+            SpecializedArgs::Named(_) => &[],
+            SpecializedArgs::Positional(values) => values,
+        };
+        named
+            .iter()
+            .map(|(_, value)| value)
+            .chain(positional.iter())
+    }
+}
+
 /// A metadata node definition.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Metadata {
@@ -200,6 +218,43 @@ impl Metadata {
             Metadata::Tuple { operands, .. } => Some(operands),
             _ => None,
         }
+    }
+
+    /// The nodes this one names by number, which is what a walk over the
+    /// graph follows. A node written in place is part of this one rather
+    /// than a reference to another, so it contributes nothing.
+    pub fn references(&self) -> Vec<MdId> {
+        match self {
+            Metadata::String(_) => Vec::new(),
+            Metadata::Tuple { operands, .. } => operands
+                .iter()
+                .filter_map(|operand| match operand {
+                    MdOperand::Ref(id) => Some(*id),
+                    _ => None,
+                })
+                .collect(),
+            Metadata::Specialized { args, .. } => args
+                .fields()
+                .filter_map(|field| match field {
+                    MdField::Ref(id) => Some(*id),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    /// The value of a named field, for a node that has named fields.
+    pub fn field(&self, wanted: &str) -> Option<&MdField> {
+        let Metadata::Specialized {
+            args: SpecializedArgs::Named(fields),
+            ..
+        } = self
+        else {
+            return None;
+        };
+        fields
+            .iter()
+            .find_map(|(name, value)| (name == wanted).then_some(value))
     }
 
     pub fn as_string(&self) -> Option<&str> {

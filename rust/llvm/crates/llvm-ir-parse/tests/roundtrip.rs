@@ -1018,6 +1018,98 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
+/// Debug info upstream cannot make sense of is taken out of the module
+/// rather than made an error, and the shape beside it is kept.
+///
+/// Four rules, each with the shape that passes written beside the one that
+/// fails, because a rule measured only where it fires is a rule that strips
+/// everything. Both texts of each pair are what `opt -S` printed.
+#[test]
+fn broken_debug_info_is_stripped_and_the_rest_is_kept() {
+    const PREAMBLE: &str = concat!(
+        "!llvm.dbg.cu = !{!0}\n",
+        "!llvm.module.flags = !{!90}\n",
+        "!90 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+        "!91 = !DIFile(filename: \"probe.c\", directory: \"/\")\n",
+        "!92 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
+        "!0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !91, ",
+        "emissionKind: FullDebug, globals: !2)\n",
+        "!2 = !{!1}\n",
+        "!1 = !DIGlobalVariableExpression(var: !3, expr: !DIExpression())\n",
+    );
+    let global = |written: &str| format!("@g = global i32 0, !dbg !1\n{PREAMBLE}!3 = {written}\n");
+    let subprogram = |written: &str, extra: &str| {
+        format!(
+            "define void @f() !dbg !6 {{\n  ret void, !dbg !13\n}}\n{PREAMBLE}\
+             !3 = distinct !DIGlobalVariable(name: \"g\", scope: !0, file: !91, line: 1, \
+             type: !92, isLocal: false, isDefinition: true)\n\
+             !5 = !DICompositeType(tag: DW_TAG_structure_type, name: \"S\", file: !91{extra})\n\
+             !6 = {written}\n\
+             !7 = !DISubroutineType(types: !8)\n!8 = !{{null}}\n\
+             !13 = !DILocation(line: 1, column: 1, scope: !6)\n"
+        )
+    };
+    let definition = "distinct !DIGlobalVariable(name: \"g\", scope: !0, file: !91, line: 1";
+    let cases: [(String, bool); 6] = [
+        // A global variable that is a definition has to have a type, and a
+        // declaration does not.
+        (
+            global(&format!(
+                "{definition}, isLocal: false, isDefinition: true)"
+            )),
+            false,
+        ),
+        (
+            global(&format!(
+                "{definition}, isLocal: false, isDefinition: false)"
+            )),
+            true,
+        ),
+        // Whatever names a type has to name one.
+        (
+            global(&format!(
+                "{definition}, type: !91, isLocal: false, isDefinition: true)"
+            )),
+            false,
+        ),
+        (
+            global(&format!(
+                "{definition}, type: !92, isLocal: false, isDefinition: true)"
+            )),
+            true,
+        ),
+        // A definition subprogram scoped inside a type the language gives
+        // one definition needs to say which declaration it defines.
+        (
+            subprogram(
+                "distinct !DISubprogram(name: \"f\", scope: !5, file: !91, line: 1, type: !7, \
+                 spFlags: DISPFlagDefinition, unit: !0)",
+                ", identifier: \"_ZTS1S\"",
+            ),
+            false,
+        ),
+        (
+            subprogram(
+                "distinct !DISubprogram(name: \"f\", scope: !5, file: !91, line: 1, type: !7, \
+                 spFlags: DISPFlagDefinition, unit: !0)",
+                "",
+            ),
+            true,
+        ),
+    ];
+    for (text, keeps) in cases {
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("did not parse: {error}\n--- from ---\n{text}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert_eq!(
+            printed.contains("!DICompileUnit"),
+            keeps,
+            "wanted the debug info {}\n--- from ---\n{text}--- printed ---\n{printed}",
+            if keeps { "kept" } else { "taken out" }
+        );
+    }
+}
+
 /// An intrinsic LangRef documents at one arity and upstream recognises at
 /// another is recognised at upstream's.
 ///

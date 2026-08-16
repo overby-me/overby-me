@@ -2749,6 +2749,57 @@ out and we leave off; a debug record upstream drops in
 `drop-debug-info-nonzero-alloca.ll`, which belongs with the stripping above;
 and the order the predecessor comment lists blocks in, which `uselistorder
 .ll` permutes and we print in block order.
+The pass after it built the half of upstream's verifier that does not refuse
+a module. A debug-info failure is not an error there: upstream says what is
+wrong, takes every bit of debug info out of the module and reads what is
+left, which is why `DebugInfo/pr34186.ll` comes back with no debug info at
+all rather than as a diagnostic. `llvm-as` does the same, so it is not one
+tool's habit, and both tools read all four of the files this pass closed.
+The stripping itself was already here for a module whose `Debug Info
+Version` flag is not 3, and it was missing the `!dbg` on a global. What is
+taken out, measured by feeding upstream a module that is valid apart from one
+node: the attachments on globals, functions and instructions, the debug
+records and `llvm.dbg.cu`. What is left is ordinary metadata, so a node
+another named list still names survives, and one broken subprogram takes the
+other function's line numbers with it, the strip being the whole module's.
+Four rules, and every one of them needed the shape that passes measured
+beside the shape that fails, because a rule measured only where it fires is a
+rule that strips everything. The first draft of three of them stripped 97 of
+the 1,093 modules in that tree that upstream keeps.
+A global variable that is a definition has to have a type: `pr34186.ll` has
+none and upstream says "missing global variable type". A declaration does
+not, which `BPF/extern-void.ll` is, describing a variable it knows only the
+name of, and `isDefinition:` left out means a definition.
+Whatever names a type has to name one: `pr34672.ll` has `type: !3` where
+`!3` is a `DIFile`, and upstream says "invalid type ref". The same question
+at a local variable and at a derived type's base, where the field may be
+absent or `null`: `baseType: null` is how a pointer to void is written, and
+asking whether the field is *there* rather than whether it *names something
+else* was most of that 97.
+A definition subprogram scoped inside a `DICompositeType` with an identifier
+is what `cross-cu-scope.ll` has, and upstream says "definition subprograms
+cannot be nested within DICompositeType when enabling ODR". Four shapes said
+what the rule is: the plain one strips, marking the composite `distinct` does
+not save it, and a `declaration:` naming the in-class declaration does, which
+is what every C++ member definition in `llvm/test/DebugInfo/COFF` carries.
+And `spFlags: 0` is not a definition while no `spFlags` at all is one, the
+older `isDefinition:` defaulting to true, which upstream shows by refusing a
+`!DISubprogram` written with neither unless it is `distinct`. The bit is 8,
+read back from `spFlags: 8`.
+Both directions over the tree, which is the check that found each of those:
+of the 1,093 modules we and upstream both read, there is now not one we
+strip and upstream keeps, and ten we keep and upstream strips, each of them
+a rule not written yet. The distinct messages in that tree are the rest of
+the list: an array type with no base type, a `DIFlagAllCallsDescribed` on
+something that is not a definition, a subprogram definition with no compile
+unit, an invalid `!dbg` attachment, an invalid expression, an invalid file,
+an invalid compile unit, a `DVRAssign` in another function, an atom group
+without key instructions, and a subprogram scoped below an ODR type through
+a lexical block, which upstream calls an invalid local scope.
+Assembler, Feature, Linker and Other unmoved, and no module we strip that
+upstream keeps in any of them either, nor in the 22,524 of `CodeGen` we both
+read, which is where a rule that fires too widely would show up first.
+DebugInfo differential 50 to 54.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*
