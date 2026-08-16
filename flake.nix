@@ -7,16 +7,6 @@
   };
 
   inputs = {
-    # Build-time environment values, passed in via `--override-input env`
-    # (e.g. CI injects PUBLIC_GIT_COMMIT_SHA for apps/wiki). Defaults to an
-    # empty file, so local builds fall back to sensible defaults. This no
-    # longer carries the working directory: the devshells discover it at
-    # runtime instead.
-    env = {
-      url = "file+file:///dev/null";
-      flake = false;
-    };
-
     # Agent Skills
     modular-skills = {
       url = "github:modular/skills";
@@ -91,22 +81,12 @@
         # pulls in are never built.
       };
     };
-    agenix = {
-      url = "github:ryantm/agenix";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        home-manager.follows = "home-manager";
-        systems.follows = "systems";
-      };
-    };
     ragenix = {
       url = "github:yaxitech/ragenix";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         flake-utils.follows = "flake-utils";
-        agenix.follows = "agenix";
         rust-overlay.follows = "rust-overlay";
-        crane.follows = "crane";
       };
     };
 
@@ -114,9 +94,6 @@
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
-    crane = {
-      url = "github:ipetkov/crane";
     };
 
     # Apps
@@ -142,12 +119,7 @@
       inputs = {
         nixpkgs.follows = "nixpkgs";
         flake-compat.follows = "flake-compat";
-        gitignore.follows = "gitignore";
       };
-    };
-    gitignore = {
-      url = "github:hercules-ci/gitignore.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
@@ -158,11 +130,6 @@
     };
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
-    };
-    hercules-ci-effects = {
-      url = "github:hercules-ci/hercules-ci-effects";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-parts.follows = "flake-parts";
     };
     systems.url = "github:nix-systems/default";
     drowse = {

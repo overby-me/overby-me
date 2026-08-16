@@ -3,15 +3,12 @@
     "agenix": {
       "inputs": {
         "darwin": "darwin",
-        "home-manager": [
-          "home-manager"
-        ],
+        "home-manager": "home-manager_2",
         "nixpkgs": [
+          "ragenix",
           "nixpkgs"
         ],
-        "systems": [
-          "systems"
-        ]
+        "systems": "systems"
       },
       "locked": {
         "lastModified": 1770165109,
@@ -61,6 +58,7 @@
     "darwin": {
       "inputs": {
         "nixpkgs": [
+          "ragenix",
           "agenix",
           "nixpkgs"
         ]
@@ -122,18 +120,6 @@
         "owner": "figsoda",
         "repo": "drowse",
         "type": "github"
-      }
-    },
-    "env": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-d6xi4mKdjkX2JFicDIv5niSzpyI0m/Hnm8GGAIU04kY=",
-        "type": "file",
-        "url": "file:///dev/null"
-      },
-      "original": {
-        "type": "file",
-        "url": "file:///dev/null"
       }
     },
     "flake-compat": {
@@ -237,26 +223,6 @@
     "gitignore": {
       "inputs": {
         "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1762808025,
-        "narHash": "sha256-XmjITeZNMTQXGhhww6ed/Wacy2KzD6svioyCX7pkUu4=",
-        "owner": "hercules-ci",
-        "repo": "gitignore.nix",
-        "rev": "cb5e3fdca1de58ccbc3ef53de65bd372b48f567c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "hercules-ci",
-        "repo": "gitignore.nix",
-        "type": "github"
-      }
-    },
-    "gitignore_2": {
-      "inputs": {
-        "nixpkgs": [
           "system-manager",
           "userborn",
           "pre-commit-hooks-nix",
@@ -299,29 +265,6 @@
         "type": "github"
       }
     },
-    "hercules-ci-effects": {
-      "inputs": {
-        "flake-parts": [
-          "flake-parts"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1784091696,
-        "narHash": "sha256-4sTf6FyZLUG3UJ1VNAHBbUGvNoiIfpPaju6D7RsDQrY=",
-        "owner": "hercules-ci",
-        "repo": "hercules-ci-effects",
-        "rev": "41134a44913c4a32cdb03e5e82ac331af0ff3efc",
-        "type": "github"
-      },
-      "original": {
-        "owner": "hercules-ci",
-        "repo": "hercules-ci-effects",
-        "type": "github"
-      }
-    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -339,6 +282,28 @@
       "original": {
         "owner": "nix-community",
         "ref": "release-26.05",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
+    "home-manager_2": {
+      "inputs": {
+        "nixpkgs": [
+          "ragenix",
+          "agenix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1745494811,
+        "narHash": "sha256-YZCh2o9Ua1n9uCvrvi5pRxtuVNml8X2a03qIFfRKpFs=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "abfad3d2958c9e6300a883bd443512c55dfeb1be",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
         "repo": "home-manager",
         "type": "github"
       }
@@ -549,7 +514,7 @@
           "userborn",
           "flake-compat"
         ],
-        "gitignore": "gitignore_2",
+        "gitignore": "gitignore",
         "nixpkgs": [
           "system-manager",
           "userborn",
@@ -572,12 +537,8 @@
     },
     "ragenix": {
       "inputs": {
-        "agenix": [
-          "agenix"
-        ],
-        "crane": [
-          "crane"
-        ],
+        "agenix": "agenix",
+        "crane": "crane",
         "flake-utils": [
           "flake-utils"
         ],
@@ -604,17 +565,12 @@
     },
     "root": {
       "inputs": {
-        "agenix": "agenix",
-        "crane": "crane",
         "disko": "disko",
         "drowse": "drowse",
-        "env": "env",
         "flake-compat": "flake-compat",
         "flake-parts": "flake-parts",
         "flake-utils": "flake-utils",
         "git-hooks": "git-hooks",
-        "gitignore": "gitignore",
-        "hercules-ci-effects": "hercules-ci-effects",
         "home-manager": "home-manager",
         "modular-skills": "modular-skills",
         "nix-darwin": "nix-darwin",
@@ -626,7 +582,7 @@
         "ragenix": "ragenix",
         "rust-overlay": "rust-overlay",
         "system-manager": "system-manager",
-        "systems": "systems_2",
+        "systems": "systems_3",
         "zen-browser": "zen-browser"
       }
     },
@@ -702,6 +658,21 @@
         "type": "github"
       }
     },
+    "systems_3": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
     "userborn": {
       "inputs": {
         "flake-compat": [
@@ -714,7 +685,7 @@
           "nixpkgs"
         ],
         "pre-commit-hooks-nix": "pre-commit-hooks-nix",
-        "systems": "systems"
+        "systems": "systems_2"
       },
       "locked": {
         "lastModified": 1770377964,

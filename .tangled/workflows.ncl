@@ -41,11 +41,9 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
           mkdir -p $HOME/.config/nix
           echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
           echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
-          printf '{"PWD":"%s"}' "$PWD" > .env
           export NIX_CONFIG="experimental-features = %%{nixFeatures}"
           nix build --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 \
-            --no-link --print-build-logs .#checks.x86_64-linux.formatting \
-            --override-input env path:$(realpath $PWD/.env)
+            --no-link --print-build-logs .#checks.x86_64-linux.formatting
         "%%,
       },
     ],
