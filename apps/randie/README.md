@@ -1,5 +1,18 @@
 # Randie
 
+<!-- publish:begin -->
+> Part of the [overby.me monorepo](https://tangled.org/overby.me/overby.me), where this lives in
+> [`apps/randie`](https://tangled.org/overby.me/overby.me/tree/main/apps/randie) and where all development happens.
+>
+> It is also published on its own, as
+> [tangled.org/overby.me/randie](https://tangled.org/overby.me/randie) and
+> [github.com/overby-me/randie](https://github.com/overby-me/randie). Both
+> are read-only mirrors, rebuilt from the monorepo with
+> [josh](https://github.com/josh-project/josh): a commit made to either is
+> overwritten by the next sync, so please open issues and pull requests on the
+> monorepo.
+<!-- publish:end -->
+
 Firmware for an indoor navigation drone, and the simulator it is flown in.
 
 A Rust port of [prozum/randie](https://github.com/prozum/randie), a university

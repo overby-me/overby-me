@@ -274,6 +274,13 @@
     description: "The overby.me website, in Rust and Dioxus with WebGL screensavers"
     filter: ":[:/web/homepage:exclude[::*.nix],:/web/homepage::flake.nix,:/apps/homepage:exclude[::*.nix],:/apps/homepage::flake.nix]:unsign"
   }
+  # Written after the restructure, so its filter names one path.
+  {
+    name: "randie"
+    path: "apps/randie"
+    description: "An indoor navigation drone's firmware and its simulator, in Rust and Dioxus"
+    filter: ":[:/apps/randie:exclude[::*.nix],:/apps/randie::flake.nix]:unsign"
+  }
   {
     name: "wclip"
     path: "dev/wclip"
