@@ -51,12 +51,30 @@ is a flakelight module, but the root flake imports it and all but one reach for
 project the three things it needs to be a real repo, all of them inert in the
 monorepo:
 
-- `flake.nix`, a flakelight flake, the same shape as the monorepo and as the
-  `default.nix` it replaces. It reads its own `Cargo.toml` with
-  `builtins.fromTOML`, so one template covers every project. flakelight derives
-  packages, checks and the overlay from a single package definition, so
-  `nix flake check` builds the package and checks formatting with nothing
-  further declared.
+- `flake.nix`, one call into [`nix-project`](../../nix/project), which is a
+  flakelight flake made callable through flakelight's `functor` option:
+
+  ```nix
+  {
+    description = "A GNU sed-compatible stream editor written in Rust";
+
+    inputs.project.url = "github:overby-me/nix-project";
+
+    outputs = inputs:
+      inputs.project ./. {
+        name = "oxidized-sed";
+        description = "A GNU sed-compatible stream editor written in Rust";
+      };
+  }
+  ```
+
+  The module behind it reads the project's own `Cargo.toml` with
+  `builtins.fromTOML`, so one template covers every project, and flakelight
+  derives packages, checks and the overlay from a single package definition,
+  so `nix flake check` builds the package and checks formatting with nothing
+  further declared. A project states only what differs: `subdir`,
+  `nativeBuildInputs`, `buildInputs`, `doCheck`, `cargoTestFlags`, `env`,
+  `toolchain`.
 - `.tangled/workflows/ci.yml`, which runs `nix flake check`. Tangled reads
   workflows from a repo root, so under `safety/oxidized/<name>/` it does nothing
   here.
@@ -66,11 +84,11 @@ The generator runs `alejandra` over what it writes, because flakelight gives
 every repo a formatting check and an unformatted generated flake fails the CI
 of the repo it was generated for.
 
-nixpkgs is pinned to the exact revision this monorepo's own `flake.lock`
-resolves, read out of it at generation time, so every published repo builds
-against identical nixpkgs and they cannot drift. Mapping the monorepo's lock
-into each repo would achieve the same, but it would reintroduce shared surface:
-one `nix flake update` would become one commit in every published repo, forever.
+nixpkgs comes from `nix-project`'s own lock, because the functor closes over
+that flake's inputs. Every published repo therefore builds against identical
+nixpkgs by construction, and each lock has one direct input. This replaced
+writing the monorepo's resolved revision into all thirty-eight files, which
+achieved the same synchronisation only for as long as nobody edited one.
 
 ### The devshell
 
@@ -79,11 +97,30 @@ everywhere: `rustfmt`, `clippy`, `typos`, `ripsecrets`, `alejandra`, `deadnix`
 and `statix`. A contributor who has only that repo is then held to what the
 monorepo holds it to.
 
-They come from this generator's template rather than from a shared flake of
-ours. Sharing them as an input would make entering the shell of every published
-repo depend on a second repo of ours, and the point of these repos is that they
-stand alone. The template is the single source of truth; regenerating
-propagates a change to all of them at once.
+They come from `nix-project` rather than from each repo's own flake, so
+changing the hook list is one commit there rather than thirty-eight
+regenerated files. That does make a published repo depend on a second repo of
+ours, which the earlier per-repo template avoided; the trade was taken once
+the alternative had drifted in practice.
+
+An overlay is the exception, and stays the consuming flake's own input:
+
+```nix
+inputs = {
+  project.url = "github:overby-me/nix-project";
+  rust-overlay.url = "github:oxalica/rust-overlay";
+};
+
+outputs = inputs:
+  inputs.project ./. {
+    name = "fe-c";
+    toolchain = true;
+    withOverlays = [inputs.rust-overlay.overlays.default];
+  };
+```
+
+Carrying `rust-overlay` in `nix-project` would make all thirty-eight repos
+fetch it for the one that pins a toolchain.
 
 ### Projects that are not pure Rust
 

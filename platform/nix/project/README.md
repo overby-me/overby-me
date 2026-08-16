@@ -25,29 +25,38 @@ rather than in twenty-odd copies:
 - a devshell carrying the pre-commit hooks the monorepo holds it to
 - a formatter
 
-A consuming flake then states only what is different about it:
+This flake is callable, through flakelight's `functor` option, so a consuming
+flake is the call and whatever is different about that project:
 
 ```nix
-outputs = inputs:
-  inputs.flakelight ./. {
-    inherit inputs;
-    imports = [inputs.standalone.flakelightModules.default];
+{
+  description = "A GNU sed-compatible stream editor written in Rust";
 
-    description = "A GNU sed-compatible stream editor written in Rust";
+  inputs.project.url = "github:overby-me/nix-project";
 
-    standalone = {
-      name = "rust-sed";
-      root = ./.;
+  outputs = inputs:
+    inputs.project ./. {
+      name = "oxidized-sed";
+      description = "A GNU sed-compatible stream editor written in Rust";
     };
-  };
+}
 ```
+
+That is the whole file. The inputs the call closes over are this flake's own,
+so nixpkgs, flakelight and the hooks are the same in every published repo
+without any of them naming a revision, and each of their locks has one direct
+input.
+
+The module is also exported as `flakelightModules.default`, for a flake that
+needs to compose it with modules of its own.
 
 ## Options
 
 | option | default | for |
 |-|-|-|
 | `name` | — | fallback package name; a workspace root has no `[package]` |
-| `root` | — | the repo root, so the module can read its `Cargo.toml` |
+| `description` | `""` | the package's `meta.description` |
+| `root` | the call's first argument | the repo root, so the module can read its `Cargo.toml` |
 | `subdir` | `""` | the crate is one level down (see below) |
 | `nativeBuildInputs` | `[]` | nixpkgs attribute names of build-time tools |
 | `buildInputs` | `[]` | nixpkgs attribute names of libraries linked against |
@@ -65,10 +74,28 @@ resolves. Its own crate is then one level down, and the build needs both
 `toolchain` exists for compiler plugins: they link against rustc's internals,
 whose API differs between releases, so they need the exact nightly named in
 their own `rust-toolchain.toml` rather than whatever rustc nixpkgs ships. The
-consuming flake supplies the `rust-overlay` overlay for it.
+consuming flake supplies the `rust-overlay` overlay for it, through
+`withOverlays`, which the call passes through:
+
+```nix
+inputs = {
+  project.url = "github:overby-me/nix-project";
+  rust-overlay.url = "github:oxalica/rust-overlay";
+};
+
+outputs = inputs:
+  inputs.project ./. {
+    name = "fe-c";
+    toolchain = true;
+    withOverlays = [inputs.rust-overlay.overlays.default];
+  };
+```
+
+An overlay is its own flake, so carrying it here would make every published
+repo fetch it for the one project that pins a toolchain.
 
 ## Contributing
 
-Development happens in the monorepo, in `platform/nix/standalone`. This repo is a
+Development happens in the monorepo, in `platform/nix/project`. This repo is a
 read-only mirror, rebuilt by josh, and a commit made here is overwritten by the
 next sync.
