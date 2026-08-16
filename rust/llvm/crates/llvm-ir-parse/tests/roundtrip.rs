@@ -1018,6 +1018,39 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
+/// An attribute set prints in upstream's order rather than the one it was
+/// written in.
+///
+/// Every line here is what `opt -S` printed for the line above it. The order
+/// is neither alphabetical nor the written one: `noundef` comes before
+/// `nonnull`, the ones taking an argument follow every bare keyword, and the
+/// quoted ones come last. `corpus/attribute-order.nu` measures it.
+#[test]
+fn attributes_print_in_the_measured_order() {
+    let text = concat!(
+        "declare void @a(ptr align 8 noalias nonnull noundef readonly ",
+        "dereferenceable(8) captures(none))\n",
+        "declare i32 @c(i32 signext range(i32 0, 8) noundef)\n",
+        "declare ptr @d(i32) \"frame-pointer\"=\"all\" nounwind memory(none) ",
+        "\"target-cpu\"=\"x86-64\" norecurse uwtable(sync) alwaysinline\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    for wanted in [
+        "declare void @a(ptr noalias noundef nonnull readonly align 8 captures(none) \
+         dereferenceable(8))",
+        "declare i32 @c(i32 noundef signext range(i32 0, 8))",
+        "attributes #0 = { alwaysinline norecurse nounwind memory(none) uwtable(sync) \
+         \"frame-pointer\"=\"all\" \"target-cpu\"=\"x86-64\" }",
+    ] {
+        assert!(
+            printed.contains(wanted),
+            "wanted:   {wanted}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
 /// Debug info upstream cannot make sense of is taken out of the module
 /// rather than made an error, and the shape beside it is kept.
 ///

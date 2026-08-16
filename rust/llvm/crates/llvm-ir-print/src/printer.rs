@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use llvm_ir::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr};
+use llvm_ir::attribute::{Attribute, AttributeSet, IntAttr};
 use llvm_ir::function::Function;
 use llvm_ir::instruction::{CallData, InstKind};
 use llvm_ir::value::{Name, escape_name, needs_quotes};
@@ -606,52 +606,36 @@ fn is_debug_intrinsic(function: &llvm_ir::function::Function) -> bool {
     ) || llvm_ir::intrinsic::rewrites::is_rewritten(name)
 }
 
-/// The order upstream writes a set in: plain keywords, then the ones taking
-/// an argument, then the quoted ones by key. Neither of the first two is
-/// alphabetical; `EnumAttr` is declared in LLVM's order and the second run's
-/// order was measured.
+/// The order upstream writes a set in: every keyword in the measured order,
+/// then the quoted ones by key.
+///
+/// The keyword order is not alphabetical and not the order the module wrote,
+/// which is the whole reason it is a table: upstream prints
+/// `noalias noundef nonnull readonly align 8 captures(none)` whatever order
+/// those were read in. `corpus/attribute-order.nu` measures it by writing
+/// two on one declaration, both ways round, and reading back which comes
+/// first.
 fn compare_attributes(left: &Attribute, right: &Attribute) -> std::cmp::Ordering {
-    run_of(left)
-        .cmp(&run_of(right))
-        .then_with(|| match (left, right) {
-            (Attribute::Enum(a), Attribute::Enum(b)) => a.cmp(b),
-            (Attribute::String { key: a, .. }, Attribute::String { key: b, .. }) => a.cmp(b),
-            _ => structured_place(left).cmp(&structured_place(right)),
-        })
-}
-
-fn run_of(attribute: &Attribute) -> u8 {
-    match attribute {
-        // `uwtable` is written bare or with a kind, and upstream sorts it
-        // with the ones that take an argument either way: the bare spelling
-        // is the same attribute carrying its default.
-        Attribute::Enum(EnumAttr::UwTable) => 1,
-        Attribute::Enum(_) => 0,
-        Attribute::String { .. } => 2,
-        _ => 1,
+    match (left, right) {
+        (Attribute::String { key: a, .. }, Attribute::String { key: b, .. }) => a.cmp(b),
+        (Attribute::String { .. }, _) => std::cmp::Ordering::Greater,
+        (_, Attribute::String { .. }) => std::cmp::Ordering::Less,
+        _ => llvm_ir::attribute::order::rank(keyword_of(left))
+            .cmp(&llvm_ir::attribute::order::rank(keyword_of(right))),
     }
 }
 
-fn structured_place(attribute: &Attribute) -> u8 {
-    let keyword = match attribute {
-        Attribute::Structured { kind, .. } => kind.keyword(),
+/// The keyword a set holds this attribute under, which is what the order is
+/// keyed on. A quoted attribute has none and never reaches this.
+fn keyword_of(attribute: &Attribute) -> &'static str {
+    match attribute {
+        Attribute::Enum(kind) => kind.keyword(),
         Attribute::Int { kind, .. } => kind.keyword(),
         Attribute::Type { kind, .. } => kind.keyword(),
         Attribute::Range { .. } => "range",
-        Attribute::Enum(EnumAttr::UwTable) => "uwtable",
-        Attribute::Enum(_) | Attribute::String { .. } => return u8::MAX,
-    };
-    [
-        "allockind",
-        "allocsize",
-        "memory",
-        "alignstack",
-        "uwtable",
-        "vscale_range",
-    ]
-    .iter()
-    .position(|known| *known == keyword)
-    .map_or(u8::MAX, |place| place as u8)
+        Attribute::Structured { kind, .. } => kind.keyword(),
+        Attribute::String { .. } => "",
+    }
 }
 
 /// The comdats some symbol joins. A bare `comdat` clause names the one the

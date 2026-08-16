@@ -2800,6 +2800,37 @@ Assembler, Feature, Linker and Other unmoved, and no module we strip that
 upstream keeps in any of them either, nor in the 22,524 of `CodeGen` we both
 read, which is where a rule that fires too widely would show up first.
 DebugInfo differential 50 to 54.
+The pass after it measured the order an attribute set prints in, which the
+printer had been half guessing at. A set is held sorted rather than written
+back as it was read, so `noalias nocapture sret(%T)` comes back
+`noalias sret(%T) captures(none)`, and the printer knew that for six
+keywords out of a hundred: `allockind`, `allocsize`, `memory`, `alignstack`,
+`uwtable`, `vscale_range`, with everything else tying and keeping whatever
+order the module wrote.
+`corpus/attribute-order.nu` asks pairwise. Two attributes on one
+declaration, read back to see which comes first, both ways round so that the
+answer is upstream's order rather than the order the probe wrote. 4,950
+pairs, 2,435 of them placed, no pair coming back both ways and no cycle,
+which is what says there is one order rather than a rule per position.
+A pair no position reads is an absent edge rather than a refused module,
+which is most of the other 2,515: `byval` and `sret` are two ways of passing
+the same argument, `range` wants an integer where `nofpclass` wants a float,
+and `memory` is a function's where `align` is a parameter's, so an order
+between them is not a thing to get wrong. Upstream's own error messages
+supplied three positions the first draft was missing: `returned` needs a
+result of its argument's type, `immarg` is refused outside an intrinsic and
+beside anything but `range`, and `jumptable` needs `unnamed_addr`. Two
+keywords stay unplaced for reasons upstream states: `elementtype` it allows
+only on a call site, and `nocapture` never comes back at all, being read as
+`captures(none)`.
+The finding was in the half nobody was asking about. The bare keywords are
+not alphabetical either: upstream prints `noalias noundef nonnull readonly`,
+and `noundef` before `nonnull` is not what sorting the keywords gives. The
+table covers all hundred rather than the nineteen the task was about, and
+`compare_attributes` is now the measured rank and the quoted ones last.
+DebugInfo differential 54 to 55, `sroa-handle-dbg-value.ll` being one
+parameter written `noalias nocapture sret(%T)`. Nothing else moved, and the
+corpus still reproduces byte for byte.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

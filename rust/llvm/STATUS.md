@@ -69,6 +69,8 @@ and each row names the check that backs it.
 | An intrinsic found by the longest documented prefix of its name | done, which is what makes `llvm.objectsize.i32.unnamed` an `llvm.objectsize` | `llvm-opt-differential` |
 | The members of an ODR type uniqued under it, keyed on the tag and name or on the linkage name | done | `llvm-opt-differential`, `llvm-opt-differential-linker` |
 | The Swift version read out of the Objective-C collector flag it was packed into | done | `llvm-opt-differential-linker` |
+| Debug info upstream cannot make sense of stripped rather than refused | done for 4 of the 14 rules `llvm/test/DebugInfo` shows, and no module stripped that upstream keeps | `llvm-opt-differential-debuginfo` |
+| An attribute set printed in upstream's order rather than the written one | done for the 100 keywords, measured pairwise both ways round | `llvm-opt-differential-debuginfo`, `llvm-roundtrip` |
 
 ## The round trip
 
@@ -319,10 +321,10 @@ files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
 against upstream's own `opt -S`, and **220 of 226** are identical, with
 four more suites measured the same way: **71 of 71** in `Feature`, **220 of
-220** in `Linker`, **144 of 144** in `Other` and **54 of 57** in
+220** in `Linker`, **144 of 144** in `Other` and **55 of 57** in
 `DebugInfo`. Three of the five print every module both tools accept exactly
 as upstream prints it; the two that do not have their remaining files
-sorted by cause in CLAUDE.md, six in one and three in the other. Some of the
+sorted by cause in CLAUDE.md, six in one and two in the other. Some of the
 remaining differences are ones where we already match
 `llvm-as | llvm-dis` and `opt -S` does something else. ODR type uniquing is most of them; the
 clearest is `!DIObjCProperty`, where `opt -S` prints the setter and the

@@ -11,6 +11,8 @@
 //! faithful syntactic form beats either a wrong model or a dropped attribute.
 //! The keyword itself is still checked, so an unknown attribute is an error.
 
+pub mod order;
+
 use crate::keyword::define_keyword_enum;
 use crate::types::TypeId;
 use llvm_support::ApInt;
