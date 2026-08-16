@@ -68,8 +68,15 @@ outputs = inputs:
 ```
 
 `projects.exclude` takes repo-relative paths and `projects.depth` bounds the
-walk (default 4, enough for `area/group/project`). Everything else is passed
-to flakelight untouched.
+walk (default 4, enough for `area/group/project`).
+
+`moduleDirs` is the other half of not listing things: every `.nix` file
+directly inside one is a flakelight module. One level deep, and no
+`default.nix` rule, because these are not projects - naming the directory is
+the point, and a subdirectory of it is a library the modules share rather
+than another module.
+
+Everything else is passed to flakelight untouched.
 
 Unlike `project`, this closes over nothing and is a plain function: a
 published repo wants our nixpkgs, but a monorepo pins its own, and its

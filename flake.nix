@@ -198,27 +198,17 @@
       # tree is an area member now.
       nixDir = ./platform/nix;
 
-      # Only what is not a project: the flake modules under nixDir, which
-      # nixDirAliases exports rather than imports.
+      # Every .nix file in it is a flakelight module; nixDirAliases exports
+      # them rather than importing them, so they are named here.
+      moduleDirs = [./platform/nix/flake/modules];
+
+      # A tool's checks live inside that tool's library rather than in a
+      # directory of modules, so these four stay named.
       imports = [
-        ./platform/nix/flake/modules/colmena.nix
-        ./platform/nix/flake/modules/darwin.nix
-        ./platform/nix/flake/modules/systemConfigs.nix
-        ./platform/nix/flake/modules/desktops.nix
-        ./platform/nix/flake/modules/devShellDefault.nix
-        ./platform/nix/flake/modules/devShellNames.nix
-        ./platform/nix/flake/modules/filterUnsupported.nix
-        ./platform/nix/flake/modules/hardware.nix
-        ./platform/nix/flake/modules/homeConfigurations.nix
-        ./platform/nix/flake/modules/lib.nix
-        ./platform/nix/flake/modules/perSystemLib.nix
         ./platform/nix/lib/cargo/checks.nix
         ./platform/nix/lib/skylark/checks.nix
         ./platform/nix/lib/buck2/checks.nix
         ./platform/nix/lib/ninja/checks.nix
-        ./platform/nix/flake/modules/secrets.nix
-        ./platform/nix/flake/modules/users.nix
-        ./platform/nix/flake/modules/zedExtensions.nix
       ];
 
       # Every directory holding a default.nix is a project and is imported.

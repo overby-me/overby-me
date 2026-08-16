@@ -18,7 +18,7 @@
 #
 # Everything except `projects` is passed to flakelight untouched.
 root: cfg: let
-  inherit (builtins) attrNames concatMap elem filter pathExists readDir substring;
+  inherit (builtins) attrNames concatMap elem filter pathExists readDir stringLength substring;
 
   discovery = cfg.projects or {};
   exclude = discovery.exclude or [];
@@ -54,12 +54,32 @@ root: cfg: let
     else concatMap (name: walk (under name) (remaining - 1)) children;
 
   discovered = walk "" depth;
+
+  # A module directory is imported file by file: every .nix in it is a
+  # flakelight module. One level only, and no default.nix rule, because
+  # these are not projects: naming the directory is the whole point, and a
+  # subdirectory of it would be a library the modules share rather than
+  # another module.
+  isNixFile = name: substring (stringLength name - 4) 4 name == ".nix";
+
+  modulesIn = dir:
+    map (name: dir + "/${name}")
+    (filter
+      (name:
+        (readDir dir).${name}
+        == "regular"
+        && substring 0 1 name != "."
+        && isNixFile name)
+      (attrNames (readDir dir)));
+
+  fromModuleDirs = concatMap modulesIn (cfg.moduleDirs or []);
 in
   cfg.inputs.flakelight root (
-    (removeAttrs cfg ["projects"])
+    (removeAttrs cfg ["projects" "moduleDirs"])
     // {
-      # Discovered last, so a workspace can still name a module explicitly:
-      # the flake modules under nixDir are not projects and stay listed.
-      imports = (cfg.imports or []) ++ discovered;
+      # Explicit first, then whole directories, then projects. A workspace
+      # can still name one module: the four lib checks are a file inside a
+      # library rather than a directory of modules.
+      imports = (cfg.imports or []) ++ fromModuleDirs ++ discovered;
     }
   )
