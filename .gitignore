@@ -12,10 +12,15 @@ tmp
 
 # Build artifacts
 build
-!rust/*/src/build
-!rust/*/src/build/**
-!platform/nix/lib/cargo/build
-!platform/nix/lib/cargo/build/**
+# Anchored to what a build directory looks like rather than to where one
+# project happened to live: these named rust/*/src/build, so moving the
+# projects into areas silently untracked nine of oxidized-ninja's source
+# files, and both its own build and the published repo's CI failed on a
+# module that was no longer in git.
+!**/src/build
+!**/src/build/**
+!**/lib/cargo/build
+!**/lib/cargo/build/**
 !platform/nix/lib/buck2/build
 !platform/nix/lib/buck2/build/**
 !platform/nix/lib/ninja/build
