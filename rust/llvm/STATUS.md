@@ -67,6 +67,7 @@ and each row names the check that backs it.
 | A call inside a funclet carrying the token the intrinsic it calls needs | done for the 25 names that need one, out of 21,452 measured | `llvm-upstream-verifier` |
 | The order a specialized node writes its fields in | done for every field its kind can be written with, ten of which no probe carried until now | `llvm-opt-differential`, `llvm-roundtrip` |
 | An intrinsic found by the longest documented prefix of its name | done, which is what makes `llvm.objectsize.i32.unnamed` an `llvm.objectsize` | `llvm-opt-differential` |
+| The members of an ODR type uniqued under it, keyed on the tag and name or on the linkage name | done | `llvm-opt-differential`, `llvm-opt-differential-linker` |
 
 ## The round trip
 

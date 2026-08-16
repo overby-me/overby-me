@@ -121,6 +121,53 @@ impl Metadata {
     /// their tags agree, and when the tags differ the second is left where it
     /// is and not even made distinct, which is the one case where an
     /// identifier buys nothing.
+    /// What a member of an ODR type is merged on: the scope it belongs to,
+    /// and a key made of what upstream compares.
+    ///
+    /// A type that gives itself an identifier has one definition across every
+    /// translation unit, and so do its members: a second member of the same
+    /// scope under the same key is the same member however much else differs.
+    /// Measured a field at a time, `file:`, `line:` and `size:` all turn out
+    /// not to matter, where the key does.
+    ///
+    /// The key is the tag and the name for a `DIDerivedType` and the linkage
+    /// name for a `DISubprogram`, which is measured rather than symmetric:
+    /// two subprograms with different names and one linkage name merge, and
+    /// two with one name and no linkage name do not. A node with no key
+    /// merges with nothing, and no other kind is merged at all: a nested
+    /// composite type has its own identifier rule, and an enumerator or a
+    /// template parameter has no scope to be a member of.
+    pub fn odr_member_key(&self) -> Option<(MdId, String)> {
+        let Metadata::Specialized { tag, args, .. } = self else {
+            return None;
+        };
+        let SpecializedArgs::Named(fields) = args else {
+            return None;
+        };
+        let text = |wanted: &str| {
+            fields.iter().find_map(|(name, value)| match value {
+                MdField::Str(text) if name == wanted => text.as_str(),
+                _ => None,
+            })
+        };
+        let scope = fields.iter().find_map(|(name, value)| match value {
+            MdField::Ref(id) if name == "scope" => Some(*id),
+            _ => None,
+        })?;
+        let key = match tag.as_str() {
+            "DIDerivedType" => {
+                let number = fields.iter().find_map(|(name, value)| match value {
+                    MdField::Unsigned(number) if name == "tag" => Some(*number),
+                    _ => None,
+                })?;
+                format!("DIDerivedType {number} {}", text("name")?)
+            }
+            "DISubprogram" => format!("DISubprogram {}", text("linkageName")?),
+            _ => return None,
+        };
+        Some((scope, key))
+    }
+
     pub fn odr_key(&self) -> Option<(u128, &str)> {
         let Metadata::Specialized { tag, args, .. } = self else {
             return None;

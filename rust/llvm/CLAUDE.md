@@ -2576,6 +2576,28 @@ recorded rather than fixed here.
 Nothing moves, which is the point: the artefact was already worked around by
 asking only documented names for a prefix, and this is the same answer with
 nothing to work around.
+The pass after it took the other half of the ODR rule, which the first pass
+of this queue had left: a type that gives itself an identifier has one
+definition across every translation unit, and so do its members.
+`Assembler/dicompositetype-members.ll` says so in its own comment, two
+members of an identified type written in different files being one member
+where the same pair under an unidentified type are two.
+The key was measured a field at a time, and it is not the symmetric thing it
+looks like. For a `DIDerivedType` it is the tag and the name, so two members
+differing only in `file:`, `line:` or `size:` merge and two differing in tag
+do not. For a `DISubprogram` it is the linkage name alone: two with different
+names and one linkage name merge, and two with one name and no linkage name
+do not. A node with no key merges with nothing, and no other kind merges at
+all, a nested composite type having its own identifier rule and an
+enumerator no scope to be a member of.
+A `distinct` node is its own node whatever it holds, and leaving that out
+cost four Linker files before it went in: a subprogram's definition is
+`distinct` and shares both its linkage name and its scope with the
+declaration it came from, so without the guard the definition merged onto
+the declaration. The merged members are held out of the structural pass as
+well, since two that merged here differ structurally by the file they were
+written in if nothing else.
+Assembler differential 217 to 218.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and

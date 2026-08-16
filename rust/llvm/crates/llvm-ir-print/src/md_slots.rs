@@ -207,6 +207,47 @@ fn unique_nodes(module: &Module) -> (HashMap<MdId, MdId>, HashSet<MdId>) {
         }
     }
 
+    // The members of a type that took an identifier are uniqued the same
+    // way, under the scope and a key of their own rather than under what they
+    // hold: two members of one ODR type with one name are one member however
+    // much else differs. `Metadata::odr_member_key` says what the key is and
+    // how it was measured.
+    //
+    // These are held out of the structural pass below as well. Two members
+    // that merged here differ structurally, by the file they were written in
+    // if nothing else, so leaving them in would let that pass separate them
+    // again.
+    let mut by_member: HashMap<(MdId, String), MdId> = HashMap::new();
+    let mut members: HashSet<MdId> = HashSet::new();
+    for id in &ids {
+        let Some(node) = module.metadata_node(*id) else {
+            continue;
+        };
+        // A `distinct` node is its own node whatever it holds, which is
+        // what keeps a subprogram's definition from merging onto the
+        // declaration it shares a linkage name and a scope with.
+        if node.is_distinct() {
+            continue;
+        }
+        let Some((scope, key)) = node.odr_member_key() else {
+            continue;
+        };
+        let scope = *canonical.get(&scope).unwrap_or(&scope);
+        if !claimed.contains(&scope) {
+            continue;
+        }
+        match by_member.get(&(scope, key.clone())) {
+            Some(first) => {
+                canonical.insert(*id, *first);
+                members.insert(*id);
+            }
+            None => {
+                by_member.insert((scope, key), *id);
+                members.insert(*id);
+            }
+        }
+    }
+
     loop {
         let mut representatives: HashMap<Metadata, MdId> = HashMap::new();
         let mut changed = false;
@@ -214,7 +255,7 @@ fn unique_nodes(module: &Module) -> (HashMap<MdId, MdId>, HashSet<MdId>) {
             let Some(node) = module.metadata_node(*id) else {
                 continue;
             };
-            if node.is_distinct() || claimed.contains(id) {
+            if node.is_distinct() || claimed.contains(id) || members.contains(id) {
                 continue;
             }
             let key = substitute(node, &canonical);
