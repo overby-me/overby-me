@@ -1,0 +1,73 @@
+# deslop configuration for Fe-C (runtime memory-safety checking).
+#
+# The cementite runtime's core representation is deliberate bit-packing:
+# PackedCap is id:48 | flags:16 in one u64 (so a (ptr, cap) pair stays
+# 128-bit atomically updatable, docs/through-mode-coherence.md), and page
+# slots compress in-page offsets to u16. Width-narrowing casts are the
+# design, stated at the type level, not accidental truncation.
+
+disabled_rules = [
+  "rust_narrowing_numeric_cast",
+
+  # The runtime's documented failure model (docs/cementite-api.md) is
+  # report-and-abort: never a Result, never unwinding, because a check
+  # failing means memory is already untrustworthy. Internal integrity
+  # violations panic/expect deliberately (PLAN section 7: louder
+  # failures), so panic-shaped heuristics flag the design itself.
+  "expect_in_non_test_code",
+  "panic_macro_leftover",
+
+  # The crate root re-exports the capability vocabulary (Cap, AllocId,
+  # PackedCap, flags) on purpose: instrumented code links against these
+  # names, and the MIR pass resolves them by path. A facade root is the
+  # API, not a wall hiding structure.
+  "rust_root_reexport_wall",
+
+  # cementite IS the trusted base: raw pointers, the global allocator, the
+  # table and the interceptors are unavoidably unsafe. Every unsafe block
+  # carries a prose SAFETY rationale, but the heuristic does not recognize
+  # trait-impl (`GlobalAlloc`) and fn-level `unsafe fn` forms. Same call as
+  # safety/oxidized/bash's config: the density is inherent, not a lint gap.
+  "unsafe_without_safety_comment",
+
+  # The allocation table and quarantine are deliberately global,
+  # mutex-guarded singletons (I2: one authoritative table). That is the
+  # architecture, not accidental shared mutable state.
+  "rust_global_lock_state",
+
+  # Struct-field access inside the table/quarantine scan and eviction loops
+  # is the data structure doing its job (radix leaves, FIFO nodes), not an
+  # array-of-structs hot-path mistake.
+  "rust_aos_hot_path",
+
+  # The global-allocator integration test uses a plain HashMap; a
+  # DoS-resistant hasher is irrelevant to allocator-traffic exercise.
+  "rust_hashmap_default_hasher",
+
+  # libc interposition (interpose.rs) is quintessential FFI: dlsym returns
+  # `*mut c_void` that must be transmuted to typed fn pointers, and the
+  # bootstrap buffer does raw pointer arithmetic. Same call as safety/oxidized/bash.
+  "rust_unsafe_raw_pointer_cast",
+
+  # `from_raw_parts` with a length the buffer does not have is not a mistake
+  # in corpus/, it is the specimen. corpus/slice-oob builds a `&[u64]`
+  # claiming 1000 elements over a 4-element buffer precisely so the checker
+  # has an out-of-bounds read to catch, and several other entries reproduce
+  # real CVEs with the same shape (elf-rs-0079, binary-vec-io-0109). A rule
+  # that fires on the bug under test cannot distinguish a corpus from a
+  # regression. Directory-wide because the pre-commit hook scans from
+  # safety/fe-c whenever any file under it changes, so a nested corpus config
+  # would not be consulted.
+  "rust_unsafe_from_raw_parts",
+
+  # deslop indexes one file at a time, so cross-module calls (`table::…`)
+  # and extern-C calls (`strdup`, the C harness) read as unresolved/
+  # hallucinated even though they compile and link fine.
+  "hallucinated_local_call",
+
+  # `std::ptr::write(dst, val)` is a memory write, not buffered I/O; the
+  # name-based heuristic misreads it as an unbuffered file write in the B1
+  # provenance fixture. (Also fires on the runtime's own stderr report,
+  # which writes once, not in a loop.)
+  "rust_unbuffered_file_writes",
+]

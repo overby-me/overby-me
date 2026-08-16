@@ -8,7 +8,7 @@
 
   inputs = {
     # Build-time environment values, passed in via `--override-input env`
-    # (e.g. CI injects PUBLIC_GIT_COMMIT_SHA for web/wiki). Defaults to an
+    # (e.g. CI injects PUBLIC_GIT_COMMIT_SHA for apps/wiki). Defaults to an
     # empty file, so local builds fall back to sensible defaults. This no
     # longer carries the working directory: the devshells discover it at
     # runtime instead.
@@ -190,88 +190,92 @@
         allowUnfree = true;
       };
 
+      # flakelight autoloads from nixDir, which defaults to ./nix; the nix
+      # tree is an area member now.
+      nixDir = ./platform/nix;
+
       imports = [
-        ./nix/flake/modules/colmena.nix
-        ./nix/flake/modules/darwin.nix
-        ./nix/flake/modules/systemConfigs.nix
-        ./nix/flake/modules/desktops.nix
-        ./nix/flake/modules/devShellDefault.nix
-        ./nix/flake/modules/devShellNames.nix
-        ./nix/flake/modules/filterUnsupported.nix
-        ./nix/flake/modules/hardware.nix
-        ./nix/flake/modules/homeConfigurations.nix
-        ./nix/flake/modules/lib.nix
-        ./nix/flake/modules/perSystemLib.nix
-        ./nix/lib/cargo/checks.nix
-        ./nix/lib/skylark/checks.nix
-        ./nix/lib/buck2/checks.nix
-        ./nix/lib/ninja/checks.nix
-        ./nix/flake/modules/secrets.nix
-        ./nix/flake/modules/users.nix
-        ./nix/flake/modules/zedExtensions.nix
+        ./platform/nix/flake/modules/colmena.nix
+        ./platform/nix/flake/modules/darwin.nix
+        ./platform/nix/flake/modules/systemConfigs.nix
+        ./platform/nix/flake/modules/desktops.nix
+        ./platform/nix/flake/modules/devShellDefault.nix
+        ./platform/nix/flake/modules/devShellNames.nix
+        ./platform/nix/flake/modules/filterUnsupported.nix
+        ./platform/nix/flake/modules/hardware.nix
+        ./platform/nix/flake/modules/homeConfigurations.nix
+        ./platform/nix/flake/modules/lib.nix
+        ./platform/nix/flake/modules/perSystemLib.nix
+        ./platform/nix/lib/cargo/checks.nix
+        ./platform/nix/lib/skylark/checks.nix
+        ./platform/nix/lib/buck2/checks.nix
+        ./platform/nix/lib/ninja/checks.nix
+        ./platform/nix/flake/modules/secrets.nix
+        ./platform/nix/flake/modules/users.nix
+        ./platform/nix/flake/modules/zedExtensions.nix
 
-        ./ironclaw/bluesky
-        ./ironclaw/calendar
-        ./ironclaw/contacts
-        ./ironclaw/mail
-        ./ironclaw/matrix
-        ./ironclaw/pixtral
-        ./ironclaw/searxng
-        ./ironclaw/signal
+        ./ai/ironclaw/bluesky
+        ./ai/ironclaw/calendar
+        ./ai/ironclaw/contacts
+        ./ai/ironclaw/mail
+        ./ai/ironclaw/matrix
+        ./ai/ironclaw/pixtral
+        ./ai/ironclaw/searxng
+        ./ai/ironclaw/signal
 
-        ./mojo/gui
-        ./mojo/wasm
-        ./mojo/zed
+        ./dev/mojo/gui
+        ./dev/mojo/wasm
+        ./dev/mojo/zed
 
-        ./nickel/workspace
-        ./nickel/zed
+        ./dev/nickel/workspace
+        ./dev/nickel/zed
 
-        ./nushell/plugin-tramp
+        ./dev/nushell/plugin-tramp
 
-        ./rust/awk
-        ./rust/bash
-        ./rust/binutils
-        ./rust/bison
-        ./rust/bubblewrap
-        ./rust/bzip2
-        ./rust/cachix
-        ./rust/curl
-        ./rust/diffutils
-        ./rust/direnv
-        ./rust/fe-c
-        ./rust/file
-        ./rust/flatpak
-        ./rust/gcc
-        ./rust/grep
-        ./rust/gzip
-        ./rust/h26xtoav1
-        ./rust/help2man
-        ./rust/llvm
-        ./rust/make
-        ./rust/meson
-        ./rust/nixos
-        ./rust/ninja
-        ./rust/nixpkgs
-        ./rust/patch
-        ./rust/patchelf
-        ./rust/pcre2
-        ./rust/perl
-        ./rust/pipewire
-        ./rust/pkg-config
-        ./rust/sed
-        ./rust/systemd
-        ./rust/tar
-        ./rust/texinfo
-        ./rust/wclip
-        ./rust/xz
+        ./safety/oxidized/awk
+        ./safety/oxidized/bash
+        ./safety/oxidized/binutils
+        ./safety/oxidized/bison
+        ./safety/oxidized/bubblewrap
+        ./safety/oxidized/bzip2
+        ./safety/oxidized/cachix
+        ./safety/oxidized/curl
+        ./safety/oxidized/diffutils
+        ./safety/oxidized/direnv
+        ./safety/fe-c
+        ./safety/oxidized/file
+        ./safety/oxidized/flatpak
+        ./safety/oxidized/gcc
+        ./safety/oxidized/grep
+        ./safety/oxidized/gzip
+        ./media/h26xtoav1
+        ./safety/oxidized/help2man
+        ./safety/oxidized/llvm
+        ./safety/oxidized/make
+        ./safety/oxidized/meson
+        ./safety/oxidized/nixos
+        ./safety/oxidized/ninja
+        ./safety/oxidized/nixpkgs
+        ./safety/oxidized/patch
+        ./safety/oxidized/patchelf
+        ./safety/oxidized/pcre2
+        ./safety/oxidized/perl
+        ./safety/oxidized/pipewire
+        ./safety/oxidized/pkg-config
+        ./safety/oxidized/sed
+        ./safety/oxidized/systemd
+        ./safety/oxidized/tar
+        ./safety/oxidized/texinfo
+        ./safety/oxidized/wclip
+        ./safety/oxidized/xz
 
         ./slides
 
-        ./tangled/cli
-        ./tangled/spindle-nix-engine
+        ./platform/tangled/cli
+        ./platform/tangled/spindle-nix-engine
 
-        ./web/homepage
-        ./web/wiki
+        ./apps/homepage
+        ./apps/wiki
       ];
       nixDirAliases = {
         packages = ["pkgs"];

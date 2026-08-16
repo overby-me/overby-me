@@ -2,7 +2,7 @@
 #
 # Generate YAML: nickel export --format yaml .tangled/workflows.ncl
 # Each top-level key becomes .tangled/workflows/<key>.yml
-let { WorkflowConfig, .. } = import "../nickel/contracts/tangled-workflow/workflow.ncl" in
+let { WorkflowConfig, .. } = import "../dev/nickel/contracts/tangled-workflow/workflow.ncl" in
 
 # Experimental Nix features this flake needs (its rust build system relies on
 # dynamic/recursive derivations). The microVM image's nix does not enable them
@@ -104,7 +104,7 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
             echo "no GITHUB_MIRROR_TOKEN: publishing to Tangled only"
             github="--no-github"
           fi
-          nu tangled/publish/publish.nu \
+          nu platform/tangled/publish/publish.nu \
             --source "$PWD" \
             --work-dir "$PWD/.publish-cache" \
             --ssh-user agent.overby.me \

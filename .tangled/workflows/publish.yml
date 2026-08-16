@@ -28,7 +28,7 @@ steps:
         echo "no GITHUB_MIRROR_TOKEN: publishing to Tangled only"
         github="--no-github"
       fi
-      nu tangled/publish/publish.nu \
+      nu platform/tangled/publish/publish.nu \
         --source "$PWD" \
         --work-dir "$PWD/.publish-cache" \
         --ssh-user agent.overby.me \
