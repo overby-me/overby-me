@@ -22,7 +22,7 @@ const PROBES = [
   ["DIFile" [[field, value]; [filename '"f"'] [directory '"d"'] [checksumkind 'CSK_MD5'] [checksum '"0123456789abcdef0123456789abcdef"'] [source '"x"']]]
   ["DIBasicType" [[field, value]; [tag 'DW_TAG_unspecified_type'] [name '"n"'] [size '8'] [align '8'] [encoding 'DW_ATE_signed'] [flags 'DIFlagPublic'] [num_extra_inhabitants '1']]]
   ["DIDerivedType" [[field, value]; [tag 'DW_TAG_member'] [name '"n"'] [scope '!14'] [file '!10'] [line '1'] [baseType '!11'] [size '8'] [align '8'] [offset '8'] [flags 'DIFlagPublic'] [extraData '!11'] [annotations '!18']]]
-  ["DICompositeType" [[field, value]; [tag 'DW_TAG_structure_type'] [name '"c"'] [scope '!14'] [file '!10'] [line '1'] [size '8'] [align '8'] [offset '8'] [flags 'DIFlagPublic'] [elements '!18'] [templateParams '!18'] [vtableHolder '!11'] [annotations '!18'] [runtimeLang 'DW_LANG_ObjC'] [identifier '"id"']]]
+  ["DICompositeType" [[field, value]; [tag 'DW_TAG_structure_type'] [name '"c"'] [scope '!14'] [file '!10'] [line '1'] [size '8'] [align '8'] [offset '8'] [num_extra_inhabitants '2'] [flags 'DIFlagPublic'] [elements '!18'] [templateParams '!18'] [vtableHolder '!11'] [annotations '!18'] [runtimeLang 'DW_LANG_ObjC'] [identifier '"id"']]]
   # An enumeration is the composite type that carries a `baseType` beside a
   # `scope`, a `file` and a `line`. Without it nothing said where `baseType`
   # goes: the structure probe above has no `baseType` and the array probe
@@ -48,6 +48,11 @@ const PROBES = [
   ["DIMacroFile" [[field, value]; [line '1'] [file '!10'] [nodes '!16']]]
   ["DIGlobalVariable" [[field, value]; [name '"g"'] [linkageName '"l"'] [scope 'null'] [file '!10'] [line '1'] [type '!11'] [isLocal 'true'] [isDefinition 'true'] [align '8'] [templateParams '!18'] [annotations '!18']]]
   ["DICompositeType/array" [[field, value]; [tag 'DW_TAG_array_type'] [name '"a"'] [baseType '!19'] [size '8'] [elements '!18'] [dataLocation '!20'] [associated '!20'] [allocated '!20'] [rank '!20'] [identifier '"aid"'] [annotations '!18'] [templateParams '!18']]]
+  # The pointer authentication fields, which only a `DW_TAG_LLVM_ptrauth_type`
+  # writes back: they share the slot `align` uses and the tag is what decides
+  # which name the slot prints under. The key has to be non-zero or the whole
+  # payload is dropped, so this probe carries one.
+  ["DIDerivedType/ptrauth" [[field, value]; [tag 'DW_TAG_LLVM_ptrauth_type'] [name '"p"'] [baseType '!11'] [size '8'] [offset '8'] [flags 'DIFlagPublic'] [annotations '!18'] [ptrAuthKey '1'] [ptrAuthIsAddressDiscriminated 'true'] [ptrAuthExtraDiscriminator '7'] [ptrAuthIsaPointer 'true'] [ptrAuthAuthenticatesNullValues 'true']]]
   ["DIStringType" [[field, value]; [tag 'DW_TAG_string_type'] [name '"s"'] [stringLength '!20'] [stringLengthExpression '!DIExpression()'] [stringLocationExpression '!DIExpression()'] [size '8'] [align '8'] [encoding 'DW_ATE_ASCII']]]
 ]
 

@@ -2411,6 +2411,33 @@ longest known prefix of the name, so `llvm.objectsize.i32.unnamed` is
 `llvm.objectsize` with the rest ignored, where the reduction here stops at
 the first component that is not a mangled type. That is the same reduction
 question a named struct raises and is recorded with it.
+The pass after it took the ptrauth fields of a `DIDerivedType`, which had
+been recorded as needing a sweep of its own and does: the five of them share
+the slot `align` uses, and the tag is what decides which name the slot prints
+under. Writing them on a `DW_TAG_pointer_type` and reading the number back
+out of `align` is what shows the layout, one bit at a time. The key is bits 0
+to 3, whether the address discriminates is bit 4, the extra discriminator is
+bits 5 to 20, whether it is an isa pointer is bit 21, and whether it
+authenticates null values is bit 22. Read the other way, `align: 2097153` on
+a ptrauth type comes back `ptrAuthKey: 1, ptrAuthIsaPointer: true`, which is
+the same word and is what pins it.
+Two rules go with the layout and neither is a shape a table of defaults can
+hold. The ptrauth spelling fills the slot only when a non-zero key is
+written, so `ptrAuthIsaPointer: true` on its own comes back false, which is
+what the task recorded as inexplicable, and `align: 16, ptrAuthKey: 0` keeps
+the sixteen. And a ptrauth type writes its three booleans back whether or not
+they are false, where every other tag writes an `align` and only when it is
+not nought.
+The key is four bits wide in storage and the field is limited to seven, which
+had to be measured separately: `align: 15` comes back `ptrAuthKey: 15` where
+`ptrAuthKey: 15` is refused, "limit is 7".
+`corpus/md-field-order.nu` gained the two probes that would have said where
+these fields print, and one for `num_extra_inhabitants`, which was the last
+line of `debug-info.ll` to differ after the ptrauth fields landed. Both are
+the shape that file's own comment already warns about: a kind whose fields
+cannot all be written at once needs a probe per shape, and a field no probe
+carries has no entry and no way to notice.
+Assembler differential 214 to 215, and `debug-info.ll` is byte-identical.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and

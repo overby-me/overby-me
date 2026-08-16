@@ -61,6 +61,7 @@ and each row names the check that backs it.
 | `!DIExpression` opcodes held as numbers, checked against what upstream reads, and written back as the words it writes | done for the 103 operations it reads, out of the 189 codes it has a word for | `llvm-upstream-verifier`, `llvm-upstream-assembler`, `llvm-roundtrip` |
 | Two spellings of one intrinsic merged into the function upstream keeps | done | `llvm-opt-differential` |
 | A call written before its intrinsic gained a parameter given the argument upstream gives it | done for the 92 declarations upstream's tests write at an older arity, and the 6 it drops outright | `llvm-verify-corpus`, `llvm-opt-differential` |
+| A `DIDerivedType`'s pointer authentication packed into the slot `align` uses, spelled by the tag | done | `llvm-opt-differential`, `llvm-roundtrip` |
 
 ## The round trip
 

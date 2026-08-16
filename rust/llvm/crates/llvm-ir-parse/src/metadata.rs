@@ -68,6 +68,9 @@ impl Parser {
                 let args = upgrade_subprogram_flags(&tag, args);
                 let args = swap_objc_accessors(&tag, args);
                 let args = drop_implied_fields(&tag, args);
+                // After the defaults are dropped, because a ptrauth type
+                // writes three booleans back whether or not they are false.
+                let args = pack_ptrauth_fields(&tag, args);
                 // Sorted here rather than at print time, because two nodes
                 // that differ only in the order their fields were written are
                 // one node upstream, and uniquing compares what is stored.
@@ -910,6 +913,110 @@ fn fill_compile_unit_defaults(tag: &str, args: SpecializedArgs) -> SpecializedAr
 /// `DW_MACINFO_start_file`, `DW_MACINFO_end_file`, or nothing at all. Not a
 /// default that survives comparison: all three spellings come back the same,
 /// so the field is dropped rather than compared.
+/// A `DIDerivedType` keeps its pointer authentication in the slot `align`
+/// uses, and which of the two names it prints under is decided by the tag.
+///
+/// Measured a bit at a time, by writing the fields on a `DW_TAG_pointer_type`
+/// and reading the number back out of `align`: the key is bits 0 to 3, whether
+/// the address discriminates is bit 4, the extra discriminator is bits 5 to
+/// 20, whether it is an isa pointer is bit 21, and whether it authenticates
+/// null values is bit 22. `align: 2097153` on a ptrauth type comes back as
+/// `ptrAuthKey: 1, ptrAuthIsaPointer: true`, which is the same word read the
+/// other way and is what pins the layout.
+///
+/// Two rules go with it, and neither is a shape a table of defaults can hold.
+/// The ptrauth spelling fills the slot only when a *non-zero* key is written,
+/// so `ptrAuthIsaPointer: true` on its own comes back false and
+/// `align: 16, ptrAuthKey: 0` keeps the sixteen. And a ptrauth type always
+/// writes the three booleans, false or not, where every other tag writes an
+/// `align` and only when it is not nought.
+///
+/// The key is four bits wide in storage and the field is limited to seven,
+/// which the schema says separately: `align: 15` comes back `ptrAuthKey: 15`
+/// where `ptrAuthKey: 15` is refused.
+fn pack_ptrauth_fields(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
+    const PTRAUTH: &[&str] = &[
+        "ptrAuthKey",
+        "ptrAuthIsAddressDiscriminated",
+        "ptrAuthExtraDiscriminator",
+        "ptrAuthIsaPointer",
+        "ptrAuthAuthenticatesNullValues",
+    ];
+    if tag != "DIDerivedType" {
+        return args;
+    }
+    let SpecializedArgs::Named(fields) = args else {
+        return args;
+    };
+    let number = |wanted: &str| -> u64 {
+        fields
+            .iter()
+            .find(|(name, _)| name == wanted)
+            .and_then(|(_, value)| match value {
+                MdField::Unsigned(number) => u64::try_from(*number).ok(),
+                _ => None,
+            })
+            .unwrap_or(0)
+    };
+    let flag = |wanted: &str| -> u64 {
+        u64::from(
+            fields
+                .iter()
+                .any(|(name, value)| name == wanted && matches!(value, MdField::Bool(true))),
+        )
+    };
+    let key = number("ptrAuthKey");
+    let word = if key == 0 {
+        number("align")
+    } else {
+        (key & 0xf)
+            | flag("ptrAuthIsAddressDiscriminated") << 4
+            | (number("ptrAuthExtraDiscriminator") & 0xffff) << 5
+            | flag("ptrAuthIsaPointer") << 21
+            | flag("ptrAuthAuthenticatesNullValues") << 22
+    };
+    let mut kept: Vec<(String, MdField)> = fields
+        .into_iter()
+        .filter(|(name, _)| name != "align" && !PTRAUTH.contains(&name.as_str()))
+        .collect();
+    let ptrauth = llvm_ir::metadata::number(tag, "tag", "DW_TAG_LLVM_ptrauth_type");
+    let is_ptrauth = kept.iter().any(|(name, value)| {
+        name == "tag"
+            && matches!(value, MdField::Unsigned(written) if Some(*written as u64) == ptrauth)
+    });
+    if !is_ptrauth {
+        if word != 0 {
+            kept.push(("align".to_string(), MdField::Unsigned(u128::from(word))));
+        }
+        return SpecializedArgs::Named(kept);
+    }
+    if word & 0xf != 0 {
+        kept.push((
+            "ptrAuthKey".to_string(),
+            MdField::Unsigned(u128::from(word & 0xf)),
+        ));
+    }
+    kept.push((
+        "ptrAuthIsAddressDiscriminated".to_string(),
+        MdField::Bool((word >> 4) & 1 == 1),
+    ));
+    if (word >> 5) & 0xffff != 0 {
+        kept.push((
+            "ptrAuthExtraDiscriminator".to_string(),
+            MdField::Unsigned(u128::from((word >> 5) & 0xffff)),
+        ));
+    }
+    kept.push((
+        "ptrAuthIsaPointer".to_string(),
+        MdField::Bool((word >> 21) & 1 == 1),
+    ));
+    kept.push((
+        "ptrAuthAuthenticatesNullValues".to_string(),
+        MdField::Bool((word >> 22) & 1 == 1),
+    ));
+    SpecializedArgs::Named(kept)
+}
+
 fn drop_implied_fields(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
     const IMPLIED: &[(&str, &str)] = &[("DIMacroFile", "type")];
     let SpecializedArgs::Named(fields) = args else {

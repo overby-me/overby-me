@@ -252,6 +252,9 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "size",
             "align",
             "offset",
+            // Between `offset` and `flags`, which neither of the two probes
+            // that kind takes was carrying: a fourth probe says so.
+            "num_extra_inhabitants",
             "flags",
             "elements",
             "runtimeLang",
@@ -280,6 +283,11 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "flags",
             "extraData",
             "annotations",
+            "ptrAuthKey",
+            "ptrAuthIsAddressDiscriminated",
+            "ptrAuthExtraDiscriminator",
+            "ptrAuthIsaPointer",
+            "ptrAuthAuthenticatesNullValues",
         ],
     ),
     ("DIEnumerator", &["name", "value", "isUnsigned"]),
