@@ -61,6 +61,10 @@ const HEADER = "// The forty-five figures, as the finished position of each of t
 
 "
 
-$HEADER + "const SOLUTIONS: &[Solution] = &[\n" + $out + "\n];\n"
+# rustfmt::skip keeps the table one line per piece. Without it the
+# formatter explodes every Placed into six lines, turning a readable
+# 547-line table into 2400 lines, and the checks.formatting check fails
+# on the generated file either way.
+$HEADER + "#[rustfmt::skip]\nconst SOLUTIONS: &[Solution] = &[\n" + $out + "\n];\n"
 | save -f xscreensaver/src/hacks3d/tangram_solutions.rs
 print "wrote xscreensaver/src/hacks3d/tangram_solutions.rs"

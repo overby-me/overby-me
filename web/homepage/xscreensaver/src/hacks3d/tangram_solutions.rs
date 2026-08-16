@@ -3,6 +3,7 @@
 // `web/homepage/gen-tangram.nu`; the fields that are the same constant in every
 // row of it are left out.
 
+#[rustfmt::skip]
 const SOLUTIONS: &[Solution] = &[
     Solution {
         name: "Teapot",
