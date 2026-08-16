@@ -178,8 +178,12 @@
     };
   };
 
+  # The workspace half of nix-project: it finds the projects, so this file
+  # does not list them. Imported by path rather than taken as an input,
+  # because nix-project is published *from* here: an input would mean
+  # publishing before the monorepo could evaluate its own change to it.
   outputs = inputs:
-    inputs.flakelight ./. {
+    import ./platform/nix/project/workspace.nix ./. {
       inherit inputs;
       systems = [
         "x86_64-linux"
@@ -194,6 +198,8 @@
       # tree is an area member now.
       nixDir = ./platform/nix;
 
+      # Only what is not a project: the flake modules under nixDir, which
+      # nixDirAliases exports rather than imports.
       imports = [
         ./platform/nix/flake/modules/colmena.nix
         ./platform/nix/flake/modules/darwin.nix
@@ -213,71 +219,13 @@
         ./platform/nix/flake/modules/secrets.nix
         ./platform/nix/flake/modules/users.nix
         ./platform/nix/flake/modules/zedExtensions.nix
-
-        ./ai/ironclaw/bluesky
-        ./ai/ironclaw/calendar
-        ./ai/ironclaw/contacts
-        ./ai/ironclaw/mail
-        ./ai/ironclaw/matrix
-        ./ai/ironclaw/pixtral
-        ./ai/ironclaw/searxng
-        ./ai/ironclaw/signal
-
-        ./dev/mojo/gui
-        ./dev/mojo/wasm
-        ./dev/mojo/zed
-
-        ./dev/nickel/workspace
-        ./dev/nickel/zed
-
-        ./dev/nushell/plugin-tramp
-
-        ./safety/oxidized/awk
-        ./safety/oxidized/bash
-        ./safety/oxidized/binutils
-        ./safety/oxidized/bison
-        ./safety/oxidized/bubblewrap
-        ./safety/oxidized/bzip2
-        ./safety/oxidized/cachix
-        ./safety/oxidized/curl
-        ./safety/oxidized/diffutils
-        ./safety/oxidized/direnv
-        ./safety/fe-c
-        ./safety/oxidized/file
-        ./safety/oxidized/flatpak
-        ./safety/oxidized/gcc
-        ./safety/oxidized/grep
-        ./safety/oxidized/gzip
-        ./media/h26xtoav1
-        ./safety/oxidized/help2man
-        ./safety/oxidized/llvm
-        ./safety/oxidized/make
-        ./safety/oxidized/meson
-        ./safety/oxidized/nixos
-        ./safety/oxidized/ninja
-        ./safety/oxidized/nixpkgs
-        ./safety/oxidized/patch
-        ./safety/oxidized/patchelf
-        ./safety/oxidized/pcre2
-        ./safety/oxidized/perl
-        ./safety/oxidized/pipewire
-        ./safety/oxidized/pkg-config
-        ./safety/oxidized/sed
-        ./safety/oxidized/systemd
-        ./safety/oxidized/tar
-        ./safety/oxidized/texinfo
-        ./dev/wclip
-        ./safety/oxidized/xz
-
-        ./slides
-
-        ./platform/tangled/cli
-        ./platform/tangled/spindle-nix-engine
-
-        ./apps/homepage
-        ./apps/randie
-        ./apps/wiki
       ];
+
+      # Every directory holding a default.nix is a project and is imported.
+      # platform/nix is not one: it is the nixDir above, and the modules in
+      # it are named explicitly.
+      projects.exclude = ["platform/nix"];
+
       nixDirAliases = {
         packages = ["pkgs"];
         flakelightModules = ["flake/modules"];

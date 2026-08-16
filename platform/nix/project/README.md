@@ -50,6 +50,38 @@ input.
 The module is also exported as `flakelightModules.default`, for a flake that
 needs to compose it with modules of its own.
 
+## Workspaces
+
+`project` is one published unit. `workspace` is the tree they live in, and
+finds them: every directory holding a `default.nix` is a project and is
+imported, so a monorepo's root flake stops carrying a list that drifts.
+
+```nix
+outputs = inputs:
+  import ./platform/nix/project/workspace.nix ./. {
+    inherit inputs;
+    systems = ["x86_64-linux"];
+    nixDir = ./platform/nix;
+    imports = [./platform/nix/flake/modules/lib.nix];  # what is not a project
+    projects.exclude = ["platform/nix"];
+  };
+```
+
+`projects.exclude` takes repo-relative paths and `projects.depth` bounds the
+walk (default 4, enough for `area/group/project`). Everything else is passed
+to flakelight untouched.
+
+Unlike `project`, this closes over nothing and is a plain function: a
+published repo wants our nixpkgs, but a monorepo pins its own, and its
+flakelight has to be the one its other modules were written against, so both
+come from the caller's `inputs`. That also means a monorepo publishing this
+very module can import it **by path**, without taking a published revision of
+itself as an input.
+
+When it replaced a hand-written list of 56 directories here, the evaluated
+output surface was identical except for one project that had been missing
+from the list for as long as it had existed.
+
 ## Options
 
 | option | default | for |

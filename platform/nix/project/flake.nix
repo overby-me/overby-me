@@ -36,6 +36,13 @@
 
       flakelightModule = module;
 
+      # The other half: `project` builds one published unit, `workspace`
+      # finds the tree of them. It closes over nothing (see workspace.nix),
+      # so it is exported as a plain function rather than through the
+      # functor, and a monorepo can import it by path instead of taking this
+      # flake as an input.
+      outputs.workspace = import ./workspace.nix;
+
       # Callable, so a published repo's whole flake is one call rather than a
       # copy of the same three inputs, the same import and the same follows.
       # The inputs closed over here are this flake's own, which is what makes
