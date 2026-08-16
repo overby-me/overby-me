@@ -38,7 +38,7 @@
         systemd
       ]
     )
-    # vibe is built from platform/nix/pkgs, so no binary cache has it and an aarch64
+    # vibe is built from platform/nix/packages, so no binary cache has it and an aarch64
     # host compiles it under emulation.  It is a desktop audio visualiser,
     # not worth that on armitas or phone.
     ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) (

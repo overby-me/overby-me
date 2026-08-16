@@ -21,7 +21,7 @@
   lib,
   ...
 }: let
-  labels = import ../../project/labels.nix;
+  labels = import ../project/labels.nix;
 
   exports = {
     # fe-c's runtime and cargo subcommand are published crates in their own
@@ -30,13 +30,13 @@
   };
 
   projects = labels.discover {
-    root = ../../../..;
+    root = ../../..;
     exclude = ["platform/nix"];
   };
 
   # Which project a definition came from, by the file the module system
   # recorded for it. A definition from outside any project - flakelight's own
-  # nixDir autoloading, which names platform/nix/pkgs by filename - is not a
+  # nixDir autoloading, which names platform/nix/packages by filename - is not a
   # project's to answer for.
   projectOf = file: let
     hits = builtins.filter (l: lib.hasSuffix "/${l.path}" file || lib.hasInfix "/${l.path}/" file) projects;
@@ -70,7 +70,7 @@ in {
         packages named outside their project's namespace:
           ${builtins.concatStringsSep "\n  " violations}
         Rename them into the project's namespace, or add the name to `exports`
-        in platform/nix/flake/modules/namespaces.nix if it is published under
+        in platform/nix/flakelightModules/namespaces.nix if it is published under
         an identity of its own.
       ''
     else "${pkgs.coreutils}/bin/true";

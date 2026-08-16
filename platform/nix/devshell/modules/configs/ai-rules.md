@@ -89,7 +89,7 @@
   `nix flake check` instantiates all of them in a single evaluator whose peak
   memory exceeds 30 GiB. `--max-jobs`/`--no-build` do not help. Run
   `just check` instead: it invokes the bounded-memory `flake-check` tool
-  (`platform/nix/pkgs/flake-check.nix`), which evaluates attributes in memory-capped
+  (`platform/nix/packages/flake-check.nix`), which evaluates attributes in memory-capped
   `nix-eval-jobs` workers and then builds only the uncached checks, one job at
   a time. Tune it via environment variables: `CHECK_FRAGMENT` (evaluate a
   different fragment, e.g. `CHECK_FRAGMENT=devShells.x86_64-linux`), `WORKERS`

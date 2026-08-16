@@ -62,7 +62,7 @@ outputs = inputs:
     inherit inputs;
     systems = ["x86_64-linux"];
     nixDir = ./platform/nix;
-    imports = [./platform/nix/flake/modules/lib.nix];  # what is not a project
+    imports = [./platform/nix/flakelightModules/lib.nix];  # what is not a project
     projects.exclude = ["platform/nix"];
   };
 ```

@@ -1,7 +1,7 @@
 # Generate commitlintrc.yml with scope options dynamically derived from
 # the Nix flake source tree.
 # Discovers top-level files (e.g. "flake.nix") and directories nested up to
-# `maxDepth` segments deep (e.g. "nix", "platform/nix/nixos", "platform/nix/nixos/config").
+# `maxDepth` segments deep (e.g. "nix", "platform/nix/nixos", "platform/nix/nixosConfigurations").
 {
   pkgs,
   lib,

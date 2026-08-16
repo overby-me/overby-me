@@ -194,13 +194,14 @@
         allowUnfree = true;
       };
 
-      # flakelight autoloads from nixDir, which defaults to ./nix; the nix
-      # tree is an area member now.
+      # flakelight autoloads from nixDir, and every directory under it is
+      # named after the output it feeds, so the mapping is the identity
+      # function and there is no alias table to keep.
       nixDir = ./platform/nix;
 
-      # Every .nix file in it is a flakelight module; nixDirAliases exports
-      # them rather than importing them, so they are named here.
-      moduleDirs = [./platform/nix/flake/modules];
+      # Every .nix file in it is a flakelight module. nixDir exports them
+      # under the directory's own name; importing them is a separate act.
+      moduleDirs = [./platform/nix/flakelightModules];
 
       # A tool's checks live inside that tool's library rather than in a
       # directory of modules, so these four stay named.
@@ -215,22 +216,5 @@
       # platform/nix is not one: it is the nixDir above, and the modules in
       # it are named explicitly.
       projects.exclude = ["platform/nix"];
-
-      nixDirAliases = {
-        packages = ["pkgs"];
-        flakelightModules = ["flake/modules"];
-        nixosConfigurations = ["nixos/config"];
-        nixosModules = ["nixos/modules"];
-        darwinConfigurations = ["darwin/config"];
-        darwinModules = ["darwin/modules"];
-        systemConfigs = ["system-manager/config"];
-        systemModules = ["system-manager/modules"];
-        homeConfigurations = ["home-manager/config"];
-        homeModules = ["home-manager/modules"];
-        users = ["home-manager/users"];
-        hardware = ["nixos/hardware"];
-        desktops = ["nixos/desktops"];
-        withOverlays = ["with-overlays"];
-      };
     };
 }

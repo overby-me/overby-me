@@ -85,21 +85,21 @@
     # aarch64 binfmt, core/hardware.nix wants amdgpu and a Nitrokey, and
     # core/virtualisation.nix pulls in docker, libvirtd and waydroid.  The
     # bootloader settings core/boot.nix carried are restated below.
-    ../modules/core/audio.nix
-    ../modules/core/console.nix
-    ../modules/core/environment.nix
-    ../modules/core/fonts.nix
-    ../modules/core/locale.nix
-    ../modules/core/networking.nix
-    ../modules/core/nix.nix
-    ../modules/core/secrets.nix
-    ../modules/core/system.nix
-    ../modules/core/uinput.nix
-    ../modules/core/users.nix
-    ../modules/core/zram.nix
-    ../modules/services/netbird.nix
-    ../modules/services/openssh.nix
-    ../modules/services/resolved.nix
+    ../nixosModules/core/audio.nix
+    ../nixosModules/core/console.nix
+    ../nixosModules/core/environment.nix
+    ../nixosModules/core/fonts.nix
+    ../nixosModules/core/locale.nix
+    ../nixosModules/core/networking.nix
+    ../nixosModules/core/nix.nix
+    ../nixosModules/core/secrets.nix
+    ../nixosModules/core/system.nix
+    ../nixosModules/core/uinput.nix
+    ../nixosModules/core/users.nix
+    ../nixosModules/core/zram.nix
+    ../nixosModules/services/netbird.nix
+    ../nixosModules/services/openssh.nix
+    ../nixosModules/services/resolved.nix
 
     # ── Machine configuration ─────────────────────────────────────────
     (_: {

@@ -11,7 +11,7 @@
 }: let
   inherit (lib) mapAttrs mapAttrsToList removeAttrs;
 
-  mkDevShell = import ../../devshell/lib/mkDevShell.nix {inherit lib inputs;};
+  mkDevShell = import ../devshell/lib/mkDevShell.nix {inherit lib inputs;};
 
   # Resolve a flakelight devShell value (pkgs: cfg) into a derivation, so it can
   # be pulled into the default shell's inputsFrom. Mirrors flakelight's
@@ -40,9 +40,9 @@ in {
       (removeAttrs config.devShells ["default"]);
   in
     mkDevShell pkgs [
-      ../../devshell/modules/common.nix
-      ../../devshell/modules/git-hooks.nix
-      ../../devshell/modules/configs/default.nix
+      ../devshell/modules/common.nix
+      ../devshell/modules/git-hooks.nix
+      ../devshell/modules/configs/default.nix
       {config.inputsFrom = otherShells;}
     ];
 }
