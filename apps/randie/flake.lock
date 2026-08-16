@@ -16,27 +16,6 @@
         "type": "github"
       }
     },
-    "flakelight": {
-      "inputs": {
-        "nixpkgs": [
-          "project",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786367861,
-        "narHash": "sha256-6SuLCSsEx1lpL5/TXdU/HPK0f4QeELLqmOlmUPHmW4s=",
-        "owner": "accelbread",
-        "repo": "flakelight",
-        "rev": "aa55b43cc4fda05655083ff846b99b5abf69252a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "accelbread",
-        "repo": "flakelight",
-        "type": "github"
-      }
-    },
     "git-hooks": {
       "inputs": {
         "flake-compat": "flake-compat",
@@ -77,22 +56,21 @@
     },
     "project": {
       "inputs": {
-        "flakelight": "flakelight",
         "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786901992,
-        "narHash": "sha256-GP5x5RDrpNtXGCg1EVUlWy1LtrLtLpMnuVJrErNe0G4=",
-        "owner": "overby-me",
-        "repo": "nix-project",
-        "rev": "c9c59a5f8519448c10407f67417f8b9dbd26b31e",
-        "type": "github"
+        "lastModified": 1786916227,
+        "narHash": "sha256-0OPe+o6eWz1jseHhqSOGGzJa8xszqR0dS3wsWMTLW7g=",
+        "ref": "refs/heads/main",
+        "rev": "8426f119899c3578c266a818f985addac061db40",
+        "revCount": 24,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-project"
       },
       "original": {
-        "owner": "overby-me",
-        "repo": "nix-project",
-        "type": "github"
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-project"
       }
     },
     "root": {
