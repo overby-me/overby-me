@@ -1018,6 +1018,37 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
+/// An attribute group number defined twice keeps the last definition.
+///
+/// Not the first, and not the two merged: two disjoint sets leave only the
+/// later one, and `noinline` before `alwaysinline` is not diagnosed at all,
+/// the earlier definition being gone rather than in conflict. A use written
+/// between the two takes the later one as well, so this is the module's
+/// last word on a number rather than what was in force at the use.
+#[test]
+fn the_last_definition_of_an_attribute_group_wins() {
+    let cases = [
+        (
+            "attributes #0 = { norecurse }\nattributes #0 = { nounwind }\n",
+            "nounwind",
+        ),
+        (
+            "attributes #0 = { noinline }\nattributes #0 = { alwaysinline }\n",
+            "alwaysinline",
+        ),
+    ];
+    for (groups, wanted) in cases {
+        let text = format!("define void @early() #0 {{\n  ret void\n}}\n{groups}");
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains(&format!("attributes #0 = {{ {wanted} }}")),
+            "wanted:   attributes #0 = {{ {wanted} }}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
 /// An attribute set prints in upstream's order rather than the one it was
 /// written in.
 ///

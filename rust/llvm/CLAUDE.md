@@ -2831,6 +2831,24 @@ table covers all hundred rather than the nineteen the task was about, and
 DebugInfo differential 54 to 55, `sroa-handle-dbg-value.ll` being one
 parameter written `noalias nocapture sret(%T)`. Nothing else moved, and the
 corpus still reproduces byte for byte.
+The pass after it settled a one-probe question the file it came from could
+not answer. `DebugInfo/unrolled-loop-remainder.ll` writes `attributes #0`
+twice, once with `readnone` and once without, and upstream's answer carries
+`memory(none)`, which is the second. That file cannot tell the later
+definition winning from the two merging, the second set being the first plus
+one attribute, so it was asked with two disjoint sets: `#0 = { norecurse }`
+then `#0 = { nounwind }` comes back `{ nounwind }` alone. The last one wins
+and nothing merges.
+Three more shapes, because a rule read off one probe is a rule read off one
+probe. A conflicting pair, `noinline` before `alwaysinline`, is not
+diagnosed at all: the earlier definition is gone rather than in conflict.
+Three definitions keep the third. And a use written between two definitions
+takes the later one, so this is the module's last word on a number rather
+than what was in force where the number was used. `llvm-as` agrees with
+`opt` on every one of them.
+We kept the first, the lookup being a search for the number. The parser
+replaces the entry now, which is what upstream holds: one group per number.
+DebugInfo differential 55 to 56.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

@@ -627,7 +627,22 @@ impl Parser {
             attributes.push(self.parse_attribute(true)?);
         }
         crate::attributes::apply_legacy_memory(&mut attributes, legacy);
-        self.module.attribute_groups.push((number, attributes));
+        // A number defined twice keeps the last definition and forgets the
+        // one before it, whatever either says: two disjoint sets do not
+        // merge, `noinline` before `alwaysinline` is not even complained
+        // about, and a use written between the two takes the later one all
+        // the same. `DebugInfo/unrolled-loop-remainder.ll` writes
+        // `attributes #0` twice, and it is the second, with `readnone` in
+        // it, that upstream prints as `memory(none)`.
+        match self
+            .module
+            .attribute_groups
+            .iter_mut()
+            .find(|(id, _)| *id == number)
+        {
+            Some(existing) => existing.1 = attributes,
+            None => self.module.attribute_groups.push((number, attributes)),
+        }
         Ok(())
     }
 }
