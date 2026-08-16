@@ -17,7 +17,7 @@
 
         meta = {
           description = "An xclip-style Wayland clipboard tool written in Rust";
-          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/wclip";
+          homepage = "https://tangled.org/overby.me/overby.me/tree/main/dev/wclip";
           license = lib.licenses.mit;
           mainProgram = "wclip";
           platforms = lib.platforms.linux;
@@ -42,7 +42,7 @@
 
         meta = {
           description = "An xclip-style Wayland clipboard tool written in Rust (dev build, fast compile)";
-          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/wclip";
+          homepage = "https://tangled.org/overby.me/overby.me/tree/main/dev/wclip";
           license = lib.licenses.mit;
           mainProgram = "wclip";
           platforms = lib.platforms.linux;

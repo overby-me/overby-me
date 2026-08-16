@@ -274,6 +274,12 @@
     description: "The overby.me website, in Rust and Dioxus with WebGL screensavers"
     filter: ":[:/web/homepage:exclude[::*.nix],:/web/homepage::flake.nix,:/apps/homepage:exclude[::*.nix],:/apps/homepage::flake.nix]:unsign"
   }
+  {
+    name: "wclip"
+    path: "dev/wclip"
+    description: "An xclip-style Wayland clipboard tool written in Rust"
+    filter: ":[:/rust/wclip:exclude[::*.nix],:/rust/wclip::flake.nix,:/safety/oxidized/wclip:exclude[::*.nix],:/safety/oxidized/wclip::flake.nix,:/dev/wclip:exclude[::*.nix],:/dev/wclip::flake.nix]:unsign"
+  }
   # Not a rust/ rewrite: the flakelight module every other published repo
   # imports. It has to be published for them to resolve it, and it is
   # deliberately first in this list so a run that adds a project pushes the
