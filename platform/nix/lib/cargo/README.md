@@ -1,4 +1,4 @@
-# nix-cargo
+# nix-lib-cargo
 
 Nix builder for Rust projects with per-crate derivations. Parses `Cargo.lock`
 and a registry index at evaluation time: no generated `Cargo.nix`, no cargo

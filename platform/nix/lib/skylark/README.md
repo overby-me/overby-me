@@ -1,4 +1,4 @@
-# skylark
+# nix-lib-skylark
 
 A pure-Nix interpreter for [Starlark](https://github.com/bazelbuild/starlark)
 (the language formerly called Skylark), used by Bazel, Buck2, and others.

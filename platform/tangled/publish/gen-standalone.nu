@@ -261,7 +261,18 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         mkdir ($dir | path join ".tangled" "workflows")
         $CI_TEXT | save -f $ci
 
+        # A published repo's README should be titled the way it publishes,
+        # not the way its directory used to be called. Nineteen still said
+        # rust-awk after the rename, which is the first thing a visitor read.
         let readme = ($dir | path join "README.md")
+        if ($readme | path exists) {
+            let txt = (open --raw $readme)
+            let h1 = ($txt | lines | where {|l| $l | str starts-with "# " } | get -o 0)
+            if $h1 != null and $h1 != $"# ($p.name)" {
+                $txt | str replace $h1 $"# ($p.name)" | save -f $readme
+                print $"  ($p.name): retitled from ($h1 | str substring 2..)"
+            }
+        }
         let banner = if ($readme | path exists) {
             let now = (open --raw $readme)
             let want = (with-banner $now (banner-text $p.name $p.path $github))

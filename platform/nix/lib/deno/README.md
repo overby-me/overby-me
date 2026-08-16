@@ -1,4 +1,4 @@
-# nix-deno
+# nix-lib-deno
 
 Nix builder for Deno projects with npm dependencies. Parses `deno.lock` at evaluation time to create individual `fetchurl` derivations per npm package, so no manual hash maintenance is needed.
 

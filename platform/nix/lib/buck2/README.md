@@ -1,4 +1,4 @@
-# nix-buck2
+# nix-lib-buck2
 
 A Nix builder for [Buck2](https://github.com/facebook/buck2) projects. It
 parses a project's `.buckconfig` and its `BUCK`/`.bzl` Starlark files at

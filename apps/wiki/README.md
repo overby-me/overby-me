@@ -1,4 +1,4 @@
-# RadikalWiki (Dioxus / WASM)
+# wiki
 
 A Rust + [Dioxus](https://dioxuslabs.com) 0.7 frontend compiled to WebAssembly:
 the port that replaced the former React RadikalWiki app in this directory. It

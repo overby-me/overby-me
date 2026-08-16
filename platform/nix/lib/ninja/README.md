@@ -1,4 +1,4 @@
-# nix-ninja
+# nix-lib-ninja
 
 A Nix builder for [Ninja](https://ninja-build.org/) projects. It extracts a
 configured project's build graph with `rust-ninja -t graph-json` (one
