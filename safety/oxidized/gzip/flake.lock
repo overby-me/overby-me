@@ -40,7 +40,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "standalone",
+          "project",
           "nixpkgs"
         ]
       },
@@ -74,14 +74,7 @@
         "type": "github"
       }
     },
-    "root": {
-      "inputs": {
-        "flakelight": "flakelight",
-        "nixpkgs": "nixpkgs",
-        "standalone": "standalone"
-      }
-    },
-    "standalone": {
+    "project": {
       "inputs": {
         "flakelight": [
           "flakelight"
@@ -92,17 +85,24 @@
         ]
       },
       "locked": {
-        "lastModified": 1786867641,
-        "narHash": "sha256-8wagkd+qYjRjcF700W2Ee3BxN7QNR5+xuejwB77+3EI=",
+        "lastModified": 1786879603,
+        "narHash": "sha256-KrAL+GjyJWDMHS+nekxm0wFDMJGRnpjoagS1UoxVp+k=",
         "owner": "overby-me",
-        "repo": "nix-standalone",
-        "rev": "94df90be51417a4fea9f572ddf0c43ffcb1525e6",
+        "repo": "nix-project",
+        "rev": "54a664f56f65c72d5b23bd470236281c262ef232",
         "type": "github"
       },
       "original": {
         "owner": "overby-me",
-        "repo": "nix-standalone",
+        "repo": "nix-project",
         "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flakelight": "flakelight",
+        "nixpkgs": "nixpkgs",
+        "project": "project"
       }
     }
   },

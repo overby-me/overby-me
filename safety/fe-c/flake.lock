@@ -40,7 +40,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "standalone",
+          "project",
           "nixpkgs"
         ]
       },
@@ -74,12 +74,36 @@
         "type": "github"
       }
     },
+    "project": {
+      "inputs": {
+        "flakelight": [
+          "flakelight"
+        ],
+        "git-hooks": "git-hooks",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786879603,
+        "narHash": "sha256-KrAL+GjyJWDMHS+nekxm0wFDMJGRnpjoagS1UoxVp+k=",
+        "owner": "overby-me",
+        "repo": "nix-project",
+        "rev": "54a664f56f65c72d5b23bd470236281c262ef232",
+        "type": "github"
+      },
+      "original": {
+        "owner": "overby-me",
+        "repo": "nix-project",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flakelight": "flakelight",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay",
-        "standalone": "standalone"
+        "project": "project",
+        "rust-overlay": "rust-overlay"
       }
     },
     "rust-overlay": {
@@ -99,30 +123,6 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "standalone": {
-      "inputs": {
-        "flakelight": [
-          "flakelight"
-        ],
-        "git-hooks": "git-hooks",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786867641,
-        "narHash": "sha256-8wagkd+qYjRjcF700W2Ee3BxN7QNR5+xuejwB77+3EI=",
-        "owner": "overby-me",
-        "repo": "nix-standalone",
-        "rev": "94df90be51417a4fea9f572ddf0c43ffcb1525e6",
-        "type": "github"
-      },
-      "original": {
-        "owner": "overby-me",
-        "repo": "nix-standalone",
         "type": "github"
       }
     }

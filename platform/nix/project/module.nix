@@ -14,14 +14,14 @@
   ...
 }: let
   inherit (lib) mkOption types;
-  cfg = config.standalone;
+  cfg = config.project;
 
   # Build inputs are named as strings rather than passed as packages, because
   # the generator that writes these flakes reads them out of a project list
   # and has no pkgs to resolve them against.
   resolve = pkgs: names: map (n: pkgs.${n}) names;
 in {
-  options.standalone = {
+  options.project = {
     name = mkOption {
       type = types.str;
       description = ''

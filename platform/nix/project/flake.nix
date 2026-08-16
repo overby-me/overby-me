@@ -10,7 +10,7 @@
 # github.com/overby-me/nix-standalone, and the monorepo is the source of
 # truth for it as for everything else here.
 {
-  description = "The shared flakelight module for repos published from the overby.me monorepo";
+  description = "The shared flakelight module for projects published from the overby.me monorepo";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d";
