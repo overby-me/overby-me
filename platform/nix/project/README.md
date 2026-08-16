@@ -89,6 +89,43 @@ When it replaced a hand-written list of 56 directories here, the evaluated
 output surface was identical except for one project that had been missing
 from the list for as long as it had existed.
 
+## Projects that name themselves from where they are
+
+A project may provide `project.nix` instead of `default.nix`. The workspace
+applies it to its own label, so the file states what it builds and never
+where the names come from:
+
+```nix
+label: {lib, ...}: {
+  packages = label.names {
+    default = ...;   # -> wclip
+    dev = ...;       # -> wclip-dev
+  };
+  checks = label.names {
+    test-version = ...;   # -> wclip-test-version
+  };
+}
+```
+
+`default` is the project itself, which is Bazel's `//foo/bar` meaning
+`//foo/bar:bar`; every other key hangs off it. `label.qualify "dev"` does one
+name at a time.
+
+This is the dendritic idea and path-derived naming at once, which look
+opposed until the file *receives* its identity rather than typing it: one
+uniform kind of file, discovered by walking the tree, and the tree decides
+the names. The reason it needs applying rather than a module argument is that
+`_module.args` is evaluation-wide - the module system cannot hand one module
+a different argument from another - and the reason applying is unambiguous is
+that every file found this way is the same kind of thing.
+
+A project written in a local vocabulary also cannot spell a name outside its
+own namespace, which is otherwise something
+`checks.namespace-ownership` has to go looking for after the fact.
+
+`default.nix` keeps working as an ordinary flakelight module, so a tree
+migrates one project at a time.
+
 ## Options
 
 | option | default | for |

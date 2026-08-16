@@ -60,7 +60,9 @@ in rec {
     root,
     areas ? defaultAreas,
     exclude ? [],
-    marker ? "default.nix",
+    # A directory is a project if it holds any of these. Several, so a tree
+    # can migrate one project at a time rather than in one commit.
+    markers ? ["default.nix"],
     depth ? 4,
   }: let
     walk = rel: remaining: let
@@ -79,7 +81,7 @@ in rec {
     in
       if elem rel exclude
       then []
-      else if rel != "" && pathExists (dir + "/${marker}")
+      else if rel != "" && builtins.any (m: pathExists (dir + "/${m}")) markers
       then [rel]
       else if remaining == 0
       then []
@@ -117,6 +119,7 @@ in rec {
       if name == basename
       then []
       else [name];
+    shortName = concatStringsSep "-" (projectSegs ++ suffix);
   in {
     inherit area path;
     project = concatStringsSep "/" projectSegs;
@@ -143,13 +146,39 @@ in rec {
     # The name to type. Bazel calls this the apparent name: short, and valid
     # only where nothing else claims it. `render` emits it when it is
     # unique and withholds it when it is not.
-    short = concatStringsSep "-" (projectSegs ++ suffix);
+    short = shortName;
 
     # The subtree that publishes this project as a repo of its own. josh
     # addresses a subtree the way a label addresses a project, so this is a
     # rendering rather than a translation. It is the *current* location
     # only; see `filterOf` for why that is not the whole filter.
     josh = ":/${path}";
+
+    # Qualify a target name written inside this project. `default` is the
+    # project itself, which is Bazel's `//foo/bar` meaning `//foo/bar:bar`;
+    # anything else hangs off it. A project therefore writes the names it
+    # uses locally and cannot spell one that lands outside its namespace,
+    # which is the property `checks.namespace-ownership` otherwise has to go
+    # looking for after the fact.
+    qualify = target:
+      if target == "default" || target == ""
+      then shortName
+      else "${shortName}-${target}";
+
+    # The same over a whole attribute set, so a file states what it builds
+    # and not where the names come from:
+    #
+    #   packages = label.names { default = ...; dev = ...; };
+    #   -> { oxidized-awk = ...; oxidized-awk-dev = ...; }
+    names = set:
+      listToAttrs (map (target: {
+          name =
+            if target == "default"
+            then shortName
+            else "${shortName}-${target}";
+          value = set.${target};
+        })
+        (attrNames set));
   };
 
   # Renderings, with the ambiguous ones separated rather than merged. What a

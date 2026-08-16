@@ -18,7 +18,7 @@
 #
 # Everything except `projects` is passed to flakelight untouched.
 root: cfg: let
-  inherit (builtins) attrNames concatMap filter readDir stringLength substring throw;
+  inherit (builtins) attrNames concatMap filter pathExists readDir stringLength substring throw;
 
   labels = import ./labels.nix;
 
@@ -29,6 +29,7 @@ root: cfg: let
   # here is how the two would come to disagree about what a project is.
   found = labels.discover ({
       inherit root;
+      markers = ["project.nix" "default.nix"];
     }
     // discovery);
 
@@ -38,10 +39,28 @@ root: cfg: let
   # tell you what it just shadowed.
   named = labels.render found;
 
+  # A `project.nix` is a module applied to its own label, which is what lets
+  # a file state what it builds without stating where the names come from:
+  #
+  #   label: {...}: { packages = label.names { default = ...; dev = ...; }; }
+  #
+  # The module system cannot hand one module a different argument from
+  # another - `_module.args` is evaluation-wide - so the label is applied at
+  # import rather than passed through it. That is only unambiguous because
+  # every file found this way is the same kind of thing, which is the
+  # dendritic part: one uniform rule, and the tree decides the names.
+  #
+  # A `default.nix` is imported as an ordinary flakelight module, so a
+  # project migrates when there is a reason to and not before.
+  moduleOf = l:
+    if pathExists (root + "/${l.path}/project.nix")
+    then import (root + "/${l.path}/project.nix") l
+    else root + "/${l.path}";
+
   discovered =
     if named.report != null
     then throw "workspace: ${named.report}"
-    else map (l: root + "/${l.path}") found;
+    else map moduleOf found;
 
   # A module directory is imported file by file: every .nix in it is a
   # flakelight module. One level only, and no default.nix rule, because
