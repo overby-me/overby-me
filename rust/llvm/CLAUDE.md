@@ -2552,6 +2552,30 @@ it has to have a size, and `target("foo")` has none where
 `target("spirv.Event")` does.
 Assembler differential 215 to 217, Verifier holding at 327 with the rule that
 replaced the wrong one, and the Linker differential back where it was.
+The pass after it took the artefact the one before had to work around. The
+closed set the reduction reads a digit-free type spelling from held `label`,
+`token` and `metadata`, and the measured mangling says a label and a token
+both spell `i0` and metadata spells `Metadata`, so none of the three can ever
+be a component. What put them there was harvesting the words that follow a
+documented name, which cannot tell a type from the last word of a name.
+`label` was the one that cost something: the only name in the tree ending in
+it is `llvm.dbg.label`, so the recognised sweep stored `llvm.dbg`, and any
+rule reading a prefix out of that table made every `llvm.dbg.*` an
+`llvm.dbg`. Regenerating with the three gone is one line each way, `llvm.dbg`
+out and `llvm.dbg.label` in.
+`void` stays, and the difference is evidence rather than taste: it follows
+`llvm.experimental.deoptimize` and `llvm.experimental.patchpoint`, both real
+intrinsics, so there it is the older spelling of a result that `isVoid` is
+the current one for. The other three follow `llvm.dbg.label`,
+`llvm.return.token`, `llvm.uses.token` and `llvm.random.metadata`, of which
+the first is a name and the rest are test inventions.
+`corpus/intrinsic-attributes.nu` needed nothing: it reduces with a regex that
+never had the four in it, which is why `declared.rs` carried no such entry.
+That the two scripts spell the same rule differently is worth knowing and is
+recorded rather than fixed here.
+Nothing moves, which is the point: the artefact was already worked around by
+asking only documented names for a prefix, and this is the same answer with
+nothing to work around.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and

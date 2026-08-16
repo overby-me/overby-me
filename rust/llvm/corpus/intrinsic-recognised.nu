@@ -44,9 +44,14 @@
 # `llvm.amdgcn.fdot2` stored `llvm.amdgcn`, which would answer for every name
 # that target has.
 def spelled [part: string]: nothing -> bool {
+  # No `label`, `token` or `metadata`: the measured mangling spells a label
+  # and a token `i0` and metadata `Metadata`, so none of the three is ever a
+  # component. Harvesting the words that follow a documented name cannot tell
+  # a type from the last word of a name, and the only name in the tree ending
+  # in `label` is `llvm.dbg.label`.
   if $part in [
     "Metadata" "bf16" "bfloat" "double" "f128" "f16" "f32" "f64" "f80" "float"
-    "fp128" "half" "isVoid" "label" "metadata" "ppcf128" "ptr" "token" "void" "x86amx"
+    "fp128" "half" "isVoid" "ppcf128" "ptr" "void" "x86amx"
   ] { return true }
   if ($part | str starts-with "sl_") { return ($part | str ends-with "s") }
   if ($part =~ '^[ip][0-9]+$') { return true }

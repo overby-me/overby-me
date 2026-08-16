@@ -29,10 +29,21 @@ fn mangled(part: &str) -> bool {
     // IR writes as words.
     // `fp128` beside `f128`: the second is what upstream mangles a `fp128`
     // to now, and the first is what the older names in its own tests carry.
+    // `label`, `token` and `metadata` are not here, and the measured
+    // mangling is why: a label and a token both spell `i0` and metadata
+    // spells `Metadata`, so none of the three can ever be a component. What
+    // put them here was harvesting the words that follow a documented name,
+    // which cannot tell a type from the last word of a name: the only name
+    // in the tree ending in `label` is `llvm.dbg.label`, and reducing
+    // through it made every `llvm.dbg.*` an `llvm.dbg`.
+    //
+    // `void` stays, being the one of the four that follows a real intrinsic:
+    // `llvm.experimental.deoptimize.void` and
+    // `llvm.experimental.patchpoint.void` are the older spelling of a result
+    // that `isVoid` is the current one for.
     const SPELLED: &[&str] = &[
         "Metadata", "bf16", "bfloat", "double", "f128", "f16", "f32", "f64", "f80", "float",
-        "fp128", "half", "isVoid", "label", "metadata", "ppcf128", "ptr", "token", "void",
-        "x86amx",
+        "fp128", "half", "isVoid", "ppcf128", "ptr", "void", "x86amx",
     ];
     if SPELLED.contains(&part) {
         return true;
