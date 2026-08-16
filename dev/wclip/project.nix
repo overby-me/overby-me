@@ -42,33 +42,32 @@ project: {lib, ...}: let
     "no-display"
     "selection-abbreviation"
   ];
-in {
-  packages = project.qualify {
-    default = {lib, ...}:
-      lib.buildCargoProject (crate
-        // {
-          # The crate keeps its own name: pname is resolved against
-          # Cargo.lock, and this names a target rather than a crate.
-          pname = "rust-wclip";
-          meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust";};
-        });
+in
+  project.make {
+    packages = {
+      default = {lib, ...}:
+        lib.buildCargoProject (crate
+          // {
+            # The crate keeps its own name: pname is resolved against
+            # Cargo.lock, and this names a target rather than a crate.
+            pname = "rust-wclip";
+            meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust";};
+          });
 
-    dev = {lib, ...}:
-      lib.buildCargoProject (crate
-        // {
-          pname = "rust-wclip-dev";
-          release = false;
-          meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust (dev build, fast compile)";};
-        });
-  };
+      dev = {lib, ...}:
+        lib.buildCargoProject (crate
+          // {
+            pname = "rust-wclip-dev";
+            release = false;
+            meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust (dev build, fast compile)";};
+          });
+    };
 
-  checks =
-    project.qualify
-    (lib.listToAttrs (
+    checks = lib.listToAttrs (
       map (name: {
         name = "test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames
-    ));
-}
+    );
+  }

@@ -5,42 +5,38 @@
 # directory named after each output type. The file says which output it feeds
 # and the project says what the entry is called, so `oxidized-nixos` appears
 # nowhere below even though every name it produces starts with it.
-project: {
-  devShells = project.qualify {
-    default = pkgs: {
-      packages = with pkgs; [
-        just
-        nix-tree
+project:
+project.make {
+  devShells.default = pkgs: {
+    packages = with pkgs; [
+      just
+      nix-tree
+    ];
+  };
+
+  nixosConfigurations = {
+    default = _: {
+      system = "x86_64-linux";
+      modules = [
+        ./base.nix
+        ./systemd.nix
+        ./bash.nix
+        ./sudo.nix
+        # ./coreutils.nix
+      ];
+    };
+
+    # Absolute, so it keeps its own name: the stock NixOS this one is
+    # measured against. A baseline is not a rung of the port.
+    "/nixos-nix" = _: {
+      system = "x86_64-linux";
+      modules = [
+        ./base.nix
       ];
     };
   };
 
-  nixosConfigurations =
-    project.qualify {
-      default = _: {
-        system = "x86_64-linux";
-        modules = [
-          ./base.nix
-          ./systemd.nix
-          ./bash.nix
-          ./sudo.nix
-          # ./coreutils.nix
-        ];
-      };
-    }
-    // {
-      # The stock NixOS this one is measured against, named for what it is
-      # rather than for the project that keeps it: a baseline is not a
-      # rung of the port.
-      nixos-nix = _: {
-        system = "x86_64-linux";
-        modules = [
-          ./base.nix
-        ];
-      };
-    };
-
-  checks = project.qualify {
+  checks = {
     boot = pkgs: import ./nixos-test.nix {inherit pkgs;};
 
     # Rung 1 (docs/ROADMAP.md "Ship one increment"): one rust component under

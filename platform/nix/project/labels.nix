@@ -43,7 +43,7 @@
 #   nix     packages.<system>.safety-oxidized-sed, plus the short alias
 #   josh    :/safety/oxidized/sed
 let
-  inherit (builtins) attrNames concatMap concatStringsSep elem elemAt filter head isAttrs isString length listToAttrs pathExists readDir substring tail;
+  inherit (builtins) attrNames concatMap concatStringsSep elem elemAt filter head isAttrs isString length listToAttrs pathExists readDir stringLength substring tail;
 
   segsOf = p: filter (x: x != "" && x != ".") (filter isString (builtins.split "/" p));
 
@@ -120,6 +120,23 @@ in rec {
       then []
       else [name];
     shortName = concatStringsSep "-" (projectSegs ++ suffix);
+
+    qualifyOne = target:
+      if substring 0 1 target == "/"
+      then substring 1 (stringLength target - 1) target
+      else if target == "default" || target == ""
+      then shortName
+      else "${shortName}-${target}";
+
+    qualifyAny = arg:
+      if isAttrs arg
+      then
+        listToAttrs (map (target: {
+            name = qualifyOne target;
+            value = arg.${target};
+          })
+          (attrNames arg))
+      else qualifyOne arg;
   in {
     inherit area path;
     # The package part of the label, in Bazel's sense: the path within the
@@ -157,7 +174,7 @@ in rec {
     # only; see `filterOf` for why that is not the whole filter.
     josh = ":/${path}";
 
-    # Qualify what this project calls a target, into what the flake calls it.
+    # What this project calls a target, turned into what the flake calls it.
     # `default` is the project itself, which is Bazel's `//foo/bar` meaning
     # `//foo/bar:bar`; anything else hangs off it.
     #
@@ -165,25 +182,32 @@ in rec {
     #   qualify { default = a; dev = b; } -> { oxidized-awk = a;
     #                                          oxidized-awk-dev = b; }
     #
-    # One name for both, because it is one idea: a file writes the target
-    # names it uses locally, and cannot write one that lands in another
-    # project's namespace. Taking the set as well as the string is what makes
-    # that convenient enough to actually do - a whole `packages` or `checks`
-    # block goes through it at once.
-    qualify = arg: let
-      one = target:
-        if target == "default" || target == ""
-        then shortName
-        else "${shortName}-${target}";
-    in
-      if isAttrs arg
-      then
-        listToAttrs (map (target: {
-            name = one target;
-            value = arg.${target};
-          })
-          (attrNames arg))
-      else one arg;
+    # A name beginning with `/` is absolute and passes through unqualified,
+    # the way a leading `//` means the root rather than here. That is the
+    # escape hatch for something a project keeps but did not name after
+    # itself, and it is visible in the file rather than configured elsewhere.
+    qualify = qualifyAny;
+
+    # The whole module at once: every output block a project declares gets
+    # its names qualified, and anything that is not a block of names is left
+    # alone.
+    #
+    #   project: project.make {
+    #     packages = { default = ...; dev = ...; };
+    #     checks   = { boot = ...; };
+    #   }
+    #
+    # One call rather than one per block, because a project is set up once.
+    # `qualify` stays for the single name, which is what you want inside a
+    # value rather than around one.
+    make = module:
+      builtins.mapAttrs (
+        _: value:
+          if isAttrs value
+          then qualifyAny value
+          else value
+      )
+      module;
   };
 
   # Renderings, with the ambiguous ones separated rather than merged. What a

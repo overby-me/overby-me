@@ -96,22 +96,38 @@ applies it to its own identity, so the file states what it builds and never
 where the names come from:
 
 ```nix
-project: {lib, ...}: {
-  packages = project.qualify {
-    default = ...;   # -> wclip
-    dev = ...;       # -> wclip-dev
-  };
-  checks = project.qualify {
-    test-version = ...;   # -> wclip-test-version
-  };
-}
+project:
+  project.make {
+    packages = {
+      default = ...;   # -> wclip
+      dev = ...;       # -> wclip-dev
+    };
+    checks = {
+      test-version = ...;   # -> wclip-test-version
+    };
+  }
 ```
 
+One call sets the project up, because a project is set up once. Every block
+of names it declares is qualified; anything that is not a block of names is
+left alone.
+
 `default` is the project itself, which is Bazel's `//foo/bar` meaning
-`//foo/bar:bar`; every other key hangs off it. `project.qualify` takes a
-single name too - `project.qualify "dev"` is `"wclip-dev"` - because it is
-one idea rather than two: what this project calls a target, turned into what
-the flake calls it.
+`//foo/bar:bar`; every other key hangs off it.
+
+A name beginning with `/` is **absolute** and passes through unqualified, the
+way a leading `//` means the root rather than here. That is how a project
+keeps something it did not name after itself:
+
+```nix
+nixosConfigurations = {
+  default = ...;        # -> oxidized-nixos
+  "/nixos-nix" = ...;   # -> nixos-nix, the baseline it is measured against
+};
+```
+
+`project.qualify` does one name where you need it inside a value rather than
+around one: `project.qualify "dev"` is `"wclip-dev"`.
 
 The argument is named for what it is. It carries a label, among a path, the
 renderings and the helpers, so calling it `label` would name one attribute of
@@ -140,16 +156,17 @@ migrates one project at a time.
 `dev/wclip/project.nix`. Every name is local; the label supplies the rest.
 
 ```nix
-project: {lib, ...}: {
-  packages = project.qualify {
-    default = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip"; ... };
-    dev     = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip-dev"; release = false; ... };
-  };
+project: {lib, ...}:
+  project.make {
+    packages = {
+      default = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip"; ... };
+      dev     = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip-dev"; release = false; ... };
+    };
 
-  checks = project.qualify {
-    test-version = pkgs: import ./testsuite.nix { inherit pkgs; name = "version"; };
-  };
-}
+    checks = {
+      test-version = pkgs: import ./testsuite.nix { inherit pkgs; name = "version"; };
+    };
+  }
 ```
 
 ```text
