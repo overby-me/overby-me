@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-file = {lib, ...}:
+    oxidized-file = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-file";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-file-dev = {lib, ...}:
+    oxidized-file-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-file-dev";
 
@@ -51,7 +51,7 @@
       };
   };
 
-  # One nix check per sample in file/file-tests — diffs `rust-file` output
+  # One nix check per sample in file/file-tests — diffs `oxidized-file` output
   # against the upstream `file` binary (both running in the same sandbox).
   checks = let
     # Pinned snapshot of https://github.com/file/file-tests. `fetchTarball`
@@ -93,7 +93,7 @@
   in
     lib.listToAttrs (
       map (p: {
-        name = "rust-file-test-${keyOf p}";
+        name = "oxidized-file-test-${keyOf p}";
         value = pkgs:
           import ./testsuite.nix {
             inherit pkgs fileTestsSrc;

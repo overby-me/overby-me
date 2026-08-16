@@ -1,5 +1,5 @@
 {
-  packages.rust-gcc = {lib, ...}:
+  packages.oxidized-gcc = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-gcc";
 

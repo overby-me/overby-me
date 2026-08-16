@@ -2,7 +2,7 @@
   lib,
   rustPlatform,
   fetchFromGitHub,
-  rust-pkg-config,
+  oxidized-pkg-config,
   libxkbcommon,
   alsa-lib,
   vulkan-loader,
@@ -27,7 +27,7 @@ rustPlatform.buildRustPackage rec {
   cargoHash = "sha256-WxOAmSEnhxJFyfUGHbSGF+UmPKCvWRn2OVfay8aHhzI=";
 
   nativeBuildInputs = [
-    rust-pkg-config
+    oxidized-pkg-config
     makeWrapper
   ];
 

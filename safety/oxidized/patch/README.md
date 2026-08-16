@@ -20,24 +20,24 @@ GNU patch 2.8 test suite.
 ## Building
 
 ```sh
-nix build .#rust-patch
+nix build .#oxidized-patch
 ./result/bin/patch --help
 ```
 
-A debug build is also available as `.#rust-patch-dev` for quick iteration.
+A debug build is also available as `.#oxidized-patch-dev` for quick iteration.
 
 ## Running the test suite
 
 Tests are run in a Nix sandbox. Each test script comes from the GNU patch
-source tarball; rust-patch is placed at `$abs_top_builddir/src/patch` and
+source tarball; oxidized-patch is placed at `$abs_top_builddir/src/patch` and
 the script is executed against it.
 
 ```sh
 # Run a single test
-nix build .#checks.x86_64-linux.rust-patch-test-{name}
+nix build .#checks.x86_64-linux.oxidized-patch-test-{name}
 
 # View failure diff
-nix log .#checks.x86_64-linux.rust-patch-test-{name}
+nix log .#checks.x86_64-linux.oxidized-patch-test-{name}
 ```
 
 See `default.nix` for the full list of test names. Tests time out after 60s.

@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-make = {lib, ...}:
+    oxidized-make = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-make";
 
@@ -28,7 +28,7 @@
         };
       };
 
-    rust-make-dev = {lib, ...}:
+    oxidized-make-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-make-dev";
 
@@ -203,13 +203,13 @@
       "variables/special"
       "variables/undefine"
     ];
-    # Flatten "features/comments" to attr "rust-make-test-features-comments".
+    # Flatten "features/comments" to attr "oxidized-make-test-features-comments".
     mkCheck = path: let
       parts = builtins.split "/" path;
       category = lib.elemAt parts 0;
       name = lib.elemAt parts 2;
     in {
-      name = "rust-make-test-${category}-${name}";
+      name = "oxidized-make-test-${category}-${name}";
       value = pkgs: import ./testsuite.nix {inherit pkgs category name;};
     };
   in

@@ -1,4 +1,4 @@
-# Shared helpers for the rust-binutils nushell test fixtures.
+# Shared helpers for the oxidized-binutils nushell test fixtures.
 #
 # testsuite.nix copies each fixture one directory below this file, so
 # fixtures start with `source ../helpers.nu` (the same layout as this
@@ -27,7 +27,7 @@ def compare [label: string] {
         print $"FAIL: ($label)"
         print "--- expected (GNU reference) ---"
         print (open --raw $ref_out)
-        print "--- actual (rust-binutils) ---"
+        print "--- actual (oxidized-binutils) ---"
         print (open --raw $rust_out)
         exit 1
     }

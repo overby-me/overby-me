@@ -14,12 +14,12 @@
 # setfacl fix for tmpfiles). The testScript prints the service journal so any
 # failure is self-diagnosing.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-rung1-sysusers -L
+# Run with: nix build .#checks.x86_64-linux.oxidized-nixos-rung1-sysusers -L
 {pkgs}: let
-  rustSysusers = "${pkgs.rust-systemd}/bin/systemd-sysusers";
+  rustSysusers = "${pkgs.oxidized-systemd}/bin/systemd-sysusers";
 in
   pkgs.testers.nixosTest {
-    name = "rust-rung1-sysusers";
+    name = "oxidized-nixos-rung1-sysusers";
 
     nodes.machine = _: {
       system.stateVersion = "25.11";

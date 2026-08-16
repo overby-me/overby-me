@@ -13,8 +13,8 @@
       wl-color-picker
       cryptsetup
     ]
-    # rust-wclip is a Wayland clipboard tool (Linux-only).
+    # wclip is a Wayland clipboard tool (Linux-only).
     ++ lib.optionals pkgs.stdenv.isLinux [
-      rust-wclip
+      wclip
     ];
 }

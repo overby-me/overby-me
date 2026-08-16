@@ -1,20 +1,20 @@
-# Run a single test from the upstream patchelf test suite against rust-patchelf.
+# Run a single test from the upstream patchelf test suite against oxidized-patchelf.
 #
 # The fixtures (compiled ELF binaries built from tests/*.c by the upstream
-# autotools setup) are produced once by rust-patchelf-fixtures and then
+# autotools setup) are produced once by oxidized-patchelf-fixtures and then
 # reused by every per-test check.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-patchelf-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-patchelf-test-set-rpath
+# Run with: nix build .#checks.x86_64-linux.oxidized-patchelf-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-patchelf-test-set-rpath
 {
   pkgs,
   name,
 }: let
   fixtures = pkgs.callPackage ./fixtures.nix {};
 in
-  pkgs.runCommand "rust-patchelf-test-${name}" {
+  pkgs.runCommand "oxidized-patchelf-test-${name}" {
     nativeBuildInputs = [
-      pkgs.rust-patchelf-dev
+      pkgs.oxidized-patchelf-dev
       pkgs.coreutils
       pkgs.binutils
       pkgs.diffutils
@@ -30,7 +30,7 @@ in
     chmod -R u+w tests
 
     # Upstream test scripts call ../src/patchelf
-    ln -s ${pkgs.rust-patchelf-dev}/bin/patchelf src/patchelf
+    ln -s ${pkgs.oxidized-patchelf-dev}/bin/patchelf src/patchelf
 
     cd tests
 

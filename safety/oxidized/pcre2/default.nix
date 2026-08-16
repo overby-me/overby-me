@@ -1,5 +1,5 @@
 {
-  packages.rust-pcre2 = {lib, ...}:
+  packages.oxidized-pcre2 = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-pcre2";
 

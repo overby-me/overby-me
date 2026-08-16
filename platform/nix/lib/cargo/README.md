@@ -115,7 +115,7 @@ nix shell nixpkgs#cargo -c nu platform/nix/lib/cargo/tools/diff-cargo.nu sweep r
 `lock`, `index`, `manifest`, `resolve`) for tests and advanced use.
 
 A fast-iteration example combining the knobs (see `safety/oxidized/systemd`):
-`rust-systemd-dev` builds with `release = false`, a nightly toolchain with
+`oxidized-systemd-dev` builds with `release = false`, a nightly toolchain with
 the cranelift codegen backend, and wild linking; the whole 100-member
 workspace cold-builds in under a minute and single-member edits rebuild in
 seconds.

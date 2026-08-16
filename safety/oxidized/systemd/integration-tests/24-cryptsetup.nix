@@ -8,7 +8,7 @@
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: no encrypted /var partition, skipping' >/skipped"
+      echo "echo 'oxidized-systemd: no encrypted /var partition, skipping' >/skipped"
       echo "exit 77"
     } > TEST-24-CRYPTSETUP.sh
     chmod +x TEST-24-CRYPTSETUP.sh

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `rust-tar`. Tests refer to the GNU tar 1.35 suite.
+All notable changes to `oxidized-tar`. Tests refer to the GNU tar 1.35 suite.
 Trajectory: 92 → 172 → 182 → 187 → 191 → 195 → 200 → 206 → 209 → 210
 → 212 → 213 → 214 → 216 → 218 → 219 → 220 → 221 → 217 → 214 → 220 →
 213 → 220 → **224/224**.
@@ -272,5 +272,5 @@ positional-option warnings.
   `checkseekhole`, `ckmtime`) once, reused by every per-test
   derivation.
 - `testsuite.nix` runs each upstream test ID in a per-test Nix sandbox
-  with `$TAR` pointed at rust-tar.
+  with `$TAR` pointed at oxidized-tar.
 - `default.nix` lists all 224 upstream test names as flake checks.

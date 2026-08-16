@@ -1,6 +1,6 @@
 {
   packages = {
-    rust-curl = {lib, ...}:
+    oxidized-curl = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-curl";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-curl-dev = {lib, ...}:
+    oxidized-curl-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-curl-dev";
 
@@ -52,8 +52,8 @@
   };
 
   # Discovery tool: runs tests 1-100 and reports which pass/fail
-  # Usage: nix build .#packages.x86_64-linux.rust-curl-test-discovery -L
-  packages.rust-curl-test-discovery = {
+  # Usage: nix build .#packages.x86_64-linux.oxidized-curl-test-discovery -L
+  packages.oxidized-curl-test-discovery = {
     lib,
     perl,
     coreutils,
@@ -61,7 +61,7 @@
     gnused,
     gnugrep,
     stunnel,
-    rust-curl-dev,
+    oxidized-curl-dev,
     curl,
     stdenv,
     autoreconfHook,
@@ -109,13 +109,13 @@
   in
     lib.warn "This derivation runs tests 1200-1500 in batch; use -L to see live output"
     (derivation {
-      name = "rust-curl-test-discovery";
+      name = "oxidized-curl-test-discovery";
       inherit (stdenv) system;
       builder = "${stdenv.shell}";
       args = [
         "-c"
         ''
-          export PATH="${lib.makeBinPath [perl coreutils diffutils gnused gnugrep stunnel rust-curl-dev]}"
+          export PATH="${lib.makeBinPath [perl coreutils diffutils gnused gnugrep stunnel oxidized-curl-dev]}"
           export TMPDIR=$(${coreutils}/bin/mktemp -d)
           export HOME="$TMPDIR"
 
@@ -126,7 +126,7 @@
           export LD_LIBRARY_PATH="${curl-test-infra}/lib"
 
           ${perl}/bin/perl ./runtests.pl \
-            -c "${rust-curl-dev}/bin/curl" \
+            -c "${oxidized-curl-dev}/bin/curl" \
             -n \
             -a \
             1200 to 1500 \
@@ -1058,7 +1058,7 @@
     allNums = testNums ++ extraNums;
   in
     builtins.listToAttrs (map (num: {
-        name = "rust-curl-test-${toString num}";
+        name = "oxidized-curl-test-${toString num}";
         value = pkgs:
           import ./testsuite.nix {
             inherit pkgs;

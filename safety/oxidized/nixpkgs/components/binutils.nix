@@ -1,6 +1,6 @@
-# Binutils: binutils → rust-binutils
+# Binutils: binutils → oxidized-binutils
 #
-# rust-binutils provides GNU binutils-compatible tools: ar, ranlib, nm,
+# oxidized-binutils provides GNU binutils-compatible tools: ar, ranlib, nm,
 # objdump, readelf, objcopy, strings, size, addr2line, c++filt, strip.
 # It is a multicall binary dispatching based on argv[0].
 {
@@ -13,7 +13,7 @@
 mkComponent {
   name = "binutils";
   original = pkgs.binutils-unwrapped;
-  replacement = pkgs.rust-binutils;
+  replacement = pkgs.oxidized-binutils;
   status = status.available;
   source = source.repo;
   phase = 5;

@@ -16,12 +16,12 @@
 A GNU gzip-compatible compression tool written in Rust.
 
 Passes **30/30** tests from the upstream GNU gzip 1.14 test suite, run
-unmodified against the rust-gzip binary in a Nix sandbox.
+unmodified against the oxidized-gzip binary in a Nix sandbox.
 
 ## Usage
 
-The binary is `gzip` from `pkgs.rust-gzip` (release) or
-`pkgs.rust-gzip-dev` (debug, faster compile). `gunzip` and `zcat` are
+The binary is `gzip` from `pkgs.oxidized-gzip` (release) or
+`pkgs.oxidized-gzip-dev` (debug, faster compile). `gunzip` and `zcat` are
 installed as symlinks.
 
 ```sh
@@ -29,7 +29,7 @@ installed as symlinks.
 echo "hello" | gzip | gunzip
 
 # From a Nix shell
-nix run .#rust-gzip -- -d file.gz
+nix run .#oxidized-gzip -- -d file.gz
 ```
 
 ## Features
@@ -92,19 +92,19 @@ Each of the 30 upstream test scripts runs as its own Nix check:
 
 ```sh
 # Single test
-nix build .#checks.x86_64-linux.rust-gzip-test-keep
+nix build .#checks.x86_64-linux.oxidized-gzip-test-keep
 
 # View a failure log
-nix log .#checks.x86_64-linux.rust-gzip-test-keep
+nix log .#checks.x86_64-linux.oxidized-gzip-test-keep
 
 # All tests (keep going on failures)
-nix build .#checks.x86_64-linux.rust-gzip-test-* --keep-going --no-link
+nix build .#checks.x86_64-linux.oxidized-gzip-test-* --keep-going --no-link
 ```
 
 ### Test harness
 
 The harness (`testsuite.nix`) extracts `pkgs.gzip.src`, builds a shadow
-`$PATH` with `gzip` / `gunzip` / `zcat` pointing at `rust-gzip-dev` and
+`$PATH` with `gzip` / `gunzip` / `zcat` pointing at `oxidized-gzip-dev` and
 companion scripts (`zdiff`, `zgrep`, `znew`, …) from the upstream tarball,
 exports the environment variables the gnulib `init.sh` framework expects
 (`LC_ALL=C`, `srcdir`, `VERSION`, etc.), then runs each test script and

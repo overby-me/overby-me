@@ -18,19 +18,19 @@ let
       workspace = manifestLib.loadWorkspace src;
     }).nodes;
 
-  wclip = resolveProject ../../../../../dev/wclip ["rust-wclip"] false;
-  xz = resolveProject ../../../../../safety/oxidized/xz ["rust-xz"] false;
-  xzDev = resolveProject ../../../../../safety/oxidized/xz ["rust-xz"] true;
+  wclip = resolveProject ../../../../../dev/wclip ["wclip"] false;
+  xz = resolveProject ../../../../../safety/oxidized/xz ["oxidized-xz"] false;
+  xzDev = resolveProject ../../../../../safety/oxidized/xz ["oxidized-xz"] true;
 
   xzNames = builtins.attrNames xz;
   has = nodes: name:
     builtins.any (id: nodes.${id}.pkg.name == name) (builtins.attrNames nodes);
 
   checks = {
-    wclipNodes = builtins.sort (a: b: a < b) (builtins.attrNames wclip) == ["libc-0.2.186" "rust-wclip-0.1.0"];
+    wclipNodes = builtins.sort (a: b: a < b) (builtins.attrNames wclip) == ["libc-0.2.186" "wclip-0.1.0"];
     # libc default feature enables std
     wclipLibcFeatures = wclip."libc-0.2.186".features == ["default" "std"];
-    wclipRootEdge = map (e: e.targetId) wclip."rust-wclip-0.1.0".edges == ["libc-0.2.186"];
+    wclipRootEdge = map (e: e.targetId) wclip."wclip-0.1.0".edges == ["libc-0.2.186"];
 
     xzHasLiblzma = has xz "liblzma" && has xz "liblzma-sys";
     # dev-deps must not be pulled in for a plain build

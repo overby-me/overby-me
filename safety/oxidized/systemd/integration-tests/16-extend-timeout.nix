@@ -7,7 +7,7 @@
   patchScript = ''
         sed -i '/^TESTLOG=/a\
     \
-    # rust-systemd: explicitly start helper services that the meson-generated\
+    # oxidized-systemd: explicitly start helper services that the meson-generated\
     # upstream test runner would Wants= into the boot transaction.\
     systemctl start --no-block success-all.service success-start.service success-runtime.service success-stop.service || :\
     systemctl start --no-block fail-start.service fail-stop.service fail-runtime.service || :' \

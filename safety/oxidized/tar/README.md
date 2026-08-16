@@ -20,28 +20,28 @@ GNU tar 1.35 test suite.
 ## Building
 
 ```sh
-nix build .#rust-tar
+nix build .#oxidized-tar
 ./result/bin/tar --help
 ```
 
-A debug build is also available as `.#rust-tar-dev` for quick iteration.
+A debug build is also available as `.#oxidized-tar-dev` for quick iteration.
 
 ## Running the test suite
 
 Tests are run in a Nix sandbox. Each test comes from the GNU tar 1.35
 source tarball; the upstream `tests/testsuite` (autom4te-built) runs the
-selected test ID with `TAR` pointed at rust-tar. A shared
+selected test ID with `TAR` pointed at oxidized-tar. A shared
 `gnutar-test-harness` derivation prebuilds the harness once.
 
 ```sh
 # Run a single test
-nix build .#checks.x86_64-linux.rust-tar-test-{name}
+nix build .#checks.x86_64-linux.oxidized-tar-test-{name}
 
 # View failure diff
-nix log .#checks.x86_64-linux.rust-tar-test-{name}
+nix log .#checks.x86_64-linux.oxidized-tar-test-{name}
 
 # Run the full 224-test matrix at -j8
-awk '{print ".#checks.x86_64-linux.rust-tar-test-"$1}' names.txt \
+awk '{print ".#checks.x86_64-linux.oxidized-tar-test-"$1}' names.txt \
   | xargs nix build --max-jobs 8 --keep-going --no-link
 ```
 

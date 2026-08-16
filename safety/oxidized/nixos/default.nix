@@ -1,5 +1,5 @@
 {
-  devShells.rust-nixos = pkgs: {
+  devShells.oxidized-nixos = pkgs: {
     packages = with pkgs; [
       just
       nix-tree
@@ -11,7 +11,7 @@
       ./base.nix
     ];
   };
-  nixosConfigurations.rust-nixos = _: {
+  nixosConfigurations.oxidized-nixos = _: {
     system = "x86_64-linux";
     modules = [
       ./base.nix
@@ -21,22 +21,22 @@
       # ./coreutils.nix
     ];
   };
-  checks.rust-nixos-boot = pkgs:
+  checks.oxidized-nixos-boot = pkgs:
     import ./nixos-test.nix {inherit pkgs;};
   # Rung 1 (docs/ROADMAP.md "Ship one increment"): one rust component under the
   # C systemd manager. Boots with C PID 1 but the rust systemd-tmpfiles.
-  checks.rust-rung1-tmpfiles = pkgs:
+  checks.oxidized-nixos-rung1-tmpfiles = pkgs:
     import ./rung1-tmpfiles-test.nix {inherit pkgs;};
   # Rung 1b: a second rust component (systemd-sysusers) under C PID 1.
-  checks.rust-rung1-sysusers = pkgs:
+  checks.oxidized-nixos-rung1-sysusers = pkgs:
     import ./rung1-sysusers-test.nix {inherit pkgs;};
   # Rung 1: the first rust DAEMON (systemd-timesyncd) under C PID 1.
-  checks.rust-rung1-timesyncd = pkgs:
+  checks.oxidized-nixos-rung1-timesyncd = pkgs:
     import ./rung1-timesyncd-test.nix {inherit pkgs;};
   # Rung 1: a second rust DAEMON (systemd-resolved) under C PID 1.
-  checks.rust-rung1-resolved = pkgs:
+  checks.oxidized-nixos-rung1-resolved = pkgs:
     import ./rung1-resolved-test.nix {inherit pkgs;};
   # Rung 1: the network-config rust DAEMON (systemd-networkd) under C PID 1.
-  checks.rust-rung1-networkd = pkgs:
+  checks.oxidized-nixos-rung1-networkd = pkgs:
     import ./rung1-networkd-test.nix {inherit pkgs;};
 }

@@ -50,7 +50,7 @@ bash /tmp/run-make-baseline.sh > /tmp/base.txt
 Via Nix:
 
 ```bash
-nix build .#checks.x86_64-linux.rust-make-test-<category>-<name>
+nix build .#checks.x86_64-linux.oxidized-make-test-<category>-<name>
 nix log    # for failure output
 ```
 

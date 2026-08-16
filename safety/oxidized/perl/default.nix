@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-perl = {
+    oxidized-perl = {
       lib,
       srcOnly,
       perl,
@@ -24,7 +24,7 @@
         # in Perl's source distribution. Without this it fell back to a
         # hand-unpacked directory under /tmp, so this package did not build.
         crateOverrides = {
-          rust-perl.PERL_SRC = "${srcOnly perl}";
+          oxidized-perl.PERL_SRC = "${srcOnly perl}";
         };
 
         meta = {
@@ -36,7 +36,7 @@
         };
       };
 
-    rust-perl-dev = {
+    oxidized-perl-dev = {
       lib,
       srcOnly,
       perl,
@@ -60,7 +60,7 @@
         # in Perl's source distribution. Without this it fell back to a
         # hand-unpacked directory under /tmp, so this package did not build.
         crateOverrides = {
-          rust-perl.PERL_SRC = "${srcOnly perl}";
+          oxidized-perl.PERL_SRC = "${srcOnly perl}";
         };
 
         release = false;
@@ -1340,7 +1340,7 @@
   in
     lib.listToAttrs (
       map (t: {
-        name = "rust-perl-test-${t.category}-${t.name}";
+        name = "oxidized-perl-test-${t.category}-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
             inherit pkgs;

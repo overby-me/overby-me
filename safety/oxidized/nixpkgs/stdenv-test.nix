@@ -5,38 +5,38 @@
 {
   stdenv,
   uutils-coreutils-noprefix,
-  rust-sed,
-  rust-grep,
-  rust-awk,
+  oxidized-sed,
+  oxidized-grep,
+  oxidized-awk,
   uutils-findutils,
-  rust-diffutils,
-  rust-file,
-  rust-tar,
-  rust-gzip,
-  rust-bzip2,
-  rust-xz,
-  rust-make,
-  rust-patch,
+  oxidized-diffutils,
+  oxidized-file,
+  oxidized-tar,
+  oxidized-gzip,
+  oxidized-bzip2,
+  oxidized-xz,
+  oxidized-make,
+  oxidized-patch,
 }: let
   # Map of original pname → replacement package.
-  # bash/shell is NOT replaced here — see rust-nixpkgs-bash-shell-test for
-  # the shell override test. rust-bash can source setup.sh (63 functions)
+  # bash/shell is NOT replaced here — see oxidized-nixpkgs-bash-shell-test for
+  # the shell override test. oxidized-bash can source setup.sh (63 functions)
   # but has issues with patchPhase/fixupPhase (namerefs, local -, etc.).
   # patchelf and strip are not in initialPath (used by fixup hooks).
   replacements = {
     coreutils = uutils-coreutils-noprefix;
-    gnused = rust-sed;
-    gnugrep = rust-grep;
-    gawk = rust-awk;
+    gnused = oxidized-sed;
+    gnugrep = oxidized-grep;
+    gawk = oxidized-awk;
     findutils = uutils-findutils;
-    diffutils = rust-diffutils;
-    file = rust-file;
-    gnutar = rust-tar;
-    gzip = rust-gzip;
-    bzip2 = rust-bzip2;
-    xz = rust-xz;
-    gnumake = rust-make;
-    patch = rust-patch;
+    diffutils = oxidized-diffutils;
+    file = oxidized-file;
+    gnutar = oxidized-tar;
+    gzip = oxidized-gzip;
+    bzip2 = oxidized-bzip2;
+    xz = oxidized-xz;
+    gnumake = oxidized-make;
+    patch = oxidized-patch;
   };
   replacedInitialPath =
     map (

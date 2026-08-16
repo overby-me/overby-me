@@ -1,7 +1,7 @@
 # Flakelight module: pure-eval Ninja builds. Lowers each Ninja edge to its own
 # Nix derivation. A sibling to platform/nix/lib/buck2 (per-action Buck2 builds) and
 # platform/nix/lib/cargo (per-crate builds); the graph is extracted once with
-# `rust-ninja -t graph-json` (one IFD), then lowered with builtins only.
+# `oxidized-ninja -t graph-json` (one IFD), then lowered with builtins only.
 # See PLAN.md.
 #
 # Exposes, via perSystemLib:

@@ -1,9 +1,9 @@
-# End-to-end test: rust-meson init → setup → ninja build → run hello world.
+# End-to-end test: oxidized-meson init → setup → ninja build → run hello world.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-meson-hello-world
+# Run with: nix build .#checks.x86_64-linux.oxidized-meson-hello-world
 {pkgs}:
-pkgs.runCommand "rust-meson-hello-world" {
-  nativeBuildInputs = [pkgs.rust-meson pkgs.ninja pkgs.gcc];
+pkgs.runCommand "oxidized-meson-hello-world" {
+  nativeBuildInputs = [pkgs.oxidized-meson pkgs.ninja pkgs.gcc];
 } ''
   # Create a temporary project
   mkdir project && cd project

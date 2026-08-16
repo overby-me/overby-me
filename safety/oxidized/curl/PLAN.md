@@ -1,4 +1,4 @@
-# rust-curl: Plan to Pass Upstream curl Tests
+# oxidized-curl: Plan to Pass Upstream curl Tests
 
 ## Overview
 
@@ -118,12 +118,12 @@ doesn't exist or the suite reports anything other than 100% OK).
 The full list is in `default.nix` under `testNums`; see the per-fix bullets
 in "Phase 7" below for what each addition unlocks.
 
-Test infrastructure is operational: `testsuite.nix` builds curl's C test servers from `pkgs.curl.src`, then runs `runtests.pl -c` against `rust-curl-dev`. The runner exits 0 for non-existent test numbers and for skipped tests, so `testsuite.nix` also greps the output for `No existing test cases were specified`, `TESTFAIL`, and `No tests were performed`, and requires `reported OK: 100%` — this prevents false positives in the curated list.
+Test infrastructure is operational: `testsuite.nix` builds curl's C test servers from `pkgs.curl.src`, then runs `runtests.pl -c` against `oxidized-curl-dev`. The runner exits 0 for non-existent test numbers and for skipped tests, so `testsuite.nix` also greps the output for `No existing test cases were specified`, `TESTFAIL`, and `No tests were performed`, and requires `reported OK: 100%` — this prevents false positives in the curated list.
 
 The Rust curl implementation supports: HTTP/HTTPS GET/POST/PUT, redirects, basic auth, cookies, TLS (rustls), multipart forms, verbose output, write-out formatting (`-w` including `%output{}`, `%{stderr}`, `%header{}`, `%{header_json}`), retry logic (including 429), range requests, file upload, gzip/deflate decompression (`--compressed`), time conditions (`-z`), URL glob output numbering (`-o #[num]`), config file parsing (`-K`), in-memory cookie engine (`-b none`), CONNECT proxy tunnel (`-p`, `--proxytunnel`), `--skip-existing`, `--no-clobber`/`--clobber`, `--stderr <file>`. No HTTP/2.
 
-Run a test: `nix build .#checks.x86_64-linux.rust-curl-test-{num}`
-View failure diff: `nix log .#checks.x86_64-linux.rust-curl-test-{num}`
+Run a test: `nix build .#checks.x86_64-linux.oxidized-curl-test-{num}`
+View failure diff: `nix log .#checks.x86_64-linux.oxidized-curl-test-{num}`
 
 ---
 
@@ -142,7 +142,7 @@ The test runner starts custom mock servers (C programs in `tests/server/`), runs
 
 ### Key property: `-c` flag
 
-`runtests.pl -c /path/to/binary` allows testing an **alternate curl binary** against the same infrastructure. This is the primary integration point for testing rust-curl.
+`runtests.pl -c /path/to/binary` allows testing an **alternate curl binary** against the same infrastructure. This is the primary integration point for testing oxidized-curl.
 
 ### Dependencies
 
@@ -156,7 +156,7 @@ The test runner starts custom mock servers (C programs in `tests/server/`), runs
 
 ### Phase 0: Build the curl test infrastructure
 
-Create a Nix derivation that builds the upstream curl project's test servers and makes `runtests.pl` available, without building the C curl binary itself (or ignoring it in favor of rust-curl).
+Create a Nix derivation that builds the upstream curl project's test servers and makes `runtests.pl` available, without building the C curl binary itself (or ignoring it in favor of oxidized-curl).
 
 ```text
 pkgs.curl.src  →  extract  →  build test servers  →  runtests.pl + servers available
@@ -169,11 +169,11 @@ This is analogous to how `safety/oxidized/awk/testsuite.nix` extracts `pkgs.gawk
 Create `safety/oxidized/curl/testsuite.nix` following the `safety/oxidized/awk` pattern:
 
 ```nix
-# Run a single curl test against rust-curl
+# Run a single curl test against oxidized-curl
 { pkgs, testNum }:
-pkgs.runCommand "rust-curl-test-${toString testNum}" {
+pkgs.runCommand "oxidized-curl-test-${toString testNum}" {
   nativeBuildInputs = [
-    pkgs.rust-curl-dev   # the binary under test
+    pkgs.oxidized-curl-dev   # the binary under test
     pkgs.perl            # test runner
     pkgs.curl            # for test servers (built from C source)
     pkgs.stunnel         # for TLS tests
@@ -192,9 +192,9 @@ pkgs.runCommand "rust-curl-test-${toString testNum}" {
   # Build test servers only (not curl itself)
   # ... configure & make in tests/server/ ...
 
-  # Run single test with rust-curl as the binary
+  # Run single test with oxidized-curl as the binary
   cd tests
-  perl runtests.pl -c ${pkgs.rust-curl-dev}/bin/curl -a -n ${toString testNum}
+  perl runtests.pl -c ${pkgs.oxidized-curl-dev}/bin/curl -a -n ${toString testNum}
 
   # Normalize and compare (handle User-Agent version differences, etc.)
   # ...
@@ -213,7 +213,7 @@ pkgs.runCommand "rust-curl-test-${toString testNum}" {
 
 Extend `safety/oxidized/curl/default.nix` with:
 
-1. A `rust-curl-dev` debug build package (for faster test iteration)
+1. A `oxidized-curl-dev` debug build package (for faster test iteration)
 2. A `checks` section mapping test numbers to individual derivations
 
 ```nix
@@ -226,7 +226,7 @@ checks = let
   ];
 in
   builtins.listToAttrs (map (num: {
-    name = "rust-curl-test-${toString num}";
+    name = "oxidized-curl-test-${toString num}";
     value = pkgs: import ./testsuite.nix { inherit pkgs; testNum = num; };
   }) testNums);
 ```
@@ -262,7 +262,7 @@ Use `runtests.pl -l` and keyword filtering to enumerate candidates.
 Follow the safety/oxidized/awk pattern of tracking pass/fail counts:
 
 1. Start with the simplest tests (test 1 = basic HTTP GET)
-2. Run, identify failures, fix rust-curl
+2. Run, identify failures, fix oxidized-curl
 3. Add passing tests to the `testNums` list in `default.nix`
 4. Update this PLAN.md with progress and failure categories
 
@@ -289,7 +289,7 @@ Nix builds have no network access. The curl test suite uses localhost servers, w
 Tests verify exact `User-Agent: curl/X.Y.Z` strings. Either:
 
 - Normalize User-Agent in output comparison (like awk normalizes `ARGV[0]`)
-- Make rust-curl report the same version string as the upstream curl being tested
+- Make oxidized-curl report the same version string as the upstream curl being tested
 - Use `<strip>` directives already in test files
 
 ### Challenge 4: Feature parity gaps
@@ -311,7 +311,7 @@ Current gaps:
 
 ### Phase 1: Infrastructure — done
 
-- [x] `rust-curl-dev` debug package in `default.nix`
+- [x] `oxidized-curl-dev` debug package in `default.nix`
 - [x] `curl-test-infra` derivation builds upstream C curl + servers from `pkgs.curl.src`
 - [x] `testsuite.nix` runs a single test via `runtests.pl -c`
 - [x] Localhost test servers verified working in Nix sandbox
@@ -576,7 +576,7 @@ To expand the passing-test list incrementally, follow this loop:
 1. **Discover** candidate tests in an unswept range:
 
    ```bash
-   nix build .#packages.x86_64-linux.rust-curl-test-discovery -L
+   nix build .#packages.x86_64-linux.oxidized-curl-test-discovery -L
    ```
 
    The derivation runs tests 1-200 in batch and writes `results.txt` showing each test's verdict. Edit its `1 to 200` range to sweep a different window (e.g. `201 to 400`).
@@ -590,7 +590,7 @@ To expand the passing-test list incrementally, follow this loop:
    - Redirects / URL handling: `url.rs`
    - Cookies: `cookie.rs`
 
-4. **Verify** with a single test: `nix build .#checks.x86_64-linux.rust-curl-test-<num>`. Use `nix log` on failure to view the diff.
+4. **Verify** with a single test: `nix build .#checks.x86_64-linux.oxidized-curl-test-<num>`. Use `nix log` on failure to view the diff.
 
 5. **Add** newly-passing test numbers to the `testNums` list in `default.nix`. Keep it sorted (or grouped consistently).
 

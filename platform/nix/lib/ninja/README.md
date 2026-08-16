@@ -1,7 +1,7 @@
 # nix-lib-ninja
 
 A Nix builder for [Ninja](https://ninja-build.org/) projects. It extracts a
-configured project's build graph with `rust-ninja -t graph-json` (one
+configured project's build graph with `oxidized-ninja -t graph-json` (one
 import-from-derivation) and lowers each Ninja *edge* to its own Nix derivation,
 with no `ninja` binary scheduling the build. A sibling to
 [`../buck2`](../buck2) (per-action Buck2 builds) and [`../cargo`](../cargo)
@@ -28,10 +28,10 @@ buck2 libraries:
 
 ## How it works
 
-1. **Extract.** `rust-ninja -t graph-json` parses `build.ninja` (and its
+1. **Extract.** `oxidized-ninja -t graph-json` parses `build.ninja` (and its
    `subninja`/`include`s) and emits every edge as JSON with its
    fully-expanded command and all input/output/dep/depfile/rspfile paths. This
-   runs once in a derivation; Nix reads the JSON (the single IFD). `rust-ninja`
+   runs once in a derivation; Nix reads the JSON (the single IFD). `oxidized-ninja`
    already does the hard parsing and `$in`/`$out`/variable expansion; the
    `graph-json` tool is a thin dumper over its `State`.
 2. **Lower.** Each edge becomes one derivation over a virtual build tree rooted
@@ -65,7 +65,7 @@ The result's `$out/<target>` is the built output.
 | `targets` | `null` | A list of output paths (produces a `symlinkJoin`) |
 | `ninjaFile` | `"build.ninja"` | Manifest filename |
 | `toolchain` | `[stdenv.cc coreutils]` | Packages on `PATH` for every edge command |
-| `rustNinja` | built here | The `rust-ninja` package used for graph extraction |
+| `rustNinja` | built here | The `oxidized-ninja` package used for graph extraction |
 | `grouping` | `null` | `edgeIndex -> groupId` (or a `groupOf` fn) to bundle edges into per-component derivations instead of one-per-edge (see below) |
 | `buildTimeLowering` | `false` | With `grouping`, compute each group's build in the sandbox (`lower_group.py`) rather than in Nix eval — collapses the eval floor at whole-OS scale |
 

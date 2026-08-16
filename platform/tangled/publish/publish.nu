@@ -14,7 +14,7 @@
 # whatever repo that is. Pointing it at a jj repo pollutes `jj op log`.
 #
 #   nu publish.nu --dry-run              # filter everything, push nothing
-#   nu publish.nu --only rust-awk        # one project
+#   nu publish.nu --only oxidized-awk        # one project
 #   nu publish.nu                        # filter and push what changed
 
 # josh's filter language has had breaking changes (`:rev` reworked, `:from`
@@ -355,11 +355,11 @@ def "main setup-github" [
 # Nothing is pushed anywhere: you fetch the branch, read it, and merge it
 # yourself.
 #
-#   nu publish.nu ingest rust-awk --from-ref some-contribution
+#   nu publish.nu ingest oxidized-awk --from-ref some-contribution
 #
 # Then, in your working repo:
 #
-#   jj git fetch --remote <work-dir>/monorepo.git   # or: git fetch <...> ingest/rust-awk
+#   jj git fetch --remote <work-dir>/monorepo.git   # or: git fetch <...> ingest/oxidized-awk
 def "main ingest" [
   project: string             # project name, as in projects.nuon
   --from-ref: string = "main" # branch on the published repo to ingest

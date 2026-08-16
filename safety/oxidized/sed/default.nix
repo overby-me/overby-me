@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-sed = {lib, ...}:
+    oxidized-sed = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-sed";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-sed-dev = {lib, ...}:
+    oxidized-sed-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-sed-dev";
 
@@ -118,7 +118,7 @@
   in
     lib.listToAttrs (
       map (name: {
-        name = "rust-sed-test-${name}";
+        name = "oxidized-sed-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames

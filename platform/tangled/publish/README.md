@@ -155,7 +155,7 @@ the thing being published.
 
 ## Projects that depend on a sibling
 
-`safety/oxidized/grep` has `rust-pcre2 = { path = "../pcre2" }`, and `media/h26xtoav1`
+`safety/oxidized/grep` has `oxidized-pcre2 = { path = "../pcre2" }`, and `media/h26xtoav1`
 reaches for two decoder crates the same way. Cargo resolves a path dependency
 on the filesystem, so no flake can supply it: the directory has to be there, at
 that relative path.

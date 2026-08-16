@@ -1,5 +1,5 @@
 {
-  packages.rust-direnv = {lib, ...}:
+  packages.oxidized-direnv = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-direnv";
 

@@ -1,4 +1,4 @@
-# Shared helpers for the rust-pipewire nushell test fixtures.
+# Shared helpers for the oxidized-pipewire nushell test fixtures.
 #
 # The testsuite harnesses copy each fixture one directory below this file,
 # mirroring the repository layout (tests/helpers.nu next to
@@ -27,7 +27,7 @@ def compare [label: string] {
         print $"FAIL: ($label)"
         print "--- expected (C reference) ---"
         print (open --raw $ref_out)
-        print "--- actual (rust-pipewire) ---"
+        print "--- actual (oxidized-pipewire) ---"
         print (open --raw $rust_out)
         exit 1
     }

@@ -1,18 +1,18 @@
-# Run a single test from the upstream Perl test suite against rust-perl.
+# Run a single test from the upstream Perl test suite against oxidized-perl.
 #
-# Compares rust-perl output against reference perl output (both running in the
+# Compares oxidized-perl output against reference perl output (both running in the
 # same sandbox), avoiding false failures from system-specific differences.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-perl-test-{category}-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-perl-test-base-if
-# View log: nix log .#checks.x86_64-linux.rust-perl-test-base-if
+# Run with: nix build .#checks.x86_64-linux.oxidized-perl-test-{category}-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-perl-test-base-if
+# View log: nix log .#checks.x86_64-linux.oxidized-perl-test-base-if
 {
   pkgs,
   category,
   name,
 }:
-pkgs.runCommand "rust-perl-test-${category}-${name}" {
-  nativeBuildInputs = [pkgs.rust-perl pkgs.perl pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep];
+pkgs.runCommand "oxidized-perl-test-${category}-${name}" {
+  nativeBuildInputs = [pkgs.oxidized-perl pkgs.perl pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep];
   perlSrc = pkgs.perl.src;
 } ''
   # Extract the perl source
@@ -28,18 +28,18 @@ pkgs.runCommand "rust-perl-test-${category}-${name}" {
   # Run with reference perl — execute the .t file and capture TAP output
   timeout 60 ${pkgs.perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/expected" 2>&1 || true
 
-  # Run with rust-perl (release build — debug is too slow for tests like
+  # Run with oxidized-perl (release build — debug is too slow for tests like
   # op/cond.t whose 20 000-deep ternary doesn't finish in 60 s unoptimised).
-  # Set PERL5LIB to reference perl's @INC so rust-perl can find core
+  # Set PERL5LIB to reference perl's @INC so oxidized-perl can find core
   # modules (Carp, Exporter, …) the same way vanilla does — vanilla
-  # has them compiled in; we don't, so without this rust-perl fails on
+  # has them compiled in; we don't, so without this oxidized-perl fails on
   # `use Carp;` while vanilla passes (e.g. benchmark/gh7094).
   REF_INC=$(${pkgs.perl}/bin/perl -e 'print join ":", @INC')
-  PERL5LIB="$REF_INC" timeout 120 ${pkgs.rust-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
+  PERL5LIB="$REF_INC" timeout 120 ${pkgs.oxidized-perl}/bin/perl -I../lib ${category}/${name}.t > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so /nix/store/... differences don't cause false failures
   REF_PERL="${pkgs.perl}/bin/perl"
-  TEST_PERL="${pkgs.rust-perl}/bin/perl"
+  TEST_PERL="${pkgs.oxidized-perl}/bin/perl"
   sed -i "s|$REF_PERL|perl|g" "$TMPDIR/expected"
   sed -i "s|$TEST_PERL|perl|g" "$TMPDIR/actual"
 

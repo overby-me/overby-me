@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-binutils = {lib, ...}:
+    oxidized-binutils = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-binutils";
 
@@ -18,7 +18,7 @@
         rootAttrs.postInstall = ''
           # Create symlinks for all binutils tools (multicall binary)
           for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
-            ln -s $out/bin/rust-binutils $out/bin/$tool
+            ln -s $out/bin/oxidized-binutils $out/bin/$tool
           done
         '';
 
@@ -30,7 +30,7 @@
         };
       };
 
-    rust-binutils-dev = {lib, ...}:
+    oxidized-binutils-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-binutils-dev";
 
@@ -50,7 +50,7 @@
         rootAttrs.postInstall = ''
           # Create symlinks for all binutils tools (multicall binary)
           for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
-            ln -s $out/bin/rust-binutils $out/bin/$tool
+            ln -s $out/bin/oxidized-binutils $out/bin/$tool
           done
         '';
 
@@ -616,7 +616,7 @@
     ];
 
     # Upstream DejaGnu .exp files to run individually.
-    # Each gets a check like: rust-binutils-dejagnu-size
+    # Each gets a check like: oxidized-binutils-dejagnu-size
     dejaGnuTests = [
       {
         exp = "cxxfilt.exp";
@@ -682,7 +682,7 @@
 
     customChecks = lib.listToAttrs (
       map (t: {
-        name = "rust-binutils-test-${t.tool}-${t.name}";
+        name = "oxidized-binutils-test-${t.tool}-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
             inherit pkgs;
@@ -697,7 +697,7 @@
         t: let
           baseName = lib.replaceStrings [".exp"] [""] t.exp;
         in {
-          name = "rust-binutils-dejagnu-${baseName}";
+          name = "oxidized-binutils-dejagnu-${baseName}";
           value = pkgs:
             import ./dejagnu-testsuite.nix {
               inherit pkgs;
@@ -711,7 +711,7 @@
 
     # Single check that runs ALL upstream .exp files (informational, always passes)
     dejaGnuAll = {
-      rust-binutils-dejagnu-all = pkgs:
+      oxidized-binutils-dejagnu-all = pkgs:
         import ./dejagnu-testsuite.nix {
           inherit pkgs;
         };

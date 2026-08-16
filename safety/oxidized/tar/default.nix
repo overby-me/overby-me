@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-tar = {lib, ...}:
+    oxidized-tar = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-tar";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-tar-dev = {lib, ...}:
+    oxidized-tar-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-tar-dev";
 
@@ -99,7 +99,7 @@
         '';
 
         # We keep everything: `src/tar` (stub; will be replaced with
-        # rust-tar at test time), the `tests/` helper programs, and the
+        # oxidized-tar at test time), the `tests/` helper programs, and the
         # autom4te-generated `tests/testsuite` script.
         installPhase = ''
           runHook preInstall
@@ -350,7 +350,7 @@
   in
     lib.listToAttrs (
       map (name: {
-        name = "rust-tar-test-${name}";
+        name = "oxidized-tar-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames

@@ -13,10 +13,10 @@
 mkComponent {
   name = "file";
   original = pkgs.file;
-  replacement = pkgs.rust-file;
+  replacement = pkgs.oxidized-file;
   status = status.available;
   source = source.repo;
   phase = 2;
   description = "File type identification using magic bytes";
-  notes = "Using rust-file from safety/oxidized/file — ELF, script, archive, image, text detection";
+  notes = "Using oxidized-file from safety/oxidized/file — ELF, script, archive, image, text detection";
 }

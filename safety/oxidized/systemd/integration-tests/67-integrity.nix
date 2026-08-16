@@ -8,7 +8,7 @@
   # The one thing this test needs from the harness is integritysetup, the
   # cryptsetup project's CLI, which the test drives to create the dm-integrity
   # device before systemd-integritysetup@ attaches it. It is a test dependency,
-  # not a rust-systemd gap.
+  # not a oxidized-systemd gap.
   #
   # Two defects had to be fixed to get here, neither of them in
   # crates/integritysetup, which was correct all along:

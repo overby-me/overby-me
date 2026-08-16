@@ -1,5 +1,5 @@
 {
-  packages.rust-bubblewrap = {lib, ...}:
+  packages.oxidized-bubblewrap = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-bubblewrap";
 

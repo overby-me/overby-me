@@ -22,7 +22,7 @@ architecture rather than reimagining it.
 
 ## Status
 
-NixOS boots with rust-systemd as PID 1 and reaches `multi-user.target` with a login
+NixOS boots with oxidized-systemd as PID 1 and reaches `multi-user.target` with a login
 prompt in about 6 seconds under cloud-hypervisor, with networking via networkd and
 resolved.
 
@@ -62,7 +62,7 @@ just build
 ```sh
 cargo test --workspace                                       # unit tests
 just difftest                                                # vs real systemd
-nix build .#checks.x86_64-linux.rust-systemd-test-01-basic -L # one integration test
+nix build .#checks.x86_64-linux.oxidized-systemd-test-01-basic -L # one integration test
 ```
 
 Never run plain `nix flake check` in this repo: it OOMs. Use `just check`.

@@ -19,7 +19,7 @@ A GNU file-compatible file type detection tool written in Rust.
 
 **320/320 tests passing (100%)** — regression suite from the upstream
 [file/file-tests](https://github.com/file/file-tests) corpus (pinned at
-`0bcc555a`). Each test runs both rust-file and the reference file(1)
+`0bcc555a`). Each test runs both oxidized-file and the reference file(1)
 against the same sample in a sandbox and diffs the output byte-for-byte.
 
 ## Usage
@@ -27,23 +27,23 @@ against the same sample in a sandbox and diffs the output byte-for-byte.
 Run a single upstream test:
 
 ```/dev/null/example.sh#L1
-nix build .#checks.x86_64-linux.rust-file-test-{type}__{file}
+nix build .#checks.x86_64-linux.oxidized-file-test-{type}__{file}
 ```
 
 View a failing test’s log:
 
 ```/dev/null/example.sh#L1
-nix log .#checks.x86_64-linux.rust-file-test-{type}__{file}
+nix log .#checks.x86_64-linux.oxidized-file-test-{type}__{file}
 ```
 
 Batch-run every test in a single evaluator (much faster than looping):
 
 ```/dev/null/example.sh#L1
-nix build .#checks.x86_64-linux.rust-file-test-* --keep-going --no-link
+nix build .#checks.x86_64-linux.oxidized-file-test-* --keep-going --no-link
 ```
 
-The binary is available as `file` from `pkgs.rust-file` (release build)
-or `pkgs.rust-file-dev` (debug build, faster compile).
+The binary is available as `file` from `pkgs.oxidized-file` (release build)
+or `pkgs.oxidized-file-dev` (debug build, faster compile).
 
 ## Architecture
 

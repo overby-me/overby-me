@@ -9,7 +9,7 @@
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: storage topology not configured in VM, skipping' >/skipped"
+      echo "echo 'oxidized-systemd: storage topology not configured in VM, skipping' >/skipped"
       echo "exit 77"
     } > TEST-64-UDEV-STORAGE.sh
     chmod +x TEST-64-UDEV-STORAGE.sh

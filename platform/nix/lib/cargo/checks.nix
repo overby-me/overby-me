@@ -33,7 +33,7 @@
         index = ./index;
         runTests = true;
       })
-      .tests."rust-wclip";
+      .tests."wclip";
 
     # End-to-end: xz with native liblzma linking through crateOverrides and
     # dev-deps excluded (criterion must not be built).

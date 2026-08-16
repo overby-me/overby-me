@@ -1,5 +1,5 @@
 {
-  packages.rust-cachix = {
+  packages.oxidized-cachix = {
     lib,
     pkg-config,
     xz,

@@ -2,7 +2,7 @@
   lib,
   rustPlatform,
   fetchFromGitHub,
-  rust-pkg-config,
+  oxidized-pkg-config,
   openssl,
   perl,
   zstd,
@@ -70,7 +70,7 @@ rustPlatform.buildRustPackage rec {
   ];
 
   nativeBuildInputs = [
-    rust-pkg-config
+    oxidized-pkg-config
     perl
   ];
 
@@ -91,7 +91,7 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/at-microcosm/microcosm-rs";
     license = with lib.licenses; [agpl3Only];
     maintainers = with lib.maintainers; [overby-me];
-    # Builds against the project's Linux-only rust-pkg-config toolchain.
+    # Builds against the project's Linux-only oxidized-pkg-config toolchain.
     platforms = lib.platforms.linux;
   };
 }

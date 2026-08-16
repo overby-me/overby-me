@@ -296,7 +296,7 @@ separation safety/oxidized/gcc keeps with real gcc.
    fe-c already uses.
 4. Consumption: `RUSTFLAGS="-Zcodegen-backend=$(nix build …)/lib/librustc_codegen_llvmrs.so"`
    or `CARGO_PROFILE_DEV_CODEGEN_BACKEND` — identical UX to cg_clif.
-5. Distribution inside the monorepo: a wrapper package `rust-llvm-rustc` that
+5. Distribution inside the monorepo: a wrapper package `oxidized-llvm-rustc` that
    pairs the dylib with its exact matching nightly, so safety/oxidized/nixpkgs can consume
    it as one coherent toolchain.
 
@@ -422,9 +422,9 @@ forbidden repo-wide as usual.
 
 ```nix
 {
-  packages.rust-llvm = {lib, ...}:
+  packages.oxidized-llvm = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-llvm";
+      pname = "oxidized-llvm";
 
       src = lib.fileset.toSource {
         root = ./.;

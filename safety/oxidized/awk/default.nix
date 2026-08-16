@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-awk = {lib, ...}:
+    oxidized-awk = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-awk";
 
@@ -28,7 +28,7 @@
         };
       };
 
-    rust-awk-dev = {lib, ...}:
+    oxidized-awk-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-awk-dev";
 
@@ -307,7 +307,7 @@
   in
     lib.listToAttrs (
       map (name: {
-        name = "rust-awk-test-${name}";
+        name = "oxidized-awk-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames

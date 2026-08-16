@@ -1,16 +1,16 @@
-# Run a single test from the upstream bzip2 sample files against rust-bzip2.
+# Run a single test from the upstream bzip2 sample files against oxidized-bzip2.
 #
-# Compares rust-bzip2 output against reference sample data shipped with
+# Compares oxidized-bzip2 output against reference sample data shipped with
 # the upstream bzip2 source tarball.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-bzip2-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-bzip2-test-compress-1
+# Run with: nix build .#checks.x86_64-linux.oxidized-bzip2-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-bzip2-test-compress-1
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-bzip2-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-bzip2-dev pkgs.bzip2 pkgs.coreutils];
+pkgs.runCommand "oxidized-bzip2-test-${name}" {
+  nativeBuildInputs = [pkgs.oxidized-bzip2-dev pkgs.bzip2 pkgs.coreutils];
   bzip2Src = pkgs.bzip2.src;
 } ''
   # Extract the upstream bzip2 source to get sample files
@@ -18,7 +18,7 @@ pkgs.runCommand "rust-bzip2-test-${name}" {
   BZ2_SRC=$(echo bzip2-*)
   cd "$BZ2_SRC"
 
-  RUST_BZIP2="${pkgs.rust-bzip2-dev}/bin/bzip2"
+  RUST_BZIP2="${pkgs.oxidized-bzip2-dev}/bin/bzip2"
   REF_BZIP2="${pkgs.bzip2}/bin/bzip2"
 
   echo "Running bzip2 test: ${name}"
@@ -78,8 +78,8 @@ pkgs.runCommand "rust-bzip2-test-${name}" {
       ;;
     symlinks)
       # Test that bunzip2 and bzcat symlinks work correctly
-      RUST_BUNZIP2="${pkgs.rust-bzip2-dev}/bin/bunzip2"
-      RUST_BZCAT="${pkgs.rust-bzip2-dev}/bin/bzcat"
+      RUST_BUNZIP2="${pkgs.oxidized-bzip2-dev}/bin/bunzip2"
+      RUST_BZCAT="${pkgs.oxidized-bzip2-dev}/bin/bzcat"
 
       # bunzip2 should decompress from stdin to stdout
       $RUST_BUNZIP2 < sample1.bz2 > out1.tst

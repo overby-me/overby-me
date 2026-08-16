@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-# Verify rust-pipewire's POD encoder produces byte-identical output to
+# Verify oxidized-pipewire's POD encoder produces byte-identical output to
 # the C `spa_pod_builder_*` API for a range of value shapes.
 #
 # Compiles a small C helper using libspa, runs both encoders for each
@@ -84,9 +84,9 @@ let cflags = (^pkg-config --cflags libspa-0.2 | str trim | split row --regex '\s
 let cc = ($env.CC? | default "cc")
 ^$cc -O2 -Wall -Werror ...$cflags ($env.TMPDIR | path join c-pod-encode.c) -o ($env.TMPDIR | path join c-pod-encode) -lm
 
-# rust-pipewire's pod-encode helper isn't a symlinked tool name; invoke
+# oxidized-pipewire's pod-encode helper isn't a symlinked tool name; invoke
 # it via the multicall wrapper.
-let rust_bin = ($env.RUST_PIPEWIRE_DEV | path join bin rust-pipewire)
+let rust_bin = ($env.RUST_PIPEWIRE_DEV | path join bin oxidized-pipewire)
 
 let cases = [
   none

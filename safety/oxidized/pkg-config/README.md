@@ -17,7 +17,7 @@ A pure Rust rewrite and drop-in replacement for [pkg-config](https://www.freedes
 
 ## Overview
 
-`rust-pkg-config` is a fully compatible, single-binary replacement for `pkg-config` and `pkgconf`, written entirely in Rust. It provides:
+`oxidized-pkg-config` is a fully compatible, single-binary replacement for `pkg-config` and `pkgconf`, written entirely in Rust. It provides:
 
 - **`pkgconf`** — a CLI binary that is a drop-in replacement for both `pkg-config` and `pkgconf`
 - **`libpkgconf`** — a Rust library crate providing the core functionality for parsing `.pc` files, resolving dependencies, managing compiler/linker flags, and comparing versions

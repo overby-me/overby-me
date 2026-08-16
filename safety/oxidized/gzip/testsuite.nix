@@ -1,21 +1,21 @@
-# Run a single test from the official GNU gzip test suite against rust-gzip.
+# Run a single test from the official GNU gzip test suite against oxidized-gzip.
 #
 # The upstream tests are self-checking POSIX sh scripts that source
 # tests/init.sh and signal pass/fail via exit code. We just need to stage
-# a tree where `gzip`, `gunzip`, `zcat` resolve to rust-gzip and the
+# a tree where `gzip`, `gunzip`, `zcat` resolve to oxidized-gzip and the
 # companion shell scripts (`zdiff`, `zgrep`, ...) resolve to the upstream
 # versions shipped by pkgs.gzip — those scripts call `gzip` by name, so
 # they pick up our binary from PATH.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-gzip-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-gzip-test-keep
+# Run with: nix build .#checks.x86_64-linux.oxidized-gzip-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-gzip-test-keep
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-gzip-test-${name}" {
+pkgs.runCommand "oxidized-gzip-test-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-gzip-dev
+    pkgs.oxidized-gzip-dev
     pkgs.gzip
     pkgs.coreutils
     pkgs.diffutils
@@ -33,11 +33,11 @@ pkgs.runCommand "rust-gzip-test-${name}" {
   cd "$GZIP_SRC"
 
   # Upstream tests do `path_prepend_ ..` which puts the extracted source
-  # root onto $PATH. Populate that directory with rust-gzip (for gzip,
+  # root onto $PATH. Populate that directory with oxidized-gzip (for gzip,
   # gunzip, zcat) and upstream companion scripts (for zdiff, zgrep, ...).
-  # The companion scripts call `gzip` by name, so they pick up rust-gzip.
+  # The companion scripts call `gzip` by name, so they pick up oxidized-gzip.
   for b in gzip gunzip zcat; do
-    ln -sf ${pkgs.rust-gzip-dev}/bin/$b ./$b
+    ln -sf ${pkgs.oxidized-gzip-dev}/bin/$b ./$b
   done
   for b in zdiff zcmp zegrep zfgrep zforce zgrep znew zless zmore gzexe; do
     if [ -x ${pkgs.gzip}/bin/$b ]; then

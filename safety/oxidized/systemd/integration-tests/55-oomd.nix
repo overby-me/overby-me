@@ -24,7 +24,7 @@
   #      credentials (generators.rs, mirroring systemd-debug-generator).
   #   2. DONE: re-run generators on `systemctl daemon-reload`, as upstream
   #      does, so a credential staged after boot takes effect.
-  #   3. REMAINING: `init.scope` is not a unit in rust-systemd. It exists only
+  #   3. REMAINING: `init.scope` is not a unit in oxidized-systemd. It exists only
   #      as a cgroup path constant (INIT_SCOPE_NAME in platform/cgroups/mod.rs).
   #      There is no unit for a drop-in to attach to, and no [Scope] resource
   #      control is ever applied to PID 1's own cgroup, so memory.high stays
@@ -41,7 +41,7 @@
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: init.scope is not a configurable unit, so [Scope] resource control never applies to PID 1' >/skipped"
+      echo "echo 'oxidized-systemd: init.scope is not a configurable unit, so [Scope] resource control never applies to PID 1' >/skipped"
       echo "exit 77"
     } > TEST-55-OOMD.sh
     chmod +x TEST-55-OOMD.sh

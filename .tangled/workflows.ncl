@@ -25,7 +25,7 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
         # evaluator and its 686 nested-QEMU VM tests cannot build here; packages
         # live only in overby-me, which cannot be made a trusted substituter for
         # this untrusted CI user, so they would rebuild from source. Even the old
-        # `nix build .#rust-cachix` cache-setup step was fatal — copying cachix's
+        # `nix build .#oxidized-cachix` cache-setup step was fatal — copying cachix's
         # large closure took 14 minutes and crashed the VM — so cachix is dropped
         # entirely (tangled caches build outputs itself; no manual push needed).
         #

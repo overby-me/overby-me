@@ -1,16 +1,16 @@
-# Run a single .sh test from the official GNU sed 4.9 test suite against rust-sed.
+# Run a single .sh test from the official GNU sed 4.9 test suite against oxidized-sed.
 #
 # The test scripts use gnulib's init.sh framework with helpers like compare_,
 # returns_, skip_, fail_, and Exit. They expect TESTS_ENVIRONMENT variables
 # set by the Makefile (abs_top_srcdir, abs_top_builddir, etc.).
 #
-# Run with: nix build .#checks.x86_64-linux.rust-sed-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-sed-test-subst-options
+# Run with: nix build .#checks.x86_64-linux.oxidized-sed-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-sed-test-subst-options
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-sed-test-${name}" {
+pkgs.runCommand "oxidized-sed-test-${name}" {
   nativeBuildInputs = [
     pkgs.coreutils
     pkgs.diffutils
@@ -21,7 +21,7 @@ pkgs.runCommand "rust-sed-test-${name}" {
     pkgs.perl # for get-mb-cur-max helper
   ];
   gnusedSrc = pkgs.gnused.src;
-  rustSed = pkgs.rust-sed-dev;
+  rustSed = pkgs.oxidized-sed-dev;
 } ''
   # Extract the GNU sed source (contains the test suite)
   tar xf $gnusedSrc

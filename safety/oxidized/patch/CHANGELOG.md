@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `rust-patch`. Tests refer to the GNU patch 2.8 suite.
+All notable changes to `oxidized-patch`. Tests refer to the GNU patch 2.8 suite.
 
 ## Unreleased
 
@@ -144,5 +144,5 @@ All notable changes to `rust-patch`. Tests refer to the GNU patch 2.8 suite.
 ### Infrastructure
 
 - `testsuite.nix` runs each upstream script in a per-test Nix sandbox
-  with `$PATCH` pointed at the rust-patch binary; 60s timeout.
+  with `$PATCH` pointed at the oxidized-patch binary; 60s timeout.
 - `default.nix` lists all 49 upstream test names as flake checks.

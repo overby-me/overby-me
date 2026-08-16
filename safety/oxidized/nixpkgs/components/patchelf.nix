@@ -1,8 +1,8 @@
-# patchelf → rust-patchelf
+# patchelf → oxidized-patchelf
 #
 # patchelf is a utility for modifying ELF binaries — changing the
 # dynamic linker, RPATH, RUNPATH, SONAME, and other ELF headers.
-# It is a critical part of Nix's fixup phase. rust-patchelf uses
+# It is a critical part of Nix's fixup phase. oxidized-patchelf uses
 # the goblin crate for ELF parsing and supports all common operations.
 {
   pkgs,
@@ -14,10 +14,10 @@
 mkComponent {
   name = "patchelf";
   original = pkgs.patchelf;
-  replacement = pkgs.rust-patchelf;
+  replacement = pkgs.oxidized-patchelf;
   status = status.available;
   source = source.repo;
   phase = 5;
   description = "ELF binary patching tool (interpreter, RPATH, SONAME)";
-  notes = "Using rust-patchelf from safety/oxidized/patchelf — uses goblin crate for ELF parsing";
+  notes = "Using oxidized-patchelf from safety/oxidized/patchelf — uses goblin crate for ELF parsing";
 }

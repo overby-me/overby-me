@@ -22,10 +22,10 @@ differential roundtrip checks passing**
 
 The Python harnesses (`misc/output_test.py`, `misc/jobserver_test.py`)
 are extracted from the upstream ninja v1.13.1 source in a Nix sandbox
-and run against the rust-ninja binary, mirroring the
+and run against the oxidized-ninja binary, mirroring the
 differential-testing pattern established by `safety/oxidized/awk` and `safety/oxidized/perl`.
 The roundtrip checks in `roundtrip.nix` build the same C project with
-both rust-ninja and reference `pkgs.ninja` and compare observable
+both oxidized-ninja and reference `pkgs.ninja` and compare observable
 behavior.
 
 ## Usage
@@ -33,23 +33,23 @@ behavior.
 Run a single upstream test:
 
 ```sh
-nix build .#checks.x86_64-linux.rust-ninja-test-{name}
+nix build .#checks.x86_64-linux.oxidized-ninja-test-{name}
 ```
 
 View a failing test's log:
 
 ```sh
-nix log .#checks.x86_64-linux.rust-ninja-test-{name}
+nix log .#checks.x86_64-linux.oxidized-ninja-test-{name}
 ```
 
 Batch-run every test in a single evaluator (much faster than looping):
 
 ```sh
-nix build .#checks.x86_64-linux.rust-ninja-test-* --keep-going --no-link
+nix build .#checks.x86_64-linux.oxidized-ninja-test-* --keep-going --no-link
 ```
 
-The binary is available as `ninja` from `pkgs.rust-ninja` (release
-build) or `pkgs.rust-ninja-dev` (debug build, faster compile).
+The binary is available as `ninja` from `pkgs.oxidized-ninja` (release
+build) or `pkgs.oxidized-ninja-dev` (debug build, faster compile).
 
 ## Architecture
 
@@ -226,7 +226,7 @@ of behavior we need to match.
 ### Differential roundtrip tests
 
 `roundtrip.nix` builds a small two-TU C project (`src/greet.c`,
-`src/main.c`, `inc/greet.h`) with both rust-ninja and reference
+`src/main.c`, `inc/greet.h`) with both oxidized-ninja and reference
 `pkgs.ninja`, then compares observable behavior. (gcc embeds absolute
 build paths in object files, so a strict `cmp` of artifacts is not
 meaningful — the checks instead validate file existence, exit

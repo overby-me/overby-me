@@ -126,7 +126,7 @@ Verified against `platform/nix/lib/cargo` as of the `fe-c/v0` branch point.
    *single* crate at an instrumented vs plain toolchain is the same
    missing per-crate knob as Q1.
 6. **Toolchain-keyed derivations: precedent exists.** `toolchain` accepts
-   any drv providing `bin/rustc`; `safety/oxidized/systemd`'s `rust-systemd-dev`
+   any drv providing `bin/rustc`; `safety/oxidized/systemd`'s `oxidized-systemd-dev`
    already passes `rust-bin.nightly.latest` from the `rust-overlay` flake
    input, and `effectiveRustcVersion` enters every artifact key. Fe-C pins
    `nightly-2026-06-29` (the newest date the locked `rust-overlay` input

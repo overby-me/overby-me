@@ -181,7 +181,7 @@ in {
     llvm-tree-bitcode = pkgs: treeCheck pkgs "Bitcode" 232;
   };
 
-  packages.rust-llvm = {lib, ...}:
+  packages.oxidized-llvm = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-llvm";
       src = llvmSrc;

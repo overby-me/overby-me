@@ -1,11 +1,11 @@
 {
-  devShells.rust-pkg-config = pkgs: {
+  devShells.oxidized-pkg-config = pkgs: {
     packages = with pkgs; [
       just
     ];
   };
 
-  packages.rust-pkg-config = {lib, ...}:
+  packages.oxidized-pkg-config = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-pkg-config";
 

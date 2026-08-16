@@ -1,10 +1,10 @@
-# rust-pkg-config setup hook
+# oxidized-pkg-config setup hook
 #
 # This hook ensures that dependencies' .pc files are discoverable
 # by adding their lib/pkgconfig and share/pkgconfig directories
 # to PKG_CONFIG_PATH when they appear as build inputs.
 #
-# This is the essential piece that makes rust-pkg-config a drop-in
+# This is the essential piece that makes oxidized-pkg-config a drop-in
 # replacement for Nixpkgs' pkg-config wrapper in Nix builds.
 
 # Skip setup hook if we're neither a build-time dep, nor doing a native compile.

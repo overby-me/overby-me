@@ -1,6 +1,6 @@
-# GCC: gcc-wrapper → rust-gcc
+# GCC: gcc-wrapper → oxidized-gcc
 #
-# rust-gcc is a GCC-compatible C compiler written in Rust (based on
+# oxidized-gcc is a GCC-compatible C compiler written in Rust (based on
 # Anthropic's ccc). It includes a built-in assembler, linker, and
 # preprocessor, targeting x86-64, i686, ARM64, and RISC-V.
 #
@@ -17,7 +17,7 @@
 mkComponent {
   name = "gcc";
   original = pkgs.stdenv.cc;
-  replacement = pkgs.rust-gcc;
+  replacement = pkgs.oxidized-gcc;
   status = status.available;
   source = source.repo;
   phase = 1;

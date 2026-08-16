@@ -1,15 +1,15 @@
-# Run upstream GNU binutils DejaGnu tests against rust-binutils.
+# Run upstream GNU binutils DejaGnu tests against oxidized-binutils.
 #
 # Runs the real `.exp` test files from the binutils source tree using
 # DejaGnu's `runtest` harness, with all tool paths pointed at
-# rust-binutils symlinks.
+# oxidized-binutils symlinks.
 #
 # Usage:
 #   Single .exp file:
-#     nix build .#checks.x86_64-linux.rust-binutils-dejagnu-size
+#     nix build .#checks.x86_64-linux.oxidized-binutils-dejagnu-size
 #
 #   All upstream tests:
-#     nix build .#checks.x86_64-linux.rust-binutils-dejagnu-all
+#     nix build .#checks.x86_64-linux.oxidized-binutils-dejagnu-all
 {
   pkgs,
   # Which .exp file(s) to run.  Pass a single name like "size.exp" or
@@ -24,12 +24,12 @@
 }: let
   name =
     if expFile == "ALL"
-    then "rust-binutils-dejagnu-all"
-    else "rust-binutils-dejagnu-${pkgs.lib.replaceStrings [".exp"] [""] expFile}";
+    then "oxidized-binutils-dejagnu-all"
+    else "oxidized-binutils-dejagnu-${pkgs.lib.replaceStrings [".exp"] [""] expFile}";
 in
   pkgs.runCommand name {
     nativeBuildInputs = [
-      pkgs.rust-binutils-dev
+      pkgs.oxidized-binutils-dev
       pkgs.dejagnu
       pkgs.expect
       pkgs.tcl
@@ -60,8 +60,8 @@ in
         cd "$WORKDIR"
         mkdir -p tmpdir
 
-        # ── Locate rust-binutils ─────────────────────────────────────────────
-        RUST_BIN="${pkgs.rust-binutils-dev}/bin"
+        # ── Locate oxidized-binutils ─────────────────────────────────────────────
+        RUST_BIN="${pkgs.oxidized-binutils-dev}/bin"
 
         # ── Create site.exp ──────────────────────────────────────────────────
         cat > site.exp << SITE_EOF

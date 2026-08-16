@@ -1,11 +1,11 @@
 {
-  devShells.rust-h264-decoder = pkgs: {
+  devShells.h264-decoder = pkgs: {
     packages = with pkgs; [
       just
     ];
   };
 
-  packages.rust-h264-decoder = {lib, ...}:
+  packages.h264-decoder = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-h264-decoder";
 

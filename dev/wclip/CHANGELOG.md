@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `rust-wclip`.
+All notable changes to `wclip`.
 
 ## Unreleased
 

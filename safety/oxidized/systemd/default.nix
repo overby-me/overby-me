@@ -15,7 +15,7 @@
         '';
     });
 in {
-  devShells.rust-systemd = pkgs: {
+  devShells.oxidized-systemd = pkgs: {
     packages = with pkgs; [
       just
       (rust-bin.stable.latest.default.override {
@@ -29,7 +29,7 @@ in {
   };
 
   packages = {
-    rust-systemd = {
+    oxidized-systemd = {
       lib,
       pam,
       systemd,
@@ -90,7 +90,7 @@ in {
     # latent manager bugs surface as visible PID 1 panics instead of the silent
     # wraparound a release build would produce.  Behavior otherwise matches the
     # release build; only optimization and these runtime checks differ.
-    rust-systemd-dev = {
+    oxidized-systemd-dev = {
       lib,
       pam,
       systemd,
@@ -136,7 +136,7 @@ in {
         };
 
         meta = {
-          description = "rust-systemd built for fast development iteration (debug + wild)";
+          description = "oxidized-systemd built for fast development iteration (debug + wild)";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
           license = lib.licenses.mit;
           mainProgram = "systemd";
@@ -144,7 +144,7 @@ in {
         };
       };
 
-    # rust-systemd-drowse = {
+    # oxidized-systemd-drowse = {
     #   drowse,
     #   lib,
     # }:
@@ -173,7 +173,7 @@ in {
     #         pkgs = import <nixpkgs> {};
     #         members = lib.attrValues (lib.mapAttrs (_: m: m.build) project.workspaceMembers);
     #       in
-    #       pkgs.runCommand "rust-systemd" {} '''
+    #       pkgs.runCommand "oxidized-systemd" {} '''
     #         mkdir -p $out/bin
     #         for pkg in ''${pkgs.lib.concatMapStringsSep " " toString members}; do
     #           for bin in $pkg/bin/*; do
@@ -202,24 +202,24 @@ in {
     #       };
     #   });
 
-    rust-systemd-systemd = {
+    oxidized-systemd-systemd = {
       runCommand,
       makeBinaryWrapper,
-      rust-systemd-dev,
+      oxidized-systemd-dev,
       kbd,
       kmod,
       util-linuxMinimal,
       systemd,
-      # `rust-systemd` (the release build) is still passed by the package
+      # `oxidized-systemd` (the release build) is still passed by the package
       # framework; absorb it with `...` since we build from the dev variant.
       ...
     }: let
       # Build the integration-test manager from the fast debug+wild dev build
-      # (see rust-systemd-dev above): quick rebuilds plus debug_assert!/overflow
+      # (see oxidized-systemd-dev above): quick rebuilds plus debug_assert!/overflow
       # checks that surface manager bugs a release build would hide.
-      rust-systemd = rust-systemd-dev;
+      oxidized-systemd = oxidized-systemd-dev;
     in
-      runCommand "rust-systemd-systemd-${rust-systemd.version}"
+      runCommand "oxidized-systemd-systemd-${oxidized-systemd.version}"
       {
         nativeBuildInputs = [makeBinaryWrapper];
 
@@ -249,9 +249,9 @@ in {
         };
 
         meta =
-          rust-systemd.meta
+          oxidized-systemd.meta
           // {
-            description = "rust-systemd packaged as a systemd drop-in replacement for NixOS";
+            description = "oxidized-systemd packaged as a systemd drop-in replacement for NixOS";
           };
       }
       ''
@@ -273,16 +273,16 @@ in {
                   cp -a "$bin" "$out/bin/$name"
                 done
 
-                # Make copied binaries writable so rust-systemd can overwrite them
+                # Make copied binaries writable so oxidized-systemd can overwrite them
                 chmod -R u+w $out/bin
 
-                # Overwrite with rust-systemd binaries (takes precedence).
+                # Overwrite with oxidized-systemd binaries (takes precedence).
                 # Dereference (-L): the cargo abstraction ships these as
                 # symlinks into per-crate store paths (udevadm-0.1.0, …), and
                 # the stage-1 initrd's self-contained `extra-utils` refuses to
                 # reference those derivations. Copying the real binaries (which
                 # link only glibc) keeps this package reference-clean.
-                for bin in ${rust-systemd}/bin/*; do
+                for bin in ${oxidized-systemd}/bin/*; do
                   name=$(basename "$bin")
                   cp -aL "$bin" "$out/bin/$name"
                 done
@@ -299,19 +299,19 @@ in {
                   ln -sf systemd-run "$out/bin/run0"
                 fi
 
-                # Replace the systemd init binary with a wrapper that execs rust-systemd,
-                # so NixOS actually boots with rust-systemd as PID 1 instead of systemd.
+                # Replace the systemd init binary with a wrapper that execs oxidized-systemd,
+                # so NixOS actually boots with oxidized-systemd as PID 1 instead of systemd.
                 # NixOS uses $out/lib/systemd/systemd as the init binary (stage-2).
-                # We can't symlink because rust-systemd's main() dispatches on argv[0]
-                # ending with "rust-systemd" or "systemd", so we need a wrapper script.
+                # We can't symlink because oxidized-systemd's main() dispatches on argv[0]
+                # ending with "oxidized-systemd" or "systemd", so we need a wrapper script.
                 rm -f $out/lib/systemd/systemd
-                makeBinaryWrapper ${rust-systemd}/bin/systemd $out/lib/systemd/systemd \
-                  --argv0 rust-systemd
+                makeBinaryWrapper ${oxidized-systemd}/bin/systemd $out/lib/systemd/systemd \
+                  --argv0 oxidized-systemd
 
-                # Replace lib/systemd/* helper binaries with rust-systemd equivalents.
+                # Replace lib/systemd/* helper binaries with oxidized-systemd equivalents.
                 # Many service units use ExecStart=$out/lib/systemd/systemd-<foo> rather
                 # than $out/bin/systemd-<foo>, so we need to overwrite those too.
-                for bin in ${rust-systemd}/bin/*; do
+                for bin in ${oxidized-systemd}/bin/*; do
                   name=$(basename "$bin")
                   if [ -e "$out/lib/systemd/$name" ]; then
                     rm -f "$out/lib/systemd/$name"
@@ -320,10 +320,10 @@ in {
                 done
 
                 # Install rust-only binaries that don't exist in the C systemd package.
-                # These are new binaries implemented in rust-systemd without a C counterpart.
+                # These are new binaries implemented in oxidized-systemd without a C counterpart.
                 for name in systemd-bsod systemd-journal-gatewayd systemd-journal-remote systemd-journal-upload systemd-battery-check systemd-report; do
-                  if [ -e "${rust-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
-                    cp -aL "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
+                  if [ -e "${oxidized-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
+                    cp -aL "${oxidized-systemd}/bin/$name" "$out/lib/systemd/$name"
                   fi
                 done
 
@@ -332,9 +332,9 @@ in {
                 # since NixOS' systemd package may not ship it, and
                 # TEST-81-GENERATORS.fstab-generator expects the binary
                 # at the canonical location.
-                if [ -e "${rust-systemd}/bin/systemd-fstab-generator" ]; then
+                if [ -e "${oxidized-systemd}/bin/systemd-fstab-generator" ]; then
                   mkdir -p "$out/lib/systemd/system-generators"
-                  cp -aL "${rust-systemd}/bin/systemd-fstab-generator" \
+                  cp -aL "${oxidized-systemd}/bin/systemd-fstab-generator" \
                     "$out/lib/systemd/system-generators/systemd-fstab-generator"
                 fi
 
@@ -451,7 +451,7 @@ in {
         KeyringMode=inherit
         USER_SERVICE
 
-                  # rust-systemd has no systemd-user-runtime-dir binary; the
+                  # oxidized-systemd has no systemd-user-runtime-dir binary; the
                   # directory is all the manager needs for XDG_RUNTIME_DIR.
                   cat > "$dir/user-runtime-dir@.service" <<RUNTIME_DIR_SERVICE
         [Unit]
@@ -470,13 +470,13 @@ in {
                 # Install test binaries at paths expected by upstream integration tests.
                 mkdir -p $out/lib/systemd/tests/unit-tests/manual
                 for name in test-journal-append test-sleep test-thp; do
-                  if [ -e "${rust-systemd}/bin/$name" ]; then
-                    cp -a "${rust-systemd}/bin/$name" "$out/lib/systemd/tests/unit-tests/manual/$name"
+                  if [ -e "${oxidized-systemd}/bin/$name" ]; then
+                    cp -a "${oxidized-systemd}/bin/$name" "$out/lib/systemd/tests/unit-tests/manual/$name"
                   fi
                 done
 
                 # Replace all references to the real systemd store path with
-                # the rust-systemd-systemd output path so NixOS module substitutions work.
+                # the oxidized-systemd-systemd output path so NixOS module substitutions work.
                 #
                 # NOTE: Only text files are patched. ELF binaries (e.g. udevadm) have
                 # the original systemd store path compiled into their RPATH and default
@@ -509,7 +509,7 @@ in {
     # The upstream systemd version the port is audited and its oracles build
     # against. `pkgs.systemd` (the differential oracles and every c-systemd-* check
     # use it) must match this, or the comparison runs against a version the port was
-    # never checked against. The `rust-systemd-upstream-pin` check below turns a
+    # never checked against. The `oxidized-systemd-upstream-pin` check below turns a
     # silent drift here into a failing check (porting rule 8). Bump only after
     # re-auditing against the new version; docs/ARCHITECTURE, docs/ROADMAP and
     # docs/TEST-OVERRIDES cite the same number in prose.
@@ -517,7 +517,7 @@ in {
 
     # Upstream systemd integration test names (without TEST- prefix).
     # Each corresponds to test/units/TEST-{name}.sh in the systemd source.
-    # Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
+    # Run with: nix build .#checks.x86_64-linux.oxidized-systemd-test-{name}
     testFiles = lib.filter (f: lib.match ".*\.nix" f != null) (
       lib.attrNames (lib.readDir ./integration-tests)
     );
@@ -533,7 +533,7 @@ in {
       )
       testFiles;
     # Every key an integration-tests entry may set, with its default.  Kept in
-    # one place so the rust-systemd and c-systemd variants cannot drift apart.
+    # one place so the oxidized-systemd and c-systemd variants cannot drift apart.
     testArgs = t: pkgs: {
       inherit pkgs;
       inherit (t) name;
@@ -552,7 +552,7 @@ in {
   in
     lib.listToAttrs (
       (map (t: {
-          name = "rust-systemd-test-${t._checkName}";
+          name = "oxidized-systemd-test-${t._checkName}";
           value = pkgs: import ./testsuite.nix (testArgs t pkgs);
         })
         tests)
@@ -568,15 +568,15 @@ in {
           # the oracles build against has moved off the version the port was
           # audited at, so drift surfaces as a failing check instead of silent
           # parity decay. Cheap (a version-string compare); no VM.
-          name = "rust-systemd-upstream-pin";
+          name = "oxidized-systemd-upstream-pin";
           value = pkgs:
-            pkgs.runCommand "rust-systemd-upstream-pin" {
+            pkgs.runCommand "oxidized-systemd-upstream-pin" {
               expected = expectedSystemdVersion;
               actual = pkgs.systemd.version;
             } ''
               if [ "$expected" != "$actual" ]; then
                 echo "systemd upstream pin drift: the port targets $expected but nixpkgs provides $actual." >&2
-                echo "Re-audit rust-systemd against $actual, then bump expectedSystemdVersion in default.nix (and the docs that cite it)." >&2
+                echo "Re-audit oxidized-systemd against $actual, then bump expectedSystemdVersion in default.nix (and the docs that cite it)." >&2
                 exit 1
               fi
               echo "systemd upstream pin OK: $expected" > "$out"

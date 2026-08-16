@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rust-meson are documented in this file.
+All notable changes to oxidized-meson are documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 

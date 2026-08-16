@@ -1,4 +1,4 @@
-# rust-pipewire: Plan to Pass Upstream PipeWire Tests
+# oxidized-pipewire: Plan to Pass Upstream PipeWire Tests
 
 ## Goal
 
@@ -7,10 +7,10 @@ multimedia (audio + video) graph daemon and its surrounding tools — verified
 against the upstream PipeWire test suite (the `test/` and `spa/tests/`
 directories of the pipewire source tree).
 
-The model is the same as `rust-binutils`, `rust-perl`, and `rust-systemd`: a
-single multicall binary (`rust-pipewire`) that dispatches on `argv[0]` and
+The model is the same as `oxidized-binutils`, `oxidized-perl`, and `oxidized-systemd`: a
+single multicall binary (`oxidized-pipewire`) that dispatches on `argv[0]` and
 exposes the full set of PipeWire tools/daemons via symlinks. Tests are run as
-Nix checks comparing rust-pipewire output against the reference C
+Nix checks comparing oxidized-pipewire output against the reference C
 `pipewire`/`spa` toolchain.
 
 ## Current Status
@@ -40,7 +40,7 @@ unit tests. Merged into `main` on 2026-07-16; further work (M15+) happens on
   produces bytes identical to the C `spa_pod_builder_*` API (verified by
   diff'ing against a libspa-linked C helper compiled in the test sandbox)
 - 1 daemon-interop test (`proto-test-hello-info`) that spawns a real C
-  pipewire daemon and confirms rust-pipewire's protocol-native client
+  pipewire daemon and confirms oxidized-pipewire's protocol-native client
   gets back `Core.Info` + `Registry.Global` events
 - **~60 daemon-comparison tests** (`daemon-test-*`) against a real
   C pipewire daemon, diffing C-tool vs Rust-tool output. Covers
@@ -67,7 +67,7 @@ unit tests. Merged into `main` on 2026-07-16; further work (M15+) happens on
 - POD round-trip + SMF + dict/JSON unit tests in-tree
 
 The reference upstream is `pkgs.pipewire` (currently 1.6.3). The Nix
-derivation extracts `pkgs.pipewire.src` and runs tests against rust-pipewire
+derivation extracts `pkgs.pipewire.src` and runs tests against oxidized-pipewire
 binaries.
 
 ---
@@ -126,8 +126,8 @@ Two complementary harnesses:
 
 1. **`spa-json-dump.exp` style (custom comparison)** — a `tests/<tool>/<name>.sh`
    shell script feeds an input file to both the reference binary and our
-   rust-pipewire binary, then `diff`s the output. This is the
-   `rust-binutils` model. Best for tools whose entire output is text
+   oxidized-pipewire binary, then `diff`s the output. This is the
+   `oxidized-binutils` model. Best for tools whose entire output is text
    (`spa-json-dump`, `pw-dump`, `pw-cli list-objects`, ...).
 
 2. **`pwtest` C-binary style (ABI-compatible cdylib)** — to run the
@@ -135,11 +135,11 @@ Two complementary harnesses:
    a `libpipewire-0.3.so` and `libspa-0.2.so` in Rust that satisfy the
    exact same C ABI. The test binaries are then linked against our
    `.so` files via `LD_LIBRARY_PATH`. This is high-effort but high-fidelity
-   and matches `rust-binutils-dejagnu`. **Deferred to Phase 6+**; until
+   and matches `oxidized-binutils-dejagnu`. **Deferred to Phase 6+**; until
    then we mirror each upstream test as a native Rust test in our own
    crate.
 
-3. **Daemon interop** — start `rust-pipewire` daemon, connect with the C
+3. **Daemon interop** — start `oxidized-pipewire` daemon, connect with the C
    `pw-cli` binary, verify protocol-level interactions. This is the most
    realistic end-to-end check and is added once a working
    protocol-native server exists.
@@ -189,7 +189,7 @@ Two complementary harnesses:
     safety/oxidized/pipewire/
       Cargo.toml
       Cargo.lock
-      default.nix              # rust-pipewire / rust-pipewire-dev packages + checks
+      default.nix              # oxidized-pipewire / oxidized-pipewire-dev packages + checks
       testsuite.nix            # custom comparison harness
       upstream-testsuite.nix   # (later) ABI-cdylib harness running pwtest binaries
       PLAN.md                  # this file
@@ -353,7 +353,7 @@ passes.
 
 - [x] `Cargo.toml` (edition 2024, multicall binary)
 - [x] `src/main.rs` dispatches on `argv[0]` / `argv[1]`
-- [x] `default.nix`: `rust-pipewire` (release) + `rust-pipewire-dev` (debug)
+- [x] `default.nix`: `oxidized-pipewire` (release) + `oxidized-pipewire-dev` (debug)
       with `postInstall` symlinks for every tool name
 - [x] `testsuite.nix`: shared comparison harness (extract `pkgs.pipewire.src`,
       define `$REF` and `$RUST` for paired binaries, normalize store paths)
@@ -443,7 +443,7 @@ output as upstream `pw-dump`.
 - [x] `pw_protocol_native` framing (16-byte header + Struct POD body),
       verified end-to-end against the live C daemon
 - [x] `Core.Hello` + `Core.GetRegistry` + `Client.UpdateProperties` issued
-      from rust-pipewire; `Core.Info`, `Registry.Global`,
+      from oxidized-pipewire; `Core.Info`, `Registry.Global`,
       `Registry.GlobalRemove`, `Core.Done`, `Core.Error`, `Module.Info`,
       `Factory.Info`, `Client.Info` events all parsed
 - [x] Higher-level `Client` struct with `handshake`, `sync`,
@@ -538,7 +538,7 @@ daemon.
 
 ### Phase 9 — Server side
 
-Goal: `rust-pipewire` daemon hosts our own clients; both C and Rust
+Goal: `oxidized-pipewire` daemon hosts our own clients; both C and Rust
 clients can connect, see the same registry, link nodes.
 
 - [ ] `pw_impl_core` / `pw_impl_client` / `pw_impl_node` / `pw_impl_link`
@@ -548,7 +548,7 @@ clients can connect, see the same registry, link nodes.
 - [ ] `module-default-nodes`
 - [ ] `module-rt` (RTKit / `SCHED_FIFO`)
 - [ ] `module-portal`
-- [ ] Daemon-only tests: start `rust-pipewire`, run upstream `pw-cli ls`
+- [ ] Daemon-only tests: start `oxidized-pipewire`, run upstream `pw-cli ls`
       against it, expect a non-empty registry
 
 ### Phase 10 — Audio backends (SPA plugins)
@@ -576,7 +576,7 @@ binaries against our `librust-pipewire-0.3.so` cdylib and run them.
       binaries with our `.so` substituted via `LD_PRELOAD`, parses the
       pwtest TAP-ish output, applies threshold gates per binary
 
-This is the analog of `rust-binutils-dejagnu`. Until it works, we treat
+This is the analog of `oxidized-binutils-dejagnu`. Until it works, we treat
 each upstream test as a manually-mirrored Rust unit test.
 
 ---
@@ -592,7 +592,7 @@ each upstream test as a manually-mirrored Rust unit test.
 
 These ship as no-op stubs so the multicall binary still satisfies every
 symlinked name; they will print a clear "not implemented in
-rust-pipewire" message and exit 0 (so package install scripts that probe
+oxidized-pipewire" message and exit 0 (so package install scripts that probe
 `--version` don't break).
 
 ---
@@ -603,13 +603,13 @@ rust-pipewire" message and exit 0 (so package install scripts that probe
    `nix flake check`: it OOMs on this tree; `just check` runs the
    bounded-memory `flake-check` tool).
 2. Reproduce with
-   `nix build .#checks.x86_64-linux.rust-pipewire-test-<tool>-<name>`.
+   `nix build .#checks.x86_64-linux.oxidized-pipewire-test-<tool>-<name>`.
 3. Read `nix log <drv>` to see the diff. The test script lives at
    `tests/<tool>/<name>.sh`.
 4. Implement the missing feature, rebuild.
 5. Once green, commit with message
    `feat(safety/oxidized/pipewire): <short description> + <N> tests`
-   (matching the existing rust-binutils style).
+   (matching the existing oxidized-binutils style).
 6. Push a feature bookmark and merge to `main` (the historical
    `pipewire-rust` bookmark was merged on 2026-07-16).
 

@@ -1,6 +1,6 @@
 # Phase 4: differential roundtrip checks.
 #
-# Build a small multi-file C project against both rust-ninja and the
+# Build a small multi-file C project against both oxidized-ninja and the
 # reference `pkgs.ninja` and compare *behavior* (not raw binary bytes
 # — gcc embeds absolute build paths in some sections, so a true `cmp`
 # would diverge by construction). Each scenario validates a specific
@@ -35,9 +35,9 @@
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-ninja-roundtrip-${name}" {
+pkgs.runCommand "oxidized-ninja-roundtrip-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-ninja-dev
+    pkgs.oxidized-ninja-dev
     pkgs.ninja
     pkgs.gcc
     pkgs.cmake
@@ -48,7 +48,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
 } ''
     set -euo pipefail
 
-    RUST_NINJA="${pkgs.rust-ninja-dev}/bin/ninja"
+    RUST_NINJA="${pkgs.oxidized-ninja-dev}/bin/ninja"
     REF_NINJA="${pkgs.ninja}/bin/ninja"
 
     # Build a tiny C project with two translation units and a shared
@@ -160,7 +160,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         echo "rust: $out_rust"
         echo "ref : $out_ref"
         [ "$out_rust" = "ninja: no work to do." ] || {
-          echo "FAIL: rust-ninja did not report no-work-to-do"; exit 1; }
+          echo "FAIL: oxidized-ninja did not report no-work-to-do"; exit 1; }
         [ "$out_ref"  = "ninja: no work to do." ] || {
           echo "FAIL: reference ninja did not report no-work-to-do"; exit 1; }
         ;;
@@ -180,7 +180,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         echo "greet.o mtime rust: $stat_before_rust -> $stat_after_rust"
         echo "greet.o mtime ref : $stat_before_ref  -> $stat_after_ref"
         [ "$stat_before_rust" = "$stat_after_rust" ] || {
-          echo "FAIL: rust-ninja unnecessarily rebuilt greet.o"; exit 1; }
+          echo "FAIL: oxidized-ninja unnecessarily rebuilt greet.o"; exit 1; }
         [ "$stat_before_ref"  = "$stat_after_ref"  ] || {
           echo "FAIL: reference ninja unnecessarily rebuilt greet.o"; exit 1; }
         assert_app_works "$RUST_DIR"
@@ -206,7 +206,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         echo "greet.o mtime rust: $stat_before_rust -> $stat_after_rust"
         echo "greet.o mtime ref : $stat_before_ref  -> $stat_after_ref"
         [ "$stat_before_rust" != "$stat_after_rust" ] || {
-          echo "FAIL: rust-ninja did not rebuild greet.o after header change";
+          echo "FAIL: oxidized-ninja did not rebuild greet.o after header change";
           exit 1; }
         [ "$stat_before_ref"  != "$stat_after_ref"  ] || {
           echo "FAIL: reference ninja did not rebuild greet.o after header change";
@@ -235,7 +235,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         out_rust=$( cd "$SRC_DIR-rust" && $RUST_NINJA )
         out_ref=$(  cd "$SRC_DIR-ref"  && $REF_NINJA  )
         [ "$out_rust" = "ninja: no work to do." ] || {
-          echo "FAIL: rust-ninja: $out_rust"; exit 1; }
+          echo "FAIL: oxidized-ninja: $out_rust"; exit 1; }
         [ "$out_ref"  = "ninja: no work to do." ] || {
           echo "FAIL: reference ninja: $out_ref"; exit 1; }
 
@@ -253,7 +253,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
       cmake-incremental-modify)
         # After a cold build, modifying *only* main.c must rebuild
         # main.o + relink app, but leave greet.o (and libgreet.a)
-        # alone. Validates that rust-ninja correctly limits the dirty
+        # alone. Validates that oxidized-ninja correctly limits the dirty
         # set in a real CMake tree where edges have order-only phony
         # anchors and depfile-driven implicit deps that could
         # over-rebuild if the dirtiness analysis is sloppy.
@@ -278,7 +278,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
         echo "greet.c.o mtime rust: $before_rust -> $after_rust"
         echo "greet.c.o mtime ref : $before_ref  -> $after_ref"
         [ "$before_rust" = "$after_rust" ] || {
-          echo "FAIL: rust-ninja unnecessarily rebuilt greet.c.o";
+          echo "FAIL: oxidized-ninja unnecessarily rebuilt greet.c.o";
           exit 1; }
         [ "$before_ref"  = "$after_ref"  ] || {
           echo "FAIL: reference ninja unnecessarily rebuilt greet.c.o";
@@ -289,7 +289,7 @@ pkgs.runCommand "rust-ninja-roundtrip-${name}" {
 
       cmake-clean-rebuild)
         # `ninja -t clean` removes outputs; the next build must
-        # cold-rebuild everything. Exercises rust-ninja parity with
+        # cold-rebuild everything. Exercises oxidized-ninja parity with
         # the reference clean tool *and* its ability to drive a
         # cmake-shaped build from scratch when artifacts vanish but
         # the manifest stays put.

@@ -11,7 +11,7 @@
       copy_command =
         if pkgs.stdenv.isDarwin
         then "pbcopy"
-        else "${pkgs.pkgsUnstable.rust-wclip}/bin/wclip -selection clipboard";
+        else "${pkgs.pkgsUnstable.wclip}/bin/wclip -selection clipboard";
       scrollback_editor = "zed-uf";
       session_serialization = false;
       pane_frames = false;

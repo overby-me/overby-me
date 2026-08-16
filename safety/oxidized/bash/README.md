@@ -52,8 +52,8 @@ The binary is named `bash` and also symlinks to `sh` when installed via Nix.
 ### With Nix
 
 ```bash
-nix build .#rust-bash          # release build
-nix build .#rust-bash-dev      # debug build (faster compile)
+nix build .#oxidized-bash          # release build
+nix build .#oxidized-bash-dev      # debug build (faster compile)
 ```
 
 ## Testing
@@ -62,13 +62,13 @@ nix build .#rust-bash-dev      # debug build (faster compile)
 
 ```bash
 # Run a single test
-nix build .#checks.x86_64-linux.rust-bash-test-NAME
+nix build .#checks.x86_64-linux.oxidized-bash-test-NAME
 
 # Run all tests (continue on failure)
-nix build --keep-going .#checks.x86_64-linux.rust-bash-test-{alias,appendop,arith,array,...}
+nix build --keep-going .#checks.x86_64-linux.oxidized-bash-test-{alias,appendop,arith,array,...}
 
 # View failure diff
-nix log .#checks.x86_64-linux.rust-bash-test-NAME
+nix log .#checks.x86_64-linux.oxidized-bash-test-NAME
 ```
 
 ### Local testing

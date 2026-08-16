@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-meson = {lib, ...}:
+    oxidized-meson = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-meson";
 
@@ -1168,7 +1168,7 @@
   in
     lib.listToAttrs (
       map (t: {
-        name = "rust-meson-test-${t.name}";
+        name = "oxidized-meson-test-${t.name}";
         value = pkgs:
           import ./testsuite.nix {
             inherit pkgs;
@@ -1178,6 +1178,6 @@
       tests
     )
     // {
-      rust-meson-hello-world = pkgs: import ./hello-world-test.nix {inherit pkgs;};
+      oxidized-meson-hello-world = pkgs: import ./hello-world-test.nix {inherit pkgs;};
     };
 }

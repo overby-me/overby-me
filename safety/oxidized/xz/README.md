@@ -17,16 +17,16 @@ A pure-Rust `xz(1)` CLI built on top of the `liblzma` crate (which
 itself bundles upstream `xz-utils` 5.8.x). Aims to be drop-in
 compatible with the upstream binary on the surface area exercised by
 xz's own test suite. Passes **117/117** Nix checks built from the
-upstream test artifacts plus four rust-xz–specific checks.
+upstream test artifacts plus four oxidized-xz–specific checks.
 
 ## Building
 
 ```sh
-nix build .#rust-xz
+nix build .#oxidized-xz
 ./result/bin/xz --help
 ```
 
-A debug build is also available as `.#rust-xz-dev` for quick
+A debug build is also available as `.#oxidized-xz-dev` for quick
 iteration. The standard symlinks (`unxz`, `xzcat`, `lzma`,
 `unlzma`, `lzcat`) are installed alongside the main `xz` binary.
 
@@ -34,7 +34,7 @@ iteration. The standard symlinks (`unxz`, `xzcat`, `lzma`,
 
 Tests run inside a Nix sandbox. The upstream test artifacts are
 extracted from `pkgs.xz.src` (xz-utils 5.8.1) and pointed at our
-`rust-xz-dev` binary. Each logical test is a separate Nix check
+`oxidized-xz-dev` binary. Each logical test is a separate Nix check
 derivation so failures are isolated.
 
 ```sh
@@ -42,16 +42,16 @@ derivation so failures are isolated.
 nix flake check
 
 # A single per-file decode check.
-nix build .#checks.x86_64-linux.\"rust-xz-good-1-arm64-lzma2-1.xz\"
+nix build .#checks.x86_64-linux.\"oxidized-xz-good-1-arm64-lzma2-1.xz\"
 
 # An upstream shell script.
-nix build .#checks.x86_64-linux.rust-xz-test-files
+nix build .#checks.x86_64-linux.oxidized-xz-test-files
 
 # An upstream C unit test (built from xz's own makefile).
-nix build .#checks.x86_64-linux.rust-xz-test-vli
+nix build .#checks.x86_64-linux.oxidized-xz-test-vli
 
 # View a failing log.
-nix log .#checks.x86_64-linux.rust-xz-fuzz
+nix log .#checks.x86_64-linux.oxidized-xz-fuzz
 ```
 
 In-tree `cargo` tests (81 total: 75 unit + 1 fuzz harness + 5
@@ -70,10 +70,10 @@ cargo bench --bench roundtrip   # criterion throughput suite
 | Per-file decode (`good-*` / `bad-*` / `unsupported-*`) | 95 | Every file in `xz-5.8.1/tests/files/`. `good-*` must decode; `bad-*` and `unsupported-*` must be rejected. |
 | Upstream shell scripts | 6 | `test_files.sh`, `test_suffix.sh`, `test_compress_generated_{abc,random,text}`, `test_scripts.sh` (skipped: needs `xzdiff`/`xzgrep` we don't ship) |
 | Upstream C unit tests | 12 | `test_check`, `test_hardware`, `test_stream_flags`, `test_filter_flags`, `test_filter_str`, `test_block_header`, `test_index`, `test_index_hash`, `test_bcj_exact_size`, `test_memlimit`, `test_lzip_decoder`, `test_vli` — built via xz's own `Makefile` against upstream liblzma. |
-| `rust-xz-roundtrip` | 1 | Random-input compress/decompress at every preset 0-9. |
-| `rust-xz-list` | 1 | End-to-end smoke test of `xz -l` output. |
-| `rust-xz-filters` | 1 | End-to-end BCJ + LZMA2 filter chain via `--x86`/`--filters=`. |
-| `rust-xz-fuzz` | 1 | Decoder-stability harness: feeds every corpus file plus prefix-truncated and bit-flipped mutations through the decoder, asserting no panics. |
+| `oxidized-xz-roundtrip` | 1 | Random-input compress/decompress at every preset 0-9. |
+| `oxidized-xz-list` | 1 | End-to-end smoke test of `xz -l` output. |
+| `oxidized-xz-filters` | 1 | End-to-end BCJ + LZMA2 filter chain via `--x86`/`--filters=`. |
+| `oxidized-xz-fuzz` | 1 | Decoder-stability harness: feeds every corpus file plus prefix-truncated and bit-flipped mutations through the decoder, asserting no panics. |
 
 The `script` helper in `testsuite.nix` treats `exit 77` (skip) as a
 **failure** by default. Only `test_scripts.sh` is allowed to skip
@@ -85,7 +85,7 @@ correction in `CHANGELOG.md`.
 ## Supported features
 
 Everything exercised by the upstream test surface, plus a few
-rust-xz-only conveniences:
+oxidized-xz-only conveniences:
 
 ### Container formats
 
@@ -172,9 +172,9 @@ safety/oxidized/xz/
     processor.rs      # Per-file driver (open, route, suffix dance, cleanup)
     suffix.rs         # Suffix mapping for compress / decompress
     bin/
-      rust-xz-fuzz.rs # Standalone decoder-stability fuzz harness
+      oxidized-xz-fuzz.rs # Standalone decoder-stability fuzz harness
   tests/
-    fuzz_corpus.rs    # Local mirror of the Nix `rust-xz-fuzz` check
+    fuzz_corpus.rs    # Local mirror of the Nix `oxidized-xz-fuzz` check
     proptest_roundtrip.rs # Property-based round-trip tests
 ```
 
@@ -198,7 +198,7 @@ same liblzma C code.
 - Per-block detail in `--list -v` (`-vv` upstream walks the index
   records; we report one block per stream as a coarse approximation).
 - A `--robot` machine-readable list output.
-- True libFuzzer integration — the in-tree `rust-xz-fuzz` derivation
+- True libFuzzer integration — the in-tree `oxidized-xz-fuzz` derivation
   only does corpus-replay + prefix-truncation + 1-byte-flip mutation.
 - A CI bench-tracking job that runs `cargo bench` on each commit.
 - Real `--memlimit-*` enforcement (currently accept-and-ignore).

@@ -84,7 +84,7 @@
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: --size=auto does not grow an existing image; Format=/Encrypt=/CopyFiles= unimplemented' >/skipped"
+      echo "echo 'oxidized-systemd: --size=auto does not grow an existing image; Format=/Encrypt=/CopyFiles= unimplemented' >/skipped"
       echo "exit 77"
     } > TEST-58-REPART.sh
     chmod +x TEST-58-REPART.sh

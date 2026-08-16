@@ -409,8 +409,8 @@ lands only with a benchmark proving it helped.
 
 - 2026-07-18 (evening): wild is the default linker for every
   buildCargoProject call (injected in the perSystemLib wiring; override
-  with `linker = null` or another package). rust-systemd additionally has
-  a `rust-systemd-dev` variant: debug profile, cranelift codegen, wild
+  with `linker = null` or another package). oxidized-systemd additionally has
+  a `oxidized-systemd-dev` variant: debug profile, cranelift codegen, wild
   linking, with `-Clinker-features=-lld` to opt out of nightly's rust-lld
   default which would bypass the -B linker shim.
 - 2026-07-18: Library lives at `platform/nix/lib/cargo/`, sibling of `platform/nix/lib/deno`;

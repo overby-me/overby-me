@@ -1,6 +1,6 @@
 source ../helpers.nu
 
-# Structural test: rust-pipewire pw-dump should produce valid JSON listing
+# Structural test: oxidized-pipewire pw-dump should produce valid JSON listing
 # the daemon's registry globals. Byte-for-byte parity with the C tool isn't
 # the goal here: the C tool also binds each global and emits a richer
 # `info` block, which is Phase 8 work for us. Here we just assert the

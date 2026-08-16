@@ -1,9 +1,9 @@
-# Run a single test from the binutils test suite against rust-binutils.
+# Run a single test from the binutils test suite against oxidized-binutils.
 #
-# Compares rust-binutils output against reference GNU binutils output.
+# Compares oxidized-binutils output against reference GNU binutils output.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-binutils-test-{tool}-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-binutils-test-nm-basic
+# Run with: nix build .#checks.x86_64-linux.oxidized-binutils-test-{tool}-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-binutils-test-nm-basic
 {
   pkgs,
   tool,
@@ -15,9 +15,9 @@
     then "c++filt"
     else tool;
 in
-  pkgs.runCommand "rust-binutils-test-${tool}-${name}" {
+  pkgs.runCommand "oxidized-binutils-test-${tool}-${name}" {
     nativeBuildInputs = [
-      pkgs.rust-binutils-dev
+      pkgs.oxidized-binutils-dev
       pkgs.binutils-unwrapped
       pkgs.coreutils
       pkgs.diffutils
@@ -42,7 +42,7 @@ in
 
     # Set up tool paths
     export REF="${pkgs.binutils-unwrapped}/bin/${binName}"
-    export RUST="${pkgs.rust-binutils-dev}/bin/${binName}"
+    export RUST="${pkgs.oxidized-binutils-dev}/bin/${binName}"
 
     # Lay the fixture out one directory below helpers.nu, mirroring the
     # repository layout so the fixture's `source ../helpers.nu` resolves.

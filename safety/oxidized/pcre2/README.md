@@ -71,7 +71,7 @@ behaviour for `grep -P`.
 ## Building and testing
 
 ```sh
-nix build .#rust-pcre2
+nix build .#oxidized-pcre2
 cd safety/oxidized/pcre2 && cargo test
 ```
 

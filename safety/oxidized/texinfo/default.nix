@@ -1,5 +1,5 @@
 {
-  packages.rust-texinfo = {lib, ...}:
+  packages.oxidized-texinfo = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-texinfo";
 

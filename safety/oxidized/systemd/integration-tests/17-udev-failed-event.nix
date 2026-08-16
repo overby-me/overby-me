@@ -25,7 +25,7 @@
   # run_test_killed FAILS, and needs an architectural change. It sends SIGABRT
   # to a process named `udev-worker` and expects UDEV_WORKER_FAILED=1,
   # UDEV_WORKER_SIGNAL=6 and UDEV_WORKER_SIGNAL_NAME=ABRT on the monitor.
-  # rust-systemd runs workers as THREADS named `udev-worker:<devpath>`, so there
+  # oxidized-systemd runs workers as THREADS named `udev-worker:<devpath>`, so there
   # is nothing for pkill to signal and no notion of a worker dying by signal to
   # report. That is a worker-process model, not a small fix.
   #

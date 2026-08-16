@@ -7,7 +7,7 @@ test:
 clippy:
     cargo clippy --workspace
 
-# Run differential tests comparing rust-systemd against real systemd
+# Run differential tests comparing oxidized-systemd against real systemd
 difftest *ARGS:
     cargo test --package difftest -- {{ARGS}}
 
@@ -27,7 +27,7 @@ difftest-list:
     cargo test --package difftest -- --list
 
 # Run the in-process differential oracles against the C systemd binaries
-# (task #22/#21): compare rust-systemd against the same input through real
+# (task #22/#21): compare oxidized-systemd against the same input through real
 # systemd. Resolves the C binaries from nixpkgs and sets the env vars that gate
 # each differential test (they skip when unset), turning upstream drift into a
 # failing test without a VM.

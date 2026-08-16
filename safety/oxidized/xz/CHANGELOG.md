@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `rust-xz`. Trajectory:
+All notable changes to `oxidized-xz`. Trajectory:
 80/84 → 87/88 → 88/88 (false ✅ — see Round 5) → 91/91 (false ✅) →
 103/103 (false ✅) → **117/117**.
 
@@ -13,7 +13,7 @@ Two real gaps remained before this round, both surfaced by repeated
 
 #### Round-2 correction
 
-The `rust-xz-test-compress` derivation from Round 2 was reported
+The `oxidized-xz-test-compress` derivation from Round 2 was reported
 green but was in fact silently skipping with `exit 77`. The helper
 invoked the script as `sh ./test_compress.sh ./fake`, but upstream
 `test_compress.sh` interprets `$1` as a *test filename* and `$2`
@@ -46,7 +46,7 @@ overstating coverage by one check each.
   `test_lzip_decoder`, `test_vli`. These exercise the C library
   internals (VLI codec, block header parser, index hash, lzip
   decoder, etc.) — they don't touch our Rust CLI but they validate
-  the liblzma `rust-xz` links against, giving us full upstream
+  the liblzma `oxidized-xz` links against, giving us full upstream
   parity. New `cTest` helper in `testsuite.nix` builds each binary
   via `make tests/<name>` and runs it as one Nix check.
 
@@ -58,7 +58,7 @@ closed both gaps.
 
 - All 9 lzip `bad-1-v*.lz` decoder-rejection cases, plus
   `unsupported-1-v234.lz` and `unsupported-check.xz`. All 11 are
-  correctly rejected by `rust-xz`.
+  correctly rejected by `oxidized-xz`.
 - `test_scripts.sh` wired with `allowSkip = true` (it tests
   `xzdiff`/`xzgrep` shell wrappers we don't ship, and self-skips
   via the standard `exit 77` path).
@@ -109,8 +109,8 @@ closed both gaps.
   256 KiB synthetic payload. On the dev box this reports
   ~870 MiB/s decode at preset 0 and ~600 MiB/s at preset 9.
 
-- **`rust-xz-fuzz` Nix check + `tests/fuzz_corpus.rs`** — the new
-  `rust-xz-fuzz` binary (auto-built by cargo from `src/bin/`) walks
+- **`oxidized-xz-fuzz` Nix check + `tests/fuzz_corpus.rs`** — the new
+  `oxidized-xz-fuzz` binary (auto-built by cargo from `src/bin/`) walks
   a corpus directory and feeds every `.xz`/`.lzma`/`.lz` file
   through the decoder verbatim, then again as prefix-truncated and
   one-byte-flipped variants. The matching Nix derivation extracts

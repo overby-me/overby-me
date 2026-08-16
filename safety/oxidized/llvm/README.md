@@ -51,7 +51,7 @@ that were left empty; they have not been started.
 
 ```console
 # Parse, verify and re-print a module (the subset of upstream opt we implement)
-nix run .#rust-llvm -- -S -passes=verify input.ll -o output.ll
+nix run .#oxidized-llvm -- -S -passes=verify input.ll -o output.ll
 
 # Same thing from a checkout
 cargo run -p llvm-tools --bin opt -- -S -passes=verify input.ll
@@ -67,7 +67,7 @@ skipped the work it asked for.
 Everything builds and tests through nix; there is no second execution path.
 
 ```console
-nix build .#rust-llvm                          # the tools
+nix build .#oxidized-llvm                          # the tools
 nix build .#checks.x86_64-linux.llvm-fmt       # rustfmt
 nix build .#checks.x86_64-linux.llvm-clippy    # clippy, -D warnings
 nix build .#checks.x86_64-linux.llvm-unit      # cargo test

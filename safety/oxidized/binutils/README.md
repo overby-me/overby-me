@@ -30,7 +30,7 @@ under `bin/`.
 
 ### 1. Custom comparison tests (`testsuite.nix`)
 
-A Nix derivation that runs a single named test, comparing `rust-binutils`
+A Nix derivation that runs a single named test, comparing `oxidized-binutils`
 output against reference GNU `binutils` output. Takes `{ pkgs, tool, name
 }` as arguments.
 
@@ -51,21 +51,21 @@ Key design decisions:
 
 A Nix derivation that runs the real upstream `.exp` test files from the
 GNU binutils source tree using DejaGnu's `runtest` harness, with all
-tool paths pointed at `rust-binutils` symlinks.
+tool paths pointed at `oxidized-binutils` symlinks.
 
 Key design decisions:
 
 - **Real upstream tests**: runs the actual `.exp` files from
   `binutils/testsuite/binutils-all/`, not hand-written approximations
 - **Generated `site.exp`**: configures tool paths (`NM`, `AR`,
-  `OBJDUMP`, etc.) to rust-binutils, and `AS_FOR_TARGET`/`CC_FOR_TARGET`
+  `OBJDUMP`, etc.) to oxidized-binutils, and `AS_FOR_TARGET`/`CC_FOR_TARGET`
   to GNU as/gcc for assembling test fixtures
 - **Threshold-based pass/fail**: each check has `minPass` (minimum
   expected passes) and `maxFail` (maximum allowed failures) so
   regressions are caught but known failures don't block CI
 - **Per-file and aggregate checks**: individual `.exp` files get
-  separate Nix checks (e.g., `rust-binutils-dejagnu-size`), plus a
-  `rust-binutils-dejagnu-all` informational check
+  separate Nix checks (e.g., `oxidized-binutils-dejagnu-size`), plus a
+  `oxidized-binutils-dejagnu-all` informational check
 - **Subdir tests**: `binutils-all/x86-64/x86-64.exp` and
   `binutils-all/i386/i386.exp` are run via a separate `runtest` call
   (basename-only dispatch can't resolve subdir paths)
@@ -74,9 +74,9 @@ Key design decisions:
 
 ### 3. `default.nix`
 
-- `rust-binutils` package — release multicall binary with symlinks for
+- `oxidized-binutils` package — release multicall binary with symlinks for
   each tool name in `postInstall`
-- `rust-binutils-dev` package — debug build for fast iteration
+- `oxidized-binutils-dev` package — debug build for fast iteration
 - `checks` attribute set wiring per-tool custom tests, per-`.exp`
   DejaGnu checks, and the aggregate DejaGnu check
 
@@ -84,13 +84,13 @@ Key design decisions:
 
 ```sh
 # Run a single custom comparison test
-nix build .#checks.x86_64-linux.rust-binutils-test-strings-basic
+nix build .#checks.x86_64-linux.oxidized-binutils-test-strings-basic
 
 # Run a single upstream DejaGnu test file
-nix build .#checks.x86_64-linux.rust-binutils-dejagnu-cxxfilt
+nix build .#checks.x86_64-linux.oxidized-binutils-dejagnu-cxxfilt
 
 # Run all upstream tests (informational, always passes)
-nix build .#checks.x86_64-linux.rust-binutils-dejagnu-all -o result
+nix build .#checks.x86_64-linux.oxidized-binutils-dejagnu-all -o result
 cat result/test-output.log    # full DejaGnu output
 cat result/summary.log        # PASS/FAIL lines only
 cat result/results.txt        # machine-readable counts
@@ -165,9 +165,9 @@ nix flake check
 ## Workflow
 
 1. Pick a failing test (`grep "^FAIL:"
-   .../rust-binutils-dejagnu-all/test-output.log`).
+   .../oxidized-binutils-dejagnu-all/test-output.log`).
 2. Reproduce locally:
-   `nix build .#checks.x86_64-linux.rust-binutils-dejagnu-<file>`.
+   `nix build .#checks.x86_64-linux.oxidized-binutils-dejagnu-<file>`.
 3. Read the failure under `nix log <drv>` and compare against the
    expected `.r` / `.dump` file in the binutils source tree.
 4. Fix the code, rebuild, re-run the threshold-gated check.

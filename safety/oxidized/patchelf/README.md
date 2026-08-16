@@ -19,7 +19,7 @@ A patchelf-compatible ELF binary patching tool written in Rust.
 
 **46/46 tests passing (100%)** — the upstream NixOS/patchelf 0.15.2
 test suite (`tests/*.sh`), wired into Nix checks. Each test runs the
-official shell script in a sandbox with `rust-patchelf` symlinked at
+official shell script in a sandbox with `oxidized-patchelf` symlinked at
 the expected `../src/patchelf` path against pre-built ELF fixtures
 from the upstream autotools build.
 
@@ -28,23 +28,23 @@ from the upstream autotools build.
 Run a single upstream test:
 
 ```sh
-nix build .#checks.x86_64-linux.rust-patchelf-test-{name}
+nix build .#checks.x86_64-linux.oxidized-patchelf-test-{name}
 ```
 
 View a failing test's log:
 
 ```sh
-nix log .#checks.x86_64-linux.rust-patchelf-test-{name}
+nix log .#checks.x86_64-linux.oxidized-patchelf-test-{name}
 ```
 
 Batch-run every test:
 
 ```sh
-nix build ".#checks.x86_64-linux.rust-patchelf-test-*" --keep-going --no-link
+nix build ".#checks.x86_64-linux.oxidized-patchelf-test-*" --keep-going --no-link
 ```
 
-The binary is available as `patchelf` from `pkgs.rust-patchelf`
-(release build, LTO + strip) or `pkgs.rust-patchelf-dev` (debug build,
+The binary is available as `patchelf` from `pkgs.oxidized-patchelf`
+(release build, LTO + strip) or `pkgs.oxidized-patchelf-dev` (debug build,
 faster compile).
 
 ## Architecture

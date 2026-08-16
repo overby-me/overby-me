@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rust-ninja.
+All notable changes to oxidized-ninja.
 
 ## [Unreleased]
 

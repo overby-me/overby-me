@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rust-sed.
+All notable changes to oxidized-sed.
 
 ## [Unreleased]
 

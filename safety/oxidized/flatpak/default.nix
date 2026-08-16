@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-flatpak = {lib, ...}:
+    oxidized-flatpak = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-flatpak";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-flatpak-dev = {lib, ...}:
+    oxidized-flatpak-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-flatpak-dev";
 
@@ -274,12 +274,12 @@
     ];
   in
     lib.listToAttrs (map (name: {
-        name = "rust-flatpak-test-${name}";
+        name = "oxidized-flatpak-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames)
     // lib.listToAttrs (map (name: {
-        name = "rust-flatpak-vm-${name}";
+        name = "oxidized-flatpak-vm-${name}";
         value = pkgs: import ./vmtest.nix {inherit pkgs name;};
       })
       vmTestNames);

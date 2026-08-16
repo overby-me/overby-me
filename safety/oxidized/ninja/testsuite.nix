@@ -1,12 +1,12 @@
 # Run a single test from the upstream ninja output_test.py suite against
-# rust-ninja.
+# oxidized-ninja.
 #
 # The strategy mirrors safety/oxidized/awk: copy the upstream ninja source tree, pin
-# the rust-ninja-dev binary onto PATH as `ninja`, and let the official
+# the oxidized-ninja-dev binary onto PATH as `ninja`, and let the official
 # misc/output_test.py drive a single TestCase method via unittest.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-ninja-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-ninja-test-test_status
+# Run with: nix build .#checks.x86_64-linux.oxidized-ninja-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-ninja-test-test_status
 {
   pkgs,
   name,
@@ -41,9 +41,9 @@
     subprocess.check_output = _patched_check_output
   '';
 in
-  pkgs.runCommand "rust-ninja-test-${name}" {
+  pkgs.runCommand "oxidized-ninja-test-${name}" {
     nativeBuildInputs = [
-      pkgs.rust-ninja-dev
+      pkgs.oxidized-ninja-dev
       pkgs.python3
       pkgs.util-linux # provides `script` used by output_test.py to fake a tty
       pkgs.coreutils
@@ -64,8 +64,8 @@ in
     cd ./ninja-src
 
     # output_test.py uses NINJA_PATH = os.path.abspath('./ninja'), so symlink
-    # the rust-ninja binary into the source root under that name.
-    ln -sf ${pkgs.rust-ninja-dev}/bin/ninja ./ninja
+    # the oxidized-ninja binary into the source root under that name.
+    ln -sf ${pkgs.oxidized-ninja-dev}/bin/ninja ./ninja
 
     # Drop the sitecustomize hook on PYTHONPATH so it auto-loads and
     # transparently patches subprocess.check_output to preserve PATH.

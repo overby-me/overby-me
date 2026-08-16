@@ -516,7 +516,7 @@ newest at top.
   `dejagnu-testsuite.nix`. Configure `site.exp` with tool paths,
   `AS_FOR_TARGET`, `CC_FOR_TARGET`. Add 9 per-file DejaGnu checks with
   calibrated thresholds plus an informational `dejagnu-all` check.
-- Add `rust-binutils-dev` package (debug build for fast iteration).
+- Add `oxidized-binutils-dev` package (debug build for fast iteration).
 - Create `testsuite.nix` with the custom comparison test runner. Create
   24 custom test scripts across 8 tools.
 - Fix nm, c++filt, size, addr2line, readelf, objdump to pass custom

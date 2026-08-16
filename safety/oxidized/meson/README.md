@@ -19,7 +19,7 @@ A drop-in [Meson](https://mesonbuild.com/) build system replacement written in R
 
 ## Architecture
 
-Unlike AST-walking interpreters, rust-meson uses a bytecode compiler and stack-based VM:
+Unlike AST-walking interpreters, oxidized-meson uses a bytecode compiler and stack-based VM:
 
 ```text
 meson.build → Lexer → Parser → AST → Compiler → Bytecode → VM → Build Graph → Backend → build.ninja
@@ -74,7 +74,7 @@ cargo build --release
 Or with Nix:
 
 ```sh
-nix build .#rust-meson
+nix build .#oxidized-meson
 ```
 
 ## Tests
@@ -83,9 +83,9 @@ nix build .#rust-meson
 
 ```sh
 # Run a single test
-nix build .#checks.x86_64-linux.rust-meson-test-1-trivial
+nix build .#checks.x86_64-linux.oxidized-meson-test-1-trivial
 
 # Run all tests
-nix flake show --json | jq -r '.checks."x86_64-linux" | keys[] | select(startswith("rust-meson-test-"))' \
+nix flake show --json | jq -r '.checks."x86_64-linux" | keys[] | select(startswith("oxidized-meson-test-"))' \
   | xargs -I{} nix build --keep-going --no-link '.#checks.x86_64-linux."{}"'
 ```

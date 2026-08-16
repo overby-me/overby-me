@@ -1,4 +1,4 @@
-# rust-flatpak Implementation Plan
+# oxidized-flatpak Implementation Plan
 
 ## Current State
 
@@ -421,7 +421,7 @@ test suite as Nix checks, following the same pattern as `safety/oxidized/awk` (o
 
 | File | Role |
 |---|---|
-| `default.nix` | Adds `rust-flatpak-dev` (debug build) + `checks` attrset mapping test names → `testsuite.nix` |
+| `default.nix` | Adds `oxidized-flatpak-dev` (debug build) + `checks` attrset mapping test names → `testsuite.nix` |
 | `testsuite.nix` | Single-test derivation template; sets up `$HOME`, `XDG_DATA_HOME`, runs test script |
 | `tests/<name>.sh` | Individual test scripts (self-contained, no `libtest.sh` dependency) |
 
@@ -548,20 +548,20 @@ Mirrors upstream remote commands. Filesystem-only.
 
 ```text
 # Single test:
-nix build .#checks.x86_64-linux.rust-flatpak-test-version
+nix build .#checks.x86_64-linux.oxidized-flatpak-test-version
 
 # All sandbox-free checks:
 nix flake check
 
 # Single VM test (once implemented):
-nix build .#checks.x86_64-linux.rust-flatpak-vm-run-hello
+nix build .#checks.x86_64-linux.oxidized-flatpak-vm-run-hello
 ```
 
 ### Test Script Convention
 
 Each `tests/<name>.sh` script:
 
-- Receives `$FLATPAK` env var pointing to the `rust-flatpak-dev` binary
+- Receives `$FLATPAK` env var pointing to the `oxidized-flatpak-dev` binary
 - Receives `$WORK` pointing to a writable temp directory
 - Has `$HOME` set to `$WORK/home`
 - Exits 0 on success, non-zero on failure
@@ -589,7 +589,7 @@ and `safety/oxidized/nixos/nixos-test.nix` (NixOS boot test).
 
 | File | Role |
 |---|---|
-| `vmtest.nix` | NixOS VM test template — boots a VM with bwrap, D-Bus, ostree, and rust-flatpak installed |
+| `vmtest.nix` | NixOS VM test template — boots a VM with bwrap, D-Bus, ostree, and oxidized-flatpak installed |
 | `vmtests/<name>.sh` | Test scripts that run inside the VM |
 | `vmtests/libtest-nix.sh` | Minimal test harness (replaces upstream `libtest.sh`) |
 | `default.nix` | Adds VM test checks alongside existing sandbox-free checks |
@@ -604,11 +604,11 @@ and `safety/oxidized/nixos/nixos-test.nix` (NixOS boot test).
   testTimeout ? 600,
 }:
 pkgs.testers.nixosTest {
-  name = "rust-flatpak-vm-${name}";
+  name = "oxidized-flatpak-vm-${name}";
 
   nodes.machine = {pkgs, ...}: {
     environment.systemPackages = [
-      pkgs.rust-flatpak-dev
+      pkgs.oxidized-flatpak-dev
       pkgs.bubblewrap
       pkgs.ostree
       pkgs.gpgme
@@ -641,7 +641,7 @@ pkgs.testers.nixosTest {
     security.unprivilegedUsernsClone = true;
 
     # XDG portal service stubs (if needed for document/permission tests)
-    # services.flatpak.enable = false; # we use rust-flatpak, not system flatpak
+    # services.flatpak.enable = false; # we use oxidized-flatpak, not system flatpak
 
     virtualisation = {
       memorySize = 2048;
@@ -673,7 +673,7 @@ Replaces upstream's `libtest.sh` with a Nix-friendly version:
 
 ```bash
 #!/bin/bash
-# Minimal test harness for rust-flatpak VM tests.
+# Minimal test harness for oxidized-flatpak VM tests.
 # Provides: setup_repo, install_repo, assert_*, ok, skip, run helpers.
 
 set -euo pipefail
@@ -973,7 +973,7 @@ Write the minimal harness shown above. Key functions: `make_test_app`,
 
 NixOS VM test template, parameterized by test name. The VM gets:
 
-- `rust-flatpak-dev` (debug build)
+- `oxidized-flatpak-dev` (debug build)
 - `bubblewrap` (suid or unprivileged userns)
 - `ostree` (real repo operations)
 - D-Bus session bus (via `services.dbus.enable`)
@@ -1030,7 +1030,7 @@ Add VM checks alongside sandbox-free checks:
 checks = let
   sandboxTests = { ... };  # existing 124 tests
   vmTests = builtins.listToAttrs (map (name: {
-    name = "rust-flatpak-vm-${name}";
+    name = "oxidized-flatpak-vm-${name}";
     value = pkgs: import ./vmtest.nix { inherit pkgs name; };
   }) vmTestNames);
 in sandboxTests // vmTests;

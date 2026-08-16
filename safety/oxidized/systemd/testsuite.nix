@@ -1,10 +1,10 @@
-# Run a single upstream systemd integration test against rust-systemd.
+# Run a single upstream systemd integration test against oxidized-systemd.
 #
-# Boots a NixOS VM with rust-systemd as PID 1, installs the upstream test
+# Boots a NixOS VM with oxidized-systemd as PID 1, installs the upstream test
 # scripts and test data, then runs the specified test and checks for /testok.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-systemd-test-01-BASIC
+# Run with: nix build .#checks.x86_64-linux.oxidized-systemd-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-systemd-test-01-BASIC
 {
   pkgs,
   name,
@@ -28,7 +28,7 @@
   # listed in docs/TEST-OVERRIDES.md with what it would take to unset it.
   expectedSkip ? false,
   # Extra unit files to link into /usr/lib/systemd/system from the C systemd
-  # package, by basename (e.g. "systemd-oomd.service").  rust-systemd overlays
+  # package, by basename (e.g. "systemd-oomd.service").  oxidized-systemd overlays
   # its binaries onto that package, so the units ship with it but only a small
   # default set is linked; linking all of them at boot is wasteful.  Tests that
   # exercise a specific daemon name the units they need here.
@@ -44,7 +44,7 @@
   # job-graph activation path (docs/EVENT-LOOP.md) instead of the default
   # fixpoint sweep. Opt-in per test for A/B comparison while the increment is
   # developed; removed with the flag when the increment merges. No effect for
-  # useUpstreamSystemd (the env var is rust-systemd-only).
+  # useUpstreamSystemd (the env var is oxidized-systemd-only).
   jobGraph ? false,
   # Boot PID 1 with SYSTEMD_RS_INIT_SCOPE=1 so it applies init.scope.d/*.conf
   # resource controls to its own init.scope cgroup (task #12). Opt-in per test
@@ -84,12 +84,12 @@
 
   testName = "TEST-${name}";
 
-  rustSystemdPackage = pkgs.rust-systemd-systemd.override {
-    inherit (pkgs) rust-systemd;
+  rustSystemdPackage = pkgs.oxidized-systemd-systemd.override {
+    inherit (pkgs) oxidized-systemd;
   };
 in
   pkgs.testers.nixosTest {
-    name = "rust-systemd-test-${name}";
+    name = "oxidized-systemd-test-${name}";
 
     nodes.machine = {
       config,
@@ -97,7 +97,7 @@ in
       pkgs,
       ...
     }: let
-      udevRulesOverride = pkgs.runCommand "rust-systemd-udev-rules-override" {} ''
+      udevRulesOverride = pkgs.runCommand "oxidized-systemd-udev-rules-override" {} ''
         mkdir -p $out/lib/udev/rules.d
         # Copy rules that either:
         #  * reference `systemctl` (systemd-unit integrations)
@@ -133,19 +133,19 @@ in
       # Boot the traditional bash stage-1 initrd rather than systemd-in-initrd.
       #
       # Newer nixpkgs flipped `boot.initrd.systemd.enable` to default true, which
-      # makes the *initramfs* PID 1 be the systemd binary (here rust-systemd).
-      # rust-systemd implements the stage-2 system manager, not the initrd
+      # makes the *initramfs* PID 1 be the systemd binary (here oxidized-systemd).
+      # oxidized-systemd implements the stage-2 system manager, not the initrd
       # stage-1 (mount API filesystems, mount /sysroot, switch_root, exec
       # stage-2), so it cannot yet run as the initrd init. The bash stage-1
-      # initrd mounts the API filesystems and switch_roots into rust-systemd as
+      # initrd mounts the API filesystems and switch_roots into oxidized-systemd as
       # the stage-2 manager — the role it is designed for, and the setup these
       # integration tests exercise. Re-enabling systemd-in-initrd is tracked as
-      # future work once rust-systemd grows an initrd mode.  This is also why
+      # future work once oxidized-systemd grows an initrd mode.  This is also why
       # TEST-08-INITRD is expectedSkip: it bails out when
       # InitRDTimestampMonotonic is 0.
       boot.initrd.systemd.enable = lib.mkIf (!useUpstreamSystemd) (lib.mkForce false);
 
-      # Use rust-systemd as the systemd package (or upstream C systemd for baseline)
+      # Use oxidized-systemd as the systemd package (or upstream C systemd for baseline)
       systemd.package =
         if useUpstreamSystemd
         then pkgs.systemd
@@ -155,11 +155,11 @@ in
       # Increment-4 A/B: when jobGraph is set, PID 1 is exec'd through a wrapper
       # that exports SYSTEMD_RS_JOB_GRAPH=1 before handing off to the real
       # binary at the stage-2 default path (which resolves to systemd.package,
-      # i.e. rust-systemd). The env var survives the exec and rust-systemd's own
+      # i.e. oxidized-systemd). The env var survives the exec and oxidized-systemd's own
       # re-exec. Left at its default (unset) for every other test, so this is a
       # no-op unless a test opts in.
       boot.systemdExecutable = lib.mkIf ((jobGraph || initScope) && !useUpstreamSystemd) (
-        lib.mkForce "${pkgs.writeShellScript "rust-systemd-flags" ''
+        lib.mkForce "${pkgs.writeShellScript "oxidized-systemd-flags" ''
           ${lib.optionalString jobGraph "export SYSTEMD_RS_JOB_GRAPH=1"}
           ${lib.optionalString initScope "export SYSTEMD_RS_INIT_SCOPE=1"}
           exec /run/current-system/systemd/lib/systemd/systemd "$@"
@@ -275,7 +275,7 @@ in
 
         services = {
           systemd-resolved.serviceConfig.PrivateDevices = lib.mkForce false;
-          # The rust-systemd package bundles the upstream C systemd-timesyncd
+          # The oxidized-systemd package bundles the upstream C systemd-timesyncd
           # binary but doesn't reimplement it, so NixOS generates an
           # Environment-only unit with no ExecStart/Type — which rust correctly
           # parses as a completed oneshot (ActiveState=inactive).  Supply
@@ -499,7 +499,7 @@ in
           done
         ''}
 
-        # The rust-systemd package doesn't ship systemd-network-generator.service
+        # The oxidized-systemd package doesn't ship systemd-network-generator.service
         # in its unit dir, so provide it inline for TEST-74-AUX-UTILS.network-generator.
         # No ConditionKernelCommandLine so the credential-only path still runs the
         # generator; the binary is symlinked into /usr/lib/systemd/ just below.
@@ -516,7 +516,7 @@ in
             > /usr/lib/systemd/system/systemd-network-generator.service
         fi
 
-        # The rust-systemd package doesn't ship systemd-ask-password.socket/.service,
+        # The oxidized-systemd package doesn't ship systemd-ask-password.socket/.service,
         # so provide them inline for TEST-74-AUX-UTILS.ask-password: the varlink
         # introspect of /run/systemd/io.systemd.AskPassword needs a listening socket
         # that activates systemd-ask-password in its Varlink server mode (LISTEN_FDS).
@@ -543,7 +543,7 @@ in
           ln -sfn ../systemd-ask-password.socket /usr/lib/systemd/system/sockets.target.wants/systemd-ask-password.socket
         fi
 
-        # The rust-systemd package doesn't enable systemd-mute-console.socket by
+        # The oxidized-systemd package doesn't enable systemd-mute-console.socket by
         # default, so provide it inline for TEST-74-AUX-UTILS.mute-console: the
         # introspect/call of /run/systemd/io.systemd.MuteConsole needs a listening
         # Accept=yes varlink socket that spawns systemd-mute-console per connection
@@ -574,7 +574,7 @@ in
           ln -sfn ../systemd-mute-console.socket /usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
         fi
 
-        # The rust-systemd package doesn't enable systemd-journalctl.socket by
+        # The oxidized-systemd package doesn't enable systemd-journalctl.socket by
         # default, so provide it inline for TEST-04-JOURNAL.journalctl-varlink:
         # the introspect/call of /run/systemd/io.systemd.JournalAccess needs a
         # listening Accept=yes varlink socket that spawns journalctl per
@@ -804,7 +804,7 @@ in
       virtualisation =
         {
           # The integration-test manager is built from the debug dev profile
-          # (rust-systemd-dev): its unoptimized PID 1 binary needs more RAM than
+          # (oxidized-systemd-dev): its unoptimized PID 1 binary needs more RAM than
           # the release build, so give the VM headroom to avoid an early-boot OOM.
           memorySize = 4096;
           cores = 2;
@@ -819,7 +819,7 @@ in
         };
       # A bootloader is required when useBootLoader is set; systemd-boot is
       # installed into the ESP at image-build time (using the build host's
-      # systemd, so it does not depend on rust-systemd's own bootctl).
+      # systemd, so it does not depend on oxidized-systemd's own bootctl).
       boot.loader = pkgs.lib.mkIf useBootLoader {
         systemd-boot.enable = true;
         efi.canTouchEfiVariables = true;

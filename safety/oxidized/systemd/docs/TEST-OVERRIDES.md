@@ -152,7 +152,7 @@ exec path, so `killall` misses it).
 
 `testsuite.nix` used to assert `test -f /testok -o -f /skipped`, and a script exiting 77
 gets `/skipped` created for it. Every override in this file was therefore invisible:
-`nix build .#checks.x86_64-linux.rust-systemd-test-46-homed` succeeded while running
+`nix build .#checks.x86_64-linux.oxidized-systemd-test-46-homed` succeeded while running
 zero lines of TEST-46-HOMED.sh.
 
 Fixed by the `expectedSkip` argument. A `/skipped` marker now fails the check unless the
@@ -169,7 +169,7 @@ rather than failing.
 
 ### 2. Unit files are not wired into the VM
 
-rust-systemd is packaged by overlaying its binaries onto the nixpkgs C systemd
+oxidized-systemd is packaged by overlaying its binaries onto the nixpkgs C systemd
 derivation (`default.nix:270-300`), so the VM's unit files come from the C package.
 `testsuite.nix:416-424` symlinks only eight of them into `/usr/lib/systemd/system`,
 with the note that linking all of them "can overwhelm PID 1".
@@ -338,7 +338,7 @@ VM run. Diagnostics must write to stderr.
   process: stitching conclusions across separate runs is what produced every
   wrong answer.
 - **55-OOMD** line 12 needs three things. Two are done (credentials, reload-time
-  generators). The third: `init.scope` is not a unit in rust-systemd, only a
+  generators). The third: `init.scope` is not a unit in oxidized-systemd, only a
   cgroup path constant, so `[Scope]` resource control never reaches PID 1's
   cgroup. That also underpins `systemctl show`/`set-property init.scope`.
 - **67-INTEGRITY** is GREEN with its override removed: all ten `test_one` cases
@@ -415,7 +415,7 @@ find what the hand-written one does not cover.
 
 | Test | Needed |
 |------|--------|
-| 63-PATH | The `issue-24577` block asserts a queued job is visible in `list-jobs`. rust-systemd resolves dependencies inline and has no job objects, so nothing is ever pending. Needs minimal job objects (also the largest remaining item from the old upstream divergence map) |
+| 63-PATH | The `issue-24577` block asserts a queued job is visible in `list-jobs`. oxidized-systemd resolves dependencies inline and has no job objects, so nothing is ever pending. Needs minimal job objects (also the largest remaining item from the old upstream divergence map) |
 | 45-TIMEDATE | `testcase_timesyncd` DONE (shipped, VM-verified), split into shippable increments rather than an all-or-nothing half-start. Both halves green. (networkd) `timedatectl ntp-servers` now routes to `org.freedesktop.network1.Manager.SetLinkNTP(i, as)` / `RevertLinkNTP(i)` over D-Bus, matching upstream `verb_ntp_servers` (the old code wrote a `50-<if>.network.d` drop-in that never matched `10-<if>.network`); networkd records a per-link NTP override (`NetworkManager.link_ntp`), writes `NTP=` lines into `/run/systemd/netif/links/<ifindex>`, and `networkctl status <if> --json[=MODE]` (newly implemented) emits the `.NTP` array as `{"Family":2,"Address":[a,b,c,d]}` for IP literals and `{"Server":"name"}` for hostnames, exactly what `assert_networkd_ntp`'s jq expression parses. (timesyncd) `Timesync1Manager` gained `RuntimeNTPServers` + `SetRuntimeNTPServers(as)` (its first PropertiesChanged emission) and a `LinkNTPServers` property fed by a background thread that watches `/run/systemd/netif/links/*`, aggregates NTP in ascending-ifindex order, and emits change-only `PropertiesChanged` (emit-from-thread via `SignalEmitter::new(conn.inner(), path)` + `zbus::block_on` + a throwaway interface on the shared state, copied from PID 1's job-signal thread). LATENT FIX exposed and fixed: timesync1 never registered before because the daemon ran as root while its D-Bus policy only lets `systemd-timesync` own the name (`User=systemd-timesync` in testsuite.nix). Covered by focused subtests `45-timedate-runtimentp`, `45-timedate-linkntp-networkd`, and the full `45-timedate-linkntp` (both halves, incl. no-signal-on-noop); base `45-timedate` `testcase_ntp` re-verified green. Commits 054c4ff5 / 78f67a79 / 7ff8a8b4 |
 | 54-CREDS | Updated 2026-08-03: `cmd_list` now matches C's `verb_list` (exit 1/ENXIO when no credentials resolve, exit 0 for a set-but-empty dir; verified differentially against the C binary), so the wrapper skips honestly before the genuinely-unsatisfiable line 95 (`systemd-creds --system`; this VM has no `/run/credentials/@system`) instead of fake-traversing past it via the old exit-0 bug. Still blocked on: `ImportCredential=`, the creds Varlink interface, the `run0` credential path, and a PID 1 import-creds path, which is what would make line 95 satisfiable and let the script reach the deleted `(! unshare -m ...)` assertion at line 171 |
 | 26-SYSTEMCTL (all edits pass) | The full interactive `systemctl edit` block RUNS + passes (un-masked 2026-08-07: the drop-in scaffold no longer seeds `[Service]` so a no-op discards, and the editor gets the upstream `+4` line arg so `mv +4 <path>` swaps in the prepared file). EDITOR=true/mv + their `override.conf` assertions and the `user@0` #26483 regression all pass. The only adaptation left is that the patchScript strips the util-linux `script` TTY wrapper (`systemctl edit` needs no TTY here); fixing the underlying `script(1)`-under-PID-1 hang (parent-side termios/poll) would let the lines run verbatim, but that is a separate deep bug, not 26-edit work |
@@ -450,7 +450,7 @@ So `RuntimeDirectory=` *does* use `private/` whenever `RuntimeDirectoryPreserve=
 is not `no`, which is why TEST-34-DYNAMICUSERMIGRATE sets it on every command and
 then asserts `/run/private/zzz` exists.
 
-**Open divergence:** rust-systemd applies `private/` to runtime directories
+**Open divergence:** oxidized-systemd applies `private/` to runtime directories
 unconditionally. Matching upstream needs `runtime_directory_preserve` plumbed
 from `exec_config` into `ExecHelperConfig`, which it is not today.
 
@@ -486,7 +486,7 @@ Document these as out of scope rather than carrying them as debt.
   A Rust port does not produce them. The equivalent coverage is `cargo test --workspace`
   (9,700 test functions). Keep the skip, change the rationale.
 - **71-HOSTNAME `testcase_nss-myhostname`** exercises the glibc NSS module from the C
-  package resolving `*.localhost`. Not rust-systemd code.
+  package resolving `*.localhost`. Not oxidized-systemd code.
 - **23-UNIT-FILE whoami** asserts the running unit is `TEST-23-UNIT-FILE.service`.
   The NixOS driver runs subtests inside `backdoor.service`. Structural difference in
   the harness, not a defect.

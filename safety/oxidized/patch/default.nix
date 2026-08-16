@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-patch = {lib, ...}:
+    oxidized-patch = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-patch";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-patch-dev = {lib, ...}:
+    oxidized-patch-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-patch-dev";
 
@@ -108,7 +108,7 @@
   in
     lib.listToAttrs (
       map (name: {
-        name = "rust-patch-test-${name}";
+        name = "oxidized-patch-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames

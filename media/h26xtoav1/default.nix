@@ -1,11 +1,11 @@
 {
-  devShells.rust-h26xtoav1 = pkgs: {
+  devShells.h26xtoav1 = pkgs: {
     packages = with pkgs; [
       just
     ];
   };
 
-  packages.rust-h26xtoav1 = {lib, ...}:
+  packages.h26xtoav1 = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-h26xtoav1";
 

@@ -85,7 +85,7 @@ The project lives in a Nix flake-based monorepo. From the repository root:
 cd safety/oxidized/flatpak && cargo build
 
 # Release build via Nix:
-nix build .#rust-flatpak
+nix build .#oxidized-flatpak
 
 # Run the full test suite (sandbox-free + VM tests):
 nix flake check

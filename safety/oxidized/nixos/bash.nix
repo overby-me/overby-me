@@ -1,12 +1,12 @@
-# bash → rust-bash replacement
+# bash → oxidized-bash replacement
 #
-# rust-bash is a Bash-compatible shell written in Rust that directly handles
+# oxidized-bash is a Bash-compatible shell written in Rust that directly handles
 # standard bash flags (-e, -u, -c, -o pipefail, etc.), [[ ]], arrays, (( )),
 # nameref, process substitution, and can source nixpkgs setup.sh.
 # No C wrapper needed — it's a drop-in replacement.
 {pkgs, ...}: let
-  # rust-bash already provides /bin/bash and /bin/sh
-  rustBash = pkgs.rust-bash;
+  # oxidized-bash already provides /bin/bash and /bin/sh
+  rustBash = pkgs.oxidized-bash;
 
   # Create replacement packages with matching names for closure rewriting
   mkRustBash = name:

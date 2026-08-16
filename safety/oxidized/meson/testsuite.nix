@@ -1,19 +1,19 @@
-# Run a single test from the upstream Meson test suite against rust-meson.
+# Run a single test from the upstream Meson test suite against oxidized-meson.
 #
 # Each test case is a directory under "test cases/common/" in the meson source.
 # Tests are self-validating via assert() in meson.build — failure = non-zero exit.
 # Tests that print MESON_SKIP_TEST are treated as skipped (pass).
 #
-# Run with: nix build .#checks.x86_64-linux.rust-meson-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-meson-test-34-logic-ops
+# Run with: nix build .#checks.x86_64-linux.oxidized-meson-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-meson-test-34-logic-ops
 {
   pkgs,
   name,
   testDir,
 }:
-pkgs.runCommand "rust-meson-test-${name}" {
+pkgs.runCommand "oxidized-meson-test-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-meson
+    pkgs.oxidized-meson
     pkgs.ninja
     pkgs.gcc
     pkgs.pkg-config

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `rust-pcre2`.
+All notable changes to `oxidized-pcre2`.
 
 ## Unreleased
 

@@ -11,7 +11,7 @@
   #     systemd-run -u ... -p Environment=XDG_SESSION_CLASS=background
   #     systemctl is-active user@1002.service   ->  inactive, expected active
   #
-  # A first attempt at explaining that said rust-systemd has no `systemd --user`
+  # A first attempt at explaining that said oxidized-systemd has no `systemd --user`
   # mode. That was WRONG and is retracted: run_user_manager() exists in
   # service_manager.rs and is substantial (XDG unit dirs, its own control
   # socket, subreaper, signal handling, a transient dir for `systemd-run
@@ -185,7 +185,7 @@
   # libpam here, and the oracle cannot be cited as evidence either way for this
   # test.
   #
-  # rust-systemd does still get further through the file than the C build does
+  # oxidized-systemd does still get further through the file than the C build does
   # in this VM, but that is a statement about the packaging, not a claim that
   # rust is more correct than upstream.
   #

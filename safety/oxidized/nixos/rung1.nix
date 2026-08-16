@@ -24,7 +24,7 @@
   ...
 }: let
   cfg = config.services.rustSystemdRung1;
-  rustSystemd = pkgs.rust-systemd;
+  rustSystemd = pkgs.oxidized-systemd;
 in {
   options.services.rustSystemdRung1 = {
     tmpfiles.enable =

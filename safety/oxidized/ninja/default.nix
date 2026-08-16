@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-ninja = {lib, ...}:
+    oxidized-ninja = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-ninja";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-ninja-dev = {lib, ...}:
+    oxidized-ninja-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-ninja-dev";
 
@@ -76,7 +76,7 @@
       "test_issue_2621"
     ];
     # Phase 4 differential roundtrip checks: build a small C project
-    # with both rust-ninja and the reference `pkgs.ninja` and `cmp` the
+    # with both oxidized-ninja and the reference `pkgs.ninja` and `cmp` the
     # produced artifacts. Catches scheduling/depfile bugs that
     # output_test.py can't surface.
     roundtripNames = [
@@ -102,17 +102,17 @@
   in
     lib.listToAttrs (
       (map (name: {
-          name = "rust-ninja-test-${name}";
+          name = "oxidized-ninja-test-${name}";
           value = pkgs: import ./testsuite.nix {inherit pkgs name;};
         })
         testNames)
       ++ (map (name: {
-          name = "rust-ninja-roundtrip-${name}";
+          name = "oxidized-ninja-roundtrip-${name}";
           value = pkgs: import ./roundtrip.nix {inherit pkgs name;};
         })
         roundtripNames)
       ++ (map (name: {
-          name = "rust-ninja-jobserver-${name}";
+          name = "oxidized-ninja-jobserver-${name}";
           value = pkgs:
             import ./testsuite.nix {
               inherit pkgs name;

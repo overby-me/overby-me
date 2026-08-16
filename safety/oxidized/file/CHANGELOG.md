@@ -1,25 +1,25 @@
 # Changelog
 
-All notable changes to rust-file.
+All notable changes to oxidized-file.
 
 ## [Unreleased]
 
 ### Test suite compatibility
 
 Passes 320/320 of the upstream file/file-tests regression corpus
-(pinned at commit 0bcc555a). Compares rust-file output against GNU
+(pinned at commit 0bcc555a). Compares oxidized-file output against GNU
 file 5.45 byte-for-byte in a Nix sandbox.
 
 ### Test harness
 
 - Nix check per sample: `testsuite.nix` runs both `file -b` and
-  `rust-file -b` against each of the 320 samples, normalizes Nix
+  `oxidized-file -b` against each of the 320 samples, normalizes Nix
   store paths, and diffs. Test names encode `type__file` from the
   `db/<type>/<file>` corpus layout.
 - `default.nix` enumerates test pairs at eval time from a pinned
   `fetchTarball` of file-tests, generating ~320 checks without a
   hand-maintained list.
-- `rust-file-dev` debug build for faster test iteration.
+- `oxidized-file-dev` debug build for faster test iteration.
 
 ### JPEG
 

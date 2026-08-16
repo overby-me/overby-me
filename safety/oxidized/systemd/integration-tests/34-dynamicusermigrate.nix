@@ -264,7 +264,7 @@
   # inside the namespace, so the directory appears owned by nobody and is
   # unwritable. Upstream attaches the exec directories with an id-mapped mount
   # (mount_setattr with MOUNT_ATTR_IDMAP and a userns fd) so the ownership is
-  # translated. rust-systemd has no mount_setattr/MOUNT_ATTR_IDMAP support at
+  # translated. oxidized-systemd has no mount_setattr/MOUNT_ATTR_IDMAP support at
   # all, and that is what the test is named for.
   #
   # TOOLING NOTES:

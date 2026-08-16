@@ -37,7 +37,7 @@ a parser over untrusted bytes, add a matching fuzzer.
 
 ## Differential tests
 
-`crates/difftest` runs identical input through rust-systemd and through real systemd and
+`crates/difftest` runs identical input through oxidized-systemd and through real systemd and
 compares outputs, with built-in normalizers for timestamps, PIDs, boot IDs, machine IDs,
 addresses and non-deterministic ordering.
 
@@ -109,12 +109,12 @@ flag these intentional differences:
 
 ## Integration tests
 
-Boots a NixOS VM with rust-systemd as PID 1, installs the upstream systemd test scripts
+Boots a NixOS VM with oxidized-systemd as PID 1, installs the upstream systemd test scripts
 and testdata, runs one test, and checks for the `/testok` marker.
 
 ```sh
-nix build .#checks.x86_64-linux.rust-systemd-test-01-basic -L
-nix build .#checks.x86_64-linux.rust-systemd-test-74-aux-utils-cat -L
+nix build .#checks.x86_64-linux.oxidized-systemd-test-01-basic -L
+nix build .#checks.x86_64-linux.oxidized-systemd-test-74-aux-utils-cat -L
 ```
 
 Never run plain `nix flake check`: this repo has thousands of check derivations and a
@@ -124,13 +124,13 @@ memory-capped `nix-eval-jobs` workers. A full run takes about an hour.
 ### The C systemd oracle
 
 Every test is registered twice. `c-systemd-test-<name>` runs the same wrapper against
-upstream C systemd instead of rust-systemd:
+upstream C systemd instead of oxidized-systemd:
 
 ```sh
 nix build .#checks.x86_64-linux.c-systemd-test-54-creds -L
 ```
 
-This is the way to settle whether a failure is a rust-systemd defect or an artefact of
+This is the way to settle whether a failure is a oxidized-systemd defect or an artefact of
 the NixOS VM. If the C build fails the same way with the override removed, the problem
 is environmental and belongs in the permanent-exclusion list rather than the fix list.
 
@@ -174,7 +174,7 @@ The process-substitution fd setup races against parallel kernel module auto-load
 early boot. If the subshell does not hook up fd 1 before the parent's next write, init
 stalls with no panic and never execs `systemd`. This caused roughly a 30% VM-test flake
 rate. NixOS on C systemd never hits it because `boot.initrd.systemd.enable` short-circuits
-past the block, and rust-systemd does not ship a stage-1 systemd initrd. Everything else
+past the block, and oxidized-systemd does not ship a stage-1 systemd initrd. Everything else
 in stage 2 is preserved verbatim; the only loss is the `<7>stage-2-init:` kmsg re-log.
 
 Do not remove this override without re-measuring the flake rate.
@@ -204,7 +204,7 @@ that is changed, a green check is not by itself evidence that a test ran. Check
 
 ## Boot testing with rust-nixos
 
-`../nixos` builds a minimal NixOS image with rust-systemd as PID 1 and boots it under
+`../nixos` builds a minimal NixOS image with oxidized-systemd as PID 1 and boots it under
 cloud-hypervisor with the serial console captured. From `rust-nixos/`:
 
 ```sh
@@ -235,7 +235,7 @@ built-in default of `warn`. Numeric syslog levels 0 to 7 are accepted.
 Then filter the log:
 
 ```sh
-grep 'rust-systemd\[systemd-timesyncd\]' /tmp/boot.log
+grep 'oxidized-systemd\[systemd-timesyncd\]' /tmp/boot.log
 ```
 
 After `ProtectKernelLogs=` hides `/dev/kmsg` the logger degrades silently and only

@@ -16,20 +16,20 @@ All 15 stdenv tools have Rust replacements available:
 
 | Component | Original | Rust Replacement | Source | Phase |
 |-----------|----------|-----------------|--------|-------|
-| Shell | bash | [rust-bash](../bash) | repo | 1 |
+| Shell | bash | [oxidized-bash](../bash) | repo | 1 |
 | Core utilities | coreutils | [uutils](https://github.com/uutils/coreutils) | nixpkgs | 1 |
 | Stream editor | gnused | [uutils-sed](https://github.com/uutils/sed) | nixpkgs | 2 |
-| Text search | gnugrep | [rust-grep](../grep) | repo | 2 |
-| Pattern processing | gawk | [rust-awk](../awk) | repo | 2 |
+| Text search | gnugrep | [oxidized-grep](../grep) | repo | 2 |
+| Pattern processing | gawk | [oxidized-awk](../awk) | repo | 2 |
 | File search | findutils | [uutils-findutils](https://github.com/uutils/findutils) | nixpkgs | 2 |
 | File comparison | diffutils | [uutils-diffutils](https://github.com/uutils/diffutils) | nixpkgs | 2 |
-| Tape archive | gnutar | [rust-tar](../tar) | repo | 3 |
-| Gzip compression | gzip | [rust-gzip](../gzip) | repo | 3 |
-| Bzip2 compression | bzip2 | [rust-bzip2](../bzip2) | repo | 3 |
-| XZ compression | xz | [rust-xz](../xz) | repo | 3 |
-| Build driver | gnumake | [rust-make](../make) | repo | 4 |
-| Patch application | gnupatch | [rust-patch](../patch) | repo | 4 |
-| ELF patching | patchelf | [rust-patchelf](../patchelf) | repo | 5 |
+| Tape archive | gnutar | [oxidized-tar](../tar) | repo | 3 |
+| Gzip compression | gzip | [oxidized-gzip](../gzip) | repo | 3 |
+| Bzip2 compression | bzip2 | [oxidized-bzip2](../bzip2) | repo | 3 |
+| XZ compression | xz | [oxidized-xz](../xz) | repo | 3 |
+| Build driver | gnumake | [oxidized-make](../make) | repo | 4 |
+| Patch application | gnupatch | [oxidized-patch](../patch) | repo | 4 |
+| ELF patching | patchelf | [oxidized-patchelf](../patchelf) | repo | 5 |
 
 ## How It Works
 
@@ -111,20 +111,20 @@ safety/oxidized/nixpkgs/
 ├── stdenv.nix           # Rust stdenv assembler
 ├── components/
 │   ├── default.nix      # Registry loader (imports all component files)
-│   ├── shell.nix        # bash → rust-bash
+│   ├── shell.nix        # bash → oxidized-bash
 │   ├── coreutils.nix    # coreutils → uutils
 │   ├── sed.nix          # gnused → uutils-sed
-│   ├── grep.nix         # gnugrep → rust-grep
-│   ├── awk.nix          # gawk → rust-awk
+│   ├── grep.nix         # gnugrep → oxidized-grep
+│   ├── awk.nix          # gawk → oxidized-awk
 │   ├── findutils.nix    # findutils → uutils-findutils
 │   ├── diffutils.nix    # diffutils → uutils-diffutils
-│   ├── tar.nix          # gnutar → rust-tar
-│   ├── gzip.nix         # gzip → rust-gzip
-│   ├── bzip2.nix        # bzip2 → rust-bzip2
-│   ├── xz.nix           # xz → rust-xz
-│   ├── make.nix         # gnumake → rust-make
-│   ├── patch.nix        # gnupatch → rust-patch
-│   └── patchelf.nix     # patchelf → rust-patchelf
+│   ├── tar.nix          # gnutar → oxidized-tar
+│   ├── gzip.nix         # gzip → oxidized-gzip
+│   ├── bzip2.nix        # bzip2 → oxidized-bzip2
+│   ├── xz.nix           # xz → oxidized-xz
+│   ├── make.nix         # gnumake → oxidized-make
+│   ├── patch.nix        # gnupatch → oxidized-patch
+│   └── patchelf.nix     # patchelf → oxidized-patchelf
 ├── PLAN.md              # Phased replacement roadmap
 ├── README.md            # This file
 └── justfile             # Build, test, and status commands
@@ -135,10 +135,10 @@ safety/oxidized/nixpkgs/
 | Project | Scope |
 |---------|-------|
 | [rust-nixos](../nixos) | Runtime system — swaps C tools in a running NixOS system |
-| [rust-systemd](../systemd) | Rust systemd replacement — PID 1, journald, networkd, etc. |
-| [rust-pkg-config](../pkg-config) | Rust pkg-config replacement for the build toolchain |
+| [oxidized-systemd](../systemd) | Rust systemd replacement — PID 1, journald, networkd, etc. |
+| [oxidized-pkg-config](../pkg-config) | Rust pkg-config replacement for the build toolchain |
 
-Together, these projects work toward a fully oxidized Nix ecosystem: packages are **built** with Rust tools (rust-nixpkgs), the resulting **system** runs Rust services (rust-nixos + rust-systemd), and the **build system** itself uses Rust utilities (rust-pkg-config).
+Together, these projects work toward a fully oxidized Nix ecosystem: packages are **built** with Rust tools (rust-nixpkgs), the resulting **system** runs Rust services (rust-nixos + oxidized-systemd), and the **build system** itself uses Rust utilities (oxidized-pkg-config).
 
 ## License
 

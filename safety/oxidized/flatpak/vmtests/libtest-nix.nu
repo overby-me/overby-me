@@ -1,4 +1,4 @@
-# Minimal test harness for rust-flatpak VM tests (nushell).
+# Minimal test harness for oxidized-flatpak VM tests (nushell).
 # Fixtures source this file from the same directory: `source ./libtest-nix.nu`
 
 $env.LC_ALL = "C"

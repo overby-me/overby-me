@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-grep = {lib, ...}:
+    oxidized-grep = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-grep";
 
@@ -168,7 +168,7 @@
   in
     lib.listToAttrs (
       map (name: {
-        name = "rust-grep-test-${name}";
+        name = "oxidized-grep-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames

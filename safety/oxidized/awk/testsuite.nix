@@ -1,17 +1,17 @@
-# Run a single test from the official GNU gawk test suite against rust-awk.
+# Run a single test from the official GNU gawk test suite against oxidized-awk.
 #
-# Compares rust-awk output against reference gawk output (both running in the
+# Compares oxidized-awk output against reference gawk output (both running in the
 # same sandbox), avoiding false failures from .ok files generated on
 # different systems.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-awk-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-awk-test-substr
+# Run with: nix build .#checks.x86_64-linux.oxidized-awk-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-awk-test-substr
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-awk-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-awk-dev pkgs.gawk pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep];
+pkgs.runCommand "oxidized-awk-test-${name}" {
+  nativeBuildInputs = [pkgs.oxidized-awk-dev pkgs.gawk pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep];
   gawkSrc = pkgs.gawk.src;
 } ''
   # Extract the test suite
@@ -33,12 +33,12 @@ pkgs.runCommand "rust-awk-test-${name}" {
   # Run with reference gawk
   eval timeout 60 "${pkgs.gawk}/bin/gawk" -f "./${name}.awk" $INPUT_ARGS > "$TMPDIR/expected" 2>&1 || true
 
-  # Run with rust-awk
-  eval timeout 60 "${pkgs.rust-awk-dev}/bin/awk" -f "./${name}.awk" $INPUT_ARGS > "$TMPDIR/actual" 2>&1 || true
+  # Run with oxidized-awk
+  eval timeout 60 "${pkgs.oxidized-awk-dev}/bin/awk" -f "./${name}.awk" $INPUT_ARGS > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so /nix/store/... differences don't cause false failures
   REF_GAWK="${pkgs.gawk}/bin/gawk"
-  TEST_AWK="${pkgs.rust-awk-dev}/bin/awk"
+  TEST_AWK="${pkgs.oxidized-awk-dev}/bin/awk"
   sed -i "s|$REF_GAWK|awk|g" "$TMPDIR/expected"
   sed -i "s|$TEST_AWK|awk|g" "$TMPDIR/actual"
 

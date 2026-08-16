@@ -2,7 +2,7 @@
 
 ## Where the port stands
 
-NixOS boots with rust-systemd as PID 1 and reaches `multi-user.target` with a login
+NixOS boots with oxidized-systemd as PID 1 and reaches `multi-user.target` with a login
 prompt in roughly 6 seconds under cloud-hypervisor, with networking via networkd and
 resolved.
 
@@ -185,7 +185,7 @@ documented inline.
 
 Still unbuilt:
 
-- **Dual-VM environment.** One VM on real systemd, one on rust-systemd, from identical
+- **Dual-VM environment.** One VM on real systemd, one on oxidized-systemd, from identical
   NixOS configurations, coordinated over vsock or the serial console. Note that
   `default.nix` already registers a `c-systemd-test-<name>` variant of every integration
   test, which covers the single-VM comparison case; the dual-VM runner is for

@@ -1,4 +1,4 @@
-# Lower a Ninja build graph (from `rust-ninja -t graph-json`) to Nix
+# Lower a Ninja build graph (from `oxidized-ninja -t graph-json`) to Nix
 # derivations: one derivation per edge, no import-from-derivation beyond the
 # single graph-extraction step. A sibling to platform/nix/lib/buck2/build/lower.nix.
 #

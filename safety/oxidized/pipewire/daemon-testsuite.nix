@@ -1,5 +1,5 @@
 # Daemon-comparison tests: spawns a real C pipewire daemon, then runs both
-# the C reference tool and rust-pipewire's tool against it and diffs the
+# the C reference tool and oxidized-pipewire's tool against it and diffs the
 # output. This is the M7 test pattern: each tool's client implementation
 # is verified end-to-end against a real server.
 {
@@ -7,9 +7,9 @@
   tool,
   name,
 }:
-pkgs.runCommand "rust-pipewire-daemon-test-${tool}-${name}" {
+pkgs.runCommand "oxidized-pipewire-daemon-test-${tool}-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-pipewire-dev
+    pkgs.oxidized-pipewire-dev
     pkgs.pipewire
     pkgs.coreutils
     pkgs.diffutils
@@ -121,7 +121,7 @@ pkgs.runCommand "rust-pipewire-daemon-test-${tool}-${name}" {
   # Tool-name → binary mapping (same in both packages).
   binName="${tool}"
   export REF="${pkgs.pipewire}/bin/$binName"
-  export RUST="${pkgs.rust-pipewire-dev}/bin/$binName"
+  export RUST="${pkgs.oxidized-pipewire-dev}/bin/$binName"
 
   # Lay the fixture out one directory below helpers.nu, mirroring the
   # repository layout so the fixture's `source ../helpers.nu` resolves.

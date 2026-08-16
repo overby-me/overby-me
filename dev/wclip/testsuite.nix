@@ -1,19 +1,19 @@
-# Command-line behaviour tests for rust-wclip.
+# Command-line behaviour tests for wclip.
 #
 # These run in the Nix sandbox where there is no Wayland compositor, so they
 # cover argument parsing, help/version output, and graceful failure modes. The
 # wire-protocol copy/paste roundtrip is covered by the crate's own tests, which
 # run during the package build.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-wclip-test-{name}
+# Run with: nix build .#checks.x86_64-linux.wclip-test-{name}
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-wclip-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-wclip-dev pkgs.coreutils];
+pkgs.runCommand "wclip-test-${name}" {
+  nativeBuildInputs = [pkgs.wclip-dev pkgs.coreutils];
 } ''
-  wclip=${pkgs.rust-wclip-dev}/bin/wclip
+  wclip=${pkgs.wclip-dev}/bin/wclip
   set -u
 
   # Helper: assert a command exits with an expected status.

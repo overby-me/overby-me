@@ -14,7 +14,7 @@
   # stays, but the blocker is now pinned more precisely than "the per-user
   # manager's slice layout". The run prints
   #
-  #   Note: rust-systemd control socket not available, executing command directly.
+  #   Note: oxidized-systemd control socket not available, executing command directly.
   #   Failed to get user unit cgroup path for app.slice.
   #
   # so `systemd-run -M testuser@.host` does not route into that user's manager

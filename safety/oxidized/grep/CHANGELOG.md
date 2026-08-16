@@ -1,15 +1,15 @@
 # Changelog
 
-All notable changes to `rust-grep`. Tests refer to the GNU grep 3.12 suite.
+All notable changes to `oxidized-grep`. Tests refer to the GNU grep 3.12 suite.
 
 ## Unreleased
 
 ### PCRE / regex
 
-- Detect nested unbounded quantifiers in rust-pcre2 (e.g. `((a+)*)+$`); return
+- Detect nested unbounded quantifiers in oxidized-pcre2 (e.g. `((a+)*)+$`); return
   `MatchLimit` on non-trivial inputs that fail to match, mirroring PCRE2's
   exponential-backtracking safeguard. Fixes `pcre-abort`.
-- Integrate `rust-pcre2` for `-P` mode (replaces `fancy-regex`).
+- Integrate `oxidized-pcre2` for `-P` mode (replaces `fancy-regex`).
 - Cross-pattern backreference validation (exit 2 for `\1` referring to a group
   outside the current `-e` pattern).
 - Automatic `fancy-regex` fallback for BRE/ERE patterns containing

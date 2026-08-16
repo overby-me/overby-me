@@ -420,7 +420,7 @@ regardless).
 
 The drive (single-dispatcher run-queue + bounded-pool activation + writer-yielding
 `dispatcher_read`) boots end-to-end behind `SYSTEMD_RS_JOB_GRAPH=1`:
-`rust-systemd-test-01-basic-jobgraph` and `-15-dropin-jobgraph` both pass the full
+`oxidized-systemd-test-01-basic-jobgraph` and `-15-dropin-jobgraph` both pass the full
 upstream scripts (multi-user.target reached, `/testok` written, no panic). Those
 two variants stay in the tree as the standing evidence.
 

@@ -1,6 +1,6 @@
 {
   packages = {
-    rust-pipewire = {lib, ...}:
+    oxidized-pipewire = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-pipewire";
 
@@ -17,7 +17,7 @@
 
         rootAttrs.postInstall = ''
           # Multicall binary: every PipeWire tool/daemon name is a symlink
-          # to rust-pipewire. argv[0] selects the dispatcher.
+          # to oxidized-pipewire. argv[0] selects the dispatcher.
           for tool in \
             pipewire pipewire-pulse pipewire-aes67 pipewire-avb pipewire-vulkan \
             pw-cli pw-mon pw-dump pw-link pw-metadata pw-loopback pw-config \
@@ -25,7 +25,7 @@
             pw-container pw-mididump pw-midiplay pw-midirecord pw-midi2play \
             pw-midi2record pw-sysex pw-dsdplay pw-encplay pw-v4l2 \
             spa-json-dump spa-inspect spa-monitor spa-acp-tool spa-resample; do
-            ln -s $out/bin/rust-pipewire $out/bin/$tool
+            ln -s $out/bin/oxidized-pipewire $out/bin/$tool
           done
         '';
 
@@ -37,7 +37,7 @@
         };
       };
 
-    rust-pipewire-dev = {lib, ...}:
+    oxidized-pipewire-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-pipewire-dev";
 
@@ -62,7 +62,7 @@
             pw-container pw-mididump pw-midiplay pw-midirecord pw-midi2play \
             pw-midi2record pw-sysex pw-dsdplay pw-encplay pw-v4l2 \
             spa-json-dump spa-inspect spa-monitor spa-acp-tool spa-resample; do
-            ln -s $out/bin/rust-pipewire $out/bin/$tool
+            ln -s $out/bin/oxidized-pipewire $out/bin/$tool
           done
         '';
 
@@ -3556,7 +3556,7 @@
   in
     builtins.listToAttrs (
       (map (t: {
-          name = "rust-pipewire-test-${t.tool}-${t.name}";
+          name = "oxidized-pipewire-test-${t.tool}-${t.name}";
           value = pkgs:
             import ./testsuite.nix {
               inherit pkgs;
@@ -3565,7 +3565,7 @@
         })
         testDefs)
       ++ (map (t: {
-          name = "rust-pipewire-pod-test-${t.name}";
+          name = "oxidized-pipewire-pod-test-${t.name}";
           value = pkgs:
             import ./pod-testsuite.nix {
               inherit pkgs;
@@ -3574,7 +3574,7 @@
         })
         podTests)
       ++ (map (t: {
-          name = "rust-pipewire-proto-test-${t.name}";
+          name = "oxidized-pipewire-proto-test-${t.name}";
           value = pkgs:
             import ./proto-testsuite.nix {
               inherit pkgs;
@@ -3583,7 +3583,7 @@
         })
         protoTests)
       ++ (map (t: {
-          name = "rust-pipewire-daemon-test-${t.tool}-${t.name}";
+          name = "oxidized-pipewire-daemon-test-${t.tool}-${t.name}";
           value = pkgs:
             import ./daemon-testsuite.nix {
               inherit pkgs;
@@ -3592,7 +3592,7 @@
         })
         daemonTests)
       ++ (map (t: {
-          name = "rust-pipewire-rich-daemon-test-${t.tool}-${t.name}";
+          name = "oxidized-pipewire-rich-daemon-test-${t.tool}-${t.name}";
           value = pkgs:
             import ./rich-daemon-testsuite.nix {
               inherit pkgs;

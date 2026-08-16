@@ -8,10 +8,10 @@
 # marker rule and succeeds, while PID 1 remains the C manager. This validates the
 # deployable module, not just an inline override.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-rung1-tmpfiles -L
+# Run with: nix build .#checks.x86_64-linux.oxidized-nixos-rung1-tmpfiles -L
 {pkgs}:
 pkgs.testers.nixosTest {
-  name = "rust-rung1-tmpfiles";
+  name = "oxidized-nixos-rung1-tmpfiles";
 
   nodes.machine = {...}: {
     imports = [./rung1.nix];
@@ -33,7 +33,7 @@ pkgs.testers.nixosTest {
     # The redirected boot service ran the rust binary and succeeded on the full
     # NixOS tmpfiles.d set (including POSIX ACL rules).
     machine.wait_for_unit("systemd-tmpfiles-setup.service")
-    machine.succeed("systemctl cat systemd-tmpfiles-setup.service | grep -q rust-systemd")
+    machine.succeed("systemctl cat systemd-tmpfiles-setup.service | grep -q oxidized-systemd")
 
     # The rust systemd-tmpfiles applied the custom rule.
     machine.succeed("test -d /run/rung1-tmpfiles")

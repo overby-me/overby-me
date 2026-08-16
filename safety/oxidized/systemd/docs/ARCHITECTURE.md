@@ -1,6 +1,6 @@
 # Architecture: the concurrency model
 
-rust-systemd's PID 1 does not share upstream systemd's execution model. This is the
+oxidized-systemd's PID 1 does not share upstream systemd's execution model. This is the
 single largest source of behavioural divergence and of every hang the project has hit.
 Read this before debugging a wedge.
 
@@ -25,7 +25,7 @@ unwinds, with the client reply parked and flushed afterwards.
 
 There are no locks. There is nothing to starve.
 
-**rust-systemd: a worker pool plus a global RwLock.**
+**oxidized-systemd: a worker pool plus a global RwLock.**
 
 A 32-thread activation pool whose workers hold the global `RuntimeInfo` **read** guard
 across the whole `activate_unit` call. Per-service state write locks are additionally
@@ -53,9 +53,9 @@ mid-transition mutation. I4 kills the exit-race class (ECHILD, lost helper exits
 
 ## Device units arrive over RPC, not netlink
 
-Upstream's PID 1 speaks to udev directly. rust-systemd splits it: udevd processes the
+Upstream's PID 1 speaks to udev directly. oxidized-systemd splits it: udevd processes the
 event and then sends PID 1 a fire-and-forget `udev-event` JSON-RPC notification on the
-control socket (`/run/systemd/rust-systemd-notify/control.socket`), carrying action,
+control socket (`/run/systemd/oxidized-systemd-notify/control.socket`), carrying action,
 sysfs path, devname, subsystem, the event environment, tags and symlinks
 (`control/control.rs:235-242`, handled at `control.rs:1214`).
 
@@ -91,7 +91,7 @@ as one deliberate series (jobs plus a single dispatcher) is
    the guard.
 3. **A bounded writer acquisition.** Give `write_poisoned_nonblocking` a deadline and an
    escalation path instead of an unbounded spin.
-4. **Minimal job objects.** rust-systemd resolves dependencies inline and has no job
+4. **Minimal job objects.** oxidized-systemd resolves dependencies inline and has no job
    objects, so nothing is ever queued and `systemctl list-jobs` is always empty. This is
    the direct blocker for TEST-63-PATH's issue-24577 assertions and is a prerequisite
    for modelling upstream's requeue-on-completion behaviour.

@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-wclip = {lib, ...}:
+    wclip = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-wclip";
 
@@ -24,7 +24,7 @@
         };
       };
 
-    rust-wclip-dev = {lib, ...}:
+    wclip-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-wclip-dev";
 
@@ -71,7 +71,7 @@
   in
     lib.listToAttrs (
       map (name: {
-        name = "rust-wclip-test-${name}";
+        name = "wclip-test-${name}";
         value = pkgs: import ./testsuite.nix {inherit pkgs name;};
       })
       testNames

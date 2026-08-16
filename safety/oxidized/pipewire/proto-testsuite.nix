@@ -4,9 +4,9 @@
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-pipewire-proto-test-${name}" {
+pkgs.runCommand "oxidized-pipewire-proto-test-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-pipewire-dev
+    pkgs.oxidized-pipewire-dev
     pkgs.pipewire
     pkgs.coreutils
     pkgs.gnugrep
@@ -21,9 +21,9 @@ pkgs.runCommand "rust-pipewire-proto-test-${name}" {
   pipewireBin="${pkgs.pipewire}"
   export pipewireBin
 
-  # The "RUST" binary in this harness is rust-pipewire's multicall;
+  # The "RUST" binary in this harness is oxidized-pipewire's multicall;
   # the test script invokes it as `$RUST proto-probe ...`.
-  RUST="${pkgs.rust-pipewire-dev}/bin/rust-pipewire"
+  RUST="${pkgs.oxidized-pipewire-dev}/bin/oxidized-pipewire"
   export RUST
 
   nu "$testScript" || exit 1

@@ -15,12 +15,12 @@
   };
 
   # The preamble writes RateLimitBurst=0 and reloads journald so its own noisy
-  # mount churn is not rate-limited out of the journal. rust-systemd reloads
+  # mount churn is not rate-limited out of the journal. oxidized-systemd reloads
   # journald fine; the C oracle on NixOS fails this reload: its journald reloads
   # the config ("Config file reloaded") but the reload control process then hangs
   # ~37s and exits 1, a NixOS C-systemd journald quirk unrelated to the mount
   # behavior under test. Make the reload non-fatal so the oracle reaches the
-  # subtests; it is a no-op for rust-systemd (whose reload succeeds).
+  # subtests; it is a no-op for oxidized-systemd (whose reload succeeds).
   patchScript = ''
     sed -i 's#^systemctl reload systemd-journald\.service$#systemctl reload systemd-journald.service || true#' TEST-60-MOUNT-RATELIMIT.sh
   '';

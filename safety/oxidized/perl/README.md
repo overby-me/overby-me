@@ -23,7 +23,7 @@ Of the 304 test entries in `default.nix`'s `testDefs`, 35 reference test paths t
 
 ## Building
 
-`rust-perl` builds with the Nix dev shell that ships with this repo. Inside the dev shell:
+`oxidized-perl` builds with the Nix dev shell that ships with this repo. Inside the dev shell:
 
 ```sh
 cargo build --release
@@ -35,17 +35,17 @@ The build pulls in a tiny C shim (`src/perl_hash_wrapper.c`) that vendors refere
 
 ## Running the test suite
 
-The Nix flake exposes per-test checks. Each one diffs `rust-perl`'s stdout/stderr against reference perl's, byte-for-byte.
+The Nix flake exposes per-test checks. Each one diffs `oxidized-perl`'s stdout/stderr against reference perl's, byte-for-byte.
 
 ```sh
 # Run the whole tracked test suite (all 304 entries).
-nix build .#checks.x86_64-linux.rust-perl-tests
+nix build .#checks.x86_64-linux.oxidized-perl-tests
 
 # Run one test.
-nix build .#checks.x86_64-linux.rust-perl-test-op-each
+nix build .#checks.x86_64-linux.oxidized-perl-test-op-each
 ```
 
-The survey wrapper used during development (`/tmp/survey_long.sh`) calls reference perl and rust-perl side-by-side, both with `PERL_HASH_SEED=0`, then diffs the captured TAP output.
+The survey wrapper used during development (`/tmp/survey_long.sh`) calls reference perl and oxidized-perl side-by-side, both with `PERL_HASH_SEED=0`, then diffs the captured TAP output.
 
 ## Architecture
 

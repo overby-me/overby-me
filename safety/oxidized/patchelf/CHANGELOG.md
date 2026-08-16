@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rust-patchelf.
+All notable changes to oxidized-patchelf.
 
 ## [Unreleased]
 
@@ -18,8 +18,8 @@ Nix checks. Up from 14/46 at the start of tracked development.
 
 ### Nix integration
 
-- `pkgs.rust-patchelf` (release, LTO + strip) and
-  `pkgs.rust-patchelf-dev` (debug, fast compile).
+- `pkgs.oxidized-patchelf` (release, LTO + strip) and
+  `pkgs.oxidized-patchelf-dev` (debug, fast compile).
 - `safety/oxidized/patchelf/fixtures.nix` builds the upstream `tests/`
   artefacts once per test session via `make check TESTS=`. Sets
   `dontPatchELF`, `dontStrip`, `noAuditTmpdir`, `noBrokenSymlinks`,
@@ -29,7 +29,7 @@ Nix checks. Up from 14/46 at the start of tracked development.
   `no-rpath-${arch}.sh` symlinks (the upstream Makefile only does
   this during `make check`).
 - `safety/oxidized/patchelf/testsuite.nix` runs each upstream `tests/*.sh` in
-  a sandbox with `rust-patchelf-dev` symlinked at the expected
+  a sandbox with `oxidized-patchelf-dev` symlinked at the expected
   `../src/patchelf` path; exports `STRIP`/`OBJDUMP`/`READELF`/
   `OBJCOPY`/`PATCHELF_DEBUG=1`/`srcdir=.`.
 - `safety/oxidized/patchelf/default.nix` declares 46 per-test checks (32

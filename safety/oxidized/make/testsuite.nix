@@ -1,20 +1,20 @@
-# Run a single test from the official GNU make test suite against rust-make.
+# Run a single test from the official GNU make test suite against oxidized-make.
 #
 # Drives the upstream Perl test runner (`run_make_tests.pl`) with
-# `-make` pointing at the rust-make binary. Exit 0 means pass, anything
+# `-make` pointing at the oxidized-make binary. Exit 0 means pass, anything
 # else means fail.
 #
-# Run with:     nix build .#checks.x86_64-linux.rust-make-test-{category}-{name}
-# Example:      nix build .#checks.x86_64-linux.rust-make-test-misc-general1
-# View failure: nix log   .#checks.x86_64-linux.rust-make-test-{category}-{name}
+# Run with:     nix build .#checks.x86_64-linux.oxidized-make-test-{category}-{name}
+# Example:      nix build .#checks.x86_64-linux.oxidized-make-test-misc-general1
+# View failure: nix log   .#checks.x86_64-linux.oxidized-make-test-{category}-{name}
 {
   pkgs,
   category,
   name,
 }:
-pkgs.runCommand "rust-make-test-${category}-${name}" {
+pkgs.runCommand "oxidized-make-test-${category}-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-make-dev
+    pkgs.oxidized-make-dev
     pkgs.coreutils
     pkgs.diffutils
     pkgs.gnused
@@ -39,7 +39,7 @@ pkgs.runCommand "rust-make-test-${category}-${name}" {
 
   # Run the test. The driver returns 0 on pass, non-zero on fail.
   if timeout 120 ${pkgs.perl}/bin/perl run_make_tests.pl \
-       -make ${pkgs.rust-make-dev}/bin/make \
+       -make ${pkgs.oxidized-make-dev}/bin/make \
        ${category}/${name} > "$TMPDIR/out" 2>&1; then
     touch $out
   else

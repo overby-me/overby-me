@@ -3,7 +3,7 @@
   # Skips rather than passes: systemd-homed.service is not wired into the VM
   # See ../docs/TEST-OVERRIDES.md.
   expectedSkip = true;
-  # rust-systemd ships homectl (so `command -v homectl` succeeds) but no
+  # oxidized-systemd ships homectl (so `command -v homectl` succeeds) but no
   # systemd-homed service unit.  Force an early skip.
   patchScript = ''
     {

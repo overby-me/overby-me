@@ -1,18 +1,18 @@
-# Run a single test from the official GNU grep test suite against rust-grep.
+# Run a single test from the official GNU grep test suite against oxidized-grep.
 #
 # The GNU grep tests are shell scripts that use the gnulib test framework.
-# We extract the test suite from the gnugrep source, place our rust-grep
+# We extract the test suite from the gnugrep source, place our oxidized-grep
 # binary first on PATH (so it's found as "grep"), and run each test script
 # in the framework's environment.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-grep-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-grep-test-backref
+# Run with: nix build .#checks.x86_64-linux.oxidized-grep-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-grep-test-backref
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-grep-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-grep pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.bash pkgs.perl];
+pkgs.runCommand "oxidized-grep-test-${name}" {
+  nativeBuildInputs = [pkgs.oxidized-grep pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.bash pkgs.perl];
   grepSrc = pkgs.gnugrep.src;
 } ''
   # Extract the test suite
@@ -30,15 +30,15 @@ pkgs.runCommand "rust-grep-test-${name}" {
 
   # Create a src/ directory with our grep binary (tests use path_prepend_ ../src)
   mkdir -p "../src"
-  ln -s ${pkgs.rust-grep}/bin/grep "../src/grep"
-  ln -s ${pkgs.rust-grep}/bin/egrep "../src/egrep"
-  ln -s ${pkgs.rust-grep}/bin/fgrep "../src/fgrep"
+  ln -s ${pkgs.oxidized-grep}/bin/grep "../src/grep"
+  ln -s ${pkgs.oxidized-grep}/bin/egrep "../src/egrep"
+  ln -s ${pkgs.oxidized-grep}/bin/fgrep "../src/fgrep"
 
   # Also create a bin directory for direct PATH usage
   mkdir -p "$TMPDIR/bin"
-  ln -s ${pkgs.rust-grep}/bin/grep "$TMPDIR/bin/grep"
-  ln -s ${pkgs.rust-grep}/bin/egrep "$TMPDIR/bin/egrep"
-  ln -s ${pkgs.rust-grep}/bin/fgrep "$TMPDIR/bin/fgrep"
+  ln -s ${pkgs.oxidized-grep}/bin/grep "$TMPDIR/bin/grep"
+  ln -s ${pkgs.oxidized-grep}/bin/egrep "$TMPDIR/bin/egrep"
+  ln -s ${pkgs.oxidized-grep}/bin/fgrep "$TMPDIR/bin/fgrep"
 
   # Put our grep first on PATH, but keep system tools available
   export PATH="$TMPDIR/bin:${pkgs.coreutils}/bin:${pkgs.diffutils}/bin:${pkgs.gnused}/bin:${pkgs.gawk}/bin:${pkgs.bash}/bin:${pkgs.perl}/bin:/usr/bin:/bin"

@@ -2,7 +2,7 @@
   lib,
   rustPlatform,
   fetchFromGitHub,
-  rust-pkg-config,
+  oxidized-pkg-config,
   webkitgtk_4_1,
 }:
 rustPlatform.buildRustPackage rec {
@@ -32,7 +32,7 @@ rustPlatform.buildRustPackage rec {
   ];
 
   nativeBuildInputs = [
-    rust-pkg-config
+    oxidized-pkg-config
   ];
 
   buildInputs = [

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `rust-perl`. Entries are reverse-chronological — the most recent iteration is at the top, foundational scaffolding at the bottom.
+All notable changes to `oxidized-perl`. Entries are reverse-chronological — the most recent iteration is at the top, foundational scaffolding at the bottom.
 
 The grouping into "current" and "earlier" iterations reflects the development sessions: each block represents a contiguous push that took the test suite from one passing count to the next.
 
@@ -487,9 +487,9 @@ Earlier unlocks:
   to void by the statement-level void hint; map/grep also clear the
   stale `next_call_ctx = 0` set by the outer `Stmt::Expr` so the first
   iteration's sub call doesn't inherit it.
-- Nix tests now use the release build of rust-perl. Debug builds time
+- Nix tests now use the release build of oxidized-perl. Debug builds time
   out on tests with deeply-recursive parses (e.g. op/cond.t's 20 000
-  nested ternaries) — `pkgs.rust-perl-dev` couldn't finish op/cond
+  nested ternaries) — `pkgs.oxidized-perl-dev` couldn't finish op/cond
   inside the 60 s sandbox timeout; release does it in ~2.5 s.
 - **File-scope closures for `require`d files**: every `require`d file gets a
   persistent lexical scope; subs defined in that file capture it via
@@ -861,10 +861,10 @@ Near-passing (local test counts):
 test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
 TAP output with test names. Function calls in argument lists fixed.
 
-Tests compare rust-perl output against reference perl output in a Nix sandbox.
+Tests compare oxidized-perl output against reference perl output in a Nix sandbox.
 
-Run a test: `nix build .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
-View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
+Run a test: `nix build .#checks.x86_64-linux.oxidized-perl-test-{category}-{name}`
+View failure diff: `nix log .#checks.x86_64-linux.oxidized-perl-test-{category}-{name}`
 
 ### Recent fixes
 

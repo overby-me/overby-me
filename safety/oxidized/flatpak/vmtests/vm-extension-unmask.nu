@@ -5,7 +5,7 @@ source ./libtest-nix.nu
 setup_repo
 
 # Test that mask/unmask commands accept extension patterns
-# rust-flatpak supports mask via the mask command
+# oxidized-flatpak supports mask via the mask command
 
 # Mask an extension pattern
 let r = (do { ^$env.FLATPAK --user mask "org.test.Hello.Locale" } | complete)

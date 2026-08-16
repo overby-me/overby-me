@@ -12,7 +12,7 @@
   # rdevno/path/flags shape). The analyze section is lightly adapted from
   # upstream: NotifyAccess=all so the systemd-notify child is accepted without
   # `--pid=parent` (not implemented); the `$FDSTORE` env assertion is kept
-  # (rust-systemd exports `$FDSTORE`=FileDescriptorStoreMax as of 579d2950).
+  # (oxidized-systemd exports `$FDSTORE`=FileDescriptorStoreMax as of 579d2950).
   patchScript = ''
         cat > TEST-80-NOTIFYACCESS.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -171,13 +171,13 @@
     # systemd-analyze fdstore (text line count + --json=short shape). Adapted
     # from upstream: NotifyAccess=all so the systemd-notify child's message is
     # accepted without --pid=parent (not implemented). The $FDSTORE env check is
-    # kept (rust-systemd exports $FDSTORE=FileDescriptorStoreMax as of 579d2950).
+    # kept (oxidized-systemd exports $FDSTORE=FileDescriptorStoreMax as of 579d2950).
     cat > /run/fdstore-analyze.sh <<'ASCRIPTEOF'
     #!/usr/bin/env bash
     set -eux
     set -o pipefail
     # FileDescriptorStoreMax=7 is exported to the service as $FDSTORE=7 (upstream
-    # asserts this; rust-systemd now exports it, so the check is restored).
+    # asserts this; oxidized-systemd now exports it, so the check is restored).
     test "$FDSTORE" = "7"
     N="/tmp/fdstore-analyze-data"
     echo waldi > "$N"

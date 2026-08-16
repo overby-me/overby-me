@@ -1,5 +1,5 @@
 {
-  packages.rust-help2man = {lib, ...}:
+  packages.oxidized-help2man = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-help2man";
 

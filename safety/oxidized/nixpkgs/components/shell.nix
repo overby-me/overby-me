@@ -1,6 +1,6 @@
-# Shell: bash → rust-bash
+# Shell: bash → oxidized-bash
 #
-# rust-bash is a Bash-compatible shell written in Rust for this project.
+# oxidized-bash is a Bash-compatible shell written in Rust for this project.
 # It implements a lexer, parser, and interpreter covering core bash features:
 # variables, control flow, functions, pipes, redirections, parameter expansion,
 # command substitution, arithmetic, and common builtins.
@@ -14,7 +14,7 @@
 mkComponent {
   name = "shell";
   original = pkgs.bash;
-  replacement = pkgs.rust-bash;
+  replacement = pkgs.oxidized-bash;
   status = status.available;
   source = source.repo;
   phase = 1;

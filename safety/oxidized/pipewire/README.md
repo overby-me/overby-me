@@ -35,7 +35,7 @@ aimed at passing the upstream PipeWire test suite.
   to the upstream tools on every test fixture
 
 A multicall binary dispatches on `argv[0]` (or `argv[1]` for
-`rust-pipewire <tool>`) so the same Rust program serves all the symlinked
+`oxidized-pipewire <tool>`) so the same Rust program serves all the symlinked
 tool names under `bin/` (`pipewire`, `pw-cli`, `spa-json-dump`, ...).
 
 See [`PLAN.md`](./PLAN.md) for the phased roadmap and current milestone.
@@ -44,7 +44,7 @@ See [`PLAN.md`](./PLAN.md) for the phased roadmap and current milestone.
 
 ### 1. Custom comparison tests (`testsuite.nix`)
 
-A Nix derivation that runs a single named test, comparing `rust-pipewire`
+A Nix derivation that runs a single named test, comparing `oxidized-pipewire`
 output against reference `pkgs.pipewire` output. Takes
 `{ pkgs, tool, name }` as arguments. Each test is a shell script in
 `tests/${tool}/${name}.sh` that uses `$REF`, `$RUST`, `$TMPDIR`, and the
@@ -54,48 +54,48 @@ output against reference `pkgs.pipewire` output. Takes
 
 Compiles a small libspa-linked C helper inside the test sandbox, encodes
 a set of named sample values via `spa_pod_builder_*`, and `cmp`s the
-bytes against rust-pipewire's encoder. This is the closest thing to
+bytes against oxidized-pipewire's encoder. This is the closest thing to
 "upstream tests" — the encoder is verified bit-exact against libspa.
 
 ### 3. Daemon-interop tests (`proto-testsuite.nix`)
 
 Spawns a real C `pipewire` daemon in a private XDG_RUNTIME_DIR sandbox,
-then connects with rust-pipewire's protocol-native client and verifies
+then connects with oxidized-pipewire's protocol-native client and verifies
 the expected handshake (`Core.Hello` → `Core.Info` + `Registry.Global`
 events).
 
 ### 4. Daemon-comparison tests (`daemon-testsuite.nix`)
 
 Spawns a real C `pipewire` daemon, then runs both the C reference tool
-(`pkgs.pipewire/bin/pw-cli`, `pw-dump`, ...) and rust-pipewire's tool
+(`pkgs.pipewire/bin/pw-cli`, `pw-dump`, ...) and oxidized-pipewire's tool
 against it and `diff`s the output. This is the M7-style end-to-end
 verification of the protocol-native client side: every byte of every
 `Registry.Global` and `*.Info` event has to round-trip correctly.
 
 ### 5. `default.nix`
 
-- `rust-pipewire` package — release multicall binary with symlinks for
+- `oxidized-pipewire` package — release multicall binary with symlinks for
   every tool name in `postInstall`
-- `rust-pipewire-dev` package — debug build for fast iteration
+- `oxidized-pipewire-dev` package — debug build for fast iteration
 - `checks` attribute set wiring per-test custom tests
 
 ## Running the tests
 
 ```sh
 # Run a single comparison test
-nix build .#checks.x86_64-linux.rust-pipewire-test-pw-cli-help
-nix build .#checks.x86_64-linux.rust-pipewire-test-spa-json-dump-conf-jack
-nix build .#checks.x86_64-linux.rust-pipewire-test-pw-mididump-tempo-meta
+nix build .#checks.x86_64-linux.oxidized-pipewire-test-pw-cli-help
+nix build .#checks.x86_64-linux.oxidized-pipewire-test-spa-json-dump-conf-jack
+nix build .#checks.x86_64-linux.oxidized-pipewire-test-pw-mididump-tempo-meta
 
 # POD encoder vs libspa
-nix build .#checks.x86_64-linux.rust-pipewire-pod-test-encode-cases
+nix build .#checks.x86_64-linux.oxidized-pipewire-pod-test-encode-cases
 
 # Daemon round-trip
-nix build .#checks.x86_64-linux.rust-pipewire-proto-test-hello-info
+nix build .#checks.x86_64-linux.oxidized-pipewire-proto-test-hello-info
 
 # Daemon-comparison: same daemon, both pw-cli binaries, diff output
-nix build .#checks.x86_64-linux.rust-pipewire-daemon-test-pw-cli-info-all
-nix build .#checks.x86_64-linux.rust-pipewire-daemon-test-pw-cli-ls-module
+nix build .#checks.x86_64-linux.oxidized-pipewire-daemon-test-pw-cli-info-all
+nix build .#checks.x86_64-linux.oxidized-pipewire-daemon-test-pw-cli-ls-module
 
 # Run everything
 nix flake check
@@ -105,7 +105,7 @@ nix flake check
 
 1. Pick the next failing test (`grep "^FAIL:" log`).
 2. Reproduce locally:
-   `nix build .#checks.x86_64-linux.rust-pipewire-test-<tool>-<name>`.
+   `nix build .#checks.x86_64-linux.oxidized-pipewire-test-<tool>-<name>`.
 3. Read the failure under `nix log <drv>` and compare against the
    expected reference output.
 4. Fix the code, rebuild, re-run the check.

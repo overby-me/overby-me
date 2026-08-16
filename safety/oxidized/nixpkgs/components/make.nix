@@ -1,6 +1,6 @@
-# GNU Make → rust-make
+# GNU Make → oxidized-make
 #
-# rust-make is a GNU Make-compatible build system driver written in Rust.
+# oxidized-make is a GNU Make-compatible build system driver written in Rust.
 # It implements Makefile parsing, variable expansion (recursive/simple/append/
 # conditional/shell), explicit and pattern rules, automatic variables,
 # built-in functions (subst, patsubst, filter, wildcard, shell, foreach,
@@ -15,7 +15,7 @@
 mkComponent {
   name = "make";
   original = pkgs.gnumake;
-  replacement = pkgs.rust-make;
+  replacement = pkgs.oxidized-make;
   status = status.available;
   source = source.repo;
   phase = 4;

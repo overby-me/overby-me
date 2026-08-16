@@ -1,6 +1,6 @@
 # Differential Test Corpus
 
-Golden file corpus for differential testing between rust-systemd and real systemd (v256). Each test category feeds identical inputs through both implementations and asserts equivalent outputs, state transitions, and side effects.
+Golden file corpus for differential testing between oxidized-systemd and real systemd (v256). Each test category feeds identical inputs through both implementations and asserts equivalent outputs, state transitions, and side effects.
 
 ## Directory Structure
 
@@ -21,7 +21,7 @@ Files in this corpus are sourced from:
 1. **Upstream systemd test suite** — Edge-case unit files from systemd's `test/` directory (v256).
 2. **Distribution unit files** — Real-world units shipped by Fedora, Debian, Arch, and NixOS.
 3. **Fuzzer-generated inputs** — Edge cases discovered by `cargo-fuzz` differential fuzzers.
-4. **Manually crafted regressions** — Files targeting specific parser or runtime behaviors where rust-systemd and real systemd are known to have diverged or where the specification is ambiguous.
+4. **Manually crafted regressions** — Files targeting specific parser or runtime behaviors where oxidized-systemd and real systemd are known to have diverged or where the specification is ambiguous.
 
 ## Version Pinning
 

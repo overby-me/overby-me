@@ -1,5 +1,5 @@
 # Helpers that wire up upstream xz tests (extracted from `pkgs.xz.src`)
-# against the locally-built `rust-xz-dev` binary, expressed as Nix
+# against the locally-built `oxidized-xz-dev` binary, expressed as Nix
 # checks so they can be enumerated by `nix flake check`.
 #
 # Mirrors the structure of `safety/oxidized/awk/testsuite.nix`.
@@ -30,9 +30,9 @@
     compressFile ? "compress_prepared_bcj_sparc",
     needsHelper ? false,
   }:
-    pkgs.runCommand "rust-xz-test-${name}" {
+    pkgs.runCommand "oxidized-xz-test-${name}" {
       nativeBuildInputs =
-        [pkgs.rust-xz-dev pkgs.gnutar pkgs.coreutils pkgs.xz]
+        [pkgs.oxidized-xz-dev pkgs.gnutar pkgs.coreutils pkgs.xz]
         ++ pkgs.lib.optionals needsHelper [pkgs.gcc pkgs.gnumake pkgs.autoconf pkgs.automake pkgs.libtool pkgs.gettext pkgs.pkg-config pkgs.m4 pkgs.po4a];
       xzSrc = pkgs.xz.src;
     } ''
@@ -40,7 +40,7 @@
       cd xz-*/tests
 
       mkdir -p fake
-      ln -s ${pkgs.rust-xz-dev}/bin/xz fake/xz
+      ln -s ${pkgs.oxidized-xz-dev}/bin/xz fake/xz
 
       ${pkgs.lib.optionalString needsHelper ''
         # Build `create_compress_files` from the upstream tarball.
@@ -72,7 +72,7 @@
         # `test_compress.sh <filename>` with no xz-dir argument,
         # which makes the script default to `../src/xz` and skip.
         # We bypass them and call `test_compress.sh` directly with
-        # both arguments so the rust-xz binary is actually used.
+        # both arguments so the oxidized-xz binary is actually used.
         then ''sh ./test_compress.sh "${compressFile}" "./fake"''
         else ''sh "./${name}.sh" "./fake"''
       }
@@ -108,8 +108,8 @@
     name,
     expect,
   }:
-    pkgs.runCommand "rust-xz-decode-${name}" {
-      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.gnutar];
+    pkgs.runCommand "oxidized-xz-decode-${name}" {
+      nativeBuildInputs = [pkgs.oxidized-xz-dev pkgs.gnutar];
       xzSrc = pkgs.xz.src;
     } ''
       tar xf "$xzSrc"
@@ -119,7 +119,7 @@
         exit 1
       fi
 
-      if ${pkgs.rust-xz-dev}/bin/xz -dc "$F" > /dev/null 2>&1; then
+      if ${pkgs.oxidized-xz-dev}/bin/xz -dc "$F" > /dev/null 2>&1; then
         case "${expect}" in
           good) touch $out ;;
           bad)  echo "bad input was accepted: ${name}"; exit 1 ;;
@@ -133,17 +133,17 @@
     '';
 
   # Quick standalone round-trip sanity check: compress + decompress a
-  # known buffer at every preset level using the rust-xz binary.
+  # known buffer at every preset level using the oxidized-xz binary.
   roundtrip =
-    pkgs.runCommand "rust-xz-roundtrip" {
-      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.diffutils];
+    pkgs.runCommand "oxidized-xz-roundtrip" {
+      nativeBuildInputs = [pkgs.oxidized-xz-dev pkgs.coreutils pkgs.diffutils];
     } ''
       set -e
       TMP=$(mktemp -d)
       head -c 65536 /dev/urandom > "$TMP/payload"
       for level in 0 1 2 3 4 5 6 7 8 9; do
-        ${pkgs.rust-xz-dev}/bin/xz -c -$level "$TMP/payload" > "$TMP/out.xz"
-        ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/out.xz" > "$TMP/decoded"
+        ${pkgs.oxidized-xz-dev}/bin/xz -c -$level "$TMP/payload" > "$TMP/out.xz"
+        ${pkgs.oxidized-xz-dev}/bin/xz -dc "$TMP/out.xz" > "$TMP/decoded"
         if ! cmp "$TMP/payload" "$TMP/decoded"; then
           echo "roundtrip mismatch at level $level"
           exit 1
@@ -156,14 +156,14 @@
   # then asserts the list output contains the expected stream count
   # and the CRC64 check name (xz's default).
   list =
-    pkgs.runCommand "rust-xz-list" {
-      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.gnugrep];
+    pkgs.runCommand "oxidized-xz-list" {
+      nativeBuildInputs = [pkgs.oxidized-xz-dev pkgs.coreutils pkgs.gnugrep];
     } ''
       set -e
       TMP=$(mktemp -d)
       printf 'list mode integration check\n' > "$TMP/payload"
-      ${pkgs.rust-xz-dev}/bin/xz -k -c "$TMP/payload" > "$TMP/payload.xz"
-      OUT=$(${pkgs.rust-xz-dev}/bin/xz -l "$TMP/payload.xz")
+      ${pkgs.oxidized-xz-dev}/bin/xz -k -c "$TMP/payload" > "$TMP/payload.xz"
+      OUT=$(${pkgs.oxidized-xz-dev}/bin/xz -l "$TMP/payload.xz")
       echo "$OUT"
       echo "$OUT" | grep -q "Strms"
       echo "$OUT" | grep -q "CRC64"
@@ -175,46 +175,46 @@
   # `--arm64`, `--filters=`). Round-trips a payload through each
   # combination and asserts byte-equality.
   filters =
-    pkgs.runCommand "rust-xz-filters" {
-      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.diffutils];
+    pkgs.runCommand "oxidized-xz-filters" {
+      nativeBuildInputs = [pkgs.oxidized-xz-dev pkgs.coreutils pkgs.diffutils];
     } ''
       set -e
       TMP=$(mktemp -d)
       head -c 16384 /dev/urandom > "$TMP/p"
 
       # --x86 + --lzma2= short-flag form.
-      ${pkgs.rust-xz-dev}/bin/xz --x86 --lzma2=preset=4 -c "$TMP/p" > "$TMP/p.xz"
-      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
+      ${pkgs.oxidized-xz-dev}/bin/xz --x86 --lzma2=preset=4 -c "$TMP/p" > "$TMP/p.xz"
+      ${pkgs.oxidized-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
       cmp "$TMP/p" "$TMP/p2"
 
       # --filters= form with a different BCJ + LZMA2 chain.
-      ${pkgs.rust-xz-dev}/bin/xz --filters="arm64 lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
-      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
+      ${pkgs.oxidized-xz-dev}/bin/xz --filters="arm64 lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
+      ${pkgs.oxidized-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
       cmp "$TMP/p" "$TMP/p2"
 
       # --filters= using the `--` token separator (same as upstream).
-      ${pkgs.rust-xz-dev}/bin/xz --filters="riscv--lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
-      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
+      ${pkgs.oxidized-xz-dev}/bin/xz --filters="riscv--lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
+      ${pkgs.oxidized-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
       cmp "$TMP/p" "$TMP/p2"
 
       touch $out
     '';
 
-  # Decoder-stability fuzz check. Runs the `rust-xz-fuzz` binary
-  # (built as part of `rust-xz-dev`) against the upstream
+  # Decoder-stability fuzz check. Runs the `oxidized-xz-fuzz` binary
+  # (built as part of `oxidized-xz-dev`) against the upstream
   # `tests/files/` corpus. Every file in the corpus is fed to the
   # decoder verbatim, then with prefix-truncated and one-byte-flipped
   # mutations; the test passes iff the decoder never panics.
   fuzz =
-    pkgs.runCommand "rust-xz-fuzz" {
-      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.gnutar pkgs.coreutils];
+    pkgs.runCommand "oxidized-xz-fuzz" {
+      nativeBuildInputs = [pkgs.oxidized-xz-dev pkgs.gnutar pkgs.coreutils];
       xzSrc = pkgs.xz.src;
     } ''
       set -e
       tar xf "$xzSrc"
       CORPUS=$(echo "$PWD"/xz-*/tests/files)
       echo "fuzz corpus: $CORPUS ($(ls "$CORPUS" | wc -l) files)"
-      ${pkgs.rust-xz-dev}/bin/rust-xz-fuzz "$CORPUS"
+      ${pkgs.oxidized-xz-dev}/bin/oxidized-xz-fuzz "$CORPUS"
       touch $out
     '';
 
@@ -222,13 +222,13 @@
   # exercise liblzma library internals (VLI codec, block header
   # parser, index hash, filter-flags codec, lzip decoder, etc.) —
   # they don't touch the `xz` CLI surface we wrap, but they
-  # validate the C library that `rust-xz` links against (via the
+  # validate the C library that `oxidized-xz` links against (via the
   # `liblzma` crate) so they're useful as upstream-parity coverage.
   #
   # We re-use upstream's own `Makefile` target and run a single
   # binary per Nix derivation so failures are isolated.
   cTest = name:
-    pkgs.runCommand "rust-xz-${name}" {
+    pkgs.runCommand "oxidized-xz-${name}" {
       nativeBuildInputs = [
         pkgs.gcc
         pkgs.gnumake

@@ -1,5 +1,5 @@
 {
-  devShells.rust-nixpkgs = pkgs: {
+  devShells.oxidized-nixpkgs = pkgs: {
     packages = with pkgs; [
       just
       nix-tree
@@ -29,7 +29,7 @@
       )
       prev.stdenv.initialPath;
 
-    # Shell replacement: rust-bash provides /bin/bash and /bin/sh
+    # Shell replacement: oxidized-bash provides /bin/bash and /bin/sh
     shellPkg = let
       shellMatch = lib.filter (c: c.name == "shell") available;
     in
@@ -40,21 +40,21 @@
     # Expose the component registry for introspection
     rust-nixpkgs-components = components;
 
-    # Wrap rust-gcc with nixpkgs cc-wrapper for proper include/lib paths
-    rust-gcc-wrapped = prev.wrapCCWith {
-      cc = final.rust-gcc;
+    # Wrap oxidized-gcc with nixpkgs cc-wrapper for proper include/lib paths
+    oxidized-gcc-wrapped = prev.wrapCCWith {
+      cc = final.oxidized-gcc;
       inherit (prev.stdenv.cc) libc bintools;
       isGNU = true;
-      # Add rust-gcc's built-in headers to the system include path
+      # Add oxidized-gcc's built-in headers to the system include path
       nixSupport.cc-cflags = [
-        "-isystem ${final.rust-gcc}/lib/gcc/x86_64-unknown-linux-gnu/14.2.0/include"
+        "-isystem ${final.oxidized-gcc}/lib/gcc/x86_64-unknown-linux-gnu/14.2.0/include"
       ];
     };
 
     # A stdenv with all available Rust replacements swapped in.
     # We disable allowedRequisites because Rust replacement packages
     # are built with the normal stdenv, so their closures transitively
-    # reference the C originals (e.g. rust-grep depends on coreutils).
+    # reference the C originals (e.g. oxidized-grep depends on coreutils).
     # A fully bootstrapped Rust stdenv (Phase 7) would rebuild the
     # replacements with themselves, eliminating these references.
     stdenvRs = prev.stdenv.override {
@@ -71,24 +71,24 @@
     # A test derivation that reports component availability status.
     # This uses the normal stdenv (not stdenvRs) so it always builds,
     # even when the Rust stdenv has issues.
-    rust-nixpkgs-test = {
+    oxidized-nixpkgs-test = {
       stdenv,
       lib,
-      rust-bash,
+      oxidized-bash,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-patchelf,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-patchelf,
     }:
       stdenv.mkDerivation {
         pname = "rust-nixpkgs-test";
@@ -97,28 +97,28 @@
         dontUnpack = true;
 
         nativeBuildInputs = [
-          rust-bash
+          oxidized-bash
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
-          rust-patchelf
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
+          oxidized-patchelf
         ];
 
         buildPhase = ''
           echo "=== rust-nixpkgs component status ==="
           echo ""
           echo "All 15 components available:"
-          echo "  Phase 1: shell (rust-bash), coreutils (uutils)"
+          echo "  Phase 1: shell (oxidized-bash), coreutils (uutils)"
           echo "  Phase 2: sed (uutils-sed), grep, awk, findutils (uutils), diffutils (uutils)"
           echo "  Phase 3: tar, gzip, bzip2, xz"
           echo "  Phase 4: make, patch"
@@ -158,39 +158,39 @@
     # Test building a trivial derivation using the Rust stdenv.
     # Constructs a stdenv with Rust tools directly from flake packages,
     # bypassing the overlay to avoid needing all overlays composed.
-    rust-nixpkgs-stdenv-test = {
+    oxidized-nixpkgs-stdenv-test = {
       lib,
       stdenv,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -233,42 +233,42 @@
 
     # Test building GNU hello (a real autotools package) with the Rust stdenv.
     # This exercises configure scripts, make, install, and fixup phases.
-    rust-nixpkgs-hello-test = {
+    oxidized-nixpkgs-hello-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
-      rust-help2man,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
+      oxidized-help2man,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -276,7 +276,7 @@
         pname = "rust-nixpkgs-hello-test";
         version = "2.12.1";
 
-        nativeBuildInputs = [rust-texinfo rust-help2man];
+        nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
 
         src = fetchurl {
           url = "mirror://gnu/hello/hello-2.12.1.tar.gz";
@@ -300,40 +300,40 @@
 
     # Test building zlib — a critical C library used by nearly everything.
     # Uses a simple configure + make (not autotools).
-    rust-nixpkgs-zlib-test = {
+    oxidized-nixpkgs-zlib-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -354,42 +354,42 @@
       };
 
     # Test building GNU patch — an autotools C package.
-    rust-nixpkgs-gnupatch-test = {
+    oxidized-nixpkgs-gnupatch-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
-      rust-help2man,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
+      oxidized-help2man,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -397,7 +397,7 @@
         pname = "rust-nixpkgs-gnupatch-test";
         version = "2.8";
 
-        nativeBuildInputs = [rust-texinfo rust-help2man];
+        nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
 
         src = fetchurl {
           url = "mirror://gnu/patch/patch-2.8.tar.xz";
@@ -418,42 +418,42 @@
       };
 
     # Test building GNU coreutils — a large autotools package with 100+ programs.
-    rust-nixpkgs-coreutils-test = {
+    oxidized-nixpkgs-coreutils-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
-      rust-help2man,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
+      oxidized-help2man,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -461,7 +461,7 @@
         pname = "rust-nixpkgs-coreutils-test";
         version = "9.6";
 
-        nativeBuildInputs = [rust-texinfo rust-help2man];
+        nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
 
         src = fetchurl {
           url = "mirror://gnu/coreutils/coreutils-9.6.tar.xz";
@@ -484,41 +484,41 @@
         };
       };
     # Test building GNU grep — autotools with regex library.
-    rust-nixpkgs-gnugrep-test = {
+    oxidized-nixpkgs-gnugrep-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -526,7 +526,7 @@
         pname = "rust-nixpkgs-gnugrep-test";
         version = "3.11";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/grep/grep-3.11.tar.xz";
@@ -549,41 +549,41 @@
       };
 
     # Test building GNU sed — autotools, exercises sed replacement compatibility.
-    rust-nixpkgs-gnused-test = {
+    oxidized-nixpkgs-gnused-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -591,7 +591,7 @@
         pname = "rust-nixpkgs-gnused-test";
         version = "4.9";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/sed/sed-4.9.tar.xz";
@@ -614,42 +614,42 @@
       };
 
     # Test building GNU diffutils — exercises diff/cmp/sdiff compatibility.
-    rust-nixpkgs-gnudiffutils-test = {
+    oxidized-nixpkgs-gnudiffutils-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
-      rust-help2man,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
+      oxidized-help2man,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -657,7 +657,7 @@
         pname = "rust-nixpkgs-gnudiffutils-test";
         version = "3.10";
 
-        nativeBuildInputs = [rust-texinfo rust-help2man];
+        nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
 
         src = fetchurl {
           url = "mirror://gnu/diffutils/diffutils-3.10.tar.xz";
@@ -683,42 +683,42 @@
         };
       };
 
-    # Test building GNU make — builds make with rust-make (self-referential!).
-    rust-nixpkgs-gnumake-test = {
+    # Test building GNU make — builds make with oxidized-make (self-referential!).
+    oxidized-nixpkgs-gnumake-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -726,7 +726,7 @@
         pname = "rust-nixpkgs-gnumake-test";
         version = "4.4.1";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/make/make-4.4.1.tar.gz";
@@ -743,48 +743,48 @@
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "GNU make built with the Rust stdenv (using rust-make!)";
+          description = "GNU make built with the Rust stdenv (using oxidized-make!)";
           license = lib.licenses.gpl3Plus;
         };
       };
 
     # Test building GNU gawk — autotools with complex configure.
-    rust-nixpkgs-gnuawk-test = {
+    oxidized-nixpkgs-gnuawk-test = {
       lib,
       stdenv,
       fetchurl,
-      rust-bison,
+      oxidized-bison,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -792,7 +792,7 @@
         pname = "rust-nixpkgs-gnuawk-test";
         version = "5.3.1";
 
-        nativeBuildInputs = [rust-texinfo rust-bison];
+        nativeBuildInputs = [oxidized-texinfo oxidized-bison];
 
         src = fetchurl {
           url = "mirror://gnu/gawk/gawk-5.3.1.tar.xz";
@@ -814,32 +814,32 @@
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "GNU awk built with the Rust stdenv (parser generated by rust-bison!)";
+          description = "GNU awk built with the Rust stdenv (parser generated by oxidized-bison!)";
           license = lib.licenses.gpl3Plus;
         };
       };
 
     # Test building GNU bc — a calculator, different autotools patterns.
     # Exercises flex/yacc-generated parsers and ed-style line editing.
-    rust-nixpkgs-bc-test = {
+    oxidized-nixpkgs-bc-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
-      rust-bison,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
+      oxidized-bison,
       flex,
       ed,
     }: let
@@ -847,18 +847,18 @@
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -866,7 +866,7 @@
         pname = "rust-nixpkgs-bc-test";
         version = "1.07.1";
 
-        nativeBuildInputs = [rust-texinfo rust-bison flex ed];
+        nativeBuildInputs = [oxidized-texinfo oxidized-bison flex ed];
 
         src = fetchurl {
           url = "mirror://gnu/bc/bc-1.07.1.tar.gz";
@@ -888,48 +888,48 @@
         };
       };
 
-    # Test using rust-bash as the stdenv SHELL (not just in initialPath).
-    # This is the critical test: can rust-bash actually execute the build
+    # Test using oxidized-bash as the stdenv SHELL (not just in initialPath).
+    # This is the critical test: can oxidized-bash actually execute the build
     # phases via setup.sh, acting as the builder shell?
-    rust-nixpkgs-bash-shell-test = {
+    oxidized-nixpkgs-bash-shell-test = {
       lib,
       stdenv,
-      rust-bash,
+      oxidized-bash,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
-      # Override the shell to use rust-bash as the builder
+      # Override the shell to use oxidized-bash as the builder
       rustShellStdenv = rustStdenv.override {
-        shell = "${rust-bash}/bin/bash";
+        shell = "${oxidized-bash}/bin/bash";
       };
     in
       rustShellStdenv.mkDerivation {
@@ -942,7 +942,7 @@
         dontFixup = true;
 
         buildPhase = ''
-          echo "=== Building with rust-bash as stdenv shell ==="
+          echo "=== Building with oxidized-bash as stdenv shell ==="
           echo "Shell: $SHELL"
           echo "Bash: $(bash --version | head -1)"
           echo "Current shell PID: $$"
@@ -962,57 +962,57 @@
             echo "Loop iteration: $i"
           done
           echo ""
-          echo "rust-bash shell test passed."
+          echo "oxidized-bash shell test passed."
         '';
 
         installPhase = ''
           mkdir -p $out
-          echo "rust-bash shell test passed" > $out/result
+          echo "oxidized-bash shell test passed" > $out/result
         '';
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "Test using rust-bash as the stdenv builder shell";
+          description = "Test using oxidized-bash as the stdenv builder shell";
           license = lib.licenses.mit;
         };
       };
 
-    # Test building GNU tar — self-referential: builds tar using rust-tar!
-    rust-nixpkgs-gnutar-test = {
+    # Test building GNU tar — self-referential: builds tar using oxidized-tar!
+    oxidized-nixpkgs-gnutar-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1020,7 +1020,7 @@
         pname = "rust-nixpkgs-gnutar-test";
         version = "1.35";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/tar/tar-1.35.tar.xz";
@@ -1037,47 +1037,47 @@
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "GNU tar built with the Rust stdenv (using rust-tar!)";
+          description = "GNU tar built with the Rust stdenv (using oxidized-tar!)";
           license = lib.licenses.gpl3Plus;
         };
       };
 
-    # Test building GNU gzip — self-referential: builds gzip using rust-gzip!
-    rust-nixpkgs-gnugzip-test = {
+    # Test building GNU gzip — self-referential: builds gzip using oxidized-gzip!
+    oxidized-nixpkgs-gnugzip-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1085,7 +1085,7 @@
         pname = "rust-nixpkgs-gnugzip-test";
         version = "1.14";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/gzip/gzip-1.14.tar.xz";
@@ -1099,7 +1099,7 @@
           find . -name '*.info' -o -name '*.info-*' | xargs touch 2>/dev/null || true
         '';
 
-        # rust-make doesn't handle .in: suffix rules, so pre-generate the scripts
+        # oxidized-make doesn't handle .in: suffix rules, so pre-generate the scripts
         preBuild = ''
           for f in gunzip gzexe zcat zcmp zdiff zegrep zfgrep zforce zgrep zless zmore znew; do
             if [ -f "$f.in" ]; then
@@ -1122,47 +1122,47 @@
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "GNU gzip built with the Rust stdenv (using rust-gzip!)";
+          description = "GNU gzip built with the Rust stdenv (using oxidized-gzip!)";
           license = lib.licenses.gpl3Plus;
         };
       };
 
-    # Test building XZ Utils — self-referential: builds xz using rust-xz!
-    rust-nixpkgs-xz-test = {
+    # Test building XZ Utils — self-referential: builds xz using oxidized-xz!
+    oxidized-nixpkgs-xz-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1170,7 +1170,7 @@
         pname = "rust-nixpkgs-xz-test";
         version = "5.6.4";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "https://github.com/tukaani-project/xz/releases/download/v5.6.4/xz-5.6.4.tar.xz";
@@ -1187,47 +1187,47 @@
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "XZ Utils built with the Rust stdenv (using rust-xz!)";
+          description = "XZ Utils built with the Rust stdenv (using oxidized-xz!)";
           license = lib.licenses.gpl3Plus;
         };
       };
 
     # Test building GNU findutils — autotools.
-    rust-nixpkgs-gnufindutils-test = {
+    oxidized-nixpkgs-gnufindutils-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1235,7 +1235,7 @@
         pname = "rust-nixpkgs-gnufindutils-test";
         version = "4.10.0";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/findutils/findutils-4.10.0.tar.xz";
@@ -1261,42 +1261,42 @@
       };
 
     # Test building GNU readline — line editing library, autotools, exercises termcap/ncurses.
-    rust-nixpkgs-readline-test = {
+    oxidized-nixpkgs-readline-test = {
       lib,
       stdenv,
       fetchurl,
       ncurses,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1304,7 +1304,7 @@
         pname = "rust-nixpkgs-readline-test";
         version = "8.2";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
         buildInputs = [ncurses];
 
         src = fetchurl {
@@ -1330,44 +1330,44 @@
       };
 
     # Test building libffi — foreign function interface, autotools+special build system.
-    # Note: libffi's Makefile uses complex conditionals that rust-make can't handle,
-    # so we add gnumake as a nativeBuildInput to override rust-make for the build.
-    rust-nixpkgs-libffi-test = {
+    # Note: libffi's Makefile uses complex conditionals that oxidized-make can't handle,
+    # so we add gnumake as a nativeBuildInput to override oxidized-make for the build.
+    oxidized-nixpkgs-libffi-test = {
       lib,
       stdenv,
       fetchurl,
       gnumake,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1375,7 +1375,7 @@
         pname = "rust-nixpkgs-libffi-test";
         version = "3.4.6";
 
-        nativeBuildInputs = [rust-texinfo gnumake];
+        nativeBuildInputs = [oxidized-texinfo gnumake];
 
         src = fetchurl {
           url = "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz";
@@ -1407,41 +1407,41 @@
       };
 
     # Test building PCRE2 — regex library, autotools.
-    rust-nixpkgs-pcre2-test = {
+    oxidized-nixpkgs-pcre2-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1449,7 +1449,7 @@
         pname = "rust-nixpkgs-pcre2-test";
         version = "10.44";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2";
@@ -1472,41 +1472,41 @@
       };
 
     # Test building GNU m4 — macro processor, used by autoconf. Autotools build.
-    rust-nixpkgs-m4-test = {
+    oxidized-nixpkgs-m4-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1514,7 +1514,7 @@
         pname = "rust-nixpkgs-m4-test";
         version = "1.4.19";
 
-        nativeBuildInputs = [rust-texinfo];
+        nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
           url = "mirror://gnu/m4/m4-1.4.19.tar.xz";
@@ -1540,42 +1540,42 @@
       };
 
     # Test building GNU libtool — shared library support. Autotools build.
-    rust-nixpkgs-libtool-test = {
+    oxidized-nixpkgs-libtool-test = {
       lib,
       stdenv,
       fetchurl,
       m4,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
-      rust-texinfo,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
+      oxidized-texinfo,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1583,7 +1583,7 @@
         pname = "rust-nixpkgs-libtool-test";
         version = "2.5.4";
 
-        nativeBuildInputs = [rust-texinfo m4];
+        nativeBuildInputs = [oxidized-texinfo m4];
 
         src = fetchurl {
           url = "mirror://gnu/libtool/libtool-2.5.4.tar.xz";
@@ -1606,40 +1606,40 @@
       };
 
     # Test building bzip2 — compression library. Simple Makefile build (not autotools).
-    rust-nixpkgs-bzip2-test = {
+    oxidized-nixpkgs-bzip2-test = {
       lib,
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      rust-sed,
-      rust-grep,
-      rust-awk,
+      oxidized-sed,
+      oxidized-grep,
+      oxidized-awk,
       uutils-findutils,
-      rust-diffutils,
-      rust-file,
-      rust-tar,
-      rust-gzip,
-      rust-bzip2,
-      rust-xz,
-      rust-make,
-      rust-patch,
+      oxidized-diffutils,
+      oxidized-file,
+      oxidized-tar,
+      oxidized-gzip,
+      oxidized-bzip2,
+      oxidized-xz,
+      oxidized-make,
+      oxidized-patch,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
           stdenv
           uutils-coreutils-noprefix
-          rust-sed
-          rust-grep
-          rust-awk
+          oxidized-sed
+          oxidized-grep
+          oxidized-awk
           uutils-findutils
-          rust-diffutils
-          rust-file
-          rust-tar
-          rust-gzip
-          rust-bzip2
-          rust-xz
-          rust-make
-          rust-patch
+          oxidized-diffutils
+          oxidized-file
+          oxidized-tar
+          oxidized-gzip
+          oxidized-bzip2
+          oxidized-xz
+          oxidized-make
+          oxidized-patch
           ;
       };
     in
@@ -1678,20 +1678,20 @@
         };
       };
 
-    # Test that rust-gcc can compile a simple C program via the nixpkgs wrapper.
-    rust-nixpkgs-gcc-test = {
+    # Test that oxidized-gcc can compile a simple C program via the nixpkgs wrapper.
+    oxidized-nixpkgs-gcc-test = {
       lib,
       stdenv,
-      rust-gcc,
+      oxidized-gcc,
       wrapCCWith,
     }: let
-      # Wrap rust-gcc the same way nixpkgs wraps real gcc
+      # Wrap oxidized-gcc the same way nixpkgs wraps real gcc
       wrappedCC = wrapCCWith {
-        cc = rust-gcc;
+        cc = oxidized-gcc;
         inherit (stdenv.cc) libc bintools;
         isGNU = true;
       };
-      # Create a stdenv using the wrapped rust-gcc
+      # Create a stdenv using the wrapped oxidized-gcc
       gccStdenv = stdenv.override {
         cc = wrappedCC;
         allowedRequisites = null;
@@ -1704,7 +1704,7 @@
         dontUnpack = true;
 
         buildPhase = ''
-          echo "=== Testing rust-gcc compilation ==="
+          echo "=== Testing oxidized-gcc compilation ==="
           echo "CC: $CC"
           $CC --version | head -1
           echo "NIX_CFLAGS_COMPILE: $NIX_CFLAGS_COMPILE"
@@ -1714,11 +1714,11 @@
           cat > hello.c << 'CEOF'
           #include <stdio.h>
           int main(void) {
-              printf("Hello from rust-gcc!\n");
+              printf("Hello from oxidized-gcc!\n");
               return 0;
           }
           CEOF
-          $CC -isystem ${rust-gcc}/lib/gcc/x86_64-unknown-linux-gnu/14.2.0/include -o hello hello.c
+          $CC -isystem ${oxidized-gcc}/lib/gcc/x86_64-unknown-linux-gnu/14.2.0/include -o hello hello.c
           file hello
           echo "Compilation succeeded!"
           # Note: execution may fail due to dynamic linker path — the built-in
@@ -1726,27 +1726,27 @@
           ./hello || echo "(execution failed — linker path issue, expected for now)"
 
           echo ""
-          echo "rust-gcc compilation test passed."
+          echo "oxidized-gcc compilation test passed."
         '';
 
         installPhase = ''
           mkdir -p $out/bin
           cp hello $out/bin/
-          echo "rust-gcc compilation test passed" > $out/result
+          echo "oxidized-gcc compilation test passed" > $out/result
         '';
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "Test compiling C code with rust-gcc";
+          description = "Test compiling C code with oxidized-gcc";
           license = lib.licenses.cc0;
         };
       };
 
-    # Test that rust-binutils ar/ranlib/nm work correctly.
-    rust-nixpkgs-binutils-test = {
+    # Test that oxidized-binutils ar/ranlib/nm work correctly.
+    oxidized-nixpkgs-binutils-test = {
       lib,
       stdenv,
-      rust-binutils,
+      oxidized-binutils,
     }:
       stdenv.mkDerivation {
         pname = "rust-nixpkgs-binutils-test";
@@ -1754,10 +1754,10 @@
 
         dontUnpack = true;
 
-        nativeBuildInputs = [rust-binutils];
+        nativeBuildInputs = [oxidized-binutils];
 
         buildPhase = ''
-          echo "=== Testing rust-binutils ==="
+          echo "=== Testing oxidized-binutils ==="
 
           # Verify tools exist
           ar --version | head -1
@@ -1812,17 +1812,17 @@
           ./test_math && echo "Linking test PASSED"
 
           echo ""
-          echo "rust-binutils test passed."
+          echo "oxidized-binutils test passed."
         '';
 
         installPhase = ''
           mkdir -p $out
-          echo "rust-binutils test passed" > $out/result
+          echo "oxidized-binutils test passed" > $out/result
         '';
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "Test rust-binutils ar/ranlib/nm functionality";
+          description = "Test oxidized-binutils ar/ranlib/nm functionality";
           license = lib.licenses.mit;
         };
       };

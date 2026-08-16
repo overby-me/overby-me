@@ -55,4 +55,4 @@
 - Nix-based test harness (`testsuite.nix`) running each upstream test
   as an isolated `pkgs.runCommand` check.
 - Companion shell scripts (`zdiff`, `zgrep`, `znew`, …) sourced from
-  `pkgs.gzip` and invoked via PATH so they pick up rust-gzip.
+  `pkgs.gzip` and invoked via PATH so they pick up oxidized-gzip.

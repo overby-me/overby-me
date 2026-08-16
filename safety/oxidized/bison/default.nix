@@ -1,5 +1,5 @@
 {
-  packages.rust-bison = {lib, ...}:
+  packages.oxidized-bison = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-bison";
 

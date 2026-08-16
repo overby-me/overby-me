@@ -1,6 +1,6 @@
 {
   name = "26-SYSTEMCTL";
-  # The interactive `systemctl edit` hunks run under rust-systemd. Two fixes made
+  # The interactive `systemctl edit` hunks run under oxidized-systemd. Two fixes made
   # them work: the drop-in scaffold no longer seeds a `[Service]` header (a no-op
   # `EDITOR=true` edit discards, so override.conf stays absent), and the editor is
   # invoked as `$EDITOR +4 <path>` like upstream `run_editor`, so the `EDITOR=mv`
@@ -10,8 +10,8 @@
   # manager.
   #
   # The only adaptation left is dropping the util-linux `script` TTY wrapper:
-  # rust-systemd's `systemctl edit` needs no controlling TTY here, and script(1)
-  # hangs under rust-systemd as PID 1 (a separate parent-side termios/poll bug).
+  # oxidized-systemd's `systemctl edit` needs no controlling TTY here, and script(1)
+  # hangs under oxidized-systemd as PID 1 (a separate parent-side termios/poll bug).
   #
   # The `systemctl edit --global` mask was removed 2026-07-27; --global works.
   patchScript = ''

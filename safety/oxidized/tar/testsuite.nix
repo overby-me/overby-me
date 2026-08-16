@@ -1,4 +1,4 @@
-# Run a single test from the official GNU tar test suite against rust-tar.
+# Run a single test from the official GNU tar test suite against oxidized-tar.
 #
 # The GNU tar tests are Autotest (.at) files that autom4te compiles into a
 # single `tests/testsuite` shell script. We rely on the prebuilt
@@ -6,19 +6,19 @@
 # binaries (`genfile`, `checkseekhole`, `ckmtime`). Each per-test
 # derivation looks up the test's numeric id by matching the .at filename
 # in `testsuite -l`, then runs just that id with `TAR` pointed at
-# rust-tar. We can't use `-k NAME` because Autotest keywords are often
+# oxidized-tar. We can't use `-k NAME` because Autotest keywords are often
 # shared across multiple tests (e.g. `append` is a keyword on every
 # append*.at file).
 #
-# Run with: nix build .#checks.x86_64-linux.rust-tar-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-tar-test-append
+# Run with: nix build .#checks.x86_64-linux.oxidized-tar-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-tar-test-append
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-tar-test-${name}" {
+pkgs.runCommand "oxidized-tar-test-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-tar-dev
+    pkgs.oxidized-tar-dev
     pkgs.coreutils
     pkgs.diffutils
     pkgs.gnused
@@ -39,11 +39,11 @@ pkgs.runCommand "rust-tar-test-${name}" {
   chmod -R u+w tar-src
   cd tar-src
 
-  # Replace the src/tar binary with rust-tar so the testsuite picks it
+  # Replace the src/tar binary with oxidized-tar so the testsuite picks it
   # up via atlocal's PATH tweak.
   rm -f src/tar
-  ln -sf ${pkgs.rust-tar-dev}/bin/tar src/tar
-  export TAR=${pkgs.rust-tar-dev}/bin/tar
+  ln -sf ${pkgs.oxidized-tar-dev}/bin/tar src/tar
+  export TAR=${pkgs.oxidized-tar-dev}/bin/tar
 
   cd tests
 

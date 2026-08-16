@@ -26,17 +26,17 @@ the scope of this project (see [excluded tests](#tests-excluded-from-harness)).
 Run a single upstream test:
 
 ```sh
-nix build .#checks.x86_64-linux.rust-sed-test-{name}
+nix build .#checks.x86_64-linux.oxidized-sed-test-{name}
 ```
 
 View a failing test's log:
 
 ```sh
-nix log .#checks.x86_64-linux.rust-sed-test-{name}
+nix log .#checks.x86_64-linux.oxidized-sed-test-{name}
 ```
 
-The binary is available as `sed` from `pkgs.rust-sed` (release build) or
-`pkgs.rust-sed-dev` (debug build, faster compile).
+The binary is available as `sed` from `pkgs.oxidized-sed` (release build) or
+`pkgs.oxidized-sed-dev` (debug build, faster compile).
 
 ## Architecture
 

@@ -1,19 +1,19 @@
-# Run a single test from the official GNU patch test suite against rust-patch.
+# Run a single test from the official GNU patch test suite against oxidized-patch.
 #
 # The GNU patch tests are shell scripts that source `test-lib.sh` and invoke
 # the patch binary via `$PATCH` or `$abs_top_builddir/src/patch`. We extract
-# the test suite from the gnupatch source, point `$PATCH` at our rust-patch
+# the test suite from the gnupatch source, point `$PATCH` at our oxidized-patch
 # binary, and run each test script in the framework's environment.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-patch-test-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-patch-test-bad-usage
+# Run with: nix build .#checks.x86_64-linux.oxidized-patch-test-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-patch-test-bad-usage
 {
   pkgs,
   name,
 }:
-pkgs.runCommand "rust-patch-test-${name}" {
+pkgs.runCommand "oxidized-patch-test-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-patch-dev
+    pkgs.oxidized-patch-dev
     pkgs.coreutils
     pkgs.diffutils
     pkgs.gnused
@@ -35,7 +35,7 @@ pkgs.runCommand "rust-patch-test-${name}" {
   export srcdir="."
   export abs_top_builddir="$(cd .. && pwd)"
   mkdir -p "$abs_top_builddir/src"
-  ln -s ${pkgs.rust-patch-dev}/bin/patch "$abs_top_builddir/src/patch"
+  ln -s ${pkgs.oxidized-patch-dev}/bin/patch "$abs_top_builddir/src/patch"
   export PATCH="$abs_top_builddir/src/patch"
 
   export TMPDIR="$(mktemp -d)"

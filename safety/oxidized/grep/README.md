@@ -16,13 +16,13 @@
 A pure-Rust reimplementation of GNU `grep(1)` that aims to be output-compatible
 with the upstream tool. Passes **121/121** tests from the GNU grep 3.12 test suite.
 
-Uses `rust-pcre2` (pure Rust) for `-P` (Perl-compatible) mode, `fancy-regex` for
+Uses `oxidized-pcre2` (pure Rust) for `-P` (Perl-compatible) mode, `fancy-regex` for
 BRE/ERE backreferences, and the `regex` crate otherwise.
 
 ## Building
 
 ```sh
-nix build .#rust-grep
+nix build .#oxidized-grep
 ./result/bin/grep --help
 ```
 
@@ -31,15 +31,15 @@ The package installs `grep`, `egrep`, and `fgrep` (symlinks) into `$out/bin`.
 ## Running the test suite
 
 Tests are run in a Nix sandbox. Each test script comes from the GNU grep source
-tarball; rust-grep is placed first on `PATH` (as `grep`/`egrep`/`fgrep`) and the
+tarball; oxidized-grep is placed first on `PATH` (as `grep`/`egrep`/`fgrep`) and the
 script is executed against it.
 
 ```sh
 # Run a single test
-nix build .#checks.x86_64-linux.rust-grep-test-{name}
+nix build .#checks.x86_64-linux.oxidized-grep-test-{name}
 
 # View failure diff
-nix log .#checks.x86_64-linux.rust-grep-test-{name}
+nix log .#checks.x86_64-linux.oxidized-grep-test-{name}
 ```
 
 See `default.nix` for the full list of test names. Tests time out after 120s.

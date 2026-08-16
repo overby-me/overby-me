@@ -18,7 +18,7 @@ A GNU awk-compatible text-processing tool written in Rust.
 ## Status
 
 **242/242 tests passing (100%)** — BASIC_TESTS from the upstream GNU gawk
-5.3.2 test suite. Each test runs both rust-awk and the reference gawk
+5.3.2 test suite. Each test runs both oxidized-awk and the reference gawk
 against the same script/input in a sandbox and diffs the output
 byte-for-byte.
 
@@ -27,23 +27,23 @@ byte-for-byte.
 Run a single upstream test:
 
 ```sh
-nix build .#checks.x86_64-linux.rust-awk-test-{name}
+nix build .#checks.x86_64-linux.oxidized-awk-test-{name}
 ```
 
 View a failing test's log:
 
 ```sh
-nix log .#checks.x86_64-linux.rust-awk-test-{name}
+nix log .#checks.x86_64-linux.oxidized-awk-test-{name}
 ```
 
 Batch-run every test in a single evaluator (much faster than looping):
 
 ```sh
-nix build .#checks.x86_64-linux.rust-awk-test-* --keep-going --no-link
+nix build .#checks.x86_64-linux.oxidized-awk-test-* --keep-going --no-link
 ```
 
-The binary is available as `awk` from `pkgs.rust-awk` (release build) or
-`pkgs.rust-awk-dev` (debug build, faster compile). It installs `gawk` as
+The binary is available as `awk` from `pkgs.oxidized-awk` (release build) or
+`pkgs.oxidized-awk-dev` (debug build, faster compile). It installs `gawk` as
 an alias.
 
 ## Architecture

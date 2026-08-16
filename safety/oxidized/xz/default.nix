@@ -1,6 +1,6 @@
 {lib, ...}: {
   packages = {
-    rust-xz = {
+    oxidized-xz = {
       lib,
       pkg-config,
       xz,
@@ -44,8 +44,8 @@
       };
 
     # Debug build used by the test suite for fast turnaround. Same
-    # trick `rust-awk-dev` uses.
-    rust-xz-dev = {
+    # trick `oxidized-awk-dev` uses.
+    oxidized-xz-dev = {
       lib,
       pkg-config,
       xz,
@@ -82,7 +82,7 @@
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "rust-xz built in debug mode for the test suite";
+          description = "oxidized-xz built in debug mode for the test suite";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/xz";
           license = lib.licenses.mit;
           mainProgram = "xz";
@@ -197,7 +197,7 @@
 
     # Each entry describes how to invoke one upstream
     # `tests/test_*.sh` script. `allowSkip` is true only when the
-    # script's preconditions are out-of-scope for rust-xz; otherwise
+    # script's preconditions are out-of-scope for oxidized-xz; otherwise
     # an exit-77 ("skip") is treated as a failure so we never
     # silently miss coverage.
     upstreamScripts = [
@@ -234,13 +234,13 @@
     sanitize = lib.replaceStrings ["_"] ["-"];
 
     scriptChecks = lib.listToAttrs (map (s: {
-        name = "rust-xz-${sanitize s.name}";
+        name = "oxidized-xz-${sanitize s.name}";
         value = pkgs: (import ./testsuite.nix {inherit pkgs;}).script s;
       })
       upstreamScripts);
 
     # Upstream C unit tests for liblzma. These don't exercise the
-    # rust-xz CLI directly, but they validate the C library it links
+    # oxidized-xz CLI directly, but they validate the C library it links
     # against — wiring them gives us full upstream-test parity.
     upstreamCTests = [
       "test_check"
@@ -258,13 +258,13 @@
     ];
 
     cTestChecks = lib.listToAttrs (map (n: {
-        name = "rust-xz-${sanitize n}";
+        name = "oxidized-xz-${sanitize n}";
         value = pkgs: (import ./testsuite.nix {inherit pkgs;}).cTest n;
       })
       upstreamCTests);
 
     goodChecks = lib.listToAttrs (map (n: {
-        name = "rust-xz-${sanitize n}";
+        name = "oxidized-xz-${sanitize n}";
         value = pkgs:
           (import ./testsuite.nix {inherit pkgs;}).file {
             name = n;
@@ -274,7 +274,7 @@
       goodFiles);
 
     badChecks = lib.listToAttrs (map (n: {
-        name = "rust-xz-${sanitize n}";
+        name = "oxidized-xz-${sanitize n}";
         value = pkgs:
           (import ./testsuite.nix {inherit pkgs;}).file {
             name = n;
@@ -288,9 +288,9 @@
     // goodChecks
     // badChecks
     // {
-      rust-xz-roundtrip = pkgs: (import ./testsuite.nix {inherit pkgs;}).roundtrip;
-      rust-xz-list = pkgs: (import ./testsuite.nix {inherit pkgs;}).list;
-      rust-xz-filters = pkgs: (import ./testsuite.nix {inherit pkgs;}).filters;
-      rust-xz-fuzz = pkgs: (import ./testsuite.nix {inherit pkgs;}).fuzz;
+      oxidized-xz-roundtrip = pkgs: (import ./testsuite.nix {inherit pkgs;}).roundtrip;
+      oxidized-xz-list = pkgs: (import ./testsuite.nix {inherit pkgs;}).list;
+      oxidized-xz-filters = pkgs: (import ./testsuite.nix {inherit pkgs;}).filters;
+      oxidized-xz-fuzz = pkgs: (import ./testsuite.nix {inherit pkgs;}).fuzz;
     };
 }

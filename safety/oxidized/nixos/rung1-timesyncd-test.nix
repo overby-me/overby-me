@@ -9,10 +9,10 @@
 # reaches active under C PID 1; the testScript prints the service journal so any
 # failure is self-diagnosing. This validates the deployable module toggle.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-rung1-timesyncd -L
+# Run with: nix build .#checks.x86_64-linux.oxidized-nixos-rung1-timesyncd -L
 {pkgs}:
 pkgs.testers.nixosTest {
-  name = "rust-rung1-timesyncd";
+  name = "oxidized-nixos-rung1-timesyncd";
 
   nodes.machine = {lib, ...}: {
     imports = [./rung1.nix];
@@ -36,7 +36,7 @@ pkgs.testers.nixosTest {
     assert "260" in version, f"expected C systemd 260 as PID 1, got: {version!r}"
 
     # The redirected service runs the rust binary...
-    machine.succeed("systemctl cat systemd-timesyncd.service | grep -q rust-systemd")
+    machine.succeed("systemctl cat systemd-timesyncd.service | grep -q oxidized-systemd")
 
     # ...and the rust Type=notify daemon reached active (it signaled READY=1),
     # proving a long-running rust daemon works under the C manager.

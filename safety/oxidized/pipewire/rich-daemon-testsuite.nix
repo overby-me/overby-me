@@ -6,9 +6,9 @@
   tool,
   name,
 }:
-pkgs.runCommand "rust-pipewire-rich-daemon-test-${tool}-${name}" {
+pkgs.runCommand "oxidized-pipewire-rich-daemon-test-${tool}-${name}" {
   nativeBuildInputs = [
-    pkgs.rust-pipewire-dev
+    pkgs.oxidized-pipewire-dev
     pkgs.pipewire
     pkgs.coreutils
     pkgs.diffutils
@@ -112,7 +112,7 @@ pkgs.runCommand "rust-pipewire-rich-daemon-test-${tool}-${name}" {
 
   binName="${tool}"
   export REF="${pkgs.pipewire}/bin/$binName"
-  export RUST="${pkgs.rust-pipewire-dev}/bin/$binName"
+  export RUST="${pkgs.oxidized-pipewire-dev}/bin/$binName"
 
   # Lay the fixture out one directory below helpers.nu, mirroring the
   # repository layout so the fixture's `source ../helpers.nu` resolves.

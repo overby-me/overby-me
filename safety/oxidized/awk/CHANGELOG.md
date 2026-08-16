@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rust-awk.
+All notable changes to oxidized-awk.
 
 ## [Unreleased]
 
@@ -71,7 +71,7 @@ Passes 242/242 of the upstream GNU gawk 5.3.2 BASIC_TESTS. Up from
 
 - `expand_hex_escapes` pre-expands `\xHH` to literal characters before
   bracket-class parsing, so `[^[]\x5b` becomes `[^[][` — an
-  unbalanced class that gawk (and now rust-awk) rejects at compile
+  unbalanced class that gawk (and now oxidized-awk) rejects at compile
   (regexpbad).
 - Octal escape `\ddd` (1–3 octal digits) converts to `\x{HEX}` so
   Rust's regex crate accepts it (`[\300-\337]` works — range2).

@@ -1,11 +1,11 @@
-# Run a single test from the official curl test suite against rust-curl.
+# Run a single test from the official curl test suite against oxidized-curl.
 #
 # Uses curl's runtests.pl with the -c flag to test an alternate binary.
 # The C curl project is built first to provide the test servers and
-# infrastructure, then runtests.pl runs the specified test against rust-curl.
+# infrastructure, then runtests.pl runs the specified test against oxidized-curl.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-curl-test-{num}
-# Example:  nix build .#checks.x86_64-linux.rust-curl-test-1
+# Run with: nix build .#checks.x86_64-linux.oxidized-curl-test-{num}
+# Example:  nix build .#checks.x86_64-linux.oxidized-curl-test-1
 {
   pkgs,
   testNum,
@@ -78,9 +78,9 @@
     dontStrip = true;
   };
 in
-  pkgs.runCommand "rust-curl-test-${testNumStr}" {
+  pkgs.runCommand "oxidized-curl-test-${testNumStr}" {
     nativeBuildInputs = [
-      pkgs.rust-curl-dev
+      pkgs.oxidized-curl-dev
       pkgs.perl
       pkgs.coreutils
       pkgs.diffutils
@@ -110,10 +110,10 @@ in
 
     echo "Running curl test: ${testNumStr}"
 
-    # Run the test with rust-curl as the binary under test
+    # Run the test with oxidized-curl as the binary under test
     # -n = no valgrind
     perl ./runtests.pl \
-      -c "${pkgs.rust-curl-dev}/bin/curl" \
+      -c "${pkgs.oxidized-curl-dev}/bin/curl" \
       -n \
       ${testNumStr} \
       > "$TMPDIR/output" 2>&1 || {

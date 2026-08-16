@@ -240,7 +240,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
 
         # A published repo's README should be titled after the project, not
         # after the directory it used to live in: nineteen still said
-        # rust-awk after the rename, which is the first line a visitor reads.
+        # oxidized-awk after the rename, which is the first line a visitor reads.
         # The heading is prose (Oxidized Systemd), the repo name is the
         # identifier (oxidized-systemd); both are derived from the same name
         # so they cannot disagree.

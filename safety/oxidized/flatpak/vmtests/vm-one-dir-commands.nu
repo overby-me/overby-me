@@ -5,7 +5,7 @@ source ./libtest-nix.nu
 for cmd in [config override remote-add repair] {
     let r = (do { ^$env.FLATPAK $cmd --system --user } | complete)
     let rc = $r.exit_code
-    # rust-flatpak may not enforce this yet, just check it doesn't crash
+    # oxidized-flatpak may not enforce this yet, just check it doesn't crash
     if ($rc == 139) or ($rc == 134) or ($rc == 136) {
         print $"FAIL: ($cmd) --system --user crashed"
         exit 1

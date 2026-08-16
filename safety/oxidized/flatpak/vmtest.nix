@@ -1,22 +1,22 @@
 # Run a single flatpak integration test inside a NixOS VM.
 #
-# Boots a NixOS VM with bubblewrap, D-Bus, and rust-flatpak installed,
+# Boots a NixOS VM with bubblewrap, D-Bus, and oxidized-flatpak installed,
 # copies the test scripts in, and runs the specified test as a regular user.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-flatpak-vm-{name}
-# Example:  nix build .#checks.x86_64-linux.rust-flatpak-vm-run-hello
+# Run with: nix build .#checks.x86_64-linux.oxidized-flatpak-vm-{name}
+# Example:  nix build .#checks.x86_64-linux.oxidized-flatpak-vm-run-hello
 {
   pkgs,
   name,
   testTimeout ? 600,
 }:
 pkgs.testers.nixosTest {
-  name = "rust-flatpak-vm-${name}";
+  name = "oxidized-flatpak-vm-${name}";
 
   nodes.machine = {pkgs, ...}: {
     environment = {
       systemPackages = [
-        pkgs.rust-flatpak-dev
+        pkgs.oxidized-flatpak-dev
         pkgs.bubblewrap
         pkgs.xdg-dbus-proxy
         pkgs.coreutils
@@ -84,7 +84,7 @@ pkgs.testers.nixosTest {
     # Run the test as testuser with full output capture
     (rc, output) = machine.execute(
         "su - testuser -c '"
-        "export FLATPAK=${pkgs.rust-flatpak-dev}/bin/flatpak; "
+        "export FLATPAK=${pkgs.oxidized-flatpak-dev}/bin/flatpak; "
         "export WORK=/tmp/flatpak-vmtest; "
         "export HOME=/home/testuser; "
         "cd /tmp/flatpak-vmtest/vmtests && "

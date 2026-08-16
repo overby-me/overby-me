@@ -1,16 +1,16 @@
-# NixOS VM integration test for rust-nixos.
+# NixOS VM integration test for oxidized-nixos.
 #
-# Boots a NixOS VM using rust-systemd as PID 1 and verifies that the system
+# Boots a NixOS VM using oxidized-systemd as PID 1 and verifies that the system
 # reaches multi-user.target with core services running.
 #
-# Run with: nix build .#checks.x86_64-linux.rust-nixos-boot
+# Run with: nix build .#checks.x86_64-linux.oxidized-nixos-boot
 {pkgs}: let
-  rustSystemdPackage = pkgs.rust-systemd-systemd.override {
-    inherit (pkgs) rust-systemd;
+  rustSystemdPackage = pkgs.oxidized-systemd-systemd.override {
+    inherit (pkgs) oxidized-systemd;
   };
 in
   pkgs.testers.nixosTest {
-    name = "rust-nixos-boot";
+    name = "oxidized-nixos-boot";
 
     nodes.machine = {
       config,
@@ -18,7 +18,7 @@ in
       pkgs,
       ...
     }: let
-      udevRulesOverride = pkgs.runCommand "rust-systemd-udev-rules-override" {} ''
+      udevRulesOverride = pkgs.runCommand "oxidized-systemd-udev-rules-override" {} ''
         mkdir -p $out/lib/udev/rules.d
         for rule in ${config.systemd.package}/lib/udev/rules.d/*.rules; do
           if grep -q 'systemctl' "$rule"; then
@@ -31,7 +31,7 @@ in
 
       system.stateVersion = "25.11";
 
-      # Use rust-systemd as the systemd package
+      # Use oxidized-systemd as the systemd package
       systemd.package = rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
 

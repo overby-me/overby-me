@@ -45,7 +45,7 @@ background process that keeps serving the data to pasting clients (exactly like
 ## Building
 
 ```sh
-nix build .#rust-wclip
+nix build .#wclip
 ./result/bin/wclip -help
 ```
 
@@ -108,16 +108,16 @@ serve a focus-less client, which is the same limitation `wl-clipboard` has.
 
 The protocol logic is covered by roundtrip tests that drive the real client
 against an in-process mock compositor over a `socketpair` (no display needed);
-they run automatically during `nix build .#rust-wclip` and via `cargo test`.
+they run automatically during `nix build .#wclip` and via `cargo test`.
 
 Additional command-line behaviour is checked in the Nix sandbox:
 
 ```sh
 # Run a single test
-nix build .#checks.x86_64-linux.rust-wclip-test-{name}
+nix build .#checks.x86_64-linux.wclip-test-{name}
 
 # View failure output
-nix log .#checks.x86_64-linux.rust-wclip-test-{name}
+nix log .#checks.x86_64-linux.wclip-test-{name}
 ```
 
 See `default.nix` for the full list of test names.

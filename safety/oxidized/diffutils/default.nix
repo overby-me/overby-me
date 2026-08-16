@@ -1,5 +1,5 @@
 {
-  packages.rust-diffutils = {lib, ...}:
+  packages.oxidized-diffutils = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-diffutils";
 
