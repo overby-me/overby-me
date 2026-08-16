@@ -24,6 +24,7 @@
 //! explain their derivations. Each looks itself up through [`candidates`],
 //! which [`reduce`] owns so that regenerating a table cannot take it away.
 
+pub mod arity;
 pub mod attributes;
 pub mod declared;
 pub mod mangle;

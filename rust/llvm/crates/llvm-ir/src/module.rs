@@ -32,14 +32,20 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// The order the functions print in, when it is not the order they were
     /// built in. Empty means the arena order, which is what a module read
-    /// straight through has.
+    /// straight through has. A function this names none of is one that does
+    /// not print at all.
     ///
-    /// Only one thing moves a function: upstream does not rename an intrinsic
+    /// Two things put an entry here. Upstream does not rename an intrinsic
     /// declaration in place, it builds a new function and erases the old, so
     /// a declaration whose name gained the types it was instantiated at
-    /// prints after everything the module wrote. Moving it in the arena would
-    /// move its id, which every constant naming it holds, so the order is
-    /// recorded here instead.
+    /// prints after everything the module wrote. And a module writing two
+    /// spellings of one intrinsic has two declarations where upstream has one
+    /// function, so the second is left out of the order once its calls have
+    /// been pointed at the first.
+    ///
+    /// Both are recorded here rather than performed on the arena, because
+    /// moving or removing a function would move its id, which every constant
+    /// naming it holds.
     pub function_order: Vec<FunctionId>,
     /// `attributes #0 = { ... }`, kept with its number so that references to
     /// it print unchanged.
@@ -85,12 +91,11 @@ impl Module {
 
     /// The functions in the order they print, as indexes into the arena.
     ///
-    /// A recorded order that does not name every function is ignored rather
-    /// than trusted: printing a module with one of its functions missing
-    /// would be a worse failure than printing them in the order they were
-    /// built.
+    /// No recorded order means the order they were built in. A recorded one
+    /// says what prints as well as in what order, so a function it leaves out
+    /// is one upstream merged away and does not write back.
     pub fn function_print_order(&self) -> Vec<usize> {
-        if self.function_order.len() != self.functions.len() {
+        if self.function_order.is_empty() {
             return (0..self.functions.len()).collect();
         }
         self.function_order

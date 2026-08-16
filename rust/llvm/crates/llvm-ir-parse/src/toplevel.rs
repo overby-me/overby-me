@@ -853,6 +853,7 @@ impl Parser {
             .map(|function| function.name.clone())
             .collect();
         let mut moved = Vec::new();
+        let mut merged = Vec::new();
         for index in 0..self.module.functions.len() {
             let Some(canonical) = self.canonical_intrinsic_name(index) else {
                 continue;
@@ -861,11 +862,11 @@ impl Parser {
             if canonical == self.module.functions[index].name {
                 continue;
             }
-            // A module that writes both spellings has two functions where
-            // upstream would have merged them, and renaming one onto the
-            // other would leave two functions with one name. Leaving the
-            // written name is the smaller difference.
+            // A module that writes both spellings has two declarations where
+            // upstream has one function, so the second is merged into the
+            // first rather than renamed onto it.
             if taken.contains(&canonical) {
+                merged.push((index, canonical));
                 continue;
             }
             taken.remove(&self.module.functions[index].name);
@@ -873,15 +874,326 @@ impl Parser {
             self.module.functions[index].name = canonical;
             moved.push(llvm_ir::value::FunctionId(index as u32));
         }
-        if moved.is_empty() {
+        for (index, canonical) in &merged {
+            self.merge_intrinsic_declaration(*index, canonical);
+        }
+        if moved.is_empty() && merged.is_empty() {
             return;
         }
-        let mut order: Vec<llvm_ir::value::FunctionId> = (0..self.module.functions.len())
+        let dropped: Vec<llvm_ir::value::FunctionId> = merged
+            .iter()
+            .map(|(index, _)| llvm_ir::value::FunctionId(*index as u32))
+            .collect();
+        let mut order: Vec<llvm_ir::value::FunctionId> = self
+            .module
+            .function_print_order()
+            .into_iter()
             .map(|index| llvm_ir::value::FunctionId(index as u32))
-            .filter(|id| !moved.contains(id))
+            .filter(|id| !moved.contains(id) && !dropped.contains(id))
             .collect();
         order.extend(moved);
         self.module.function_order = order;
+    }
+
+    /// Gives a call written before its intrinsic gained a parameter the
+    /// argument upstream gives it, and drops the intrinsics upstream drops.
+    ///
+    /// `declare i8 @llvm.ctlz.i8(i8)` is the spelling from before that
+    /// intrinsic took a second argument, and upstream reads it as the current
+    /// one: the declaration gains the parameter and every call gains an
+    /// `i1 false`. `llvm.stackprotectorcheck` goes the other way and is
+    /// removed, call and declaration together.
+    ///
+    /// `crates/llvm-ir/src/intrinsic/arity.rs` is the table and
+    /// `corpus/intrinsic-arity.nu` explains how it was measured. This runs
+    /// before the renaming, because the mangling table is keyed on an
+    /// intrinsic's current arity and would leave a declaration at the older
+    /// one alone.
+    pub(crate) fn upgrade_intrinsic_arity(&mut self) {
+        let mut dropped = Vec::new();
+        let mut moved = Vec::new();
+        for index in 0..self.module.functions.len() {
+            let function = &self.module.functions[index];
+            if function.blocks().next().is_some() {
+                continue;
+            }
+            let Name::Named(name) = function.name.clone() else {
+                continue;
+            };
+            if llvm_ir::intrinsic::arity::is_dropped(&name) {
+                dropped.push(llvm_ir::value::FunctionId(index as u32));
+                continue;
+            }
+            let Some(added) = llvm_ir::intrinsic::arity::upgrade(&name, function.params.len())
+            else {
+                continue;
+            };
+            let mut arguments = Vec::with_capacity(added.len());
+            for text in added {
+                // A row whose value this cannot build leaves the declaration
+                // as it was, which is the same answer as having no row.
+                let Some(argument) = self.appended_argument(text) else {
+                    arguments.clear();
+                    break;
+                };
+                arguments.push(argument);
+            }
+            if arguments.is_empty() {
+                continue;
+            }
+            for (ty, _) in &arguments {
+                self.module.functions[index]
+                    .params
+                    .push(llvm_ir::function::Param {
+                        ty: *ty,
+                        attrs: llvm_ir::attribute::AttributeSet::default(),
+                        name: None,
+                    });
+            }
+            self.append_call_arguments(llvm_ir::value::FunctionId(index as u32), &arguments);
+            moved.push(llvm_ir::value::FunctionId(index as u32));
+        }
+        for id in &dropped {
+            self.drop_calls_to(*id);
+        }
+        if dropped.is_empty() && moved.is_empty() {
+            return;
+        }
+        // Upstream rebuilds a declaration it upgrades rather than editing it,
+        // so it prints after everything the module wrote, the way a renamed
+        // one does. One it drops prints nowhere at all.
+        let mut order: Vec<llvm_ir::value::FunctionId> = self
+            .module
+            .function_print_order()
+            .into_iter()
+            .map(|index| llvm_ir::value::FunctionId(index as u32))
+            .filter(|id| !dropped.contains(id) && !moved.contains(id))
+            .collect();
+        order.extend(moved);
+        self.module.function_order = order;
+    }
+
+    /// One argument upstream appends, read out of the table's own text.
+    ///
+    /// The shapes measured are an integer and a token, which is every value
+    /// upstream synthesises: `i1 false`, `i1 0`, `i32 0`, `token none`.
+    fn appended_argument(&mut self, text: &str) -> Option<(llvm_ir::TypeId, Value)> {
+        let (spelling, value) = text.split_once(' ')?;
+        if spelling == "token" && value == "none" {
+            let ty = self.module.ctx.token_type();
+            let constant = self.module.ctx.intern_constant(Constant::NoneToken(ty));
+            return Some((ty, Value::Constant(constant)));
+        }
+        let bits: u32 = spelling.strip_prefix('i')?.parse().ok()?;
+        let number: u64 = match value {
+            "false" => 0,
+            "true" => 1,
+            other => other.parse().ok()?,
+        };
+        let ty = self.module.ctx.int_type(bits);
+        let constant = self.module.ctx.intern_constant(Constant::Integer {
+            ty,
+            value: llvm_support::ApInt::from_u64(bits, number),
+        });
+        Some((ty, Value::Constant(constant)))
+    }
+
+    /// Appends the arguments to every call of one function.
+    fn append_call_arguments(
+        &mut self,
+        callee: llvm_ir::value::FunctionId,
+        arguments: &[(llvm_ir::TypeId, Value)],
+    ) {
+        // The call carries the callee's function type as well as its
+        // arguments, and a call whose two disagree is one nothing reads.
+        let mut types: Vec<(llvm_ir::TypeId, llvm_ir::TypeId)> = Vec::new();
+        for index in 0..self.module.functions.len() {
+            let blocks: Vec<llvm_ir::BlockId> = self.module.functions[index]
+                .blocks()
+                .map(|(id, _)| id)
+                .collect();
+            for block in blocks {
+                let instructions = self.module.functions[index]
+                    .block(block)
+                    .instructions
+                    .clone();
+                for id in instructions {
+                    if self.callee_pointer_type(index, id, callee).is_none() {
+                        continue;
+                    }
+                    let written = match &self.module.functions[index].instruction(id).kind {
+                        llvm_ir::instruction::InstKind::Call(call)
+                        | llvm_ir::instruction::InstKind::Invoke { call, .. }
+                        | llvm_ir::instruction::InstKind::CallBr { call, .. } => call.function_type,
+                        _ => continue,
+                    };
+                    if types.iter().any(|(from, _)| *from == written) {
+                        continue;
+                    }
+                    let TypeKind::Function {
+                        result,
+                        params,
+                        is_var_arg,
+                    } = self.module.ctx.type_kind(written).clone()
+                    else {
+                        continue;
+                    };
+                    let mut params = params;
+                    params.extend(arguments.iter().map(|(ty, _)| *ty));
+                    let widened = self.module.ctx.function_type(result, params, is_var_arg);
+                    types.push((written, widened));
+                }
+            }
+        }
+        self.rewrite_calls_to(callee, &mut |call| {
+            if let Some((_, widened)) = types.iter().find(|(from, _)| *from == call.function_type) {
+                call.function_type = *widened;
+            }
+            for (ty, value) in arguments {
+                call.args.push(llvm_ir::instruction::CallArg {
+                    ty: *ty,
+                    attrs: llvm_ir::attribute::AttributeSet::default(),
+                    value: *value,
+                });
+            }
+        });
+    }
+
+    /// Removes every call to one function, which is what upstream does with
+    /// an intrinsic it no longer has. Only a call returning nothing is ever
+    /// removed, so there is no result left with nothing to read.
+    fn drop_calls_to(&mut self, callee: llvm_ir::value::FunctionId) {
+        for index in 0..self.module.functions.len() {
+            let blocks: Vec<llvm_ir::BlockId> = self.module.functions[index]
+                .blocks()
+                .map(|(id, _)| id)
+                .collect();
+            for block in blocks {
+                let instructions = self.module.functions[index]
+                    .block(block)
+                    .instructions
+                    .clone();
+                let kept: Vec<llvm_ir::InstId> = instructions
+                    .iter()
+                    .filter(|id| self.callee_pointer_type(index, **id, callee).is_none())
+                    .copied()
+                    .collect();
+                if kept.len() != instructions.len() {
+                    self.module.functions[index].block_mut(block).instructions = kept;
+                }
+            }
+        }
+    }
+
+    /// Runs a change over every call to one function.
+    fn rewrite_calls_to(
+        &mut self,
+        callee: llvm_ir::value::FunctionId,
+        change: &mut dyn FnMut(&mut llvm_ir::instruction::CallData),
+    ) {
+        for index in 0..self.module.functions.len() {
+            let blocks: Vec<llvm_ir::BlockId> = self.module.functions[index]
+                .blocks()
+                .map(|(id, _)| id)
+                .collect();
+            for block in blocks {
+                let instructions = self.module.functions[index]
+                    .block(block)
+                    .instructions
+                    .clone();
+                for id in instructions {
+                    if self.callee_pointer_type(index, id, callee).is_none() {
+                        continue;
+                    }
+                    let instruction = self.module.functions[index].instruction_mut(id);
+                    match &mut instruction.kind {
+                        llvm_ir::instruction::InstKind::Call(call)
+                        | llvm_ir::instruction::InstKind::Invoke { call, .. }
+                        | llvm_ir::instruction::InstKind::CallBr { call, .. } => change(call),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Points every call to one spelling of an intrinsic at the function the
+    /// other spelling made.
+    ///
+    /// Upstream builds one function per name, so a module declaring both
+    /// `@llvm.aarch64.thread.pointer` and `@llvm.arm.thread.pointer` comes
+    /// back with a single `@llvm.thread.pointer.p0` that both call sites
+    /// name. Only calls are redirected, which is all there is: an intrinsic's
+    /// address may not be taken, so nothing else can hold one.
+    ///
+    /// The merged declaration stays in the arena and is left out of the print
+    /// order. Removing the function would move every id after it, and an id
+    /// is what a constant naming one holds.
+    fn merge_intrinsic_declaration(&mut self, from: usize, canonical: &Name) {
+        let Some(to) = self
+            .module
+            .functions
+            .iter()
+            .position(|function| function.name == *canonical)
+        else {
+            return;
+        };
+        let from = llvm_ir::value::FunctionId(from as u32);
+        let to = llvm_ir::value::FunctionId(to as u32);
+        for index in 0..self.module.functions.len() {
+            let blocks: Vec<llvm_ir::BlockId> = self.module.functions[index]
+                .blocks()
+                .map(|(id, _)| id)
+                .collect();
+            for block in blocks {
+                let instructions = self.module.functions[index]
+                    .block(block)
+                    .instructions
+                    .clone();
+                for id in instructions {
+                    let Some(ty) = self.callee_pointer_type(index, id, from) else {
+                        continue;
+                    };
+                    let constant = self.module.ctx.intern_constant(Constant::Global {
+                        target: GlobalRef::Function(to),
+                        ty,
+                    });
+                    let instruction = self.module.functions[index].instruction_mut(id);
+                    match &mut instruction.kind {
+                        llvm_ir::instruction::InstKind::Call(call)
+                        | llvm_ir::instruction::InstKind::Invoke { call, .. }
+                        | llvm_ir::instruction::InstKind::CallBr { call, .. } => {
+                            call.callee = Value::Constant(constant);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// The type of the constant a call names its callee through, when that
+    /// callee is this function and nothing else.
+    fn callee_pointer_type(
+        &self,
+        index: usize,
+        id: llvm_ir::InstId,
+        callee: llvm_ir::value::FunctionId,
+    ) -> Option<llvm_ir::TypeId> {
+        let instruction = self.module.functions[index].instruction(id);
+        let call = match &instruction.kind {
+            llvm_ir::instruction::InstKind::Call(call)
+            | llvm_ir::instruction::InstKind::Invoke { call, .. }
+            | llvm_ir::instruction::InstKind::CallBr { call, .. } => call,
+            _ => return None,
+        };
+        let Value::Constant(constant) = call.callee else {
+            return None;
+        };
+        let Constant::Global { target, ty } = self.module.ctx.constant(constant) else {
+            return None;
+        };
+        (*target == GlobalRef::Function(callee)).then_some(*ty)
     }
 
     /// Reads the calls upstream reads as an instruction rather than as a

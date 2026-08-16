@@ -41,7 +41,18 @@ pub(crate) fn reachable_named_structs(module: &Module) -> Vec<StructId> {
         walk.ty(ifunc.value_type);
         walk.constant(ifunc.resolver);
     }
-    for function in &module.functions {
+    // In the order they print rather than the order they were read, and
+    // without the ones that do not print at all: upstream walks the module it
+    // is about to write, so a declaration it erased in an upgrade takes its
+    // types with it, and one it moved to the end meets them later.
+    //
+    // Measured on a module declaring `%late @llvm.ssa.copy(%late)` above a
+    // function taking `%early`: upstream writes `%early` first, the renamed
+    // declaration having moved past it. Nothing here reaches that yet, a
+    // named struct being a mangling this does not build, so no file moves;
+    // the walk is what upstream does either way.
+    for index in module.function_print_order() {
+        let function = &module.functions[index];
         walk.ty(function.return_type);
         walk.attributes(&function.return_attrs);
         for param in &function.params {

@@ -2350,6 +2350,67 @@ was recorded as unmeasurable because `llvm-as` aborts on `!prof` and
 every other kind, and a crash is not a verdict either way, so the rule is
 written for all of them.
 Assembler 481 to 482 and Verifier 323 to 325.
+The pass after it took the two declarations that resolve to one name, which
+the renaming pass had recorded as deliberate rather than closed. Upstream
+builds one function per name, so a module declaring both
+`@llvm.aarch64.thread.pointer` and `@llvm.arm.thread.pointer` comes back with
+a single `@llvm.thread.pointer.p0` and two call sites naming it. The second
+declaration is merged rather than renamed onto the first: its calls are
+pointed at the survivor and it is left out of the print order. Only calls are
+redirected, which is all there is, an intrinsic's address not being something
+a module may take.
+Leaving it out of the order is what took the model change. `function_order`
+had been "the order the functions print in" with a guard treating any order
+shorter than the arena as no order at all, so a dropped function silently
+fell back to printing everything. It is what prints as well as in what order
+now, which is the same thing the four debug-info intrinsics have needed since
+the fiftieth pass and got a name test instead.
+The type finder went with it, walking the print order rather than the arena:
+upstream walks the module it is about to write, so a declaration it erased
+takes its types with it and one it moved to the end meets them later.
+Measured on a module declaring `%late @llvm.ssa.copy(%late)` above a function
+taking `%early`, where upstream writes `%early` first. Nothing reaches that
+yet, a named struct being a mangling this does not build, so no file moves.
+Assembler differential 213 to 214.
+The other half of that task was the argument count, and it took four probe
+designs to measure. An intrinsic that has gained a parameter since a module
+was written is read through an upgrade rather than refused: `declare i8
+@llvm.ctlz.i8(i8)` comes back with an `i1 immarg` and every call to it with
+an `i1 false`. `corpus/intrinsic-arity.nu` writes each `declare` line
+upstream's own tests hold, calls it with what it says it takes, and reads
+back what upstream made of the call, which needs no guess about which
+arities ever existed: the old spellings live in those tests because that is
+what they test.
+What the four designs were is the useful part. Calling with constants makes
+a synthesised argument indistinguishable from one upstream folded out of
+what was passed, so `llvm.x86.avx512.mask.load.d` read as gaining a
+passthrough it had actually computed; calling with the probe function's own
+parameters tells them apart, because anything worked out of them comes back
+mentioning one. It also tells a drop from an expansion: an intrinsic
+upstream rewrites into other instructions leaves them behind, where the same
+call on constants folds to nothing and reads exactly like a call upstream
+removed. A drop is only recorded for an intrinsic returning nothing, because
+a call that folded to a constant leaves no instruction either and removing
+that would leave whatever read the result with nothing to read. And the
+arguments written have to have survived in order: `llvm.nvvm.rotate.b64`
+comes back as an `llvm.fshl.i64` whose operands upstream worked out, which
+reads as the same call with an argument appended unless they are checked.
+Ninety-two declarations upstream reads at an older arity, six it drops
+outright, six hundred and thirty-eight it rewrites into other instructions,
+which is a transformation rather than a table and is reported rather than
+guessed at. The name is recorded as written and both sides are reduced by
+the measured grammar at lookup: reducing in the sweep with a loose rule
+turned `llvm.aarch64.sve.ld2.sret.nxv16i8` into `llvm.aarch64.sve`, which as
+a key answers for every intrinsic that target has.
+A call carries the callee's function type as well as its arguments, and
+widening one without the other is a call nothing reads; the fixture table
+caught that, which is what it is for.
+No ratchet moves. `auto_upgrade_intrinsics.ll` is down from forty differing
+lines to ten, and the ten are one thing: upstream finds an intrinsic by the
+longest known prefix of the name, so `llvm.objectsize.i32.unnamed` is
+`llvm.objectsize` with the rest ignored, where the reduction here stops at
+the first component that is not a mangled type. That is the same reduction
+question a named struct raises and is recorded with it.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and

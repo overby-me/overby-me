@@ -59,6 +59,8 @@ and each row names the check that backs it.
 | One written intrinsic name implying a declaration per instantiation it is called at | done | `llvm-upstream-assembler`, `llvm-roundtrip` |
 | A call read as an instruction rather than as a call | done for the four `llvm.nvvm.atomic.load.*` upstream's tests exercise | `llvm-upstream-assembler`, `llvm-roundtrip` |
 | `!DIExpression` opcodes held as numbers, checked against what upstream reads, and written back as the words it writes | done for the 103 operations it reads, out of the 189 codes it has a word for | `llvm-upstream-verifier`, `llvm-upstream-assembler`, `llvm-roundtrip` |
+| Two spellings of one intrinsic merged into the function upstream keeps | done | `llvm-opt-differential` |
+| A call written before its intrinsic gained a parameter given the argument upstream gives it | done for the 92 declarations upstream's tests write at an older arity, and the 6 it drops outright | `llvm-verify-corpus`, `llvm-opt-differential` |
 
 ## The round trip
 
@@ -256,6 +258,16 @@ Two derivations feed the metadata schema, both measured against upstream
 rather than reasoned about: `corpus/md-required-fields.nu` says which fields
 a node cannot be written without, and `corpus/md-field-defaults.nu` says
 which are dropped when written at their default.
+
+`corpus/intrinsic-arity.nu` asks what upstream makes of a declaration written
+at an older arity, which is the seventh reading of the same `declare` lines:
+the call is given the probe function's own parameters rather than constants,
+because an argument upstream works out of a constant is indistinguishable
+from one it synthesises, and because a call on constants folds away and reads
+exactly like one upstream removed. 92 declarations it reads at an older
+arity, 6 it drops outright, and 638 it rewrites into other instructions,
+which is a transformation rather than a table and is reported rather than
+guessed at.
 
 `corpus/dwarf-expression.nu` does the same for what a `!DIExpression` holds,
 and it asks two kinds of question. Validity is the exit code of

@@ -1018,19 +1018,41 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
-/// A module that writes both spellings keeps both: upstream would have had
-/// one function where this has two, and renaming one onto the other would
-/// leave two functions sharing a name, which is worse.
+/// A module that writes both spellings of one intrinsic comes back with one
+/// function, both call sites naming it.
+///
+/// Upstream builds a function per name, so the second spelling finds the one
+/// the first made rather than making another. Both shapes here are what
+/// `opt -S` printed for the same module: the declaration alone, and the
+/// declaration with a call to each spelling.
 #[test]
-fn a_name_already_taken_is_not_renamed_onto() {
+fn two_spellings_of_one_intrinsic_come_back_as_one() {
     let text = "declare ptr @llvm.stacksave()\ndeclare ptr @llvm.stacksave.p0()\n";
     let module =
         llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
     let printed = llvm_ir_print::print_module(&module);
     assert!(
-        printed.contains("declare ptr @llvm.stacksave()")
-            && printed.contains("declare ptr @llvm.stacksave.p0()"),
-        "both should still be there\n--- printed ---\n{printed}"
+        printed.contains("declare ptr @llvm.stacksave.p0()")
+            && !printed.contains("declare ptr @llvm.stacksave()"),
+        "one declaration, under the canonical name\n--- printed ---\n{printed}"
+    );
+
+    let called = concat!(
+        "declare ptr @llvm.stacksave()\n",
+        "declare ptr @llvm.stacksave.p0()\n",
+        "define void @f() {\n",
+        "  %a = call ptr @llvm.stacksave()\n",
+        "  %b = call ptr @llvm.stacksave.p0()\n",
+        "  ret void\n",
+        "}\n",
+    );
+    let module = llvm_ir_parse::parse_module(called)
+        .unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert_eq!(
+        printed.matches("call ptr @llvm.stacksave.p0()").count(),
+        2,
+        "both calls name the surviving function\n--- printed ---\n{printed}"
     );
 }
 

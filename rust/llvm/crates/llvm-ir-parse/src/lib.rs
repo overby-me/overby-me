@@ -97,6 +97,10 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         );
     }
     parser.add_implied_intrinsics();
+    // Before the renaming: the mangling table is keyed on an intrinsic's
+    // current arity, so a declaration still at the older one has to gain its
+    // parameter before its name can be worked out.
+    parser.upgrade_intrinsic_arity();
     // After the declarations the calls implied, so that a name a call wrote
     // without its components is filled in the same way one a declaration
     // wrote is.
