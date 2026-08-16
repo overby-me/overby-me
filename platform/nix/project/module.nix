@@ -31,6 +31,16 @@ in {
       '';
     };
 
+    description = mkOption {
+      type = types.str;
+      default = "";
+      description = ''
+        One line about the project, becoming the package's meta.description.
+        Stated here rather than alongside it as a flakelight option, so a
+        published flake states everything it has to say in one attribute set.
+      '';
+    };
+
     root = mkOption {
       type = types.path;
       description = "The repo root, so the module can read its Cargo.toml.";
@@ -113,6 +123,7 @@ in {
     systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
     pname = cfg.name;
     formatter = pkgs: pkgs.alejandra;
+    description = lib.mkIf (cfg.description != "") cfg.description;
 
     # flakelight turns this into packages.default, a check and an overlay, so
     # `nix flake check` builds it and a published repo's CI needs nothing

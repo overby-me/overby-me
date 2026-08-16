@@ -27,12 +27,34 @@
     };
   };
 
-  outputs = inputs:
+  outputs = inputs: let
+    module = import ./module.nix {gitHooks = inputs.git-hooks;};
+  in
     inputs.flakelight ./. {
       inherit inputs;
       systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
 
-      flakelightModule = import ./module.nix {gitHooks = inputs.git-hooks;};
+      flakelightModule = module;
+
+      # Callable, so a published repo's whole flake is one call rather than a
+      # copy of the same three inputs, the same import and the same follows.
+      # The inputs closed over here are this flake's own, which is what makes
+      # nixpkgs identical across every published repo by construction: there
+      # is one lock to pin it in, not thirty-eight to keep in step.
+      #
+      #   outputs = inputs: inputs.project ./. { name = "oxidized-sed"; ... };
+      #
+      # Everything in that set is a `project` option, except withOverlays,
+      # which a project needing an overlay of its own passes through: the
+      # overlay's flake has to be its input, not ours, or every repo would
+      # fetch it.
+      functor = _: root: cfg:
+        inputs.flakelight root {
+          inherit inputs;
+          imports = [module];
+          project = (removeAttrs cfg ["withOverlays"]) // {inherit root;};
+          withOverlays = cfg.withOverlays or [];
+        };
 
       formatter = pkgs: pkgs.alejandra;
     };
