@@ -123,3 +123,16 @@
 - **To update a config:** edit the source file in `devshell/modules/configs/`, then run `touch .envrc && direnv export json` to regenerate and re-copy the root copies. All root copies are overwritten on each shell entry from their (possibly Nix-store) sources, so changes to generated sources (e.g. `.commitlintrc.yml`) require a devshell re-evaluation to refresh the copied result.
 
 - **To update tangled workflows:** edit `.tangled/workflows.ncl`, then the pre-commit hook will regenerate `.tangled/workflows/*.yml` automatically. Contracts are in `nickel/contracts/tangled-workflow/`. Never edit the YAML files directly.
+
+## Rust ports (`rust/`)
+
+- **Read `rust/PORTING.md` before working in any tree under `rust/`.** It is the
+  binding method for every port: oracle first, honest denominators, per-port
+  `docs/TEST-OVERRIDES.md` ledgers, reference-implementation arbitration, declared
+  purity, shipped increments over green counts.
+- **Never weaken, skip, or replace a test without a ledger entry** in that port's
+  `docs/TEST-OVERRIDES.md` stating what was changed and what removing the override
+  would take. A test must never claim a pass it did not earn.
+- **Do not present subset results as totals.** "N/N passing" requires N to be the
+  full upstream suite; otherwise name the subset explicitly (see the denominator
+  audit in `rust/PORTING.md`).

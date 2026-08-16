@@ -7,7 +7,7 @@
 use std::fs;
 use std::io::Read;
 
-use log::trace;
+use log::{trace, warn};
 
 pub(crate) mod bpf_devices;
 mod cgroup1;
@@ -94,6 +94,122 @@ pub fn move_to_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupError
     Ok(())
 }
 
+/// Apply resource controls from `init.scope.d/*.conf` drop-ins to the
+/// `init.scope` cgroup that PID 1 lives in, so `init.scope` can be tuned like
+/// real systemd's (e.g. `MemoryMax=` on the manager scope). Slice A of modeling
+/// init.scope as a configurable unit (task #12), gated on
+/// `SYSTEMD_RS_INIT_SCOPE=1` while the feature is built out. Best-effort: never
+/// fails the boot. The drop-ins are read with a simple KEY=VALUE scan (any
+/// section), which avoids needing a `[Scope]`-section parser that does not yet
+/// exist.
+#[cfg(target_os = "linux")]
+pub fn apply_init_scope_resource_controls(
+    base_path: &std::path::Path,
+    unit_dirs: &[std::path::PathBuf],
+) {
+    if std::env::var("SYSTEMD_RS_INIT_SCOPE").as_deref() != Ok("1") {
+        return;
+    }
+    let Some(v2_root) = detect_v2_root(base_path) else {
+        return;
+    };
+    let init_scope = v2_root.join(INIT_SCOPE_NAME);
+    if !init_scope.exists() {
+        return;
+    }
+
+    // The memory controls slice A supports, each a MemoryLimit written to its
+    // cgroup file. More controls (CPU/tasks/io) follow in later slices.
+    const MEMORY_KEYS: &[&str] = &[
+        "MemoryMin",
+        "MemoryLow",
+        "MemoryHigh",
+        "MemoryMax",
+        "MemorySwapMax",
+    ];
+    const CPU_KEYS: &[&str] = &["CPUWeight", "CPUQuota"];
+
+    // Collect the last value seen per key from init.scope.d/*.conf across the
+    // unit dirs, with later dirs and lexicographically-later files overriding
+    // earlier ones (drop-in precedence).
+    let mut values: std::collections::BTreeMap<&str, String> = std::collections::BTreeMap::new();
+    for dir in unit_dirs {
+        let dropin_dir = dir.join(format!("{INIT_SCOPE_NAME}.d"));
+        let Ok(entries) = std::fs::read_dir(&dropin_dir) else {
+            continue;
+        };
+        let mut confs: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "conf"))
+            .collect();
+        confs.sort();
+        for conf in confs {
+            let Ok(content) = std::fs::read_to_string(&conf) else {
+                continue;
+            };
+            for line in content.lines() {
+                let line = line.trim();
+                for &key in MEMORY_KEYS.iter().chain(CPU_KEYS) {
+                    if let Some(v) = line.strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
+                        values.insert(key, v.trim().to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    let log = |key: &str, val: &str, res: Result<(), CgroupError>| match res {
+        Ok(()) => trace!("init.scope: applied {key}={val}"),
+        Err(e) => warn!("init.scope: failed to apply {key}={val}: {e:?}"),
+    };
+
+    // Memory controls parse to a MemoryLimit.
+    for &key in MEMORY_KEYS {
+        let Some(val) = values.get(key) else { continue };
+        let Ok(Some(limit)) = crate::units::unit_parsing::parse_memory_limit(val) else {
+            warn!("init.scope: ignoring invalid {key}={val}");
+            continue;
+        };
+        let res = match key {
+            "MemoryMin" => cgroup2::set_memory_min(&init_scope, &limit),
+            "MemoryLow" => cgroup2::set_memory_low(&init_scope, &limit),
+            "MemoryHigh" => cgroup2::set_memory_high(&init_scope, &limit),
+            "MemoryMax" => cgroup2::set_memory_max(&init_scope, &limit),
+            "MemorySwapMax" => cgroup2::set_memory_swap_max(&init_scope, &limit),
+            _ => continue,
+        };
+        log(key, val, res);
+    }
+
+    // For cpu controls to exist on init.scope, the cpu controller must be
+    // delegated from the root's subtree_control (init.scope/cpu.* only appear
+    // once the parent enables it). Enable it on demand -- only when a cpu
+    // drop-in is present -- matching systemd's lazy controller enablement. The
+    // root is exempt from the no-internal-processes rule, so this is safe even
+    // with PID 1 and kernel threads at the root. Best-effort.
+    if values.contains_key("CPUWeight") || values.contains_key("CPUQuota") {
+        let subtree = v2_root.join("cgroup.subtree_control");
+        if let Err(e) = std::fs::write(&subtree, "+cpu") {
+            warn!("init.scope: failed to enable the cpu controller at the root: {e}");
+        }
+    }
+
+    // CPUWeight= is a bare weight; CPUQuota= is a percentage (e.g. `50%`).
+    if let Some(val) = values.get("CPUWeight") {
+        match val.parse::<u64>() {
+            Ok(w) => log("CPUWeight", val, cgroup2::set_cpu_weight(&init_scope, w)),
+            Err(_) => warn!("init.scope: ignoring invalid CPUWeight={val}"),
+        }
+    }
+    if let Some(val) = values.get("CPUQuota") {
+        match val.strip_suffix('%').unwrap_or(val).trim().parse::<u64>() {
+            Ok(pct) => log("CPUQuota", val, cgroup2::set_cpu_quota(&init_scope, pct)),
+            Err(_) => warn!("init.scope: ignoring invalid CPUQuota={val}"),
+        }
+    }
+}
+
 pub fn move_out_of_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupError> {
     if let Some(v2_root) = detect_v2_root(base_path) {
         let init_scope = v2_root.join(INIT_SCOPE_NAME);
@@ -132,8 +248,33 @@ pub fn move_out_of_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupE
 /// root (with slice hierarchy), matching real systemd's layout.
 pub fn get_cgroup_root(base_path: &std::path::Path) -> Result<std::path::PathBuf, CgroupError> {
     if let Some(v2_root) = detect_v2_root(base_path) {
-        trace!("Cgroup root: {v2_root:?}");
-        Ok(v2_root)
+        // Root units at THIS manager's own cgroup rather than the mount root.
+        // The manager process lives in <unit-root>/init.scope (PID 1) or
+        // <unit-root>/systemd_rs_self (legacy layout); stripping that trailing
+        // component yields the unit root. For PID 1 the result is empty (the
+        // mount root — unchanged behaviour); a `systemd --user` manager, which
+        // logind places in its delegated /user.slice/…/user@UID.service, resolves
+        // to that subtree so it creates its units there instead of failing to
+        // write the system hierarchy.
+        let rel = std::fs::read_to_string("/proc/self/cgroup")
+            .ok()
+            .and_then(|c| {
+                c.lines()
+                    .find_map(|l| l.strip_prefix("0::").map(str::to_string))
+            })
+            .map(|p| {
+                let mut p = p.trim_start_matches('/').to_string();
+                for suffix in [OWN_CGROUP_NAME, INIT_SCOPE_NAME] {
+                    if let Some(stripped) = p.strip_suffix(suffix) {
+                        p = stripped.trim_end_matches('/').to_string();
+                    }
+                }
+                p
+            })
+            .unwrap_or_default();
+        let root = v2_root.join(&rel);
+        trace!("Cgroup root: {root:?} (v2_root={v2_root:?}, rel={rel:?})");
+        Ok(root)
     } else {
         // Fallback to get_own_freezer for non-v2 systems
         get_own_freezer(base_path)
@@ -338,6 +479,91 @@ pub fn freeze_kill_thaw_cgroup(
 }
 
 pub fn remove_cgroup(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
+    fs::remove_dir(cgroup_path).map_err(|e| CgroupError::IOErr(e, format!("{cgroup_path:?}")))
+}
+
+/// Recursively remove a cgroup directory: remove every descendant cgroup
+/// subdirectory depth-first, then the directory itself. A delegated cgroup can
+/// contain child cgroups created by the (untrusted) payload — a plain
+/// `remove_dir` on the parent then fails with `ENOTEMPTY` and leaks the whole
+/// tree. Child removal is best-effort: a subdirectory that cannot be removed
+/// (still holds processes, or is owned by another user and its own children are
+/// not writable by us) is skipped rather than aborting, so as much of the tree
+/// is reclaimed as possible. Mirrors systemd's cg_trim.
+/// Remove now-empty ancestor cgroups, walking up from `start`.
+///
+/// A service's own cgroup is removed when it exits, but its slice's cgroup used
+/// to be left behind forever: TEST-19-CGROUP.cleanup-slice waits for
+/// `systemd-cgls /test19cleanup.slice` to start failing after the only service
+/// in it stops, and that never happened.
+///
+/// Walks upwards while each ancestor is genuinely empty — no processes in
+/// cgroup.procs and no child cgroup directories — and stops at the first one
+/// that is not, so shared slices like system.slice are never touched while they
+/// still hold anything. Also stops at `root` so it can never escape the cgroup
+/// hierarchy. Errors are ignored: a slice that cannot be pruned is untidy, not
+/// broken.
+pub fn prune_empty_parent_cgroups(start: &std::path::Path, root: &std::path::Path) {
+    let mut cur = start.parent();
+    while let Some(dir) = cur {
+        if dir == root || !dir.starts_with(root) {
+            return;
+        }
+        let procs_empty = fs::read_to_string(dir.join("cgroup.procs"))
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(false);
+        if !procs_empty {
+            return;
+        }
+        let has_children = fs::read_dir(dir)
+            .map(|mut it| it.any(|e| e.map(|e| e.path().is_dir()).unwrap_or(false)))
+            .unwrap_or(true);
+        if has_children {
+            return;
+        }
+        if fs::remove_dir(dir).is_err() {
+            return;
+        }
+        cur = dir.parent();
+    }
+}
+
+/// Collect every pid in `cgroup_path` and, recursively, in its child cgroups.
+///
+/// Used by `systemctl kill --kill-subgroup=`, which signals a whole subtree
+/// rather than a single cgroup level. A missing directory yields no pids
+/// rather than an error: to the caller an absent subgroup and an empty one
+/// mean the same thing.
+pub fn pids_in_cgroup_recursive(cgroup_path: &std::path::Path) -> Vec<i32> {
+    let mut pids = Vec::new();
+    if let Ok(contents) = fs::read_to_string(cgroup_path.join("cgroup.procs")) {
+        pids.extend(contents.lines().filter_map(|l| l.trim().parse::<i32>().ok()));
+    }
+    if let Ok(entries) = fs::read_dir(cgroup_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && !fs::symlink_metadata(&path).map(|m| m.is_symlink()).unwrap_or(true)
+            {
+                pids.extend(pids_in_cgroup_recursive(&path));
+            }
+        }
+    }
+    pids
+}
+
+pub fn remove_cgroup_recursive(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
+    if let Ok(entries) = fs::read_dir(cgroup_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Only real cgroup subdirectories need recursion; the controller
+            // pseudo-files (cgroup.procs, cgroup.subtree_control, ...) are
+            // removed together with the directory itself.
+            if path.is_dir() && !fs::symlink_metadata(&path).map(|m| m.is_symlink()).unwrap_or(true)
+            {
+                let _ = remove_cgroup_recursive(&path);
+            }
+        }
+    }
     fs::remove_dir(cgroup_path).map_err(|e| CgroupError::IOErr(e, format!("{cgroup_path:?}")))
 }
 

@@ -13,6 +13,43 @@
   testEnv ? {},
   testTimeout ? 1800,
   useUpstreamSystemd ? false,
+  # Attach a software TPM (swtpm -> /dev/tpmrm0) to the VM. Needed by TEST-70-TPM2,
+  # whose systemd-tpm2-setup/tpm2 tooling requires a TPM2 device.
+  enableTpm ? false,
+  # Start the VM with allow_reboot=True so a guest `systemctl reboot` restarts
+  # the VM (QEMU resets + re-runs the same kernel) instead of the default
+  # -no-reboot behaviour (guest reboot terminates QEMU). Needed by reboot tests
+  # (TEST-09-REBOOT); harmless but undesirable for others (a kernel panic would
+  # loop instead of fast-failing), so it is opt-in per test.
+  allowReboot ? false,
+  # Accept `/skipped` (upstream's exit-77 convention) as a passing outcome.
+  # OFF by default: a skip means zero assertions ran, so it fails the check and
+  # a newly-self-skipping test surfaces as red.  Every test that sets this is
+  # listed in docs/TEST-OVERRIDES.md with what it would take to unset it.
+  expectedSkip ? false,
+  # Extra unit files to link into /usr/lib/systemd/system from the C systemd
+  # package, by basename (e.g. "systemd-oomd.service").  rust-systemd overlays
+  # its binaries onto that package, so the units ship with it but only a small
+  # default set is linked; linking all of them at boot is wasteful.  Tests that
+  # exercise a specific daemon name the units they need here.
+  extraUnits ? [],
+  # Boot the VM through a real bootloader from a disk image (instead of the
+  # default directBoot, which loads the kernel directly and cannot cleanly
+  # re-run the whole boot on reboot). A firmware reboot re-initialises every
+  # device and re-runs the full boot, so the test driver's backdoor console is
+  # re-established exactly like the first boot. Needed by multi-boot reboot
+  # tests; implies allowReboot. Opt-in per test (slower: builds a disk image).
+  useBootLoader ? false,
+  # Boot PID 1 with SYSTEMD_RS_JOB_GRAPH=1 so it takes the increment-4
+  # job-graph activation path (docs/EVENT-LOOP.md) instead of the default
+  # fixpoint sweep. Opt-in per test for A/B comparison while the increment is
+  # developed; removed with the flag when the increment merges. No effect for
+  # useUpstreamSystemd (the env var is rust-systemd-only).
+  jobGraph ? false,
+  # Boot PID 1 with SYSTEMD_RS_INIT_SCOPE=1 so it applies init.scope.d/*.conf
+  # resource controls to its own init.scope cgroup (task #12). Opt-in per test
+  # while the feature is built out. No effect for useUpstreamSystemd.
+  initScope ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -73,6 +110,19 @@ in
           if grep -q 'systemctl' "$rule" \
              || grep -q 'IMPORT{builtin}' "$rule" \
              || [ "$name" = "99-systemd.rules" ]; then
+            # Skip rules that IMPORT{program}= a relative-path helper the
+            # systemd package doesn't ship as a standalone binary — e.g.
+            # 60-tpm2-id.rules calls `tpm2_id`, whose logic now lives only in
+            # the udevadm builtin, not a program file. NixOS's udev-rules
+            # builder rejects such references ("<prog> is called in udev rules
+            # but not installed by udev"), which would fail the whole system
+            # build. NixOS itself ships none of these rules and no integration
+            # test needs them, so drop them here.
+            missing=""
+            for prog in $(sed -nE 's/.*IMPORT\{program\}="([^/$][^ "]*).*/\1/p' "$rule"); do
+              [ -x "${config.systemd.package}/lib/udev/$prog" ] || missing=1
+            done
+            [ -n "$missing" ] && continue
             cp "$rule" "$out/lib/udev/rules.d/$name"
           fi
         done
@@ -80,12 +130,41 @@ in
     in {
       system.stateVersion = "25.11";
 
+      # Boot the traditional bash stage-1 initrd rather than systemd-in-initrd.
+      #
+      # Newer nixpkgs flipped `boot.initrd.systemd.enable` to default true, which
+      # makes the *initramfs* PID 1 be the systemd binary (here rust-systemd).
+      # rust-systemd implements the stage-2 system manager, not the initrd
+      # stage-1 (mount API filesystems, mount /sysroot, switch_root, exec
+      # stage-2), so it cannot yet run as the initrd init. The bash stage-1
+      # initrd mounts the API filesystems and switch_roots into rust-systemd as
+      # the stage-2 manager — the role it is designed for, and the setup these
+      # integration tests exercise. Re-enabling systemd-in-initrd is tracked as
+      # future work once rust-systemd grows an initrd mode.  This is also why
+      # TEST-08-INITRD is expectedSkip: it bails out when
+      # InitRDTimestampMonotonic is 0.
+      boot.initrd.systemd.enable = lib.mkIf (!useUpstreamSystemd) (lib.mkForce false);
+
       # Use rust-systemd as the systemd package (or upstream C systemd for baseline)
       systemd.package =
         if useUpstreamSystemd
         then pkgs.systemd
         else rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
+
+      # Increment-4 A/B: when jobGraph is set, PID 1 is exec'd through a wrapper
+      # that exports SYSTEMD_RS_JOB_GRAPH=1 before handing off to the real
+      # binary at the stage-2 default path (which resolves to systemd.package,
+      # i.e. rust-systemd). The env var survives the exec and rust-systemd's own
+      # re-exec. Left at its default (unset) for every other test, so this is a
+      # no-op unless a test opts in.
+      boot.systemdExecutable = lib.mkIf ((jobGraph || initScope) && !useUpstreamSystemd) (
+        lib.mkForce "${pkgs.writeShellScript "rust-systemd-flags" ''
+          ${lib.optionalString jobGraph "export SYSTEMD_RS_JOB_GRAPH=1"}
+          ${lib.optionalString initScope "export SYSTEMD_RS_INIT_SCOPE=1"}
+          exec /run/current-system/systemd/lib/systemd/systemd "$@"
+        ''}"
+      );
 
       # Replace the upstream bash stage-2-init.sh with a version that
       # strips the racy `exec > >(tee -i /proc/self/fd/"$logOutFd" |
@@ -127,7 +206,12 @@ in
               nixStoreMountOpts = lib.concatStringsSep " " (
                 map lib.escapeShellArg config.boot.nixStoreMountOpts
               );
-              inherit (config.system.nixos) distroName;
+              # Mirror the stage-2 module's own `inherit (config.boot) …
+              # stage2Greeting`. Newer nixpkgs replaced the `@distroName@`
+              # placeholder with a precomputed `@stage2Greeting@`, so passing
+              # distroName now makes the strict replaceVarsWith fail ("pattern
+              # @distroName@ doesn't match anything").
+              inherit (config.boot) stage2Greeting;
               useHostResolvConf =
                 config.networking.resolvconf.enable
                 && config.networking.useHostResolvConf;
@@ -140,6 +224,14 @@ in
             };
           })
         );
+
+      # run0 runs its command with PAMName=systemd-run0, matching upstream, so
+      # logind registers a session for it. The C systemd package ships a
+      # lib/pam.d/systemd-run0 stack but NixOS does not wire it into /etc/pam.d,
+      # and without an /etc/pam.d entry pam_start() fails and no session is
+      # created. startSession pulls pam_systemd.so into the session stack, which
+      # is the module that talks to logind.
+      security.pam.services.systemd-run0.startSession = true;
 
       # sudo-rs
       security.sudo.enable = false;
@@ -183,7 +275,25 @@ in
 
         services = {
           systemd-resolved.serviceConfig.PrivateDevices = lib.mkForce false;
-          systemd-timesyncd.serviceConfig.PrivateDevices = lib.mkForce false;
+          # The rust-systemd package bundles the upstream C systemd-timesyncd
+          # binary but doesn't reimplement it, so NixOS generates an
+          # Environment-only unit with no ExecStart/Type — which rust correctly
+          # parses as a completed oneshot (ActiveState=inactive).  Supply
+          # ExecStart/Type so `timedatectl set-ntp true` brings timesyncd active
+          # (TEST-45-TIMEDATE testcase_ntp asserts assert_timesyncd_state active).
+          systemd-timesyncd.serviceConfig = {
+            PrivateDevices = lib.mkForce false;
+            Type = lib.mkForce "notify";
+            ExecStart =
+              lib.mkForce "${config.systemd.package}/lib/systemd/systemd-timesyncd";
+            StateDirectory = lib.mkForce "systemd/timesync";
+            RuntimeDirectory = lib.mkForce "systemd/timesync";
+            # Run as the systemd-timesync user so it may own org.freedesktop.timesync1
+            # per the D-Bus policy (org.freedesktop.timesync1.conf allows that user);
+            # without this the daemon runs as root and D-Bus refuses the name.
+            User = lib.mkForce "systemd-timesync";
+            Group = lib.mkForce "systemd-timesync";
+          };
           # Use Type=simple so the service is immediately active.
           # ExecReload uses a token-based handshake: it writes a unique
           # token to reload-request, sends SIGHUP to both the PID file
@@ -350,15 +460,151 @@ in
         # upstream units because loading hundreds of extra units at boot can
         # overwhelm PID 1.
         mkdir -p /usr/lib/systemd/system
+        # Writable network config dir for tests that write .network/.netdev/.link
+        # files under /usr/lib/systemd/network/ (TEST-74-AUX-UTILS.networkctl.sh).
+        mkdir -p /usr/lib/systemd/network
         for f in ${config.systemd.package}/example/systemd/system/systemd-importd.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.socket \
                  ${config.systemd.package}/example/systemd/system/systemd-journald-varlink@.socket \
+                 ${config.systemd.package}/example/systemd/system/systemd-sysusers.service \
                  ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.service \
-                 ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.socket; do
+                 ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.socket \
+                 ${config.systemd.package}/lib/systemd/system/systemd-bsod.service; do
           name=$(basename "$f")
           [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
         done
+
+        # Per-test extra units (the `extraUnits` argument).  The C systemd
+        # package keeps most of its optional units under example/systemd/system
+        # rather than lib/systemd/system, so look in both.  Fail loudly on a
+        # typo: a silently missing unit turns into a confusing "unit not found"
+        # deep inside the test.
+        ${pkgs.lib.optionalString (extraUnits != []) ''
+          for name in ${pkgs.lib.escapeShellArgs extraUnits}; do
+            [ -e "/usr/lib/systemd/system/$name" ] && continue
+            found=""
+            for dir in ${config.systemd.package}/example/systemd/system \
+                       ${config.systemd.package}/lib/systemd/system; do
+              if [ -e "$dir/$name" ]; then
+                ln -sfn "$dir/$name" "/usr/lib/systemd/system/$name"
+                found=1
+                break
+              fi
+            done
+            if [ -z "$found" ]; then
+              echo "extraUnits: no such unit '$name' in the systemd package" >&2
+              exit 1
+            fi
+          done
+        ''}
+
+        # The rust-systemd package doesn't ship systemd-network-generator.service
+        # in its unit dir, so provide it inline for TEST-74-AUX-UTILS.network-generator.
+        # No ConditionKernelCommandLine so the credential-only path still runs the
+        # generator; the binary is symlinked into /usr/lib/systemd/ just below.
+        if [ ! -e /usr/lib/systemd/system/systemd-network-generator.service ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Generate network units from Kernel command line and credentials' \
+            'DefaultDependencies=no' \
+            'Before=network-pre.target' \
+            '[Service]' \
+            'Type=oneshot' \
+            'RemainAfterExit=yes' \
+            'ExecStart=/usr/lib/systemd/systemd-network-generator' \
+            > /usr/lib/systemd/system/systemd-network-generator.service
+        fi
+
+        # The rust-systemd package doesn't ship systemd-ask-password.socket/.service,
+        # so provide them inline for TEST-74-AUX-UTILS.ask-password: the varlink
+        # introspect of /run/systemd/io.systemd.AskPassword needs a listening socket
+        # that activates systemd-ask-password in its Varlink server mode (LISTEN_FDS).
+        if [ ! -e /usr/lib/systemd/system/systemd-ask-password.socket ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Query the User Interactively for a Password' \
+            'DefaultDependencies=no' \
+            'Before=sockets.target' \
+            '[Socket]' \
+            'ListenStream=/run/systemd/io.systemd.AskPassword' \
+            'SocketMode=0666' \
+            '[Install]' \
+            'WantedBy=sockets.target' \
+            > /usr/lib/systemd/system/systemd-ask-password.socket
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Query the User Interactively for a Password' \
+            'DefaultDependencies=no' \
+            '[Service]' \
+            'ExecStart=-/usr/bin/systemd-ask-password --no-tty' \
+            > /usr/lib/systemd/system/systemd-ask-password.service
+          mkdir -p /usr/lib/systemd/system/sockets.target.wants
+          ln -sfn ../systemd-ask-password.socket /usr/lib/systemd/system/sockets.target.wants/systemd-ask-password.socket
+        fi
+
+        # The rust-systemd package doesn't enable systemd-mute-console.socket by
+        # default, so provide it inline for TEST-74-AUX-UTILS.mute-console: the
+        # introspect/call of /run/systemd/io.systemd.MuteConsole needs a listening
+        # Accept=yes varlink socket that spawns systemd-mute-console per connection
+        # (the accepted connection is passed as fd 3 via LISTEN_FDS).
+        if [ ! -e /usr/lib/systemd/system/systemd-mute-console.socket ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Console Output Muting Service Socket' \
+            'DefaultDependencies=no' \
+            'Before=sockets.target' \
+            '[Socket]' \
+            'ListenStream=/run/systemd/io.systemd.MuteConsole' \
+            'FileDescriptorName=varlink' \
+            'SocketMode=0600' \
+            'Accept=yes' \
+            'MaxConnectionsPerSource=16' \
+            '[Install]' \
+            'WantedBy=sockets.target' \
+            > /usr/lib/systemd/system/systemd-mute-console.socket
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Console Output Muting Service' \
+            'DefaultDependencies=no' \
+            '[Service]' \
+            'ExecStart=/usr/bin/systemd-mute-console' \
+            > /usr/lib/systemd/system/systemd-mute-console@.service
+          mkdir -p /usr/lib/systemd/system/sockets.target.wants
+          ln -sfn ../systemd-mute-console.socket /usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
+        fi
+
+        # The rust-systemd package doesn't enable systemd-journalctl.socket by
+        # default, so provide it inline for TEST-04-JOURNAL.journalctl-varlink:
+        # the introspect/call of /run/systemd/io.systemd.JournalAccess needs a
+        # listening Accept=yes varlink socket that spawns journalctl per
+        # connection (the accepted connection is passed as fd 3 via LISTEN_FDS,
+        # and journalctl serves io.systemd.JournalAccess.GetEntries).
+        if [ ! -e /usr/lib/systemd/system/systemd-journalctl.socket ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Journal Log Access Socket' \
+            'DefaultDependencies=no' \
+            'Before=sockets.target' \
+            '[Socket]' \
+            'ListenStream=/run/systemd/io.systemd.JournalAccess' \
+            'FileDescriptorName=varlink' \
+            'SocketMode=0666' \
+            'Accept=yes' \
+            'MaxConnectionsPerSource=16' \
+            '[Install]' \
+            'WantedBy=sockets.target' \
+            > /usr/lib/systemd/system/systemd-journalctl.socket
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Journal Log Access' \
+            'DefaultDependencies=no' \
+            '[Service]' \
+            'ExecStart=/usr/bin/journalctl' \
+            > /usr/lib/systemd/system/systemd-journalctl@.service
+          mkdir -p /usr/lib/systemd/system/sockets.target.wants
+          ln -sfn ../systemd-journalctl.socket /usr/lib/systemd/system/sockets.target.wants/systemd-journalctl.socket
+        fi
 
         # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
         # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)
@@ -541,19 +787,48 @@ in
             isSystemUser = true;
             group = "systemd-journal";
           };
+          # systemd-timesync user for TEST-45-TIMEDATE: `timedatectl set-ntp true`
+          # starts systemd-timesyncd, which runs as User=systemd-timesync (real
+          # systemd ships example/sysusers.d/systemd-timesync.conf to create it).
+          systemd-timesync = {
+            isSystemUser = true;
+            group = "systemd-timesync";
+          };
         };
         groups.daemon = {};
         groups.testuser = {};
+        groups.systemd-timesync = {};
       };
 
       # Give the VM enough resources for tests
-      virtualisation = {
-        memorySize = 2048;
-        cores = 2;
+      virtualisation =
+        {
+          # The integration-test manager is built from the debug dev profile
+          # (rust-systemd-dev): its unoptimized PID 1 binary needs more RAM than
+          # the release build, so give the VM headroom to avoid an early-boot OOM.
+          memorySize = 4096;
+          cores = 2;
+          # Software TPM for TEST-70-TPM2 (opt-in per test via enableTpm).
+          tpm.enable = enableTpm;
+        }
+        // pkgs.lib.optionalAttrs useBootLoader {
+          # Boot via a bootloader on a disk image so a guest reboot re-runs the
+          # full firmware->bootloader->kernel boot (see the useBootLoader arg).
+          useBootLoader = true;
+          useEFIBoot = true;
+        };
+      # A bootloader is required when useBootLoader is set; systemd-boot is
+      # installed into the ESP at image-build time (using the build host's
+      # systemd, so it does not depend on rust-systemd's own bootctl).
+      boot.loader = pkgs.lib.mkIf useBootLoader {
+        systemd-boot.enable = true;
+        efi.canTouchEfiVariables = true;
+        timeout = 0;
       };
     };
 
     testScript = ''
+      ${pkgs.lib.optionalString (allowReboot || useBootLoader) "machine.start(allow_reboot=True)"}
       machine.wait_for_unit("multi-user.target", timeout=120)
 
       # Reload systemd to pick up any test unit files installed via activation
@@ -592,39 +867,77 @@ in
       # "prerequisite missing, skip") creates /skipped even when the script
       # didn't touch it itself (e.g. TEST-83-BTRFS exits 77 on non-btrfs root
       # without writing /skipped).
-      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
+      # Run the test in its OWN session (setsid) so it is not a background
+      # process group of the backdoor shell's controlling tty (/dev/hvc0).
+      # Without this, util-linux `script`'s tcsetattr(STDIN, raw) generates
+      # SIGTTOU and hangs forever (task #51: blocks networkctl-edit + pty-forward).
+      # `-w` waits for the child so the /testok check below still works.
+      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}setsid -w bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
 
-      try:
-          (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
-          print(output)
-          # tee masks the real exit code; rely on /testok check below
-      except BrokenPipeError:
-          # Some tests (e.g. TEST-18-FAILUREACTION) trigger a VM reboot.
-          # Wait for the machine to come back up, then re-run the test script
-          # which will detect the second phase (e.g. via /firstphase marker).
-          print("BrokenPipeError: VM likely rebooted, waiting for it to come back...")
-          machine.wait_for_unit("multi-user.target", timeout=120)
-          machine.succeed("systemctl daemon-reload")
-          (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
-          print(output)
+      # A test may reboot the VM one or more times (TEST-09-REBOOT's multi-boot
+      # journal cycle, TEST-18-FAILUREACTION, ...). A reboot mid-execute tears
+      # down the backdoor shell, surfacing as EITHER a BrokenPipeError (the
+      # connection dropped) OR a binascii.Error (the reboot truncated the final
+      # base64 output frame). On either, reconnect to the rebooted VM and re-run
+      # the test script, which resumes the next phase itself (it tracks progress
+      # across boots, e.g. via /var/tmp/.systemd_reboot_count). Loop until the
+      # script completes without rebooting. Non-rebooting tests take the first
+      # iteration and break immediately, so their behaviour is unchanged.
+      import binascii
+      reboot_seen = 0
+      while True:
+          try:
+              (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
+              print(output)
+              # tee masks the real exit code; rely on /testok check below
+              break
+          except (BrokenPipeError, binascii.Error):
+              reboot_seen += 1
+              if reboot_seen > 10:
+                  raise Exception("too many reboots; aborting to avoid an infinite loop")
+              print(f"VM rebooted (#{reboot_seen}), reconnecting and resuming the test...")
+              machine.connected = False
+              machine.wait_for_unit("multi-user.target", timeout=120)
+              machine.succeed("systemctl daemon-reload")
 
-      # Check for /testok (standard systemd test success marker) or
-      # /skipped (upstream convention for tests that detected a missing
-      # prerequisite — e.g. TEST-08-INITRD when not running under a
-      # systemd initrd).  Either is a valid "this test ran to completion"
-      # marker; its absence means the script crashed / a set-e-trapped
-      # `test` assertion failed.
+      # Check for /testok, the standard systemd test success marker.  Its
+      # absence means the script crashed or a set-e-trapped `test` assertion
+      # failed.
+      #
+      # /skipped is the upstream convention for a test that detected a missing
+      # prerequisite and bailed out (exit 77).  A skip is NOT a pass: it means
+      # zero assertions ran.  By default it fails the check, so a test that
+      # starts self-skipping (a regressed prerequisite, a masked feature) shows
+      # up as red instead of silently green.  Tests that are legitimately
+      # expected to skip set `expectedSkip = true` in their integration-tests
+      # entry; that list is the audit surface, and every entry on it is
+      # accounted for in docs/TEST-OVERRIDES.md.
       (rc_ok, ok_out) = machine.execute("test -f /testok")
       (rc_skip, skip_out) = machine.execute("test -f /skipped")
       if rc_ok != 0 and rc_skip != 0:
-          print("=== /testok and /skipped both missing — dumping journal for diagnostics ===")
+          print("=== /testok and /skipped both missing, dumping journal for diagnostics ===")
           (rc_j, j) = machine.execute("journalctl --no-pager -b 2>&1 | tail -400")
           print(j)
           print("=== systemctl list-units --failed ===")
           (rc_f, f) = machine.execute("systemctl list-units --failed 2>&1")
           print(f)
-      # Assert one of /testok or /skipped exists — previous `machine.fail`
-      # was inverted and silently let missing-marker cases pass.
-      machine.succeed("test -f /testok -o -f /skipped")
+
+      if ${if expectedSkip then "True" else "False"}:
+          # Opted in to skipping: either marker is accepted, because such a
+          # test may also run to completion once its prerequisite appears.
+          machine.succeed("test -f /testok -o -f /skipped")
+          if rc_ok == 0:
+              print("NOTE: expectedSkip is set but the test reached /testok. "
+                    "Drop expectedSkip from this test's integration-tests entry.")
+      else:
+          if rc_ok != 0 and rc_skip == 0:
+              print("=== test wrote /skipped, so nothing was verified ===")
+              (rc_s, s) = machine.execute("cat /skipped 2>&1")
+              print(s)
+              raise Exception(
+                  "test skipped itself (/skipped) but is not marked expectedSkip; "
+                  "a skip is not a pass, see docs/TEST-OVERRIDES.md"
+              )
+          machine.succeed("test -f /testok")
     '';
   }

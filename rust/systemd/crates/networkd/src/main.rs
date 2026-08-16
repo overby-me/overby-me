@@ -24,6 +24,7 @@ mod link;
 mod manager;
 mod netdev;
 mod netdev_create;
+mod varlink_metrics;
 
 use std::collections::HashMap;
 use std::fs;
@@ -259,6 +260,10 @@ struct SignalFlags {
     reload: AtomicBool,
     /// ifindex of link to force-renew; 0 means no pending renew, -1 means all.
     force_renew_ifindex: std::sync::atomic::AtomicI32,
+    /// Pending per-link NTP operations from the D-Bus SetLinkNTP/RevertLinkNTP
+    /// methods, drained by the main loop: `(ifindex, Some(servers))` sets the
+    /// runtime override, `(ifindex, None)` reverts to the configured servers.
+    link_ntp_ops: Mutex<Vec<(i32, Option<Vec<String>>)>>,
 }
 
 impl SignalFlags {
@@ -266,6 +271,7 @@ impl SignalFlags {
         Self {
             reload: AtomicBool::new(false),
             force_renew_ifindex: std::sync::atomic::AtomicI32::new(0),
+            link_ntp_ops: Mutex::new(Vec::new()),
         }
     }
 }
@@ -487,6 +493,36 @@ impl Network1Manager {
             .force_renew_ifindex
             .store(ifindex, Ordering::Relaxed);
     }
+
+    /// SetLinkNTP(i ifindex, as servers): set per-link NTP servers, matching
+    /// upstream org.freedesktop.network1.Manager. Used by `timedatectl
+    /// ntp-servers`. Queued for the main loop, which records the override and
+    /// rewrites the link state file so timesyncd can pick it up.
+    #[zbus(name = "SetLinkNTP")]
+    fn set_link_ntp(&self, ifindex: i32, servers: Vec<String>) {
+        log::info!(
+            "D-Bus SetLinkNTP() called for ifindex={} ({} servers)",
+            ifindex,
+            servers.len()
+        );
+        self.signals
+            .link_ntp_ops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((ifindex, Some(servers)));
+    }
+
+    /// RevertLinkNTP(i ifindex): clear the per-link NTP override, reverting to
+    /// the configured NTP= servers. Used by `timedatectl revert`.
+    #[zbus(name = "RevertLinkNTP")]
+    fn revert_link_ntp(&self, ifindex: i32) {
+        log::info!("D-Bus RevertLinkNTP() called for ifindex={}", ifindex);
+        self.signals
+            .link_ntp_ops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((ifindex, None));
+    }
 }
 
 /// Convert a link ifindex to a D-Bus object path.
@@ -591,6 +627,10 @@ fn main() {
 
     setup_logging();
     log::info!("systemd-networkd starting");
+
+    // Serve io.systemd.Network metrics at /run/systemd/report/io.systemd.Network
+    // so systemd-report can enumerate per-interface network metrics.
+    varlink_metrics::spawn_metrics_server();
 
     // Set up signal handling.
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -823,8 +863,36 @@ fn main() {
             if let Err(e) = mgr.configure_links() {
                 log::warn!("Failed to reconfigure links on reload: {}", e);
             }
+            // Persist per-link state files for any links added or changed by the
+            // reload (e.g. a runtime .netdev added via `networkctl edit`), so
+            // systemd-networkd-wait-online can see the new interface instead of
+            // reporting it as missing until the next state-file write.
+            mgr.write_state_files();
             update_shared_state(&shared_state, &mgr);
             sd_notify(&format!("STATUS={}", mgr.overall_state()));
+        }
+
+        // Apply pending SetLinkNTP/RevertLinkNTP operations from D-Bus
+        // (timedatectl ntp-servers / revert). Recording the override and
+        // rewriting the link state file lets timesyncd observe the change.
+        let ntp_ops: Vec<(i32, Option<Vec<String>>)> = {
+            let mut q = signal_flags
+                .link_ntp_ops
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *q)
+        };
+        if !ntp_ops.is_empty() {
+            for (ifindex, op) in ntp_ops {
+                let idx = ifindex.max(0) as u32;
+                match op {
+                    Some(servers) => {
+                        mgr.set_link_ntp(idx, servers);
+                    }
+                    None => mgr.revert_link_ntp(idx),
+                }
+            }
+            mgr.write_state_files();
         }
 
         // Process DHCP: receive replies, handle timeouts, send retransmits.
@@ -1166,6 +1234,15 @@ fn main() {
 
         // Check SLAAC address lifetimes (deprecation and expiration).
         if mgr.check_ra_address_lifetimes() {
+            mgr.write_state_files();
+            update_shared_state(&shared_state, &mgr);
+        }
+
+        // Refresh link carrier state from the kernel. A link brought up on a
+        // recent reload gains IFF_RUNNING (carrier) a moment later via the
+        // kernel linkwatch queue, so re-read here and rewrite the state files
+        // when carrier changes. systemd-networkd-wait-online reads those files.
+        if mgr.refresh_carrier_states() {
             mgr.write_state_files();
             update_shared_state(&shared_state, &mgr);
         }

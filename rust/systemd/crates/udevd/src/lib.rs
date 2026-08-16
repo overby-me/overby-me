@@ -1621,9 +1621,20 @@ fn match_token(token: &RuleToken, event: &UEvent, program_result: &mut String) -
             event.env.get("TAGS").cloned()
         }
         "TEST" => {
-            // TEST checks if a file/path exists
-            let path = expand_substitutions(&token.value, event, program_result.as_str(), "", &[]);
-            let exists = Path::new(&path).exists();
+            // TEST checks if a file/path exists. A relative path is resolved
+            // against the device's sysfs directory (matching upstream udev's
+            // test_action in udev-rules.c); only an absolute path is used
+            // as-is. Without this, e.g. `TEST!="loop/backing_file"` on a loop
+            // device always reported "absent" (it was checked against udevd's
+            // CWD), so `SYSTEMD_READY=0` was set even for a loop with a backing
+            // file and its `.device` unit never became active.
+            let raw = expand_substitutions(&token.value, event, program_result.as_str(), "", &[]);
+            let path = if raw.starts_with('/') {
+                std::path::PathBuf::from(&raw)
+            } else {
+                event.syspath().join(&raw)
+            };
+            let exists = path.exists();
             let matches = match token.op {
                 RuleOp::Match => exists,
                 RuleOp::Nomatch => !exists,
@@ -1692,7 +1703,34 @@ fn match_program(token: &RuleToken, event: &UEvent, program_result: &mut String)
         child_cmd.env(k, v);
     }
 
-    let result = child_cmd.output();
+    // PROGRAM= gets the same deadline as IMPORT{program}=. Without one a rule
+    // like `PROGRAM!="/usr/bin/sleep 60"` blocks its worker for the full sixty
+    // seconds, which is what TEST-17-UDEV.failed-event sets event_timeout=10 to
+    // cut short. The wait runs on a helper thread so the child's stdout is
+    // drained meanwhile; polling without reading would let a chatty program
+    // fill the pipe and block.
+    let result = match child_cmd.spawn() {
+        Err(e) => Err(e),
+        Ok(child) => {
+            let pid = child.id() as libc::pid_t;
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(child.wait_with_output());
+            });
+            let timeout =
+                std::time::Duration::from_secs(EVENT_TIMEOUT.load(Ordering::Relaxed));
+            match rx.recv_timeout(timeout) {
+                Ok(r) => r,
+                Err(_) => {
+                    log::debug!("PROGRAM '{cmd}' timed out after {timeout:?}, killing it");
+                    // SAFETY: pid names a child of this process that the
+                    // waiting thread has not yet reported, so it is unreaped.
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                    Err(std::io::Error::from(std::io::ErrorKind::TimedOut))
+                }
+            }
+        }
+    };
 
     match result {
         Ok(output) => {
@@ -1952,6 +1990,27 @@ fn execute_assignment(
     }
 }
 
+/// Strip one matching pair of surrounding quotes from an imported property
+/// value, as upstream's `get_property_from_string` does.
+///
+/// `dmsetup udevflags` prints its flags as `DM_UDEV_PRIMARY_SOURCE_FLAG='1'`,
+/// and 10-dm.rules then compares that property against "1". Keeping the quotes
+/// made every such comparison fail, so the rules concluded the event was not
+/// from the primary source and set DM_UDEV_DISABLE_DISK_RULES_FLAG, which made
+/// 13-dm-disk.rules skip the device: a dm device with a filesystem on it never
+/// got its /dev/disk/by-uuid/ symlink.
+///
+/// Only a matched pair is removed, and never the whitespace around the value,
+/// which IMPORT{program} is expected to preserve.
+fn unquote_property_value(val: &str) -> &str {
+    let b = val.as_bytes();
+    if b.len() >= 2 && (b[0] == b'"' || b[0] == b'\'') && b[b.len() - 1] == b[0] {
+        &val[1..val.len() - 1]
+    } else {
+        val
+    }
+}
+
 /// Handle IMPORT{type}="value" directives.
 fn handle_import(
     import_type: &str,
@@ -1975,7 +2034,7 @@ fn handle_import(
                     }
                     if let Some(eq) = line.find('=') {
                         let key = line[..eq].to_string();
-                        let val = line[eq + 1..].to_string();
+                        let val = unquote_property_value(&line[eq + 1..]).to_string();
                         if !key.is_empty() {
                             event.env.insert(key, val);
                         }
@@ -1993,7 +2052,7 @@ fn handle_import(
                     }
                     if let Some(eq) = line.find('=') {
                         let key = line[..eq].trim().to_string();
-                        let val = line[eq + 1..].trim().trim_matches('"').to_string();
+                        let val = unquote_property_value(line[eq + 1..].trim()).to_string();
                         event.env.insert(key, val);
                     }
                 }
@@ -3515,6 +3574,20 @@ fn builtin_net_setup_link(event: &mut UEvent) {
             .insert("ID_NET_LINK_FILE_ALTNAMES".to_string(), alt_names.join(" "));
     }
 
+    // Apply Alias= directly to the interface (IFLA_IFALIAS via sysfs) so
+    // `ip link show` reports `alias <value>`. Unlike the ID_NET_LINK_FILE_*
+    // exports above this is a real device setting; it persists across a
+    // subsequent NamePolicy rename since it is an interface attribute.
+    if let Some(ref alias) = link.link_section.alias {
+        let ifalias_path = format!("/sys/class/net/{original_name}/ifalias");
+        if let Err(e) = std::fs::write(&ifalias_path, alias) {
+            log::debug!(
+                "net_setup_link: could not set ifalias for '{}': {}",
+                original_name, e
+            );
+        }
+    }
+
     // .link file Property=/UnsetProperty=/ImportProperty= apply only on
     // add/bind/move events.  Upstream `link_apply_config` early-returns
     // for any other action (notably 'change') so re-processing a device
@@ -3801,6 +3874,252 @@ fn ethtool_driver(ifname: &str) -> Option<String> {
     }
 }
 
+/// Encode a filesystem label the way udev/libblkid does for the `*_ENC`
+/// properties: printable ASCII outside the safe set becomes `\xNN`. The safe
+/// set matches libudev's `encode_devnode_name` allow-list so by-label symlink
+/// names come out identical to upstream.
+fn udev_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        let safe = b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'#' | b'+' | b'-' | b'.' | b':' | b'=' | b'@' | b'_' | b'/'
+            );
+        if safe {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("\\x{b:02x}"));
+        }
+    }
+    out
+}
+
+/// `LOOP_GET_STATUS64` ioctl number (from `<linux/loop.h>`).
+const LOOP_GET_STATUS64: libc::c_ulong = 0x4C05;
+
+/// Subset of the kernel's `struct loop_info64` (`<linux/loop.h>`). The layout
+/// must match the kernel exactly so `LOOP_GET_STATUS64` fills the right fields.
+#[repr(C)]
+struct UdevLoopInfo64 {
+    lo_device: u64,
+    lo_inode: u64,
+    lo_rdev: u64,
+    lo_offset: u64,
+    lo_sizelimit: u64,
+    lo_number: u32,
+    lo_encrypt_type: u32,
+    lo_encrypt_key_size: u32,
+    lo_flags: u32,
+    lo_file_name: [u8; 64],
+    lo_crypt_name: [u8; 64],
+    lo_encrypt_key: [u8; 32],
+    lo_init: [u64; 2],
+}
+
+/// Read the loopback backing-file identity (device number, inode, and the
+/// free-form `lo_file_name` reference) of a loop block device. Mirrors
+/// systemd's `read_loopback_backing_inode()` in udev-builtin-blkid.c: the
+/// `lo_file_name` is the arbitrary userspace-provided string (e.g. set by
+/// `systemd-dissect --attach --loop-ref=NAME`), NOT the `loop/backing_file`
+/// sysfs attribute (which is always an absolute path). Returns `None` on any
+/// ioctl failure (e.g. the device is not actually a loop device).
+fn read_loopback_backing(devnode: &Path) -> Option<(u64, u64, Option<String>)> {
+    use std::os::unix::ffi::OsStrExt;
+    let cpath = std::ffi::CString::new(devnode.as_os_str().as_bytes()).ok()?;
+    let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return None;
+    }
+    // SAFETY: an all-zero loop_info64 is a valid initial value; the ioctl fills it.
+    let mut info: UdevLoopInfo64 = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::ioctl(fd, LOOP_GET_STATUS64 as _, &mut info as *mut UdevLoopInfo64) };
+    unsafe { libc::close(fd) };
+    if rc < 0 {
+        return None;
+    }
+    // lo_file_name is NUL-padded. Suppress it when empty or possibly truncated
+    // (all 63 usable bytes consumed), exactly as upstream does, since the
+    // kernel silently truncates over-long names.
+    let cap = info.lo_file_name.len() - 1; // 63
+    let used = info
+        .lo_file_name
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(info.lo_file_name.len());
+    let fname = if used == 0 || used >= cap {
+        None
+    } else {
+        Some(String::from_utf8_lossy(&info.lo_file_name[..used]).into_owned())
+    };
+    Some((info.lo_device, info.lo_inode, fname))
+}
+
+/// Format a 16-byte binary UUID as the canonical 8-4-4-4-12 hex string.
+fn format_uuid(u: &[u8]) -> String {
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        u[0],
+        u[1],
+        u[2],
+        u[3],
+        u[4],
+        u[5],
+        u[6],
+        u[7],
+        u[8],
+        u[9],
+        u[10],
+        u[11],
+        u[12],
+        u[13],
+        u[14],
+        u[15]
+    )
+}
+
+/// Push ID_FS_LABEL / ID_FS_LABEL_ENC from a NUL/space-terminated label field.
+fn push_fs_label(out: &mut Vec<(String, String)>, label: &[u8]) {
+    let end = label.iter().position(|&b| b == 0).unwrap_or(label.len());
+    let mut label = &label[..end];
+    while label.last() == Some(&b' ') {
+        label = &label[..label.len() - 1];
+    }
+    if !label.is_empty() {
+        out.push((
+            "ID_FS_LABEL".to_string(),
+            String::from_utf8_lossy(label).into_owned(),
+        ));
+        out.push(("ID_FS_LABEL_ENC".to_string(), udev_encode(label)));
+    }
+}
+
+/// Push ID_FS_UUID / ID_FS_UUID_ENC from a 16-byte binary UUID (skipped if all-zero).
+fn push_fs_uuid(out: &mut Vec<(String, String)>, uuid: &[u8]) {
+    if uuid.len() == 16 && uuid.iter().any(|&b| b != 0) {
+        let s = format_uuid(uuid);
+        // UUID characters are all in the safe set, so ENC == plain.
+        out.push(("ID_FS_UUID".to_string(), s.clone()));
+        out.push(("ID_FS_UUID_ENC".to_string(), s));
+    }
+}
+
+fn read_at(f: &mut std::fs::File, off: u64, buf: &mut [u8]) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    f.seek(SeekFrom::Start(off)).is_ok() && f.read_exact(buf).is_ok()
+}
+
+/// Probe a block device for filesystem metadata natively, returning the udev
+/// `ID_FS_*` properties libblkid would (TYPE, USAGE, LABEL[_ENC], UUID[_ENC]).
+///
+/// rust-systemd runs its own udevd, and NixOS's systemd-initrd ships no
+/// standalone `blkid` binary (upstream udev links libblkid), so the previous
+/// `IMPORT{builtin}="blkid"` implementation — which shelled out to `blkid` —
+/// silently produced nothing in the initrd. Without ID_FS_LABEL_ENC the
+/// `disk/by-label/*` symlink is never created, so the root device can't be
+/// found and the boot hangs. Probing the superblocks ourselves fixes that
+/// without depending on an external tool. Covers the common filesystems; falls
+/// through (returns empty) for anything unrecognised so the caller can still
+/// try a real `blkid` if one happens to be present.
+fn probe_filesystem(devnode: &std::path::Path) -> Vec<(String, String)> {
+    let mut f = match std::fs::File::open(devnode) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+
+    // ext2/3/4 — superblock at byte offset 1024, magic 0xEF53 at sb+0x38.
+    let mut sb = [0u8; 1024];
+    if read_at(&mut f, 1024, &mut sb) && sb[0x38] == 0x53 && sb[0x39] == 0xEF {
+        let compat = u32::from_le_bytes([sb[0x5c], sb[0x5d], sb[0x5e], sb[0x5f]]);
+        let incompat = u32::from_le_bytes([sb[0x60], sb[0x61], sb[0x62], sb[0x63]]);
+        let ro_compat = u32::from_le_bytes([sb[0x64], sb[0x65], sb[0x66], sb[0x67]]);
+        // ext4 if any 64bit/extent/flex_bg/… incompat or ro-compat feature is set.
+        let ext4 = incompat & (0x0040 | 0x0080 | 0x0100 | 0x0200 | 0x0400) != 0
+            || ro_compat & (0x0008 | 0x0010 | 0x0020 | 0x0040 | 0x0400) != 0;
+        let ext3 = compat & 0x0004 != 0; // HAS_JOURNAL
+        let fstype = if ext4 {
+            "ext4"
+        } else if ext3 {
+            "ext3"
+        } else {
+            "ext2"
+        };
+        out.push(("ID_FS_TYPE".to_string(), fstype.to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+        push_fs_uuid(&mut out, &sb[0x68..0x78]);
+        push_fs_label(&mut out, &sb[0x78..0x88]);
+        return out;
+    }
+
+    // XFS — magic "XFSB" at offset 0; uuid at 32, label (12 bytes) at 108.
+    let mut xfs = [0u8; 128];
+    if read_at(&mut f, 0, &mut xfs) && &xfs[0..4] == b"XFSB" {
+        out.push(("ID_FS_TYPE".to_string(), "xfs".to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+        push_fs_uuid(&mut out, &xfs[32..48]);
+        push_fs_label(&mut out, &xfs[108..120]);
+        return out;
+    }
+
+    // btrfs — superblock at 65536, magic "_BHRfS_M" at sb+0x40; fsid at sb+0x20,
+    // label (256 bytes) at sb+0x12b.
+    let mut btrfs = [0u8; 0x200];
+    if read_at(&mut f, 65536, &mut btrfs) && &btrfs[0x40..0x48] == b"_BHRfS_M" {
+        out.push(("ID_FS_TYPE".to_string(), "btrfs".to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+        push_fs_uuid(&mut out, &btrfs[0x20..0x30]);
+        let mut label = [0u8; 256];
+        if read_at(&mut f, 65536 + 0x12b, &mut label) {
+            push_fs_label(&mut out, &label);
+        }
+        return out;
+    }
+
+    // swap — magic "SWAPSPACE2"/"SWAP-SPACE" at the end of the first page
+    // (offset 4086); uuid at 1036, label (16 bytes) at 1052.
+    let mut page = [0u8; 4096];
+    if read_at(&mut f, 0, &mut page)
+        && (&page[4086..4096] == b"SWAPSPACE2" || &page[4086..4096] == b"SWAP-SPACE")
+    {
+        out.push(("ID_FS_TYPE".to_string(), "swap".to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "other".to_string()));
+        push_fs_uuid(&mut out, &page[1036..1052]);
+        push_fs_label(&mut out, &page[1052..1068]);
+        return out;
+    }
+
+    // FAT/vfat — boot signature 0x55AA at 510. FAT32 vs FAT12/16 differ in
+    // where the label / volume id / type string live.
+    if page[510] == 0x55 && page[511] == 0xAA {
+        // FAT32 has a zero "sectors per FAT (16-bit)" at offset 22.
+        let is_fat32 = page[22] == 0 && page[23] == 0;
+        let (label_off, vid_off, type_off) = if is_fat32 { (71, 67, 82) } else { (43, 39, 54) };
+        let type_ok = &page[type_off..type_off + 3] == b"FAT";
+        if type_ok {
+            out.push(("ID_FS_TYPE".to_string(), "vfat".to_string()));
+            out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+            // Volume id → XXXX-XXXX serial.
+            let vid = u32::from_le_bytes([
+                page[vid_off],
+                page[vid_off + 1],
+                page[vid_off + 2],
+                page[vid_off + 3],
+            ]);
+            let serial = format!("{:04X}-{:04X}", (vid >> 16) & 0xffff, vid & 0xffff);
+            out.push(("ID_FS_UUID".to_string(), serial.clone()));
+            out.push(("ID_FS_UUID_ENC".to_string(), serial));
+            let label = &page[label_off..label_off + 11];
+            if label != b"NO NAME    " {
+                push_fs_label(&mut out, label);
+            }
+            return out;
+        }
+    }
+
+    out
+}
+
 /// Handle IMPORT{builtin} for common udev builtins.
 fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -3887,27 +4206,63 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             }
         }
         "blkid" => {
-            // Identify filesystem/partition type
-            // Try to run the real blkid for accurate results
+            // Identify filesystem metadata (ID_FS_TYPE/LABEL/UUID/…). Probe the
+            // superblocks natively first, like libblkid — the initrd ships no
+            // standalone `blkid` binary, so shelling out silently produced
+            // nothing and the root's by-label symlink was never created. Only
+            // fall back to an external `blkid` for filesystems we don't probe.
             if let Some(devnode) = event.devnode() {
-                let output = Command::new("blkid")
-                    .arg("-p")
-                    .arg("-o")
-                    .arg("udev")
-                    .arg(&devnode)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .output();
-                if let Ok(output) = output
-                    && output.status.success()
-                {
-                    for line in String::from_utf8_lossy(&output.stdout).lines() {
-                        if let Some(eq) = line.find('=') {
-                            let key = line[..eq].to_string();
-                            let val = line[eq + 1..].to_string();
-                            event.env.insert(key, val);
+                let props = probe_filesystem(&devnode);
+                if !props.is_empty() {
+                    for (key, val) in props {
+                        event.env.insert(key, val);
+                    }
+                } else {
+                    let output = Command::new("blkid")
+                        .arg("-p")
+                        .arg("-o")
+                        .arg("udev")
+                        .arg(&devnode)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::null())
+                        .output();
+                    if let Ok(output) = output
+                        && output.status.success()
+                    {
+                        for line in String::from_utf8_lossy(&output.stdout).lines() {
+                            if let Some(eq) = line.find('=') {
+                                let key = line[..eq].to_string();
+                                let val = line[eq + 1..].to_string();
+                                event.env.insert(key, val);
+                            }
                         }
+                    }
+                }
+
+                // Loopback backing-file identity — the blkid builtin also picks
+                // up the loop device's backing inode/device and free-form
+                // lo_file_name reference, which 60-persistent-storage.rules turns
+                // into /dev/disk/by-loop-inode/* and by-loop-ref/* symlinks.
+                let sysname = event.devpath.rsplit('/').next().unwrap_or("");
+                if sysname.starts_with("loop")
+                    && let Some((devno, inode, fname)) = read_loopback_backing(&devnode)
+                {
+                    let major = ((devno >> 8) & 0xfff) | ((devno >> 32) & !0xfff);
+                    let minor = (devno & 0xff) | ((devno >> 12) & !0xff);
+                    event
+                        .env
+                        .insert("ID_LOOP_BACKING_DEVICE".into(), format!("{major}:{minor}"));
+                    event
+                        .env
+                        .insert("ID_LOOP_BACKING_INODE".into(), inode.to_string());
+                    if let Some(fname) = fname {
+                        event
+                            .env
+                            .insert("ID_LOOP_BACKING_FILENAME_ENC".into(), udev_encode(fname.as_bytes()));
+                        event
+                            .env
+                            .insert("ID_LOOP_BACKING_FILENAME".into(), fname);
                     }
                 }
             }
@@ -3944,6 +4299,74 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
 }
 
 /// Run a program and capture its stdout output.
+/// Deadline for a spawned rule program, in seconds.
+///
+/// Refreshed from udev.conf at start-up and on every reload. A PROGRAM= that
+/// never returns used to wedge its event forever, since the spawn simply
+/// waited; upstream kills it when the event timeout expires and carries on
+/// with the program counting as a non-match.
+static EVENT_TIMEOUT: AtomicU64 = AtomicU64::new(EVENT_TIMEOUT_SECS);
+
+/// Read `event_timeout=` from udev.conf and its drop-in directories.
+///
+/// Later directories win, so a drop-in under /run overrides /usr/lib and one
+/// under /etc overrides both, which is the order the test's
+/// /run/udev/udev.conf.d/ file relies on.
+fn load_event_timeout() -> u64 {
+    load_event_timeout_from(
+        Path::new("/etc/udev/udev.conf"),
+        &[
+            "/usr/lib/udev/udev.conf.d",
+            "/run/udev/udev.conf.d",
+            "/etc/udev/udev.conf.d",
+        ],
+    )
+}
+
+fn load_event_timeout_from(conf: &Path, dirs: &[&str]) -> u64 {
+    let mut timeout = EVENT_TIMEOUT_SECS;
+
+    let mut files: Vec<PathBuf> = vec![conf.to_path_buf()];
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        let mut confs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "conf"))
+            .collect();
+        confs.sort();
+        files.extend(confs);
+    }
+
+    for file in files {
+        let Ok(content) = fs::read_to_string(&file) else {
+            continue;
+        };
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(val) = line.strip_prefix("event_timeout=")
+                && let Ok(secs) = val.trim().parse::<u64>()
+            {
+                timeout = secs;
+            }
+        }
+    }
+
+    timeout
+}
+
+/// Re-read the parts of udev.conf that affect event processing.
+fn refresh_udev_config() {
+    let timeout = load_event_timeout();
+    EVENT_TIMEOUT.store(timeout, Ordering::Relaxed);
+    log::debug!("udev.conf: event_timeout={timeout}");
+}
+
 fn run_program_capture(cmd: &str, event: &UEvent) -> Option<String> {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     if parts.is_empty() {
@@ -3967,7 +4390,36 @@ fn run_program_capture(cmd: &str, event: &UEvent) -> Option<String> {
         child_cmd.env(k, v);
     }
 
-    match child_cmd.output() {
+    // Spawn and wait with a deadline. The wait happens on a helper thread so
+    // the child's stdout is drained while we wait: polling for exit without
+    // reading would let a chatty program fill the pipe and block.
+    let child = match child_cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!("Failed to execute '{}': {}", cmd, e);
+            return None;
+        }
+    };
+    let pid = child.id() as libc::pid_t;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    let timeout = std::time::Duration::from_secs(EVENT_TIMEOUT.load(Ordering::Relaxed));
+    let result = match rx.recv_timeout(timeout) {
+        Ok(r) => r,
+        Err(_) => {
+            log::debug!("Program '{cmd}' timed out after {timeout:?}, killing it");
+            // SAFETY: pid names a child of this process that has not been
+            // reaped, since the waiting thread has not reported it yet.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+            return None;
+        }
+    };
+
+    match result {
         Ok(output) if output.status.success() => {
             // Strip only trailing newlines — leading/trailing SPACE inside
             // the captured value is significant for IMPORT{program}
@@ -4019,7 +4471,7 @@ fn resolve_program_path(name: &str) -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// Get the database file path for a device.
-pub fn device_db_path(event: &UEvent) -> PathBuf {
+pub fn device_id(event: &UEvent) -> String {
     // Upstream systemd convention:
     //   * block: b<maj>:<min>
     //   * char:  c<maj>:<min>
@@ -4027,18 +4479,22 @@ pub fn device_db_path(event: &UEvent) -> PathBuf {
     //   * else:  +<subsystem>:<sysname>
     if !event.major.is_empty() && !event.minor.is_empty() {
         let dev_type = if event.subsystem == "block" { 'b' } else { 'c' };
-        Path::new(DB_DIR).join(format!("{}{}:{}", dev_type, event.major, event.minor))
+        format!("{}{}:{}", dev_type, event.major, event.minor)
     } else if event.subsystem == "net"
         && let Some(ifindex) = event.env.get("IFINDEX")
         && !ifindex.is_empty()
     {
-        Path::new(DB_DIR).join(format!("n{ifindex}"))
+        format!("n{ifindex}")
     } else if !event.subsystem.is_empty() {
         let basename = event.devpath.rsplit('/').next().unwrap_or(&event.devpath);
-        Path::new(DB_DIR).join(format!("+{}:{}", event.subsystem, basename))
+        format!("+{}:{}", event.subsystem, basename)
     } else {
-        Path::new(DB_DIR).join(format!("n{}", event.devpath.replace('/', "\\x2f")))
+        format!("n{}", event.devpath.replace('/', "\\x2f"))
     }
+}
+
+pub fn device_db_path(event: &UEvent) -> PathBuf {
+    Path::new(DB_DIR).join(device_id(event))
 }
 
 /// Acquire an exclusive flock on the database lock file.
@@ -4244,64 +4700,254 @@ fn remove_device_tags(event: &UEvent) {
 // ---------------------------------------------------------------------------
 
 /// Create device symlinks in /dev/.
-fn create_device_symlinks(event: &UEvent, symlinks: &[String]) {
+/// Serialize updates to a device symlink via udev's `/run/udev/links.lock/`
+/// directory, mirroring upstream systemd-udevd. Holding the guard keeps an
+/// exclusive flock for the duration of the symlink update; dropping it removes
+/// the lock file and releases the lock, so `/run/udev/links.lock/` exists but
+/// is left empty once all events have been processed (which the udev test
+/// suite asserts, e.g. TEST-17-UDEV.diskseq).
+struct SymlinkLock {
+    file: fs::File,
+    path: PathBuf,
+}
+
+impl SymlinkLock {
+    fn acquire(link_path: &Path) -> Option<Self> {
+        // Upstream creates both the symlink "stack" directory and its lock dir.
+        let _ = fs::create_dir_all("/run/udev/links");
+        fs::create_dir_all("/run/udev/links.lock").ok()?;
+        // Encode the symlink path into a flat lock-file name (leading slash
+        // dropped, remaining slashes escaped) — enough for per-symlink locking.
+        let name = link_path
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .replace('/', "\\x2f");
+        let path = Path::new("/run/udev/links.lock").join(name);
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .ok()?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return None;
+        }
+        Some(SymlinkLock { file, path })
+    }
+}
+
+impl Drop for SymlinkLock {
+    fn drop(&mut self) {
+        // Remove the lock file while still holding the lock, then release, so
+        // the lock directory ends up empty (mirrors upstream make_lock_file).
+        let _ = fs::remove_file(&self.path);
+        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+/// Escape a symlink path into a single filename, mirroring upstream's
+/// `udev_node_escape_path`: only `/` and `\` are encoded.
+fn udev_node_escape_path(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for c in src.chars() {
+        match c {
+            '/' => out.push_str("\\x2f"),
+            '\\' => out.push_str("\\x5c"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The `/run/udev/links/<escaped>` directory recording every device that
+/// currently claims `link_path`, one entry per device.
+fn stack_directory(link_path: &Path) -> Option<PathBuf> {
+    let name = link_path.strip_prefix("/dev").ok()?.to_str()?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(Path::new("/run/udev/links").join(udev_node_escape_path(name)))
+}
+
+/// `OPTIONS="link_priority="` for this event, defaulting to 0 as upstream does.
+fn devlink_priority(options: &HashSet<String>) -> i32 {
+    options
+        .iter()
+        .find_map(|o| o.strip_prefix("link_priority="))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(0)
+}
+
+/// Record or withdraw this device's claim on a symlink.
+///
+/// The entry is itself a symlink named after the device id whose target is
+/// `<priority>:<devnode>`, so a claim can be read back without consulting the
+/// database, exactly as upstream's `stack_directory_update` stores it.
+fn stack_directory_update(dir: &Path, id: &str, devnode: &Path, priority: i32, add: bool) {
+    let entry = dir.join(id);
+    if add {
+        let data = format!("{}:{}", priority, devnode.display());
+        if let Ok(existing) = fs::read_link(&entry)
+            && existing.as_os_str() == data.as_str()
+        {
+            return;
+        }
+        let _ = fs::create_dir_all(dir);
+        let _ = fs::remove_file(&entry);
+        let _ = std::os::unix::fs::symlink(&data, &entry);
+    } else {
+        let _ = fs::remove_file(&entry);
+    }
+}
+
+/// Find the device node of the highest-priority device claiming a symlink.
+///
+/// Ours is seeded first when adding, so an equal priority keeps the device
+/// being processed: upstream only replaces on a strictly greater priority.
+fn stack_directory_find_prioritized(
+    dir: &Path,
+    id: &str,
+    own: Option<(PathBuf, i32)>,
+) -> Option<PathBuf> {
+    let (mut devnode, mut priority) = match own {
+        Some((n, p)) => (Some(n), p),
+        None => (None, i32::MIN),
+    };
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_name() == id {
+                continue;
+            }
+            let Ok(target) = fs::read_link(entry.path()) else {
+                continue;
+            };
+            let Some(target) = target.to_str().and_then(|t| {
+                let (prio, node) = t.split_once(':')?;
+                Some((prio.parse::<i32>().ok()?, PathBuf::from(node)))
+            }) else {
+                continue;
+            };
+            let (other_priority, other_devnode) = target;
+            // A claim whose device node is gone is stale; the removal uevent
+            // will clear the entry, so just skip it meanwhile.
+            if !other_devnode.exists() {
+                continue;
+            }
+            if devnode.is_some() && other_priority <= priority {
+                continue;
+            }
+            devnode = Some(other_devnode);
+            priority = other_priority;
+        }
+    }
+
+    devnode
+}
+
+/// Point a symlink at a device node, or remove it when nothing claims it.
+fn apply_symlink(link_path: &Path, winner: Option<&Path>) {
+    let Some(devnode) = winner else {
+        let _ = fs::remove_file(link_path);
+        return;
+    };
+
+    if let Some(parent) = link_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    // Use a relative symlink where possible
+    let target = if let (Some(link_parent), true) =
+        (link_path.parent(), devnode.starts_with("/dev"))
+    {
+        pathdiff(devnode, link_parent).unwrap_or_else(|_| devnode.to_path_buf())
+    } else {
+        devnode.to_path_buf()
+    };
+
+    if let Ok(existing) = fs::read_link(link_path)
+        && existing == target
+    {
+        return;
+    }
+
+    let _ = fs::remove_file(link_path);
+    if let Err(e) = std::os::unix::fs::symlink(&target, link_path) {
+        log::debug!(
+            "Failed to create symlink {} -> {}: {}",
+            link_path.display(),
+            target.display(),
+            e
+        );
+    } else {
+        log::debug!(
+            "Created symlink {} -> {}",
+            link_path.display(),
+            target.display()
+        );
+    }
+}
+
+fn resolve_link_path(link: &str) -> PathBuf {
+    if link.starts_with('/') {
+        PathBuf::from(link)
+    } else {
+        PathBuf::from("/dev").join(link)
+    }
+}
+
+/// Claim symlinks for a device and repoint each at whichever claimant has the
+/// highest `link_priority`.
+///
+/// Two devices can legitimately carry the same filesystem signature, so
+/// `/dev/disk/by-uuid/<uuid>` may be claimed by both a loop device and the
+/// dm device stacked on it. Last-writer-wins made that resolution arbitrary;
+/// `OPTIONS="link_priority="` is how a rule expresses which one should win.
+fn create_device_symlinks(event: &UEvent, symlinks: &[String], priority: i32) {
+    let Some(devnode) = event.devnode() else {
+        return;
+    };
+    let id = device_id(event);
+
     for link in symlinks {
-        let link_path = if link.starts_with('/') {
-            PathBuf::from(link)
-        } else {
-            PathBuf::from("/dev").join(link)
+        let link_path = resolve_link_path(link);
+
+        // Serialize the update against other workers via udev's symlink lock.
+        let _lock = SymlinkLock::acquire(&link_path);
+
+        let Some(dir) = stack_directory(&link_path) else {
+            apply_symlink(&link_path, Some(&devnode));
+            continue;
         };
 
-        if let Some(parent) = link_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-
-        // Remove existing symlink
-        let _ = fs::remove_file(&link_path);
-
-        // Create symlink to device node
-        if let Some(devnode) = event.devnode() {
-            // Use a relative symlink where possible
-            let target = if let (Some(link_parent), true) =
-                (link_path.parent(), devnode.starts_with("/dev"))
-            {
-                // Try to compute relative path
-                if let Ok(rel) = pathdiff(&devnode, link_parent) {
-                    rel
-                } else {
-                    devnode.clone()
-                }
-            } else {
-                devnode.clone()
-            };
-
-            if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
-                log::debug!(
-                    "Failed to create symlink {} -> {}: {}",
-                    link_path.display(),
-                    target.display(),
-                    e
-                );
-            } else {
-                log::debug!(
-                    "Created symlink {} -> {}",
-                    link_path.display(),
-                    target.display()
-                );
-            }
-        }
+        stack_directory_update(&dir, &id, &devnode, priority, true);
+        let winner =
+            stack_directory_find_prioritized(&dir, &id, Some((devnode.clone(), priority)));
+        apply_symlink(&link_path, winner.as_deref());
     }
 }
 
 /// Remove device symlinks.
-fn remove_device_symlinks(symlinks: &[String]) {
+///
+/// Withdrawing this device's claim does not necessarily remove the symlink:
+/// another device may still claim it, in which case the link is handed over
+/// rather than deleted.
+fn remove_device_symlinks(event: &UEvent, symlinks: &[String]) {
+    let id = device_id(event);
+
     for link in symlinks {
-        let link_path = if link.starts_with('/') {
-            PathBuf::from(link)
-        } else {
-            PathBuf::from("/dev").join(link)
+        let link_path = resolve_link_path(link);
+        let _lock = SymlinkLock::acquire(&link_path);
+
+        let Some(dir) = stack_directory(&link_path) else {
+            let _ = fs::remove_file(&link_path);
+            continue;
         };
-        let _ = fs::remove_file(&link_path);
+
+        stack_directory_update(&dir, &id, Path::new(""), 0, false);
+        let winner = stack_directory_find_prioritized(&dir, &id, None);
+        apply_symlink(&link_path, winner.as_deref());
+        let _ = fs::remove_dir(&dir);
     }
 }
 
@@ -4374,8 +5020,14 @@ fn set_device_permissions(event: &UEvent, result: &RuleResult) {
         }
     }
 
-    // Set mode
-    if let Some(mode) = result.mode {
+    // Set mode. Mirror upstream udev-node.c node_apply_permissions: when a
+    // GROUP is assigned (gid > 0) but no explicit MODE rule matched, "upgrade"
+    // the mode to 0660 so the group actually gains access. Without this, a loop
+    // device keeps the kernel's 0600 default on the `add` event, yet
+    // 60-block.rules sets 0660 on the detach `change` event, so
+    // TEST-17-UDEV.loop-own sees the mode flip 600->660 and never "restores".
+    let mode = result.mode.or_else(|| (gid > 0).then_some(0o660));
+    if let Some(mode) = mode {
         unsafe {
             let path_c = std::ffi::CString::new(devnode.to_string_lossy().as_bytes()).ok();
             if let Some(path_c) = path_c {
@@ -5193,7 +5845,7 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
 
             // Create symlinks
             if !result.symlinks.is_empty() {
-                create_device_symlinks(event, &result.symlinks);
+                create_device_symlinks(event, &result.symlinks, devlink_priority(&result.options));
             }
 
             // Mark the device as still-being-processed if we will run
@@ -5242,7 +5894,7 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                     }
                 }
             }
-            remove_device_symlinks(&old_symlinks);
+            remove_device_symlinks(event, &old_symlinks);
 
             // Remove tags
             remove_device_tags(event);
@@ -6147,6 +6799,7 @@ pub fn run_daemon() {
     ensure_runtime_dirs();
 
     // Load rules (Arc for sharing with worker threads)
+    refresh_udev_config();
     let mut rules = Arc::new(RuleSet::load());
 
     // Load hardware database (hwdb.bin)
@@ -6318,6 +6971,7 @@ pub fn run_daemon() {
             RELOAD_FLAG.store(false, Ordering::SeqCst);
             rules_reload_needed = false;
             log::info!("Reloading rules...");
+            refresh_udev_config();
             rules = Arc::new(RuleSet::load());
             // Also reload hwdb
             hwdb = Arc::new(match Hwdb::open_default() {
@@ -6508,6 +7162,77 @@ pub fn run_daemon() {
 
 #[cfg(test)]
 mod tests {
+    // -----------------------------------------------------------------------
+    // Native filesystem probe tests (IMPORT{builtin}="blkid" replacement)
+    // -----------------------------------------------------------------------
+
+    fn probe_map(bytes: &[u8]) -> std::collections::HashMap<String, String> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!("udevd-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Unique per call so parallel tests don't clobber each other's image.
+        let path = dir.join(format!("img-{}", SEQ.fetch_add(1, Ordering::Relaxed)));
+        std::fs::write(&path, bytes).unwrap();
+        let out = super::probe_filesystem(&path).into_iter().collect();
+        let _ = std::fs::remove_file(&path);
+        out
+    }
+
+    #[test]
+    fn test_probe_ext4_label_and_uuid() {
+        // Craft a minimal ext4 superblock: magic 0xEF53 at 1024+0x38, the
+        // EXTENTS incompat feature so it's detected as ext4, a UUID and label.
+        let mut img = vec![0u8; 4096];
+        let sb = 1024;
+        img[sb + 0x38] = 0x53;
+        img[sb + 0x39] = 0xEF; // s_magic = 0xEF53
+        img[sb + 0x60] = 0x40; // s_feature_incompat: INCOMPAT_EXTENTS
+        let uuid = [
+            0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x12, 0x34, 0x12, 0x34, 0x12, 0x34, 0x56, 0x78,
+            0x9a, 0xbc,
+        ];
+        img[sb + 0x68..sb + 0x78].copy_from_slice(&uuid);
+        img[sb + 0x78..sb + 0x78 + 5].copy_from_slice(b"nixos");
+        let m = probe_map(&img);
+        assert_eq!(m.get("ID_FS_TYPE").map(String::as_str), Some("ext4"));
+        assert_eq!(m.get("ID_FS_USAGE").map(String::as_str), Some("filesystem"));
+        assert_eq!(m.get("ID_FS_LABEL").map(String::as_str), Some("nixos"));
+        assert_eq!(m.get("ID_FS_LABEL_ENC").map(String::as_str), Some("nixos"));
+        assert_eq!(
+            m.get("ID_FS_UUID").map(String::as_str),
+            Some("12345678-1234-1234-1234-123456789abc")
+        );
+        assert_eq!(
+            m.get("ID_FS_UUID_ENC").map(String::as_str),
+            Some("12345678-1234-1234-1234-123456789abc")
+        );
+    }
+
+    #[test]
+    fn test_probe_ext2_no_journal() {
+        let mut img = vec![0u8; 2048];
+        let sb = 1024;
+        img[sb + 0x38] = 0x53;
+        img[sb + 0x39] = 0xEF;
+        // no features → ext2
+        let m = probe_map(&img);
+        assert_eq!(m.get("ID_FS_TYPE").map(String::as_str), Some("ext2"));
+    }
+
+    #[test]
+    fn test_probe_unknown_is_empty() {
+        let img = vec![0u8; 4096];
+        assert!(probe_map(&img).is_empty());
+    }
+
+    #[test]
+    fn test_udev_encode_spaces() {
+        // A label with a space must be encoded like libblkid for the symlink.
+        assert_eq!(super::udev_encode(b"My Disk"), "My\\x20Disk");
+        assert_eq!(super::udev_encode(b"nixos"), "nixos");
+    }
+
     // -----------------------------------------------------------------------
     // Network interface renaming tests
     // -----------------------------------------------------------------------
@@ -8450,6 +9175,172 @@ mod tests {
 
         let result2 = expand_substitutions("%c{2+}", &event, "foo bar baz", "", &[]);
         assert_eq!(result2, "bar baz");
+    }
+
+    /// A PROGRAM= deadline comes from udev.conf, with drop-ins layered on top
+    /// in /usr/lib, /run and /etc order. TEST-17-UDEV.failed-event writes its
+    /// event_timeout into /run/udev/udev.conf.d/.
+    #[test]
+    fn test_load_event_timeout_from_dropins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join("udev.conf");
+        let lib_d = tmp.path().join("lib.d");
+        let run_d = tmp.path().join("run.d");
+        fs::create_dir_all(&lib_d).unwrap();
+        fs::create_dir_all(&run_d).unwrap();
+
+        let dirs = [lib_d.to_str().unwrap(), run_d.to_str().unwrap()];
+
+        // Nothing configured anywhere: the built-in default stands.
+        assert_eq!(
+            load_event_timeout_from(Path::new("/nonexistent"), &dirs),
+            EVENT_TIMEOUT_SECS
+        );
+
+        // udev.conf alone.
+        fs::write(&conf, "# comment\n\nevent_timeout=30\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 30);
+
+        // A drop-in overrides udev.conf, and a later directory overrides an
+        // earlier one.
+        fs::write(lib_d.join("10-a.conf"), "event_timeout=20\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 20);
+        fs::write(run_d.join("test-17.conf"), "event_timeout=10\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 10);
+
+        // Unrelated and malformed settings are ignored, not fatal.
+        fs::write(
+            run_d.join("test-17.conf"),
+            "timeout_signal=SIGABRT\nevent_timeout=notanumber\nevent_timeout=15\n",
+        )
+        .unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 15);
+
+        // Files that are not *.conf are not drop-ins.
+        fs::write(run_d.join("ignored.txt"), "event_timeout=99\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 15);
+    }
+
+    /// A program that never returns must not wedge its event forever.
+    #[test]
+    fn test_run_program_capture_kills_on_timeout() {
+        let event = make_test_event("add", "/devices/virtual/mem/null", "mem");
+        let previous = EVENT_TIMEOUT.swap(1, Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        let result = run_program_capture("/bin/sleep 60", &event);
+        let elapsed = started.elapsed();
+        EVENT_TIMEOUT.store(previous, Ordering::Relaxed);
+
+        assert!(result.is_none(), "a killed program must not match");
+        assert!(
+            elapsed < std::time::Duration::from_secs(30),
+            "returned after {elapsed:?}, so it waited for the program"
+        );
+    }
+
+    /// `dmsetup udevflags` quotes its values, and the dm rules compare the
+    /// result against a bare "1".
+    #[test]
+    fn test_unquote_property_value() {
+        assert_eq!(unquote_property_value("'1'"), "1");
+        assert_eq!(unquote_property_value("\"1\""), "1");
+        assert_eq!(unquote_property_value("1"), "1");
+        // Only a matched pair is stripped.
+        assert_eq!(unquote_property_value("'1\""), "'1\"");
+        assert_eq!(unquote_property_value("'"), "'");
+        assert_eq!(unquote_property_value(""), "");
+        // Inner quotes and surrounding whitespace are left alone: IMPORT{program}
+        // must preserve the spaces in `FOO= aaa `.
+        assert_eq!(unquote_property_value(" aaa "), " aaa ");
+        assert_eq!(unquote_property_value("a'b"), "a'b");
+        assert_eq!(unquote_property_value("''"), "");
+    }
+
+    #[test]
+    fn test_udev_node_escape_path_slashes() {
+        assert_eq!(
+            udev_node_escape_path("disk/by-uuid/1234"),
+            "disk\\x2fby-uuid\\x2f1234"
+        );
+        assert_eq!(udev_node_escape_path("a\\b"), "a\\x5cb");
+        assert_eq!(udev_node_escape_path("plain"), "plain");
+    }
+
+    #[test]
+    fn test_stack_directory_name() {
+        assert_eq!(
+            stack_directory(Path::new("/dev/disk/by-uuid/abc")).unwrap(),
+            Path::new("/run/udev/links/disk\\x2fby-uuid\\x2fabc")
+        );
+        // Not under /dev, and /dev itself, have no stack directory.
+        assert!(stack_directory(Path::new("/srv/link")).is_none());
+        assert!(stack_directory(Path::new("/dev")).is_none());
+    }
+
+    #[test]
+    fn test_devlink_priority_parsing() {
+        let mut o = HashSet::new();
+        assert_eq!(devlink_priority(&o), 0);
+        o.insert("link_priority=-200".to_string());
+        assert_eq!(devlink_priority(&o), -200);
+        let mut o2 = HashSet::new();
+        o2.insert("link_priority=bogus".to_string());
+        assert_eq!(devlink_priority(&o2), 0);
+    }
+
+    /// The dm-over-loop case from TEST-67-INTEGRITY: both devices carry the
+    /// same filesystem, and the loop device is pushed down with
+    /// link_priority=-200 so the symlink resolves to the dm node.
+    #[test]
+    fn test_stack_directory_prefers_higher_priority() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("links");
+        let loopdev = tmp.path().join("loop1");
+        let dmdev = tmp.path().join("dm-0");
+        fs::write(&loopdev, "").unwrap();
+        fs::write(&dmdev, "").unwrap();
+
+        stack_directory_update(&dir, "b7:1", &loopdev, -200, true);
+        stack_directory_update(&dir, "b254:0", &dmdev, 0, true);
+
+        // Whichever device is being processed, the dm node wins.
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b7:1", Some((loopdev.clone(), -200))),
+            Some(dmdev.clone())
+        );
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b254:0", Some((dmdev.clone(), 0))),
+            Some(dmdev.clone())
+        );
+
+        // Once the dm device withdraws, the loop device takes the link over
+        // rather than the link disappearing.
+        stack_directory_update(&dir, "b254:0", Path::new(""), 0, false);
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b254:0", None),
+            Some(loopdev)
+        );
+
+        // With no claimants left there is nothing to point at.
+        stack_directory_update(&dir, "b7:1", Path::new(""), 0, false);
+        assert_eq!(stack_directory_find_prioritized(&dir, "b7:1", None), None);
+    }
+
+    /// A claim whose device node has vanished must not win the symlink.
+    #[test]
+    fn test_stack_directory_skips_stale_claim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("links");
+        let live = tmp.path().join("live");
+        fs::write(&live, "").unwrap();
+
+        stack_directory_update(&dir, "b1:1", Path::new("/nonexistent/gone"), 100, true);
+        stack_directory_update(&dir, "b2:2", &live, 0, true);
+
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b2:2", Some((live.clone(), 0))),
+            Some(live)
+        );
     }
 
     #[test]

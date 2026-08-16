@@ -22,7 +22,8 @@
     [[ -n "$DESC" ]]
 
     : "systemctl show ActiveState for slice units"
-    systemctl show -P ActiveState system.slice > /dev/null
+    # system.slice is always active.
+    [[ "$(systemctl show -P ActiveState system.slice)" == "active" ]]
     SCEOF
     chmod +x TEST-74-AUX-UTILS.show-cgroup.sh
   '';

@@ -15,9 +15,15 @@
 
     : "InvocationID changes on restart"
     UNIT="inv-test-$RANDOM"
-    systemd-run --wait --unit="$UNIT" true
+    systemd-run --unit="$UNIT" sleep 3600
     INV1="$(systemctl show -P InvocationID "$UNIT.service")"
-    systemd-run --wait --unit="$UNIT" true 2>/dev/null || true
+    [[ -n "$INV1" ]]
+    systemctl restart "$UNIT.service"
+    INV2="$(systemctl show -P InvocationID "$UNIT.service")"
+    [[ -n "$INV2" ]]
+    # A fresh invocation must get a fresh 128-bit InvocationID.
+    [[ "$INV1" != "$INV2" ]]
+    systemctl stop "$UNIT.service" 2>/dev/null || true
     IIEOF
     chmod +x TEST-74-AUX-UTILS.invocation-id.sh
   '';

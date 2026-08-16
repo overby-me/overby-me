@@ -762,3 +762,36 @@ impl Socket {
         Ok(())
     }
 }
+
+/// Close a socket unit's listening fds while preserving the on-disk socket
+/// file (i.e. always as if RemoveOnStop=no), and drop any orphaned TCP LISTEN
+/// sockets.  Used by `daemon-reload` when an active socket's on-disk fragment
+/// has been removed: upstream keeps such a unit running (is-active stays
+/// active) but stops dispatching new connections until an explicit restart.
+/// Closing the fds makes further connects fail with ECONNREFUSED, while the
+/// socket file is left in place so `stat --format=%G/%a` still reports the
+/// SocketGroup/SocketMode.  `daemon-reload` never re-opens the fds; only a
+/// restart re-listens.
+pub fn close_listening_fds_keep_file(conf: &SocketConfig, name: &str, fd_store: &mut FDStore) {
+    let tcp_ports: Vec<u16> = conf
+        .sockets
+        .iter()
+        .filter_map(|s| match &s.specialized {
+            SpecializedSocketConfig::TcpSocket(tcp) => Some(tcp.addr.port()),
+            _ => None,
+        })
+        .collect();
+
+    if let Some(fds) = fd_store.remove_global(&name.to_string()) {
+        for (sock_conf, fd_entry) in conf.sockets.iter().zip(fds.iter()) {
+            // remove_on_stop = false: close the descriptor but never unlink
+            // the socket file.
+            let _ = sock_conf.specialized.close(fd_entry.2.as_raw_fd(), false);
+        }
+        // `fds` drops here → the owned descriptors are closed.
+    }
+
+    for port in tcp_ports {
+        network_sockets::destroy_tcp_listeners_on_port(port);
+    }
+}

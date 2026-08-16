@@ -112,10 +112,15 @@ fn get_next_service_to_shutdown(unit_table: &UnitTable) -> Option<UnitId> {
             .before
             .iter()
             .filter(|&next_id| {
-                let unit = unit_table.get(next_id).unwrap();
-                let status = &unit.common.status;
-                let status_locked = status.read_poisoned();
-                status_locked.is_started()
+                // A `before` dependency that is no longer in the unit table has
+                // already been removed (stopped), so it cannot hold up this
+                // unit's shutdown. Unwrapping here panicked the shutdown thread,
+                // which is what stalled the reboot (09-reboot): PID1 died before
+                // reaching the systemd-shutdown handoff.
+                let Some(dep) = unit_table.get(next_id) else {
+                    return false;
+                };
+                dep.common.status.read_poisoned().is_started()
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -306,24 +311,29 @@ pub fn shutdown_sequence(run_info: ArcMutRuntimeInfo, action: ShutdownAction) {
             ri.notify_eventfds();
         }
 
+        // Re-acquire the RuntimeInfo read lock per iteration instead of
+        // holding one guard across the whole kill loop: shutdown_unit blocks
+        // on ExecStop/kill waits, and a single guard held for the entire
+        // sequence starves any writer (and with it, via the writer-preferring
+        // rwlock, every other reader) for the whole shutdown.
+        trace!("Kill all units");
+        loop {
+            let ri = match run_info.read() {
+                Ok(r) => r,
+                Err(e) => e.into_inner(),
+            };
+            let Some(id) = get_next_service_to_shutdown(&ri.unit_table) else {
+                break;
+            };
+            shutdown_unit(&id, &ri);
+        }
+        trace!("Killed all units");
+
         let run_info_lock = match run_info.read() {
             Ok(r) => r,
             Err(e) => e.into_inner(),
         };
         let run_info_locked = &*run_info_lock;
-
-        trace!("Kill all units");
-        loop {
-            let id = {
-                if let Some(id) = get_next_service_to_shutdown(&run_info_locked.unit_table) {
-                    id
-                } else {
-                    break;
-                }
-            };
-            shutdown_unit(&id, run_info_locked);
-        }
-        trace!("Killed all units");
 
         let control_socket = run_info_locked
             .config

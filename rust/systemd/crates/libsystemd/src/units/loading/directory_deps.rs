@@ -675,6 +675,25 @@ pub fn resolve_symlink_aliases(
             }
         }
     }
+
+    // Register the D-Bus activation alias `dbus-<busname>.service` for every
+    // service that declares BusName=. When a client calls a bus name with no
+    // owner, dbus-daemon asks PID 1 to start `dbus-<busname>.service` (upstream
+    // ships that name as a symlink to the real unit). Deriving it from BusName=
+    // here lets StartUnit(dbus-org.freedesktop.timedate1.service) resolve to
+    // systemd-timedated.service even when the alias symlink isn't installed.
+    for unit in unit_table.values_mut() {
+        let dbus_name = match &unit.specific {
+            Specific::Service(svc) => svc.conf.dbus_name.clone(),
+            _ => None,
+        };
+        if let Some(bus) = dbus_name {
+            let alias = format!("dbus-{bus}.service");
+            if unit.id.name != alias && !unit.common.unit.aliases.contains(&alias) {
+                unit.common.unit.aliases.push(alias);
+            }
+        }
+    }
 }
 
 /// Merge `source` UnitIds into `target` vec, skipping duplicates and self-references.
@@ -1005,7 +1024,7 @@ fn collect_applicable_dropins(
         && let Some(overrides) = dropins.get(type_suffix)
     {
         for (filename, content) in overrides {
-            let resolved = resolve_specifiers(content, unit_name, "");
+            let resolved = resolve_specifiers(content, unit_name, instance_of(unit_name));
             result.push((filename.clone(), resolved));
         }
     }
@@ -1022,7 +1041,7 @@ fn collect_applicable_dropins(
             let key = format!("{prefix}-{suffix}"); // e.g., "a-.service"
             if let Some(overrides) = dropins.get(&key) {
                 for (filename, content) in overrides {
-                    let resolved = resolve_specifiers(content, unit_name, "");
+                    let resolved = resolve_specifiers(content, unit_name, instance_of(unit_name));
                     result.push((filename.clone(), resolved));
                 }
             }
@@ -1032,7 +1051,7 @@ fn collect_applicable_dropins(
     // 3. Exact unit name drop-ins
     if let Some(overrides) = dropins.get(unit_name) {
         for (filename, content) in overrides {
-            let resolved = resolve_specifiers(content, unit_name, "");
+            let resolved = resolve_specifiers(content, unit_name, instance_of(unit_name));
             result.push((filename.clone(), resolved));
         }
     }
@@ -1134,7 +1153,7 @@ pub fn apply_dropins(
             };
 
         // Resolve specifiers in the base content (%n, %i, %p, etc.)
-        let base_content = resolve_specifiers(&base_content, &unit_name, "");
+        let base_content = resolve_specifiers(&base_content, &unit_name, instance_of(&unit_name));
 
         // Merge base + all drop-in contents
         let merged = merge_unit_contents(&base_content, &overrides);
@@ -1391,14 +1410,29 @@ fn has_unresolved_specifiers(s: &str) -> bool {
     crate::specifier::has_unresolved_specifiers(s)
 }
 
-/// Lazily-initialized system specifier context.
+/// Lazily-initialized specifier context for this manager.
 ///
-/// Created once on first use so that every `resolve_specifiers` call
-/// shares the same snapshot of hostname, machine-id, boot-id, etc.
-fn system_specifier_context() -> &'static crate::specifier::SpecifierContext {
+/// Created once on first use so that every `resolve_specifiers` call shares the
+/// same snapshot of hostname, machine-id, boot-id, etc. A process is either the
+/// system manager or a user manager for its whole life, so the flavour can be
+/// decided once here.
+///
+/// This used to be hardcoded to `for_system()`, which left
+/// `SpecifierContext::for_user()` dead code and gave every unit loaded by a
+/// USER manager system values: `%t` resolved to `/run` rather than
+/// `$XDG_RUNTIME_DIR` (so a user `dbus.socket` with `ListenStream=%t/bus` tried
+/// to bind the system bus path), and `%S`, `%C`, `%h` were wrong the same way.
+fn manager_specifier_context() -> &'static crate::specifier::SpecifierContext {
     use std::sync::OnceLock;
     static CTX: OnceLock<crate::specifier::SpecifierContext> = OnceLock::new();
-    CTX.get_or_init(crate::specifier::SpecifierContext::for_system)
+    CTX.get_or_init(|| {
+        // Set by run_user_manager() before any unit is loaded.
+        if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+            crate::specifier::SpecifierContext::for_user()
+        } else {
+            crate::specifier::SpecifierContext::for_system()
+        }
+    })
 }
 
 /// Resolve systemd specifiers in a unit file content string.
@@ -1409,8 +1443,28 @@ fn system_specifier_context() -> &'static crate::specifier::SpecifierContext {
 /// `%S`, `%T`, `%V`, `%%`, and more).
 ///
 /// Delegates to [`crate::specifier::resolve_specifiers`].
+/// Extract the instance name from an instantiated unit name.
+///
+/// `getty@tty2.service` -> `tty2`; a plain or template unit -> `""`.
+///
+/// Drop-in and base content used to be specifier-resolved with a hardcoded
+/// empty instance, so `%i`/`%I` in a drop-in on an instantiated template
+/// silently expanded to nothing. That is how
+/// `ExecStart=-agetty --autologin u --noclear %I $TERM` became
+/// `agetty ... --noclear dumb`, with $TERM landing in the tty slot.
+pub fn instance_of(unit_name: &str) -> &str {
+    let Some(at) = unit_name.find('@') else {
+        return "";
+    };
+    let rest = &unit_name[at + 1..];
+    match rest.rfind('.') {
+        Some(dot) => &rest[..dot],
+        None => rest,
+    }
+}
+
 pub fn resolve_specifiers(content: &str, unit_name: &str, instance: &str) -> String {
-    crate::specifier::resolve_specifiers(content, unit_name, instance, system_specifier_context())
+    crate::specifier::resolve_specifiers(content, unit_name, instance, manager_specifier_context())
 }
 
 /// Load a template unit, instantiate it with the given instance name,
@@ -1469,6 +1523,107 @@ pub fn instantiate_template(
             .ok()
     } else {
         None
+    }
+}
+
+/// The unit names a `LogNamespace=<ns>` service must be ordered after.
+///
+/// Upstream (`src/core/unit.c`, `unit_add_default_dependencies`) adds both
+/// `After=` and `Requires=` on `systemd-journald@<ns>.socket`,
+/// `systemd-journald-varlink@<ns>.socket` and `systemd-journald-sync@<ns>.service`.
+/// We wire the two sockets: the first is the one the exec helper connects
+/// stdout to (`/run/systemd/journal.<ns>/stdout`), and the second is what
+/// `journalctl --namespace=` talks to.  The sync service is not shipped by
+/// every build, so it is left out rather than turned into a hard requirement
+/// that could not be satisfied.
+pub fn log_namespace_dependencies(ns: &str) -> Vec<String> {
+    vec![
+        format!("systemd-journald@{ns}.socket"),
+        format!("systemd-journald-varlink@{ns}.socket"),
+    ]
+}
+
+/// Every template instance that must exist in the unit table for a
+/// `LogNamespace=<ns>` service to start.
+///
+/// This is a superset of [`log_namespace_dependencies`]: the sockets carry
+/// `Service=systemd-journald@%i.service`, and activating a socket whose
+/// `Service=` target is absent from the table fails with "Tried to activate a
+/// unit that can not be found".  The service is materialized but deliberately
+/// not added to `Requires=`, matching upstream, which lets the socket activate
+/// it.
+pub fn log_namespace_units(ns: &str) -> Vec<String> {
+    let mut units = log_namespace_dependencies(ns);
+    units.push(format!("systemd-journald@{ns}.service"));
+    units
+}
+
+/// Give every `LogNamespace=` service its implicit dependency on the journal
+/// namespace instance, and materialize the instances it needs.
+///
+/// Runs *before* [`instantiate_template_units`] so the `systemd-journald@<ns>`
+/// instances get created from their templates by the existing
+/// referenced-in-Requires= pass, rather than needing a second instantiation
+/// path.  The `.service` instance is not in any `Requires=` (the socket
+/// activates it), so it is instantiated explicitly here.
+pub fn add_log_namespace_dependencies(
+    unit_table: &mut HashMap<UnitId, Unit>,
+    unit_dirs: &[PathBuf],
+    dropins: &HashMap<String, Vec<(String, String)>>,
+) {
+    use crate::units::Specific;
+
+    let mut namespaces: Vec<(UnitId, String)> = Vec::new();
+    for unit in unit_table.values() {
+        let Specific::Service(svc) = &unit.specific else {
+            continue;
+        };
+        let Some(ns) = svc.conf.exec_config.log_namespace.as_deref() else {
+            continue;
+        };
+        if !ns.is_empty() {
+            namespaces.push((unit.id.clone(), ns.to_owned()));
+        }
+    }
+
+    for (unit_id, ns) in &namespaces {
+        let deps: Vec<UnitId> = log_namespace_dependencies(ns)
+            .iter()
+            .filter_map(|n| n.as_str().try_into().ok())
+            .collect();
+        let Some(unit) = unit_table.get_mut(unit_id) else {
+            continue;
+        };
+        let d = &mut unit.common.dependencies;
+        for dep in deps {
+            if !d.requires.contains(&dep) {
+                d.requires.push(dep.clone());
+            }
+            if !d.after.contains(&dep) {
+                d.after.push(dep);
+            }
+        }
+    }
+
+    for (_, ns) in &namespaces {
+        for name in log_namespace_units(ns) {
+            let Ok(id) = <&str as TryInto<UnitId>>::try_into(name.as_str()) else {
+                continue;
+            };
+            if unit_table.contains_key(&id) {
+                continue;
+            }
+            let Some((template_name, instance_name)) = parse_template_instance(&name) else {
+                continue;
+            };
+            if let Some(inst) =
+                instantiate_template(&template_name, &instance_name, &name, unit_dirs, dropins)
+            {
+                unit_table.insert(id, inst);
+            } else {
+                warn!("LogNamespace=: could not instantiate {name} from {template_name}");
+            }
+        }
     }
 }
 
@@ -1960,6 +2115,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                 common: Common {
                     status: RwLock::new(UnitStatus::NeverStarted),
                     unit: UnitConfig {
+                        collect_mode: crate::units::CollectMode::default(),
                         description: format!("Swap unit for {} (from /etc/fstab)", device),
                         documentation: Vec::new(),
                         fragment_path: None,
@@ -1970,6 +2126,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         assertions: Vec::new(),
                         success_action: Default::default(),
                         failure_action: Default::default(),
+                        success_action_exit_status: None,
+                        failure_action_exit_status: None,
                         job_timeout_action: Default::default(),
                         job_timeout_sec: None,
                         allow_isolate: false,
@@ -1994,6 +2152,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         wanted_by,
                         requires: Vec::new(),
                         required_by,
+                        requisite: Vec::new(),
                         conflicts: Vec::new(),
                         conflicted_by: Vec::new(),
                         before,
@@ -2137,6 +2296,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
             common: Common {
                 status: RwLock::new(UnitStatus::NeverStarted),
                 unit: UnitConfig {
+                    collect_mode: crate::units::CollectMode::default(),
                     description: format!("Mount unit for {mountpoint} (from /etc/fstab)"),
                     documentation: Vec::new(),
                     fragment_path: None,
@@ -2147,6 +2307,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     assertions: Vec::new(),
                     success_action: Default::default(),
                     failure_action: Default::default(),
+                    success_action_exit_status: None,
+                    failure_action_exit_status: None,
                     job_timeout_action: Default::default(),
                     job_timeout_sec: None,
                     allow_isolate: false,
@@ -2171,6 +2333,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     wanted_by,
                     requires: Vec::new(),
                     required_by,
+                    requisite: Vec::new(),
                     conflicts: Vec::new(),
                     conflicted_by: Vec::new(),
                     before,
@@ -2211,6 +2374,12 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     force_unmount: false,
                     directory_mode: 0o755,
                     timeout_sec: None,
+                    configuration_directory: Vec::new(),
+                    runtime_directory: Vec::new(),
+                    state_directory: Vec::new(),
+                    cache_directory: Vec::new(),
+                    logs_directory: Vec::new(),
+                    runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve::No,
                 },
                 state: RwLock::new(MountState {
                     common: CommonState::default(),
@@ -2263,6 +2432,15 @@ fn is_list_setting(key: &str) -> bool {
             | "EnvironmentFile"
             | "PassEnvironment"
             | "UnsetEnvironment"
+            // StandardInputText=/StandardInputData= accumulate into a single
+            // stdin buffer across the fragment and drop-ins (reset with an
+            // empty value), so drop-in merging must not drop earlier values.
+            | "StandardInputText"
+            | "StandardInputData"
+            // Documentation= accumulates across fragment and drop-ins and is
+            // not deduplicated (systemd.unit(5)), so drop-in merging must
+            // append rather than replace.
+            | "Documentation"
             // Dependency directives accumulate
             | "Requires"
             | "Wants"
@@ -2833,10 +3011,13 @@ mod tests {
                     fragment_path: None,
                     refs_by_name: vec![],
                     default_dependencies: true,
+                    collect_mode: crate::units::CollectMode::default(),
                     conditions: vec![],
                     assertions: vec![],
                     success_action: crate::units::UnitAction::None,
                     failure_action: crate::units::UnitAction::None,
+                    success_action_exit_status: None,
+                    failure_action_exit_status: None,
                     aliases: vec![],
                     ignore_on_isolate: false,
                     default_instance: None,
@@ -2862,6 +3043,7 @@ mod tests {
                     wanted_by: vec![],
                     requires: vec![],
                     required_by: vec![],
+                    requisite: vec![],
                     conflicts: vec![],
                     conflicted_by: vec![],
                     before: vec![],
@@ -3143,5 +3325,74 @@ mod tests {
         let dep = unit_table.get(&dep_id).unwrap();
         assert!(dep.common.dependencies.before.contains(&real_id));
         assert!(!dep.common.dependencies.before.contains(&alias_id));
+    }
+
+    #[test]
+    fn log_namespace_dependency_names_match_upstream_templates() {
+        // Upstream (src/core/unit.c) orders a LogNamespace= unit after the
+        // journald and journald-varlink sockets for that namespace.
+        assert_eq!(
+            log_namespace_dependencies("foobar"),
+            vec![
+                "systemd-journald@foobar.socket".to_owned(),
+                "systemd-journald-varlink@foobar.socket".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn log_namespace_units_adds_the_service_the_socket_activates() {
+        // The sockets carry Service=systemd-journald@%i.service; that instance
+        // has to exist in the unit table or activating the socket fails with
+        // "Tried to activate a unit that can not be found".  It is materialized
+        // but intentionally absent from the dependency list.
+        let units = log_namespace_units("foobar");
+        assert!(units.contains(&"systemd-journald@foobar.service".to_owned()));
+        for dep in log_namespace_dependencies("foobar") {
+            assert!(units.contains(&dep), "{dep} missing from log_namespace_units");
+        }
+        assert!(
+            !log_namespace_dependencies("foobar")
+                .contains(&"systemd-journald@foobar.service".to_owned())
+        );
+    }
+
+    #[test]
+    fn log_namespace_unit_names_are_parseable_template_instances() {
+        for name in log_namespace_units("ns-with-dashes") {
+            let (template, instance) =
+                parse_template_instance(&name).expect("should parse as a template instance");
+            assert!(template.contains('@'));
+            assert_eq!(instance, "ns-with-dashes");
+        }
+    }
+
+    /// Guards the drop-in specifier fix: `%i`/`%I` in a drop-in on an
+    /// instantiated template used to expand to nothing because the instance was
+    /// hardcoded empty, which silently corrupted the resulting ExecStart=.
+    #[test]
+    fn instance_of_extracts_template_instances() {
+        assert_eq!(instance_of("getty@tty2.service"), "tty2");
+        assert_eq!(instance_of("user@1002.service"), "1002");
+        assert_eq!(instance_of("systemd-fsck@dev-sda1.service"), "dev-sda1");
+
+        // A template itself has no instance, and neither does a plain unit.
+        assert_eq!(instance_of("getty@.service"), "");
+        assert_eq!(instance_of("sshd.service"), "");
+
+        // Instances may contain dots and dashes; only the type suffix is cut.
+        assert_eq!(instance_of("mnt-data\\x2ddir@foo.bar.mount"), "foo.bar");
+        assert_eq!(instance_of("a@b"), "b");
+    }
+
+    /// The concrete regression: a getty drop-in must keep its tty argument.
+    #[test]
+    fn dropin_specifiers_resolve_against_the_instance() {
+        let dropin = "[Service]\nExecStart=-agetty --noclear %I $TERM\n";
+        let out = resolve_specifiers(dropin, "getty@tty2.service", instance_of("getty@tty2.service"));
+        assert!(
+            out.contains("--noclear tty2"),
+            "%I must expand to the instance, got: {out}"
+        );
     }
 }

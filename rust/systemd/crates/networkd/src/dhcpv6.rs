@@ -2099,6 +2099,49 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_dhcpv6_parsers_never_panic() {
+        // Robustness net (task #22): DHCPv6 reply/advertise parsing consumes
+        // attacker-controlled server packets. Dhcpv6Message::parse and its
+        // option sub-parsers must never panic or hang on malformed input. The
+        // sub-parsers are also driven directly, so deep paths are exercised
+        // even when the top-level parse rejects random bytes early.
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xd6cf_1234_abcd_5eed;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let len = (next() % 256) as usize;
+                let input: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+                let buf = input.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = Dhcpv6Message::parse(&input);
+                    let _ = parse_options(&input);
+                    let _ = parse_ia_na(&input);
+                    let _ = parse_ia_pd(&input);
+                    let _ = parse_ia_addr(&input);
+                    let _ = parse_ia_prefix(&input);
+                    let _ = parse_ipv6_list(&input);
+                    let _ = parse_dns_labels(&input);
+                });
+                assert!(res.is_ok(), "dhcpv6 parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "dhcpv6 fuzz did not finish in 30s -- a malformed packet hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
+    #[test]
     fn test_duid_from_mac_time() {
         let mac = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
         let duid = Duid::from_mac_time(&mac, 1000);

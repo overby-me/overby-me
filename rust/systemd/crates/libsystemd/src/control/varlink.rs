@@ -139,14 +139,92 @@ fn process_varlink_message(
                 "product": "rust-systemd",
                 "version": "0.1.0",
                 "url": "",
-                "interfaces": ["io.systemd.Manager"]
+                "interfaces": ["io.systemd.Manager", "io.systemd.Unit"]
             }
         })),
+        "io.systemd.Unit.SetProperties" => {
+            // {"runtime": bool, "name": "unit", "properties": {"Key": <value>}}
+            // Route to the same set-property logic as the control socket so
+            // Markers= and friends share one implementation.
+            let params = msg
+                .get("parameters")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let (name, props) =
+                parse_set_properties(&params).ok_or_else(|| invalid_parameter("name"))?;
+            match crate::control::execute_command(
+                crate::control::Command::SetProperty(name, props),
+                run_info.clone(),
+            ) {
+                Ok(_) => Ok(serde_json::json!({ "parameters": {} })),
+                Err(e) => Err(serde_json::json!({
+                    "error": "io.systemd.Unit.PropertyReadOnly",
+                    "parameters": {"message": e}
+                })),
+            }
+        }
+        "io.systemd.Manager.EnqueueMarkedJobs" => {
+            // Varlink equivalent of `systemctl reload-or-restart --marked`.
+            match crate::control::execute_command(
+                crate::control::Command::ReloadOrRestart("--marked".to_owned()),
+                run_info.clone(),
+            ) {
+                Ok(_) => Ok(serde_json::json!({ "parameters": {} })),
+                Err(e) => Err(serde_json::json!({
+                    "error": "io.systemd.Manager.JobError",
+                    "parameters": {"message": e}
+                })),
+            }
+        }
         _ => Err(serde_json::json!({
             "error": "org.varlink.service.MethodNotFound",
             "parameters": {"method": method}
         })),
     }
+}
+
+/// Translate the `io.systemd.Unit.SetProperties` parameters object into the
+/// `(unit name, textual property assignments)` pair the control-socket
+/// `set-property` handler expects.  Returns `None` if the mandatory `name`
+/// field is missing.  Multi-valued properties (e.g. `Markers`) arrive as a
+/// JSON array and are joined with spaces to match the textual syntax.
+fn parse_set_properties(params: &serde_json::Value) -> Option<(String, Vec<String>)> {
+    let name = params.get("name").and_then(|v| v.as_str())?.to_owned();
+    let mut props: Vec<String> = Vec::new();
+    if let Some(obj) = params.get("properties").and_then(|v| v.as_object()) {
+        for (key, value) in obj {
+            let rendered = match value {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Array(a) => a
+                    .iter()
+                    .filter_map(|x| x.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Null => String::new(),
+                _ => continue,
+            };
+            props.push(format!("{key}={rendered}"));
+        }
+    }
+    if params
+        .get("runtime")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        props.push("--runtime".to_owned());
+    }
+    Some((name, props))
+}
+
+/// Build an `org.varlink.service.InvalidParameter` error for a missing or
+/// malformed named parameter.
+fn invalid_parameter(param: &str) -> serde_json::Value {
+    serde_json::json!({
+        "error": "org.varlink.service.InvalidParameter",
+        "parameters": {"parameter": param}
+    })
 }
 
 /// Send a structured log message to the journal with custom fields.
@@ -157,6 +235,20 @@ pub fn journal_log_with_fields(message: &str, priority: u8, fields: &[(&str, &st
         Ok(s) => s,
         Err(_) => return,
     };
+
+    // The manager (PID 1) must NEVER block on journal logging.  This function
+    // is called from hot paths that hold locks — e.g.
+    // `state_transition_starting` sends the "Starting ..." lifecycle line while
+    // holding the unit's status write lock and its ordering deps' read locks
+    // (from `acquire_locks`).  If journald is not draining
+    // `/run/systemd/journal/socket` (not yet started, or its datagram receive
+    // buffer filled by the burst of lifecycle messages during early boot), a
+    // blocking `send_to` would stall that thread with the status locks held,
+    // cascading into an activation-wide deadlock as every other unit blocks in
+    // `acquire_locks`.  Match systemd's non-blocking journal client: set the
+    // socket non-blocking so a full buffer drops the message (EAGAIN) instead
+    // of blocking.
+    let _ = sock.set_nonblocking(true);
 
     let mut payload = String::new();
     payload.push_str(&format!("MESSAGE={message}\n"));
@@ -258,4 +350,27 @@ fn build_describe_response(run_info: &ArcMutRuntimeInfo) -> serde_json::Value {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_set_properties;
+
+    #[test]
+    fn set_properties_markers_array_from_varlinkctl() {
+        // The exact parameters object TEST-26-SYSTEMCTL sends via
+        // `varlinkctl call ... io.systemd.Unit.SetProperties`.
+        let params = serde_json::json!({
+            "runtime": true,
+            "name": "systemctl-test-13715.service",
+            "properties": {"Markers": ["needs-reload", "needs-restart"]}
+        });
+        let (name, props) = parse_set_properties(&params).expect("name present");
+        assert_eq!(name, "systemctl-test-13715.service");
+        assert!(
+            props.contains(&"Markers=needs-reload needs-restart".to_owned()),
+            "props did not contain the joined Markers assignment: {props:?}"
+        );
+        assert!(props.contains(&"--runtime".to_owned()), "runtime flag missing: {props:?}");
+    }
 }

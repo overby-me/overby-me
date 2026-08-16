@@ -10,7 +10,7 @@
     set -o pipefail
 
     : "systemctl list-units with glob pattern"
-    OUT="$(systemctl list-units --no-pager "systemd-*" 2>/dev/null)" || true
+    OUT="$(systemctl list-units --no-pager "systemd-*")"
     echo "$OUT" | grep -q "systemd-"
 
     : "systemctl list-units --all shows inactive too"

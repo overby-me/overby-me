@@ -9,14 +9,11 @@
     set -eux
     set -o pipefail
 
-    : "systemctl list-jobs runs without error"
-    systemctl list-jobs --no-pager > /dev/null
-
-    : "systemctl list-jobs --after shows job ordering"
-    systemctl list-jobs --after --no-pager > /dev/null || true
-
-    : "systemctl list-jobs --before shows job ordering"
-    systemctl list-jobs --before --no-pager > /dev/null || true
+    : "systemctl list-jobs reports the job queue"
+    OUT="$(systemctl list-jobs --no-pager 2>&1)"
+    # With no pending jobs, list-jobs prints its JOB header and/or a
+    # 'No jobs' notice; either way the output must be well-formed.
+    grep -qiE "JOB|No jobs" <<<"$OUT"
     LJEOF
     chmod +x TEST-74-AUX-UTILS.list-jobs.sh
   '';

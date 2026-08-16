@@ -53,6 +53,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod varlink;
+
 // ---------------------------------------------------------------------------
 // CLI definition
 // ---------------------------------------------------------------------------
@@ -718,6 +720,20 @@ fn parse_timestamp(s: &str) -> Result<u64, String> {
                 .unwrap()
                 .and_local_timezone(chrono::Local);
             if let chrono::LocalResult::Single(ldt) = dt {
+                return Ok(ldt.timestamp_micros() as u64);
+            }
+        }
+    }
+
+    // Bare time-of-day "HH:MM:SS" or "HH:MM" — systemd interprets these as
+    // today at that time (e.g. TEST-07-PID1.prefix-shell filters with
+    // `--since "$(date +%H:%M:%S)"`).
+    for fmt in &["%H:%M:%S", "%H:%M"] {
+        if let Ok(t) = chrono::NaiveTime::parse_from_str(s, fmt) {
+            let today = chrono::Local::now().date_naive();
+            if let chrono::LocalResult::Single(ldt) =
+                today.and_time(t).and_local_timezone(chrono::Local)
+            {
                 return Ok(ldt.timestamp_micros() as u64);
             }
         }
@@ -1660,6 +1676,13 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
+    // Socket-activated io.systemd.JournalAccess Varlink server mode: when a
+    // connected socket is passed on fd 3 (systemd-journalctl.socket, Accept=yes)
+    // serve the interface and exit instead of parsing CLI arguments.
+    if varlink::invoked_as_varlink() {
+        varlink::serve();
+    }
+
     let cli = Cli::parse_from(preprocess_boot_args(std::env::args()));
 
     // Handle --facility help
@@ -1752,7 +1775,7 @@ fn main() {
     if cli.list_namespaces {
         // List journal namespaces. Namespaces are subdirectories under
         // /var/log/journal/<machine-id>.* or /run/log/journal/<machine-id>.*
-        let namespaces = discover_namespaces();
+        let namespaces = discover_namespaces(cli.root.as_deref().unwrap_or(""));
         if cli.output.starts_with("json") {
             let items: Vec<String> = namespaces.iter().map(|n| format!("\"{}\"", n)).collect();
             println!("[{}]", items.join(","));
@@ -2108,11 +2131,17 @@ fn main() {
                 // Current boot (most recent)
                 boots.last().map(|b| b.boot_id.clone())
             } else if let Ok(offset) = boot_spec.parse::<i64>() {
-                // Numeric offset: 0 = current, -1 = previous, etc.
-                let idx = if offset >= 0 {
-                    offset as usize
+                // Numeric offset per journalctl(1): a POSITIVE N selects the Nth
+                // boot from the beginning (1 = oldest, 2 = second oldest, ...);
+                // 0/-0 is the last (current) boot; a negative -N is N boots before
+                // last. `boots` is chronological (oldest first, last = current).
+                let idx = if offset > 0 {
+                    (offset as usize).saturating_sub(1)
+                } else if offset == 0 {
+                    boots.len().saturating_sub(1)
                 } else {
-                    boots.len().saturating_sub((-offset) as usize)
+                    // -1 = boot before last, -N = N boots before last.
+                    boots.len().saturating_sub(1 + (-offset) as usize)
                 };
                 boots.get(idx).map(|b| b.boot_id.clone())
             } else {
@@ -2376,22 +2405,40 @@ fn main() {
     // --reverse controls direction.  With --reverse, the cursor becomes an
     // upper bound (iterate backwards from cursor).  Without --reverse it is
     // a lower bound (iterate forward from cursor).
+    // Cursor comparisons use (realtime, seqnum) to match the chronological
+    // order entries are sorted by (read_all_from_files sorts by realtime then
+    // seqnum). Comparing seqnum alone is inconsistent when the latest-realtime
+    // entry is not the highest-seqnum entry, which breaks --cursor-file /
+    // --after-cursor phase isolation (an older entry leaks past the saved tail
+    // cursor). Fall back to seqnum-only for a cursor that carries no t= field.
     if let Some(ref cursor_str) = effective_cursor
         && effective_after_cursor.is_none()
-        && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
+        && let Some((seqnum, realtime)) = parse_cursor(cursor_str)
     {
         if cli.reverse {
-            filtered.retain(|e| e.seqnum <= seqnum);
+            if realtime != 0 {
+                filtered.retain(|e| (e.realtime_usec, e.seqnum) <= (realtime, seqnum));
+            } else {
+                filtered.retain(|e| e.seqnum <= seqnum);
+            }
+        } else if realtime != 0 {
+            filtered.retain(|e| (e.realtime_usec, e.seqnum) >= (realtime, seqnum));
         } else {
             filtered.retain(|e| e.seqnum >= seqnum);
         }
     }
 
     if let Some(ref cursor_str) = effective_after_cursor
-        && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
+        && let Some((seqnum, realtime)) = parse_cursor(cursor_str)
     {
         if cli.reverse {
-            filtered.retain(|e| e.seqnum < seqnum);
+            if realtime != 0 {
+                filtered.retain(|e| (e.realtime_usec, e.seqnum) < (realtime, seqnum));
+            } else {
+                filtered.retain(|e| e.seqnum < seqnum);
+            }
+        } else if realtime != 0 {
+            filtered.retain(|e| (e.realtime_usec, e.seqnum) > (realtime, seqnum));
         } else {
             filtered.retain(|e| e.seqnum > seqnum);
         }
@@ -2545,7 +2592,18 @@ fn main() {
     // Exit 1 when --grep or --unit was used and no entries matched (matches
     // real journalctl behavior). This is important for scripts that use
     // `journalctl --grep=X` or `journalctl --unit=X` to check for entries.
-    if filtered.is_empty() && !cli.follow && (cli.grep.is_some() || cli.unit.is_some()) {
+    //
+    // Exception: when a cursor filter (--cursor / --after-cursor / --cursor-file)
+    // is active, an empty result is the normal "no new entries since the cursor"
+    // case and must exit 0, matching real journalctl. TEST-36-NUMAPOLICY relies
+    // on this: `journalctl -u init.scope --cursor-file=X` under `set -e`
+    // legitimately finds no entries for a policy phase that logged nothing.
+    if filtered.is_empty()
+        && !cli.follow
+        && effective_after_cursor.is_none()
+        && effective_cursor.is_none()
+        && (cli.grep.is_some() || cli.unit.is_some())
+    {
         process::exit(1);
     }
 }
@@ -3210,9 +3268,17 @@ fn find_namespace_dir(base: &PathBuf, namespace: &str) -> Option<PathBuf> {
 
 /// Discover journal namespaces by scanning journal directories for
 /// namespace-specific subdirectories (e.g., `<machine-id>.foobar`).
-fn discover_namespaces() -> Vec<String> {
+/// Discover journal namespaces under `root` (empty for the live system).
+///
+/// `--root=DIR` must be honoured here: TEST-44-LOG-NAMESPACE asserts that
+/// `journalctl --root=/tmp --list-namespaces --quiet` prints nothing, which only
+/// holds if the search is confined to the given tree rather than the host's.
+fn discover_namespaces(root: &str) -> Vec<String> {
     let mut namespaces = Vec::new();
-    let dirs = ["/var/log/journal", "/run/log/journal"];
+    let dirs = [
+        format!("{root}/var/log/journal"),
+        format!("{root}/run/log/journal"),
+    ];
 
     for dir in &dirs {
         let Ok(entries) = fs::read_dir(dir) else {

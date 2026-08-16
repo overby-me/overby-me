@@ -7,7 +7,7 @@ mod socket_unit;
 mod swap_unit;
 mod target_unit;
 mod timer_unit;
-mod unit_parser;
+pub(crate) mod unit_parser;
 
 pub use device_unit::*;
 pub use mount_unit::*;
@@ -22,6 +22,11 @@ pub use unit_parser::*;
 
 use log::trace;
 use std::path::PathBuf;
+
+/// Maximum number of `LogExtraFields=` entries kept for a unit, matching
+/// systemd's `LOG_EXTRA_FIELDS_MAX` (`ENTRY_FIELD_COUNT_MAX` 1024 - 10). Excess
+/// fields in a unit file are ignored; over the bus the assignment is rejected.
+pub const LOG_EXTRA_FIELDS_MAX: usize = 1014;
 
 pub struct ParsedCommonConfig {
     pub unit: ParsedUnitSection,
@@ -113,6 +118,12 @@ pub struct ParsedSliceSection {
     pub io_write_iops_max: Vec<IoDeviceLimit>,
     /// TasksMax= — maximum number of tasks (processes + threads). See systemd.resource-control(5).
     pub tasks_max: Option<TasksMax>,
+    /// ConcurrencySoftMax= sets a soft limit on concurrently-active units in the
+    /// slice; new starts queue when reached. None = infinity. See systemd.resource-control(5).
+    pub concurrency_soft_max: Option<u32>,
+    /// ConcurrencyHardMax= sets a hard limit on concurrently-active-or-pending units
+    /// in the slice; new starts are refused when reached. None = infinity. See systemd.resource-control(5).
+    pub concurrency_hard_max: Option<u32>,
     /// Delegate= — delegate cgroup subtree to the unit. See systemd.resource-control(5).
     pub delegate: Delegate,
     /// CPUAccounting= — enable CPU accounting. See systemd.resource-control(5).
@@ -244,6 +255,9 @@ pub struct ParsedTimerSection {
     pub wake_system: bool,
     /// RemainAfterElapse= — if true, timer stays loaded after elapsing (default true).
     pub remain_after_elapse: bool,
+    /// DeferReactivation= — if true, re-arm a repeating calendar timer relative
+    /// to when the triggered unit deactivates, not when the timer fired.
+    pub defer_reactivation: bool,
     /// OnClockChange= — if true, the timer is triggered when the system clock
     /// jumps relative to the monotonic clock (e.g. DST change, NTP correction).
     /// See systemd.timer(5).
@@ -304,6 +318,13 @@ pub enum UnitCondition {
     /// left-hand side of an assignment) or a key=value assignment (checked for an exact match).
     /// Reads from /proc/cmdline (or /proc/1/cmdline in containers). See systemd.unit(5).
     KernelCommandLine { argument: String, negate: bool },
+    /// ConditionKernelVersion=>=5.10 (true if the running kernel is >= 5.10)
+    /// ConditionKernelVersion=!<4.0 (true if the kernel is NOT < 4.0)
+    /// Compares the running kernel release (/proc/sys/kernel/osrelease) against
+    /// an expression: an operator (`<`, `<=`, `=`/`==`, `!=`/`<>`, `>=`, `>`)
+    /// followed by a version, or with no operator a shell-style glob match.
+    /// See systemd.unit(5).
+    KernelVersion { expression: String, negate: bool },
     /// ConditionDirectoryNotEmpty=/some/path (true if path exists as a directory and is not empty)
     /// ConditionDirectoryNotEmpty=!/some/path (true if path does NOT exist, is not a directory, or is empty)
     /// Checks whether the specified path exists, is a directory, and contains
@@ -716,6 +737,333 @@ fn detect_virtualization() -> Option<DetectedVirt> {
     None
 }
 
+/// Parse a boolean the way C's `parse_boolean()` does (case-sensitive), for the
+/// `$SYSTEMD_FIRST_BOOT` override. `None` means "not a boolean", so the caller
+/// falls back to the `/run/systemd/first-boot` flag, exactly like C.
+fn parse_first_boot_bool(s: &str) -> Option<bool> {
+    match s.trim() {
+        "1" | "yes" | "y" | "true" | "t" | "on" => Some(true),
+        "0" | "no" | "n" | "false" | "f" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod first_boot_bool_tests {
+    use super::parse_first_boot_bool;
+
+    #[test]
+    fn parses_c_boolean_tokens() {
+        for t in ["1", "yes", "y", "true", "t", "on"] {
+            assert_eq!(parse_first_boot_bool(t), Some(true), "{t}");
+        }
+        for f in ["0", "no", "n", "false", "f", "off"] {
+            assert_eq!(parse_first_boot_bool(f), Some(false), "{f}");
+        }
+        // Non-booleans return None so the caller falls back to the flag file.
+        assert_eq!(parse_first_boot_bool("Yes"), None);
+        assert_eq!(parse_first_boot_bool(""), None);
+        assert_eq!(parse_first_boot_bool("maybe"), None);
+    }
+}
+
+/// Parse a single `ConditionX=Y` / `AssertX=Y` spec into a [`UnitCondition`],
+/// for callers outside unit-file loading (e.g. `systemd-analyze condition`).
+/// A leading `!` on the value negates. Returns `None` for a spec without `=` or
+/// a condition name this does not model (notably `KernelVersion`), so the caller
+/// can fall back.
+fn parse_single_condition(spec: &str) -> Option<UnitCondition> {
+    let (key, raw) = spec.split_once('=')?;
+    let key = key.trim().strip_prefix('|').map(str::trim).unwrap_or(key.trim());
+    let name = key
+        .strip_prefix("Condition")
+        .or_else(|| key.strip_prefix("Assert"))?;
+    let raw = raw.trim();
+    let (value, negate) = match raw.strip_prefix('!') {
+        Some(rest) => (rest.trim().to_string(), true),
+        None => (raw.to_string(), false),
+    };
+    let first_boot_bool = || parse_first_boot_bool(&value).unwrap_or(false);
+    Some(match name {
+        "PathExists" => UnitCondition::PathExists { path: value, negate },
+        "PathExistsGlob" => UnitCondition::PathExistsGlob { pattern: value, negate },
+        "PathIsDirectory" => UnitCondition::PathIsDirectory { path: value, negate },
+        "PathIsSymbolicLink" => UnitCondition::PathIsSymbolicLink { path: value, negate },
+        "PathIsMountPoint" => UnitCondition::PathIsMountPoint { path: value, negate },
+        "PathIsReadWrite" => UnitCondition::PathIsReadWrite { path: value, negate },
+        "PathIsEncrypted" => UnitCondition::PathIsEncrypted { path: value, negate },
+        "DirectoryNotEmpty" => UnitCondition::DirectoryNotEmpty { path: value, negate },
+        "FileNotEmpty" => UnitCondition::FileNotEmpty { path: value, negate },
+        "FileIsExecutable" => UnitCondition::FileIsExecutable { path: value, negate },
+        "NeedsUpdate" => UnitCondition::NeedsUpdate { path: value, negate },
+        "Virtualization" => UnitCondition::Virtualization { value, negate },
+        "Capability" => UnitCondition::Capability { capability: value, negate },
+        "KernelModuleLoaded" => UnitCondition::KernelModuleLoaded { module: value, negate },
+        "KernelCommandLine" => UnitCondition::KernelCommandLine { argument: value, negate },
+        "KernelVersion" => UnitCondition::KernelVersion { expression: value, negate },
+        "ControlGroupController" => {
+            UnitCondition::ControlGroupController { controller: value, negate }
+        }
+        "Security" => UnitCondition::Security { technology: value, negate },
+        "Architecture" => UnitCondition::Architecture { arch: value, negate },
+        "Environment" => UnitCondition::Environment { expression: value, negate },
+        "Firmware" => UnitCondition::Firmware { value, negate },
+        "Host" => UnitCondition::Host { value, negate },
+        "Memory" => UnitCondition::Memory { value, negate },
+        "CPUFeature" => UnitCondition::CPUFeature { feature: value, negate },
+        "CPUs" => UnitCondition::CPUs { expression: value, negate },
+        "OSRelease" => UnitCondition::OSRelease { expression: value, negate },
+        "User" => UnitCondition::User { value, negate },
+        "Group" => UnitCondition::Group { value, negate },
+        "FirstBoot" => UnitCondition::FirstBoot { value: first_boot_bool(), negate },
+        "ACPower" => UnitCondition::ACPower { value: first_boot_bool(), negate },
+        _ => return None,
+    })
+}
+
+/// Parse and evaluate a single `ConditionX=Y` / `AssertX=Y` spec through the
+/// same [`UnitCondition::check`] logic PID 1 uses. Returns `None` for a
+/// condition this does not model (the caller can fall back). See
+/// [`parse_single_condition`].
+pub fn evaluate_condition_spec(spec: &str) -> Option<bool> {
+    parse_single_condition(spec).map(|c| c.check())
+}
+
+/// Read the running kernel release (e.g. "6.1.0-foo"), the value C's
+/// ConditionKernelVersion compares against (uname release, exposed at
+/// /proc/sys/kernel/osrelease).
+fn kernel_release_string() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Compare two version strings using systemd's `strverscmp_improved`
+/// (src/fundamental/string-util-fundamental.c). Segments are numeric or
+/// alphabetic; `~` marks a pre-release (oldest), `-`/`^`/`.` are ordered
+/// separators, numeric segments outrank alpha, leading zeros are ignored, and a
+/// longer string is newer except when the extra part is `~`-prefixed. All other
+/// characters are treated as separators. Returns -1 (a<b), 0 (a==b), 1 (a>b).
+///
+/// This mirrors the port in `systemd-analyze` (`compare-versions`) and
+/// `vpick-core`; keep the three in sync. The earlier naive "first numeric
+/// dotted segment" compare misordered `~` pre-releases and `-`/`^` separators.
+fn compare_kernel_versions(a: &str, b: &str) -> i32 {
+    fn is_valid(c: u8) -> bool {
+        c.is_ascii_digit() || c.is_ascii_alphabetic() || matches!(c, b'~' | b'-' | b'^' | b'.')
+    }
+    // Current byte, or NUL past the end (mirrors C's NUL-terminated scan).
+    fn at(s: &[u8], k: usize) -> u8 {
+        if k < s.len() { s[k] } else { 0 }
+    }
+    fn cmp<T: Ord>(x: T, y: T) -> i32 {
+        (x > y) as i32 - (x < y) as i32
+    }
+
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut i = 0;
+    let mut j = 0;
+    loop {
+        // Drop leading invalid characters (treated as separators).
+        while i < a.len() && !is_valid(a[i]) {
+            i += 1;
+        }
+        while j < b.len() && !is_valid(b[j]) {
+            j += 1;
+        }
+
+        // '~': a segment prefixed with it is the oldest.
+        if at(a, i) == b'~' || at(b, j) == b'~' {
+            let r = cmp(at(a, i) != b'~', at(b, j) != b'~');
+            if r != 0 {
+                return r;
+            }
+            i += 1;
+            j += 1;
+        }
+
+        // If either reached the end, the longer one is newer (after the '~' check).
+        if at(a, i) == 0 || at(b, j) == 0 {
+            return cmp(at(a, i), at(b, j));
+        }
+
+        // Ordered separators: '-' (version/release), '^' (patched), '.' (point).
+        for sep in [b'-', b'^', b'.'] {
+            if at(a, i) == sep || at(b, j) == sep {
+                let r = cmp(at(a, i) != sep, at(b, j) != sep);
+                if r != 0 {
+                    return r;
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+
+        if at(a, i).is_ascii_digit() || at(b, j).is_ascii_digit() {
+            // Numeric segments; an empty one is older than a numeric one.
+            let mut ii = i;
+            while ii < a.len() && a[ii].is_ascii_digit() {
+                ii += 1;
+            }
+            let mut jj = j;
+            while jj < b.len() && b[jj].is_ascii_digit() {
+                jj += 1;
+            }
+            let r = cmp(i != ii, j != jj);
+            if r != 0 {
+                return r;
+            }
+            // Ignore leading zeros, then compare by length, then lexically.
+            while i < ii && a[i] == b'0' {
+                i += 1;
+            }
+            while j < jj && b[j] == b'0' {
+                j += 1;
+            }
+            let r = cmp(ii - i, jj - j);
+            if r != 0 {
+                return r;
+            }
+            let r = cmp(&a[i..ii], &b[j..jj]);
+            if r != 0 {
+                return r;
+            }
+            i = ii;
+            j = jj;
+        } else {
+            // Alphabetic segments compared lexically, then longer is newer.
+            let mut ii = i;
+            while ii < a.len() && a[ii].is_ascii_alphabetic() {
+                ii += 1;
+            }
+            let mut jj = j;
+            while jj < b.len() && b[jj].is_ascii_alphabetic() {
+                jj += 1;
+            }
+            let n = (ii - i).min(jj - j);
+            let r = cmp(&a[i..i + n], &b[j..j + n]);
+            if r != 0 {
+                return r;
+            }
+            let r = cmp(ii - i, jj - j);
+            if r != 0 {
+                return r;
+            }
+            i = ii;
+            j = jj;
+        }
+    }
+}
+
+/// Shell-style glob match (only `*` wildcards), used by ConditionKernelVersion
+/// when the expression carries no comparison operator.
+fn matches_kernel_glob(pattern: &str, version: &str) -> bool {
+    if !pattern.contains('*') {
+        return version.contains(pattern);
+    }
+    let mut pos = 0usize;
+    for (i, part) in pattern.split('*').enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !version[pos..].starts_with(part) {
+                return false;
+            }
+            pos += part.len();
+        } else {
+            match version[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Evaluate a `ConditionKernelVersion` expression (the leading `!` already
+/// stripped into `negate` by the parser): an operator (`<`, `<=`, `=`/`==`,
+/// `!=`/`<>`, `>=`, `>`) plus a version, or a glob when no operator is present.
+fn eval_kernel_version_expr(expression: &str) -> bool {
+    let rest = expression.trim();
+    let (op, version) = if let Some(r) = rest.strip_prefix("<=") {
+        ("<=", r.trim())
+    } else if let Some(r) = rest.strip_prefix(">=") {
+        (">=", r.trim())
+    } else if let Some(r) = rest.strip_prefix("==") {
+        ("==", r.trim())
+    } else if let Some(r) = rest.strip_prefix("!=") {
+        ("!=", r.trim())
+    } else if let Some(r) = rest.strip_prefix("<>") {
+        ("!=", r.trim())
+    } else if let Some(r) = rest.strip_prefix('<') {
+        ("<", r.trim())
+    } else if let Some(r) = rest.strip_prefix('>') {
+        (">", r.trim())
+    } else if let Some(r) = rest.strip_prefix('=') {
+        ("==", r.trim())
+    } else {
+        return matches_kernel_glob(rest, &kernel_release_string());
+    };
+    let cmp = compare_kernel_versions(&kernel_release_string(), version);
+    match op {
+        "<" => cmp < 0,
+        "<=" => cmp <= 0,
+        "==" => cmp == 0,
+        "!=" => cmp != 0,
+        ">=" => cmp >= 0,
+        ">" => cmp > 0,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod condition_spec_tests {
+    use super::evaluate_condition_spec;
+
+    #[test]
+    fn evaluates_known_conditions() {
+        // /proc always exists on Linux; negation flips it; any host has a CPU
+        // and a kernel newer than 1.0.
+        assert_eq!(evaluate_condition_spec("ConditionPathExists=/proc"), Some(true));
+        assert_eq!(evaluate_condition_spec("ConditionPathExists=!/proc"), Some(false));
+        assert_eq!(evaluate_condition_spec("ConditionCPUs=>=1"), Some(true));
+        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=>=1.0"), Some(true));
+        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=<1.0"), Some(false));
+    }
+
+    #[test]
+    fn returns_none_for_unknown_or_malformed() {
+        // Unknown name, and a spec without '='.
+        assert_eq!(evaluate_condition_spec("ConditionBogusXyz=1"), None);
+        assert_eq!(evaluate_condition_spec("ConditionPathExists"), None);
+    }
+
+    #[test]
+    fn compare_kernel_versions_strverscmp() {
+        use super::compare_kernel_versions;
+        let lt = |a: &str, b: &str| assert!(compare_kernel_versions(a, b) < 0, "{a} < {b}");
+        let eq = |a: &str, b: &str| assert_eq!(compare_kernel_versions(a, b), 0, "{a} == {b}");
+
+        // Cases the earlier naive "first numeric dotted segment" compare got
+        // wrong: `~` is a pre-release (oldest), `-`/`^` are ordered separators.
+        lt("1~rc1", "1");
+        lt("1.0-1", "1.0-2");
+        lt("123", "123-a");
+        lt("123.a-1", "123a-1");
+        eq("007", "7");
+
+        // Plain numeric dotted comparisons behave identically to the old impl,
+        // which is why the VM `ConditionKernelVersion=` tests (all numeric,
+        // e.g. `>=1.0`, `>=999.0`, `<999.0`) are unaffected by this change.
+        lt("1.0", "999.0");
+        lt("5.10.0", "5.10.1");
+        lt("5.9.0", "5.10.0");
+        eq("6.1.0", "6.1.0");
+    }
+}
+
 impl UnitCondition {
     /// Evaluate the condition. Returns true if the condition is met.
     pub fn check(&self) -> bool {
@@ -763,12 +1111,17 @@ impl UnitCondition {
                 if *negate { !result } else { result }
             }
             UnitCondition::FirstBoot { value, negate } => {
-                // systemd considers it "first boot" when /etc/machine-id
-                // does not exist or is empty (uninitialized).
-                let is_first_boot = match std::fs::metadata("/etc/machine-id") {
-                    Ok(meta) => meta.len() == 0,
-                    Err(_) => true, // file doesn't exist → first boot
-                };
+                // Match C's in_first_boot(): the $SYSTEMD_FIRST_BOOT override,
+                // else the /run/systemd/first-boot flag PID 1 writes on a
+                // genuine first boot. Not keyed off /etc/machine-id, which PID 1
+                // generates early enough that it is already present by the time
+                // conditions are evaluated.
+                let is_first_boot = std::env::var("SYSTEMD_FIRST_BOOT")
+                    .ok()
+                    .and_then(|e| parse_first_boot_bool(&e))
+                    .unwrap_or_else(|| {
+                        std::path::Path::new("/run/systemd/first-boot").exists()
+                    });
                 let result = if *value {
                     is_first_boot
                 } else {
@@ -842,15 +1195,30 @@ impl UnitCondition {
                 };
                 if *negate { !result } else { result }
             }
+            UnitCondition::KernelVersion { expression, negate } => {
+                let result = eval_kernel_version_expr(expression);
+                if *negate { !result } else { result }
+            }
             UnitCondition::PathIsReadWrite { path, negate } => {
-                // Check whether the path is on a read-write filesystem.
-                // We use access(W_OK) which checks whether the process could
-                // write to the path — if the filesystem is read-only this
-                // will report false. For directories we check the directory
-                // itself; for files we check the file.
-                let is_rw = match nix::unistd::access(path.as_str(), nix::unistd::AccessFlags::W_OK)
-                {
-                    Ok(()) => true,
+                // True iff the path exists and its underlying filesystem is
+                // mounted read-write.  systemd checks the filesystem's
+                // read-only flag (statvfs ST_RDONLY), NOT whether the path
+                // itself is writable: e.g. /proc/sys/net/ lives on a
+                // read-write procfs even though the directory is not itself
+                // writable, so access(W_OK) wrongly reported it read-only and
+                // skipped systemd-sysctl.service
+                // (ConditionPathIsReadWrite=/proc/sys/net/).
+                let is_rw = match std::ffi::CString::new(path.as_bytes()) {
+                    Ok(c_path) => {
+                        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+                        if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } == 0 {
+                            // ST_RDONLY set ⇒ read-only filesystem.
+                            (stat.f_flag & libc::ST_RDONLY) == 0
+                        } else {
+                            // statvfs() fails (e.g. ENOENT) ⇒ path absent.
+                            false
+                        }
+                    }
                     Err(_) => false,
                 };
                 if *negate { !is_rw } else { is_rw }
@@ -1700,13 +2068,11 @@ pub struct ParsedUnitSection {
     /// Exit status to report when `SuccessAction=` triggers.
     /// Only meaningful when SuccessAction= is set to something other than `none`.
     /// Matches systemd's `SuccessActionExitStatus=` setting.
-    /// Parsed and stored; no runtime enforcement yet.
     pub success_action_exit_status: Option<u8>,
 
     /// Exit status to report when `FailureAction=` triggers.
     /// Only meaningful when FailureAction= is set to something other than `none`.
     /// Matches systemd's `FailureActionExitStatus=` setting.
-    /// Parsed and stored; no runtime enforcement yet.
     pub failure_action_exit_status: Option<u8>,
 
     /// Absolute paths that this unit requires mount points for.
@@ -1989,9 +2355,12 @@ pub struct ParsedSocketSection {
 
     /// DeferTrigger= — controls whether to defer triggering the associated
     /// service when a connection comes in. Takes a boolean or "patient".
-    /// Defaults to No. Parsed and stored; no runtime enforcement yet.
-    /// See systemd.socket(5).
+    /// Defaults to No. See systemd.socket(5).
     pub defer_trigger: DeferTrigger,
+
+    /// DeferTriggerMaxSec= — maximum time (seconds) the socket may stay in the
+    /// deferred state before it fails. None = no limit. See systemd.socket(5).
+    pub defer_trigger_max_sec: Option<u64>,
 
     /// Writable= — whether to open the FIFO or special file for writing
     /// as well (i.e. O_RDWR rather than O_RDONLY). Defaults to false.
@@ -2660,6 +3029,51 @@ pub struct ParsedInstallSection {
     /// Matches systemd's `DefaultInstance=` setting in the `[Install]` section.
     pub default_instance: Option<String>,
 }
+
+/// A single `StandardInputText=` or `StandardInputData=` directive, retained
+/// in the order the directives appear across the fragment and its drop-ins.
+/// systemd feeds both kinds into one stdin buffer in appearance order, so the
+/// relative ordering must be preserved to reconstruct the merged
+/// `StandardInputData` property correctly (see 15-DROPIN
+/// testcase_transient_service_dropins).
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum StdinInput {
+    /// `StandardInputText=` value — raw text; a trailing newline is appended
+    /// when materialized into the stdin buffer.
+    Text(String),
+    /// `StandardInputData=` value — base64-encoded bytes.
+    Data(String),
+}
+
+/// Reconstruct the raw stdin byte stream from ordered `StandardInputText=`/
+/// `StandardInputData=` entries: each `Text` value contributes its bytes plus a
+/// trailing newline; each `Data` value contributes its base64-decoded bytes.
+/// Mirrors systemd's accumulation of `c->stdin_data`. Used for both the
+/// `StandardInputData` D-Bus property and for actually feeding the service stdin.
+pub fn reconstruct_stdin_data(inputs: &[StdinInput]) -> Vec<u8> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+    let mut bytes: Vec<u8> = Vec::new();
+    for item in inputs {
+        match item {
+            StdinInput::Text(s) => {
+                // Decode C-style escapes (\n, \t, \xNN, ...) exactly as systemd's
+                // cunescape does at parse time, then terminate the entry with a
+                // newline. Shared with the StandardInputData D-Bus property so both
+                // report/feed identical bytes.
+                bytes.extend(crate::entrypoints::exec_helper::cunescape(s));
+                bytes.push(b'\n');
+            }
+            StdinInput::Data(s) => {
+                if let Ok(decoded) = engine.decode(s) {
+                    bytes.extend(decoded);
+                }
+            }
+        }
+    }
+    bytes
+}
+
 pub struct ParsedExecSection {
     pub user: Option<String>,
     pub group: Option<String>,
@@ -2696,6 +3110,10 @@ pub struct ParsedExecSection {
     /// stored; no runtime enforcement yet. See systemd.exec(5).
     pub runtime_directory_preserve: RuntimeDirectoryPreserve,
     pub tty_path: Option<PathBuf>,
+    /// TTYColumns= / TTYRows=: terminal window size applied via TIOCSWINSZ when
+    /// the service connects to a TTY. None = unset (leave the current size).
+    pub tty_columns: Option<u16>,
+    pub tty_rows: Option<u16>,
     /// TTYReset= — reset the TTY to sane defaults before use (default: false).
     /// Matches systemd behavior: resets termios, keyboard mode, switches to text mode.
     pub tty_reset: bool,
@@ -2794,12 +3212,19 @@ pub struct ParsedExecSection {
     /// the OS file system hierarchy. Parsed and stored; no runtime enforcement
     /// yet (requires mount namespace support). See systemd.exec(5).
     pub protect_system: ProtectSystem,
+    /// MemoryTHP= — the transparent-huge-page policy applied to the service's
+    /// processes via prctl(PR_SET_THP_DISABLE). See systemd.exec(5).
+    pub memory_thp: MemoryThp,
     /// RestrictNamespaces= — restricts access to Linux namespace types for the
     /// service. Can be a boolean (`yes` restricts all, `no` allows all) or a
     /// space-separated list of namespace type identifiers (cgroup, ipc, net,
     /// mnt, pid, user, uts). A `~` prefix inverts the list. Parsed and stored;
     /// no runtime seccomp enforcement yet. See systemd.exec(5).
     pub restrict_namespaces: RestrictNamespaces,
+    /// DelegateNamespaces= names namespace types (mnt/net/pid/uts/ipc/cgroup) the
+    /// service is allowed to manage itself, run inside an owned user namespace.
+    /// Empty = none. See systemd.exec(5).
+    pub delegate_namespaces: Vec<String>,
     /// RestrictRealtime= — if true, any attempts to enable realtime scheduling
     /// in a process of the unit are refused via seccomp. Defaults to false.
     /// Parsed and stored; no runtime seccomp enforcement yet. See systemd.exec(5).
@@ -2897,6 +3322,7 @@ pub struct ParsedExecSection {
     /// the list. Parsed and stored; no runtime mount-namespace enforcement
     /// yet. See systemd.exec(5).
     pub read_write_paths: Vec<String>,
+    pub exec_search_path: Vec<String>,
     /// MemoryDenyWriteExecute= — if true, attempts to create memory mappings
     /// that are both writable and executable, or to change existing writable
     /// mappings to executable, are prohibited. Defaults to false. Parsed and
@@ -2946,18 +3372,18 @@ pub struct ParsedExecSection {
     /// IOSchedulingClass= — sets the I/O scheduling class for executed
     /// processes. Takes one of "none" (or "0"), "realtime" (or "1"),
     /// "best-effort" (or "2"), or "idle" (or "3"). Defaults to None
-    /// (kernel default, which is best-effort). Parsed and stored; no
-    /// runtime ioprio_set() enforcement yet. See systemd.exec(5).
+    /// (kernel default, which is best-effort). Applied via ioprio_set() in
+    /// the exec helper. See systemd.exec(5).
     pub io_scheduling_class: IOSchedulingClass,
     /// IOSchedulingPriority= — sets the I/O scheduling priority for executed
     /// processes. Takes an integer between 0 (highest priority) and 7
     /// (lowest priority). The default priority for the best-effort scheduling
-    /// class is 4. Parsed and stored; no runtime enforcement yet.
+    /// class is 4. Applied via ioprio_set() in the exec helper.
     /// See systemd.exec(5).
     pub io_scheduling_priority: Option<u8>,
     /// UMask= — sets the file mode creation mask (umask) for executed
     /// processes. Takes an octal value (e.g. 0022, 0077). Defaults to 0022.
-    /// Parsed and stored; no runtime enforcement yet. See systemd.exec(5).
+    /// Applied via umask() in the exec helper. See systemd.exec(5).
     pub umask: Option<u32>,
     /// ProcSubset= — controls which subset of /proc/ is mounted for the
     /// unit. Takes one of "all" (full /proc, default) or "pid" (only
@@ -2966,8 +3392,8 @@ pub struct ParsedExecSection {
     pub proc_subset: ProcSubset,
     /// Nice= — sets the default nice level (scheduling priority) for
     /// executed processes. Takes an integer between -20 (highest priority)
-    /// and 19 (lowest priority). Parsed and stored; no runtime enforcement
-    /// yet. See systemd.exec(5).
+    /// and 19 (lowest priority). Applied via setpriority() in the exec
+    /// helper. See systemd.exec(5).
     pub nice: Option<i32>,
     /// RemoveIPC= — if true, all System V and POSIX IPC objects owned by
     /// the user and group of the executed processes are removed when the
@@ -3231,6 +3657,10 @@ pub struct ParsedExecSection {
     /// (usually under /proc/PID/ns/net or /run/netns/NAME).
     /// See systemd.exec(5).
     pub network_namespace_path: Option<String>,
+    /// UserNamespacePath= — run the service in the specified existing user
+    /// namespace. Takes a file path to a user namespace file (usually under
+    /// /proc/PID/ns/user). See systemd.exec(5).
+    pub user_namespace_path: Option<String>,
 
     // ── Security directives ──────────────────────────────────────────
     /// SecureBits= — controls the secure-bits flags of the executed
@@ -3289,6 +3719,10 @@ pub struct ParsedExecSection {
     /// specified in Base64 encoding. Useful for binary data.
     /// Multiple directives accumulate. See systemd.exec(5).
     pub standard_input_data: Vec<String>,
+    /// StandardInputText=/StandardInputData= directives in the order they
+    /// appear across the fragment and drop-ins. Used to reconstruct the
+    /// merged `StandardInputData` property while preserving directive order.
+    pub stdin_inputs: Vec<StdinInput>,
     /// SetLoginEnvironment= — if true, the `$XDG_SESSION_ID`,
     /// `$XDG_RUNTIME_DIR` and similar PAM login session environment
     /// variables are set. Defaults to unset (determined by `PAMName=`
@@ -3422,6 +3856,23 @@ pub enum ProtectSystem {
     /// /proc, /sys, and API mount points. Implies `ReadWritePaths=`,
     /// `ReadOnlyPaths=`, `InaccessiblePaths=` are still honoured.
     Strict,
+}
+
+/// `MemoryTHP=` — control the transparent-huge-page policy of a service's
+/// processes via `prctl(PR_SET_THP_DISABLE, ...)`. See systemd.exec(5).
+#[derive(
+    Clone, Copy, Eq, PartialEq, Hash, Debug, serde::Serialize, serde::Deserialize, Default,
+)]
+pub enum MemoryThp {
+    /// Do not touch the inherited THP setting (default).
+    #[default]
+    Inherit,
+    /// Disable THPs completely for the process.
+    Disable,
+    /// Disable THPs for the process except where explicitly madvised.
+    Madvise,
+    /// Restore the system default THP setting for the process.
+    System,
 }
 
 /// ProtectHome= — controls whether /home, /root, and /run/user are
@@ -3966,6 +4417,10 @@ pub enum StandardInput {
     /// services). The accepted connection fd (fd 3, the first LISTEN_FD) is
     /// dup'd to stdin.
     Socket,
+    /// `StandardInput=file:PATH` — stdin is connected to the given file, opened
+    /// read-only. The path is opened in the child just before exec (like the
+    /// Tty arm), mirroring `StandardOutput=file:`.
+    File(String),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]

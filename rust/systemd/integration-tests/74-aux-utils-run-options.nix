@@ -9,9 +9,11 @@
     set -eux
     set -o pipefail
 
-    : "systemd-run with --uid runs as specified user"
+    : "systemd-run with --uid runs as the specified user"
     UNIT="run-uid-$RANDOM"
-    systemd-run --wait --unit="$UNIT" --uid=nobody id > /dev/null || true
+    NOBODY_UID="$(id -u nobody)"
+    OUT="$(systemd-run --wait --pipe --unit="$UNIT" --uid=nobody id -u)"
+    [[ "$OUT" == "$NOBODY_UID" ]]
 
     : "systemd-run with --nice sets nice level"
     UNIT2="run-nice-$RANDOM"

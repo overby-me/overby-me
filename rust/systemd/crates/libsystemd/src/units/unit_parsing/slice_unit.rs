@@ -45,6 +45,19 @@ pub fn parse_slice(
     })
 }
 
+/// Parse a `ConcurrencyHardMax=`/`ConcurrencySoftMax=` value: empty or
+/// "infinity" means no limit (None); otherwise a plain unsigned count.
+fn parse_concurrency_max(value: &str, key: &str) -> Result<Option<u32>, ParsingErrorReason> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("infinity") {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<u32>()
+        .map(Some)
+        .map_err(|_| ParsingErrorReason::Generic(format!("{key} is not a valid count: {value}")))
+}
+
 fn parse_slice_section(
     section: &std::collections::HashMap<String, Vec<(u32, String)>>,
     slice: &mut ParsedSliceSection,
@@ -135,12 +148,15 @@ fn parse_slice_section(
                 } else if trimmed.eq_ignore_ascii_case("infinity") {
                     slice.tasks_max = Some(super::TasksMax::Infinity);
                 } else if let Some(pct) = trimmed.strip_suffix('%') {
-                    let pct_val = pct.trim().parse::<u64>().map_err(|_| {
+                    // Accept both integer ("50%") and scaled ("40.00%")
+                    // percentages; set-property persists TasksMaxScale as the
+                    // latter (e.g. "TasksMax=40.00%").
+                    let pct_val = pct.trim().parse::<f64>().map_err(|_| {
                         ParsingErrorReason::Generic(format!(
                             "TasksMax percentage is not a valid number: {value}"
                         ))
                     })?;
-                    slice.tasks_max = Some(super::TasksMax::Percent(pct_val));
+                    slice.tasks_max = Some(super::TasksMax::Percent(pct_val.round() as u64));
                 } else {
                     let num = trimmed.parse::<u64>().map_err(|_| {
                         ParsingErrorReason::Generic(format!(
@@ -149,6 +165,14 @@ fn parse_slice_section(
                     })?;
                     slice.tasks_max = Some(super::TasksMax::Value(num));
                 }
+            }
+
+            // --- Concurrency limits ---
+            "CONCURRENCYSOFTMAX" => {
+                slice.concurrency_soft_max = parse_concurrency_max(value, "ConcurrencySoftMax")?;
+            }
+            "CONCURRENCYHARDMAX" => {
+                slice.concurrency_hard_max = parse_concurrency_max(value, "ConcurrencyHardMax")?;
             }
 
             // --- Delegation ---

@@ -28,7 +28,16 @@ fn remove_delegate_children(path: &std::path::Path) {
 }
 
 /// This is the place to do anything that is not standard unix but specific to one os. Like cgroups
-pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
+///
+/// `dynamic_uid` carries the UID/GID allocated for `DynamicUser=yes` services
+/// (allocated once by the caller before the fork). Cgroup delegation must chown
+/// the delegated files to this UID; resolving `exec_config.user` would give root
+/// because the dynamic user is not recorded there.
+#[cfg_attr(not(feature = "cgroups"), allow(unused_variables))]
+pub fn pre_fork_os_specific(
+    srvc: &ServiceConfig,
+    dynamic_uid: Option<u32>,
+) -> Result<(), String> {
     #[cfg(feature = "cgroups")]
     {
         std::fs::create_dir_all(&srvc.platform_specific.cgroup_path).map_err(|e| {
@@ -42,29 +51,6 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
         // by Delegate=yes services). Without this, a second start of a delegated
         // service would fail with "File exists" when creating sub-cgroups.
         remove_delegate_children(&srvc.platform_specific.cgroup_path);
-
-        // When Delegate is enabled, chown the cgroup directory to the service user
-        // so the service process can manage its own sub-cgroup hierarchy.
-        if srvc.delegate != Delegate::No {
-            let uid = super::start_service::resolve_uid(&srvc.exec_config.user)
-                .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?;
-            let uid = nix::unistd::Uid::from_raw(uid);
-            let gid = super::start_service::resolve_gid(&srvc.exec_config.group)
-                .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?;
-            let gid = nix::unistd::Gid::from_raw(gid);
-            trace!(
-                "Delegating cgroup {:?} to uid={} gid={}",
-                &srvc.platform_specific.cgroup_path, uid, gid
-            );
-            nix::unistd::chown(&srvc.platform_specific.cgroup_path, Some(uid), Some(gid)).map_err(
-                |e| {
-                    format!(
-                        "Couldnt chown service cgroup ({:?}) to uid={} gid={}: {}",
-                        srvc.platform_specific.cgroup_path, uid, gid, e
-                    )
-                },
-            )?;
-        }
 
         // Enable required cgroup controllers on the parent before writing limits.
         // We collect which controllers are needed based on the configured directives
@@ -111,6 +97,139 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
                         "Could not enable cgroup controllers {:?} for {:?}: {}",
                         needed_controllers, &srvc.platform_specific.cgroup_path, e
                     );
+                }
+            }
+        }
+
+        // When MemoryPressureWatch is enabled the service (possibly a
+        // DynamicUser) must be able to WRITE the PSI trigger to its cgroup's
+        // memory.pressure file. The Delegate= chown below only runs for
+        // delegated services and never covers memory.pressure, so chown that one
+        // file to the service user here for any watched service. Mirrors systemd
+        // making memory.pressure writable for MemoryPressureWatch= (79-MEMPRESS).
+        if !matches!(
+            srvc.memory_pressure_watch,
+            crate::units::MemoryPressureWatch::Off | crate::units::MemoryPressureWatch::Skip
+        ) {
+            use std::os::unix::fs::PermissionsExt;
+            let pressure = srvc.platform_specific.cgroup_path.join("memory.pressure");
+            if pressure.exists() {
+                let uid = match dynamic_uid {
+                    Some(u) => u,
+                    None => super::start_service::resolve_uid(&srvc.exec_config.user).unwrap_or(0),
+                };
+                let gid = match dynamic_uid {
+                    Some(g) if srvc.exec_config.group.is_none() => g,
+                    _ => super::start_service::resolve_gid(&srvc.exec_config.group).unwrap_or(uid),
+                };
+                let _ = std::fs::set_permissions(
+                    &pressure,
+                    std::fs::Permissions::from_mode(0o644),
+                );
+                let _ = nix::unistd::chown(
+                    &pressure,
+                    Some(nix::unistd::Uid::from_raw(uid)),
+                    Some(nix::unistd::Gid::from_raw(gid)),
+                );
+            }
+        }
+
+        // When Delegate is enabled, hand the service's cgroup to the service
+        // user so it can manage its own sub-hierarchy. This runs AFTER
+        // controllers are enabled on the parent, so controller-specific
+        // interface files (memory.oom.group, memory.reclaim) already exist and
+        // can be chowned. Mirrors systemd's cg_set_access(): the directory
+        // plus a fixed set of delegation control files. Best-effort on the
+        // files: those absent on the current kernel/controller set are skipped.
+        if srvc.delegate != Delegate::No {
+            use std::os::unix::fs::PermissionsExt;
+            // For DynamicUser=yes the allocated UID is passed in via
+            // `dynamic_uid` (exec_config.user is None, which resolve_uid would
+            // map to root). Otherwise resolve the explicit User=/Group=.
+            let uid = match dynamic_uid {
+                Some(u) => u,
+                None => super::start_service::resolve_uid(&srvc.exec_config.user)
+                    .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?,
+            };
+            let uid = nix::unistd::Uid::from_raw(uid);
+            let gid = match dynamic_uid {
+                // DynamicUser=yes uses GID == UID unless Group= is explicit.
+                Some(g) if srvc.exec_config.group.is_none() => g,
+                _ => super::start_service::resolve_gid(&srvc.exec_config.group)
+                    .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?,
+            };
+            let gid = nix::unistd::Gid::from_raw(gid);
+            trace!(
+                "Delegating cgroup {:?} to uid={} gid={}",
+                &srvc.platform_specific.cgroup_path, uid, gid
+            );
+            // Directory: mode 0755, owned by the service user.
+            let _ = std::fs::set_permissions(
+                &srvc.platform_specific.cgroup_path,
+                std::fs::Permissions::from_mode(0o755),
+            );
+            nix::unistd::chown(&srvc.platform_specific.cgroup_path, Some(uid), Some(gid)).map_err(
+                |e| {
+                    format!(
+                        "Couldnt chown service cgroup ({:?}) to uid={} gid={}: {}",
+                        srvc.platform_specific.cgroup_path, uid, gid, e
+                    )
+                },
+            )?;
+            // Delegation control files: mode 0644, owned by the service user.
+            // The chmod is essential (not just chown): the kernel exposes some
+            // attributes read-only by default (e.g. cgroup.threads in a domain
+            // cgroup), so without restoring the owner-write bit the delegated
+            // user cannot manage them. Mirrors systemd's chmod_and_chown() in
+            // cg_set_access(). Best-effort: attributes absent on the current
+            // kernel/controller set are skipped.
+            for attr in [
+                "cgroup.procs",
+                "cgroup.subtree_control",
+                "cgroup.threads",
+                "memory.oom.group",
+                "memory.reclaim",
+            ] {
+                let attr_path = srvc.platform_specific.cgroup_path.join(attr);
+                let _ = std::fs::set_permissions(
+                    &attr_path,
+                    std::fs::Permissions::from_mode(0o644),
+                );
+                if let Err(e) = nix::unistd::chown(&attr_path, Some(uid), Some(gid)) {
+                    trace!(
+                        "Couldn't chown delegation file {:?} to uid={} gid={}: {} (continuing)",
+                        attr_path, uid, gid, e
+                    );
+                }
+            }
+
+            // DelegateSubgroup=NAME: create the named subgroup under the (now
+            // delegated) service cgroup and delegate it to the same user. The
+            // service's own process is placed here (post_fork), keeping the main
+            // delegated cgroup free of internal processes so it can carry child
+            // cgroups + controllers (cgroup v2 no-internal-process rule).
+            if let Some(ref sub) = srvc.delegate_subgroup {
+                let subpath = srvc.platform_specific.cgroup_path.join(sub);
+                if let Err(e) = std::fs::create_dir_all(&subpath) {
+                    trace!("Could not create delegate subgroup {:?}: {}", subpath, e);
+                }
+                let _ =
+                    std::fs::set_permissions(&subpath, std::fs::Permissions::from_mode(0o755));
+                let _ = nix::unistd::chown(&subpath, Some(uid), Some(gid));
+                // Beyond the main-cgroup delegation files, a subgroup also gets
+                // cgroup.max.depth / cgroup.max.descendants delegated so the owner
+                // can bound its own subtree (TEST-19-CGROUP.delegate testcase_subgroup).
+                for attr in [
+                    "cgroup.procs",
+                    "cgroup.subtree_control",
+                    "cgroup.threads",
+                    "cgroup.max.depth",
+                    "cgroup.max.descendants",
+                ] {
+                    let ap = subpath.join(attr);
+                    let _ =
+                        std::fs::set_permissions(&ap, std::fs::Permissions::from_mode(0o644));
+                    let _ = nix::unistd::chown(&ap, Some(uid), Some(gid));
                 }
             }
         }
@@ -332,6 +451,33 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
                 }
             }
         }
+        // ── Network interface restriction (BPF cgroup/skb) ────────────────
+        if !srvc.restrict_network_interfaces.is_empty() {
+            match cgroups::bpf_devices::apply_restrict_network_interfaces(
+                &srvc.platform_specific.cgroup_path,
+                &srvc.restrict_network_interfaces,
+            ) {
+                Ok(()) => trace!(
+                    "RestrictNetworkInterfaces applied for cgroup {:?}",
+                    &srvc.platform_specific.cgroup_path
+                ),
+                Err(e) => trace!("Could not apply RestrictNetworkInterfaces: {}", e),
+            }
+        }
+        // ── IPAddressAllow= / IPAddressDeny= (BPF cgroup/skb) ─────────────
+        if !srvc.ip_address_allow.is_empty() || !srvc.ip_address_deny.is_empty() {
+            match cgroups::bpf_devices::apply_ip_address_policy(
+                &srvc.platform_specific.cgroup_path,
+                &srvc.ip_address_allow,
+                &srvc.ip_address_deny,
+            ) {
+                Ok(()) => trace!(
+                    "IPAddress policy applied for cgroup {:?}",
+                    &srvc.platform_specific.cgroup_path
+                ),
+                Err(e) => trace!("Could not apply IPAddress policy: {}", e),
+            }
+        }
     }
     let _ = srvc;
     Ok(())
@@ -341,14 +487,20 @@ pub fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(),
     #[cfg(feature = "cgroups")]
     {
         use log::trace;
-        trace!("Move service to cgroup: {:?}", &conf.cgroup_path);
+        // With DelegateSubgroup=NAME the process runs in the named subgroup
+        // beneath the delegated service cgroup rather than the cgroup itself.
+        let target = match &conf.delegate_subgroup {
+            Some(sub) => conf.cgroup_path.join(sub),
+            None => conf.cgroup_path.clone(),
+        };
+        trace!("Move service to cgroup: {:?}", &target);
         // Ensure the cgroup directory exists before moving into it.
         // For socket-activated services, PID 1 may not have created the
         // cgroup yet when the exec helper runs.
-        if let Err(e) = std::fs::create_dir_all(&conf.cgroup_path) {
-            trace!("Could not create cgroup dir {:?}: {}", &conf.cgroup_path, e);
+        if let Err(e) = std::fs::create_dir_all(&target) {
+            trace!("Could not create cgroup dir {:?}: {}", &target, e);
         }
-        cgroups::move_self_to_cgroup(&conf.cgroup_path)
+        cgroups::move_self_to_cgroup(&target)
             .map_err(|e| format!("postfork os specific: {}", e))?;
     }
     let _ = conf;
@@ -370,6 +522,10 @@ pub fn setup_slice_cgroup(
     let Some(slice_path) = service_cgroup_path.parent() else {
         return;
     };
+
+    // Whether the slice cgroup already existed: its IP filter is attached once,
+    // when the cgroup is first created (see the end of this function).
+    let slice_existed = slice_path.exists();
 
     // Create the slice cgroup directory
     if let Err(e) = std::fs::create_dir_all(slice_path) {
@@ -491,9 +647,18 @@ pub fn setup_slice_cgroup(
     // Also enable controllers within the slice's subtree_control so
     // child cgroups (the service) can have limits applied.
     {
-        // Always enable memory and pids for children — the service's own
-        // pre_fork_os_specific may need them.
-        let child_controllers: Vec<&str> = vec!["memory", "pids", "cpu", "io"];
+        // Enable memory/pids/cpu for children — the service's own
+        // pre_fork_os_specific may need them.  `io` is deliberately NOT
+        // enabled unconditionally: the service-level path already enables io
+        // up the ancestor chain when a service actually needs it (io_accounting
+        // / IO* limits, see enable_controllers_on_parent above), and enabling
+        // io in EVERY slice's subtree_control keeps it pinned in each slice's
+        // cgroup.controllers forever — a controller can only be removed once no
+        // sibling still delegates it, so the unconditional +io blocked the
+        // controller-mask trim on unit exit (TEST-19-CGROUP.delegate
+        // testcase_controllers: `io` must vanish from system.slice once the
+        // last IOAccounting unit exits).
+        let child_controllers: Vec<&str> = vec!["memory", "pids", "cpu"];
         let subtree_control = slice_path.join("cgroup.subtree_control");
         let value = child_controllers
             .iter()
@@ -505,6 +670,46 @@ pub fn setup_slice_cgroup(
                 "Could not enable controllers in slice subtree_control {:?}: {}",
                 subtree_control, e
             );
+        }
+    }
+
+    // Slice-level DeviceAllow=/DevicePolicy= apply to every unit in the slice,
+    // attached on first creation like the IP filter below. apply_device_policy
+    // no-ops for the default auto policy with no DeviceAllow=, and ALLOW_MULTI
+    // makes the slice's device filter combine with each unit's own.
+    if !slice_existed
+        && let Err(e) = cgroups::bpf_devices::apply_device_policy(
+            slice_path,
+            &slice_conf.device_policy,
+            &slice_conf.device_allow,
+        )
+    {
+        trace!(
+            "Could not apply slice device policy to {:?}: {}",
+            slice_path, e
+        );
+    }
+
+    // Slice-level IPAddressAllow=/IPAddressDeny= apply to every unit in the
+    // slice. Attach the filter to the slice cgroup when it is first created;
+    // BPF_F_ALLOW_MULTI (see bpf_prog_attach) makes it run in addition to each
+    // member unit's own IP filter, so both the slice's and the unit's rules are
+    // enforced hierarchically. Re-running this per service start would stack
+    // duplicate programs, so gate on first creation: an emptied slice cgroup is
+    // pruned and recreated fresh, which re-attaches with the current config.
+    if !slice_existed
+        && (!slice_conf.ip_address_allow.is_empty() || !slice_conf.ip_address_deny.is_empty())
+    {
+        match cgroups::bpf_devices::apply_ip_address_policy(
+            slice_path,
+            &slice_conf.ip_address_allow,
+            &slice_conf.ip_address_deny,
+        ) {
+            Ok(()) => trace!("Applied slice IPAddress policy to {:?}", slice_path),
+            Err(e) => trace!(
+                "Could not apply slice IPAddress policy to {:?}: {}",
+                slice_path, e
+            ),
         }
     }
 }

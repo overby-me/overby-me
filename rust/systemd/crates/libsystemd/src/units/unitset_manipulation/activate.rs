@@ -96,6 +96,47 @@ pub(crate) fn check_start_rate_limit(unit: &Unit) -> bool {
     }
 }
 
+/// Check-only variant of the start rate limit: returns true if starting the unit
+/// right now would exceed StartLimitBurst= within StartLimitIntervalSec=, WITHOUT
+/// recording the attempt (activation records it via record_start_timestamp).
+///
+/// Used to enforce the limit on a manual `systemctl start`: the exit handler
+/// already rate-limits auto-restarts, but a manual start reached activation
+/// unchecked, so a repeatedly-failing unit could be hand-started without ever
+/// tripping start-limit-hit the way upstream does.
+pub(crate) fn start_rate_limit_would_block(unit: &Unit) -> bool {
+    let burst = unit.common.unit.start_limit_burst.unwrap_or(5);
+    let interval = match &unit.common.unit.start_limit_interval_sec {
+        Some(Timeout::Duration(d)) => *d,
+        Some(Timeout::Infinity) | None => std::time::Duration::from_secs(10),
+    };
+
+    // If burst is 0 or interval is zero, rate limiting is disabled.
+    if burst == 0 || interval.is_zero() {
+        return false;
+    }
+
+    fn would_block(common: &mut CommonState, burst: u32, interval: std::time::Duration) -> bool {
+        let now = std::time::Instant::now();
+        common
+            .start_timestamps
+            .retain(|t| now.duration_since(*t) < interval);
+        common.start_timestamps.len() >= burst as usize
+    }
+
+    match &unit.specific {
+        Specific::Service(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Socket(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Target(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Slice(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Mount(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Swap(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Timer(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Path(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+        Specific::Device(s) => would_block(&mut s.state.write_poisoned().common, burst, interval),
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct UnitOperationError {
     pub reason: UnitOperationErrorReason,
@@ -230,9 +271,24 @@ pub fn unstarted_deps(
             let is_pull_dep = required || pulled;
 
             let Some(elem_unit) = run_info.unit_table.get(elem) else {
-                // Dependency not in unit table (e.g. optional unit that was
-                // never loaded, or removed during pruning/cycle-breaking).
-                // Treat it as ready so it doesn't block activation.
+                // Dependency not in the unit table. A *required* (Requires=/
+                // BindsTo=) dependency on a .device unit that isn't loaded yet
+                // means udev has not announced the device — we must WAIT rather
+                // than start prematurely. Otherwise systemd-fsck@… / …mount for
+                // a by-label/by-uuid device runs before its /dev symlink exists
+                // and fails, so the initrd root never mounts. The device unit is
+                // created and marked Started from the later udev event, which
+                // re-triggers activation of whatever was blocked on it.
+                if required && matches!(elem.kind, crate::units::UnitIdKind::Device) {
+                    trace!(
+                        "unstarted_deps: {:?} waiting for not-yet-announced device {:?}",
+                        id, elem
+                    );
+                    acc.push(elem.clone());
+                    return acc;
+                }
+                // Otherwise (optional unit never loaded, or removed during
+                // pruning/cycle-breaking): treat as ready so it doesn't block.
                 warn!(
                     "Unit {:?} has an ordering dependency on {:?} which is not in the unit table. Ignoring.",
                     id, elem
@@ -401,6 +457,36 @@ pub fn activate_unit(
                 // NeverStarted, Stopping, Restarting — proceed.
                 // Also: Stopped + SocketActivation — restart via socket traffic.
             }
+        }
+    }
+
+    // Requisite=: every listed unit must ALREADY be active. Unlike Requires=,
+    // they are not pulled in — if any is inactive, this start fails.
+    {
+        let unmet: Vec<UnitId> = unit
+            .common
+            .dependencies
+            .requisite
+            .iter()
+            .filter(|req_id| {
+                !run_info
+                    .unit_table
+                    .get(req_id)
+                    .map(|u| u.common.status.read_poisoned().is_started())
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        if !unmet.is_empty() {
+            trace!(
+                "Requisite= not met for {}: {unmet:?} not active",
+                id_to_start.name
+            );
+            return Err(UnitOperationError {
+                reason: UnitOperationErrorReason::DependencyError(unmet),
+                unit_name: id_to_start.name.clone(),
+                unit_id: id_to_start.clone(),
+            });
         }
     }
 
@@ -602,7 +688,7 @@ pub fn activate_unit(
 /// Activate the slice hierarchy for a unit that just started.
 /// In systemd, when a service runs in a slice, the slice and all its
 /// ancestor slices are implicitly activated.
-fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
+pub(crate) fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
     // Extract the slice name from the unit's specific config
     let slice_name = match &unit.specific {
         Specific::Service(svc) => svc.conf.slice.clone(),
@@ -643,8 +729,49 @@ fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
     }
 }
 
+/// Are we the init of the machine itself, rather than a user manager or the
+/// PID 1 of a container?
+///
+/// Mirrors the `MANAGER_IS_USER(m) || detect_container() > 0` test that guards
+/// upstream's `exit` emergency action (emergency-action.c:153-170).  A user
+/// manager is never PID 1, and a container payload is PID 1 only of its own
+/// namespace, so in both cases exiting is harmless.  Exiting the machine's own
+/// init is not: the kernel panics with "Attempted to kill init".
+fn is_system_init() -> bool {
+    if std::process::id() != 1 {
+        return false;
+    }
+    // What nspawn and the other container managers set, and where PID 1
+    // records it for everyone else.
+    std::env::var_os("container").is_none()
+        && !std::path::Path::new("/run/systemd/container").exists()
+}
+
+/// Resolve the status to propagate for a `SuccessAction=`/`FailureAction=`.
+///
+/// Upstream's `unit_success_action_exit_status()` /
+/// `unit_failure_action_exit_status()` (unit.c:6283-6314): an explicit
+/// `SuccessActionExitStatus=`/`FailureActionExitStatus=` wins, otherwise the
+/// unit propagates its own main exit status, with 255 standing in for a process
+/// that did not exit cleanly (upstream's -EBADE case).
+pub fn resolve_action_exit_status(
+    configured: Option<u8>,
+    code: &crate::signal_handler::ChildTermination,
+) -> Option<u8> {
+    if let Some(status) = configured {
+        return Some(status);
+    }
+    match code {
+        crate::signal_handler::ChildTermination::Exit(c) => u8::try_from(*c).ok(),
+        crate::signal_handler::ChildTermination::Signal(_, _) => Some(255),
+    }
+}
+
 /// Execute a `SuccessAction=` or `FailureAction=` by initiating the
 /// appropriate system transition.
+///
+/// `exit_status` is the value to propagate for the `exit` variants, as resolved
+/// by [`resolve_action_exit_status`]; it is ignored by every other action.
 ///
 /// For the `-force` variants the service manager exits immediately after
 /// minimal cleanup.  For the `-immediate` variants we call
@@ -657,14 +784,26 @@ fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
 /// spawning the corresponding system command, which is the same strategy
 /// systemd uses when it is *not* PID 1.  The clean-shutdown path is handled
 /// by the global `SHUTTING_DOWN` flag in `crate::shutdown`.
-pub fn execute_unit_action(action: &UnitAction, unit_name: &str) {
+pub fn execute_unit_action(action: &UnitAction, unit_name: &str, exit_status: Option<u8>) {
     match action {
         UnitAction::None => {}
 
         // ── exit ────────────────────────────────────────────────────
         UnitAction::Exit | UnitAction::ExitForce => {
-            info!("{unit_name}: executing {action:?} — exiting service manager");
-            std::process::exit(0);
+            let status = exit_status.unwrap_or(0);
+            if is_system_init() {
+                // Upstream refuses to exit the machine's init: "exit" degrades
+                // to "poweroff" and "exit-force" to "poweroff-force"
+                // (emergency-action.c:164-170).  Exiting here would panic the
+                // kernel instead of shutting the machine down.
+                info!(
+                    "{unit_name}: doing \"poweroff\" action instead of an \"exit\" emergency action"
+                );
+                let _ = std::process::Command::new("poweroff").status();
+                std::process::exit(status as i32);
+            }
+            info!("{unit_name}: executing {action:?} — exiting service manager with {status}");
+            std::process::exit(status as i32);
         }
 
         // ── reboot ──────────────────────────────────────────────────
@@ -774,6 +913,80 @@ pub fn collect_unit_start_subgraph(ids_to_start: &mut Vec<UnitId>, unit_table: &
 /// Collects the subgraph of units that need to be started to reach the `target_id` (Note: not required to be a unit of type .target).
 ///
 /// Then starts these units as concurrently as possible respecting the before <-> after ordering
+/// The unit the manager is currently trying to reach. Starts as the boot
+/// target and is replaced whenever `systemctl isolate` switches goals (e.g.
+/// the initrd isolating to `initrd-switch-root.target`). The background
+/// re-drive uses this so asynchronous completions re-evaluate the CURRENT goal
+/// rather than the static boot target — without it, a completion that occurs
+/// after an isolate re-drives the already-reached boot target and the isolate
+/// goal stalls.
+static ACTIVE_GOAL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Record the unit the manager is now trying to reach.
+pub fn set_active_goal(name: &str) {
+    if let Ok(mut g) = ACTIVE_GOAL.lock() {
+        *g = Some(name.to_owned());
+    }
+}
+
+/// The unit the manager is currently trying to reach, if set.
+pub fn active_goal() -> Option<String> {
+    ACTIVE_GOAL.lock().ok().and_then(|g| g.clone())
+}
+
+/// Count of in-flight `activate_needed_units_with_source` calls. Used so the
+/// background goal re-drive can skip while another activation is already
+/// running, instead of launching a concurrent full activation (each spins up a
+/// 32-thread pool) that would just contend locks and starve real progress.
+static ACTIVATION_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// True if at least one activation pass is currently running.
+pub fn activation_in_flight() -> bool {
+    ACTIVATION_DEPTH.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+struct ActivationDepthGuard;
+impl ActivationDepthGuard {
+    fn new() -> Self {
+        ACTIVATION_DEPTH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for ActivationDepthGuard {
+    fn drop(&mut self) {
+        ACTIVATION_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Pending-writer gate (the quiescent-point mechanism upstream gets for free
+/// from its single-threaded event loop).  A table-wide mutator (daemon-reload)
+/// sets this before spinning for the RuntimeInfo write lock; the hot
+/// background readers (deferred completion pollers, the goal re-drive, new
+/// activation pool jobs) back off while it is set, so a zero-reader window
+/// reliably appears instead of the writer livelocking against 32 overlapping
+/// 100ms read pulses.
+static WRITER_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True while a table-wide writer (daemon-reload) is waiting for the lock.
+/// Cooperative background readers should skip their next acquisition.
+pub fn writer_pending() -> bool {
+    WRITER_PENDING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// RAII guard announcing a pending table-wide writer.
+pub struct WriterPendingGuard;
+impl WriterPendingGuard {
+    pub fn announce() -> Self {
+        WRITER_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for WriterPendingGuard {
+    fn drop(&mut self) {
+        WRITER_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub fn activate_needed_units(
     target_id: UnitId,
     run_info: ArcMutRuntimeInfo,
@@ -790,6 +1003,7 @@ pub fn activate_needed_units_with_source(
     run_info: ArcMutRuntimeInfo,
     source: ActivationSource,
 ) -> Vec<UnitOperationError> {
+    let _depth_guard = ActivationDepthGuard::new();
     let mut needed_ids = vec![target_id.clone()];
     {
         let run_info = run_info.read_poisoned();
@@ -826,30 +1040,69 @@ pub fn activate_needed_units_with_source(
     // These can be started and the the graph can be traversed and other units can be started as soon as
     // all other units they depend on are started. This works because the units form an DAG if only
     // the 'after' relations are considered for traversal.
-    let root_units =
-        { find_startable_units(&needed_ids, &run_info.read_poisoned(), Some(&needed_ids)) };
-    let root_names: Vec<&str> = root_units.iter().map(|id| id.name.as_str()).collect();
-    trace!(
-        "activate_needed_units: root units count={}: {:?}",
-        root_units.len(),
-        root_names
-    );
-
     // Use a generous thread pool so that slow-starting notify services
     // (which block a thread while waiting for READY=1) don't starve
     // oneshot/target activations that could complete immediately.
     let tpool = ThreadPool::new(32);
     let errors = Arc::new(Mutex::new(Vec::new()));
-    activate_units_recursive(
-        root_units,
-        Arc::new(needed_ids),
-        run_info.clone(),
-        tpool.clone(),
-        errors.clone(),
-        source,
-    );
+    let needed_ids = Arc::new(needed_ids);
 
-    tpool.join();
+    // Fixpoint sweep: re-run the forward walk until a full pass starts no new
+    // unit. rust-systemd's activation propagates a "before-chain" as each unit
+    // completes, but a unit with several ordering dependencies can be reached
+    // (and dropped as not-yet-startable) before its LAST dependency completes,
+    // and that last dependency only re-dispatches its own before-chain. Without
+    // a fixpoint sweep, the tail of a fan-in chain — e.g. the /nix/store overlay
+    // mount that waits on the ro-store mount, the rw-store mount, AND the
+    // upper/work mkdir service — is nondeterministically left NeverStarted, so
+    // the initrd never finishes and switch-root never fires. Re-walking until no
+    // progress closes that systemic gap. activate_unit is idempotent for
+    // already-Started/Starting/failed units (it early-returns with an empty
+    // before-chain), so extra passes are cheap and cannot double-start anything.
+    let count_started = |ids: &[UnitId]| -> usize {
+        let ri = run_info.read_poisoned();
+        ids.iter()
+            .filter(|id| {
+                ri.unit_table
+                    .get(id)
+                    .map(|u| u.common.status.read_poisoned().is_started())
+                    .unwrap_or(false)
+            })
+            .count()
+    };
+
+    let max_passes = needed_ids.len() + 2;
+    for pass in 0..max_passes {
+        let started_before = count_started(&needed_ids);
+
+        let root_units =
+            { find_startable_units(&needed_ids, &run_info.read_poisoned(), Some(&needed_ids)) };
+
+        activate_units_recursive(
+            root_units,
+            needed_ids.clone(),
+            run_info.clone(),
+            tpool.clone(),
+            errors.clone(),
+            source,
+        );
+        tpool.join();
+
+        let started_after = count_started(&needed_ids);
+        if started_after == started_before {
+            // Fixpoint reached: this pass started nothing new. Any remaining
+            // not-started units are either blocked on async completions handled
+            // elsewhere (Type=notify deferred waits, udev device events) or
+            // genuinely unsatisfiable.
+            break;
+        }
+        if pass + 1 == max_passes {
+            warn!(
+                "activate_needed_units: hit max passes ({}) for target {} without reaching a fixpoint",
+                max_passes, target_id.name
+            );
+        }
+    }
     info!("activate_needed_units: activation complete, all jobs dispatched");
 
     // Post-activation: check for upheld units that failed to start.
@@ -915,11 +1168,136 @@ fn find_startable_units(
     let mut startable = Vec::new();
 
     for id in ids {
+        // `.device` units are activated exclusively by udev (see udev_event.rs
+        // marking them Started(Plugged) when the kernel announces the device),
+        // never by the job machinery. Force-starting one here would mark it
+        // Started before its /dev node/symlink exists, so a unit that
+        // BindsTo=/After= it — systemd-fsck@<dev>.service, the by-label mount —
+        // would run against a missing device (fsck exits 1, the root never
+        // mounts). Leave devices out of the startable set; a unit depending on a
+        // device waits (unstarted_deps) until the udev event plugs it and
+        // re-activates the dependents.
+        if matches!(id.kind, crate::units::UnitIdKind::Device) {
+            continue;
+        }
         if unstarted_deps(id, run_info, activation_set).is_empty() {
             startable.push(id.clone());
         }
     }
     startable
+}
+
+/// Classify a just-activated service's deferral, all under the caller's
+/// already-held table read guard (a second read acquisition would risk the
+/// writer-preferring rwlock deadlock): whether the start is still pending (the
+/// unit is left `Starting`), and if so whether it deferred at the
+/// `ExecCondition=`/`ExecStartPre=` helper phase (`is_prestart_chain`) or as a
+/// multi-command `Type=oneshot` preliminary-exec phase (`is_oneshot_prelim`).
+/// Both use the lock-free `main_pid` atomic so no per-unit state lock is taken
+/// under the table guard. Shared by the pool path and the increment-4 job-graph
+/// drain so the two cannot diverge (docs/EVENT-LOOP.md).
+fn detect_deferred_kind(ri: &RuntimeInfo, id: &UnitId) -> (bool, bool, bool) {
+    let is_deferred = ri
+        .unit_table
+        .get(id)
+        .is_some_and(|unit| matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting));
+    let is_oneshot_prelim = if let Some(unit) = ri.unit_table.get(id)
+        && let Specific::Service(svc) = &unit.specific
+    {
+        svc.conf.srcv_type == crate::units::ServiceType::OneShot
+            && svc.conf.exec.len() > 1
+            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+    } else {
+        false
+    };
+    let is_prestart_chain = if let Some(unit) = ri.unit_table.get(id)
+        && let Specific::Service(svc) = &unit.specific
+    {
+        (!svc.conf.exec_condition.is_empty() || !svc.conf.startpre.is_empty())
+            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+    } else {
+        false
+    };
+    (is_deferred, is_prestart_chain, is_oneshot_prelim)
+}
+
+/// Park a deferred service start on the dispatcher: send the
+/// `StartServiceChain` / `StartOneshotChain` / `StartServiceWait` event that
+/// matches the deferral kind, after waking the notification reader so it
+/// collects the new service's socket (docs/EVENT-LOOP.md inc 2). Extracted from
+/// `activate_units_recursive` so the increment-4 job-graph drain reuses the
+/// exact parking path rather than diverging from it. `next_services_ids` is the
+/// before-chain to dispatch when the start completes (the pool passes the real
+/// dependents; the job graph passes empty and schedules dependents itself).
+#[allow(clippy::too_many_arguments)]
+fn park_deferred_start(
+    id: UnitId,
+    is_prestart_chain: bool,
+    is_oneshot_prelim: bool,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<UnitId>>,
+    errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
+    run_info: ArcMutRuntimeInfo,
+    unit_name: &str,
+) {
+    // Wake the global notification handler so it re-collects sockets (including
+    // the new service's notification socket) and can process READY=1.
+    {
+        let ri = run_info.read_poisoned();
+        ri.notify_eventfds();
+    }
+    info!("activate_units_recursive: {unit_name} deferred start, parking on the dispatcher");
+    if is_prestart_chain {
+        // The ExecCondition=/ExecStartPre= phase runs as a dispatcher chain;
+        // its main phase then routes to the oneshot chain or a start wait.
+        let dispatcher = {
+            let ri = run_info.read_poisoned();
+            ri.dispatcher.clone()
+        };
+        dispatcher.send_normal(crate::entrypoints::dispatcher::Event::StartServiceChain(
+            ServiceStartChain {
+                id,
+                next_services_ids,
+                filter_ids,
+                errors,
+                source,
+                phase: StartChainPhase::Condition(0),
+            },
+        ));
+    } else if is_oneshot_prelim {
+        // Hand the exec chain to the dispatcher: each preliminary command is
+        // forked initiate-only and advanced by its ChildExit event.
+        let dispatcher = {
+            let ri = run_info.read_poisoned();
+            ri.dispatcher.clone()
+        };
+        dispatcher.send_normal(crate::entrypoints::dispatcher::Event::StartOneshotChain(
+            OneshotChainStart {
+                id,
+                next_services_ids,
+                filter_ids,
+                errors,
+                source,
+            },
+        ));
+    } else {
+        // Park the deferred start; the dispatcher re-evaluates it on
+        // Notify/ChildExit events and enforces its timeouts.
+        match crate::entrypoints::dispatcher::global() {
+            Some(handle) => handle.send_normal(
+                crate::entrypoints::dispatcher::Event::StartServiceWait(StartWaitParams {
+                    id,
+                    next_services_ids: Some(next_services_ids),
+                    filter_ids,
+                    errors,
+                    source,
+                    check_starting: false,
+                }),
+            ),
+            None => error!("no dispatcher to park the deferred start of {unit_name}"),
+        }
+    }
 }
 
 /// Start all units in `ids_to_start` and push jobs into the threadpool to start all following units.
@@ -995,6 +1373,14 @@ fn activate_units_recursive(
                 other => other,
             };
 
+            // Yield to a pending table-wide writer before pinning a read
+            // guard for the whole activation.  Bounded so a stalled writer
+            // cannot wedge activation forever.
+            let gate_start = std::time::Instant::now();
+            while writer_pending() && gate_start.elapsed() < std::time::Duration::from_secs(10) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+
             // Hold the RuntimeInfo read lock in a named variable so we can
             // reuse it for the post-activation status check without acquiring
             // a second read lock (which would deadlock on glibc's
@@ -1019,17 +1405,10 @@ fn activate_units_recursive(
                         false
                     };
 
-                    // Check if READY=1 wait was deferred (unit still Starting).
-                    let is_deferred = if let Some(unit) =
-                        ri_guard.unit_table.get(&id_saved)
-                    {
-                        matches!(
-                            &*unit.common.status.read_poisoned(),
-                            UnitStatus::Starting
-                        )
-                    } else {
-                        false
-                    };
+                    // Classify the deferral under the guard we already hold
+                    // (shared with the increment-4 job-graph drain).
+                    let (is_deferred, is_prestart_chain, is_oneshot_prelim) =
+                        detect_deferred_kind(&ri_guard, &id_saved);
 
                     // Drop the read lock before triggering OnFailure= (which
                     // may need a write lock via find_or_load_unit).
@@ -1039,39 +1418,17 @@ fn activate_units_recursive(
                     }
 
                     if is_deferred {
-                        // Wake the global notification handler so it re-collects
-                        // sockets (including the new service's notification
-                        // socket) and can process READY=1 notifications.
-                        {
-                            let ri = run_info_copy.read_poisoned();
-                            ri.notify_eventfds();
-                        }
-
-                        // Type=notify service with deferred READY=1 wait.
-                        // Spawn a background thread (NOT in the thread pool,
-                        // so tpool.join() won't wait for it) to poll for
-                        // signaled_ready and dispatch the before-chain.
-                        info!(
-                            "activate_units_recursive: {} deferred notify wait, spawning background thread",
-                            unit_name
+                        park_deferred_start(
+                            id_saved.clone(),
+                            is_prestart_chain,
+                            is_oneshot_prelim,
+                            next_services_ids,
+                            filter_ids_copy.clone(),
+                            errors_copy.clone(),
+                            source,
+                            run_info_copy.clone(),
+                            &unit_name,
                         );
-                        let run_info_bg = run_info_copy;
-                        let id_bg = id_saved;
-                        let filter_ids_bg = filter_ids_copy;
-                        let errors_bg = errors_copy;
-                        std::thread::Builder::new()
-                            .name(format!("notify-wait-{}", unit_name))
-                            .spawn(move || {
-                                deferred_notify_wait_and_dispatch(
-                                    id_bg,
-                                    next_services_ids,
-                                    filter_ids_bg,
-                                    run_info_bg,
-                                    errors_bg,
-                                    source,
-                                );
-                            })
-                            .expect("Failed to spawn deferred notify wait thread");
                     } else {
                         // Normal path: dispatch before-chain immediately.
                         if !next_services_ids.is_empty() {
@@ -1133,6 +1490,553 @@ fn activate_units_recursive(
     }
 }
 
+/// Bounded worker pool for increment-4 job-graph activations. Activating a unit
+/// can block (a mount waits on its device), so the drive must never run it on
+/// the dispatcher thread; it hands each activation to this pool instead, which
+/// also restores the concurrency the fixpoint sweep got from its own 32-worker
+/// pool. Shared across drive passes and initialised on first use.
+static JOB_GRAPH_POOL: std::sync::OnceLock<ThreadPool> = std::sync::OnceLock::new();
+
+/// True only while the boot producer ([`activate_needed_units_via_job_graph`])
+/// is draining its closure. The pool worker's completion-wake (send a
+/// `JobQueued` when an activation settles, so process-less target chains advance
+/// at event speed instead of one level per 200ms nudge) is gated on this: during
+/// boot it removes the nudge from the critical path, but POST-boot it must stay
+/// silent so runtime `--no-block` jobs keep the exact completion timing the
+/// control path expects (an unconditional wake perturbs runtime job-mode
+/// sequencing, e.g. 03-jobs' list-jobs / ignore-dependencies checks).
+static JOB_GRAPH_BOOT_DRAINING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// True only while the job-graph boot producer is draining its closure. Used to
+/// scope boot-only dispatcher work (the parked-oneshot re-check) so it never
+/// perturbs post-boot runtime job handling.
+#[must_use]
+pub fn job_graph_boot_draining() -> bool {
+    JOB_GRAPH_BOOT_DRAINING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Increment-4 job-graph drive, run as step 4 of the single dispatcher loop
+/// behind `SYSTEMD_RS_JOB_GRAPH=1` (docs/EVENT-LOOP.md, "The flag-on dispatch
+/// belongs in the existing dispatcher loop"). One pass:
+///
+/// 1. Retire every `Running` job whose unit reached a terminal status (Started
+///    or Stopped); a vanished unit's job is canceled.
+/// 2. Fire JobTimeout (`pop_expired`) for any job past its deadline, so a stuck
+///    unit self-terminates the closure instead of hanging the dispatcher.
+/// 3. Re-prime readiness (`enqueue_ready`): every `Waiting` job whose ordering
+///    prerequisites are now met joins the run queue. This is the completion
+///    requeue — running it each pass, triggered by the dispatcher's own wakes
+///    (Notify, ChildExit) rather than a per-completion hook threaded through
+///    `dispatch_one`.
+/// 4. Dispatch (`pop_ready`): activate each ready unit initiate-only, mirroring
+///    the pool path (`DeferNotifyWait` for the fork, deferred starts parked on
+///    this same dispatcher via [`park_deferred_start`] with an *empty*
+///    before-chain because the graph schedules dependents itself), and arm the
+///    job's timeout.
+///
+/// A no-op when the registry is empty, which is always the case with the flag
+/// off, so the default dispatcher loop is untouched. Activation here must never
+/// block the dispatcher; that holds for services (fork-and-return) and is why
+/// the first slice is service-only (mounts move off-thread in inc 5).
+pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
+    use crate::units::jobs::{JobId, JobKind, JobResult, JobState};
+
+    // Every RuntimeInfo read here is on the dispatcher (or a pool worker it
+    // spawns), so it must yield to a queued writer via `dispatcher_read` and
+    // never block-wait: a plain read behind a writer stalls the dispatcher into
+    // the writer-starvation wedge (docs/EVENT-LOOP.md inc 2, and the 16/59
+    // dispatcher-throughput flake).
+    let jobs = { dispatcher_read(run_info).jobs.clone() };
+    // Fast path: nothing enqueued means nothing to drive (the flag-off case and
+    // the common flag-on idle case).
+    if jobs.lock().unwrap().is_empty() {
+        return;
+    }
+
+    // Phase 1: retire completed and timed-out jobs, then re-prime readiness.
+    {
+        let ri = dispatcher_read(run_info);
+        let mut reg = jobs.lock().unwrap();
+
+        // The activation set for readiness is every unit that still holds a job.
+        let activation_set: Vec<UnitId> = reg.iter().map(|job| job.unit.clone()).collect();
+        let is_ready = |ri: &RuntimeInfo, u: &UnitId| {
+            !matches!(u.kind, crate::units::UnitIdKind::Device)
+                && unstarted_deps(u, ri, Some(&activation_set)).is_empty()
+        };
+
+        // Inc-4 scope: the drive only activates Start jobs. Runtime
+        // Reload/Restart/Stop/etc. jobs are installed and completed by the
+        // control path itself (as with the flag off); the drive must not
+        // retire them here (it would finish a live Reload the moment the unit
+        // reads Started) nor dispatch them below.
+        let running: Vec<(JobId, UnitId)> = reg
+            .iter()
+            .filter(|job| job.state == JobState::Running && job.kind == JobKind::Start)
+            .map(|job| (job.id, job.unit.clone()))
+            .collect();
+        for (jid, unit_id) in running {
+            let status = ri
+                .unit_table
+                .get(&unit_id)
+                .map(|u| u.common.status.read_poisoned().clone());
+            match status {
+                // Unit removed (e.g. daemon-reload): the job can never complete.
+                None => {
+                    reg.finish(jid, JobResult::Canceled);
+                }
+                Some(UnitStatus::Started(_)) => {
+                    reg.finish(jid, JobResult::Done);
+                }
+                Some(UnitStatus::Stopped(_, errs)) => {
+                    reg.finish(
+                        jid,
+                        if errs.is_empty() {
+                            JobResult::Done
+                        } else {
+                            JobResult::Failed
+                        },
+                    );
+                }
+                // Still activating or not yet begun: leave the job running.
+                _ => {}
+            }
+        }
+
+        // Externally-completed jobs never go Running through the drive: a
+        // `.device` unit is plugged by udev (is_ready excludes Device, so it is
+        // never dispatched) and a Start job whose unit is already active needs
+        // no work. Finish any such Waiting Start job the moment its unit reads
+        // Started, so it stops blocking the units ordered after it and the
+        // closure can drain. (enqueue_ready below then re-primes the newly
+        // unblocked frontier.)
+        let waiting_done: Vec<JobId> = reg
+            .iter()
+            .filter(|job| job.state == JobState::Waiting && job.kind == JobKind::Start)
+            .filter(|job| {
+                matches!(
+                    ri.unit_table
+                        .get(&job.unit)
+                        .map(|u| u.common.status.read_poisoned().clone()),
+                    Some(UnitStatus::Started(_))
+                )
+            })
+            .map(|job| job.id)
+            .collect();
+        for jid in waiting_done {
+            reg.finish(jid, JobResult::Done);
+        }
+
+        let now = std::time::Instant::now();
+        for jid in reg.pop_expired(now) {
+            warn!("job-graph: job {jid} exceeded its deadline, finishing as Timeout");
+            reg.finish(jid, JobResult::Timeout);
+        }
+
+        reg.enqueue_ready(|u| is_ready(&ri, u));
+    }
+
+    // Phase 2: dispatch every ready job by activating its unit on the bounded
+    // pool, never inline on the dispatcher (a blocking mount would stall every
+    // other unit) and in parallel across the frontier. The job is marked Running
+    // with its deadline before the activation is handed off, so Phase 1's scan
+    // on the next dispatcher wake sees it in flight; the scan retires it once its
+    // unit reaches a terminal status. `filter`/`errors` are the arguments the
+    // parked-start continuation expects; the job graph hands an empty
+    // before-chain, so `filter` only scopes readiness for a continuation that
+    // will not dispatch dependents anyway.
+    let filter: Arc<Vec<UnitId>> =
+        Arc::new(jobs.lock().unwrap().iter().map(|j| j.unit.clone()).collect());
+    let errors: Arc<Mutex<Vec<UnitOperationError>>> = Arc::new(Mutex::new(Vec::new()));
+    let pool = JOB_GRAPH_POOL.get_or_init(|| ThreadPool::new(32));
+    loop {
+        let jid = { jobs.lock().unwrap().pop_ready() };
+        let Some(jid) = jid else { break };
+        let unit_id = match jobs.lock().unwrap().get(jid) {
+            // Only Start jobs are driven here; leave a ready non-Start job for
+            // the control path (it is popped from the run queue but not
+            // touched, and its owner finishes it).
+            Some(job) if job.kind == JobKind::Start => job.unit.clone(),
+            Some(_) => continue,
+            None => continue,
+        };
+        // Do not re-activate a unit another path is already handling. The drive
+        // owns boot-closure units, which are NeverStarted when it dispatches
+        // them; if the unit has already LEFT NeverStarted, an inline runtime
+        // `systemctl start` (or an in-flight activation) is driving it, and
+        // calling activate_unit again double-starts it. Observed after the
+        // default flip: a runtime blocking start of a oneshot with a required
+        // oneshot dep ran ExecStart twice and its parked wait went Abandoned.
+        // Retire an already-Started job here; leave a Starting one Running for
+        // Phase 1 to retire on its terminal transition.
+        {
+            let status = dispatcher_read(run_info)
+                .unit_table
+                .get(&unit_id)
+                .map(|u| u.common.status.read_poisoned().clone());
+            match status {
+                Some(UnitStatus::NeverStarted) => {}
+                Some(UnitStatus::Started(_)) => {
+                    jobs.lock().unwrap().finish(jid, JobResult::Done);
+                    continue;
+                }
+                _ => {
+                    jobs.lock().unwrap().set_running(jid);
+                    continue;
+                }
+            }
+        }
+        {
+            let mut reg = jobs.lock().unwrap();
+            reg.set_running(jid);
+            reg.set_deadline(
+                jid,
+                std::time::Instant::now() + std::time::Duration::from_secs(90),
+            );
+        }
+
+        let run_info_c = run_info.clone();
+        let jobs_c = jobs.clone();
+        let filter_c = filter.clone();
+        let errors_c = errors.clone();
+        pool.execute(move || {
+            // inc-5: run a mount's mount(2) / a swap's swapon(2) blocking
+            // syscall OFF the global RuntimeInfo read guard. Holding the read
+            // across a slow mount/swap pins it for the whole syscall, which
+            // under load starves the global writer (udev device-plug writes) and
+            // fragilizes activation. Clone the config under a brief read, DROP
+            // the guard, run the syscall guard-free, then re-acquire briefly to
+            // publish the unit's status and wake the dispatcher (whose Phase-1
+            // scan retires the job).
+            enum BlockingKind {
+                Mount(crate::units::unit::MountConfig),
+                Swap(crate::units::unit::SwapConfig),
+            }
+            let blocking = {
+                let ri = dispatcher_read(&run_info_c);
+                match ri.unit_table.get(&unit_id).map(|u| &u.specific) {
+                    Some(crate::units::Specific::Mount(m)) => {
+                        Some(BlockingKind::Mount(m.conf.clone()))
+                    }
+                    Some(crate::units::Specific::Swap(s)) => {
+                        Some(BlockingKind::Swap(s.conf.clone()))
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(kind) = blocking {
+                let scratch = std::sync::RwLock::new(UnitStatus::Starting);
+                let result = match &kind {
+                    BlockingKind::Mount(c) => {
+                        crate::units::unit::activate_mount(&unit_id, c, &scratch)
+                    }
+                    BlockingKind::Swap(c) => {
+                        crate::units::unit::activate_swap(&unit_id, c, &scratch)
+                    }
+                };
+                let final_status = scratch.into_inner().unwrap_or(UnitStatus::Starting);
+                {
+                    let ri = dispatcher_read(&run_info_c);
+                    if let Some(u) = ri.unit_table.get(&unit_id) {
+                        *u.common.status.write_poisoned() = final_status;
+                    }
+                }
+                if result.is_err() {
+                    trigger_on_failure_units(&unit_id, &run_info_c);
+                    jobs_c.lock().unwrap().finish(jid, JobResult::Failed);
+                }
+                if JOB_GRAPH_BOOT_DRAINING.load(std::sync::atomic::Ordering::Relaxed) {
+                    dispatcher_read(&run_info_c)
+                        .dispatcher
+                        .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+                }
+                return;
+            }
+            let ri = dispatcher_read(&run_info_c);
+            match activate_unit(unit_id.clone(), &ri, ActivationSource::DeferNotifyWait) {
+                Ok(StartResult::Started(_before_chain)) => {
+                    let (is_deferred, is_prestart_chain, is_oneshot_prelim) =
+                        detect_deferred_kind(&ri, &unit_id);
+                    drop(ri);
+                    if is_deferred {
+                        park_deferred_start(
+                            unit_id.clone(),
+                            is_prestart_chain,
+                            is_oneshot_prelim,
+                            Vec::new(),
+                            filter_c,
+                            errors_c,
+                            ActivationSource::Regular,
+                            run_info_c.clone(),
+                            &unit_id.name,
+                        );
+                    }
+                    // Non-deferred completions, and the eventual deferred
+                    // completion, are retired by the dispatcher's next scan.
+                }
+                Err(e) => {
+                    drop(ri);
+                    error!("job-graph: failed to activate {}: {e}", unit_id.name);
+                    trigger_on_failure_units(&unit_id, &run_info_c);
+                    jobs_c.lock().unwrap().finish(jid, JobResult::Failed);
+                }
+            }
+            // Event-driven completion (boot only): this activation just settled
+            // (Started, or Failed), so wake the dispatcher to re-scan the run
+            // queue now rather than waiting for the producer's periodic nudge.
+            // Phase 1 retires the finished job and enqueue_ready primes the
+            // newly-unblocked frontier on the very next dispatcher pass, so a
+            // process-less target chain advances at event speed instead of one
+            // level per 200ms tick. Gated on the boot drain: post-boot the nudge
+            // is gone (only the producer loops it), so runtime `--no-block` jobs
+            // must not get this extra wake or their completion timing shifts.
+            if JOB_GRAPH_BOOT_DRAINING.load(std::sync::atomic::Ordering::Relaxed) {
+                dispatcher_read(&run_info_c)
+                    .dispatcher
+                    .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+            }
+        });
+    }
+}
+
+/// Increment-4 job-graph replacement for [`activate_needed_units`], used behind
+/// `SYSTEMD_RS_JOB_GRAPH` to bring a whole start closure up through the single
+/// dispatcher instead of the fixpoint sweep. Installs a job per unit in the
+/// closure, primes the initially-startable ones and wakes the dispatcher (whose
+/// [`drive_run_queue`] activates each on the bounded pool, retires completions on
+/// its next scan, and requeues), then blocks until the registry drains so the
+/// caller keeps the synchronous activation contract. The periodic wake catches
+/// process-less completions (targets, condition-skips) that fire no event. All
+/// RuntimeInfo reads yield to writers ([`dispatcher_read`]) so this boot thread
+/// never blocks the writer that would in turn stall the dispatcher.
+pub fn activate_needed_units_via_job_graph(
+    target_id: UnitId,
+    run_info: ArcMutRuntimeInfo,
+) -> Vec<UnitOperationError> {
+    use crate::units::jobs::{JobKind, JobMode};
+
+    let jobs = { dispatcher_read(&run_info).jobs.clone() };
+
+    let subgraph = {
+        let ri = dispatcher_read(&run_info);
+        let mut ids = vec![target_id.clone()];
+        collect_unit_start_subgraph(&mut ids, &ri.unit_table);
+        ids
+    };
+    info!(
+        "activate_needed_units_via_job_graph: target={}, {} units in closure",
+        target_id.name,
+        subgraph.len()
+    );
+
+    {
+        let ri = dispatcher_read(&run_info);
+        let mut reg = jobs.lock().unwrap();
+        for uid in &subgraph {
+            let _ = reg.create(
+                uid.clone(),
+                JobKind::Start,
+                ActivationSource::Regular,
+                JobMode::Replace,
+            );
+        }
+        reg.enqueue_ready(|u| {
+            !matches!(u.kind, crate::units::UnitIdKind::Device)
+                && unstarted_deps(u, &ri, Some(&subgraph)).is_empty()
+        });
+        ri.dispatcher
+            .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+    }
+
+    // The dispatcher drive owns the closure now; block until it drains. The
+    // pool worker's completion-wake (enabled for this drain) advances the drive
+    // at event speed; the 200ms nudge below is now only a backstop for a
+    // completion path that fires neither an event nor the wake. The overall
+    // deadline is a boot-wide safety net.
+    JOB_GRAPH_BOOT_DRAINING.store(true, std::sync::atomic::Ordering::Relaxed);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    let mut tick: u32 = 0;
+    let mut fallback_done = false;
+    loop {
+        if jobs.lock().unwrap().is_empty() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            warn!("activate_needed_units_via_job_graph: closure did not drain within 300s");
+            crate::entrypoints::kmsg("JGSTALL DEADLINE: closure did not drain within 300s");
+            break;
+        }
+        tick += 1;
+        // Reliability fallback for the elusive intermittent inc-4 drive stall
+        // (whole closure Waiting, nothing dispatched). If the drive has not
+        // drained the closure within ~20s (a normal boot settles well under
+        // that, even under parallel load), force completion once through the
+        // proven flag-off fixpoint sweep. activate_unit is idempotent for
+        // already-Started/Starting units, so this cannot double-start; the
+        // fixpoint activates the stuck frontier and the drive's scan then
+        // retires the finished jobs. Guarantees the boot always completes, so
+        // making the job graph the default cannot hang a boot.
+        if !fallback_done && tick >= 100 {
+            fallback_done = true;
+            warn!(
+                "activate_needed_units_via_job_graph: {} not drained after ~20s; \
+                 forcing completion via the fixpoint sweep",
+                target_id.name
+            );
+            let _ = activate_needed_units(target_id.clone(), run_info.clone());
+        }
+        // Observability for a slow/stalling boot drain: once the closure has not
+        // drained within ~10s (a normal boot settles well under that; only a
+        // stall reaches here), name the still-pending jobs every ~5s via kmsg so
+        // a stalled boot identifies its stuck units and, for each Waiting job,
+        // the deps it is blocked on and their status. Chunked to stay under the
+        // ~1KB kmsg LOG_LINE_MAX (a full one-line dump overflows and is dropped).
+        // Quiet on a healthy boot (drains before tick 50).
+        if tick >= 50 && tick.is_multiple_of(25) {
+            let status_tag = |ri: &RuntimeInfo, u: &UnitId| -> &'static str {
+                match ri.unit_table.get(u).map(|x| x.common.status.read_poisoned().clone()) {
+                    None => "gone",
+                    Some(UnitStatus::NeverStarted) => "NS",
+                    Some(UnitStatus::Starting) => "ing",
+                    Some(UnitStatus::Stopping) => "stopping",
+                    Some(UnitStatus::Restarting) => "restarting",
+                    Some(UnitStatus::Started(_)) => "OK",
+                    Some(UnitStatus::Stopped(_, ref e)) if e.is_empty() => "stop",
+                    Some(UnitStatus::Stopped(_, _)) => "FAIL",
+                }
+            };
+            let (pending, ready_stuck, failed): (Vec<String>, Vec<String>, Vec<String>) = {
+                let ri = dispatcher_read(&run_info);
+                let reg = jobs.lock().unwrap();
+                let set: Vec<UnitId> = reg.iter().map(|j| j.unit.clone()).collect();
+                let mut pending = Vec::new();
+                let mut ready_stuck = Vec::new();
+                // A blocker whose status is Stopped-with-errors is the true sink
+                // of the stall (e.g. a required socket that failed to activate
+                // permanently blocks its dependent). Record its error reason so
+                // the trace names WHY it failed, not just that it did.
+                let mut failed: std::collections::BTreeMap<String, String> =
+                    std::collections::BTreeMap::new();
+                for j in reg.iter() {
+                    if j.state == crate::units::jobs::JobState::Waiting {
+                        let blockers = unstarted_deps(&j.unit, &ri, Some(&set));
+                        // Smoking gun: a Waiting job that is actually ready
+                        // (empty blockers, not a Device) but never dispatched
+                        // => an enqueue_ready / pop_ready / Phase-2 bug, not a
+                        // genuine dep chain.
+                        if blockers.is_empty()
+                            && !matches!(j.unit.kind, crate::units::UnitIdKind::Device)
+                        {
+                            ready_stuck.push(j.unit.name.clone());
+                        }
+                        let names: Vec<String> = blockers
+                            .iter()
+                            .map(|b| format!("{}:{}", b.name, status_tag(&ri, b)))
+                            .collect();
+                        for b in &blockers {
+                            if let Some(UnitStatus::Stopped(_, errs)) = ri
+                                .unit_table
+                                .get(b)
+                                .map(|x| x.common.status.read_poisoned().clone())
+                                && !errs.is_empty()
+                                && !failed.contains_key(&b.name)
+                            {
+                                let mut reason = format!("{errs:?}");
+                                reason.truncate(400);
+                                failed.insert(b.name.clone(), reason);
+                            }
+                        }
+                        pending.push(format!("{}=W<-[{}]", j.unit.name, names.join(",")));
+                    } else {
+                        pending.push(format!("{}={:?}", j.unit.name, j.state));
+                    }
+                }
+                let failed: Vec<String> =
+                    failed.into_iter().map(|(n, r)| format!("{n}: {r}")).collect();
+                (pending, ready_stuck, failed)
+            };
+            for f in &failed {
+                crate::entrypoints::kmsg(&format!("JGSTALL FAIL {f}"));
+            }
+            // kmsg has a ~1KB per-line limit (LOG_LINE_MAX); the full pending
+            // dump for a ~29-unit closure overflows it and the kernel drops the
+            // payload, so the message renders empty and the stall is both
+            // unreadable AND undetectable. Emit a short header (always
+            // greppable via the "JGSTALL" tag) plus the blocker graph in small
+            // chunks (<=5 units/line) so every line fits.
+            crate::entrypoints::kmsg(&format!(
+                "JGSTALL t={} jobs={} readystuck={:?}",
+                tick,
+                pending.len(),
+                ready_stuck
+            ));
+            for (ci, chunk) in pending.chunks(5).enumerate() {
+                crate::entrypoints::kmsg(&format!(
+                    "JGSTALL t={} c{}: {}",
+                    tick,
+                    ci,
+                    chunk.join(" | ")
+                ));
+            }
+        }
+        // Recovery net (the flag-on analogue of the flag-off
+        // `spawn_active_goal_redrive` thread, which flag-on skips): every ~2s,
+        // re-collect the closure and top up any unit that is still
+        // NeverStarted yet holds no job — one that loaded after the initial
+        // collection, or whose start the event-driven path dropped in a race.
+        // Then re-prime readiness. Without this net an intermittent drive
+        // re-scan miss becomes a PERMANENT stall (flag-off silently recovers
+        // via its redrive; flag-on had no equivalent). Only NeverStarted units
+        // are recreated, so Started/Failed/Starting units are never re-run.
+        if tick.is_multiple_of(10) {
+            let ri = dispatcher_read(&run_info);
+            let mut fresh = vec![target_id.clone()];
+            collect_unit_start_subgraph(&mut fresh, &ri.unit_table);
+            let mut reg = jobs.lock().unwrap();
+            let have: std::collections::HashSet<UnitId> =
+                reg.iter().map(|j| j.unit.clone()).collect();
+            for uid in &fresh {
+                if have.contains(uid) {
+                    continue;
+                }
+                let never_started = matches!(
+                    ri.unit_table
+                        .get(uid)
+                        .map(|u| u.common.status.read_poisoned().clone()),
+                    Some(UnitStatus::NeverStarted)
+                );
+                if never_started {
+                    let _ = reg.create(
+                        uid.clone(),
+                        JobKind::Start,
+                        ActivationSource::Regular,
+                        JobMode::Replace,
+                    );
+                }
+            }
+            reg.enqueue_ready(|u| {
+                !matches!(u.kind, crate::units::UnitIdKind::Device)
+                    && unstarted_deps(u, &ri, Some(&fresh)).is_empty()
+            });
+        }
+        {
+            let ri = dispatcher_read(&run_info);
+            ri.dispatcher
+                .send_normal(crate::entrypoints::dispatcher::Event::JobQueued);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    // Boot drain done: silence the completion-wake so post-boot runtime jobs
+    // keep the control path's completion timing.
+    JOB_GRAPH_BOOT_DRAINING.store(false, std::sync::atomic::Ordering::Relaxed);
+    info!(
+        "activate_needed_units_via_job_graph: {} closure settled",
+        target_id.name
+    );
+    Vec::new()
+}
+
 /// Background thread for deferred Type=notify READY=1 wait.
 ///
 /// Polls `signaled_ready` (set by the global notification handler when
@@ -1142,212 +2046,1294 @@ fn activate_units_recursive(
 ///
 /// This runs outside the activation thread pool so that `tpool.join()` can
 /// complete without waiting for potentially-infinite READY=1 waits.
-fn deferred_notify_wait_and_dispatch(
-    id: UnitId,
+/// Kill the service's remaining processes, clear its runtime fds and mark it
+/// StoppedUnexpected — shared cleanup for the deferred start failure paths
+/// (start timeout, dbus-name timeout, exec confirmation failure, failing
+/// forking parent).  Mirrors the cleanup in Service::deactivate_service
+/// (PID, process_group, notification socket, stdout/stderr).
+fn deferred_start_fail_cleanup(
+    run_info: &ArcMutRuntimeInfo,
+    id: &UnitId,
+    name: &str,
+    reason: String,
+) {
+    if let Ok(ri) = run_info.try_read()
+        && let Some(unit) = ri.unit_table.get(id)
+    {
+        if let Specific::Service(svc) = &unit.specific {
+            let mut state = svc.state.write_poisoned();
+            state.srvc.kill_all_remaining_processes(&svc.conf, name);
+            state.srvc.pid = None;
+            state.srvc.process_group = None;
+            if let Some(path) = state.srvc.notifications_path.take() {
+                let _ = std::fs::remove_file(&path);
+            }
+            state.srvc.notifications = None;
+            state.srvc.stdout = None;
+            state.srvc.stderr = None;
+            drop(state);
+        }
+        // Transition to Stopped/Failed. Scope the status guard so it drops
+        // before the restart scheduler below reacquires it.
+        {
+            let mut status = unit.common.status.write_poisoned();
+            if matches!(&*status, UnitStatus::Starting) {
+                *status = UnitStatus::Stopped(
+                    crate::units::status::StatusStopped::StoppedUnexpected,
+                    vec![UnitOperationErrorReason::GenericStartError(reason)],
+                );
+            }
+        }
+        // A failed start still owes OnFailure= and Restart=: the exit tail
+        // normally fires them for a service, but a deferred start failure is
+        // finalized here on the dispatcher where the tail never runs (the
+        // notify-before-READY case is suppressed there, and a start job never
+        // reaches the runtime exit path). This finalizer is the single owner,
+        // so it fires OnFailure= and, per Restart=, flips the unit from the
+        // failed status above to Restarting and reactivates it after
+        // RestartSec on spawned threads. OnSuccess= is never fired for a
+        // failed start.
+        crate::services::on_service_start_failed(id, &ri, run_info);
+    }
+}
+
+/// Yield-to-writers read acquisition for dispatcher-side code: the
+/// dispatcher must never block-wait on the RuntimeInfo RwLock. With a
+/// writer queued (writer-preferring rwlock) a blocking read stalls the
+/// dispatcher, while the writer itself waits on activation readers whose
+/// readiness only the dispatcher can apply: a three-way deadlock. Spin on
+/// try_read with a short sleep instead, like every other cooperative
+/// reader.
+pub(crate) fn dispatcher_read(
+    run_info: &ArcMutRuntimeInfo,
+) -> std::sync::RwLockReadGuard<'_, crate::runtime_info::RuntimeInfo> {
+    let spin_start = std::time::Instant::now();
+    let mut warned = false;
+    loop {
+        match run_info.try_read() {
+            Ok(guard) => {
+                if warned {
+                    crate::entrypoints::kmsg(&format!(
+                        "DISPATCHER-READ recovered after {:?}",
+                        spin_start.elapsed()
+                    ));
+                }
+                return guard;
+            }
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                // A long spin here is the dispatcher-throughput stall that
+                // flakes 16/59: make it self-diagnosing in kmsg instead of
+                // silent (the margin analysis lives in the task ledger).
+                if !warned && spin_start.elapsed() >= std::time::Duration::from_millis(500) {
+                    warned = true;
+                    crate::entrypoints::kmsg(
+                        "DISPATCHER-READ stalled >500ms behind a queued writer",
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+    }
+}
+
+/// Everything a deferred multi-command Type=oneshot start needs to advance:
+/// carried by the dispatcher between steps (docs/EVENT-LOOP.md inc 2).
+pub struct OneshotChainStart {
+    pub id: UnitId,
+    pub next_services_ids: Vec<UnitId>,
+    pub filter_ids: Arc<Vec<UnitId>>,
+    pub errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    pub source: ActivationSource,
+}
+
+pub enum OneshotStepOutcome {
+    /// A preliminary command was forked; the chain now waits for this pid's
+    /// ChildExit event, bounded by the per-command start timeout.
+    Advanced {
+        pid: nix::unistd::Pid,
+        cmd: crate::units::Commandline,
+        timeout: Option<std::time::Duration>,
+    },
+    /// The main process was forked (or the oneshot completed with no
+    /// command left): the dispatcher should park a start wait for the
+    /// unit's completion, carrying the chain's dispatch context.
+    AwaitCompletion,
+    /// A preliminary command failed on a unit with ExecStopPost=: the
+    /// dispatcher should drive this poststop chain before the failure is
+    /// finalized.
+    PoststopChain(ServiceStartChain),
+    /// The chain is done: a failure was recorded, or the unit vanished.
+    Finished,
+}
+
+/// One decide-and-fork step of a multi-command Type=oneshot start whose
+/// preliminary (non-last) `ExecStart=` commands were deferred by
+/// `Service::start` (returning `StartResult::DeferredOneshotExec`). Runs on
+/// the dispatcher: each call takes one brief read guard, relocates in the
+/// (possibly reloaded) exec list via `current_exec_argv` exactly like
+/// Service::start's inline loop, and either forks the next preliminary
+/// command, forks the last command as the main process, or completes the
+/// oneshot. It never waits: the fork's exit comes back as a ChildExit event
+/// that [`oneshot_chain_child_exited`] consumes, so a concurrent
+/// `systemctl daemon-reload` can commit between commands and the final
+/// command reflects the reloaded config (07-pid1-exec-deserialization).
+pub(crate) fn oneshot_chain_step(
+    chain: &OneshotChainStart,
+    run_info: &ArcMutRuntimeInfo,
+) -> OneshotStepOutcome {
+    let id = chain.id.clone();
+    let name = id.name.clone();
+
+    enum Step {
+        // Carries the command so the exit handler can apply the same
+        // exit-status rules as Service::run_cmd, including the `-` prefix.
+        Wait(
+            std::process::Child,
+            Option<std::time::Duration>,
+            crate::units::Commandline,
+        ),
+        Forked(Result<Option<crate::services::StartResult>, ServiceErrorReason>),
+        Completed,
+        SpawnErr(String),
+        Gone,
+    }
+
+    let step = {
+        let ri = dispatcher_read(run_info);
+        match ri.unit_table.get(&id) {
+            None => Step::Gone,
+            Some(unit) => match &unit.specific {
+                Specific::Service(svc) => {
+                    let conf = &svc.conf;
+                    let exec_list = conf.exec.clone();
+                    let working_dir = conf.exec_config.working_directory.clone();
+                    let mut st = svc.state.write_poisoned();
+                    let timeout = st.srvc.get_start_timeout(conf);
+
+                    // Relocate in the (possibly reloaded) exec list via the
+                    // argv of the command we just ran, exactly like
+                    // Service::start's inline loop.
+                    let mut idx = 0usize;
+                    let mut removed = false;
+                    if let Some(last_argv) = st.srvc.current_exec_argv.take() {
+                        match exec_list.iter().position(|c| c.to_string() == last_argv) {
+                            Some(pos) => idx = pos + 1,
+                            None => removed = true,
+                        }
+                    }
+
+                    if removed {
+                        // The currently-running command vanished from the
+                        // reloaded config: finish the oneshot without running
+                        // any further command (empty log), matching upstream
+                        // ("the currently executed command vanished ... simply
+                        // finish executing the unit"). Signal completion via
+                        // main_exit_status=0; the parked start wait
+                        // performs the Started transition + dispatch.
+                        st.srvc.current_exec_argv = None;
+                        st.srvc.main_exit_status = Some(0);
+                        st.srvc.main_exit_termination =
+                            Some(crate::signal_handler::ChildTermination::Exit(0));
+                        Step::Completed
+                    } else if idx + 1 >= exec_list.len() {
+                        // Only the last command remains: fork it as the main
+                        // process.
+                        Step::Forked(st.srvc.fork_main_and_maybe_defer(
+                            conf,
+                            id.clone(),
+                            &name,
+                            &ri,
+                            chain.source,
+                            &unit.common,
+                        ))
+                    } else {
+                        let cmd = exec_list[idx].clone();
+                        st.srvc.current_exec_argv = Some(cmd.to_string());
+                        match st.srvc.spawn_helper_child(
+                            &cmd,
+                            id.clone(),
+                            &name,
+                            &ri,
+                            working_dir.as_ref(),
+                        ) {
+                            Ok(child) => Step::Wait(child, timeout, cmd),
+                            Err(e) => Step::SpawnErr(format!("{e}")),
+                        }
+                    }
+                }
+                _ => Step::Gone,
+            },
+        }
+    };
+
+    match step {
+        Step::Wait(child, timeout, cmd) => OneshotStepOutcome::Advanced {
+            pid: nix::unistd::Pid::from_raw(child.id() as i32),
+            cmd,
+            timeout,
+        },
+        Step::Forked(Ok(_)) | Step::Completed => {
+            // Main process forked (its completion wait is itself deferred),
+            // or the oneshot finished with no further command. The
+            // dispatcher parks a start wait to own the completion.
+            OneshotStepOutcome::AwaitCompletion
+        }
+        Step::Forked(Err(e)) => {
+            chain.errors.lock_poisoned().push(UnitOperationError {
+                unit_name: name.clone(),
+                unit_id: id.clone(),
+                reason: UnitOperationErrorReason::ServiceStartError(e),
+            });
+            OneshotStepOutcome::Finished
+        }
+        Step::SpawnErr(e) => {
+            // Preserved shape from the thread-based driver: the error is
+            // recorded but the unit stays in Starting (the deferred fail
+            // cleanup is only wired to the wait path).
+            error!("deferred oneshot {name}: failed to spawn preliminary command: {e}");
+            chain.errors.lock_poisoned().push(UnitOperationError {
+                unit_name: name.clone(),
+                unit_id: id.clone(),
+                reason: UnitOperationErrorReason::GenericStartError(e),
+            });
+            OneshotStepOutcome::Finished
+        }
+        Step::Gone => OneshotStepOutcome::Finished,
+    }
+}
+
+/// Consume a chain child's exit on the dispatcher: apply the same
+/// exit-status rules as Service::run_cmd (success or a leading `-` prefix
+/// continues; anything else aborts the start), then run the next step.
+pub(crate) fn oneshot_chain_child_exited(
+    chain: &OneshotChainStart,
+    cmd: &crate::units::Commandline,
+    termination: crate::signal_handler::ChildTermination,
+    run_info: &ArcMutRuntimeInfo,
+) -> OneshotStepOutcome {
+    // A preliminary ExecStart= that fails must abort the rest of the
+    // oneshot, exactly as Service::run_cmd does for the inline path.
+    if termination.success() || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus) {
+        return oneshot_chain_step(chain, run_info);
+    }
+    match oneshot_chain_fail(
+        chain,
+        crate::services::RunCmdError::BadExitCode(cmd.to_string(), termination),
+        run_info,
+    ) {
+        Some(post) => OneshotStepOutcome::PoststopChain(post),
+        None => OneshotStepOutcome::Finished,
+    }
+}
+
+/// The chain's per-command start timeout fired: SIGKILL the preliminary
+/// command (mirroring the thread driver's child.kill()) and fail the start.
+/// The kill's reap arrives later as an unmatched ChildExit and is dropped.
+pub(crate) fn oneshot_chain_timed_out(
+    chain: &OneshotChainStart,
+    cmd: &crate::units::Commandline,
+    pid: nix::unistd::Pid,
+    timeout: Option<std::time::Duration>,
+    run_info: &ArcMutRuntimeInfo,
+) -> OneshotStepOutcome {
+    unsafe {
+        libc::kill(pid.as_raw(), libc::SIGKILL);
+    }
+    match oneshot_chain_fail(
+        chain,
+        crate::services::RunCmdError::Timeout(
+            cmd.to_string(),
+            format!("Timeout ({timeout:?}) reached"),
+        ),
+        run_info,
+    ) {
+        Some(post) => OneshotStepOutcome::PoststopChain(post),
+        None => OneshotStepOutcome::Finished,
+    }
+}
+
+/// A deferred ExecCondition=/ExecStartPre= helper phase advanced on the
+/// dispatcher (docs/EVENT-LOOP.md inc 2), carrying the same dispatch
+/// context as the oneshot chain. Created when `Service::start` returns
+/// `StartResult::DeferredPrestart` for a pool-path activation.
+pub struct ServiceStartChain {
+    pub id: UnitId,
+    pub next_services_ids: Vec<UnitId>,
+    pub filter_ids: Arc<Vec<UnitId>>,
+    pub errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    pub source: ActivationSource,
+    pub phase: StartChainPhase,
+}
+
+pub enum StartChainPhase {
+    /// Running ExecCondition= command `idx`.
+    Condition(usize),
+    /// Running ExecStartPre= command `idx`.
+    Prestart(usize),
+    /// A condition or prestart command errored; ExecStopPost= runs before
+    /// the start is failed with `error` (mirrors the inline path's
+    /// PrestartFailed-plus-poststop handling).
+    PoststopAfterError { idx: usize, error: String },
+}
+
+pub enum StartChainOutcome {
+    /// A helper was forked; the chain waits for this pid's exit, holding
+    /// the Child so its piped output can be drained then.
+    Advanced {
+        pid: nix::unistd::Pid,
+        child: std::process::Child,
+        cmd: crate::units::Commandline,
+        timeout: Option<std::time::Duration>,
+    },
+    /// The helper phase completed and the main phase produced this start
+    /// result for the dispatcher to route.
+    MainDispatched(crate::services::StartResult),
+    /// The chain ended without a main fork (skip, failure, or the unit
+    /// vanished or left Starting).
+    Finished,
+}
+
+/// Advance the chain: run through empty or exhausted phases, fork the next
+/// helper command, or run the main phase. Never waits.
+pub(crate) fn service_start_chain_step(
+    chain: &mut ServiceStartChain,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartChainOutcome {
+    enum Action {
+        Fork(crate::units::Commandline),
+        NextPhase(StartChainPhase),
+        RunMain,
+        FinalizeError(String),
+    }
+    loop {
+        let action = {
+            let ri = dispatcher_read(run_info);
+            let Some(unit) = ri.unit_table.get(&chain.id) else {
+                return StartChainOutcome::Finished;
+            };
+            if !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting) {
+                return StartChainOutcome::Finished;
+            }
+            let Specific::Service(svc) = &unit.specific else {
+                return StartChainOutcome::Finished;
+            };
+            match &chain.phase {
+                StartChainPhase::Condition(idx) => {
+                    if *idx >= svc.conf.exec_condition.len() {
+                        Action::NextPhase(StartChainPhase::Prestart(0))
+                    } else {
+                        Action::Fork(svc.conf.exec_condition[*idx].clone())
+                    }
+                }
+                StartChainPhase::Prestart(idx) => {
+                    if *idx >= svc.conf.startpre.len() {
+                        Action::RunMain
+                    } else {
+                        Action::Fork(svc.conf.startpre[*idx].clone())
+                    }
+                }
+                StartChainPhase::PoststopAfterError { idx, error } => {
+                    if *idx >= svc.conf.stoppost.len() {
+                        Action::FinalizeError(error.clone())
+                    } else {
+                        Action::Fork(svc.conf.stoppost[*idx].clone())
+                    }
+                }
+            }
+        };
+        match action {
+            Action::NextPhase(phase) => {
+                chain.phase = phase;
+            }
+            Action::FinalizeError(error) => {
+                start_chain_finalize_error(chain, error, run_info);
+                return StartChainOutcome::Finished;
+            }
+            Action::Fork(cmd) => {
+                let name = chain.id.name.clone();
+                let forked = {
+                    let ri = dispatcher_read(run_info);
+                    let Some(unit) = ri.unit_table.get(&chain.id) else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let Specific::Service(svc) = &unit.specific else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let working_dir = svc.conf.exec_config.working_directory.clone();
+                    let mut st = svc.state.write_poisoned();
+                    let timeout = st.srvc.get_start_timeout(&svc.conf);
+                    // The helper must see the service's filesystem view
+                    // (BindPaths=, PrivateTmp=), like the inline phases.
+                    st.srvc.helper_mount_ns =
+                        crate::services::helper_mount_ns_from_conf(&svc.conf);
+                    let res = st.srvc.spawn_helper_child(
+                        &cmd,
+                        chain.id.clone(),
+                        &name,
+                        &ri,
+                        working_dir.as_ref(),
+                    );
+                    st.srvc.helper_mount_ns = None;
+                    res.map(|child| (child, timeout))
+                };
+                match forked {
+                    Ok((child, timeout)) => {
+                        return StartChainOutcome::Advanced {
+                            pid: nix::unistd::Pid::from_raw(child.id() as i32),
+                            child,
+                            cmd,
+                            timeout,
+                        };
+                    }
+                    Err(e) => {
+                        // Mirror run_cmd's spawn-error handling: a leading
+                        // '-' swallows the failure and the chain continues;
+                        // anything else is a start error.
+                        if cmd
+                            .prefixes
+                            .contains(&crate::units::CommandlinePrefix::Minus)
+                        {
+                            advance_chain_index(chain);
+                        } else {
+                            chain_error_to_poststop(chain, format!("Failed to spawn {cmd}: {e}"));
+                        }
+                    }
+                }
+            }
+            Action::RunMain => {
+                let name = chain.id.name.clone();
+                let main_result = {
+                    let ri = dispatcher_read(run_info);
+                    let Some(unit) = ri.unit_table.get(&chain.id) else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let Specific::Service(svc) = &unit.specific else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let conf = svc.conf.clone();
+                    let mut st = svc.state.write_poisoned();
+                    st.srvc.start_main_phase(
+                        &conf,
+                        chain.id.clone(),
+                        &name,
+                        &ri,
+                        ActivationSource::DeferNotifyWait,
+                        &unit.common,
+                    )
+                };
+                match main_result {
+                    Ok(result) => return StartChainOutcome::MainDispatched(result),
+                    Err(e) => {
+                        chain.errors.lock_poisoned().push(UnitOperationError {
+                            unit_name: name,
+                            unit_id: chain.id.clone(),
+                            reason: UnitOperationErrorReason::ServiceStartError(e),
+                        });
+                        // Route through the chain's own poststop phase so
+                        // ExecStopPost= runs before the failure finalizes.
+                        chain_error_to_poststop(
+                            chain,
+                            "main ExecStart dispatch failed".to_owned(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Consume a chain helper's exit on the dispatcher, mirroring run_cmd's
+/// wait semantics per phase, then advance.
+pub(crate) fn service_start_chain_child_exited(
+    chain: &mut ServiceStartChain,
+    cmd: &crate::units::Commandline,
+    mut child: std::process::Child,
+    termination: crate::signal_handler::ChildTermination,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartChainOutcome {
+    // Drain the helper's piped output into the service buffers, as the
+    // inline run_cmd does after its wait.
+    {
+        let ri = dispatcher_read(run_info);
+        if let Some(unit) = ri.unit_table.get(&chain.id)
+            && let Specific::Service(svc) = &unit.specific
+        {
+            let status = unit.common.status.read_poisoned().clone();
+            svc.state.write_poisoned().srvc.drain_helper_output_nonblocking(
+                &mut child,
+                &chain.id.name,
+                &status,
+            );
+        }
+    }
+    drop(child);
+
+    let ok = termination.success()
+        || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus);
+    match &chain.phase {
+        StartChainPhase::Condition(_) => {
+            if ok {
+                advance_chain_index(chain);
+            } else if let crate::signal_handler::ChildTermination::Exit(code) = termination
+                && (1..=254).contains(&code)
+            {
+                // ExecCondition= exit 1-254: skip the service, not a failure.
+                apply_condition_skip(&chain.id, run_info);
+                return StartChainOutcome::Finished;
+            } else {
+                chain_error_to_poststop(
+                    chain,
+                    format!("ExecCondition {cmd} failed: {termination:?}"),
+                );
+            }
+        }
+        StartChainPhase::Prestart(_) => {
+            if ok {
+                advance_chain_index(chain);
+            } else {
+                chain_error_to_poststop(
+                    chain,
+                    format!("ExecStartPre {cmd} failed: {termination:?}"),
+                );
+            }
+        }
+        StartChainPhase::PoststopAfterError { error, .. } => {
+            if ok {
+                advance_chain_index(chain);
+            } else {
+                // Mirror run_all_cmds: the first poststop failure aborts the
+                // rest; both errors are reported.
+                let combined = format!("{error}; ExecStopPost {cmd} failed: {termination:?}");
+                start_chain_finalize_error(chain, combined, run_info);
+                return StartChainOutcome::Finished;
+            }
+        }
+    }
+    service_start_chain_step(chain, run_info)
+}
+
+/// The chain helper's per-command timeout fired: SIGKILL it and route the
+/// timeout through the same per-phase error handling as a bad exit.
+pub(crate) fn service_start_chain_timed_out(
+    chain: &mut ServiceStartChain,
+    cmd: &crate::units::Commandline,
+    pid: nix::unistd::Pid,
+    timeout: Option<std::time::Duration>,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartChainOutcome {
+    unsafe {
+        libc::kill(pid.as_raw(), libc::SIGKILL);
+    }
+    let error = format!("{cmd} timed out ({timeout:?})");
+    match &chain.phase {
+        StartChainPhase::Condition(_) | StartChainPhase::Prestart(_) => {
+            chain_error_to_poststop(chain, error);
+            service_start_chain_step(chain, run_info)
+        }
+        StartChainPhase::PoststopAfterError {
+            error: original, ..
+        } => {
+            let combined = format!("{original}; {error}");
+            start_chain_finalize_error(chain, combined, run_info);
+            StartChainOutcome::Finished
+        }
+    }
+}
+
+fn advance_chain_index(chain: &mut ServiceStartChain) {
+    chain.phase = match &chain.phase {
+        StartChainPhase::Condition(idx) => StartChainPhase::Condition(idx + 1),
+        StartChainPhase::Prestart(idx) => StartChainPhase::Prestart(idx + 1),
+        StartChainPhase::PoststopAfterError { idx, error } => StartChainPhase::PoststopAfterError {
+            idx: idx + 1,
+            error: error.clone(),
+        },
+    };
+}
+
+fn chain_error_to_poststop(chain: &mut ServiceStartChain, error: String) {
+    chain.phase = StartChainPhase::PoststopAfterError { idx: 0, error };
+}
+
+fn start_chain_finalize_error(
+    chain: &ServiceStartChain,
+    error: String,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    chain.errors.lock_poisoned().push(UnitOperationError {
+        unit_name: chain.id.name.clone(),
+        unit_id: chain.id.clone(),
+        reason: UnitOperationErrorReason::GenericStartError(error.clone()),
+    });
+    finalize_deferred_start_failure(run_info, &chain.id, error);
+    trigger_on_failure_units(&chain.id, run_info);
+}
+
+/// ExecCondition= said no: mark the unit skipped and re-arm its sockets.
+/// Mirrors Unit::activate's ConditionSkipped arm (units/unit.rs), which
+/// stays inline for the non-chain sources.
+fn apply_condition_skip(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let ri = dispatcher_read(run_info);
+    let Some(unit) = ri.unit_table.get(id) else {
+        return;
+    };
+    {
+        let mut status = unit.common.status.write_poisoned();
+        if matches!(&*status, UnitStatus::Starting) {
+            *status = UnitStatus::Stopped(crate::units::StatusStopped::ConditionSkipped, vec![]);
+        }
+    }
+    if let Specific::Service(svc) = &unit.specific {
+        for socket_id in &svc.conf.sockets {
+            if let Some(sock_unit) = ri.unit_table.get(socket_id)
+                && let Specific::Socket(sock) = &sock_unit.specific
+            {
+                if sock.state.read_poisoned().result
+                    == crate::units::SocketResult::TriggerLimitHit
+                {
+                    continue;
+                }
+                if sock.conf.flush_pending {
+                    crate::units::flush_socket_fds(socket_id, &ri);
+                }
+                sock.state.write_poisoned().sock.activated = false;
+            }
+        }
+        if !svc.conf.sockets.is_empty() {
+            ri.notify_eventfds();
+        }
+    }
+}
+
+/// The chain's main phase reported WaitingForSocket: apply the status and
+/// socket re-arm that Unit::activate's arm applies for inline starts.
+pub(crate) fn apply_waiting_for_socket(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let ri = dispatcher_read(run_info);
+    let Some(unit) = ri.unit_table.get(id) else {
+        return;
+    };
+    {
+        let mut status = unit.common.status.write_poisoned();
+        if matches!(&*status, UnitStatus::Starting) {
+            *status =
+                UnitStatus::Started(crate::units::StatusStarted::WaitingForSocket);
+        }
+    }
+    if let Specific::Service(svc) = &unit.specific {
+        for socket_id in &svc.conf.sockets {
+            if let Some(sock_unit) = ri.unit_table.get(socket_id)
+                && let Specific::Socket(sock) = &sock_unit.specific
+            {
+                if sock.state.read_poisoned().result
+                    == crate::units::SocketResult::TriggerLimitHit
+                {
+                    continue;
+                }
+                if sock.conf.flush_pending {
+                    crate::units::flush_socket_fds(socket_id, &ri);
+                }
+                sock.state.write_poisoned().sock.activated = false;
+            }
+        }
+        ri.notify_eventfds();
+    }
+}
+
+/// Finalize a deferred start failure without running ExecStopPost=: kill
+/// remaining processes, clear runtime fds, StoppedUnexpected. The poststop
+/// chain's own finalizer, and the fallback when no ExecStopPost= exists.
+pub(crate) fn finalize_deferred_start_failure(
+    run_info: &ArcMutRuntimeInfo,
+    id: &UnitId,
+    reason: String,
+) {
+    warn!("deferred start of {} failed: {reason}", id.name);
+    deferred_start_fail_cleanup(run_info, id, &id.name.clone(), reason);
+}
+
+/// Fail a deferred start the way upstream does: the service's processes are
+/// killed, then ExecStopPost= runs, then the unit is marked failed. The
+/// poststop commands must not be waited for here (the historical inline
+/// attempt deadlocked PID 1, see the 23-unit-file-execstoppost wrapper), so
+/// when the unit has ExecStopPost= this returns a chain parked in its
+/// poststop phase for the dispatcher to drive; the chain's finalizer sets
+/// the failed status afterwards. With no ExecStopPost= the failure is
+/// finalized immediately and None is returned.
+#[must_use]
+pub(crate) fn fail_deferred_start(
+    run_info: &ArcMutRuntimeInfo,
+    id: &UnitId,
+    reason: String,
+) -> Option<ServiceStartChain> {
+    // Without a live dispatcher (unit tests, very early boot) nothing can
+    // drive the chain, so the failure must finalize directly or the unit
+    // leaks in Starting.
+    let has_stoppost = crate::entrypoints::dispatcher::global().is_some() && {
+        let ri = dispatcher_read(run_info);
+        match ri.unit_table.get(id) {
+            Some(unit) => match &unit.specific {
+                // Kill the started processes first, like the plain cleanup,
+                // but leave the status in Starting so the poststop chain's
+                // steps still own the unit.
+                Specific::Service(svc) if !svc.conf.stoppost.is_empty() => {
+                    let mut state = svc.state.write_poisoned();
+                    state
+                        .srvc
+                        .kill_all_remaining_processes(&svc.conf, &id.name);
+                    state.srvc.pid = None;
+                    state.srvc.process_group = None;
+                    true
+                }
+                _ => false,
+            },
+            None => false,
+        }
+    };
+    if has_stoppost {
+        warn!(
+            "deferred start of {} failed: {reason}; running ExecStopPost before failing",
+            id.name
+        );
+        Some(ServiceStartChain {
+            id: id.clone(),
+            next_services_ids: Vec::new(),
+            filter_ids: Arc::new(Vec::new()),
+            errors: Arc::new(Mutex::new(Vec::new())),
+            source: ActivationSource::Regular,
+            phase: StartChainPhase::PoststopAfterError {
+                idx: 0,
+                error: reason,
+            },
+        })
+    } else {
+        finalize_deferred_start_failure(run_info, id, reason);
+        None
+    }
+}
+
+#[must_use]
+fn oneshot_chain_fail(
+    chain: &OneshotChainStart,
+    e: crate::services::RunCmdError,
+    run_info: &ArcMutRuntimeInfo,
+) -> Option<ServiceStartChain> {
+    let id = &chain.id;
+    let name = &id.name;
+    // Clear the relocation breadcrumb so nothing can resume the sequence
+    // from the failed command.
+    {
+        let ri = dispatcher_read(run_info);
+        if let Some(unit) = ri.unit_table.get(id)
+            && let Specific::Service(svc) = &unit.specific
+        {
+            svc.state.write_poisoned().srvc.current_exec_argv = None;
+        }
+    }
+    let reason = format!("{e}");
+    chain.errors.lock_poisoned().push(UnitOperationError {
+        unit_name: name.clone(),
+        unit_id: id.clone(),
+        reason: UnitOperationErrorReason::ServiceStartError(ServiceErrorReason::StartFailed(e)),
+    });
+    // Reporting the error is not enough: the unit would stay in
+    // UnitStatus::Starting and be started again from the top, re-running
+    // the preliminary commands forever. Fail the start; with ExecStopPost=
+    // configured that hands back a poststop chain to drive first.
+    fail_deferred_start(run_info, id, reason)
+}
+
+/// What a parked deferred start needs the dispatcher to know at
+/// registration (docs/EVENT-LOOP.md inc 2).
+pub struct StartWaitParams {
+    pub id: UnitId,
+    /// The before-chain to dispatch on completion; None means "collect the
+    /// unit's Before= dependents at registration" (the trigger-path
+    /// wrappers' behavior).
+    pub next_services_ids: Option<Vec<UnitId>>,
+    pub filter_ids: Arc<Vec<UnitId>>,
+    pub errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    pub source: ActivationSource,
+    /// Only park if the unit is (still) in Starting.
+    pub check_starting: bool,
+}
+
+/// Registration-time facts for a parked start, read under one brief guard.
+pub struct StartWaitSetup {
+    pub svc_type: crate::units::ServiceType,
+    pub timeout: Option<std::time::Duration>,
+    pub stop_timeout: Option<std::time::Duration>,
+    pub dbus_name: Option<String>,
+    pub next_services_ids: Vec<UnitId>,
+}
+
+/// One brief guard: bail out if the unit is gone or (when requested) no
+/// longer Starting, wake the notification reader so it collects the new
+/// service's socket, and copy out the type-relevant config.
+pub(crate) fn start_wait_setup(params: &StartWaitParams, run_info: &ArcMutRuntimeInfo) -> Option<StartWaitSetup> {
+    let ri = dispatcher_read(run_info);
+    let unit = ri.unit_table.get(&params.id)?;
+    if params.check_starting
+        && !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting)
+    {
+        return None;
+    }
+    ri.notify_eventfds();
+    let next_services_ids = params
+        .next_services_ids
+        .clone()
+        .unwrap_or_else(|| unit.common.dependencies.before.clone());
+    if let Specific::Service(svc) = &unit.specific {
+        let state = svc.state.read_poisoned();
+        Some(StartWaitSetup {
+            svc_type: svc.conf.srcv_type,
+            timeout: state.srvc.get_start_timeout(&svc.conf),
+            stop_timeout: state.srvc.get_stop_timeout(&svc.conf),
+            dbus_name: svc.conf.dbus_name.clone(),
+            next_services_ids,
+        })
+    } else {
+        None
+    }
+}
+
+/// The dispatcher's verdict when re-evaluating a parked start.
+pub(crate) enum StartWaitVerdict {
+    /// No readiness signal yet; keep waiting.
+    Pending,
+    /// Readiness arrived: run [`finish_deferred_start`] on a finisher thread.
+    Ready,
+    /// The unit vanished or left Starting (someone else owns the outcome,
+    /// e.g. the exit handler after a failing oneshot); end the wait silently.
+    Abandoned,
+    /// The start failed in a way this wait owns: run the deferred cleanup
+    /// with this reason and end the wait.
+    Fail(String),
+}
+
+/// Re-evaluate a parked deferred start against current unit state. Runs on
+/// the dispatcher under one brief read guard; mirrors the per-type readiness
+/// logic of the retired polling completion handler, including the forking
+/// daemon-PID pickup side effect.
+pub(crate) fn evaluate_start_wait(
+    id: &UnitId,
+    svc_type: crate::units::ServiceType,
+    exec_confirm_elapsed: bool,
+    dbus_done: bool,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartWaitVerdict {
+    use crate::units::ServiceType;
+    let ri = dispatcher_read(run_info);
+    let Some(unit) = ri.unit_table.get(id) else {
+        return StartWaitVerdict::Abandoned;
+    };
+    if !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting) {
+        return StartWaitVerdict::Abandoned;
+    }
+    let Specific::Service(svc) = &unit.specific else {
+        return StartWaitVerdict::Abandoned;
+    };
+
+    // For oneshot/forking services, completion is the ExecStart process
+    // exiting. main_exit_status is set by the exit head when the process is
+    // reaped (and cleared on each new spawn), so it is a race-free "has it
+    // finished" signal.
+    let exit_success = if matches!(svc_type, ServiceType::OneShot | ServiceType::Forking) {
+        let state = svc.state.read_poisoned();
+        // main_exit_status is the race-free "has the main process finished?"
+        // signal; judge SUCCESS via the recorded termination so a signal listed
+        // in SuccessExitStatus= counts (the bare status number cannot tell
+        // `exit N` from death by signal N). This matches the exit handler's own
+        // is_success verdict, so the start wait and the exit handler agree
+        // instead of leaving a signal-success oneshot wedged in Starting. Fall
+        // back to the exit-code test when no termination was recorded.
+        state.srvc.main_exit_status.map(|code| {
+            let succeeded = match state.srvc.main_exit_termination {
+                Some(term) => svc.conf.success_exit_status.is_success(&term),
+                None => code == 0 || svc.conf.success_exit_status.exit_codes.contains(&code),
+            };
+            succeeded
+                || svc
+                    .conf
+                    .exec
+                    .last()
+                    .map(|e| e.prefixes.contains(&crate::units::CommandlinePrefix::Minus))
+                    .unwrap_or(false)
+        })
+    } else {
+        None
+    };
+
+    match svc_type {
+        ServiceType::OneShot => match exit_success {
+            Some(true) => StartWaitVerdict::Ready,
+            // The exit handler owns the failed/OnFailure/Restart transition.
+            Some(false) => StartWaitVerdict::Abandoned,
+            None => StartWaitVerdict::Pending,
+        },
+        ServiceType::Forking => match exit_success {
+            Some(true) => {
+                // The parent exiting cleanly means the daemon is up. Pick up
+                // the daemon PID (PIDFile, else MAINPID from sd_notify) and
+                // track it, mirroring the inline fork_parent Forking arm.
+                let mut state = svc.state.write_poisoned();
+                // Consume the signal so the daemon's own later exit is not
+                // mistaken for another parent exit.
+                state.srvc.main_exit_status = None;
+                state.srvc.main_exit_termination = None;
+                let daemon_pid = if let Some(ref pid_file_path) = svc.conf.pid_file {
+                    let p = crate::services::fork_parent::read_pid_file(pid_file_path);
+                    if p.is_none() {
+                        warn!(
+                            "deferred start: could not read PIDFile {:?} for {}",
+                            pid_file_path, id.name
+                        );
+                    }
+                    p
+                } else if let Some(mp) = state.srvc.main_pid {
+                    // MAINPID reported via sd_notify.
+                    Some(mp)
+                } else if svc.conf.guess_main_pid {
+                    // No PIDFile= and no sd_notify MAINPID: guess the main PID as
+                    // the sole process left in the service's cgroup after the
+                    // ExecStart= parent exited (GuessMainPID=, default yes).
+                    crate::services::fork_parent::guess_main_pid_from_cgroup(
+                        &svc.conf.platform_specific.cgroup_path,
+                    )
+                } else {
+                    None
+                };
+                if let Some(daemon_pid) = daemon_pid {
+                    state.srvc.pid = Some(daemon_pid);
+                    let now = crate::units::UnitTimestamps::now_usec();
+                    state.srvc.exec_main_start_timestamp = Some(now);
+                    state.srvc.exec_main_handoff_timestamp = Some(now);
+                    ri.pid_table.lock_poisoned().insert(
+                        daemon_pid,
+                        crate::runtime_info::PidEntry::Service(id.clone(), svc.conf.srcv_type),
+                    );
+                } else {
+                    state.srvc.pid = None;
+                }
+                StartWaitVerdict::Ready
+            }
+            Some(false) => {
+                StartWaitVerdict::Fail("Forking ExecStart parent exited with failure".to_owned())
+            }
+            None => StartWaitVerdict::Pending,
+        },
+        ServiceType::Exec => {
+            let exec_failed = svc.state.read_poisoned().srvc.main_exit_status == Some(203);
+            if exec_failed {
+                StartWaitVerdict::Fail("exec() of the service binary failed".to_owned())
+            } else if exec_confirm_elapsed {
+                StartWaitVerdict::Ready
+            } else {
+                StartWaitVerdict::Pending
+            }
+        }
+        ServiceType::Dbus => {
+            if dbus_done {
+                StartWaitVerdict::Ready
+            } else if svc.state.read_poisoned().srvc.main_exit_status.is_some() {
+                // The main process exited before the bus name appeared: the
+                // exit handler owns the outcome (clean exit deactivates,
+                // failure fails), so the wait must not keep the deadline
+                // armed for a unit that is about to leave Starting.
+                StartWaitVerdict::Abandoned
+            } else {
+                StartWaitVerdict::Pending
+            }
+        }
+        // RELOADING=1 implies a previous READY=1, so a reloading service
+        // counts as started. A notify main exiting before READY=1 is
+        // upstream's 'protocol' failure; the exit head suppressed death
+        // processing so this wait owns it, ExecStopPost= included.
+        ServiceType::Notify | ServiceType::NotifyReload => {
+            let state = svc.state.read_poisoned();
+            if state.srvc.signaled_ready || state.srvc.reloading {
+                StartWaitVerdict::Ready
+            } else if state.srvc.main_exit_status.is_some() {
+                StartWaitVerdict::Fail(
+                    "Service exited before sending READY=1".to_owned(),
+                )
+            } else {
+                StartWaitVerdict::Pending
+            }
+        }
+        // Everything else that lands here waits for READY=1.
+        _ => {
+            let state = svc.state.read_poisoned();
+            if state.srvc.signaled_ready || state.srvc.reloading {
+                StartWaitVerdict::Ready
+            } else {
+                StartWaitVerdict::Pending
+            }
+        }
+    }
+}
+
+/// Compute the effective start deadline: the base TimeoutStartSec deadline,
+/// pushed out by an EXTEND_TIMEOUT_USEC extension when one is active
+/// (extension never shortens; timing out requires BOTH elapsed).
+pub(crate) fn effective_start_deadline(
+    id: &UnitId,
+    base_deadline: Option<std::time::Instant>,
+    run_info: &ArcMutRuntimeInfo,
+) -> Option<std::time::Instant> {
+    let base = base_deadline?;
+    let ri = dispatcher_read(run_info);
+    if let Some(unit) = ri.unit_table.get(id)
+        && let Specific::Service(svc) = &unit.specific
+    {
+        let state = svc.state.read_poisoned();
+        if let (Some(usec), Some(ts)) = (
+            state.srvc.extend_timeout_usec,
+            state.srvc.extend_timeout_timestamp,
+        ) {
+            let ext = ts + std::time::Duration::from_micros(usec);
+            return Some(base.max(ext));
+        }
+    }
+    Some(base)
+}
+
+/// Send the start-timeout SIGTERM (process group first, else the main pid),
+/// mirroring the retired poller's graceful first escalation step.
+pub(crate) fn start_wait_send_sigterm(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let ri = dispatcher_read(run_info);
+    if let Some(unit) = ri.unit_table.get(id)
+        && let Specific::Service(svc) = &unit.specific
+    {
+        let state = svc.state.read_poisoned();
+        if let Some(pg) = state.srvc.process_group {
+            let _ = nix::sys::signal::kill(pg, nix::sys::signal::Signal::SIGTERM);
+        } else if let Some(pid) = state.srvc.pid {
+            let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
+        }
+    }
+}
+
+/// Complete a deferred start whose readiness signal arrived: run
+/// ExecStartPost=, flip the unit to Started with its bookkeeping, and
+/// dispatch the before-chain. Shared by the polling completion handler and
+/// the dispatcher's finisher thread (docs/EVENT-LOOP.md inc 2). May block
+/// on the poststart helper wait, so it must never run on the dispatcher
+/// itself.
+pub(crate) fn finish_deferred_start(
+    id: &UnitId,
+    name: &str,
     next_services_ids: Vec<UnitId>,
     filter_ids: Arc<Vec<UnitId>>,
     run_info: ArcMutRuntimeInfo,
     errors: Arc<Mutex<Vec<UnitOperationError>>>,
     source: ActivationSource,
 ) {
-    let name = id.name.clone();
-
-    // Extract the start timeout from the service config.
-    let timeout = {
+    {
         let ri = run_info.read_poisoned();
-        if let Some(unit) = ri.unit_table.get(&id)
-            && let Specific::Service(svc) = &unit.specific
-        {
-            let state = svc.state.read_poisoned();
-            state.srvc.get_start_timeout(&svc.conf)
-        } else {
-            None
-        }
-    };
-
-    let start_time = std::time::Instant::now();
-
-    // Poll until READY=1 is received, the unit leaves Starting state
-    // (e.g. process exited / was killed), or the start timeout expires.
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        // Check timeout, respecting EXTEND_TIMEOUT_USEC if set.
-        let timed_out = if let Some(timeout) = timeout {
-            // Check if the service sent EXTEND_TIMEOUT_USEC
-            if let Ok(ri) = run_info.try_read()
-                && let Some(unit) = ri.unit_table.get(&id)
-                && let Specific::Service(svc) = &unit.specific
-            {
-                let state = svc.state.read_poisoned();
-                match (
-                    state.srvc.extend_timeout_usec,
-                    state.srvc.extend_timeout_timestamp,
-                ) {
-                    (Some(usec), Some(ts)) => {
-                        let ext_dur = std::time::Duration::from_micros(usec);
-                        ts.elapsed() > ext_dur
-                    }
-                    _ => start_time.elapsed() > timeout,
-                }
-            } else {
-                start_time.elapsed() > timeout
-            }
-        } else {
-            false
+        let Some(unit) = ri.unit_table.get(id) else {
+            return;
         };
-        if timed_out {
-            warn!(
-                "deferred_notify_wait: {} timed out after {:?} waiting for READY=1",
-                name, timeout
-            );
-            // Kill the service process and clean up properly — matching the
-            // cleanup in Service::deactivate_service (PID, process_group,
-            // notification socket, stdout/stderr).
-            if let Ok(ri) = run_info.try_read()
-                && let Some(unit) = ri.unit_table.get(&id)
-            {
-                if let Specific::Service(svc) = &unit.specific {
+        // Something else may have transitioned the unit in the window since
+        // readiness was observed (e.g. the exit handler); completing twice
+        // must not happen.
+        if !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting) {
+            return;
+        }
+
+        // Run ExecStartPost= before flipping Started, mirroring the
+        // inline path (run_poststart after wait_for_service).  On failure
+        // run ExecStopPost and fail the start.  NOTE: this holds the
+        // RuntimeInfo read guard + state write lock across the bounded
+        // poststart helper wait; taking helper waits fully off the locks
+        // is docs/ARCHITECTURE.md invariant I1.
+        if let Specific::Service(svc) = &unit.specific
+            && !svc.conf.startpost.is_empty()
+        {
+            let poststart_res = {
+                let mut state = svc.state.write_poisoned();
+                state.srvc.run_poststart(&svc.conf, id.clone(), name, &ri)
+            };
+            if let Err(e) = poststart_res {
+                warn!("deferred start: ExecStartPost failed for {name}: {e}");
+                {
                     let mut state = svc.state.write_poisoned();
-                    state.srvc.kill_all_remaining_processes(&svc.conf, &name);
-                    state.srvc.pid = None;
-                    state.srvc.process_group = None;
-                    if let Some(path) = state.srvc.notifications_path.take() {
-                        let _ = std::fs::remove_file(&path);
-                    }
-                    state.srvc.notifications = None;
-                    state.srvc.stdout = None;
-                    state.srvc.stderr = None;
-                    drop(state);
+                    let _ = state.srvc.run_poststop(&svc.conf, id.clone(), name, &ri);
                 }
-                // Transition to Stopped/Failed
                 let mut status = unit.common.status.write_poisoned();
                 if matches!(&*status, UnitStatus::Starting) {
                     *status = UnitStatus::Stopped(
                         crate::units::status::StatusStopped::StoppedUnexpected,
                         vec![UnitOperationErrorReason::GenericStartError(format!(
-                            "Timed out waiting for READY=1 ({:?})",
-                            timeout
+                            "ExecStartPost failed: {e}"
                         ))],
                     );
                 }
-            }
-            return;
-        }
-
-        // Use try_read() to yield to pending writers (e.g., find_or_load_unit
-        // needing a write lock to load a new unit from disk).
-        let ri = match run_info.try_read() {
-            Ok(g) => g,
-            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
-            Err(std::sync::TryLockError::WouldBlock) => continue, // retry next iteration
-        };
-        let Some(unit) = ri.unit_table.get(&id) else {
-            return;
-        };
-
-        // If the unit is no longer Starting, something else handled it
-        // (e.g. SIGCHLD exit handler transitioned it to Stopped/Failed).
-        {
-            let status = unit.common.status.read_poisoned();
-            if !matches!(&*status, UnitStatus::Starting) {
-                trace!(
-                    "deferred_notify_wait: {} left Starting state ({:?}), stopping poll",
-                    name, &*status
-                );
                 return;
             }
         }
 
-        // Check if the global notification handler has set signaled_ready.
-        // Also check if the service is in reloading state — RELOADING=1
-        // implies the service previously sent READY=1, so it should be
-        // considered started even though signaled_ready was cleared.
-        let ready = if let Specific::Service(svc) = &unit.specific {
-            let state = svc.state.read_poisoned();
-            state.srvc.signaled_ready || state.srvc.reloading
-        } else {
-            return;
-        };
-
-        if ready {
-            info!(
-                "deferred_notify_wait: {} received READY=1, transitioning to Started",
-                name
-            );
-
-            // Update service state and unit status under brief locks.
-            if let Specific::Service(svc) = &unit.specific {
-                let mut state = svc.state.write_poisoned();
-                state.srvc.signaled_ready = false;
-                state.srvc.runtime_started_at = Some(std::time::Instant::now());
-                // Initialize watchdog reference timestamp from READY=1 moment.
-                if svc.conf.watchdog_sec.is_some() && state.srvc.watchdog_last_ping.is_none() {
-                    state.srvc.watchdog_last_ping = Some(std::time::Instant::now());
-                }
+        // Update service state and unit status under brief locks.
+        if let Specific::Service(svc) = &unit.specific {
+            let mut state = svc.state.write_poisoned();
+            state.srvc.signaled_ready = false;
+            state.srvc.runtime_started_at = Some(std::time::Instant::now());
+            // Initialize watchdog reference timestamp from READY=1 moment.
+            if svc.conf.watchdog_sec.is_some() && state.srvc.watchdog_last_ping.is_none() {
+                state.srvc.watchdog_last_ping = Some(std::time::Instant::now());
             }
-
-            // Transition unit status to Started.
-            {
-                let mut status = unit.common.status.write_poisoned();
-                if matches!(&*status, UnitStatus::Starting) {
-                    *status = UnitStatus::Started(StatusStarted::Running);
-                }
-            }
-
-            // Record lifecycle timestamps.
-            unit.common
-                .timestamps
-                .write_poisoned()
-                .record_active_enter();
-
-            // Activate slice hierarchy.
-            activate_slice_hierarchy(unit, &ri);
-
-            // Log the lifecycle event.
-            let desc = unit.common.unit.description.clone();
-            let log_level_max = unit.log_level_max();
-            let msg = if desc.is_empty() {
-                format!("Started {}.", name)
-            } else {
-                format!("Started {desc}.")
-            };
-            crate::control::varlink::journal_log_unit_lifecycle(
-                &msg,
-                &name,
-                log_level_max.as_deref(),
-            );
-
-            drop(ri);
-
-            // Dispatch the before-chain so dependent units can start.
-            if !next_services_ids.is_empty() {
-                let next_names: Vec<&str> = next_services_ids
-                    .iter()
-                    .map(|id| id.name.as_str())
-                    .collect();
-                info!(
-                    "deferred_notify_wait: {} dispatching {} dependents: {:?}",
-                    name,
-                    next_services_ids.len(),
-                    next_names
-                );
-
-                let tpool = ThreadPool::new(8);
-                activate_units_recursive(
-                    next_services_ids,
-                    filter_ids,
-                    run_info,
-                    tpool.clone(),
-                    errors,
-                    source,
-                );
-                tpool.join();
-            }
-            return;
         }
 
-        drop(ri);
+        // Transition unit status to Started.
+        {
+            let mut status = unit.common.status.write_poisoned();
+            if matches!(&*status, UnitStatus::Starting) {
+                *status = UnitStatus::Started(StatusStarted::Running);
+            }
+        }
+
+        // Record lifecycle timestamps.
+        unit.common
+            .timestamps
+            .write_poisoned()
+            .record_active_enter();
+
+        // Activate slice hierarchy.
+        activate_slice_hierarchy(unit, &ri);
+
+        // Log the lifecycle event.
+        let desc = unit.common.unit.description.clone();
+        let log_level_max = unit.log_level_max();
+        let msg = if desc.is_empty() {
+            format!("Started {}.", name)
+        } else {
+            format!("Started {desc}.")
+        };
+        crate::control::varlink::journal_log_unit_lifecycle(&msg, name, log_level_max.as_deref());
+    }
+
+    // Dispatch the before-chain so dependent units can start.
+    if !next_services_ids.is_empty() {
+        let next_names: Vec<&str> = next_services_ids
+            .iter()
+            .map(|id| id.name.as_str())
+            .collect();
+        info!(
+            "deferred_notify_wait: {} dispatching {} dependents: {:?}",
+            name,
+            next_services_ids.len(),
+            next_names
+        );
+
+        let tpool = ThreadPool::new(8);
+        activate_units_recursive(
+            next_services_ids,
+            filter_ids,
+            run_info,
+            tpool.clone(),
+            errors,
+            source,
+        );
+        tpool.join();
+    }
+}
+
+/// Re-drive the before-chain of a deferred start whose wait was ABANDONED (the
+/// unit failed, vanished, or already left `Starting`) so its After=-ordered
+/// dependents are re-evaluated.  A soft dependent (`Wants=`/`Upholds=`) must
+/// still start when its dependency failed; a hard dependent (`Requires=`/
+/// `BindsTo=`) stays held back by its own `unstarted_deps` check (the failed dep
+/// is `Stopped`, not `Started`).
+///
+/// The success completion (`finish_deferred_start`) dispatches this same
+/// `next_services_ids` scoped by the transaction's `filter_ids`; the Abandoned
+/// arm previously dropped it, so a soft dependent of a failed deferred oneshot
+/// was left inactive.  The transaction `filter_ids` (NOT the raw before-chain)
+/// is what bounds the walk, so pure-ordering `After=` units outside the
+/// transaction are never spuriously started.
+///
+/// Runs on its own thread: activation must not run on the dispatcher, and it
+/// first waits (bounded) for the unit to leave `Starting`, because the terminal
+/// transition is performed by the asynchronous exit handler — without the wait,
+/// `unstarted_deps` could still observe the dep as `Starting` and wrongly block
+/// the soft dependent.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_redrive_after_abandoned(
+    id: UnitId,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<UnitId>>,
+    errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
+    run_info: ArcMutRuntimeInfo,
+) {
+    if next_services_ids.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        loop {
+            let terminal = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table
+                    .get(&id)
+                    .map(|u| !matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
+                    .unwrap_or(true)
+            };
+            if terminal || started.elapsed() > std::time::Duration::from_secs(5) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let tpool = ThreadPool::new(8);
+        activate_units_recursive(
+            next_services_ids,
+            filter_ids,
+            run_info,
+            tpool.clone(),
+            errors,
+            source,
+        );
+        tpool.join();
+    });
+}
+
+/// Park the deferred completion of a service whose start wait was deferred
+/// (`start_service` returned `StartResult::DeferredNotifyWait`, so the unit
+/// is left in `Starting`).  Used by activation paths that call
+/// `activate_unit` directly and therefore do not go through
+/// `activate_units_recursive`'s deferral — notably socket activation.
+/// Sends an event rather than taking any lock: several callers hold a
+/// RuntimeInfo read guard, and a second same-thread read acquisition
+/// deadlocks against a queued writer on std's futex rwlock, which is why
+/// the dispatcher handle comes from the process-global accessor.
+pub(crate) fn spawn_deferred_service_wait(id: UnitId, _run_info: ArcMutRuntimeInfo) {
+    send_start_wait_event(id, false);
+}
+
+/// Convenience wrapper for trigger paths (timer, path, udev, exit-handler)
+/// that call `activate_unit` directly: if the unit was left `Starting`
+/// (i.e. its start wait was deferred), park its completion.  Without this
+/// the unit has no completion owner — nothing enforces its start timeout
+/// and nothing transitions it to Started, so it can sit in `activating`
+/// forever.
+pub(crate) fn spawn_deferred_service_wait_if_starting(id: &UnitId, _run_info: &ArcMutRuntimeInfo) {
+    send_start_wait_event(id.clone(), true);
+}
+
+fn send_start_wait_event(id: UnitId, check_starting: bool) {
+    let name = id.name.clone();
+    match crate::entrypoints::dispatcher::global() {
+        Some(handle) => handle.send_normal(
+            crate::entrypoints::dispatcher::Event::StartServiceWait(StartWaitParams {
+                id,
+                next_services_ids: None,
+                filter_ids: Arc::new(Vec::new()),
+                errors: Arc::new(Mutex::new(Vec::new())),
+                source: ActivationSource::Regular,
+                check_starting,
+            }),
+        ),
+        None => error!("no dispatcher to park the deferred start of {name}"),
     }
 }
 
@@ -1511,4 +3497,41 @@ pub fn upholds_retry_loop(unit_id: UnitId, arc_ri: ArcMutRuntimeInfo) {
         "Upholds= gave up restarting {} after {} retries",
         unit_id.name, max_retries
     );
+}
+
+#[cfg(test)]
+mod action_exit_status_tests {
+    use super::resolve_action_exit_status;
+    use crate::signal_handler::ChildTermination;
+    use nix::sys::signal::Signal;
+
+    #[test]
+    fn configured_status_wins_over_the_exit_code() {
+        // TEST-18-FAILUREACTION relies on this: it runs `false` (exit 1) with
+        // -p FailureActionExitStatus=123 and expects 123, not 1.
+        let code = ChildTermination::Exit(1);
+        assert_eq!(resolve_action_exit_status(Some(123), &code), Some(123));
+    }
+
+    #[test]
+    fn without_a_configured_status_the_exit_code_is_propagated() {
+        let code = ChildTermination::Exit(7);
+        assert_eq!(resolve_action_exit_status(None, &code), Some(7));
+    }
+
+    #[test]
+    fn a_signalled_process_propagates_255() {
+        // Upstream's -EBADE case: exited, but not cleanly (unit.c:6293).
+        let code = ChildTermination::Signal(Signal::SIGKILL, false);
+        assert_eq!(resolve_action_exit_status(None, &code), Some(255));
+    }
+
+    #[test]
+    fn an_out_of_range_exit_code_propagates_nothing() {
+        // Exit statuses are a byte; anything else has nothing to propagate.
+        let code = ChildTermination::Exit(300);
+        assert_eq!(resolve_action_exit_status(None, &code), None);
+        // ...but an explicit setting still wins.
+        assert_eq!(resolve_action_exit_status(Some(5), &code), Some(5));
+    }
 }

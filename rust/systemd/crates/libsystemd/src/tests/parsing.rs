@@ -3915,6 +3915,31 @@ fn test_tty_reset_explicit_yes() {
 }
 
 #[test]
+fn test_tty_size_parsing() {
+    let parse = |body: &str| {
+        crate::units::parse_service(
+            crate::units::parse_file(body).unwrap(),
+            &std::path::PathBuf::from("/x.service"),
+        )
+        .unwrap()
+    };
+
+    // Unset by default (upstream's UINT_MAX / "leave as-is").
+    let s = parse("[Service]\nExecStart=/bin/true\n");
+    assert_eq!(s.srvc.exec_section.tty_columns, None);
+    assert_eq!(s.srvc.exec_section.tty_rows, None);
+
+    // Explicit columns/rows parse.
+    let s = parse("[Service]\nExecStart=/bin/true\nTTYColumns=80\nTTYRows=24\n");
+    assert_eq!(s.srvc.exec_section.tty_columns, Some(80));
+    assert_eq!(s.srvc.exec_section.tty_rows, Some(24));
+
+    // Over-u16 saturates, matching C's USHRT_MAX ceiling.
+    let s = parse("[Service]\nExecStart=/bin/true\nTTYColumns=70000\n");
+    assert_eq!(s.srvc.exec_section.tty_columns, Some(u16::MAX));
+}
+
+#[test]
 fn test_tty_reset_explicit_no() {
     let test_service_str = r#"
     [Service]
@@ -8498,12 +8523,12 @@ fn test_success_exit_status_is_success_extra_signal() {
     };
     assert!(
         ses.is_success(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1
+            nix::sys::signal::Signal::SIGUSR1, false
         ))
     );
     assert!(
         !ses.is_success(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR2
+            nix::sys::signal::Signal::SIGUSR2, false
         ))
     );
 }
@@ -8514,33 +8539,33 @@ fn test_success_exit_status_is_clean_signal_defaults() {
     // Built-in clean signals
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGHUP
+            nix::sys::signal::Signal::SIGHUP, false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGINT
+            nix::sys::signal::Signal::SIGINT, false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGTERM
+            nix::sys::signal::Signal::SIGTERM, false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGPIPE
+            nix::sys::signal::Signal::SIGPIPE, false
         ))
     );
     // Not clean by default
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1
+            nix::sys::signal::Signal::SIGUSR1, false
         ))
     );
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGKILL
+            nix::sys::signal::Signal::SIGKILL, false
         ))
     );
 }
@@ -8554,19 +8579,19 @@ fn test_success_exit_status_is_clean_signal_extra() {
     // Extra signal is now clean
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1
+            nix::sys::signal::Signal::SIGUSR1, false
         ))
     );
     // Built-in clean signals still work
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGTERM
+            nix::sys::signal::Signal::SIGTERM, false
         ))
     );
     // Other signals still not clean
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR2
+            nix::sys::signal::Signal::SIGUSR2, false
         ))
     );
 }
@@ -31003,6 +31028,43 @@ fn test_condition_first_boot_yes_parsed() {
 }
 
 #[test]
+fn test_condition_kernel_version_parsed() {
+    // Regression: ConditionKernelVersion= was not wired into the unit parser at
+    // all, so the condition was silently dropped and never gated the unit.
+    let test_service_str = r#"
+    [Unit]
+    ConditionKernelVersion = >=5.10
+    ConditionKernelVersion = !<4.0
+
+    [Service]
+    ExecStart = /bin/myservice
+    "#;
+
+    let parsed_file = crate::units::parse_file(test_service_str).unwrap();
+    let service = crate::units::parse_service(
+        parsed_file,
+        &std::path::PathBuf::from("/path/to/unitfile.service"),
+    )
+    .unwrap();
+
+    assert_eq!(service.common.unit.conditions.len(), 2);
+    match &service.common.unit.conditions[0] {
+        crate::units::UnitCondition::KernelVersion { expression, negate } => {
+            assert_eq!(expression, ">=5.10");
+            assert!(!negate);
+        }
+        other => panic!("Expected KernelVersion condition, got {:?}", other),
+    }
+    match &service.common.unit.conditions[1] {
+        crate::units::UnitCondition::KernelVersion { expression, negate } => {
+            assert_eq!(expression, "<4.0", "a leading ! must strip into negate");
+            assert!(*negate);
+        }
+        other => panic!("Expected negated KernelVersion condition, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_condition_first_boot_no_parsed() {
     let test_service_str = r#"
     [Unit]
@@ -44487,6 +44549,81 @@ fn test_mount_unit_loaded_from_directory() {
 }
 
 #[test]
+fn test_instance_symlink_to_different_template_preserves_instance() {
+    // TEST-15-DROPIN.testcase_template_dropins: bar-alias@2.service is an
+    // instance-level symlink to yup@.service (a DIFFERENT template than the
+    // bar-alias@.service -> bar@.service template alias). So bar-alias@2 must
+    // resolve to yup@2 — carrying its own instance number across — not collapse
+    // onto another yup instance (e.g. yup@0).
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+
+    std::fs::write(p.join("yup@.service"), "[Service]\nExecStart=/bin/true\n").unwrap();
+    std::fs::write(p.join("bar@.service"), "[Service]\nExecStart=/bin/true\n").unwrap();
+
+    // Template alias (bar-alias@ -> bar@) plus per-instance symlinks, two of
+    // which point at a DIFFERENT template/instance (yup).
+    std::os::unix::fs::symlink("bar@.service", p.join("bar-alias@.service")).unwrap();
+    std::os::unix::fs::symlink("bar@1.service", p.join("bar-alias@1.service")).unwrap();
+    std::os::unix::fs::symlink("yup@.service", p.join("bar-alias@2.service")).unwrap();
+    std::os::unix::fs::symlink("yup@3.service", p.join("bar-alias@3.service")).unwrap();
+
+    // .requires/ dirs for every template and instance, exactly as the upstream
+    // testcase creates them.
+    let mut reqs: Vec<(String, String)> = Vec::new();
+    reqs.push(("bar@.service".into(), "bar-template-requires.device".into()));
+    reqs.push(("yup@.service".into(), "yup-template-requires.device".into()));
+    reqs.push((
+        "bar-alias@.service".into(),
+        "bar-alias-template-requires.device".into(),
+    ));
+    for i in 0..=3 {
+        reqs.push((
+            format!("bar@{i}.service"),
+            format!("bar-{i}-requires.device"),
+        ));
+        reqs.push((
+            format!("yup@{i}.service"),
+            format!("yup-{i}-requires.device"),
+        ));
+        reqs.push((
+            format!("bar-alias@{i}.service"),
+            format!("bar-alias-{i}-requires.device"),
+        ));
+    }
+    for (host, dev) in &reqs {
+        let reqdir = p.join(format!("{host}.requires"));
+        std::fs::create_dir_all(&reqdir).unwrap();
+        std::os::unix::fs::symlink(format!("../{dev}"), reqdir.join(dev)).unwrap();
+    }
+
+    let paths = vec![p.to_path_buf()];
+    let unit_table = crate::units::load_all_units_no_prune(&paths, "default.target").unwrap();
+
+    let unit = unit_table
+        .values()
+        .find(|u| {
+            u.id.name == "bar-alias@2.service"
+                || u.common
+                    .unit
+                    .aliases
+                    .iter()
+                    .any(|a| a == "bar-alias@2.service")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no unit carries bar-alias@2.service; units: {:?}",
+                unit_table.keys().map(|id| &id.name).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        unit.id.name, "yup@2.service",
+        "bar-alias@2 (symlink to yup@.service) must resolve to yup@2, got {}",
+        unit.id.name
+    );
+}
+
+#[test]
 fn test_mount_unit_loaded_with_wants_dependency() {
     let dir = tempfile::tempdir().unwrap();
 
@@ -44596,6 +44733,12 @@ fn test_mount_unit_mount_config_from_parsed() {
         force_unmount: true,
         directory_mode: 0o700,
         timeout_sec: Some(30),
+        configuration_directory: vec![],
+        runtime_directory: vec![],
+        state_directory: vec![],
+        cache_directory: vec![],
+        logs_directory: vec![],
+        runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve::default(),
     };
 
     let config = MountConfig::from(parsed);
@@ -49445,7 +49588,7 @@ fn test_requisite_multiple_units() {
 }
 
 #[test]
-fn test_requisite_also_added_to_requires() {
+fn test_requisite_not_added_to_requires() {
     let test_service_str = r#"
     [Unit]
     Requisite = network.target
@@ -49456,11 +49599,22 @@ fn test_requisite_also_added_to_requires() {
     let service =
         crate::units::parse_service(parsed_file, &std::path::PathBuf::from("test.service"))
             .unwrap();
+    // Requisite= is a DISTINCT dependency: it must NOT be merged into Requires=
+    // (that merge was a bug, fixed in 74692e88 — Requisite= refuses a start
+    // whose target is inactive but, unlike Requires=, does not pull it in).
+    assert!(
+        !service
+            .common
+            .unit
+            .requires
+            .contains(&"network.target".to_string()),
+        "Requisite= must not be merged into Requires="
+    );
     assert!(
         service
             .common
             .unit
-            .requires
+            .requisite
             .contains(&"network.target".to_string())
     );
 }

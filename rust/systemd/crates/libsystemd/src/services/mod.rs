@@ -3,9 +3,10 @@
 //! 2. processgroupid setting
 //! 3. duping of filedescriptors
 //! 4. signaling processgroup on kill
+pub(crate) mod clean_ipc;
 mod fork_child;
 pub mod fork_os_specific;
-mod fork_parent;
+pub(crate) mod fork_parent;
 mod kill_os_specific;
 mod prepare_service;
 mod service_exit_handler;

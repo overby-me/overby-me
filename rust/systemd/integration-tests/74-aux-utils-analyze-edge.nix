@@ -16,12 +16,15 @@
     systemd-analyze timespan "1d 2h 3min 4s 5ms 6us"
 
     : "systemd-analyze calendar with --iterations shows multiple"
-    systemd-analyze calendar --iterations=5 "hourly" | grep -c "Next" | grep -q "5" || true
+    # --iterations=5 prints the first elapse as "Next elapse" and the rest as
+    # "Iter. #N", so the 5th iteration must appear as "Iter. #5".
+    systemd-analyze calendar --iterations=5 "hourly" | grep -q "Iter. #5"
 
     : "systemd-analyze calendar handles complex specs"
     systemd-analyze calendar "Mon,Wed *-*-* 12:00:00"
     systemd-analyze calendar "quarterly"
-    systemd-analyze calendar "semi-annually" || systemd-analyze calendar "semiannually" || true
+    systemd-analyze calendar "semi-annually"
+    systemd-analyze calendar "semiannually"
     AEEOF
     chmod +x TEST-74-AUX-UTILS.analyze-edge.sh
   '';

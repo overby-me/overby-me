@@ -25,12 +25,24 @@ pub struct CalendarSpec {
     pub month: CalendarComponent,
     /// Day-of-month component.
     pub day: CalendarComponent,
+    /// When true, day values count from the END of the month (the `~` syntax,
+    /// e.g. `*-*~01` = last day). Resolved per-month in [`Self::next_elapse`].
+    pub day_from_end: bool,
     /// Hour component.
     pub hour: CalendarComponent,
     /// Minute component.
     pub minute: CalendarComponent,
     /// Second component.
     pub second: CalendarComponent,
+    /// When true, the expression carried an explicit ` UTC` suffix and the
+    /// normalized form re-emits it. Elapse is computed in UTC either way (the
+    /// port has no local-timezone database), so this only affects rendering
+    /// and input acceptance; named timezones remain unsupported.
+    pub utc: bool,
+    /// `@TIMESTAMP` — a one-shot event at an exact UNIX time (seconds). When
+    /// set, the component fields are unused: elapse is the instant itself (once,
+    /// if still in the future) and the normalized form is its UTC datetime.
+    pub fixed_instant: Option<i64>,
 }
 
 /// A range of weekdays (inclusive), e.g. Mon..Fri or just Wed.
@@ -88,6 +100,35 @@ impl CalendarSpec {
             return Err("Empty calendar expression".to_string());
         }
 
+        // @TIMESTAMP — a one-shot event at an exact UNIX time in seconds
+        // (systemd.time(7)). Matches C: integer seconds only, rendered in UTC,
+        // and the resulting year must be in [1970, 2199] (calendarspec.c
+        // MAX_YEAR); a fractional `@N.5` is a timestamp, not a calendar spec.
+        if let Some(rest) = input.strip_prefix('@') {
+            if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(format!("Invalid calendar expression: {input}"));
+            }
+            let secs: i64 = rest
+                .parse()
+                .map_err(|_| format!("Timestamp out of range: {input}"))?;
+            if !(1970..=2199).contains(&unix_to_datetime(secs).year) {
+                return Err(format!("Timestamp out of range: {input}"));
+            }
+            return Ok(CalendarSpec {
+                original: input.to_string(),
+                weekdays: None,
+                year: None,
+                month: CalendarComponent::Wildcard,
+                day: CalendarComponent::Wildcard,
+                day_from_end: false,
+                hour: CalendarComponent::Wildcard,
+                minute: CalendarComponent::Wildcard,
+                second: CalendarComponent::Wildcard,
+                utc: true,
+                fixed_instant: Some(secs),
+            });
+        }
+
         // Handle well-known shorthands — parse the expanded form but keep
         // the original shorthand name so `as_fixed_interval()` can recognise it.
         let shorthand_expansion = match input.to_lowercase().as_str() {
@@ -109,7 +150,18 @@ impl CalendarSpec {
         }
 
         let original = input.to_string();
-        let parts: Vec<&str> = input.split_whitespace().collect();
+        let mut parts: Vec<&str> = input.split_whitespace().collect();
+
+        // A trailing ` UTC` timezone suffix (systemd.time(7)). Only UTC is
+        // accepted — the elapse is already computed in UTC, so this just
+        // records the suffix for the normalized form. Named timezones
+        // (e.g. `Europe/Berlin`) need a timezone database and stay rejected.
+        let utc = if parts.len() >= 2 && parts.last() == Some(&"UTC") {
+            parts.pop();
+            true
+        } else {
+            false
+        };
 
         let (weekdays, date_time_parts) = if !parts.is_empty() && looks_like_weekday(parts[0]) {
             let wd = parse_weekdays(parts[0])?;
@@ -142,13 +194,16 @@ impl CalendarSpec {
         };
 
         // Parse date: YYYY-MM-DD or *-MM-DD or MM-DD etc.
-        let (year, month, day) = if let Some(d) = date_part {
+        // The `~` day separator (e.g. `*-*~01`) marks day values as counted
+        // from the end of the month.
+        let (year, month, day, day_from_end) = if let Some(d) = date_part {
             parse_date_part(d)?
         } else {
             (
                 None,
                 CalendarComponent::Wildcard,
                 CalendarComponent::Wildcard,
+                false,
             )
         };
 
@@ -167,7 +222,9 @@ impl CalendarSpec {
         // components fall outside wall-clock bounds (e.g. `*-* 99:*:*`).
         // Upstream: TEST-65-ANALYZE asserts these error out.
         validate_component_range(&month, 1, 12, "month")?;
-        validate_component_range(&day, 1, 31, "day")?;
+        // From-end day values (`~N`) are capped at 28: upstream forbids dates
+        // more than 28 days from the end of the month (calendarspec.c chain_valid).
+        validate_component_range(&day, 1, if day_from_end { 28 } else { 31 }, "day")?;
         validate_component_range(&hour, 0, 23, "hour")?;
         validate_component_range(&minute, 0, 59, "minute")?;
         validate_component_range(&second, 0, 60, "second")?;
@@ -178,9 +235,12 @@ impl CalendarSpec {
             year,
             month,
             day,
+            day_from_end,
             hour,
             minute,
             second,
+            utc,
+            fixed_instant: None,
         })
     }
 
@@ -189,6 +249,12 @@ impl CalendarSpec {
     ///
     /// The caller converts between `Instant`/system-clock and `DateTime` as needed.
     pub fn next_elapse(&self, after: DateTime) -> Option<DateTime> {
+        // `@TIMESTAMP` is a one-shot: fire once, only if the instant is still
+        // strictly ahead of the reference (so it does not re-arm after firing).
+        if let Some(t) = self.fixed_instant {
+            return (t > Self::datetime_to_unix(&after)).then(|| unix_to_datetime(t));
+        }
+
         // Brute-force forward search with early pruning.
         // We iterate year→month→day→hour→minute→second, skipping non-matching values.
         // Safety limit: don't search more than 5 years ahead.
@@ -214,7 +280,11 @@ impl CalendarSpec {
                     1
                 };
 
-                let days = matching_values_from(&self.day, d_start, max_day);
+                let days = if self.day_from_end {
+                    resolve_from_end_days(&self.day, d_start, max_day)
+                } else {
+                    matching_values_from(&self.day, d_start, max_day)
+                };
 
                 for d in days {
                     if d > max_day {
@@ -292,6 +362,14 @@ impl CalendarSpec {
 
     /// Produce a normalized representation of the calendar expression.
     pub fn normalized(&self) -> String {
+        if let Some(t) = self.fixed_instant {
+            let dt = unix_to_datetime(t);
+            return format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+                dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+            );
+        }
+
         let mut s = String::new();
 
         if let Some(ref wds) = self.weekdays {
@@ -317,7 +395,7 @@ impl CalendarSpec {
             s.push_str("*-");
         }
         s.push_str(&format_component_padded(&self.month, 2));
-        s.push('-');
+        s.push(if self.day_from_end { '~' } else { '-' });
         s.push_str(&format_component_padded(&self.day, 2));
 
         s.push(' ');
@@ -328,6 +406,10 @@ impl CalendarSpec {
         s.push_str(&format_component_padded(&self.minute, 2));
         s.push(':');
         s.push_str(&format_component_padded(&self.second, 2));
+
+        if self.utc {
+            s.push_str(" UTC");
+        }
 
         s
     }
@@ -428,9 +510,44 @@ fn parse_date_part(
         Option<CalendarComponent>,
         CalendarComponent,
         CalendarComponent,
+        bool, // day counts from the end of the month (`~`)
     ),
     String,
 > {
+    // A `~` separates the day when it is counted from the end of the month
+    // (e.g. `*-*~01`, `2024-02~1..3`); it takes the place of the final `-`.
+    // The from-end flag is a single property of the whole day component
+    // (mirrors upstream calendarspec.c's `end_of_month`), so only one `~` is
+    // allowed — a second (`~5..~1`) is rejected below.
+    if let Some(pos) = s.find('~') {
+        let head = &s[..pos];
+        let day_str = &s[pos + 1..];
+        // Upstream allows a single `~` (before the day); a second one
+        // (e.g. `~5..~1`) is rejected.
+        if day_str.contains('~') {
+            return Err(format!("Invalid calendar expression: {s}"));
+        }
+        let day = parse_component(day_str)?;
+        let head_parts: Vec<&str> = head.split('-').collect();
+        let (year, month) = if head_parts.len() == 2 {
+            let year = if head_parts[0] == "*" {
+                None
+            } else {
+                Some(parse_component(head_parts[0])?)
+            };
+            (year, parse_component(head_parts[1])?)
+        } else if head_parts.len() == 1 {
+            if head_parts[0].is_empty() {
+                (None, CalendarComponent::Wildcard)
+            } else {
+                (None, parse_component(head_parts[0])?)
+            }
+        } else {
+            return Err(format!("Invalid date format: {s}"));
+        };
+        return Ok((year, month, day, true));
+    }
+
     let parts: Vec<&str> = s.split('-').collect();
     match parts.len() {
         3 => {
@@ -442,18 +559,18 @@ fn parse_date_part(
             };
             let month = parse_component(parts[1])?;
             let day = parse_component(parts[2])?;
-            Ok((year, month, day))
+            Ok((year, month, day, false))
         }
         2 => {
             // MM-DD (year wildcard implied)
             let month = parse_component(parts[0])?;
             let day = parse_component(parts[1])?;
-            Ok((None, month, day))
+            Ok((None, month, day, false))
         }
         1 => {
             // Just a day? Treat as *-*-DD
             let day = parse_component(parts[0])?;
-            Ok((None, CalendarComponent::Wildcard, day))
+            Ok((None, CalendarComponent::Wildcard, day, false))
         }
         _ => Err(format!("Invalid date format: {s}")),
     }
@@ -598,6 +715,10 @@ fn parse_single_value(s: &str) -> Result<CalendarValue, String> {
             let b: u32 = b_str
                 .parse()
                 .map_err(|_| format!("Invalid value: {b_str}"))?;
+            // Upstream rejects a reversed range (start > stop).
+            if a > b {
+                return Err(format!("Range start after end: {s}"));
+            }
             Ok(CalendarValue::RangeRepeat(a, b, step))
         } else {
             let v: u32 = base.parse().map_err(|_| format!("Invalid value: {base}"))?;
@@ -610,6 +731,10 @@ fn parse_single_value(s: &str) -> Result<CalendarValue, String> {
         let b: u32 = b_str
             .parse()
             .map_err(|_| format!("Invalid value: {b_str}"))?;
+        // Upstream rejects a reversed range (start > stop).
+        if a > b {
+            return Err(format!("Range start after end: {s}"));
+        }
         Ok(CalendarValue::Range(a, b))
     } else {
         let v: u32 = s.parse().map_err(|_| format!("Invalid value: {s}"))?;
@@ -652,6 +777,79 @@ fn value_matches(val: &CalendarValue, v: u32) -> bool {
 }
 
 /// Generate matching values in `[from..=max]` for a component, in order.
+/// Resolve a from-end (`~`) day component against a concrete month length,
+/// returning matching absolute days of month in `1..=max_day` that are `>=
+/// from`, sorted. `~N` maps to `max_day - N + 1`; ranges and repeats are
+/// resolved in absolute space after conversion, mirroring upstream
+/// calendarspec.c (find_end_of_month + the start/stop SWAP for reversed order).
+fn resolve_from_end_days(comp: &CalendarComponent, from: u32, max_day: u32) -> Vec<u32> {
+    // N days-from-the-end -> absolute day of month, if it lands inside the month.
+    let abs = |n: u32| -> Option<u32> {
+        if (1..=max_day).contains(&n) {
+            Some(max_day - n + 1)
+        } else {
+            None
+        }
+    };
+    let mut result: Vec<u32> = Vec::new();
+    match comp {
+        // `~*` / `~*/N` are degenerate — from-end on a wildcard is meaningless,
+        // so fall back to plain forward matching over the month.
+        CalendarComponent::Wildcard | CalendarComponent::WildcardRepeat(_) => {
+            return matching_values_from(comp, from, max_day);
+        }
+        CalendarComponent::List(values) => {
+            for cv in values {
+                match cv {
+                    CalendarValue::Exact(n) => {
+                        if let Some(d) = abs(*n) {
+                            result.push(d);
+                        }
+                    }
+                    CalendarValue::Range(a, b) => {
+                        if let (Some(da), Some(db)) = (abs(*a), abs(*b)) {
+                            let (lo, hi) = (da.min(db), da.max(db));
+                            result.extend(lo..=hi);
+                        }
+                    }
+                    CalendarValue::Repeat(start, step) => {
+                        // Absolute start, then step forward toward month end.
+                        if let Some(mut d) = abs(*start) {
+                            loop {
+                                result.push(d);
+                                if *step == 0 {
+                                    break;
+                                }
+                                d += *step;
+                                if d > max_day {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    CalendarValue::RangeRepeat(a, b, step) => {
+                        if let (Some(da), Some(db)) = (abs(*a), abs(*b)) {
+                            let (lo, hi) = (da.min(db), da.max(db));
+                            let mut d = lo;
+                            while d <= hi {
+                                result.push(d);
+                                if *step == 0 {
+                                    break;
+                                }
+                                d += *step;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    result.retain(|&d| d >= from);
+    result.sort_unstable();
+    result.dedup();
+    result
+}
+
 fn matching_values_from(comp: &CalendarComponent, from: u32, max: u32) -> Vec<u32> {
     let mut result = Vec::new();
     match comp {
@@ -900,6 +1098,100 @@ pub fn as_fixed_interval(spec: &CalendarSpec) -> Option<std::time::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fuzz_calendar_parser_never_panics() {
+        // parse() handles OnCalendar= from unit files, and next_elapse() does
+        // civil-date arithmetic that must not overflow-panic or loop forever.
+        // Fuzz both with random calendar strings and random, often out-of-range
+        // base times; the 30s guard also catches a non-terminating next_elapse.
+        const TOKENS: &[&str] = &[
+            "minutely", "hourly", "daily", "monthly", "weekly", "yearly",
+            "quarterly", "semiannually", "annually", "Mon", "Fri", "Sat,Sun",
+            "Mon..Fri", "*-*-*", "*:0/15", "00:00:00", "12:00", "*-*-1", "*-01~01",
+            "2025-*-*", "*/2", "0/5", "..", "/", "-", ":", "~", ",", "*", "60",
+            "99", "13", "32", " ", "  ", "\t", "UTC", "@1234", "+", "0", "999999999",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xca1e_0da7_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let ntok = (next() % 12) as usize;
+                let mut input = String::new();
+                for _ in 0..ntok {
+                    if next() % 6 == 0 {
+                        input.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        input.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let after = DateTime {
+                    year: (next() % 12000) as i32 - 2000,
+                    month: next() % 20,
+                    day: next() % 40,
+                    hour: next() % 30,
+                    minute: next() % 70,
+                    second: next() % 70,
+                };
+                let buf = input.clone();
+                let res = std::panic::catch_unwind(move || {
+                    if let Ok(spec) = CalendarSpec::parse(&input) {
+                        let _ = spec.next_elapse(after);
+                    }
+                });
+                assert!(
+                    res.is_ok(),
+                    "calendar parser panicked on: {buf:?} after={after:?}"
+                );
+            }
+
+            // Exercise next_elapse directly on specs that definitely parse,
+            // chaining each result forward to stress the civil-date arithmetic
+            // across leap years and month/century boundaries (and to surface a
+            // non-terminating search, caught by the 30s guard).
+            const VALID: &[&str] = &[
+                "daily", "weekly", "monthly", "yearly", "hourly", "*-*-* 12:00:00",
+                "Mon..Fri 09:00:00", "*-02-29", "*:0/15", "Mon *-*-1..7 00:00:00",
+                "*-12-31 23:59:59", "*-*-01 00:00:00",
+            ];
+            for spec_str in VALID {
+                let Ok(spec) = CalendarSpec::parse(spec_str) else {
+                    continue;
+                };
+                let mut dt = DateTime {
+                    year: 1970 + (next() % 400) as i32,
+                    month: 1 + next() % 12,
+                    day: 1 + next() % 28,
+                    hour: next() % 24,
+                    minute: next() % 60,
+                    second: next() % 60,
+                };
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    for _ in 0..2000 {
+                        match spec.next_elapse(dt) {
+                            Some(n) => dt = n,
+                            None => break,
+                        }
+                    }
+                }));
+                assert!(res.is_ok(), "next_elapse panicked for spec {spec_str:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "calendar fuzz did not finish in 30s -- a malformed spec hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
 
     // -- Parsing tests --
 
@@ -1806,6 +2098,67 @@ mod tests {
             Some(std::time::Duration::from_secs(86400))
         );
         assert!(as_fixed_interval(&CalendarSpec::parse("*-*-* 06:00:00").unwrap()).is_none());
+    }
+
+    #[test]
+    fn test_end_of_month_last_day_elapse() {
+        let spec = CalendarSpec::parse("*-*~01").unwrap();
+        assert!(spec.day_from_end);
+        assert_eq!(spec.normalized(), "*-*~01 00:00:00");
+        let at = |y, mo, d| DateTime {
+            year: y,
+            month: mo,
+            day: d,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        };
+        // Last day of a 31-day month, and of leap February.
+        let jan = spec.next_elapse(at(2024, 1, 15)).unwrap();
+        assert_eq!((jan.year, jan.month, jan.day), (2024, 1, 31));
+        let feb = spec.next_elapse(at(2024, 2, 1)).unwrap();
+        assert_eq!((feb.year, feb.month, feb.day), (2024, 2, 29));
+    }
+
+    #[test]
+    fn test_end_of_month_rejects_reversed_and_double_tilde() {
+        assert!(CalendarSpec::parse("*-*~7..1").is_err()); // reversed from-end range
+        assert!(CalendarSpec::parse("*-*~5..~1").is_err()); // a second `~`
+        assert!(CalendarSpec::parse("*-*-7..5").is_err()); // reversed ordinary range
+        assert!(CalendarSpec::parse("*-*~30").is_err()); // > 28 from the end
+    }
+
+    #[test]
+    fn test_utc_suffix() {
+        let spec = CalendarSpec::parse("Mon *-*-* 00:00:00 UTC").unwrap();
+        assert!(spec.utc);
+        assert_eq!(spec.normalized(), "Mon *-*-* 00:00:00 UTC");
+        let plain = CalendarSpec::parse("Mon *-*-* 00:00:00").unwrap();
+        assert!(!plain.utc);
+        assert_eq!(plain.normalized(), "Mon *-*-* 00:00:00");
+    }
+
+    #[test]
+    fn test_fixed_instant_at_timestamp() {
+        // @1704067200 == 2024-01-01 00:00:00 UTC.
+        let spec = CalendarSpec::parse("@1704067200").unwrap();
+        assert_eq!(spec.fixed_instant, Some(1704067200));
+        assert_eq!(spec.normalized(), "2024-01-01 00:00:00 UTC");
+        let at = |y, mo, d| DateTime {
+            year: y,
+            month: mo,
+            day: d,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        };
+        // One-shot: fires once while ahead of the reference, never once past.
+        let hit = spec.next_elapse(at(2023, 12, 31)).unwrap();
+        assert_eq!((hit.year, hit.month, hit.day), (2024, 1, 1));
+        assert!(spec.next_elapse(at(2024, 6, 1)).is_none());
+        // Out-of-range year (> 2199) and a fractional timestamp are rejected.
+        assert!(CalendarSpec::parse("@7258118400").is_err());
+        assert!(CalendarSpec::parse("@123.5").is_err());
     }
 
     // -- Edge case tests --

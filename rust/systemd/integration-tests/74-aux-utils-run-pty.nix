@@ -9,10 +9,11 @@
     set -eux
     set -o pipefail
 
-    : "systemd-run --wait --pipe runs command and captures output"
-    # --pipe forwards stdin/stdout/stderr
+    : "systemd-run --wait --pipe forwards command output"
+    # --pipe connects the command's stdout to ours, so we capture its output.
     UNIT="run-pipe-$RANDOM"
-    systemd-run --wait --pipe --unit="$UNIT" echo "pipe-test-output" > /dev/null || true
+    OUT="$(systemd-run --wait --pipe --unit="$UNIT" echo "pipe-test-output")"
+    [[ "$OUT" == *"pipe-test-output"* ]]
 
     : "systemd-run with --setenv passes environment"
     UNIT2="run-setenv-$RANDOM"

@@ -1,8 +1,10 @@
 {
   name = "65-ANALYZE";
-  # Custom rewrite: test subcommands that work locally or via control socket.
-  # Skip dump, security, cat, verify --unit, condition --unit, plot,
-  # syscall-filter, filesystems (need D-Bus, BPF, or other unimplemented features).
+  # Custom rewrite: exercises the systemd-analyze verbs the rust crate implements.
+  # architectures, filesystems, syscall-filter and transient-settings were added
+  # once the crate gained them; security, verify, condition --unit and cat-config
+  # are covered here too, as is `architectures --json`. Still omitted: dump and
+  # plot (bus state dump / SVG bootchart output), which are not yet ported.
   patchScript = ''
     cat > TEST-65-ANALYZE.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -12,13 +14,13 @@
     . "$(dirname "$0")"/util.sh
 
     : "systemd-analyze time (boot timing)"
-    systemd-analyze time || :
+    systemd-analyze time
 
     : "systemd-analyze blame (unit timing)"
-    systemd-analyze blame || :
+    systemd-analyze blame
 
     : "systemd-analyze critical-chain"
-    systemd-analyze critical-chain || :
+    systemd-analyze critical-chain
 
     : "systemd-analyze log-level get/set"
     ORIG_LOG_LEVEL="$(systemd-analyze log-level)"
@@ -89,7 +91,14 @@
     systemd-analyze dot --from-pattern="*.service" --to-pattern="*.target" >/dev/null
 
     : "systemd-analyze verify"
-    systemd-analyze verify /run/systemd/system/default.target 2>&1 || :
+    cat >/run/systemd/system/analyze-verify-test.service <<EOF
+    [Unit]
+    Description=analyze verify test
+    [Service]
+    ExecStart=/bin/true
+    EOF
+    systemd-analyze verify /run/systemd/system/analyze-verify-test.service
+    rm -f /run/systemd/system/analyze-verify-test.service
 
     : "systemd-analyze condition"
     systemd-analyze condition 'ConditionPathExists=/etc/os-release'
@@ -120,7 +129,7 @@
     systemd-analyze cat-config --tldr systemd/system.conf >/dev/null
 
     : "systemd-analyze security"
-    systemd-analyze security || :
+    systemd-analyze security
 
     : "systemd-analyze exit-status"
     systemd-analyze exit-status
@@ -139,6 +148,46 @@
     [[ $cap == *cap_net_broadcast* ]]
     [[ $cap == *cap_net_admin* ]]
     [[ $cap == *cap_net_raw* ]]
+
+    : "systemd-analyze architectures"
+    systemd-analyze architectures
+    systemd-analyze architectures x86
+    systemd-analyze architectures x86-64
+    systemd-analyze architectures native
+    systemd-analyze architectures uname
+
+    : "systemd-analyze architectures --json emits a JSON table (id/name/support)"
+    AJSON="$(systemd-analyze architectures --json=short)"
+    [[ "$AJSON" == \[*\] ]]
+    [[ "$AJSON" == *'"id":'* ]]
+    [[ "$AJSON" == *'"name":'* ]]
+    [[ "$AJSON" == *'"support":'* ]]
+    [[ "$AJSON" == *'x86-64'* ]]
+
+    : "systemd-analyze architectures native --json reports support=native"
+    NJSON="$(systemd-analyze architectures native --json=short)"
+    [[ "$NJSON" == *'"support":"native"'* ]]
+
+    : "systemd-analyze syscall-filter"
+    systemd-analyze syscall-filter >/dev/null
+    systemd-analyze syscall-filter @chown @sync
+    systemd-analyze syscall-filter @sync @sync @sync
+    (! systemd-analyze syscall-filter @chown @sync @foobar)
+    (! systemd-analyze syscall-filter --global)
+
+    : "systemd-analyze filesystems"
+    systemd-analyze filesystems >/dev/null
+    systemd-analyze filesystems @basic-api
+    systemd-analyze filesystems @basic-api @basic-api @basic-api
+    (! systemd-analyze filesystems @basic-api @basic-api @foobar @basic-api)
+    (! systemd-analyze filesystems --global @basic-api)
+
+    : "systemd-analyze transient-settings"
+    systemd-analyze transient-settings service | grep NoNewPrivileges
+    systemd-analyze transient-settings mount | grep CPUQuotaPeriodSec
+    (! systemd-analyze transient-settings service | grep CPUAccounting)
+    (! systemd-analyze transient-settings service | grep ConditionKernelVersion)
+    (! systemd-analyze transient-settings service | grep AssertKernelVersion)
 
     touch /testok
     TESTEOF

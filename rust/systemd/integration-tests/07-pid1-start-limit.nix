@@ -23,16 +23,35 @@
     }
     trap at_exit EXIT
 
-    printf '[Unit]\nStartLimitBurst=3\nStartLimitIntervalSec=30\n[Service]\nType=oneshot\nExecStart=false\n' > "/run/systemd/system/$UNIT.service"
+    # StartLimitBurst=3 within a wide interval so all attempts fall in one window.
+    # ExecStart=false makes every start fail; a failed start attempt still counts
+    # against the burst.
+    printf '[Unit]\nStartLimitBurst=3\nStartLimitIntervalSec=300\n[Service]\nType=oneshot\nExecStart=false\n' > "/run/systemd/system/$UNIT.service"
     systemctl daemon-reload
 
-    # First 3 starts should be allowed (they fail, but they start)
-    for i in 1 2 3; do
-        systemctl start "$UNIT.service" || true
+    : "Three manual starts are permitted (each fails), consuming the burst"
+    for _ in 1 2 3; do
+        systemctl start "$UNIT.service" 2>/dev/null || true
     done
 
-    # After 3 failures within the interval, the 4th start should be refused
+    : "The fourth manual start within the interval is refused by StartLimitBurst="
     (! systemctl start "$UNIT.service" 2>/dev/null)
+
+    : "Result reports start-limit-hit, not the generic exit-code"
+    # This is what de-vacuums the test: (! systemctl start) alone passes merely
+    # because ExecStart=false fails.  Only a genuine rate-limit refusal sets
+    # Result=start-limit-hit; a plain exec failure would read exit-code.
+    result="$(systemctl show -P Result "$UNIT.service")"
+    test "$result" = "start-limit-hit"
+
+    : "reset-failed drops the rate-limit history so a start is permitted again"
+    systemctl reset-failed "$UNIT.service"
+    systemctl start "$UNIT.service" 2>/dev/null || true
+    # The post-reset start ran (and failed via ExecStart=false); it must NOT have
+    # been blocked by the stale rate limit, so Result is exit-code, not
+    # start-limit-hit.
+    result2="$(systemctl show -P Result "$UNIT.service")"
+    test "$result2" != "start-limit-hit"
     SLEOF
   '';
 }

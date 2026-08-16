@@ -9,9 +9,9 @@
     set -eux
     set -o pipefail
 
-    : "DefaultDependencies property exists"
+    : "DefaultDependencies=no for systemd-journald (early-boot service)"
     DD="$(systemctl show -P DefaultDependencies systemd-journald.service)"
-    [[ "$DD" == "yes" || "$DD" == "no" ]]
+    [[ "$DD" == "no" ]]
     DDEOF
     chmod +x TEST-74-AUX-UTILS.default-deps.sh
   '';

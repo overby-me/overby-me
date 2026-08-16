@@ -1,5 +1,8 @@
 {
   name = "64-UDEV-STORAGE";
+  # Skips rather than passes: no multi-device storage topology in the VM
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 64-UDEV-STORAGE requires extensive storage hardware setup
   # (multiple block devices, LVM, LUKS, MD, iSCSI) not present in the
   # nixosTest VM.

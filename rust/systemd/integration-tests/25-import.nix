@@ -1,5 +1,8 @@
 {
   name = "25-IMPORT";
+  # Skips rather than passes: no systemd-importd
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 25-IMPORT exercises `machinectl import-raw`, which relies on
   # systemd-importd (not functional in rust-systemd's stub machinectl yet).
   patchScript = ''

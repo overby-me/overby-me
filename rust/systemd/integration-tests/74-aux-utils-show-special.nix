@@ -11,9 +11,9 @@
 
     . "$(dirname "$0")"/util.sh
 
-    : "systemctl show NNeedDaemonReload returns boolean"
+    : "systemctl show NeedDaemonReload is no for a freshly-booted unit"
     RELOAD="$(systemctl show -P NeedDaemonReload systemd-journald.service)"
-    [[ "$RELOAD" == "no" || "$RELOAD" == "yes" ]]
+    [[ "$RELOAD" == "no" ]]
 
     : "systemctl show MainPID for running service"
     PID="$(systemctl show -P MainPID systemd-journald.service)"

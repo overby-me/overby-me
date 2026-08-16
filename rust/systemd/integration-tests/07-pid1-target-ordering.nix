@@ -48,6 +48,34 @@
     # B should have started before A
     [[ "$(sed -n '1p' /tmp/order-test-log)" == "B" ]]
     [[ "$(sed -n '2p' /tmp/order-test-log)" == "A" ]]
+    systemctl stop order-test-a.service order-test-b.service
+
+    : "Before= ordering: C (Before=D) starts before D"
+    cat > /run/systemd/system/order-test-c.service << EOF
+    [Unit]
+    Before=order-test-d.service
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=bash -c 'echo C >> /tmp/order-test-log'
+    EOF
+
+    cat > /run/systemd/system/order-test-d.service << EOF
+    [Unit]
+    Wants=order-test-c.service
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=bash -c 'echo D >> /tmp/order-test-log'
+    EOF
+
+    retry systemctl daemon-reload
+    rm -f /tmp/order-test-log
+    retry systemctl start order-test-d.service
+    # C declares Before=D, so even pulled in via Wants it runs first.
+    [[ "$(sed -n '1p' /tmp/order-test-log)" == "C" ]]
+    [[ "$(sed -n '2p' /tmp/order-test-log)" == "D" ]]
+    systemctl stop order-test-c.service order-test-d.service
     TOEOF
   '';
 }

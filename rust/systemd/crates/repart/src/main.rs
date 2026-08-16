@@ -65,6 +65,12 @@ const DEFAULT_WEIGHT: u32 = 1000;
 /// Maximum number of GPT partition entries (standard).
 const MAX_GPT_ENTRIES: u32 = 128;
 
+/// A GPT partition label holds 36 UTF-16 code units.
+const GPT_LABEL_MAX_UTF16: usize = 36;
+
+/// Alignment grain libfdisk uses for a fresh GPT's first usable LBA.
+const GPT_FIRST_LBA_GRAIN: u64 = 1024 * 1024;
+
 /// Standard repart.d search paths.
 const DEFINITION_SEARCH_PATHS: &[&str] = &[
     "/etc/repart.d",
@@ -160,6 +166,20 @@ fn resolve_arch_type(identifier: &str, arch: &str) -> Option<String> {
         "usr-verity" => Some(format!("usr-{arch}-verity")),
         "usr-verity-sig" => Some(format!("usr-{arch}-verity-sig")),
         _ => None,
+    }
+}
+
+/// Whether repart knows how to grow this partition type's file system,
+/// mirroring `gpt_partition_type_knows_growfs`: root, usr, home, srv, var, tmp
+/// and xbootldr, but not their verity siblings, which are read-only by nature.
+fn type_knows_growfs(type_uuid: &str) -> bool {
+    match type_uuid_to_identifier(&type_uuid.to_lowercase()) {
+        Some(id) => {
+            matches!(id, "home" | "srv" | "var" | "tmp" | "xbootldr")
+                || ((id.starts_with("root-") || id.starts_with("usr-"))
+                    && !id.ends_with("-verity"))
+        }
+        None => false,
     }
 }
 
@@ -299,49 +319,112 @@ fn is_zero_guid(guid: &str) -> bool {
     guid == ZERO_GUID
 }
 
-/// Simple UUID v4-like generation from a seed + name using basic hashing.
-/// This produces deterministic UUIDs from a seed, matching systemd's approach.
-fn generate_uuid_from_seed(seed: &str, name: &str, counter: u32) -> String {
-    // Simple hash-based UUID generation (not cryptographic, but deterministic).
-    // In real systemd this uses HMAC-SHA256.
-    let mut h: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
-    for b in seed.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    for b in name.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    for b in counter.to_le_bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    let h2 = h
-        .wrapping_mul(0x517cc1b727220a95)
-        .wrapping_add(0x6c62272e07bb0142);
+/// HMAC-SHA256, as upstream uses to derive every reproducible UUID.
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    const BLOCK_SIZE: usize = 64;
 
-    let bytes_a = h.to_le_bytes();
-    let bytes_b = h2.to_le_bytes();
+    let mut padded_key = [0u8; BLOCK_SIZE];
+    if key.len() > BLOCK_SIZE {
+        padded_key[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        padded_key[..key.len()].copy_from_slice(key);
+    }
 
-    // Set version 4 and variant 1
-    let time_hi = (u16::from_le_bytes([bytes_a[6], bytes_a[7]]) & 0x0FFF) | 0x4000;
-    let clock_seq = (bytes_b[0] & 0x3F) | 0x80;
+    let mut ipad = [0x36u8; BLOCK_SIZE];
+    let mut opad = [0x5cu8; BLOCK_SIZE];
+    for i in 0..BLOCK_SIZE {
+        ipad[i] ^= padded_key[i];
+        opad[i] ^= padded_key[i];
+    }
 
+    let inner = {
+        let mut h = Sha256::new();
+        h.update(ipad);
+        h.update(data);
+        h.finalize()
+    };
+    let outer = {
+        let mut h = Sha256::new();
+        h.update(opad);
+        h.update(inner);
+        h.finalize()
+    };
+
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&outer);
+    out
+}
+
+/// The 16 raw bytes of a UUID in text order, ignoring dashes.
+fn uuid_bytes(uuid: &str) -> Option<[u8; 16]> {
+    let hex: String = uuid.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
+/// Take the first half of a digest and mark it as a v4 UUID, as
+/// `id128_make_v4_uuid` does.
+fn make_v4_uuid(digest: &[u8; 32]) -> String {
+    let mut b = [0u8; 16];
+    b.copy_from_slice(&digest[..16]);
+    b[6] = (b[6] & 0x0F) | 0x40;
+    b[8] = (b[8] & 0x3F) | 0x80;
+
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
     format!(
-        "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        u32::from_le_bytes([bytes_a[0], bytes_a[1], bytes_a[2], bytes_a[3]]),
-        u16::from_le_bytes([bytes_a[4], bytes_a[5]]),
-        time_hi,
-        clock_seq,
-        bytes_b[1],
-        bytes_b[2],
-        bytes_b[3],
-        bytes_b[4],
-        bytes_b[5],
-        bytes_b[6],
-        bytes_b[7]
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
     )
+    .to_uppercase()
+}
+
+/// The HMAC key for a seed: its 16 raw bytes when it is a UUID (or a bare
+/// machine ID), otherwise the string itself, so an unusual seed still derives
+/// something stable rather than failing.
+fn seed_key(seed: &str) -> Vec<u8> {
+    match uuid_bytes(seed) {
+        Some(b) => b.to_vec(),
+        None => seed.as_bytes().to_vec(),
+    }
+}
+
+/// Derive a UUID from the seed and a token, mirroring upstream `derive_uuid`.
+///
+/// The seed is the HMAC *key*, never the plaintext, because the seed is
+/// typically the machine ID and must not leak into the result.
+fn derive_uuid(seed: &str, token: &str) -> String {
+    make_v4_uuid(&hmac_sha256(&seed_key(seed), token.as_bytes()))
+}
+
+/// Derive a partition's UUID from the seed, its type and its instance number,
+/// mirroring upstream `partition_acquire_uuid`.
+///
+/// The first partition of a given type hashes the bare type UUID; every later
+/// one appends its LE64 instance number, so adding a second partition of a type
+/// does not renumber the first.
+fn derive_partition_uuid(seed: &str, type_uuid: &str, instance: u64) -> String {
+    let type_bytes = match uuid_bytes(type_uuid) {
+        Some(b) => b.to_vec(),
+        None => type_uuid.as_bytes().to_vec(),
+    };
+
+    let mut msg = type_bytes;
+    if instance > 0 {
+        msg.extend_from_slice(&instance.to_le_bytes());
+    }
+
+    make_v4_uuid(&hmac_sha256(&seed_key(seed), &msg))
 }
 
 fn generate_random_uuid() -> String {
@@ -504,6 +587,11 @@ struct PartitionDefinition {
     copy_files: Vec<String>,
     /// Path or "auto" for block-level copy.
     copy_blocks: Option<String>,
+    /// Byte range within `copy_blocks` to copy. Set only by --copy-from=,
+    /// which copies a specific partition out of a source image rather than
+    /// the whole file.
+    copy_blocks_offset: u64,
+    copy_blocks_size: u64,
     /// Directories to create.
     make_directories: Vec<String>,
     /// Encryption mode.
@@ -552,6 +640,8 @@ impl Default for PartitionDefinition {
             format: None,
             copy_files: Vec::new(),
             copy_blocks: None,
+            copy_blocks_offset: 0,
+            copy_blocks_size: 0,
             make_directories: Vec::new(),
             encrypt: None,
             verity: None,
@@ -581,24 +671,41 @@ impl PartitionDefinition {
         } else if let Some(false) = self.read_only {
             f &= !(1u64 << 60);
         }
-        if let Some(true) = self.grow_fs {
-            f |= 1u64 << 59;
-        } else if let Some(false) = self.grow_fs {
-            f &= !(1u64 << 59);
+        match self.grow_fs {
+            Some(true) => f |= 1u64 << 59,
+            Some(false) => f &= !(1u64 << 59),
+            // Upstream defaults growfs ON for every type whose file system it
+            // knows how to grow, unless the partition is read-only. A plain
+            // `Type=home` therefore carries GUID:59 with no GrowFileSystem= in
+            // the definition at all, which is what sfdisk reports as
+            // attrs="GUID:59".
+            None => {
+                if type_knows_growfs(&self.type_uuid) && !matches!(self.read_only, Some(true)) {
+                    f |= 1u64 << 59;
+                }
+            }
         }
         f
     }
 
+    /// The label a partition carries when its definition sets none: the type
+    /// UUID's designator, exactly as upstream's partition_acquire_label uses
+    /// it, falling back to "linux" for a type it does not know.
+    ///
+    /// The designator is used verbatim, dashes and all: upstream writes
+    /// "root-x86-64", not "root x86 64", and it derives the name from the type
+    /// UUID rather than from whatever spelling Type= used in the file.
+    fn derived_label(&self) -> String {
+        type_uuid_to_identifier(&self.type_uuid.to_lowercase())
+            .unwrap_or("linux")
+            .to_string()
+    }
+
     /// Derive a label from the partition type if none is set.
     fn effective_label(&self) -> String {
-        if let Some(ref l) = self.label {
-            l.clone()
-        } else if let Some(ref id) = self.type_id {
-            id.replace('-', " ")
-        } else if let Some(name) = type_uuid_to_identifier(&self.type_uuid) {
-            name.replace('-', " ")
-        } else {
-            "Linux".to_string()
+        match self.label {
+            Some(ref l) => l.clone(),
+            None => self.derived_label(),
         }
     }
 }
@@ -658,11 +765,22 @@ fn parse_partition_definition(path: &Path, arch: &str) -> Result<PartitionDefini
                 }
             }
             "Label" => {
-                def.label = if value.is_empty() {
-                    None
+                // A GPT label holds 36 UTF-16 code units. Upstream validates
+                // here and IGNORES an over-long one, so an earlier Label= in
+                // the same file survives; silently truncating instead wrote a
+                // name nobody asked for. A definition may legitimately offer a
+                // long label and a short fallback in that order.
+                if value.encode_utf16().count() > GPT_LABEL_MAX_UTF16 {
+                    eprintln!(
+                        "Partition label too long for GPT table, ignoring: \"{value}\""
+                    );
                 } else {
-                    Some(value.to_string())
-                };
+                    def.label = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
+                }
             }
             "UUID" => {
                 def.uuid = if value.is_empty() {
@@ -893,6 +1011,201 @@ fn load_definitions(dirs: &[&str], arch: &str) -> Result<Vec<PartitionDefinition
     Ok(defs)
 }
 
+/// One partition's or padding's claim on a free span.
+#[derive(Clone, Copy, Debug)]
+struct SpanClaim {
+    weight: u64,
+    min: u64,
+    max: u64,
+}
+
+/// `value * weight / weight_sum`, mirroring upstream's scale_by_weight.
+fn scale_by_weight(value: u64, weight: u64, weight_sum: u64) -> u64 {
+    if weight == 0 {
+        return 0;
+    }
+    if weight == weight_sum {
+        return value;
+    }
+    ((value as u128) * (weight as u128) / (weight_sum as u128)) as u64
+}
+
+/// Settle every claim on a free span, mirroring upstream's
+/// context_grow_partitions_phase.
+///
+/// Claims are settled SEQUENTIALLY rather than split simultaneously: each takes
+/// its weighted share of whatever is *left*, and the span and the weight sum
+/// are charged down before the next claim is considered. Splitting the original
+/// total instead, then rounding each share down to the grain independently,
+/// loses up to a grain per partition: three equal claims on a 50 MiB image came
+/// out 33432/33432/33432 sectors where upstream gets 33432/33440/33440.
+///
+/// The phases matter as much as the order. A claim needing more than its share
+/// takes its minimum, and one accepting less takes its maximum; either way the
+/// remainder goes back into the span and everything is reconsidered from the
+/// start, so a capped partition hands its surplus to whatever can still grow.
+/// Only once no claim is over or under its bounds is the rest distributed.
+fn grow_claims(claims: &[SpanClaim], span: u64, grain: u64) -> Vec<u64> {
+    const PHASE_OVERCHARGE: u8 = 0;
+    const PHASE_UNDERCHARGE: u8 = 1;
+    const PHASE_DISTRIBUTE: u8 = 2;
+
+    let mut sizes: Vec<Option<u64>> = vec![None; claims.len()];
+    let mut span = span;
+    let mut weight_sum: u64 = claims.iter().map(|c| c.weight).sum();
+    let mut phase = PHASE_OVERCHARGE;
+
+    while phase <= PHASE_DISTRIBUTE {
+        let mut try_again = false;
+
+        for (i, c) in claims.iter().enumerate() {
+            if sizes[i].is_some() {
+                continue;
+            }
+
+            let share = scale_by_weight(span, c.weight, weight_sum);
+            let ceiling = c.max.max(c.min);
+            let assigned = match phase {
+                PHASE_OVERCHARGE if c.min > share => Some(c.min),
+                PHASE_UNDERCHARGE if ceiling < share => Some(ceiling),
+                PHASE_DISTRIBUTE => Some(align_down(share, grain).clamp(c.min, ceiling)),
+                _ => None,
+            };
+
+            if let Some(size) = assigned {
+                sizes[i] = Some(size);
+                span = span.saturating_sub(align_up(size, grain));
+                weight_sum = weight_sum.saturating_sub(c.weight);
+                if phase != PHASE_DISTRIBUTE {
+                    try_again = true;
+                }
+            }
+        }
+
+        if try_again {
+            phase = PHASE_OVERCHARGE;
+        } else {
+            phase += 1;
+        }
+    }
+
+    sizes.into_iter().map(|s| s.unwrap_or(0)).collect()
+}
+
+/// Whether `--defer-partitions=` names this partition's type.
+///
+/// A deferred partition is allocated and numbered exactly as if it were being
+/// created, so everything after it keeps its offset and slot, but no entry for
+/// it is written to the table. It is left for a later run to fill in.
+fn type_is_deferred(type_uuid: &str, deferred: &[String], arch: &str) -> bool {
+    deferred
+        .iter()
+        .filter_map(|e| filter_entry_uuid(e, arch))
+        .any(|u| u.eq_ignore_ascii_case(type_uuid))
+}
+
+/// Build partition definitions from an existing image, for `--copy-from=`.
+///
+/// Every used partition in the source becomes a definition pinned to that
+/// partition's exact size, type, UUID, label and GPT flags, carrying the byte
+/// range to copy across. Passing the same image twice therefore duplicates its
+/// partitions, which is what upstream does and what TEST-58-REPART checks.
+fn definitions_from_copy_source(src: &str) -> Result<Vec<PartitionDefinition>, String> {
+    let mut file =
+        fs::File::open(src).map_err(|e| format!("Cannot open --copy-from source {src}: {e}"))?;
+
+    // Upstream reads the source's own sector size; 512 is the only size these
+    // images use and the only one read_gpt_header is exercised with.
+    let sector_size = SECTOR_SIZE_DEFAULT;
+    let header = read_gpt_header(&mut file, sector_size)
+        .map_err(|e| format!("Cannot read GPT header of {src}: {e}"))?
+        .ok_or_else(|| format!("Cannot copy from disk {src} with no GPT disk label."))?;
+
+    let parts = read_gpt_partitions(&mut file, &header, sector_size)
+        .map_err(|e| format!("Cannot read partitions of {src}: {e}"))?;
+
+    // Padding after a partition is the gap up to the next one, or up to the end
+    // of the usable area for the last, both aligned to the grain.
+    let grain = std::cmp::max(GPT_FIRST_LBA_GRAIN, sector_size);
+    let usable_end = (header.last_usable_lba + 1) * sector_size;
+
+    let mut defs = Vec::new();
+    for part in &parts {
+        if is_zero_guid(&part.type_guid) {
+            continue;
+        }
+
+        let start = part.first_lba * sector_size;
+        let size = (part.last_lba - part.first_lba + 1) * sector_size;
+        let end = start + size;
+
+        let next = parts
+            .iter()
+            .map(|q| q.first_lba * sector_size)
+            .filter(|&q_start| q_start >= end)
+            .min()
+            .unwrap_or(usable_end);
+        let padding = align_down(next, grain).saturating_sub(align_up(end, grain));
+
+        let mut def = PartitionDefinition::default();
+        def.filename = src.to_string();
+        def.path = PathBuf::from(src);
+        def.type_uuid = part.type_guid.clone();
+        def.uuid = Some(part.unique_guid.clone());
+        if !part.name.is_empty() {
+            def.label = Some(part.name.clone());
+        }
+        def.size_min = size;
+        def.size_max = size;
+        def.padding_min = padding;
+        def.padding_max = padding;
+        def.flags = part.attributes;
+        def.copy_blocks = Some(src.to_string());
+        def.copy_blocks_offset = start;
+        def.copy_blocks_size = size;
+        defs.push(def);
+    }
+
+    Ok(defs)
+}
+
+/// Resolve a `--include-partitions=`/`--exclude-partitions=` entry to a type
+/// UUID. Entries may be a designator such as `home` or a bare UUID.
+fn filter_entry_uuid(entry: &str, arch: &str) -> Option<String> {
+    partition_type_uuid(entry, arch).or_else(|| uuid_bytes(entry).map(|_| entry.to_uppercase()))
+}
+
+/// Apply the partition type filter, mirroring upstream `partition_type_exclude`.
+///
+/// The two options are one list and one mode, not two independent lists: with
+/// an include list anything unlisted is dropped, with an exclude list anything
+/// listed is dropped, and with neither everything is kept.
+fn filter_definitions_by_type(
+    defs: Vec<PartitionDefinition>,
+    args: &Args,
+    arch: &str,
+) -> Vec<PartitionDefinition> {
+    let (list, include) = if !args.include_partitions.is_empty() {
+        (&args.include_partitions, true)
+    } else if !args.exclude_partitions.is_empty() {
+        (&args.exclude_partitions, false)
+    } else {
+        return defs;
+    };
+
+    let wanted: Vec<String> = list
+        .iter()
+        .filter_map(|e| filter_entry_uuid(e, arch))
+        .collect();
+
+    defs.into_iter()
+        .filter(|d| {
+            let listed = wanted.iter().any(|u| u.eq_ignore_ascii_case(&d.type_uuid));
+            if listed { include } else { !include }
+        })
+        .collect()
+}
+
 fn load_definitions_from_dir(dir: &str, arch: &str) -> Result<Vec<PartitionDefinition>, String> {
     load_definitions(&[dir], arch)
 }
@@ -1046,7 +1359,7 @@ fn parse_utf16le_name(data: &[u8]) -> String {
 
 fn encode_utf16le_name(name: &str) -> [u8; 72] {
     let mut buf = [0u8; 72];
-    for (i, code_unit) in name.encode_utf16().take(36).enumerate() {
+    for (i, code_unit) in name.encode_utf16().take(GPT_LABEL_MAX_UTF16).enumerate() {
         let bytes = code_unit.to_le_bytes();
         buf[i * 2] = bytes[0];
         buf[i * 2 + 1] = bytes[1];
@@ -1159,7 +1472,17 @@ fn build_gpt_header(
         (1u64, disk_size_sectors - 1, primary_entries_start)
     };
 
-    let first_usable_lba = 2 + entries_sectors;
+    // libfdisk, which upstream repart drives, opens a GPT's usable area on its
+    // 1 MiB grain rather than immediately after the entry array, so a fresh
+    // label reports first-lba 2048 at a 512-byte sector size. Never advance
+    // past a partition that already starts earlier, so rewriting a table laid
+    // out against the bare minimum keeps describing itself correctly.
+    let minimum_first_usable = 2 + entries_sectors;
+    let aligned_first_usable = align_up(minimum_first_usable, GPT_FIRST_LBA_GRAIN / sector_size);
+    let first_usable_lba = match partitions.iter().map(|p| p.first_lba).min() {
+        Some(earliest) => aligned_first_usable.min(earliest.max(minimum_first_usable)),
+        None => aligned_first_usable,
+    };
     let last_usable_lba = disk_size_sectors - 1 - entries_sectors - 1;
 
     let mut header = vec![0u8; sector_size as usize];
@@ -1278,6 +1601,22 @@ struct MatchedPartition {
     slot_index: u32,
 }
 
+/// Pick a label for a partition whose definition sets none, mirroring
+/// upstream's partition_acquire_label: the type's designator, with -2, -3 and
+/// so on appended when an earlier partition already carries that name.
+///
+/// Only a derived label is numbered. An explicit Label= is used as written,
+/// even when it repeats.
+fn unique_derived_label(base: &str, earlier: &[MatchedPartition]) -> String {
+    let mut candidate = base.to_string();
+    let mut k = 1;
+    while earlier.iter().any(|m| m.assigned_label == candidate) {
+        k += 1;
+        candidate = format!("{base}-{k}");
+    }
+    candidate
+}
+
 /// Match existing partitions to definition files by GPT type UUID.
 fn match_partitions(
     defs: &[PartitionDefinition],
@@ -1309,17 +1648,23 @@ fn match_partitions(
             && let Some(&part) = group.get(*counter)
         {
             // Matched to existing partition
+            // An existing partition keeps the name already on disk; only a
+            // nameless one gets a derived, de-duplicated label.
+            let existing_label = if !part.name.is_empty() {
+                part.name.clone()
+            } else {
+                match def.label {
+                    Some(ref l) => l.clone(),
+                    None => unique_derived_label(&def.derived_label(), &matched),
+                }
+            };
             matched.push(MatchedPartition {
                 definition_index: i,
                 existing: Some(part.clone()),
                 allocated_size: 0,
                 padding_size: 0,
                 assigned_uuid: part.unique_guid.clone(),
-                assigned_label: if part.name.is_empty() {
-                    def.effective_label()
-                } else {
-                    part.name.clone()
-                },
+                assigned_label: existing_label,
                 is_new: false,
                 is_grown: false,
                 start_lba: part.first_lba,
@@ -1331,13 +1676,17 @@ fn match_partitions(
         }
 
         // No existing match — this is a new partition
+        let new_label = match def.label {
+            Some(ref l) => l.clone(),
+            None => unique_derived_label(&def.derived_label(), &matched),
+        };
         matched.push(MatchedPartition {
             definition_index: i,
             existing: None,
             allocated_size: 0,
             padding_size: 0,
             assigned_uuid: String::new(),
-            assigned_label: def.effective_label(),
+            assigned_label: new_label,
             is_new: true,
             is_grown: false,
             start_lba: 0,
@@ -1397,6 +1746,62 @@ fn find_free_regions(
     free
 }
 
+/// A contiguous gap, and the existing partition it follows.
+///
+/// The partition matters: upstream reduces the space an area offers to NEW
+/// partitions by the padding the preceding partition is owed, so a gap that is
+/// entirely a neighbour's PaddingMinBytes= is not free at all.
+#[derive(Clone, Copy, Debug)]
+struct FreeArea {
+    start_lba: u64,
+    end_lba: u64,
+    /// Index into `existing` of the partition this gap follows.
+    after: Option<usize>,
+}
+
+impl FreeArea {
+    fn sectors(&self) -> u64 {
+        self.end_lba - self.start_lba + 1
+    }
+}
+
+/// Split the usable range into gaps, remembering which partition each follows.
+fn find_free_areas(
+    existing: &[GptPartition],
+    first_usable_lba: u64,
+    last_usable_lba: u64,
+) -> Vec<FreeArea> {
+    let mut order: Vec<usize> = (0..existing.len()).collect();
+    order.sort_by_key(|&i| existing[i].first_lba);
+
+    let mut areas = Vec::new();
+    let mut cursor = first_usable_lba;
+    let mut previous: Option<usize> = None;
+
+    for &i in &order {
+        let p = &existing[i];
+        if cursor < p.first_lba {
+            areas.push(FreeArea {
+                start_lba: cursor,
+                end_lba: p.first_lba - 1,
+                after: previous,
+            });
+        }
+        cursor = p.last_lba + 1;
+        previous = Some(i);
+    }
+
+    if cursor <= last_usable_lba {
+        areas.push(FreeArea {
+            start_lba: cursor,
+            end_lba: last_usable_lba,
+            after: previous,
+        });
+    }
+
+    areas
+}
+
 /// Allocate space for new/grown partitions using weight-based distribution.
 fn allocate_space(
     defs: &[PartitionDefinition],
@@ -1407,12 +1812,19 @@ fn allocate_space(
     existing: &[GptPartition],
     seed: &str,
 ) -> Result<(), String> {
-    // Find the highest existing slot index
-    let max_existing_slot = existing.iter().map(|p| p.slot_index).max().unwrap_or(0);
-    let mut next_slot = if existing.is_empty() {
-        0
-    } else {
-        max_existing_slot + 1
+    // Partition numbers fill the LOWEST free slots, not the ones after the
+    // highest in use. A disk whose only partition sits in slot 4, because the
+    // first three were deferred, gets those three back when they are filled in
+    // rather than being numbered 5, 6 and 7.
+    let mut used_slots: std::collections::HashSet<u32> =
+        existing.iter().map(|p| p.slot_index).collect();
+    let mut next_free_slot = || {
+        let mut candidate = 0u32;
+        while used_slots.contains(&candidate) {
+            candidate += 1;
+        }
+        used_slots.insert(candidate);
+        candidate
     };
 
     // Calculate total available space
@@ -1513,63 +1925,191 @@ fn allocate_space(
         }
     }
 
-    // Distribute remaining space by weight
-    let remaining = total_free_bytes.saturating_sub(fixed_bytes);
-    let total_weight: u64 = requests
-        .iter()
-        .map(|r| r.weight as u64 + r.padding_weight as u64)
-        .sum();
+    // Distribute remaining space by weight. Each request contributes two
+    // claims, the partition and its padding, so a capped partition hands its
+    // surplus to whatever else can still grow.
+    // Upstream lays partitions out on a 4096-byte grain, not on the sector
+    // size, so a size that is sector-aligned but not grain-aligned is rounded
+    // down to the grain.
+    let grain = std::cmp::max(4096, sector_size);
 
-    for req in &requests {
+    // Space is allocated PER FREE AREA, not across their sum. A partition has
+    // to live in one contiguous gap, so sizing it against the total lets it be
+    // sized larger than any gap can hold and placement then fails outright.
+    let areas = find_free_areas(existing, first_usable_lba, last_usable_lba);
+
+    // An area offers new partitions less than its full size when the partition
+    // it follows is owed padding: that padding is not free space. A disk whose
+    // only partition asks for PaddingMinBytes=92M leaves the whole trailing gap
+    // spoken for, so nothing new belongs there.
+    let area_available: Vec<u64> = areas
+        .iter()
+        .map(|a| {
+            let owed = a
+                .after
+                .and_then(|idx| {
+                    matched
+                        .iter()
+                        .find(|m| {
+                            m.existing.as_ref().map(|e| e.slot_index)
+                                == Some(existing[idx].slot_index)
+                        })
+                        .map(|m| defs[m.definition_index].padding_min)
+                })
+                .unwrap_or(0);
+            (a.sectors() * sector_size).saturating_sub(owed)
+        })
+        .collect();
+
+    // First fit over the areas sorted smallest first, budgeting each
+    // partition's minimum as it is placed, mirroring context_allocate_partitions.
+    // An existing partition is not placed: it grows in place, into the gap that
+    // follows it if there is one.
+    let mut smallest_first: Vec<usize> = (0..areas.len()).collect();
+    smallest_first.sort_by_key(|&i| area_available[i]);
+
+    let mut budget = area_available.clone();
+    let mut assignment: Vec<Option<usize>> = vec![None; requests.len()];
+
+    for (ri, req) in requests.iter().enumerate() {
+        let m = &matched[req.matched_idx];
+        if !m.is_new {
+            assignment[ri] = m.existing.as_ref().and_then(|e| {
+                areas
+                    .iter()
+                    .position(|a| a.after.map(|idx| existing[idx].slot_index) == Some(e.slot_index))
+            });
+            continue;
+        }
+
+        let needed = req.min_bytes.saturating_add(req.padding_min);
+        if let Some(&ai) = smallest_first.iter().find(|&&i| budget[i] >= needed) {
+            assignment[ri] = Some(ai);
+            budget[ai] -= needed;
+        }
+    }
+
+    let mut sizes = vec![0u64; requests.len() * 2];
+    for ai in 0..areas.len() {
+        let members: Vec<usize> = (0..requests.len())
+            .filter(|&ri| assignment[ri] == Some(ai))
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+
+        let mut claims: Vec<SpanClaim> = Vec::with_capacity(members.len() * 2);
+        for &ri in &members {
+            let req = &requests[ri];
+            let m = &matched[req.matched_idx];
+            // An existing partition claims its TOTAL size, with its current
+            // size as the floor since it never shrinks. That works because the
+            // span below covers the gap PLUS the partition's own extent, so a
+            // partition too big to fit its weighted share of the two settles at
+            // its current size and hands the rest of the gap to whoever else
+            // wants it.
+            let (min, max) = if m.is_new {
+                (req.min_bytes, req.max_bytes)
+            } else {
+                let current = m
+                    .existing
+                    .as_ref()
+                    .map(|e| e.size_bytes(sector_size))
+                    .unwrap_or(0);
+                (current, defs[m.definition_index].size_max.max(current))
+            };
+            claims.push(SpanClaim {
+                weight: req.weight as u64,
+                min,
+                max,
+            });
+            claims.push(SpanClaim {
+                weight: req.padding_weight as u64,
+                min: req.padding_min,
+                max: req.padding_max,
+            });
+        }
+
+        // The span covers this gap AND the extent of the partition it follows,
+        // when that partition is competing here. Upstream folds the two
+        // together (context_grow_partitions_on_free_area) so an existing
+        // partition's claim can be expressed as a total size rather than as
+        // growth; sizing it against the bare gap would cap it at the gap.
+        let preceding_extent = areas[ai]
+            .after
+            .filter(|&idx| {
+                members.iter().any(|&ri| {
+                    let m = &matched[requests[ri].matched_idx];
+                    !m.is_new
+                        && m.existing.as_ref().map(|e| e.slot_index)
+                            == Some(existing[idx].slot_index)
+                })
+            })
+            .map(|idx| align_up(existing[idx].size_bytes(sector_size), grain))
+            .unwrap_or(0);
+
+        let grown = grow_claims(&claims, area_available[ai] + preceding_extent, grain);
+        for (k, &ri) in members.iter().enumerate() {
+            sizes[ri * 2] = grown[k * 2];
+            sizes[ri * 2 + 1] = grown[k * 2 + 1];
+        }
+    }
+
+    // Upstream numbers partition UUIDs per type, in definition order: the first
+    // partition of a type hashes the bare type UUID and later ones append their
+    // instance number. Numbering by slot instead would change every partition's
+    // UUID whenever an unrelated type was added ahead of it.
+    let mut type_counts: HashMap<String, u64> = HashMap::new();
+    let type_instance: Vec<u64> = matched
+        .iter()
+        .map(|m| {
+            let counter = type_counts
+                .entry(defs[m.definition_index].type_uuid.clone())
+                .or_insert(0);
+            let instance = *counter;
+            *counter += 1;
+            instance
+        })
+        .collect();
+
+    for (req_idx, req) in requests.iter().enumerate() {
         let m = &mut matched[req.matched_idx];
         let def = &defs[m.definition_index];
 
         if !m.is_new
             && let Some(existing) = &m.existing
         {
-            // Growth of existing partition
-            let share = if total_weight > 0 {
-                (remaining as u128 * req.weight as u128 / total_weight as u128) as u64
-            } else {
-                0
-            };
-            let growth = share.min(req.max_bytes);
+            // The claim result is the partition's TOTAL size, not its growth.
             let current_size = existing.size_bytes(sector_size);
-            m.allocated_size = current_size + growth;
-            m.is_grown = growth > 0;
+            m.allocated_size = sizes[req_idx * 2].max(current_size);
+            m.is_grown = m.allocated_size > current_size;
         } else {
-            // New partition
-            let share = if total_weight > 0 {
-                (remaining as u128 * req.weight as u128 / total_weight as u128) as u64
-            } else {
-                0
-            };
-            let size = (req.min_bytes + share)
-                .min(req.max_bytes)
-                .max(req.min_bytes);
-            let aligned_size = align_up(size, sector_size);
+            // New partition. grow_claims already clamped to the definition's
+            // bounds and aligned to the grain.
+            let size = sizes[req_idx * 2];
+            // Round DOWN to the sector size. The weight shares already sum to
+            // exactly the free space, so rounding each partition UP would push
+            // the total past the available region and leave the last partition
+            // with nowhere to go ("no free region of N available"). Rounding
+            // down keeps the sum within the region (min is sector-aligned, so a
+            // partition never drops below its minimum) at the cost of a tiny
+            // unused tail.
+            let aligned_size = align_down(size, grain);
             m.allocated_size = aligned_size;
 
             // Assign UUID
             if let Some(ref uuid) = def.uuid {
                 m.assigned_uuid = uuid.clone();
             } else {
-                m.assigned_uuid = generate_uuid_from_seed(seed, &def.type_uuid, next_slot);
+                m.assigned_uuid =
+                    derive_partition_uuid(seed, &def.type_uuid, type_instance[req.matched_idx]);
             }
 
-            m.slot_index = next_slot;
-            next_slot += 1;
+            m.slot_index = next_free_slot();
         }
 
         // Padding
-        let padding_share = if total_weight > 0 && req.padding_weight > 0 {
-            (remaining as u128 * req.padding_weight as u128 / total_weight as u128) as u64
-        } else {
-            0
-        };
-        m.padding_size = (req.padding_min + padding_share)
-            .min(req.padding_max)
-            .max(req.padding_min);
+        m.padding_size = sizes[req_idx * 2 + 1];
     }
 
     // Now lay out new partitions in free regions
@@ -1688,7 +2228,6 @@ fn allocate_space(
 // mkfs support
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 fn run_mkfs(device_path: &str, fstype: &str, label: &str, _uuid: &str) -> Result<(), String> {
     let (cmd, args): (&str, Vec<String>) = match fstype {
         "ext4" => (
@@ -1754,6 +2293,215 @@ fn run_mkfs(device_path: &str, fstype: &str, label: &str, _uuid: &str) -> Result
     Ok(())
 }
 
+/// Format newly created partitions inside an image file. The image is attached
+/// to a loop device with partition scanning so each partition appears as
+/// `/dev/loopNp<num>`, then mkfs is run on each. Best-effort: the partition
+/// table is already written, so a formatting failure is surfaced but does not
+/// undo it. Requires privileges + loop device support (available in the test VM).
+fn format_new_partitions(
+    device_path: &str,
+    matched: &[MatchedPartition],
+    defs: &[PartitionDefinition],
+) -> Result<(), String> {
+    use std::process::Command;
+
+    // Collect (kernel partition number, fstype, label, def index) for partitions
+    // that need a filesystem. Kernel partition nodes are numbered 1-based in GPT
+    // slot order, so the node for slot S is loopNp(S+1).
+    let mut to_format: Vec<(u32, String, String, usize)> = Vec::new();
+    for m in matched {
+        if !m.is_new || m.allocated_size == 0 {
+            continue;
+        }
+        let def = &defs[m.definition_index];
+        if let Some(ref fstype) = def.format
+            && fstype != "empty"
+        {
+            to_format.push((
+                m.slot_index + 1,
+                fstype.clone(),
+                m.assigned_label.clone(),
+                m.definition_index,
+            ));
+        }
+    }
+    if to_format.is_empty() {
+        return Ok(());
+    }
+
+    // Attach the image to a loop device with a scanned partition table.
+    let out = Command::new("losetup")
+        .args(["--find", "--show", "--partscan", "--nooverlap", device_path])
+        .output()
+        .map_err(|e| format!("Failed to run losetup: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "losetup failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let loopdev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Let the partition device nodes appear.
+    let _ = Command::new("udevadm")
+        .args(["settle", "--timeout=10"])
+        .status();
+
+    let mut format_err: Option<String> = None;
+    for (partnum, fstype, label, def_idx) in &to_format {
+        let part_dev = format!("{loopdev}p{partnum}");
+        // Wait briefly for the node in case udev is slow.
+        for _ in 0..30 {
+            if std::path::Path::new(&part_dev).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if let Err(e) = run_mkfs(&part_dev, fstype, label, "") {
+            format_err = Some(format!("mkfs {part_dev} ({fstype}): {e}"));
+            break;
+        }
+        // Emit user.validatefs.* xattrs on filesystems that support them (i.e.
+        // not vfat/swap). Failures here are non-fatal — the filesystem is
+        // already created.
+        if !matches!(fstype.as_str(), "vfat" | "fat" | "fat32" | "fat16" | "swap")
+            && let Err(e) = write_validatefs_xattrs(&part_dev, defs, *def_idx)
+        {
+            eprintln!("Warning: failed to set validatefs xattrs on {part_dev}: {e}");
+        }
+    }
+
+    // Detach the loop device regardless of the formatting outcome.
+    let _ = Command::new("losetup").args(["-d", &loopdev]).status();
+
+    match format_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Mount a freshly formatted partition and write the `user.validatefs.*`
+/// extended attributes to its filesystem root, mirroring upstream
+/// systemd-repart's AddValidateFS= behaviour. The label / type-uuid attributes
+/// gather the partition and its verity siblings (partitions sharing the same
+/// VerityMatchKey=); the mount-point attribute comes from MountPoint= or the
+/// partition type's well-known mount point.
+fn write_validatefs_xattrs(
+    part_dev: &str,
+    defs: &[PartitionDefinition],
+    def_idx: usize,
+) -> Result<(), String> {
+    use std::process::Command;
+    let def = &defs[def_idx];
+
+    // Gather this partition and its verity siblings (same non-empty
+    // VerityMatchKey=), then collect their labels and type UUIDs, sorted for a
+    // reproducible order.
+    let mut labels: Vec<String> = Vec::new();
+    let mut type_uuids: Vec<String> = Vec::new();
+    let has_sibling_key = def.verity_match_key.as_deref().is_some_and(|k| !k.is_empty());
+    for (i, d) in defs.iter().enumerate() {
+        let is_self = i == def_idx;
+        let is_sibling = has_sibling_key && d.verity_match_key == def.verity_match_key;
+        if is_self || is_sibling {
+            labels.push(d.effective_label());
+            type_uuids.push(d.type_uuid.clone());
+        }
+    }
+    labels.sort();
+    labels.dedup();
+    type_uuids.sort();
+    type_uuids.dedup();
+
+    // Mount point: explicit MountPoint= wins, else the type's default.
+    let mount_point = def
+        .mount_point
+        .clone()
+        .or_else(|| default_mount_point(&def.type_uuid).map(str::to_owned));
+
+    // Mount the partition on a temporary directory.
+    let tmp = format!("/tmp/.repart-validatefs-{}", std::process::id());
+    let _ = std::fs::create_dir_all(&tmp);
+    let status = Command::new("mount")
+        .arg(part_dev)
+        .arg(&tmp)
+        .status()
+        .map_err(|e| format!("mount: {e}"))?;
+    if !status.success() {
+        let _ = std::fs::remove_dir(&tmp);
+        return Err(format!("mount {part_dev} at {tmp} failed"));
+    }
+
+    let set = |name: &str, values: &[String]| -> Result<(), String> {
+        // Values are joined with NUL and NUL-terminated, matching upstream's
+        // strv encoding (which setfattr cannot express via argv).
+        let mut buf: Vec<u8> = Vec::new();
+        for v in values {
+            buf.extend_from_slice(v.as_bytes());
+            buf.push(0);
+        }
+        setxattr_at(&tmp, name, &buf)
+    };
+
+    let mut xattr_err: Option<String> = None;
+    if let Err(e) = set("user.validatefs.gpt_label", &labels) {
+        xattr_err = Some(e);
+    } else if let Err(e) = set("user.validatefs.gpt_type_uuid", &type_uuids) {
+        xattr_err = Some(e);
+    } else if let Some(mp) = mount_point
+        && let Err(e) = set("user.validatefs.mount_point", &[mp])
+    {
+        xattr_err = Some(e);
+    }
+
+    let _ = Command::new("umount").arg(&tmp).status();
+    let _ = std::fs::remove_dir(&tmp);
+
+    match xattr_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Set an extended attribute on a path via the raw syscall (setfattr cannot
+/// carry NUL-separated values through argv).
+fn setxattr_at(path: &str, name: &str, value: &[u8]) -> Result<(), String> {
+    let c_path = std::ffi::CString::new(path).map_err(|e| e.to_string())?;
+    let c_name = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+    let ret = unsafe {
+        libc::setxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+/// The well-known mount point for a GPT partition type, used when no explicit
+/// MountPoint= is set. ESP/swap/verity have none (not validatefs-mounted here).
+fn default_mount_point(type_uuid: &str) -> Option<&'static str> {
+    let id = type_uuid_to_identifier(type_uuid)?;
+    if id.starts_with("root") && !id.contains("verity") {
+        Some("/")
+    } else if id.starts_with("usr") && !id.contains("verity") {
+        Some("/usr")
+    } else {
+        match id {
+            "home" => Some("/home"),
+            "srv" => Some("/srv"),
+            "var" => Some("/var"),
+            "tmp" => Some("/var/tmp"),
+            _ => None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -1793,6 +2541,7 @@ struct Args {
     empty: EmptyMode,
     size: Option<String>,
     definitions: Vec<String>,
+    copy_from: Vec<String>,
     seed: Option<String>,
     factory_reset: bool,
     can_factory_reset: bool,
@@ -1821,6 +2570,7 @@ impl Default for Args {
             empty: EmptyMode::Refuse,
             size: None,
             definitions: Vec::new(),
+            copy_from: Vec::new(),
             seed: None,
             factory_reset: false,
             can_factory_reset: false,
@@ -1879,6 +2629,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         } else if arg == "--size" {
             i += 1;
             args.size = Some(argv.get(i).ok_or("--size requires a value")?.clone());
+        } else if let Some(val) = arg.strip_prefix("--copy-from=") {
+            args.copy_from.push(val.to_string());
+        } else if arg == "--copy-from" {
+            i += 1;
+            args.copy_from
+                .push(argv.get(i).ok_or("--copy-from requires a value")?.clone());
         } else if let Some(val) = arg.strip_prefix("--definitions=") {
             args.definitions.push(val.to_string());
         } else if arg == "--definitions" {
@@ -1998,6 +2754,18 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         }
 
         i += 1;
+    }
+
+    // Upstream overrides --dry-run after parsing, in this order:
+    // --can-factory-reset only reports, so it implies a dry run and opens
+    // everything read-only; --empty=create makes a file that did not exist a
+    // moment ago, so there is nothing to protect and it implies --dry-run=no.
+    // Without the second rule an --empty=create invocation with no explicit
+    // --dry-run= prints its table and writes nothing.
+    if args.can_factory_reset {
+        args.dry_run = true;
+    } else if args.empty == EmptyMode::Create {
+        args.dry_run = false;
     }
 
     Ok(args)
@@ -2248,7 +3016,25 @@ fn run(argv: &[String]) -> Result<i32, String> {
         all_defs
     };
 
-    if defs.is_empty() {
+    // --include-partitions=/--exclude-partitions= select by partition TYPE.
+    // Both were parsed and then never consulted, so a caller's explicit filter
+    // was silently ignored and the partitions it excluded were created anyway.
+    let mut defs = filter_definitions_by_type(defs, &args, arch);
+
+    // --copy-from= appends the source image's partitions, in order, after any
+    // definitions. Repeating the option repeats its partitions.
+    for src in &args.copy_from {
+        defs.extend(definitions_from_copy_source(src)?);
+    }
+    let defs = defs;
+
+    // Having no definitions is not by itself a reason to stop. Upstream reads
+    // the definitions and then carries straight on to find_root(),
+    // resize_backing_fd() and context_load_partition_table(), so
+    // `--empty=create --size=1G` writes an empty GPT image even when no
+    // *.conf matched. Returning early here skipped the image creation
+    // entirely, and the caller then failed on the missing file.
+    if defs.is_empty() && args.empty != EmptyMode::Create {
         eprintln!("No partition definitions found.");
         return Ok(0);
     }
@@ -2332,7 +3118,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
                     .map(|d| d.size_min.max(MIN_PARTITION_SIZE) + d.padding_min)
                     .sum();
                 let entries_size = MAX_GPT_ENTRIES as u64 * GPT_ENTRY_SIZE;
-                let overhead = sector_size * 2 + entries_size * 2 + sector_size;
+                // The front reservation is the whole 1 MiB grain the first
+                // usable LBA is aligned to, not just the MBR, header and entry
+                // array: sizing it any smaller leaves a usable area too short
+                // for the partitions that were just measured.
+                let overhead = GPT_FIRST_LBA_GRAIN + entries_size + sector_size;
                 align_up(total_min + overhead, sector_size)
             }
             Some(s) => parse_size(s)?,
@@ -2348,6 +3138,28 @@ fn run(argv: &[String]) -> Result<i32, String> {
             .map_err(|e| format!("Cannot create {device_path}: {e}"))?;
         file.set_len(file_size)
             .map_err(|e| format!("Cannot set file size: {e}"))?;
+        drop(file);
+    } else if is_file
+        && let Some(requested) = args.size.as_deref()
+        && requested != "auto"
+    {
+        // --size= applies to an image that already exists too, not only to one
+        // being created: upstream resizes the backing file whenever the option
+        // is given. Growing only, since shrinking a partitioned image would
+        // cut into whatever sits at the end of it.
+        let wanted = parse_size(requested)?;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&device_path)
+            .map_err(|e| format!("Cannot open {device_path} to resize: {e}"))?;
+        let current = file
+            .metadata()
+            .map_err(|e| format!("Cannot stat {device_path}: {e}"))?
+            .len();
+        if wanted > current {
+            file.set_len(wanted)
+                .map_err(|e| format!("Cannot grow {device_path}: {e}"))?;
+        }
         drop(file);
     }
 
@@ -2373,10 +3185,19 @@ fn run(argv: &[String]) -> Result<i32, String> {
     {
         let parts = read_gpt_partitions(&mut file, hdr, sector_size)
             .map_err(|e| format!("Cannot read partitions: {e}"))?;
+        // The usable area ends where the CURRENT disk ends, not where it did
+        // when the label was written. After --size= grows an image the backup
+        // header moves to the new end, and the space in between becomes usable;
+        // keeping the old value would hide it from the allocator and nothing
+        // would grow into it.
+        let disk_size_sectors = file_size / sector_size;
+        let entries_sectors = (MAX_GPT_ENTRIES as u64 * GPT_ENTRY_SIZE).div_ceil(sector_size);
+        let last_usable = (disk_size_sectors.saturating_sub(entries_sectors + 2))
+            .max(hdr.last_usable_lba.min(disk_size_sectors));
         (
             hdr.disk_guid.clone(),
             hdr.first_usable_lba,
-            hdr.last_usable_lba,
+            last_usable,
             parts,
         )
     } else {
@@ -2392,9 +3213,14 @@ fn run(argv: &[String]) -> Result<i32, String> {
                 let disk_size_sectors = file_size / sector_size;
                 let entries_sectors =
                     (MAX_GPT_ENTRIES as u64 * GPT_ENTRY_SIZE).div_ceil(sector_size);
-                let first_usable = 2 + entries_sectors;
+                // libfdisk, which upstream repart drives, starts a fresh GPT's
+                // usable area on its 1 MiB grain rather than immediately after
+                // the entry array, so a new label reports first-lba 2048 at a
+                // 512-byte sector size, not 34.
+                let first_usable =
+                    align_up(2 + entries_sectors, GPT_FIRST_LBA_GRAIN / sector_size);
                 let last_usable = disk_size_sectors - 1 - entries_sectors - 1;
-                let guid = generate_uuid_from_seed(&seed, "disk", 0);
+                let guid = derive_uuid(&seed, "disk-uuid");
                 (guid, first_usable, last_usable, Vec::new())
             }
         }
@@ -2453,7 +3279,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
     )?;
 
     // Check if anything changed
-    let has_changes = matched.iter().any(|m| m.is_new || m.is_grown);
+    // Writing a label onto a disk that had none is itself a change, even when
+    // no partition is added: `--empty=create` on a fresh image exists to
+    // produce exactly that, an empty but valid GPT.
+    let creates_label = existing_header.is_none();
+    let has_changes = creates_label || matched.iter().any(|m| m.is_new || m.is_grown);
 
     // Output
     match args.json_mode {
@@ -2530,6 +3360,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
     for m in &matched {
         if m.is_new && m.allocated_size > 0 {
             let def = &defs[m.definition_index];
+            // A deferred partition has already taken its space and its slot
+            // above; it just does not get written to the table.
+            if type_is_deferred(&def.type_uuid, &args.defer_partitions, arch) {
+                continue;
+            }
             final_partitions.push(GptPartition {
                 type_guid: def.type_uuid.clone(),
                 unique_guid: m.assigned_uuid.clone(),
@@ -2555,23 +3390,78 @@ fn run(argv: &[String]) -> Result<i32, String> {
 
     eprintln!("Partition table written successfully.");
 
-    // Format new partitions if requested (only works on image files via loopback)
-    // For now, we just log what would be formatted
-    for m in &matched {
-        if m.is_new && m.allocated_size > 0 {
-            let def = &defs[m.definition_index];
-            if let Some(ref fstype) = def.format
-                && fstype != "empty"
-            {
-                eprintln!(
-                    "Note: Partition '{}' should be formatted as {} (use loopback device to format)",
-                    def.filename, fstype
-                );
-            }
-        }
+    // Copy partition contents for anything that named a source, which today is
+    // every partition --copy-from= contributed. This has to happen after the
+    // table is written, since the target offsets come from the layout above.
+    if let Err(e) = copy_partition_blocks(&mut file, &matched, &defs, sector_size) {
+        return Err(format!("Failed to copy partition contents: {e}"));
+    }
+
+    // Format new partitions inside the image via a loop device. Only for image
+    // files (a loop device is attached to the whole image and partition-scanned).
+    if is_file
+        && let Err(e) = format_new_partitions(&device_path, &matched, &defs)
+    {
+        eprintln!("Warning: partition formatting failed: {e}");
     }
 
     Ok(0)
+}
+
+/// Copy the contents of every partition that named a block source.
+///
+/// A partition contributed by `--copy-from=` carries the byte range it came
+/// from, so the bytes land at the offset the layout just assigned rather than
+/// wherever they sat in the source.
+fn copy_partition_blocks(
+    target: &mut fs::File,
+    matched: &[MatchedPartition],
+    defs: &[PartitionDefinition],
+    sector_size: u64,
+) -> io::Result<()> {
+    const CHUNK: usize = 1024 * 1024;
+
+    for m in matched {
+        if !m.is_new {
+            continue;
+        }
+        let def = &defs[m.definition_index];
+        let Some(src) = def.copy_blocks.as_deref() else {
+            continue;
+        };
+
+        let mut source = fs::File::open(src)?;
+        // --copy-from= pins a byte range within the source, since it lifts one
+        // partition out of a whole image. A plain CopyBlocks= names a file
+        // whose entire contents go into the partition.
+        let length = if def.copy_blocks_size > 0 {
+            def.copy_blocks_size
+        } else {
+            source.metadata()?.len()
+        };
+        if length == 0 {
+            continue;
+        }
+
+        source.seek(SeekFrom::Start(def.copy_blocks_offset))?;
+        target.seek(SeekFrom::Start(m.start_lba * sector_size))?;
+
+        let mut left = std::cmp::min(length, m.allocated_size);
+        let mut buf = vec![0u8; CHUNK];
+        while left > 0 {
+            let want = std::cmp::min(left as usize, CHUNK);
+            // A short read means the source ended early; the rest of the
+            // partition simply stays as it is rather than failing the run.
+            let got = source.read(&mut buf[..want])?;
+            if got == 0 {
+                break;
+            }
+            target.write_all(&buf[..got])?;
+            left -= got as u64;
+        }
+    }
+
+    target.flush()
 }
 
 fn print_usage() {
@@ -3085,37 +3975,566 @@ mod tests {
         assert_eq!(encoded, [0u8; 16]);
     }
 
+    /// home.conf in TEST-58-REPART sets a short Label= then a too-long one.
+    /// The over-long value must be ignored so the short one survives, rather
+    /// than truncated to 36 characters.
     #[test]
-    fn test_generate_uuid_from_seed_deterministic() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed1", "type1", 0);
-        assert_eq!(a, b);
+    fn test_label_too_long_is_ignored_not_truncated() {
+        let tmp = TempDir::new().unwrap();
+        let conf = tmp.path().join("home.conf");
+        fs::write(
+            &conf,
+            "[Partition]\nType=home\nLabel=home-first\n\
+             Label=home-always-too-long-xxxxxxxxxxxxxx-%v\nFormat=vfat\n",
+        )
+        .unwrap();
+
+        let def = parse_partition_definition(&conf, "x86-64").unwrap();
+        assert_eq!(def.label.as_deref(), Some("home-first"));
+    }
+
+    /// A label of exactly 36 UTF-16 units still fits and must be accepted.
+    #[test]
+    fn test_label_at_limit_is_accepted() {
+        let tmp = TempDir::new().unwrap();
+        let conf = tmp.path().join("home.conf");
+        let exactly_36 = "x".repeat(36);
+        fs::write(
+            &conf,
+            format!("[Partition]\nType=home\nLabel={exactly_36}\n"),
+        )
+        .unwrap();
+
+        let def = parse_partition_definition(&conf, "x86-64").unwrap();
+        assert_eq!(def.label.as_deref(), Some(exactly_36.as_str()));
+    }
+
+    /// growfs defaults on for types repart can grow, so `Type=home` alone
+    /// carries GUID:59; swap cannot grow and must not.
+    /// The exact split TEST-58-REPART step 2 asserts: a 1 GiB image with an
+    /// unbounded home and a swap capped at 64 MiB, after 92 MiB of padding.
+    /// Home must absorb everything swap cannot take.
+    #[test]
+    fn test_grow_claims_redistributes_capped_surplus() {
+        let usable = (2097118u64 - 2048 + 1) * 512;
+        let swap_cap = 64 * 1024 * 1024;
+        let padding = 92 * 1024 * 1024;
+
+        // home, home padding (none), swap, swap padding (92M, no weight).
+        let claims = [
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 0, min: 0, max: 0 },
+            SpanClaim { weight: 1000, min: 0, max: swap_cap },
+            SpanClaim { weight: 0, min: padding, max: padding },
+        ];
+        let sizes = grow_claims(&claims, usable, 4096);
+
+        assert_eq!(sizes[2], swap_cap, "swap takes exactly its cap");
+        assert_eq!(sizes[3], padding, "padding takes exactly its minimum");
+        assert_eq!(sizes[0] / 512, 1775576, "home absorbs the surplus");
+        assert_eq!(2048 + sizes[0] / 512, 1777624, "swap starts where home ends");
+    }
+
+    /// The span for a free area covers the gap AND the extent of the partition
+    /// it follows, which is what lets an existing partition claim a TOTAL size
+    /// there. TEST-58-REPART steps 4 and 5 pin both halves of the rule.
+    #[test]
+    fn test_grow_claims_span_includes_preceding_partition() {
+        const GRAIN: u64 = 4096;
+
+        // Step 4: a 2G disk, the existing partition holds 188416 sectors, the
+        // rest of the disk is free, and nothing else competes. It grows to fill.
+        let gap = (4194270u64 - 2097112 + 1) * 512;
+        let current = 188416u64 * 512;
+        let claims = [SpanClaim { weight: 1000, min: current, max: u64::MAX }];
+        let sizes = grow_claims(&claims, gap + align_up(current, GRAIN), GRAIN);
+        assert_eq!(sizes[0] / 512, 2285568, "existing partition grows to fill");
+
+        // Step 5: the disk grows again and a NEW partition appears after it.
+        // The existing partition is already larger than its weighted share of
+        // the combined span, so it settles at its current size and the newcomer
+        // takes the whole gap.
+        let gap = (6291422u64 - 4194264 + 1) * 512;
+        let current = 2285568u64 * 512;
+        let claims = [
+            SpanClaim { weight: 1000, min: current, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+        ];
+        let sizes = grow_claims(&claims, gap + align_up(current, GRAIN), GRAIN);
+        assert_eq!(sizes[0] / 512, 2285568, "existing partition stays put");
+        assert_eq!(sizes[1] / 512, 2097152, "new partition takes the whole gap");
+
+        // Sizing against the bare gap instead shortchanges the newcomer, which
+        // is the defect this rule fixes.
+        let bare = grow_claims(&claims, gap, GRAIN);
+        assert!(
+            bare[1] / 512 < 2097152,
+            "bare gap should not have satisfied the newcomer, got {}",
+            bare[1] / 512
+        );
+    }
+
+    /// Three equal claims on the 50 MiB source image TEST-58-REPART builds:
+    /// settling them one at a time against what is left gives upstream's
+    /// 33432/33440/33440, where splitting the total simultaneously and rounding
+    /// each share down loses a grain apiece and gives 33432 three times.
+    #[test]
+    fn test_grow_claims_keeps_grain_remainders() {
+        let usable = (102366u64 - 2048 + 1) * 512;
+        let claims = [
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+        ];
+        let sizes = grow_claims(&claims, usable, 4096);
+        let sectors: Vec<u64> = sizes.iter().map(|s| s / 512).collect();
+        assert_eq!(sectors, vec![33432, 33440, 33440]);
+    }
+
+    /// Without any bound in play the split stays proportional.
+    #[test]
+    fn test_grow_claims_proportional_when_unbounded() {
+        let claims = [
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 3000, min: 0, max: u64::MAX },
+        ];
+        // Grain 1 keeps the arithmetic exact so the ratio is visible.
+        assert_eq!(grow_claims(&claims, 4000, 1), vec![1000, 3000]);
+    }
+
+    /// A claim needing more than its share takes its minimum, and the rest is
+    /// reconsidered from the start rather than being left short.
+    #[test]
+    fn test_grow_claims_overcharge_and_degenerate() {
+        let claims = [
+            SpanClaim { weight: 1000, min: 3000, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+        ];
+        let sizes = grow_claims(&claims, 4000, 1);
+        assert_eq!(sizes[0], 3000);
+        assert_eq!(sizes[1], 1000);
+
+        // A zero-weight claim with no minimum takes nothing.
+        let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
+        assert_eq!(grow_claims(&none, 500, 1), vec![0]);
+        assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
+    }
+
+    /// CopyBlocks= in a definition file copies the WHOLE named file into the
+    /// partition. TEST-58-REPART writes 40M of random bytes and then cmp's them
+    /// against the image at the partition's offset.
+    #[test]
+    fn test_full_copy_blocks_from_definition() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+
+        // A recognisable payload, larger than one copy chunk would be if the
+        // loop were mis-bounded.
+        let payload: Vec<u8> = (0..(3 * 1024 * 1024u32)).map(|i| (i % 251) as u8).collect();
+        let src = tmp.path().join("block-copy");
+        fs::write(&src, &payload).unwrap();
+
+        fs::write(
+            defs_dir.join("extra.conf"),
+            format!(
+                "[Partition]\nType=linux-generic\nLabel=block-copy\nCopyBlocks={}\n",
+                src.display()
+            ),
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=64M",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "run failed: {r:?}");
+
+        let mut f = fs::File::open(&img).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().unwrap();
+        let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+        assert_eq!(parts.len(), 1);
+
+        // The payload must sit at the partition's offset, byte for byte.
+        let mut got = vec![0u8; payload.len()];
+        f.seek(SeekFrom::Start(parts[0].first_lba * 512)).unwrap();
+        f.read_exact(&mut got).unwrap();
+        assert!(got == payload, "CopyBlocks= contents did not reach the image");
+    }
+
+    /// --size= grows an image that already exists, not only one being created.
+    /// TEST-58-REPART re-runs repart with --size=2G over its 1G image and
+    /// expects the usable area to reach LBA 4194270.
+    #[test]
+    fn test_full_size_grows_existing_image() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\n",
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "create failed: {r:?}");
+        assert_eq!(fs::metadata(&img).unwrap().len(), 1024 * 1024 * 1024);
+
+        let mut f = fs::File::open(&img).unwrap();
+        let before = read_gpt_header(&mut f, 512).unwrap().unwrap();
+        assert_eq!(before.last_usable_lba, 2097118);
+        drop(f);
+
+        let r = run(&args(&[
+            "--size=2G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "grow failed: {r:?}");
+
+        assert_eq!(fs::metadata(&img).unwrap().len(), 2 * 1024 * 1024 * 1024);
+        let mut f = fs::File::open(&img).unwrap();
+        let after = read_gpt_header(&mut f, 512).unwrap().unwrap();
+        assert_eq!(after.last_usable_lba, 4194270, "usable area follows the grow");
+
+        // The existing partition grows INTO the new space: its final size is
+        // what it already had plus the gap that opened after it, not merely the
+        // size of that gap.
+        let parts = read_gpt_partitions(&mut f, &after, 512).unwrap();
+        assert_eq!(parts.len(), 1);
+        let grown = parts[0].last_lba - parts[0].first_lba + 1;
+        assert!(
+            grown > 2097118 - 2048,
+            "partition did not grow past the old disk: {grown} sectors"
+        );
+        // It reaches the end of the usable area bar the grain-alignment tail.
+        let tail = after.last_usable_lba - (parts[0].first_lba + grown - 1);
+        assert!(tail < 4096 / 512, "left {tail} sectors unused at the end");
+    }
+
+    /// Refilling deferred partitions onto a disk that already holds swap: the
+    /// three new partitions must fit the gap BEFORE swap, not be sized against
+    /// the sum of all free space. The trailing gap is swap's PaddingMinBytes=,
+    /// so it offers nothing. This is the step TEST-58-REPART failed with
+    /// "no free region of 319.6M available".
+    #[test]
+    fn test_full_allocates_per_free_area() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\nFormat=vfat\n",
+        )
+        .unwrap();
+        for name in ["root.conf", "root2.conf"] {
+            fs::write(defs_dir.join(name), "[Partition]\nType=root\nFormat=vfat\n").unwrap();
+        }
+        fs::write(
+            defs_dir.join("swap.conf"),
+            "[Partition]\nType=swap\nSizeMaxBytes=64M\nPaddingMinBytes=92M\n",
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        // First lay down swap alone, deferring the rest.
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            "--defer-partitions=home,root",
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "deferred run failed: {r:?}");
+
+        // Now fill the deferred partitions in.
+        let r = run(&args(&[
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "refill run failed: {r:?}");
+
+        let mut f = fs::File::open(&img).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let mut parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+        parts.sort_by_key(|p| p.first_lba);
+
+        // Slots too: the deferred partitions get 1, 2 and 3 back rather than
+        // being numbered after swap, which holds slot 4.
+        let expected: [(u64, u64, &str, u32); 4] = [
+            (2048, 591856, "home-first", 0),
+            (593904, 591856, "root-x86-64", 1),
+            (1185760, 591864, "root-x86-64-2", 2),
+            (1777624, 131072, "swap", 3),
+        ];
+        assert_eq!(parts.len(), 4);
+        for (i, (start, size, label, slot)) in expected.iter().enumerate() {
+            assert_eq!(parts[i].first_lba, *start, "partition {} start", i + 1);
+            assert_eq!(
+                parts[i].last_lba - parts[i].first_lba + 1,
+                *size,
+                "partition {} size",
+                i + 1
+            );
+            assert_eq!(parts[i].name, *label, "partition {} label", i + 1);
+            assert_eq!(parts[i].slot_index, *slot, "partition {} slot", i + 1);
+        }
+    }
+
+    /// --defer-partitions= leaves the named types out of the table while they
+    /// still take their space and slot, so everything after keeps its offset.
+    /// TEST-58-REPART defers home and root and expects only swap left, still
+    /// numbered 4 and still at the offset it had with all four present.
+    #[test]
+    fn test_full_defer_partitions_keeps_layout() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\nFormat=vfat\n",
+        )
+        .unwrap();
+        for name in ["root.conf", "root2.conf"] {
+            fs::write(defs_dir.join(name), "[Partition]\nType=root\nFormat=vfat\n").unwrap();
+        }
+        fs::write(
+            defs_dir.join("swap.conf"),
+            "[Partition]\nType=swap\nSizeMaxBytes=64M\nPaddingMinBytes=92M\n",
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            "--defer-partitions=home,root",
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "run failed: {r:?}");
+
+        let mut f = fs::File::open(&img).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+
+        assert_eq!(parts.len(), 1, "only swap should be written");
+        assert_eq!(parts[0].name, "swap");
+        assert_eq!(parts[0].first_lba, 1777624, "swap keeps its offset");
+        assert_eq!(parts[0].last_lba - parts[0].first_lba + 1, 131072);
+        // Slot 4 of the table, i.e. sfdisk's zzz4, with 1..3 left empty.
+        assert_eq!(parts[0].slot_index, 3);
+    }
+
+    /// End-to-end --copy-from=, pinned to the exact table TEST-58-REPART
+    /// asserts: a 50M source holding home, root and root2, copied twice into a
+    /// 1G image, giving six partitions laid out contiguously with the source's
+    /// own UUIDs and labels duplicated.
+    #[test]
+    fn test_full_copy_from_duplicates_source_partitions() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\nFormat=vfat\n",
+        )
+        .unwrap();
+        // root2.conf is a copy of root.conf, as the test's symlink makes it.
+        for name in ["root.conf", "root2.conf"] {
+            fs::write(defs_dir.join(name), "[Partition]\nType=root\nFormat=vfat\n").unwrap();
+        }
+
+        let src = tmp.path().join("qqq");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=50M",
+            &format!("--seed={SEED}"),
+            "--include-partitions=root,home",
+            &format!("--definitions={}", defs_dir.display()),
+            src.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "building the source image failed: {r:?}");
+
+        let dst = tmp.path().join("copy");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            "--definitions",
+            "",
+            &format!("--copy-from={}", src.display()),
+            &format!("--copy-from={}", src.display()),
+            dst.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "copy-from run failed: {r:?}");
+
+        let mut f = fs::File::open(&dst).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+
+        assert_eq!(parts.len(), 6, "got {} partitions", parts.len());
+
+        // The three source partitions appear twice, in order, with their
+        // labels and UUIDs duplicated verbatim rather than re-derived.
+        // The explicit Label= survives and the derived ones match upstream,
+        // including the numbering of the repeated root type.
+        let labels = ["home-first", "root-x86-64", "root-x86-64-2"];
+        for i in 0..3 {
+            assert_eq!(parts[i].name, labels[i], "partition {} label", i + 1);
+            assert_eq!(parts[i].name, parts[i + 3].name, "labels differ between copies");
+            assert_eq!(parts[i].unique_guid, parts[i + 3].unique_guid);
+            assert_eq!(parts[i].type_guid, parts[i + 3].type_guid);
+            assert_eq!(
+                parts[i].last_lba - parts[i].first_lba,
+                parts[i + 3].last_lba - parts[i + 3].first_lba,
+                "copies of partition {} differ in size",
+                i + 1
+            );
+        }
+
+        // The whole table, exactly as TEST-58-REPART asserts it.
+        let expected: [(u64, u64); 6] = [
+            (2048, 33432),
+            (35480, 33440),
+            (68920, 33440),
+            (102360, 33432),
+            (135792, 33440),
+            (169232, 33440),
+        ];
+        for (i, (start, size)) in expected.iter().enumerate() {
+            assert_eq!(parts[i].first_lba, *start, "partition {} start", i + 1);
+            assert_eq!(
+                parts[i].last_lba - parts[i].first_lba + 1,
+                *size,
+                "partition {} size",
+                i + 1
+            );
+        }
+
+    }
+
+    /// TEST-58-REPART passes --include-partitions=home,swap over definitions
+    /// that also declare root twice, and expects only home and swap on disk.
+    #[test]
+    fn test_filter_definitions_include() {
+        let mk = |t: &str| {
+            let mut d = PartitionDefinition::default();
+            d.type_uuid = partition_type_uuid(t, "x86-64").unwrap();
+            d
+        };
+        let defs = vec![mk("home"), mk("root"), mk("root"), mk("swap")];
+
+        let mut a = Args::default();
+        a.include_partitions = vec!["home".into(), "swap".into()];
+        let kept = filter_definitions_by_type(defs.clone(), &a, "x86-64");
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].type_uuid, partition_type_uuid("home", "x86-64").unwrap());
+        assert_eq!(kept[1].type_uuid, partition_type_uuid("swap", "x86-64").unwrap());
+
+        // Exclude is the same list with the opposite sense.
+        let mut b = Args::default();
+        b.exclude_partitions = vec!["root".into()];
+        let kept = filter_definitions_by_type(defs.clone(), &b, "x86-64");
+        assert_eq!(kept.len(), 2);
+
+        // With neither option nothing is dropped.
+        let kept = filter_definitions_by_type(defs, &Args::default(), "x86-64");
+        assert_eq!(kept.len(), 4);
+    }
+
+    /// A bare type UUID is accepted alongside a designator.
+    #[test]
+    fn test_filter_definitions_accepts_raw_uuid() {
+        let mut d = PartitionDefinition::default();
+        d.type_uuid = partition_type_uuid("swap", "x86-64").unwrap();
+
+        let mut a = Args::default();
+        a.include_partitions = vec![d.type_uuid.to_lowercase()];
+        assert_eq!(filter_definitions_by_type(vec![d], &a, "x86-64").len(), 1);
+    }
+
+    /// The exact values TEST-58-REPART asserts for its fixed seed. These pin
+    /// the whole derivation: HMAC-SHA256 keyed by the seed's raw bytes, first
+    /// half of the digest, marked as v4.
+    #[test]
+    fn test_derive_uuid_matches_upstream() {
+        let seed = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        assert_eq!(
+            derive_uuid(seed, "disk-uuid"),
+            "1D2CE291-7CCE-4F7D-BC83-FDB49AD74EBD"
+        );
     }
 
     #[test]
-    fn test_generate_uuid_from_seed_different_seeds() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed2", "type1", 0);
-        assert_ne!(a, b);
+    fn test_derive_partition_uuid_matches_upstream() {
+        let seed = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        // home, first instance: the bare type UUID is hashed, with no counter.
+        assert_eq!(
+            derive_partition_uuid(seed, "933AC7E1-2EB4-4F13-B844-0E14E2AEF915", 0),
+            "4980595D-D74A-483A-AA9E-9903879A0EE5"
+        );
+        // swap, first instance.
+        assert_eq!(
+            derive_partition_uuid(seed, "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F", 0),
+            "78C92DB8-3D2B-4823-B0DC-792B78F66F1E"
+        );
+    }
+
+    /// A later instance of the same type appends its LE64 counter, so it must
+    /// differ from the first without disturbing it.
+    #[test]
+    fn test_derive_partition_uuid_instances_differ() {
+        let seed = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let t = "933AC7E1-2EB4-4F13-B844-0E14E2AEF915";
+        let first = derive_partition_uuid(seed, t, 0);
+        let second = derive_partition_uuid(seed, t, 1);
+        assert_ne!(first, second);
+        assert_eq!(first, derive_partition_uuid(seed, t, 0));
     }
 
     #[test]
-    fn test_generate_uuid_from_seed_different_names() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed1", "type2", 0);
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn test_generate_uuid_from_seed_different_counters() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed1", "type1", 1);
-        assert_ne!(a, b);
+    fn test_uuid_bytes_roundtrip() {
+        // Dashed and bare forms parse identically; a machine ID has no dashes.
+        assert_eq!(
+            uuid_bytes("750b6cd5-c4ae-4012-a15e-7be3c29e6a47"),
+            uuid_bytes("750b6cd5c4ae4012a15e7be3c29e6a47")
+        );
+        assert!(uuid_bytes("too-short").is_none());
+        assert!(uuid_bytes("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
     }
 
     #[test]
     fn test_generate_uuid_has_version_4() {
-        let uuid = generate_uuid_from_seed("seed", "name", 0);
+        let uuid = derive_uuid("750b6cd5c4ae4012a15e7be3c29e6a47", "name");
         // Version nibble is at position 14 (in the 3rd group, first char)
         let parts: Vec<&str> = uuid.split('-').collect();
         assert_eq!(parts.len(), 5);
@@ -3768,13 +5187,17 @@ Weight=333
         assert_eq!(def.effective_label(), "MyLabel");
     }
 
+    /// The label comes from the TYPE UUID's designator, not from whatever
+    /// spelling Type= used, and the designator is used verbatim: upstream
+    /// writes "root-x86-64", never "root x86 64".
     #[test]
-    fn test_effective_label_from_type_id() {
+    fn test_effective_label_from_type_uuid_not_type_id() {
         let def = PartitionDefinition {
-            type_id: Some("root-x86-64".into()),
+            type_id: Some("root".into()),
+            type_uuid: "4f68bce3-e8cd-4db1-96e7-fbcaf984b709".into(),
             ..Default::default()
         };
-        assert_eq!(def.effective_label(), "root x86 64");
+        assert_eq!(def.effective_label(), "root-x86-64");
     }
 
     #[test]
@@ -3789,7 +5212,7 @@ Weight=333
     #[test]
     fn test_effective_label_fallback() {
         let def = PartitionDefinition::default();
-        assert_eq!(def.effective_label(), "Linux");
+        assert_eq!(def.effective_label(), "linux");
     }
 
     // -----------------------------------------------------------------------
@@ -5673,6 +7096,49 @@ Weight=333
         assert!(hdr.is_some());
     }
 
+    /// `--empty=create` implies `--dry-run=no`: the test drives it with no
+    /// `--dry-run=` of its own and still expects an image on disk.
+    #[test]
+    fn test_parse_args_empty_create_implies_no_dry_run() {
+        let a = parse_args(&args(&["--empty=create", "--size=1G", "/tmp/x"])).unwrap();
+        assert!(!a.dry_run);
+        // An explicit --dry-run=yes does not survive it, matching upstream.
+        let a = parse_args(&args(&["--dry-run=yes", "--empty=create", "--size=1G", "/tmp/x"]))
+            .unwrap();
+        assert!(!a.dry_run);
+        // --can-factory-reset wins, and only reports.
+        let a = parse_args(&args(&["--can-factory-reset", "--empty=create"])).unwrap();
+        assert!(a.dry_run);
+    }
+
+    /// With no matching definitions, `--empty=create` must still write the
+    /// image. Upstream carries on past an empty definition set, so bailing out
+    /// early left the caller with no file at all.
+    #[test]
+    fn test_full_empty_create_without_definitions() {
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+
+        let img_path = tmp.path().join("zzz");
+        let result = run(&args(&[
+            "--dry-run=no",
+            "--empty=create",
+            "--size=1G",
+            "--seed=empty-defs",
+            &format!("--definitions={}", defs_dir.display()),
+            img_path.to_str().unwrap(),
+        ]));
+        assert!(result.is_ok(), "run failed: {result:?}");
+
+        let mut f = fs::File::open(&img_path).unwrap();
+        assert_eq!(f.metadata().unwrap().len(), 1024 * 1024 * 1024);
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        // Matches what `sfdisk -d` reports for an upstream-created empty image.
+        assert_eq!(hdr.first_usable_lba, 2048);
+        assert_eq!(hdr.last_usable_lba, 2097118);
+    }
+
     // -----------------------------------------------------------------------
     // run with no device specified
     // -----------------------------------------------------------------------
@@ -5840,7 +7306,35 @@ Weight=333
             type_id: None,
             ..Default::default()
         };
-        assert_eq!(def.effective_label(), "Linux");
+        assert_eq!(def.effective_label(), "linux");
+    }
+
+    /// A repeated type is numbered from the second occurrence, as upstream's
+    /// partition_acquire_label does, while an explicit Label= is left alone.
+    #[test]
+    fn test_unique_derived_label_numbering() {
+        let mk = |label: &str| MatchedPartition {
+            definition_index: 0,
+            existing: None,
+            allocated_size: 0,
+            padding_size: 0,
+            assigned_uuid: String::new(),
+            assigned_label: label.to_string(),
+            is_new: true,
+            is_grown: false,
+            start_lba: 0,
+            end_lba: 0,
+            slot_index: 0,
+        };
+
+        assert_eq!(unique_derived_label("root-x86-64", &[]), "root-x86-64");
+        let one = [mk("root-x86-64")];
+        assert_eq!(unique_derived_label("root-x86-64", &one), "root-x86-64-2");
+        let two = [mk("root-x86-64"), mk("root-x86-64-2")];
+        assert_eq!(unique_derived_label("root-x86-64", &two), "root-x86-64-3");
+        // An unrelated neighbour does not push the numbering along.
+        let other = [mk("home-first")];
+        assert_eq!(unique_derived_label("root-x86-64", &other), "root-x86-64");
     }
 
     // -----------------------------------------------------------------------
@@ -6029,17 +7523,16 @@ Weight=333
     }
 
     // -----------------------------------------------------------------------
-    // generate_uuid_from_seed: version and variant bits
+    // derive_uuid: version and variant bits
     // -----------------------------------------------------------------------
 
     #[test]
     fn test_generate_uuid_from_seed_version_and_variant() {
-        let uuid = generate_uuid_from_seed("seed", "name", 0);
-        // generate_uuid_from_seed sets version in time_hi (u16 with | 0x4000),
-        // so position 14 (first char of 3rd group) is '4'.
+        let uuid = derive_uuid("750b6cd5c4ae4012a15e7be3c29e6a47", "name");
+        // The v4 marking puts '4' at position 14 (first char of 3rd group).
         assert_eq!(uuid.chars().nth(14), Some('4'));
         // Variant 1: clock_seq high nibble at position 19 should be 8, 9, a, or b
-        let variant_char = uuid.chars().nth(19).unwrap();
+        let variant_char = uuid.chars().nth(19).unwrap().to_ascii_lowercase();
         assert!(
             "89ab".contains(variant_char),
             "variant char '{}' not in 89ab",

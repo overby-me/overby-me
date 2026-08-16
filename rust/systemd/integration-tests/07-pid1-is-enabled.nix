@@ -48,6 +48,16 @@
     systemctl mask is-enabled-test.service
     [[ "$(systemctl is-enabled is-enabled-test.service)" == "masked" ]]
     systemctl unmask is-enabled-test.service
+
+    : "systemctl is-enabled for a unit with no [Install] section is static"
+    cat > /run/systemd/system/is-enabled-static.service << EOF
+    [Service]
+    Type=oneshot
+    ExecStart=true
+    EOF
+    retry systemctl daemon-reload
+    [[ "$(systemctl is-enabled is-enabled-static.service)" == "static" ]]
+    rm -f /run/systemd/system/is-enabled-static.service
     IEEOF
   '';
 }

@@ -175,7 +175,34 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         &unit.common.dependencies.conflicted_by,
     );
     insert_dep_list(&mut props, "Before", &unit.common.dependencies.before);
-    insert_dep_list(&mut props, "After", &unit.common.dependencies.after);
+    // For a mount unit that is not active, derive `After` from the fragment
+    // config (its declared local/remote classification) instead of the stored
+    // deps: the async mount monitor overrides a static unit's deps for an active
+    // mount and reverts them only on the unmount POLLPRI, which races a
+    // `systemctl show` issued right after `systemctl stop`. The unit status is
+    // set synchronously (Started by the monitor once the mount is active, which
+    // is-active waits for; Stopped by deactivate_mount during the stop itself),
+    // so keying off it keeps `After` correct and synchronous in both directions.
+    let mount_inactive = matches!(&unit.specific, crate::units::Specific::Mount(_))
+        && !matches!(
+            &*unit.common.status.read_poisoned(),
+            UnitStatus::Started(_)
+        );
+    match &unit.specific {
+        crate::units::Specific::Mount(m) if mount_inactive => {
+            let is_net = crate::units::mount_is_network_static(
+                m.conf.fs_type.as_deref(),
+                m.conf.options.as_deref(),
+            );
+            let (after, _, _, _) = crate::units::mount_default_deps(&m.conf.what, is_net);
+            let derived: Vec<crate::units::UnitId> = after
+                .iter()
+                .filter_map(|n| crate::units::dep_unit_id(n))
+                .collect();
+            insert_dep_list(&mut props, "After", &derived);
+        }
+        _ => insert_dep_list(&mut props, "After", &unit.common.dependencies.after),
+    }
     insert_dep_list(&mut props, "PartOf", &unit.common.dependencies.part_of);
     insert_dep_list(&mut props, "PartOfBy", &unit.common.dependencies.part_of_by);
     insert_dep_list(&mut props, "BindsTo", &unit.common.dependencies.binds_to);
@@ -207,6 +234,44 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             insert(&mut props, "SubState", "plugged");
         }
 
+        // Mount units report `mounted` when active (not the default `running`).
+        // TEST-60-MOUNT-RATELIMIT.testcase_issue_20329 asserts `SubState=mounted`
+        // after `systemctl start <path>.mount`.
+        if matches!(&unit.specific, Specific::Mount(_))
+            && matches!(&*status, UnitStatus::Started(_))
+        {
+            insert(&mut props, "SubState", "mounted");
+        }
+
+        // Socket units report `listening` when bound and idle, and `running`
+        // while one or more accepted connections are being serviced.  The
+        // generic mapping reports `running` for any Started unit; distinguish
+        // the two socket SubStates via the accepted-connection counter.
+        // TEST-07-PID1.socket-defer asserts `listening` right after start.
+        if matches!(&*status, UnitStatus::Started(_))
+            && let Specific::Socket(specific) = &unit.specific
+        {
+            let st = specific.state.read_poisoned();
+            let sub = if st.sock.deferred {
+                // DeferTrigger=: a connection is pending but activation is
+                // deferred because a Conflicts= unit is currently activating.
+                "deferred"
+            } else if specific.conf.accept {
+                // Accept=yes: running while accepted connections are serviced.
+                if st.sock.active_accept_connections > 0 {
+                    "running"
+                } else {
+                    "listening"
+                }
+            } else if st.sock.activated {
+                // Accept=no: running while the triggered service is active.
+                "running"
+            } else {
+                "listening"
+            };
+            insert(&mut props, "SubState", sub);
+        }
+
         // Override ActiveState for completed oneshot services with
         // RemainAfterExit=no: they are kept as Started for the boot
         // activation walker, but should report "inactive" (issue #27953).
@@ -230,6 +295,10 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         {
             insert(&mut props, "SubState", "exited");
         }
+        // Note: the Type=notify-reload reload SubState overlay is applied later,
+        // inside the Specific::Service arm, using the non-blocking state guard
+        // taken there (state_ref). Doing a fresh blocking svc.state read here
+        // would risk the `systemctl show` hang the arm's try_read guards against.
     }
 
     // ── Lifecycle timestamps ─────────────────────────────────────────
@@ -289,6 +358,40 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 let relative = if relative.is_empty() { "/" } else { relative };
                 insert(&mut props, "ControlGroup", relative);
             }
+            // TasksCurrent / MemoryCurrent — live counters read from the
+            // service's cgroup when its controllers are enabled (e.g. under a
+            // TasksMax=/MemoryMax=/*Accounting= setting). Absent otherwise.
+            #[cfg(target_os = "linux")]
+            {
+                let cg = &svc.conf.platform_specific.cgroup_path;
+                let read_counter = |file: &str| -> Option<String> {
+                    let s = std::fs::read_to_string(cg.join(file)).ok()?;
+                    let s = s.trim();
+                    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+                        Some(s.to_string())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(v) = read_counter("pids.current") {
+                    insert(&mut props, "TasksCurrent", &v);
+                }
+                if let Some(v) = read_counter("memory.current") {
+                    insert(&mut props, "MemoryCurrent", &v);
+                }
+                if let Some(v) = read_counter("memory.peak") {
+                    insert(&mut props, "MemoryPeak", &v);
+                }
+                // CPUUsageNSec — cpu.stat's usage_usec (microseconds) as ns.
+                if let Ok(stat) = std::fs::read_to_string(cg.join("cpu.stat"))
+                    && let Some(usec) = stat
+                        .lines()
+                        .find_map(|l| l.strip_prefix("usage_usec "))
+                        .and_then(|v| v.trim().parse::<u64>().ok())
+                {
+                    insert(&mut props, "CPUUsageNSec", &(usec.saturating_mul(1000)).to_string());
+                }
+            }
             insert_service_config(&mut props, &svc.conf);
             insert_exec_config(&mut props, &svc.conf.exec_config);
 
@@ -343,9 +446,26 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                         "timeout"
                     } else if state.srvc.watchdog_timeout_fired {
                         "watchdog"
+                    } else if state.srvc.start_limit_hit {
+                        "start-limit-hit"
                     } else {
                         match &*status {
-                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                // A signal death reports "core-dump" when the
+                                // kernel dumped core, else "signal"; anything
+                                // else is a non-zero exit code.
+                                match state.srvc.main_exit_termination {
+                                    Some(crate::signal_handler::ChildTermination::Signal(
+                                        _,
+                                        true,
+                                    )) => "core-dump",
+                                    Some(crate::signal_handler::ChildTermination::Signal(
+                                        _,
+                                        false,
+                                    )) => "signal",
+                                    _ => "exit-code",
+                                }
+                            }
                             _ => "success",
                         }
                     };
@@ -500,6 +620,9 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 if let Some(ref bus_error) = state.srvc.notify_bus_error {
                     insert(&mut props, "StatusBusError", bus_error);
                 }
+                if let Some(ref varlink_error) = state.srvc.notify_varlink_error {
+                    insert(&mut props, "StatusVarlinkError", varlink_error);
+                }
                 if let Some(ref exit_status) = state.srvc.notify_exit_status {
                     insert(&mut props, "StatusExitStatus", exit_status);
                 }
@@ -514,6 +637,26 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     "NFileDescriptorStore",
                     &state.srvc.stored_fds.len().to_string(),
                 );
+                // SubState=dead-resources-pinned: a stopped service keeps its fd
+                // store only when pinned (FileDescriptorStorePreserve=yes). While
+                // that pinned store is non-empty and the unit is inactive, systemd
+                // reports this distinct substate instead of plain "dead", until the
+                // store is released (e.g. `systemctl clean --what=fdstore`). This
+                // overrides the "dead" set by insert_status() earlier. Reading the
+                // unit status while holding the service-state guard follows the
+                // service-state -> unit-status lock order the writers use (see the
+                // Status block above), so it does not deadlock.
+                let unit_is_inactive = matches!(
+                    &*unit.common.status.read_poisoned(),
+                    UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                );
+                if svc.conf.file_descriptor_store_preserve
+                    == crate::units::FileDescriptorStorePreserve::Yes
+                    && !state.srvc.stored_fds.is_empty()
+                    && unit_is_inactive
+                {
+                    insert(&mut props, "SubState", "dead-resources-pinned");
+                }
                 // ExtraFileDescriptorNames is the space-separated list of
                 // FD names registered via StartTransientUnit's
                 // ExtraFileDescriptors property. We reuse stored_fds for
@@ -567,10 +710,44 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 "SendSIGHUP",
                 if svc.conf.send_sighup { "yes" } else { "no" },
             );
-            // CleanResult / ReloadResult — always "success" (cleaning/reload
-            // failures not tracked yet)
+            insert(
+                &mut props,
+                "FileDescriptorStorePreserve",
+                format_fd_store_preserve(&svc.conf.file_descriptor_store_preserve),
+            );
+            // CleanResult is always "success" (cleaning failures not tracked yet).
+            //
+            // Type=notify-reload reload lifecycle, computed from the already-held
+            // non-blocking state guard (state_ref) so no extra svc.state lock is
+            // taken: a second read here while state_guard holds the try_read can
+            // deadlock under writer contention, and a blocking read would hang
+            // `systemctl show`. SubState reports reload-signal once the reload
+            // signal is sent, reload-notify after the service answers RELOADING=1,
+            // and returns to running with ReloadResult=timeout if READY=1 does not
+            // arrive within the start timeout. If state_ref is None (contended),
+            // fall through to the plain "success"/default, matching the arm.
             insert(&mut props, "CleanResult", "success");
-            insert(&mut props, "ReloadResult", "success");
+            let mut reload_result = "success";
+            if svc.conf.srcv_type == crate::units::ServiceType::NotifyReload
+                && let Some(state) = state_ref
+                && let Some(started) = state.srvc.reload_started
+                && (state.srvc.pid.is_some() || state.srvc.main_pid.is_some())
+            {
+                let timed_out = matches!(
+                    state.srvc.get_start_timeout(&svc.conf),
+                    Some(t) if started.elapsed() > t
+                );
+                let sub = if timed_out {
+                    reload_result = "timeout";
+                    "running"
+                } else if state.srvc.reloading {
+                    "reload-notify"
+                } else {
+                    "reload-signal"
+                };
+                insert(&mut props, "SubState", sub);
+            }
+            insert(&mut props, "ReloadResult", reload_result);
         }
         Specific::Socket(sock) => {
             insert_socket_config(&mut props, &sock.conf);
@@ -1134,11 +1311,11 @@ fn insert_unit_config(props: &mut PropertyMap, conf: &UnitConfig) {
         None => insert(props, "FragmentPath", ""),
     }
 
-    // SourcePath (same as FragmentPath for our purposes)
-    match &conf.fragment_path {
-        Some(p) => insert(props, "SourcePath", &p.display().to_string()),
-        None => insert(props, "SourcePath", ""),
-    }
+    // SourcePath is the file a unit was *synthesised* from (e.g. /etc/fstab for
+    // a generated mount unit, or a generator's input) - NOT the fragment path.
+    // A normal on-disk unit has none, so it stays empty until unit generation
+    // records a real source.
+    insert(props, "SourcePath", "");
 
     // Drop-in files
     if conf.loaded_dropin_files.is_empty() {
@@ -1347,8 +1524,16 @@ fn insert_service_config(props: &mut PropertyMap, conf: &ServiceConfig) {
         !matches!(conf.delegate, crate::units::Delegate::No),
     );
 
-    // Watchdog
-    insert_timeout(props, "WatchdogUSec", &conf.watchdog_sec);
+    // Watchdog — an unset (or zero) watchdog reports 0, not infinity.
+    // Unlike RuntimeMaxUSec (where None means "no limit" = infinity), an
+    // absent WatchdogSec means the watchdog is disabled, which systemd
+    // reports as WatchdogUSec=0.
+    let watchdog_usec = match &conf.watchdog_sec {
+        Some(Timeout::Duration(d)) => format!("{}us", d.as_micros()),
+        Some(Timeout::Infinity) => "infinity".to_string(),
+        None => "0".to_string(),
+    };
+    insert(props, "WatchdogUSec", &watchdog_usec);
 
     // RuntimeMaxUSec
     insert_timeout(props, "RuntimeMaxUSec", &conf.runtime_max_sec);
@@ -1536,6 +1721,40 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
         insert(props, "OOMScoreAdjust", &adj.to_string());
     }
 
+    // NUMAPolicy= / NUMAMask=
+    if let Some(ref pol) = conf.numa_policy {
+        insert(props, "NUMAPolicy", pol);
+    }
+    if let Some(ref mask) = conf.numa_mask {
+        insert(props, "NUMAMask", mask);
+    }
+
+    // CPUAffinity= — the literal `numa` resolves to the CPU list of the
+    // NUMAMask nodes (read from /sys/devices/system/node/nodeN/cpulist),
+    // matching systemd; a numeric list is shown as configured.
+    if !conf.cpu_affinity.is_empty() {
+        let rendered = if conf.cpu_affinity.iter().any(|t| t == "numa") {
+            let nodes = conf
+                .numa_mask
+                .as_deref()
+                .and_then(crate::numa::parse_numa_mask)
+                .unwrap_or_default();
+            crate::numa::numa_cpu_list(&nodes)
+        } else {
+            Some(conf.cpu_affinity.join(" "))
+        };
+        if let Some(a) = rendered
+            && !a.is_empty()
+        {
+            insert(props, "CPUAffinity", &a);
+        }
+    }
+
+    // LogExtraFields=
+    if !conf.log_extra_fields.is_empty() {
+        insert(props, "LogExtraFields", &conf.log_extra_fields.join(" "));
+    }
+
     // Nice
     if let Some(nice) = conf.nice {
         insert(props, "Nice", &nice.to_string());
@@ -1636,27 +1855,22 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
     // IP address allow/deny (from ServiceConfig but stored in ExecConfig vicinity)
     // These are on ServiceConfig, not ExecConfig, so handled in insert_service_config.
 
-    // StandardInputData= is reported as the base64 encoding of the
-    // concatenation of every StandardInputText= value (each suffixed with
-    // "\n") followed by every StandardInputData= value (pre-decoded from
-    // base64).  `systemctl show -P StandardInputData` expects this merged
-    // base64 form.  Matches upstream behaviour exercised by 15-DROPIN
-    // testcase_transient_service_dropins.
+    // StandardInputData= is reported as the base64 encoding of every
+    // StandardInputText=/StandardInputData= directive concatenated in the
+    // order the directives appear across the fragment and drop-ins (text
+    // values suffixed with "\n"; data values pre-decoded from base64).  The
+    // ordering comes from `stdin_inputs`; the two legacy vecs cannot represent
+    // an interleaving where a data directive precedes a text one.  Matches
+    // upstream behaviour exercised by 15-DROPIN testcase_transient_service_dropins.
     {
         use base64::Engine;
-        let engine = base64::engine::general_purpose::STANDARD;
-        let mut bytes: Vec<u8> = Vec::new();
-        for s in &conf.standard_input_text {
-            bytes.extend_from_slice(s.as_bytes());
-            bytes.push(b'\n');
-        }
-        for s in &conf.standard_input_data {
-            if let Ok(decoded) = engine.decode(s) {
-                bytes.extend(decoded);
-            }
-        }
+        let bytes = crate::units::unit_parsing::reconstruct_stdin_data(&conf.stdin_inputs);
         if !bytes.is_empty() {
-            insert(props, "StandardInputData", &engine.encode(&bytes));
+            insert(
+                props,
+                "StandardInputData",
+                &base64::engine::general_purpose::STANDARD.encode(&bytes),
+            );
         }
     }
 }
@@ -1976,6 +2190,19 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
         None => insert(props, "TasksMax", "infinity"),
     }
 
+    // Concurrency limits (D-Bus type "u"; UINT_MAX means infinity/unset, matching
+    // systemd's bus_property_get_unsigned over the UINT_MAX default).
+    insert(
+        props,
+        "ConcurrencySoftMax",
+        &conf.concurrency_soft_max.unwrap_or(u32::MAX).to_string(),
+    );
+    insert(
+        props,
+        "ConcurrencyHardMax",
+        &conf.concurrency_hard_max.unwrap_or(u32::MAX).to_string(),
+    );
+
     // Accounting toggles
     match conf.cpu_accounting {
         Some(v) => insert_bool(props, "CPUAccounting", v),
@@ -2104,6 +2331,14 @@ fn insert_mount_config(props: &mut PropertyMap, conf: &MountConfig) {
 }
 
 // ── Enum formatters ──────────────────────────────────────────────────────
+
+fn format_fd_store_preserve(p: &crate::units::FileDescriptorStorePreserve) -> &'static str {
+    match p {
+        crate::units::FileDescriptorStorePreserve::No => "no",
+        crate::units::FileDescriptorStorePreserve::Yes => "yes",
+        crate::units::FileDescriptorStorePreserve::Restart => "restart",
+    }
+}
 
 fn format_service_type(t: ServiceType) -> String {
     match t {
@@ -2260,6 +2495,14 @@ mod tests {
             format_service_type(ServiceType::NotifyReload),
             "notify-reload"
         );
+    }
+
+    #[test]
+    fn test_format_fd_store_preserve() {
+        use crate::units::FileDescriptorStorePreserve as P;
+        assert_eq!(format_fd_store_preserve(&P::No), "no");
+        assert_eq!(format_fd_store_preserve(&P::Yes), "yes");
+        assert_eq!(format_fd_store_preserve(&P::Restart), "restart");
     }
 
     #[test]
@@ -2428,6 +2671,8 @@ mod tests {
             io_read_iops_max: Vec::new(),
             io_write_iops_max: Vec::new(),
             tasks_max: None,
+            concurrency_soft_max: None,
+            concurrency_hard_max: None,
             delegate: crate::units::Delegate::No,
             cpu_accounting: None,
             memory_accounting: None,
@@ -2654,6 +2899,23 @@ mod tests {
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("TasksMax").unwrap(), "4096");
+    }
+
+    #[test]
+    fn test_slice_config_concurrency_max() {
+        let mut conf = default_slice_config();
+        conf.concurrency_soft_max = Some(3);
+        conf.concurrency_hard_max = Some(4);
+        let mut props = PropertyMap::new();
+        insert_slice_config(&mut props, &conf);
+        assert_eq!(props.get("ConcurrencySoftMax").unwrap(), "3");
+        assert_eq!(props.get("ConcurrencyHardMax").unwrap(), "4");
+
+        // Unset reports UINT_MAX (infinity), matching systemd.
+        let mut props2 = PropertyMap::new();
+        insert_slice_config(&mut props2, &default_slice_config());
+        assert_eq!(props2.get("ConcurrencySoftMax").unwrap(), "4294967295");
+        assert_eq!(props2.get("ConcurrencyHardMax").unwrap(), "4294967295");
     }
 
     #[test]

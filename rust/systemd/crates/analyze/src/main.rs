@@ -35,6 +35,12 @@ struct Cli {
     #[arg(long, global = true)]
     no_pager: bool,
 
+    /// Control recursive error checking (verify). Accepted globally, i.e. it
+    /// may precede the verb (`--recursive-errors=no verify ...`) as upstream's
+    /// getopt allows, as well as follow it. Parsed for compatibility; ignored.
+    #[arg(long, global = true, value_name = "MODE")]
+    recursive_errors: Option<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -133,10 +139,6 @@ enum Command {
         #[arg(long, num_args = 0..=1, default_missing_value = "yes")]
         man: Option<String>,
 
-        /// Control recursive error checking
-        #[arg(long, value_name = "MODE")]
-        recursive_errors: Option<String>,
-
         /// Also check generator output
         #[arg(long)]
         generators: Option<String>,
@@ -223,6 +225,9 @@ enum Command {
     Fdstore {
         /// Service unit name
         unit: String,
+        /// Output the entries as JSON (short or pretty).
+        #[arg(long, value_name = "MODE")]
+        json: Option<String>,
     },
 
     /// Analyze image dissection policies
@@ -268,9 +273,37 @@ enum Command {
         /// Capability name(s) or number(s) to look up (omit for full table)
         capabilities: Vec<String>,
 
-        /// Look up capabilities from a hex mask
+        /// Parse the single positional argument as a numeric capability mask
         #[arg(short = 'm', long)]
-        mask: Option<String>,
+        mask: bool,
+    },
+
+    /// List CPU architectures and their support status
+    Architectures {
+        /// Architecture name(s) or the keywords native/uname/secondary (omit
+        /// for the full table)
+        architectures: Vec<String>,
+        /// Output the entries as JSON (short or pretty).
+        #[arg(long, value_name = "MODE")]
+        json: Option<String>,
+    },
+
+    /// List known filesystems and their predefined sets
+    Filesystems {
+        /// Filesystem set name(s) like @basic-api (omit for the full listing)
+        filesystems: Vec<String>,
+    },
+
+    /// List system calls and their predefined filter sets
+    SyscallFilter {
+        /// Syscall filter set name(s) like @basic-io (omit for the full listing)
+        syscall_filters: Vec<String>,
+    },
+
+    /// List the properties that can be set for transient units
+    TransientSettings {
+        /// Unit type(s) like service, mount, socket
+        properties: Vec<String>,
     },
 }
 
@@ -330,9 +363,12 @@ impl TimeSpan {
             return Ok(TimeSpan { usec: u64::MAX });
         }
 
-        // Try parsing as a plain number (treated as microseconds)
+        // A plain number with no unit is seconds, matching C `systemd-analyze
+        // timespan` (parse_time's default unit): `timespan 5` is 5 s, not 5 us.
         if let Ok(v) = input.parse::<u64>() {
-            return Ok(TimeSpan { usec: v });
+            return Ok(TimeSpan {
+                usec: v.saturating_mul(USEC_PER_SEC),
+            });
         }
 
         let mut total: u64 = 0;
@@ -435,6 +471,88 @@ fn format_usec(usec: u64) -> String {
     format!("{span}")
 }
 
+/// Faithful port of C's `format_timespan` (src/basic/time-util.c): render a
+/// microsecond duration into its "1h 30min" / "1.500000s" human form. The
+/// `accuracy` (in usec) bounds the precision of the decimal shown for a
+/// sub-minute value; `systemd-analyze timespan`'s TABLE_TIMESPAN uses 1 (whole
+/// microsecond), so "1.5s" prints as "1.500000s" and "1s 1us" as "1.000001s".
+/// Kept separate from [`format_usec`] (which the boot-time reports use with a
+/// coarser, host-dependent precision).
+fn format_timespan_full(mut t: u64, accuracy: u64) -> String {
+    const TABLE: &[(&str, u64)] = &[
+        ("y", USEC_PER_YEAR),
+        ("month", USEC_PER_MONTH),
+        ("w", USEC_PER_WEEK),
+        ("d", USEC_PER_DAY),
+        ("h", USEC_PER_HOUR),
+        ("min", USEC_PER_MINUTE),
+        ("s", USEC_PER_SEC),
+        ("ms", USEC_PER_MSEC),
+        ("us", 1),
+    ];
+
+    if t == u64::MAX {
+        return "infinity".to_string();
+    }
+    if t == 0 {
+        return "0".to_string();
+    }
+
+    let mut out = String::new();
+    let mut something = false;
+    for &(suffix, unit) in TABLE {
+        if t == 0 {
+            break;
+        }
+        if t < accuracy && something {
+            break;
+        }
+        if t < unit {
+            continue;
+        }
+
+        let a = t / unit;
+        let mut b = t % unit;
+        let mut done = false;
+
+        // Show a sub-minute value with a remainder in decimal ("1.500000s").
+        if t < USEC_PER_MINUTE && b > 0 {
+            let mut j: i32 = 0;
+            let mut cc = unit;
+            while cc > 1 {
+                j += 1;
+                cc /= 10;
+            }
+            let mut cc = accuracy;
+            while cc > 1 {
+                b /= 10;
+                j -= 1;
+                cc /= 10;
+            }
+            if j > 0 {
+                if something {
+                    out.push(' ');
+                }
+                out.push_str(&format!("{a}.{b:0width$}{suffix}", width = j as usize));
+                t = 0;
+                done = true;
+            }
+        }
+
+        if !done {
+            if something {
+                out.push(' ');
+            }
+            out.push_str(&format!("{a}{suffix}"));
+            t = b;
+        }
+
+        something = true;
+    }
+
+    out
+}
+
 /// Parse a time unit suffix and return (multiplier_in_usec, chars_consumed).
 fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
     let units: &[(&str, u64)] = &[
@@ -458,6 +576,7 @@ fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
         ("year", USEC_PER_YEAR),
         ("msec", USEC_PER_MSEC),
         ("usec", 1),
+        ("µs", 1),
         ("min", USEC_PER_MINUTE),
         ("ms", USEC_PER_MSEC),
         ("us", 1),
@@ -469,6 +588,19 @@ fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
         ("w", USEC_PER_WEEK),
         ("y", USEC_PER_YEAR),
     ];
+
+    // systemd's time-unit table is case-SENSITIVE for the single-letter `M`
+    // (month) vs `m` (minute); the table below is matched case-insensitively
+    // for convenience, so a bare capital `M` must be resolved to month here,
+    // before it is lowercased into `m`. Longer capitalised units (`Month`)
+    // still fall through to the case-insensitive match.
+    if let Some(after) = s.strip_prefix('M')
+        && (after.is_empty()
+            || after.starts_with(' ')
+            || after.starts_with(|c: char| c.is_ascii_digit()))
+    {
+        return Ok((USEC_PER_MONTH, 1));
+    }
 
     let lower = s.to_lowercase();
     for &(suffix, mult) in units {
@@ -483,9 +615,11 @@ fn parse_time_unit(s: &str) -> Result<(u64, usize), String> {
         }
     }
 
-    // If no unit, assume microseconds
+    // If no unit is given, assume seconds -- matching C `systemd-analyze
+    // timespan` (parse_time's default unit), where e.g. `timespan 5` is 5 s,
+    // not 5 us.
     if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
-        return Ok((1, 0));
+        return Ok((USEC_PER_SEC, 0));
     }
 
     Err(format!("Unknown time unit in: {s}"))
@@ -531,7 +665,9 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
     // Relative: "+5min", "-2h"
     if let Some(rest) = input.strip_prefix('+') {
         let span = TimeSpan::parse(rest)?;
-        return Ok(SystemTime::now() + Duration::from_micros(span.usec));
+        return SystemTime::now()
+            .checked_add(Duration::from_micros(span.usec))
+            .ok_or_else(|| "Timestamp would overflow".to_string());
     }
     if let Some(rest) = input.strip_prefix('-') {
         let span = TimeSpan::parse(rest)?;
@@ -548,13 +684,19 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
             .ok_or_else(|| "Timestamp would be before UNIX epoch".to_string());
     }
 
-    // "@EPOCH_SECONDS"
+    // "@EPOCH_SECONDS" with an optional fractional part ("@1700000000.5").
     if let Some(rest) = input.strip_prefix('@') {
-        let secs: u64 = rest
-            .trim()
+        let rest = rest.trim();
+        let (whole, frac) = rest.split_once('.').unwrap_or((rest, ""));
+        let secs: u64 = whole
             .parse()
             .map_err(|_| format!("Invalid epoch timestamp: {rest}"))?;
-        return Ok(UNIX_EPOCH + Duration::from_secs(secs));
+        let micros = parse_fractional_micros(frac)
+            .ok_or_else(|| format!("Invalid epoch timestamp: {rest}"))?;
+        return UNIX_EPOCH
+            .checked_add(Duration::from_secs(secs))
+            .and_then(|t| t.checked_add(Duration::from_micros(micros)))
+            .ok_or_else(|| format!("Invalid epoch timestamp: {rest}"));
     }
 
     // YYYY-MM-DD HH:MM:SS
@@ -565,38 +707,125 @@ fn parse_timestamp(input: &str) -> Result<SystemTime, String> {
     Err(format!("Failed to parse timestamp: {input}"))
 }
 
-fn try_parse_datetime(input: &str) -> Option<SystemTime> {
-    let parts: Vec<&str> = input.splitn(2, [' ', 'T']).collect();
-
-    let date_str = parts.first()?;
-    let time_str = parts.get(1).copied().unwrap_or("00:00:00");
-
-    let date_parts: Vec<&str> = date_str.split('-').collect();
-    if date_parts.len() != 3 {
+/// Parse the fractional-seconds digits after a '.' into microseconds, matching
+/// C's microsecond precision: pad or truncate to 6 digits (".5" -> 500000).
+/// Returns None if the fraction contains a non-digit.
+fn parse_fractional_micros(frac: &str) -> Option<u64> {
+    if frac.is_empty() {
+        return Some(0);
+    }
+    if !frac.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
+    let digits: String = frac.chars().take(6).collect();
+    format!("{digits:0<6}").parse().ok()
+}
 
-    let year: i64 = date_parts[0].parse().ok()?;
-    let month: u32 = date_parts[1].parse().ok()?;
-    let day: u32 = date_parts[2].parse().ok()?;
+/// A bare 3-letter weekday abbreviation (case-insensitive), as C emits and
+/// accepts at the front of a timestamp. A trailing comma is not accepted (C
+/// rejects "Mon, ...").
+fn is_weekday_abbrev(s: &str) -> bool {
+    ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        .iter()
+        .any(|w| s.eq_ignore_ascii_case(w))
+}
 
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+/// Today's date (UTC) as (year, month, day), used when a timestamp carries a
+/// time but no date.
+fn today_ymd() -> Option<(i64, u32, u32)> {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
+    Some(civil_from_days(secs.div_euclid(86400)))
+}
+
+fn try_parse_datetime(input: &str) -> Option<SystemTime> {
+    // Strip a trailing "UTC" zone token. We evaluate in UTC (there is no zone
+    // database here), and without this the zone is glued onto the last time
+    // field and silently parsed away: "23:59:59 UTC" -> seconds "59 UTC" -> 0.
+    let input = input.trim();
+    let input = match input.rsplit_once(' ') {
+        Some((head, tz)) if tz.eq_ignore_ascii_case("UTC") => head.trim_end(),
+        _ => input,
+    };
+
+    // Strip an optional leading weekday ("Mon 2024-01-01 ..."), which C emits
+    // and accepts. C validates it against the date; remember it and reject a
+    // mismatch once the date is known.
+    let expected_dow = match input.split_once(' ') {
+        Some((wd, _)) if is_weekday_abbrev(wd) => Some(wd),
+        _ => None,
+    };
+    let input = match input.split_once(' ') {
+        Some((wd, rest)) if is_weekday_abbrev(wd) => rest.trim_start(),
+        _ => input,
+    };
+
+    let parts: Vec<&str> = input.splitn(2, [' ', 'T']).collect();
+
+    let date_str: &str = parts.first().copied()?;
+
+    // A date-less input that is just a time ("12:00:00", "01:02") means "today
+    // at that time" in C. Detect a first token that is a time (has ':') rather
+    // than a date and substitute today's date (UTC, as all of this is
+    // UTC-evaluated).
+    let (year, month, day, time_str): (i64, u32, u32, &str) =
+        if parts.len() == 1 && date_str.contains(':') {
+            let (y, mo, d) = today_ymd()?;
+            (y, mo, d, date_str)
+        } else {
+            let date_parts: Vec<&str> = date_str.split('-').collect();
+            if date_parts.len() != 3 {
+                return None;
+            }
+            (
+                date_parts[0].parse().ok()?,
+                date_parts[1].parse().ok()?,
+                date_parts[2].parse().ok()?,
+                parts.get(1).copied().unwrap_or("00:00:00"),
+            )
+        };
+
+    // Reject years outside C's accepted range. Below 1970 is before the epoch
+    // (unrepresentable as a non-negative UNIX time) and above 9999 is C's
+    // 4-digit-year limit; both also overflow the civil-date arithmetic below.
+    if !(1970..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
         return None;
     }
 
     let time_parts: Vec<&str> = time_str.split(':').collect();
     let hour: u32 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minute: u32 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let second: u32 = time_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // The seconds field may carry a fractional part ("07.500000"). Reject a
+    // non-numeric seconds field (e.g. an unsupported zone) instead of silently
+    // treating it as 0, which used to drop the seconds entirely.
+    let (second, micros): (u32, u64) = match time_parts.get(2) {
+        Some(s) => {
+            let (whole, frac) = s.split_once('.').unwrap_or((s, ""));
+            (whole.parse().ok()?, parse_fractional_micros(frac)?)
+        }
+        None => (0, 0),
+    };
 
     if hour > 23 || minute > 59 || second > 60 {
         return None;
     }
 
     let days = days_from_civil(year, month, day);
+
+    // Reject a leading weekday that does not match the date, as C does.
+    if let Some(wd) = expected_dow {
+        let dow = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+        let actual = dow[weekday_from_days(days) as usize % 7];
+        if !wd.eq_ignore_ascii_case(actual) {
+            return None;
+        }
+    }
+
     let secs = days as u64 * 86400 + hour as u64 * 3600 + minute as u64 * 60 + second as u64;
 
-    Some(UNIX_EPOCH + Duration::from_secs(secs))
+    Some(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_micros(micros))
 }
 
 /// Convert a civil date to days since UNIX epoch (Howard Hinnant algorithm).
@@ -887,6 +1116,16 @@ fn evaluate_condition(expr: &str) -> (bool, &'static str) {
             let result = normalised == want;
             if np { !result } else { result }
         }
+        "ConditionFirstBoot" | "AssertFirstBoot" => {
+            // C's condition_test_first_boot: compare the requested boolean to
+            // in_first_boot() -- the $SYSTEMD_FIRST_BOOT override, else the
+            // /run/systemd/first-boot flag PID 1 writes on a genuine first
+            // boot. Deliberately not keyed off /etc/machine-id.
+            match parse_boolean_c(value) {
+                Some(want) => in_first_boot() == want,
+                None => false,
+            }
+        }
         _ => {
             return (false, "Unknown condition type");
         }
@@ -898,6 +1137,27 @@ fn evaluate_condition(expr: &str) -> (bool, &'static str) {
     } else {
         (false, "not met")
     }
+}
+
+/// Parse a boolean the way C's `parse_boolean()` does (case-sensitive).
+fn parse_boolean_c(s: &str) -> Option<bool> {
+    match s.trim() {
+        "1" | "yes" | "y" | "true" | "t" | "on" => Some(true),
+        "0" | "no" | "n" | "false" | "f" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether this is a first boot, matching C's `in_first_boot()`: the
+/// `$SYSTEMD_FIRST_BOOT` override, else the `/run/systemd/first-boot` flag that
+/// PID 1 writes on a genuine first boot.
+fn in_first_boot() -> bool {
+    if let Ok(e) = std::env::var("SYSTEMD_FIRST_BOOT")
+        && let Some(b) = parse_boolean_c(&e)
+    {
+        return b;
+    }
+    Path::new("/run/systemd/first-boot").exists()
 }
 
 /// Evaluate a `ConditionKernelVersion=` / `AssertKernelVersion=` expression.
@@ -986,29 +1246,119 @@ fn matches_kernel_glob(pattern: &str, version: &str) -> bool {
 /// `a < b`, 0 if equal, positive if `a > b`.  Non-numeric prefixes/suffixes
 /// are stripped — anything like `5.10.0-rc1` becomes `5.10.0` for comparison
 /// purposes.
+/// Compare two version strings using systemd's `strverscmp_improved`
+/// (src/fundamental/string-util-fundamental.c). Segments are numeric or
+/// alphabetic; `~` marks a pre-release (oldest), `-`/`^`/`.` are ordered
+/// separators, numeric segments outrank alpha, leading zeros are ignored, and a
+/// longer string is newer except when the extra part is `~`-prefixed. All other
+/// characters are treated as separators. Returns -1 (a<b), 0 (a==b), 1 (a>b).
+/// Used for both `compare-versions` and `ConditionKernelVersion=` ordering.
 fn compare_kernel_versions(a: &str, b: &str) -> i32 {
-    fn split(s: &str) -> Vec<u32> {
-        s.split(|c: char| !c.is_ascii_digit() && c != '.')
-            .next()
-            .unwrap_or("")
-            .split('.')
-            .filter_map(|p| p.parse::<u32>().ok())
-            .collect()
+    fn is_valid(c: u8) -> bool {
+        c.is_ascii_digit() || c.is_ascii_alphabetic() || matches!(c, b'~' | b'-' | b'^' | b'.')
     }
-    let av = split(a);
-    let bv = split(b);
-    let len = av.len().max(bv.len());
-    for i in 0..len {
-        let x = av.get(i).copied().unwrap_or(0);
-        let y = bv.get(i).copied().unwrap_or(0);
-        if x < y {
-            return -1;
+    // Current byte, or NUL past the end (mirrors C's NUL-terminated scan).
+    fn at(s: &[u8], k: usize) -> u8 {
+        if k < s.len() { s[k] } else { 0 }
+    }
+    fn cmp<T: Ord>(x: T, y: T) -> i32 {
+        (x > y) as i32 - (x < y) as i32
+    }
+
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut i = 0;
+    let mut j = 0;
+    loop {
+        // Drop leading invalid characters (treated as separators).
+        while i < a.len() && !is_valid(a[i]) {
+            i += 1;
         }
-        if x > y {
-            return 1;
+        while j < b.len() && !is_valid(b[j]) {
+            j += 1;
+        }
+
+        // '~': a segment prefixed with it is the oldest.
+        if at(a, i) == b'~' || at(b, j) == b'~' {
+            let r = cmp(at(a, i) != b'~', at(b, j) != b'~');
+            if r != 0 {
+                return r;
+            }
+            i += 1;
+            j += 1;
+        }
+
+        // If either reached the end, the longer one is newer (after the '~' check).
+        if at(a, i) == 0 || at(b, j) == 0 {
+            return cmp(at(a, i), at(b, j));
+        }
+
+        // Ordered separators: '-' (version/release), '^' (patched), '.' (point).
+        for sep in [b'-', b'^', b'.'] {
+            if at(a, i) == sep || at(b, j) == sep {
+                let r = cmp(at(a, i) != sep, at(b, j) != sep);
+                if r != 0 {
+                    return r;
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+
+        if at(a, i).is_ascii_digit() || at(b, j).is_ascii_digit() {
+            // Numeric segments; an empty one is older than a numeric one.
+            let mut ii = i;
+            while ii < a.len() && a[ii].is_ascii_digit() {
+                ii += 1;
+            }
+            let mut jj = j;
+            while jj < b.len() && b[jj].is_ascii_digit() {
+                jj += 1;
+            }
+            let r = cmp(i != ii, j != jj);
+            if r != 0 {
+                return r;
+            }
+            // Ignore leading zeros, then compare by length, then lexically.
+            while i < ii && a[i] == b'0' {
+                i += 1;
+            }
+            while j < jj && b[j] == b'0' {
+                j += 1;
+            }
+            let r = cmp(ii - i, jj - j);
+            if r != 0 {
+                return r;
+            }
+            let r = cmp(&a[i..ii], &b[j..jj]);
+            if r != 0 {
+                return r;
+            }
+            i = ii;
+            j = jj;
+        } else {
+            // Alphabetic segments compared lexically, then longer is newer.
+            let mut ii = i;
+            while ii < a.len() && a[ii].is_ascii_alphabetic() {
+                ii += 1;
+            }
+            let mut jj = j;
+            while jj < b.len() && b[jj].is_ascii_alphabetic() {
+                jj += 1;
+            }
+            let n = (ii - i).min(jj - j);
+            let r = cmp(&a[i..i + n], &b[j..j + n]);
+            if r != 0 {
+                return r;
+            }
+            let r = cmp(ii - i, jj - j);
+            if r != 0 {
+                return r;
+            }
+            i = ii;
+            j = jj;
         }
     }
-    0
 }
 
 fn check_ac_power() -> bool {
@@ -1151,6 +1501,8 @@ fn verify_unit_file(path: &str) -> Vec<String> {
     let mut has_service_section = false;
     let mut has_exec_start = false;
     let mut has_type = false;
+    let mut service_type: Option<String> = None;
+    let mut private_pids: Option<String> = None;
     let mut current_section = String::new();
 
     for (lineno, line) in content.lines().enumerate() {
@@ -1186,14 +1538,19 @@ fn verify_unit_file(path: &str) -> Vec<String> {
             continue;
         }
 
-        if let Some((key, _val)) = line.split_once('=') {
+        if let Some((key, val)) = line.split_once('=') {
             let key = key.trim();
+            let val = val.trim();
             if current_section.as_str() == "Service" {
                 if key == "ExecStart" {
                     has_exec_start = true;
                 }
                 if key == "Type" {
                     has_type = true;
+                    service_type = Some(val.to_string());
+                }
+                if key == "PrivatePIDs" {
+                    private_pids = Some(val.to_string());
                 }
             }
         }
@@ -1208,6 +1565,17 @@ fn verify_unit_file(path: &str) -> Vec<String> {
                 "{path}: Service has no ExecStart= and no Type= setting"
             ));
         }
+        // PrivatePIDs=yes cannot be combined with Type=forking: the forked main
+        // process cannot be tracked across the new PID namespace, so upstream
+        // (service_verify) refuses to load such a unit.
+        if has_service_section
+            && matches!(private_pids.as_deref(), Some("yes" | "true" | "1" | "on"))
+            && service_type.as_deref() == Some("forking")
+        {
+            issues.push(format!(
+                "{path}: Service type forking is not compatible with PrivatePIDs=yes"
+            ));
+        }
     }
 
     if issues.is_empty() {
@@ -1219,7 +1587,27 @@ fn verify_unit_file(path: &str) -> Vec<String> {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
+/// Exit successfully when our stdout consumer closes the pipe early, e.g.
+/// `systemd-analyze timespan 1us | grep -q 1us` under `set -o pipefail`: grep
+/// exits after the first match and closes the pipe, so any further write from
+/// us hits EPIPE. Rust ignores SIGPIPE by default, turning such a write into a
+/// panic ("failed printing to stdout: Broken pipe") and a non-zero exit that
+/// pipefail then reports as a failure. The C tools finish with status 0 here
+/// (their buffered output flushes in a single write before the reader leaves),
+/// so match that observable behaviour with a clean, successful exit.
+extern "C" fn exit_on_sigpipe(_sig: libc::c_int) {
+    // _exit is async-signal-safe; process::exit()/exit() is not.
+    unsafe { libc::_exit(0) }
+}
+
 fn main() {
+    // SAFETY: installing a signal handler at startup, before spawning threads.
+    unsafe {
+        libc::signal(
+            libc::SIGPIPE,
+            exit_on_sigpipe as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+    }
     let cli = Cli::parse();
 
     match cli.command {
@@ -1257,7 +1645,7 @@ fn main() {
         Some(Command::Security { ref units, .. }) => cmd_security(units),
         Some(Command::Plot) => cmd_plot(),
         Some(Command::InspectElf { ref files }) => cmd_inspect_elf(files),
-        Some(Command::Fdstore { ref unit }) => cmd_fdstore(unit),
+        Some(Command::Fdstore { ref unit, ref json }) => cmd_fdstore(unit, json.as_deref()),
         Some(Command::ImagePolicy { ref policies }) => cmd_image_policy(policies),
         Some(Command::Pcrs) => cmd_pcrs(),
         Some(Command::Srk) => cmd_srk(),
@@ -1266,8 +1654,15 @@ fn main() {
         Some(Command::ExitStatus { ref statuses }) => cmd_exit_status(statuses),
         Some(Command::Capability {
             ref capabilities,
-            ref mask,
-        }) => cmd_capability(capabilities, mask.as_deref()),
+            mask,
+        }) => cmd_capability(capabilities, mask),
+        Some(Command::Architectures {
+            ref architectures,
+            ref json,
+        }) => cmd_architectures(architectures, json.as_deref()),
+        Some(Command::Filesystems { ref filesystems }) => cmd_filesystems(filesystems),
+        Some(Command::SyscallFilter { ref syscall_filters }) => cmd_syscall_filter(syscall_filters),
+        Some(Command::TransientSettings { ref properties }) => cmd_transient_settings(properties),
     }
 }
 
@@ -1438,8 +1833,14 @@ fn cmd_calendar(expressions: &[String], iterations: u32, base_time: Option<&str>
     for expr in expressions {
         match CalendarSpec::parse(expr) {
             Ok(spec) => {
-                println!("  Original form: {}", spec.original);
-                println!("Normalized form: {}", spec.normalized());
+                // C only prints the original form when it differs from the
+                // normalized form (analyze-calendar.c), so an already-normalized
+                // spec shows just the normalized line.
+                let normalized = spec.normalized();
+                if spec.original != normalized {
+                    println!("  Original form: {}", spec.original);
+                }
+                println!("Normalized form: {normalized}");
 
                 if iterations > 0 {
                     let now = base_now;
@@ -1450,10 +1851,12 @@ fn cmd_calendar(expressions: &[String], iterations: u32, base_time: Option<&str>
                     for i in 0..iterations {
                         if let Some(next) = spec.next_elapse(ref_dt) {
                             let next_unix = CalendarSpec::datetime_to_unix(&next);
+                            // Match C's right-aligned labels: "Next elapse" and
+                            // "Iteration #N" both pad to a 15-column field.
                             let label = if i == 0 {
-                                "    Next elapse".to_string()
+                                format!("{:>15}", "Next elapse")
                             } else {
-                                format!("          Iter. #{}", i + 1)
+                                format!("{:>15}", format!("Iteration #{}", i + 1))
                             };
 
                             // Format as a human-readable UTC timestamp
@@ -1541,14 +1944,19 @@ fn cmd_timespan(expressions: &[String]) {
         process::exit(1);
     }
 
-    for expr in expressions {
+    for (i, expr) in expressions.iter().enumerate() {
         match TimeSpan::parse(expr) {
             Ok(span) => {
+                // C's verb_timespan prints a vertical table with the fields
+                // right-aligned to the widest label ("Original"): the raw input,
+                // the microseconds, then the human-readable form. Multiple inputs
+                // are separated by a blank line (none trails the last).
+                if i > 0 {
+                    println!();
+                }
                 println!("Original: {expr}");
-                println!("      {}:", format_usec(span.usec));
-                println!("   {} us", span.usec);
-                println!("   {span}");
-                println!();
+                println!("      μs: {}", span.usec);
+                println!("   Human: {}", format_timespan_full(span.usec, 1));
             }
             Err(e) => {
                 eprintln!("Failed to parse time span '{}': {}", expr, e);
@@ -1585,6 +1993,13 @@ fn cmd_compare_versions(args: &[String]) {
                 _ => ">",
             };
             println!("{} {} {}", args[0], sym, args[1]);
+            // The exit status encodes the relation, matching C systemd-analyze:
+            // 0 when equal, 11 when a > b, 12 when a < b.
+            match cmp.signum() {
+                -1 => process::exit(12),
+                1 => process::exit(11),
+                _ => {}
+            }
         }
         3 => {
             let cmp = compare_versions(&args[0], &args[2]);
@@ -1617,14 +2032,35 @@ fn cmd_timestamp(expressions: &[String]) {
         process::exit(1);
     }
 
-    for expr in expressions {
+    for (i, expr) in expressions.iter().enumerate() {
         match parse_timestamp(expr) {
             Ok(ts) => {
                 let dur = ts.duration_since(UNIX_EPOCH).unwrap_or_default();
+                // C `format_timestamp` renders time 0 as "-" (an unset stamp).
+                let normalized = if dur.is_zero() {
+                    "-".to_string()
+                } else {
+                    format_timestamp(ts)
+                };
+                // Multiple inputs are separated by a blank line (none trails).
+                if i > 0 {
+                    println!();
+                }
                 println!("  Original form: {expr}");
-                println!("Normalized form: {}", format_timestamp(ts));
-                println!("       (in UTC): {}", format_timestamp(ts));
-                println!("   UNIX seconds: @{}", dur.as_secs());
+                println!("Normalized form: {normalized}");
+                // C prints the "(in UTC)" line only when the normalized form is
+                // rendered in a non-UTC local zone (to also show the UTC value).
+                // We currently render the normalized form in UTC, so it is
+                // redundant and omitted, matching C under TZ=UTC.
+                if !normalized.ends_with(" UTC") && normalized != "-" {
+                    println!("       (in UTC): {normalized}");
+                }
+                let micros = dur.subsec_micros();
+                if micros == 0 {
+                    println!("   UNIX seconds: @{}", dur.as_secs());
+                } else {
+                    println!("   UNIX seconds: @{}.{:06}", dur.as_secs(), micros);
+                }
                 let from_now = if let Ok(d) = ts.duration_since(SystemTime::now()) {
                     format!("in {}", format_usec(d.as_micros() as u64))
                 } else if let Ok(d) = SystemTime::now().duration_since(ts) {
@@ -1633,7 +2069,6 @@ fn cmd_timestamp(expressions: &[String]) {
                     "now".to_string()
                 };
                 println!("      From now: {from_now}");
-                println!();
             }
             Err(e) => {
                 eprintln!("Failed to parse timestamp '{}': {}", expr, e);
@@ -1686,7 +2121,13 @@ fn cmd_condition(expressions: &[String], unit: Option<&str>) {
 
     let mut all_met = true;
     for expr in &all_exprs {
-        let (met, reason) = evaluate_condition(expr);
+        // Prefer libsystemd's complete evaluator (the same one PID 1 uses), so
+        // every condition type it models is handled consistently. Fall back to
+        // the local evaluator for the few it does not (notably KernelVersion).
+        let (met, reason) = match libsystemd::units::evaluate_condition_spec(expr) {
+            Some(met) => (met, if met { "met" } else { "not met" }),
+            None => evaluate_condition(expr),
+        };
         let status = if met { "met" } else { "not met" };
         println!("{expr}: {status} ({reason})");
         if !met {
@@ -2650,69 +3091,80 @@ fn cmd_inspect_elf(files: &[String]) {
 
 // ── FD store ──────────────────────────────────────────────────────────────
 
-fn cmd_fdstore(unit: &str) {
-    // Attempt to query fd store via the runtime state directory.
-    // Exit with code 1 when no fdstore entries exist (matching real
-    // systemd's behavior that tests rely on).
-    let fdstore_dir = format!("/run/rust-systemd/fdstore/{unit}");
-    let path = Path::new(&fdstore_dir);
-
-    println!("         Unit: {unit}");
-
-    if !path.exists() {
-        // Try the standard systemd path as well
-        let systemd_path = format!("/run/systemd/units/fdstore/{unit}");
-        if Path::new(&systemd_path).exists()
-            && let Ok(entries) = fs::read_dir(&systemd_path)
-        {
-            let fds: Vec<_> = entries.flatten().collect();
-            if fds.is_empty() {
-                println!("    FD Store: (no entries)");
-                std::process::exit(1);
-            }
-            println!("    FD Store: {} entries", fds.len());
-            for entry in &fds {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let metadata = entry.metadata().ok();
-                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                println!("      {name}: {size} bytes");
-            }
-            return;
-        }
-
-        eprintln!("No file descriptor store data found for {unit}.");
-        std::process::exit(1);
-    }
-
-    match fs::read_dir(path) {
-        Ok(entries) => {
-            let fds: Vec<_> = entries.flatten().collect();
-            if fds.is_empty() {
-                println!("    FD Store: (empty)");
-                std::process::exit(1);
-            } else {
-                println!("    FD Store: {} entries", fds.len());
-                println!();
-                println!("  {:>4}  {:<20}  INFO", "IDX", "NAME");
-                for (idx, entry) in fds.iter().enumerate() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    // Try to read metadata about the fd
-                    let info = fs::read_to_string(entry.path())
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string();
-                    let info_display = if info.is_empty() {
-                        "(no info)".to_string()
-                    } else {
-                        info
-                    };
-                    println!("  {:>4}  {:<20}  {}", idx, name, info_display);
+fn cmd_fdstore(unit: &str, json: Option<&str>) {
+    // Query PID 1's live fd store over the control socket. The manager returns a
+    // JSON array of per-fd metadata (fdname, type, devno, inode, rdevno, path,
+    // flags), mirroring systemd's DumpFileDescriptorStore. Exit 1 when the store
+    // is empty/absent, which the tests (and upstream) rely on.
+    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
+    let request = format!(r#"{{"jsonrpc":"2.0","method":"fdstore-dump","params":"{unit}","id":1}}"#);
+    let entries: Vec<serde_json::Value> = {
+        use std::io::Write;
+        let mut got = None;
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+            let _ = stream.write_all(request.as_bytes());
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+            if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream) {
+                if resp.get("error").is_some() {
+                    eprintln!("No file descriptor store data found for {unit}.");
+                    std::process::exit(1);
+                }
+                if let Some(serde_json::Value::Array(arr)) = resp.get("result") {
+                    got = Some(arr.clone());
                 }
             }
         }
-        Err(e) => {
-            eprintln!("    FD Store: error reading: {e}");
-            std::process::exit(1);
+        match got {
+            Some(v) => v,
+            None => {
+                eprintln!("No file descriptor store data found for {unit}.");
+                std::process::exit(1);
+            }
+        }
+    };
+
+    if entries.is_empty() {
+        eprintln!("No file descriptor store entries for {unit}.");
+        std::process::exit(1);
+    }
+
+    if let Some(mode) = json {
+        // Emit fields in the order upstream's DumpFileDescriptorStore uses
+        // (fdname, type, devno, inode, rdevno, path, flags); serde_json would
+        // otherwise sort keys alphabetically, which the TEST-80 grep rejects.
+        let field = |e: &serde_json::Value, k: &str| e.get(k).cloned().unwrap_or(serde_json::Value::Null);
+        let objs: Vec<String> = entries
+            .iter()
+            .map(|e| {
+                format!(
+                    r#"{{"fdname":{},"type":{},"devno":{},"inode":{},"rdevno":{},"path":{},"flags":{}}}"#,
+                    field(e, "fdname"),
+                    field(e, "type"),
+                    field(e, "devno"),
+                    field(e, "inode"),
+                    field(e, "rdevno"),
+                    field(e, "path"),
+                    field(e, "flags"),
+                )
+            })
+            .collect();
+        if mode == "pretty" {
+            println!("[\n\t{}\n]", objs.join(",\n\t"));
+        } else {
+            println!("[{}]", objs.join(","));
+        }
+    } else {
+        // Text: a header line plus one line per entry, so `wc -l` == 1 + N
+        // (upstream prints 2 lines for a single stored fd).
+        println!("File Descriptor Store of {unit}:");
+        for e in &entries {
+            let s = |k: &str| {
+                e.get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-")
+                    .to_string()
+            };
+            println!("  {}  {}  {}", s("fdname"), s("path"), s("flags"));
         }
     }
 }
@@ -3088,43 +3540,64 @@ const EXIT_STATUS_TABLE: &[(&str, u8, &str)] = &[
     ("CREDENTIALS", 243, "systemd"),
     ("BPF", 244, "systemd"),
     ("KSM", 245, "systemd"),
+    ("MEMORY_THP", 246, "systemd"),
     ("EXCEPTION", 255, "systemd"),
 ];
 
 fn cmd_exit_status(statuses: &[String]) {
-    println!("{:<24} {:>6} CLASS", "NAME", "STATUS");
-
-    if statuses.is_empty() {
-        for &(name, code, class) in EXIT_STATUS_TABLE {
-            println!("{:<24} {:>6} {}", name, code, class);
-        }
-        return;
-    }
-
-    let mut had_error = false;
-    for s in statuses {
-        if let Ok(num) = s.parse::<u8>() {
-            if let Some(&(name, code, class)) =
-                EXIT_STATUS_TABLE.iter().find(|&&(_, c, _)| c == num)
-            {
-                println!("{:<24} {:>6} {}", name, code, class);
-            } else {
-                println!("{:<24} {:>6} -", "-", num);
+    // Resolve every argument first. C's verb_exit_status errors out, printing no
+    // table, on the first invalid status, and prints rows in argument order (it
+    // does not sort). A name is matched case-sensitively (exit_status_from_string
+    // uses streq); otherwise the argument must be a u8 (0..=255), which shows as
+    // "-"/"-" when no named mapping exists. Anything else is "Invalid exit
+    // status".
+    let rows: Vec<(&str, u8, &str)> = if statuses.is_empty() {
+        EXIT_STATUS_TABLE.to_vec()
+    } else {
+        let mut rows = Vec::with_capacity(statuses.len());
+        for s in statuses {
+            let resolved = EXIT_STATUS_TABLE
+                .iter()
+                .find(|&&(n, _, _)| n == s.as_str())
+                .copied()
+                .or_else(|| {
+                    s.parse::<u8>().ok().map(|num| {
+                        EXIT_STATUS_TABLE
+                            .iter()
+                            .find(|&&(_, c, _)| c == num)
+                            .copied()
+                            .unwrap_or(("-", num, "-"))
+                    })
+                });
+            match resolved {
+                Some(row) => rows.push(row),
+                None => {
+                    eprintln!("Invalid exit status \"{s}\".");
+                    std::process::exit(1);
+                }
             }
-        } else {
-            let upper = s.to_uppercase();
-            if let Some(&(name, code, class)) =
-                EXIT_STATUS_TABLE.iter().find(|&&(n, _, _)| n == upper)
-            {
-                println!("{:<24} {:>6} {}", name, code, class);
-            } else {
-                eprintln!("Unknown exit status: {s}");
-                had_error = true;
-            }
         }
-    }
-    if had_error {
-        std::process::exit(1);
+        rows
+    };
+
+    // Column widths follow C's table formatter: NAME fits the widest name shown
+    // (never narrower than its header), STATUS is right-aligned and at least as
+    // wide as "STATUS", and CLASS is the trailing column.
+    let name_w = rows
+        .iter()
+        .map(|&(n, _, _)| n.len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    let status_w = rows
+        .iter()
+        .map(|&(_, c, _)| c.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max("STATUS".len());
+    println!("{:<name_w$} {:>status_w$} CLASS", "NAME", "STATUS");
+    for (name, code, class) in rows {
+        println!("{:<name_w$} {:>status_w$} {}", name, code, class);
     }
 }
 
@@ -3175,68 +3648,1381 @@ const CAPABILITY_TABLE: &[(&str, u32)] = &[
     ("cap_checkpoint_restore", 40),
 ];
 
-fn cmd_capability(capabilities: &[String], mask: Option<&str>) {
-    if let Some(hex) = mask {
-        let hex = hex.strip_prefix("0x").unwrap_or(hex);
-        let mask_val = match u64::from_str_radix(hex, 16) {
-            Ok(v) => v,
-            Err(_) => {
-                eprintln!("Invalid capability mask: {hex}");
+fn cmd_capability(capabilities: &[String], mask: bool) {
+    // The highest capability number rust knows. C uses MAX(CAP_LAST_CAP,
+    // cap_last_cap()) which also probes the running kernel, so on a newer kernel
+    // C may accept a higher number than rust does.
+    let last_cap = CAPABILITY_TABLE.iter().map(|&(_, n)| n).max().unwrap_or(0);
+
+    // Resolve the rows to print. C's verb_capabilities resolves every argument
+    // first and bails out with an error, printing no table at all, on the first
+    // unknown capability; every mode emits the table sorted by number (the full
+    // table is naturally ordered, the others via table_set_sort).
+    let rows: Vec<(&str, u32)> = if mask {
+        // Mask mode: `-m`/`--mask` is a flag; the single positional argument is a
+        // hex capability mask and each set bit selects that capability.
+        if capabilities.len() != 1 {
+            eprintln!("Exactly 1 positional argument expected.");
+            std::process::exit(1);
+        }
+        let arg = &capabilities[0];
+        let hex = arg.strip_prefix("0x").unwrap_or(arg);
+        let Ok(mut cap_mask) = u64::from_str_radix(hex, 16) else {
+            eprintln!("Capability mask \"{arg}\" is not valid.");
+            std::process::exit(1);
+        };
+        let mut rows = Vec::new();
+        let mut c: u32 = 0;
+        while cap_mask != 0 {
+            if cap_mask & 1 != 0 {
+                if c > last_cap {
+                    eprintln!("Capability {c} is not known.");
+                    std::process::exit(1);
+                }
+                if let Some(&row) = CAPABILITY_TABLE.iter().find(|&&(_, n)| n == c) {
+                    rows.push(row);
+                }
+            }
+            c += 1;
+            cap_mask >>= 1;
+        }
+        rows.sort_by_key(|&(_, n)| n);
+        rows
+    } else if capabilities.is_empty() {
+        CAPABILITY_TABLE.to_vec()
+    } else {
+        let mut rows = Vec::with_capacity(capabilities.len());
+        for s in capabilities {
+            let found = if let Ok(num) = s.parse::<u32>() {
+                CAPABILITY_TABLE.iter().find(|&&(_, n)| n == num).copied()
+            } else {
+                // C's capability_from_name matches the full "cap_xxx" name
+                // case-insensitively; it does not accept a bare name without the
+                // "cap_" prefix (e.g. "sys_admin" is unknown).
+                let lower = s.to_lowercase();
+                CAPABILITY_TABLE.iter().find(|&&(n, _)| n == lower).copied()
+            };
+            match found {
+                Some(row) => rows.push(row),
+                None => {
+                    // Match C's message and its print-nothing-on-error behavior.
+                    eprintln!("Capability \"{s}\" is not known.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        rows.sort_by_key(|&(_, n)| n);
+        rows
+    };
+
+    // Column widths follow C's table formatter: NAME fits the widest name shown
+    // (never narrower than the "NAME" header), NUMBER stays right-aligned and at
+    // least as wide as its header.
+    let name_w = rows
+        .iter()
+        .map(|&(n, _)| n.len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    let num_w = rows
+        .iter()
+        .map(|&(_, n)| n.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max("NUMBER".len());
+    println!("{:<name_w$} {:>num_w$}", "NAME", "NUMBER");
+    for (name, num) in rows {
+        println!("{:<name_w$} {:>num_w$}", name, num);
+    }
+}
+
+// ── Architecture table ─────────────────────────────────────────────────────
+
+/// The `Architecture` enum from C's src/basic/architecture.h, in declaration
+/// order (the index is the enum id, which is `architectures`' sort key), mapped
+/// to the name `architecture_to_string` produces.
+const ARCH_NAMES: &[&str] = &[
+    "alpha",       // 0  ALPHA
+    "arc",         // 1  ARC
+    "arc-be",      // 2  ARC_BE
+    "arm",         // 3  ARM
+    "arm64",       // 4  ARM64
+    "arm64-be",    // 5  ARM64_BE
+    "arm-be",      // 6  ARM_BE
+    "cris",        // 7  CRIS
+    "ia64",        // 8  IA64
+    "loongarch64", // 9  LOONGARCH64
+    "m68k",        // 10 M68K
+    "mips",        // 11 MIPS
+    "mips64",      // 12 MIPS64
+    "mips64-le",   // 13 MIPS64_LE
+    "mips-le",     // 14 MIPS_LE
+    "nios2",       // 15 NIOS2
+    "parisc",      // 16 PARISC
+    "parisc64",    // 17 PARISC64
+    "ppc",         // 18 PPC
+    "ppc64",       // 19 PPC64
+    "ppc64-le",    // 20 PPC64_LE
+    "ppc-le",      // 21 PPC_LE
+    "riscv32",     // 22 RISCV32
+    "riscv64",     // 23 RISCV64
+    "s390",        // 24 S390
+    "s390x",       // 25 S390X
+    "sh",          // 26 SH
+    "sh64",        // 27 SH64
+    "sparc",       // 28 SPARC
+    "sparc64",     // 29 SPARC64
+    "tilegx",      // 30 TILEGX
+    "x86",         // 31 X86
+    "x86-64",      // 32 X86_64
+];
+
+/// The native architecture (C's compile-time `native_architecture()`), and the
+/// secondary personality if any (`ARCHITECTURE_SECONDARY`), as indices into
+/// [`ARCH_NAMES`].
+fn native_and_secondary_arch() -> (usize, Option<usize>) {
+    // Index constants for readability.
+    const ARM: usize = 3;
+    const ARM64: usize = 4;
+    const MIPS: usize = 11;
+    const MIPS64: usize = 12;
+    const PPC: usize = 18;
+    const PPC64: usize = 19;
+    const PPC64_LE: usize = 20;
+    const PPC_LE: usize = 21;
+    const S390: usize = 24;
+    const S390X: usize = 25;
+    const X86: usize = 31;
+    const X86_64: usize = 32;
+
+    if cfg!(target_arch = "x86_64") {
+        (X86_64, Some(X86))
+    } else if cfg!(target_arch = "x86") {
+        (X86, None)
+    } else if cfg!(target_arch = "aarch64") {
+        (ARM64, Some(ARM))
+    } else if cfg!(target_arch = "arm") {
+        (ARM, None)
+    } else if cfg!(target_arch = "powerpc64") {
+        // Both endiannesses map PPC64<->PPC via the secondary personality.
+        if cfg!(target_endian = "little") {
+            (PPC64_LE, Some(PPC_LE))
+        } else {
+            (PPC64, Some(PPC))
+        }
+    } else if cfg!(target_arch = "s390x") {
+        (S390X, Some(S390))
+    } else if cfg!(target_arch = "mips64") {
+        (MIPS64, Some(MIPS))
+    } else if cfg!(target_arch = "riscv64") {
+        (23, None)
+    } else {
+        // Unknown target: no native match, so every row is "foreign".
+        (usize::MAX, None)
+    }
+}
+
+/// The running kernel's architecture (C's `uname_architecture()`), from
+/// `uname().machine`, as an index into [`ARCH_NAMES`] when recognized.
+fn uname_arch() -> Option<usize> {
+    let mut u: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut u) } != 0 {
+        return None;
+    }
+    let machine: Vec<u8> = u
+        .machine
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    let machine = String::from_utf8_lossy(&machine);
+    // The common uname machine strings mapped to canonical architecture names.
+    let name = match machine.as_ref() {
+        "x86_64" => "x86-64",
+        "i386" | "i486" | "i586" | "i686" => "x86",
+        "aarch64" => "arm64",
+        "aarch64_be" => "arm64-be",
+        m if m.starts_with("armv") => "arm",
+        "ppc64" => "ppc64",
+        "ppc64le" => "ppc64-le",
+        "s390x" => "s390x",
+        "riscv64" => "riscv64",
+        "loongarch64" => "loongarch64",
+        "mips64" => "mips64",
+        other => other,
+    };
+    ARCH_NAMES.iter().position(|&n| n == name)
+}
+
+fn cmd_architectures(args: &[String], json: Option<&str>) {
+    let (native, secondary) = native_and_secondary_arch();
+    let uname = uname_arch();
+
+    // Resolve the architecture indices to show. C errors out (printing no table)
+    // on the first unknown architecture; the full table is emitted in enum order
+    // and an explicit list is sorted by the enum id (column 0).
+    let rows: Vec<usize> = if args.is_empty() {
+        (0..ARCH_NAMES.len()).collect()
+    } else {
+        let mut rows = Vec::with_capacity(args.len());
+        for arg in args {
+            let idx = match arg.as_str() {
+                "native" => native,
+                "uname" => uname.unwrap_or(usize::MAX),
+                "secondary" => match secondary {
+                    Some(s) => s,
+                    None => {
+                        eprintln!("No secondary architecture.");
+                        std::process::exit(1);
+                    }
+                },
+                name => match ARCH_NAMES.iter().position(|&n| n == name) {
+                    Some(i) => i,
+                    None => {
+                        eprintln!("Architecture \"{arg}\" not known.");
+                        std::process::exit(1);
+                    }
+                },
+            };
+            rows.push(idx);
+        }
+        rows.sort_unstable();
+        rows
+    };
+
+    let support = |a: usize| -> &'static str {
+        if a == native {
+            "native"
+        } else if Some(a) == uname {
+            "uname"
+        } else if Some(a) == secondary {
+            "secondary"
+        } else {
+            "foreign"
+        }
+    };
+
+    // --json: emit the underlying table as JSON. The C table has a hidden "id"
+    // column (the architecture enum index, also the sort key) plus "name" and
+    // "support"; all three appear in the JSON output.
+    if let Some(mode) = json {
+        let arr: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|&a| {
+                serde_json::json!({
+                    "id": a,
+                    "name": ARCH_NAMES[a],
+                    "support": support(a),
+                })
+            })
+            .collect();
+        let val = serde_json::Value::Array(arr);
+        let out = if mode == "pretty" {
+            serde_json::to_string_pretty(&val).unwrap()
+        } else {
+            serde_json::to_string(&val).unwrap()
+        };
+        println!("{out}");
+        return;
+    }
+
+    // C's table formatter sizes NAME to the widest name shown (never narrower
+    // than the "NAME" header); SUPPORT is the trailing column.
+    let name_w = rows
+        .iter()
+        .map(|&a| ARCH_NAMES[a].len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    println!("{:<name_w$} SUPPORT", "NAME");
+    for a in rows {
+        println!("{:<name_w$} {}", ARCH_NAMES[a], support(a));
+    }
+}
+
+// ── Filesystem sets ────────────────────────────────────────────────────────
+
+// GENERATED from `systemd-analyze filesystems @<set>` (systemd 260.2). Do not
+// hand-edit; the differential oracle validates it against C. See the frontier
+// memory + src/basic/filesystem-sets.py for the upstream source of truth.
+const FS_MAGICS: &[(&str, &[u64])] = &[
+    ("adfs", &[0xadf5]),
+    ("affs", &[0xadff]),
+    ("afs", &[0x6b414653, 0x5346414f]),
+    ("anon_inodefs", &[0x9041934]),
+    ("apparmorfs", &[0x5a3c69f0]),
+    ("autofs", &[0x187]),
+    ("balloon-kvm", &[0x13661366]),
+    ("bcachefs", &[0xca451a4e]),
+    ("bdev", &[0x62646576]),
+    ("binder", &[0x6c6f6f70]),
+    ("binfmt_misc", &[0x42494e4d]),
+    ("bpf", &[0xcafe4a11]),
+    ("btrfs", &[0x9123683e]),
+    ("btrfs_test_fs", &[0x73727279]),
+    ("ceph", &[0xc36400]),
+    ("cgroup", &[0x27e0eb]),
+    ("cgroup2", &[0x63677270]),
+    ("cifs", &[0xff534d42, 0xfe534d42]),
+    ("coda", &[0x73757245]),
+    ("configfs", &[0x62656570]),
+    ("cpuset", &[0x27e0eb]),
+    ("cramfs", &[0x28cd3d45]),
+    ("dax", &[0x64646178]),
+    ("debugfs", &[0x64626720]),
+    ("devmem", &[0x454d444d]),
+    ("devpts", &[0x1cd1]),
+    ("devtmpfs", &[0x1021994]),
+    ("dmabuf", &[0x444d4142]),
+    ("ecryptfs", &[0xf15f]),
+    ("efivarfs", &[0xde5e81e4]),
+    ("efs", &[0x414a53]),
+    ("erofs", &[0xe0f5e1e2]),
+    ("exfat", &[0x2011bab0]),
+    ("ext2", &[0xef53]),
+    ("ext3", &[0xef53]),
+    ("ext4", &[0xef53]),
+    ("f2fs", &[0xf2f52010]),
+    ("fuse", &[0x65735546]),
+    ("fuseblk", &[0x65735546]),
+    ("fusectl", &[0x65735543]),
+    ("gfs", &[0x1161970]),
+    ("gfs2", &[0x1161970]),
+    ("gmem", &[0x474d454d]),
+    ("hostfs", &[0xc0ffee]),
+    ("hpfs", &[0xf995e849]),
+    ("hugetlbfs", &[0x958458f6]),
+    ("iso9660", &[0x9660]),
+    ("jffs2", &[0x72b6]),
+    ("minix", &[0x137f, 0x138f, 0x2468, 0x2478, 0x4d5a]),
+    ("mqueue", &[0x19800202]),
+    ("msdos", &[0x4d44]),
+    ("ncp", &[0x564c]),
+    ("ncpfs", &[0x564c]),
+    ("nfs", &[0x6969]),
+    ("nfs4", &[0x6969]),
+    ("nilfs2", &[0x3434]),
+    ("nsfs", &[0x6e736673]),
+    ("ntfs", &[0x5346544e]),
+    ("ntfs3", &[0x7366746e]),
+    ("nullfs", &[0x4e554c4c]),
+    ("ocfs2", &[0x7461636f]),
+    ("openpromfs", &[0x9fa1]),
+    ("orangefs", &[0x20030529]),
+    ("overlay", &[0x794c7630]),
+    ("pidfs", &[0x50494446]),
+    ("pipefs", &[0x50495045]),
+    ("ppc-cmm", &[0xc7571590]),
+    ("proc", &[0x9fa0]),
+    ("pstore", &[0x6165676c]),
+    ("pvfs2", &[0x20030529]),
+    ("qnx4", &[0x2f]),
+    ("qnx6", &[0x68191122]),
+    ("ramfs", &[0x858458f6]),
+    ("reiserfs", &[0x52654973]),
+    ("resctrl", &[0x7655821]),
+    ("rpc_pipefs", &[0x67596969]),
+    ("secretmem", &[0x5345434d]),
+    ("securityfs", &[0x73636673]),
+    ("selinuxfs", &[0xf97cff8c]),
+    ("shiftfs", &[0x6a656a62]),
+    ("smackfs", &[0x43415d53]),
+    ("smb3", &[0xff534d42]),
+    ("smbfs", &[0x517b]),
+    ("sockfs", &[0x534f434b]),
+    ("squashfs", &[0x73717368]),
+    ("sysfs", &[0x62656572]),
+    ("tmpfs", &[0x1021994]),
+    ("tracefs", &[0x74726163]),
+    ("udf", &[0x15013346]),
+    ("usbdevfs", &[0x9fa2]),
+    ("v9fs", &[0x1021997]),
+    ("vboxsf", &[0x786f4256]),
+    ("vfat", &[0x4d44]),
+    ("xenfs", &[0xabba1974]),
+    ("xfs", &[0x58465342]),
+    ("z3fold", &[0x33]),
+    ("zonefs", &[0x5a4f4653]),
+    ("zsmalloc", &[0x58295829]),
+];
+
+const MAGIC_OWNER: &[(u64, &str)] = &[
+    (0x2f, "qnx4"),
+    (0x33, "z3fold"),
+    (0x187, "autofs"),
+    (0x137f, "minix"),
+    (0x138f, "minix"),
+    (0x1cd1, "devpts"),
+    (0x2468, "minix"),
+    (0x2478, "minix"),
+    (0x3434, "nilfs2"),
+    (0x4d44, "vfat"),
+    (0x4d5a, "minix"),
+    (0x517b, "smbfs"),
+    (0x564c, "ncpfs"),
+    (0x6969, "nfs4"),
+    (0x72b6, "jffs2"),
+    (0x9660, "iso9660"),
+    (0x9fa0, "proc"),
+    (0x9fa1, "openpromfs"),
+    (0x9fa2, "usbdevfs"),
+    (0xadf5, "adfs"),
+    (0xadff, "affs"),
+    (0xef53, "ext4"),
+    (0xf15f, "ecryptfs"),
+    (0x27e0eb, "cgroup"),
+    (0x414a53, "efs"),
+    (0xc0ffee, "hostfs"),
+    (0xc36400, "ceph"),
+    (0x1021994, "tmpfs"),
+    (0x1021997, "v9fs"),
+    (0x1161970, "gfs2"),
+    (0x7655821, "resctrl"),
+    (0x9041934, "anon_inodefs"),
+    (0x13661366, "balloon-kvm"),
+    (0x15013346, "udf"),
+    (0x19800202, "mqueue"),
+    (0x20030529, "orangefs"),
+    (0x2011bab0, "exfat"),
+    (0x28cd3d45, "cramfs"),
+    (0x42494e4d, "binfmt_misc"),
+    (0x43415d53, "smackfs"),
+    (0x444d4142, "dmabuf"),
+    (0x454d444d, "devmem"),
+    (0x474d454d, "gmem"),
+    (0x4e554c4c, "nullfs"),
+    (0x50494446, "pidfs"),
+    (0x50495045, "pipefs"),
+    (0x52654973, "reiserfs"),
+    (0x5345434d, "secretmem"),
+    (0x5346414f, "afs"),
+    (0x5346544e, "ntfs"),
+    (0x534f434b, "sockfs"),
+    (0x58295829, "zsmalloc"),
+    (0x58465342, "xfs"),
+    (0x5a3c69f0, "apparmorfs"),
+    (0x5a4f4653, "zonefs"),
+    (0x6165676c, "pstore"),
+    (0x62646576, "bdev"),
+    (0x62656570, "configfs"),
+    (0x62656572, "sysfs"),
+    (0x63677270, "cgroup2"),
+    (0x64626720, "debugfs"),
+    (0x64646178, "dax"),
+    (0x65735543, "fusectl"),
+    (0x65735546, "fuse"),
+    (0x67596969, "rpc_pipefs"),
+    (0x68191122, "qnx6"),
+    (0x6a656a62, "shiftfs"),
+    (0x6b414653, "afs"),
+    (0x6c6f6f70, "binder"),
+    (0x6e736673, "nsfs"),
+    (0x73636673, "securityfs"),
+    (0x7366746e, "ntfs3"),
+    (0x73717368, "squashfs"),
+    (0x73727279, "btrfs_test_fs"),
+    (0x73757245, "coda"),
+    (0x7461636f, "ocfs2"),
+    (0x74726163, "tracefs"),
+    (0x786f4256, "vboxsf"),
+    (0x794c7630, "overlay"),
+    (0x858458f6, "ramfs"),
+    (0x9123683e, "btrfs"),
+    (0x958458f6, "hugetlbfs"),
+    (0xabba1974, "xenfs"),
+    (0xc7571590, "ppc-cmm"),
+    (0xca451a4e, "bcachefs"),
+    (0xcafe4a11, "bpf"),
+    (0xde5e81e4, "efivarfs"),
+    (0xe0f5e1e2, "erofs"),
+    (0xf2f52010, "f2fs"),
+    (0xf97cff8c, "selinuxfs"),
+    (0xf995e849, "hpfs"),
+    (0xfe534d42, "cifs"),
+    (0xff534d42, "cifs"),
+];
+
+const FS_SETS: &[(&str, &str, &[&str])] = &[
+    ("@basic-api", "Basic filesystem API", &["cgroup", "cgroup2", "devpts", "devtmpfs", "mqueue", "proc", "sysfs"]),
+    ("@anonymous", "Anonymous inodes", &["anon_inodefs", "pipefs", "sockfs"]),
+    ("@application", "Application virtual filesystems", &["autofs", "fuse", "overlay"]),
+    ("@auxiliary-api", "Auxiliary filesystem API", &["binfmt_misc", "configfs", "efivarfs", "fusectl", "hugetlbfs", "rpc_pipefs", "securityfs"]),
+    ("@common-block", "Common block device filesystems", &["btrfs", "erofs", "exfat", "ext4", "f2fs", "iso9660", "ntfs3", "squashfs", "udf", "vfat", "xfs"]),
+    ("@historical-block", "Historical block device filesystems", &["ext2", "ext3", "minix"]),
+    ("@network", "Well-known network filesystems", &["afs", "ceph", "cifs", "gfs", "gfs2", "ncp", "ncpfs", "nfs", "nfs4", "ocfs2", "orangefs", "pvfs2", "smb3", "smbfs"]),
+    ("@privileged-api", "Privileged filesystem API", &["bpf", "debugfs", "pstore", "tracefs"]),
+    ("@security", "Security/MAC API VFS", &["apparmorfs", "selinuxfs", "smackfs"]),
+    ("@temporary", "Temporary filesystems", &["ramfs", "tmpfs"]),
+    ("@known", "All known filesystems declared in the kernel", &["apparmorfs", "adfs", "affs", "afs", "anon_inodefs", "autofs", "balloon-kvm", "bcachefs", "bdev", "binder", "binfmt_misc", "bpf", "btrfs", "btrfs_test_fs", "cpuset", "ceph", "cgroup2", "cgroup", "cifs", "coda", "configfs", "cramfs", "dax", "debugfs", "devmem", "devpts", "devtmpfs", "dmabuf", "ecryptfs", "efivarfs", "efs", "erofs", "ext2", "ext3", "ext4", "exfat", "f2fs", "fuseblk", "fuse", "fusectl", "gfs", "gfs2", "gmem", "hostfs", "hpfs", "hugetlbfs", "iso9660", "jffs2", "minix", "mqueue", "msdos", "ncp", "ncpfs", "nfs", "nfs4", "nilfs2", "nsfs", "ntfs", "ntfs3", "nullfs", "ocfs2", "openpromfs", "orangefs", "overlay", "pidfs", "pipefs", "ppc-cmm", "proc", "pstore", "pvfs2", "qnx4", "qnx6", "ramfs", "resctrl", "reiserfs", "rpc_pipefs", "secretmem", "securityfs", "selinuxfs", "shiftfs", "smackfs", "smb3", "smbfs", "sockfs", "squashfs", "sysfs", "tmpfs", "tracefs", "udf", "usbdevfs", "vboxsf", "vfat", "v9fs", "xenfs", "xfs", "z3fold", "zonefs", "zsmalloc"]),
+];
+
+/// Look up a filesystem's magic numbers (empty if unknown).
+fn fs_magics(fs: &str) -> &'static [u64] {
+    FS_MAGICS
+        .iter()
+        .find(|(f, _)| *f == fs)
+        .map(|(_, m)| *m)
+        .unwrap_or(&[])
+}
+
+/// The canonical owner filesystem of a magic (C's fs_type_to_string), used for
+/// the "[owner]" alias notation.
+fn magic_owner(magic: u64) -> Option<&'static str> {
+    MAGIC_OWNER
+        .iter()
+        .find(|(m, _)| *m == magic)
+        .map(|(_, o)| *o)
+}
+
+/// A filesystem is "primary" if it owns at least one of its magics.
+fn fs_is_primary(fs: &str) -> bool {
+    fs_magics(fs).iter().any(|&m| magic_owner(m) == Some(fs))
+}
+
+/// Render one filesystem set exactly like C's dump_filesystem_set.
+fn dump_filesystem_set(name: &str, comment: &str, members: &[&str]) {
+    println!("{name}");
+    println!("    # {comment}");
+    for &fs in members {
+        // A nested "@set" reference (none are currently defined) prints as-is.
+        if fs.starts_with('@') {
+            println!("    {fs}");
+            continue;
+        }
+        print!("    {fs}");
+        let magics = fs_magics(fs);
+        for (i, &m) in magics.iter().enumerate() {
+            print!("{}", if i == 0 { " (magic: " } else { ", " });
+            print!("0x{m:x}");
+            if let Some(owner) = magic_owner(m)
+                && owner != fs
+            {
+                print!("[{owner}]");
+            }
+            if i + 1 == magics.len() {
+                print!(")");
+            }
+        }
+        println!();
+    }
+}
+
+fn cmd_filesystems(args: &[String]) {
+    use std::collections::BTreeSet;
+
+    if !args.is_empty() {
+        // Explicit set(s): error out on the first unknown one (C's ENOENT path).
+        for (i, name) in args.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            match FS_SETS.iter().find(|(n, _, _)| *n == name.as_str()) {
+                Some(&(n, c, m)) => dump_filesystem_set(n, c, m),
+                None => {
+                    eprintln!("Filesystem set \"{name}\" not found.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        return;
+    }
+
+    // Full listing: every set, then the ungrouped and unlisted sections.
+    for (i, &(n, c, m)) in FS_SETS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        dump_filesystem_set(n, c, m);
+    }
+
+    // "Ungrouped": @known members not in any *other* group, primary only.
+    let known_members = FS_SETS.last().map(|(_, _, m)| *m).unwrap_or(&[]);
+    let grouped: BTreeSet<&str> = FS_SETS[..FS_SETS.len().saturating_sub(1)]
+        .iter()
+        .flat_map(|(_, _, m)| m.iter().copied())
+        .collect();
+    let mut ungrouped: Vec<&str> = known_members
+        .iter()
+        .copied()
+        .filter(|fs| !grouped.contains(fs) && fs_is_primary(fs))
+        .collect();
+    ungrouped.sort_unstable();
+    println!();
+    println!("# Ungrouped filesystems (known but not included in any of the groups except @known):");
+    for fs in ungrouped {
+        println!("#   {fs}");
+    }
+
+    // "Unlisted": filesystems the local kernel knows that are in no group at
+    // all. Host-dependent; shown only when non-empty (matching C).
+    if let Ok(content) = std::fs::read_to_string("/proc/filesystems") {
+        let all_grouped: BTreeSet<&str> = FS_SETS
+            .iter()
+            .flat_map(|(_, _, m)| m.iter().copied())
+            .collect();
+        let mut unlisted: Vec<String> = content
+            .lines()
+            .filter_map(|l| l.split_once('\t').map(|(_, name)| name.trim().to_string()))
+            .filter(|name| !all_grouped.contains(name.as_str()))
+            .collect();
+        unlisted.sort();
+        unlisted.dedup();
+        if !unlisted.is_empty() {
+            println!();
+            println!("# Unlisted filesystems (available to the local kernel, but not included in any of the groups listed above):");
+            for fs in unlisted {
+                println!("#   {fs}");
+            }
+        }
+    }
+}
+
+// ── Syscall filter sets ────────────────────────────────────────────────────
+
+// GENERATED from `systemd-analyze syscall-filter @<set>` (systemd 260.2). Do
+// not hand-edit; the differential oracle validates it against C.
+const SYSCALL_SETS: &[(&str, &str, &[&str])] = &[
+    ("@default", "System calls that are always permitted", &["@sandbox", "arch_prctl", "brk", "cacheflush", "clock_getres", "clock_getres_time64", "clock_gettime", "clock_gettime64", "clock_nanosleep", "clock_nanosleep_time64", "execve", "exit", "exit_group", "futex", "futex_time64", "futex_waitv", "get_robust_list", "get_thread_area", "getegid", "getegid32", "geteuid", "geteuid32", "getgid", "getgid32", "getgroups", "getgroups32", "getpgid", "getpgrp", "getpid", "getppid", "getrandom", "getresgid", "getresgid32", "getresuid", "getresuid32", "getrlimit", "getsid", "gettid", "gettimeofday", "getuid", "getuid32", "lsm_get_self_attr", "lsm_list_modules", "membarrier", "mmap", "mmap2", "mprotect", "mseal", "munmap", "nanosleep", "pause", "prlimit64", "restart_syscall", "riscv_flush_icache", "riscv_hwprobe", "rseq", "rt_sigreturn", "sched_getaffinity", "sched_yield", "set_robust_list", "set_thread_area", "set_tid_address", "set_tls", "sigreturn", "time", "ugetrlimit", "uretprobe"]),
+    ("@aio", "Asynchronous IO", &["io_cancel", "io_destroy", "io_getevents", "io_pgetevents", "io_pgetevents_time64", "io_setup", "io_submit", "io_uring_enter", "io_uring_register", "io_uring_setup"]),
+    ("@basic-io", "Basic IO", &["_llseek", "close", "close_range", "dup", "dup2", "dup3", "llseek", "lseek", "pread64", "preadv", "preadv2", "pwrite64", "pwritev", "pwritev2", "read", "readv", "write", "writev"]),
+    ("@chown", "Change ownership of files and directories", &["chown", "chown32", "fchown", "fchown32", "fchownat", "lchown", "lchown32"]),
+    ("@clock", "Change the system time", &["adjtimex", "clock_adjtime", "clock_adjtime64", "clock_settime", "clock_settime64", "settimeofday"]),
+    ("@cpu-emulation", "System calls for CPU emulation functionality", &["modify_ldt", "subpage_prot", "switch_endian", "vm86", "vm86old"]),
+    ("@debug", "Debugging, performance monitoring and tracing functionality", &["lookup_dcookie", "perf_event_open", "pidfd_getfd", "ptrace", "rtas", "s390_runtime_instr", "sys_debug_setcontext"]),
+    ("@file-system", "File system operations", &["access", "chdir", "chmod", "close", "creat", "faccessat", "faccessat2", "fallocate", "fchdir", "fchmod", "fchmodat", "fchmodat2", "fcntl", "fcntl64", "fgetxattr", "file_getattr", "file_setattr", "flistxattr", "fremovexattr", "fsetxattr", "fstat", "fstat64", "fstatat", "fstatat64", "fstatfs", "fstatfs64", "ftruncate", "ftruncate64", "futimesat", "getcwd", "getdents", "getdents64", "getxattr", "getxattrat", "inotify_add_watch", "inotify_init", "inotify_init1", "inotify_rm_watch", "lgetxattr", "link", "linkat", "listmount", "listxattr", "listxattrat", "llistxattr", "lremovexattr", "lsetxattr", "lstat", "lstat64", "mkdir", "mkdirat", "mknod", "mknodat", "newfstat", "newfstatat", "oldfstat", "oldlstat", "oldstat", "open", "open_tree", "openat", "openat2", "readlink", "readlinkat", "removexattr", "removexattrat", "rename", "renameat", "renameat2", "rmdir", "setxattr", "setxattrat", "stat", "stat64", "statfs", "statfs64", "statmount", "statx", "symlink", "symlinkat", "truncate", "truncate64", "unlink", "unlinkat", "utime", "utimensat", "utimensat_time64", "utimes"]),
+    ("@io-event", "Event loop system calls", &["_newselect", "epoll_create", "epoll_create1", "epoll_ctl", "epoll_ctl_old", "epoll_pwait", "epoll_pwait2", "epoll_wait", "epoll_wait_old", "eventfd", "eventfd2", "poll", "ppoll", "ppoll_time64", "pselect6", "pselect6_time64", "select"]),
+    ("@ipc", "SysV IPC, POSIX Message Queues or other IPC", &["ipc", "memfd_create", "mq_getsetattr", "mq_notify", "mq_open", "mq_timedreceive", "mq_timedreceive_time64", "mq_timedsend", "mq_timedsend_time64", "mq_unlink", "msgctl", "msgget", "msgrcv", "msgsnd", "pipe", "pipe2", "process_madvise", "process_vm_readv", "process_vm_writev", "semctl", "semget", "semop", "semtimedop", "semtimedop_time64", "shmat", "shmctl", "shmdt", "shmget"]),
+    ("@keyring", "Kernel keyring access", &["add_key", "keyctl", "request_key"]),
+    ("@memlock", "Memory locking control", &["mlock", "mlock2", "mlockall", "munlock", "munlockall"]),
+    ("@module", "Loading and unloading of kernel modules", &["delete_module", "finit_module", "init_module"]),
+    ("@mount", "Mounting and unmounting of file systems", &["chroot", "fsconfig", "fsmount", "fsopen", "fspick", "mount", "mount_setattr", "move_mount", "open_tree_attr", "pivot_root", "umount", "umount2"]),
+    ("@network-io", "Network or Unix socket IO, should not be needed if not network facing", &["accept", "accept4", "bind", "connect", "getpeername", "getsockname", "getsockopt", "listen", "recv", "recvfrom", "recvmmsg", "recvmmsg_time64", "recvmsg", "send", "sendmmsg", "sendmsg", "sendto", "setsockopt", "shutdown", "socket", "socketcall", "socketpair"]),
+    ("@obsolete", "Unusual, obsolete or unimplemented system calls", &["_sysctl", "afs_syscall", "bdflush", "break", "create_module", "ftime", "get_kernel_syms", "getpmsg", "gtty", "idle", "lock", "mpx", "prof", "profil", "putpmsg", "query_module", "security", "sgetmask", "ssetmask", "stime", "stty", "sysfs", "tuxcall", "ulimit", "uselib", "ustat", "vserver"]),
+    ("@pkey", "System calls used for memory protection keys", &["pkey_alloc", "pkey_free", "pkey_mprotect"]),
+    ("@privileged", "All system calls which need super-user capabilities", &["@chown", "@clock", "@module", "@raw-io", "@reboot", "@swap", "_sysctl", "acct", "bpf", "capset", "chroot", "fanotify_init", "fanotify_mark", "nfsservctl", "open_by_handle_at", "pivot_root", "quotactl", "quotactl_fd", "setdomainname", "setfsuid", "setfsuid32", "setgroups", "setgroups32", "sethostname", "setresuid", "setresuid32", "setreuid", "setreuid32", "setuid", "setuid32", "vhangup"]),
+    ("@process", "Process control, execution, namespacing operations", &["capget", "clone", "clone3", "execveat", "fork", "getrusage", "kill", "pidfd_open", "pidfd_send_signal", "prctl", "rt_sigqueueinfo", "rt_tgsigqueueinfo", "setns", "swapcontext", "tgkill", "times", "tkill", "unshare", "vfork", "wait4", "waitid", "waitpid"]),
+    ("@raw-io", "Raw I/O port access", &["ioperm", "iopl", "pciconfig_iobase", "pciconfig_read", "pciconfig_write", "s390_pci_mmio_read", "s390_pci_mmio_write"]),
+    ("@reboot", "Reboot and reboot preparation/kexec", &["kexec_file_load", "kexec_load", "reboot"]),
+    ("@resources", "Alter resource settings", &["ioprio_set", "mbind", "migrate_pages", "move_pages", "nice", "sched_setaffinity", "sched_setattr", "sched_setparam", "sched_setscheduler", "set_mempolicy", "set_mempolicy_home_node", "setpriority", "setrlimit"]),
+    ("@sandbox", "Sandbox functionality", &["landlock_add_rule", "landlock_create_ruleset", "landlock_restrict_self", "seccomp"]),
+    ("@setuid", "Operations for changing user/group credentials", &["setgid", "setgid32", "setgroups", "setgroups32", "setregid", "setregid32", "setresgid", "setresgid32", "setresuid", "setresuid32", "setreuid", "setreuid32", "setuid", "setuid32"]),
+    ("@signal", "Process signal handling", &["rt_sigaction", "rt_sigpending", "rt_sigprocmask", "rt_sigsuspend", "rt_sigtimedwait", "rt_sigtimedwait_time64", "sigaction", "sigaltstack", "signal", "signalfd", "signalfd4", "sigpending", "sigprocmask", "sigsuspend"]),
+    ("@swap", "Enable/disable swap devices", &["swapoff", "swapon"]),
+    ("@sync", "Synchronize files and memory to storage", &["fdatasync", "fsync", "msync", "sync", "sync_file_range", "sync_file_range2", "syncfs"]),
+    ("@system-service", "General system service operations", &["@aio", "@basic-io", "@chown", "@default", "@file-system", "@io-event", "@ipc", "@keyring", "@memlock", "@network-io", "@process", "@resources", "@setuid", "@signal", "@sync", "@timer", "arm_fadvise64_64", "capget", "capset", "copy_file_range", "fadvise64", "fadvise64_64", "flock", "get_mempolicy", "getcpu", "getpriority", "ioctl", "ioprio_get", "kcmp", "madvise", "mremap", "name_to_handle_at", "oldolduname", "olduname", "personality", "readahead", "readdir", "remap_file_pages", "sched_get_priority_max", "sched_get_priority_min", "sched_getattr", "sched_getparam", "sched_getscheduler", "sched_rr_get_interval", "sched_rr_get_interval_time64", "sched_yield", "sendfile", "sendfile64", "setfsgid", "setfsgid32", "setfsuid", "setfsuid32", "setpgid", "setsid", "splice", "sysinfo", "tee", "umask", "uname", "userfaultfd", "vmsplice"]),
+    ("@timer", "Schedule operations by time", &["alarm", "getitimer", "setitimer", "timer_create", "timer_delete", "timer_getoverrun", "timer_gettime", "timer_gettime64", "timer_settime", "timer_settime64", "timerfd_create", "timerfd_gettime", "timerfd_gettime64", "timerfd_settime", "timerfd_settime64", "times"]),
+    ("@known", "All known syscalls declared in the kernel", &["@obsolete", "_llseek", "_newselect", "accept", "accept4", "access", "acct", "add_key", "adjtimex", "alarm", "arc_gettls", "arc_settls", "arc_usr_cmpxchg", "arch_prctl", "arm_fadvise64_64", "atomic_barrier", "atomic_cmpxchg_32", "bind", "bpf", "breakpoint", "brk", "cachectl", "cacheflush", "cachestat", "capget", "capset", "chdir", "chmod", "chown", "chown32", "chroot", "clock_adjtime", "clock_adjtime64", "clock_getres", "clock_getres_time64", "clock_gettime", "clock_gettime64", "clock_nanosleep", "clock_nanosleep_time64", "clock_settime", "clock_settime64", "clone", "clone3", "close", "close_range", "connect", "copy_file_range", "creat", "delete_module", "dipc", "dup", "dup2", "dup3", "epoll_create", "epoll_create1", "epoll_ctl", "epoll_ctl_old", "epoll_pwait", "epoll_pwait2", "epoll_wait", "epoll_wait_old", "eventfd", "eventfd2", "exec_with_loader", "execv", "execve", "execveat", "exit", "exit_group", "faccessat", "faccessat2", "fadvise64", "fadvise64_64", "fallocate", "fanotify_init", "fanotify_mark", "fchdir", "fchmod", "fchmodat", "fchmodat2", "fchown", "fchown32", "fchownat", "fcntl", "fcntl64", "fdatasync", "fgetxattr", "file_getattr", "file_setattr", "finit_module", "flistxattr", "flock", "fork", "fremovexattr", "fsconfig", "fsetxattr", "fsmount", "fsopen", "fspick", "fstat", "fstat64", "fstatat64", "fstatfs", "fstatfs64", "fsync", "ftruncate", "ftruncate64", "futex", "futex_requeue", "futex_time64", "futex_wait", "futex_waitv", "futex_wake", "futimesat", "get_mempolicy", "get_robust_list", "get_thread_area", "get_tls", "getcpu", "getcwd", "getdents", "getdents64", "getdomainname", "getdtablesize", "getegid", "getegid32", "geteuid", "geteuid32", "getgid", "getgid32", "getgroups", "getgroups32", "gethostname", "getitimer", "getpagesize", "getpeername", "getpgid", "getpgrp", "getpid", "getppid", "getpriority", "getrandom", "getresgid", "getresgid32", "getresuid", "getresuid32", "getrlimit", "getrusage", "getsid", "getsockname", "getsockopt", "gettid", "gettimeofday", "getuid", "getuid32", "getxattr", "getxattrat", "getxgid", "getxpid", "getxuid", "init_module", "inotify_add_watch", "inotify_init", "inotify_init1", "inotify_rm_watch", "io_cancel", "io_destroy", "io_getevents", "io_pgetevents", "io_pgetevents_time64", "io_setup", "io_submit", "io_uring_enter", "io_uring_register", "io_uring_setup", "ioctl", "ioperm", "iopl", "ioprio_get", "ioprio_set", "ipc", "kcmp", "kern_features", "kexec_file_load", "kexec_load", "keyctl", "kill", "landlock_add_rule", "landlock_create_ruleset", "landlock_restrict_self", "lchown", "lchown32", "lgetxattr", "link", "linkat", "listen", "listmount", "listns", "listxattr", "listxattrat", "llistxattr", "llseek", "lookup_dcookie", "lremovexattr", "lseek", "lsetxattr", "lsm_get_self_attr", "lsm_list_modules", "lsm_set_self_attr", "lstat", "lstat64", "madvise", "map_shadow_stack", "mbind", "membarrier", "memfd_create", "memfd_secret", "memory_ordering", "migrate_pages", "mincore", "mkdir", "mkdirat", "mknod", "mknodat", "mlock", "mlock2", "mlockall", "mmap", "mmap2", "modify_ldt", "mount", "mount_setattr", "move_mount", "move_pages", "mprotect", "mq_getsetattr", "mq_notify", "mq_open", "mq_timedreceive", "mq_timedreceive_time64", "mq_timedsend", "mq_timedsend_time64", "mq_unlink", "mremap", "mseal", "msgctl", "msgget", "msgrcv", "msgsnd", "msync", "multiplexer", "munlock", "munlockall", "munmap", "name_to_handle_at", "nanosleep", "newfstatat", "nice", "old_adjtimex", "oldfstat", "oldlstat", "oldolduname", "oldstat", "oldumount", "olduname", "open", "open_by_handle_at", "open_tree", "open_tree_attr", "openat", "openat2", "or1k_atomic", "osf_fstat", "osf_fstatfs", "osf_fstatfs64", "osf_getdirentries", "osf_getdomainname", "osf_getitimer", "osf_getrusage", "osf_getsysinfo", "osf_gettimeofday", "osf_lstat", "osf_mount", "osf_proplist_syscall", "osf_select", "osf_set_program_attributes", "osf_setitimer", "osf_setsysinfo", "osf_settimeofday", "osf_shmat", "osf_sigprocmask", "osf_sigstack", "osf_stat", "osf_statfs", "osf_statfs64", "osf_swapon", "osf_syscall", "osf_sysinfo", "osf_usleep_thread", "osf_utimes", "osf_utsname", "osf_wait4", "pause", "pciconfig_iobase", "pciconfig_read", "pciconfig_write", "perf_event_open", "perfctr", "personality", "pidfd_getfd", "pidfd_open", "pidfd_send_signal", "pipe", "pipe2", "pivot_root", "pkey_alloc", "pkey_free", "pkey_mprotect", "poll", "ppoll", "ppoll_time64", "prctl", "pread64", "preadv", "preadv2", "prlimit64", "process_madvise", "process_mrelease", "process_vm_readv", "process_vm_writev", "pselect6", "pselect6_time64", "ptrace", "pwrite64", "pwritev", "pwritev2", "quotactl", "quotactl_fd", "read", "readahead", "readdir", "readlink", "readlinkat", "readv", "reboot", "recv", "recvfrom", "recvmmsg", "recvmmsg_time64", "recvmsg", "remap_file_pages", "removexattr", "removexattrat", "rename", "renameat", "renameat2", "request_key", "restart_syscall", "riscv_flush_icache", "riscv_hwprobe", "rmdir", "rseq", "rt_sigaction", "rt_sigpending", "rt_sigprocmask", "rt_sigqueueinfo", "rt_sigreturn", "rt_sigsuspend", "rt_sigtimedwait", "rt_sigtimedwait_time64", "rt_tgsigqueueinfo", "rtas", "s390_guarded_storage", "s390_pci_mmio_read", "s390_pci_mmio_write", "s390_runtime_instr", "s390_sthyi", "sched_get_affinity", "sched_get_priority_max", "sched_get_priority_min", "sched_getaffinity", "sched_getattr", "sched_getparam", "sched_getscheduler", "sched_rr_get_interval", "sched_rr_get_interval_time64", "sched_set_affinity", "sched_setaffinity", "sched_setattr", "sched_setparam", "sched_setscheduler", "sched_yield", "seccomp", "select", "semctl", "semget", "semop", "semtimedop", "semtimedop_time64", "send", "sendfile", "sendfile64", "sendmmsg", "sendmsg", "sendto", "set_mempolicy", "set_mempolicy_home_node", "set_robust_list", "set_thread_area", "set_tid_address", "set_tls", "setdomainname", "setfsgid", "setfsgid32", "setfsuid", "setfsuid32", "setgid", "setgid32", "setgroups", "setgroups32", "sethae", "sethostname", "setitimer", "setns", "setpgid", "setpgrp", "setpriority", "setregid", "setregid32", "setresgid", "setresgid32", "setresuid", "setresuid32", "setreuid", "setreuid32", "setrlimit", "setsid", "setsockopt", "settimeofday", "setuid", "setuid32", "setxattr", "setxattrat", "sgetmask", "shmat", "shmctl", "shmdt", "shmget", "shutdown", "sigaction", "sigaltstack", "signal", "signalfd", "signalfd4", "sigpending", "sigprocmask", "sigreturn", "sigsuspend", "socket", "socketcall", "socketpair", "splice", "spu_create", "spu_run", "ssetmask", "stat", "stat64", "statfs", "statfs64", "statmount", "statx", "stime", "subpage_prot", "swapcontext", "swapoff", "swapon", "switch_endian", "symlink", "symlinkat", "sync", "sync_file_range", "sync_file_range2", "syncfs", "sys_debug_setcontext", "syscall", "sysfs", "sysinfo", "syslog", "sysmips", "tee", "tgkill", "time", "timer_create", "timer_delete", "timer_getoverrun", "timer_gettime", "timer_gettime64", "timer_settime", "timer_settime64", "timerfd", "timerfd_create", "timerfd_gettime", "timerfd_gettime64", "timerfd_settime", "timerfd_settime64", "times", "tkill", "truncate", "truncate64", "ugetrlimit", "umask", "umount", "umount2", "uname", "unlink", "unlinkat", "unshare", "uprobe", "uretprobe", "userfaultfd", "usr26", "usr32", "ustat", "utime", "utimensat", "utimensat_time64", "utimes", "utrap_install", "vfork", "vhangup", "vm86", "vm86old", "vmsplice", "wait4", "waitid", "waitpid", "write", "writev"]),
+];
+
+/// Render one syscall filter set exactly like C's dump_syscall_filter: the set
+/// name, its help comment, then each member (a syscall name or a nested "@set"
+/// reference), all printed verbatim.
+fn dump_syscall_filter_set(name: &str, comment: &str, members: &[&str]) {
+    println!("{name}");
+    println!("    # {comment}");
+    for &m in members {
+        println!("    {m}");
+    }
+}
+
+fn cmd_syscall_filter(args: &[String]) {
+    use std::collections::BTreeSet;
+
+    if !args.is_empty() {
+        for (i, name) in args.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            match SYSCALL_SETS.iter().find(|(n, _, _)| *n == name.as_str()) {
+                Some(&(n, c, m)) => dump_syscall_filter_set(n, c, m),
+                None => {
+                    eprintln!("Filter set \"{name}\" not found.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        return;
+    }
+
+    // Full listing: every set, then the ungrouped and unlisted sections. C's
+    // syscall_set_add/remove operate on DIRECT syscall members only (nested "@"
+    // references are skipped, not expanded).
+    for (i, &(n, c, m)) in SYSCALL_SETS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        dump_syscall_filter_set(n, c, m);
+    }
+
+    let direct = |m: &'static [&'static str]| m.iter().copied().filter(|s| !s.starts_with('@'));
+    let known = SYSCALL_SETS.last().map(|(_, _, m)| *m).unwrap_or(&[]);
+    let grouped: BTreeSet<&str> = SYSCALL_SETS[..SYSCALL_SETS.len().saturating_sub(1)]
+        .iter()
+        .flat_map(|(_, _, m)| direct(m))
+        .collect();
+    let mut ungrouped: Vec<&str> = direct(known).filter(|s| !grouped.contains(s)).collect();
+    ungrouped.sort_unstable();
+    println!();
+    println!("# Ungrouped System Calls (known but not included in any of the groups except @known):");
+    for s in ungrouped {
+        println!("#   {s}");
+    }
+
+    syscall_filter_unlisted();
+}
+
+/// C's load_kernel_syscalls reads the tracefs available_events list; the
+/// "Unlisted" section is the syscalls it knows that are in no group. When the
+/// file can't be read, C prints a blank line then a notice to stderr.
+fn syscall_filter_unlisted() {
+    use std::collections::BTreeSet;
+
+    let read = std::fs::read_to_string("/sys/kernel/tracing/available_events")
+        .or_else(|_| std::fs::read_to_string("/sys/kernel/debug/tracing/available_events"));
+    match read {
+        Err(e) => {
+            println!();
+            let msg = match e.raw_os_error() {
+                Some(errno) => unsafe {
+                    std::ffi::CStr::from_ptr(libc::strerror(errno))
+                        .to_string_lossy()
+                        .into_owned()
+                },
+                None => e.to_string(),
+            };
+            eprintln!(
+                "# Not showing unlisted system calls, couldn't retrieve kernel system call list: {msg}"
+            );
+        }
+        Ok(content) => {
+            let grouped: BTreeSet<&str> = SYSCALL_SETS
+                .iter()
+                .flat_map(|(_, _, m)| m.iter().copied().filter(|s| !s.starts_with('@')))
+                .collect();
+            // Some syscalls are named differently inside the kernel; C hides these.
+            let hidden = ["newuname", "newfstat", "newstat", "newlstat", "sysctl"];
+            let mut unlisted: Vec<String> = content
+                .lines()
+                .filter_map(|l| l.strip_prefix("syscalls:sys_enter_"))
+                .filter(|e| !hidden.contains(e) && !grouped.contains(*e))
+                .map(String::from)
+                .collect();
+            unlisted.sort();
+            unlisted.dedup();
+            if !unlisted.is_empty() {
+                println!();
+                println!("# Unlisted System Calls (supported by the local kernel, but not included in any of the groups listed above):");
+                for s in unlisted {
+                    println!("#   {s}");
+                }
+            }
+        }
+    }
+}
+
+// ── Transient (D-Bus-settable) unit properties ─────────────────────────────
+
+// GENERATED from `systemd-analyze transient-settings <type>` (systemd 260.2).
+// Do not hand-edit; the differential oracle validates it against C. The order
+// mirrors C's bus_dump_transient_settings property tables.
+const TRANSIENT_SETTINGS: &[(&str, &[&str])] = &[
+    ("service", &[
+        "DevicePolicy", "Slice", "ManagedOOMSwap", "ManagedOOMMemoryPressure",
+        "ManagedOOMPreference", "MemoryPressureWatch", "DelegateSubgroup",
+        "ManagedOOMMemoryPressureLimit", "MemoryAccounting", "MemoryZSwapWriteback", "IOAccounting",
+        "TasksAccounting", "IPAccounting", "CoredumpReceive", "CPUWeight", "StartupCPUWeight",
+        "IOWeight", "StartupIOWeight", "AllowedCPUs", "StartupAllowedCPUs", "AllowedMemoryNodes",
+        "StartupAllowedMemoryNodes", "DisableControllers", "Delegate", "MemoryMin", "MemoryLow",
+        "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryZSwapMax", "TasksMax", "CPUQuota",
+        "CPUQuotaPeriodSec", "DeviceAllow", "IODeviceWeight", "IODeviceLatencyTargetSec",
+        "IPAddressAllow", "IPAddressDeny", "IPIngressFilterPath", "IPEgressFilterPath",
+        "BPFProgram", "SocketBindAllow", "SocketBindDeny", "MemoryPressureThresholdSec", "NFTSet",
+        "BindNetworkInterface", "ManagedOOMMemoryPressureDurationSec", "IOReadBandwidthMax",
+        "IOWriteBandwidthMax", "IOReadIOPSMax", "IOWriteIOPSMax", "User", "Group", "UtmpIdentifier",
+        "UtmpMode", "PAMName", "TTYPath", "WorkingDirectory", "RootDirectory", "SyslogIdentifier",
+        "ProtectSystem", "ProtectHome", "SELinuxContext", "RootImage", "RootVerity", "RootMStack",
+        "RuntimeDirectoryPreserve", "Personality", "KeyringMode", "ProtectProc", "ProcSubset",
+        "NetworkNamespacePath", "UserNamespacePath", "IPCNamespacePath", "LogNamespace",
+        "RootImagePolicy", "MountImagePolicy", "ExtensionImagePolicy", "PrivatePIDs", "PrivateBPF",
+        "BPFDelegateCommands", "BPFDelegateMaps", "BPFDelegatePrograms", "BPFDelegateAttachments",
+        "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "TTYVTDisallocate", "PrivateDevices",
+        "PrivateNetwork", "PrivateMounts", "PrivateIPC", "NoNewPrivileges", "SyslogLevelPrefix",
+        "MemoryDenyWriteExecute", "RestrictRealtime", "DynamicUser", "RemoveIPC",
+        "ProtectKernelTunables", "ProtectKernelModules", "ProtectKernelLogs", "ProtectClock",
+        "MountAPIVFS", "BindLogSockets", "CPUSchedulingResetOnFork", "LockPersonality", "MemoryKSM",
+        "MemoryTHP", "RestrictSUIDSGID", "RootEphemeral", "SetLoginEnvironment",
+        "ReadWriteDirectories", "ReadOnlyDirectories", "InaccessibleDirectories", "ReadWritePaths",
+        "ReadOnlyPaths", "InaccessiblePaths", "ExecPaths", "NoExecPaths", "ExecSearchPath",
+        "ExtensionDirectories", "ConfigurationDirectory", "SupplementaryGroups",
+        "SystemCallArchitectures", "SyslogLevel", "LogLevelMax", "SyslogFacility", "SecureBits",
+        "CPUSchedulingPolicy", "CPUSchedulingPriority", "OOMScoreAdjust", "CoredumpFilter", "Nice",
+        "SystemCallErrorNumber", "IOSchedulingClass", "IOSchedulingPriority",
+        "RuntimeDirectoryMode", "StateDirectoryMode", "CacheDirectoryMode", "LogsDirectoryMode",
+        "ConfigurationDirectoryMode", "UMask", "TimerSlackNSec", "LogRateLimitIntervalSec",
+        "LogRateLimitBurst", "TTYRows", "TTYColumns", "MountFlags", "Environment",
+        "UnsetEnvironment", "PassEnvironment", "EnvironmentFile", "SetCredential",
+        "SetCredentialEncrypted", "LoadCredential", "LoadCredentialEncrypted", "ImportCredential",
+        "LogExtraFields", "LogFilterPatterns", "StandardInput", "StandardOutput", "StandardError",
+        "StandardInputText", "StandardInputData", "AppArmorProfile", "SmackProcessLabel",
+        "CapabilityBoundingSet", "AmbientCapabilities", "CPUAffinity", "NUMAPolicy", "NUMAMask",
+        "RestrictAddressFamilies", "RestrictFileSystems", "SystemCallFilter", "SystemCallLog",
+        "RestrictNetworkInterfaces", "RestrictNamespaces", "DelegateNamespaces", "BindPaths",
+        "BindReadOnlyPaths", "TemporaryFileSystem", "RootHash", "RootHashSignature",
+        "RootImageOptions", "MountImages", "ExtensionImages", "StateDirectory", "RuntimeDirectory",
+        "CacheDirectory", "LogsDirectory", "ProtectHostname", "PrivateTmp", "ProtectControlGroups",
+        "PrivateUsers", "StateDirectoryQuota", "CacheDirectoryQuota", "LogsDirectoryQuota",
+        "StateDirectoryAccounting", "CacheDirectoryAccounting", "LogsDirectoryAccounting",
+        "LimitCPU", "LimitFSIZE", "LimitDATA", "LimitSTACK", "LimitCORE", "LimitRSS", "LimitNPROC",
+        "LimitNOFILE", "LimitMEMLOCK", "LimitAS", "LimitLOCKS", "LimitSIGPENDING", "LimitMSGQUEUE",
+        "LimitNICE", "LimitRTPRIO", "LimitRTTIME", "KillMode", "SendSIGHUP", "SendSIGKILL",
+        "KillSignal", "RestartKillSignal", "FinalKillSignal", "WatchdogSignal", "PIDFile", "Type",
+        "ExitType", "Restart", "RestartMode", "BusName", "NotifyAccess", "USBFunctionDescriptors",
+        "USBFunctionStrings", "OOMPolicy", "TimeoutStartFailureMode", "TimeoutStopFailureMode",
+        "FileDescriptorStorePreserve", "PermissionsStartOnly", "RootDirectoryStartOnly",
+        "RemainAfterExit", "GuessMainPID", "RestartSec", "RestartMaxDelaySec", "TimeoutStartSec",
+        "TimeoutStopSec", "TimeoutAbortSec", "RuntimeMaxSec", "RuntimeRandomizedExtraSec",
+        "WatchdogSec", "TimeoutSec", "FileDescriptorStoreMax", "RestartSteps", "ExecCondition",
+        "ExecStartPre", "ExecStart", "ExecStartPost", "ExecReload", "ExecReloadPost", "ExecStop",
+        "ExecStopPost", "RestartPreventExitStatus", "RestartForceExitStatus", "SuccessExitStatus",
+        "OpenFile", "ReloadSignal", "RefreshOnReload", "Description", "SourcePath",
+        "OnFailureJobMode", "JobTimeoutAction", "JobTimeoutRebootArgument", "StartLimitAction",
+        "FailureAction", "SuccessAction", "RebootArgument", "CollectMode", "StopWhenUnneeded",
+        "RefuseManualStart", "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate",
+        "SurviveFinalKillSignal", "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec",
+        "StartLimitIntervalSec", "StartLimitBurst", "SuccessActionExitStatus",
+        "FailureActionExitStatus", "Documentation", "RequiresMountsFor", "WantsMountsFor",
+        "Markers", "Requires", "Requisite", "Wants", "BindsTo", "PartOf", "Upholds", "RequiredBy",
+        "RequisiteOf", "WantedBy", "BoundBy", "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy",
+        "Before", "After", "OnSuccess", "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers",
+        "TriggeredBy", "PropagatesReloadTo", "ReloadPropagatedFrom", "PropagatesStopTo",
+        "StopPropagatedFrom", "JoinsNamespaceOf", "References", "ReferencedBy", "InSlice",
+        "SliceOf", "ConditionArchitecture", "ConditionFirmware", "ConditionVirtualization",
+        "ConditionHost", "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("socket", &[
+        "DevicePolicy", "Slice", "ManagedOOMSwap", "ManagedOOMMemoryPressure",
+        "ManagedOOMPreference", "MemoryPressureWatch", "DelegateSubgroup",
+        "ManagedOOMMemoryPressureLimit", "MemoryAccounting", "MemoryZSwapWriteback", "IOAccounting",
+        "TasksAccounting", "IPAccounting", "CoredumpReceive", "CPUWeight", "StartupCPUWeight",
+        "IOWeight", "StartupIOWeight", "AllowedCPUs", "StartupAllowedCPUs", "AllowedMemoryNodes",
+        "StartupAllowedMemoryNodes", "DisableControllers", "Delegate", "MemoryMin", "MemoryLow",
+        "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryZSwapMax", "TasksMax", "CPUQuota",
+        "CPUQuotaPeriodSec", "DeviceAllow", "IODeviceWeight", "IODeviceLatencyTargetSec",
+        "IPAddressAllow", "IPAddressDeny", "IPIngressFilterPath", "IPEgressFilterPath",
+        "BPFProgram", "SocketBindAllow", "SocketBindDeny", "MemoryPressureThresholdSec", "NFTSet",
+        "BindNetworkInterface", "ManagedOOMMemoryPressureDurationSec", "IOReadBandwidthMax",
+        "IOWriteBandwidthMax", "IOReadIOPSMax", "IOWriteIOPSMax", "User", "Group", "UtmpIdentifier",
+        "UtmpMode", "PAMName", "TTYPath", "WorkingDirectory", "RootDirectory", "SyslogIdentifier",
+        "ProtectSystem", "ProtectHome", "SELinuxContext", "RootImage", "RootVerity", "RootMStack",
+        "RuntimeDirectoryPreserve", "Personality", "KeyringMode", "ProtectProc", "ProcSubset",
+        "NetworkNamespacePath", "UserNamespacePath", "IPCNamespacePath", "LogNamespace",
+        "RootImagePolicy", "MountImagePolicy", "ExtensionImagePolicy", "PrivatePIDs", "PrivateBPF",
+        "BPFDelegateCommands", "BPFDelegateMaps", "BPFDelegatePrograms", "BPFDelegateAttachments",
+        "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "TTYVTDisallocate", "PrivateDevices",
+        "PrivateNetwork", "PrivateMounts", "PrivateIPC", "NoNewPrivileges", "SyslogLevelPrefix",
+        "MemoryDenyWriteExecute", "RestrictRealtime", "DynamicUser", "RemoveIPC",
+        "ProtectKernelTunables", "ProtectKernelModules", "ProtectKernelLogs", "ProtectClock",
+        "MountAPIVFS", "BindLogSockets", "CPUSchedulingResetOnFork", "LockPersonality", "MemoryKSM",
+        "MemoryTHP", "RestrictSUIDSGID", "RootEphemeral", "SetLoginEnvironment",
+        "ReadWriteDirectories", "ReadOnlyDirectories", "InaccessibleDirectories", "ReadWritePaths",
+        "ReadOnlyPaths", "InaccessiblePaths", "ExecPaths", "NoExecPaths", "ExecSearchPath",
+        "ExtensionDirectories", "ConfigurationDirectory", "SupplementaryGroups",
+        "SystemCallArchitectures", "SyslogLevel", "LogLevelMax", "SyslogFacility", "SecureBits",
+        "CPUSchedulingPolicy", "CPUSchedulingPriority", "OOMScoreAdjust", "CoredumpFilter", "Nice",
+        "SystemCallErrorNumber", "IOSchedulingClass", "IOSchedulingPriority",
+        "RuntimeDirectoryMode", "StateDirectoryMode", "CacheDirectoryMode", "LogsDirectoryMode",
+        "ConfigurationDirectoryMode", "UMask", "TimerSlackNSec", "LogRateLimitIntervalSec",
+        "LogRateLimitBurst", "TTYRows", "TTYColumns", "MountFlags", "Environment",
+        "UnsetEnvironment", "PassEnvironment", "EnvironmentFile", "SetCredential",
+        "SetCredentialEncrypted", "LoadCredential", "LoadCredentialEncrypted", "ImportCredential",
+        "LogExtraFields", "LogFilterPatterns", "StandardInput", "StandardOutput", "StandardError",
+        "StandardInputText", "StandardInputData", "AppArmorProfile", "SmackProcessLabel",
+        "CapabilityBoundingSet", "AmbientCapabilities", "CPUAffinity", "NUMAPolicy", "NUMAMask",
+        "RestrictAddressFamilies", "RestrictFileSystems", "SystemCallFilter", "SystemCallLog",
+        "RestrictNetworkInterfaces", "RestrictNamespaces", "DelegateNamespaces", "BindPaths",
+        "BindReadOnlyPaths", "TemporaryFileSystem", "RootHash", "RootHashSignature",
+        "RootImageOptions", "MountImages", "ExtensionImages", "StateDirectory", "RuntimeDirectory",
+        "CacheDirectory", "LogsDirectory", "ProtectHostname", "PrivateTmp", "ProtectControlGroups",
+        "PrivateUsers", "StateDirectoryQuota", "CacheDirectoryQuota", "LogsDirectoryQuota",
+        "StateDirectoryAccounting", "CacheDirectoryAccounting", "LogsDirectoryAccounting",
+        "LimitCPU", "LimitFSIZE", "LimitDATA", "LimitSTACK", "LimitCORE", "LimitRSS", "LimitNPROC",
+        "LimitNOFILE", "LimitMEMLOCK", "LimitAS", "LimitLOCKS", "LimitSIGPENDING", "LimitMSGQUEUE",
+        "LimitNICE", "LimitRTPRIO", "LimitRTTIME", "KillMode", "SendSIGHUP", "SendSIGKILL",
+        "KillSignal", "RestartKillSignal", "FinalKillSignal", "WatchdogSignal", "Accept",
+        "FlushPending", "Writable", "KeepAlive", "NoDelay", "FreeBind", "Transparent", "Broadcast",
+        "PassCredentials", "PassFileDescriptorsToExec", "PassSecurity", "PassPacketInfo",
+        "ReusePort", "RemoveOnStop", "SELinuxContextFromNet", "Priority", "IPTTL", "Mark", "IPTOS",
+        "Backlog", "MaxConnections", "MaxConnectionsPerSource", "KeepAliveProbes",
+        "TriggerLimitBurst", "PollLimitBurst", "SocketMode", "DirectoryMode",
+        "MessageQueueMaxMessages", "MessageQueueMessageSize", "TimeoutSec", "KeepAliveTimeSec",
+        "KeepAliveIntervalSec", "DeferAcceptSec", "TriggerLimitIntervalSec", "PollLimitIntervalSec",
+        "DeferTriggerMaxSec", "ReceiveBuffer", "SendBuffer", "PipeSize", "ExecStartPre",
+        "ExecStartPost", "ExecReload", "ExecStopPost", "SmackLabel", "SmackLabelIPIn",
+        "SmackLabelIPOut", "TCPCongestion", "BindToDevice", "BindIPv6Only", "FileDescriptorName",
+        "SocketUser", "SocketGroup", "Timestamping", "DeferTrigger", "Symlinks", "SocketProtocol",
+        "ListenStream", "ListenDatagram", "ListenSequentialPacket", "ListenNetlink",
+        "ListenSpecial", "ListenMessageQueue", "ListenFIFO", "ListenUSBFunction", "Description",
+        "SourcePath", "OnFailureJobMode", "JobTimeoutAction", "JobTimeoutRebootArgument",
+        "StartLimitAction", "FailureAction", "SuccessAction", "RebootArgument", "CollectMode",
+        "StopWhenUnneeded", "RefuseManualStart", "RefuseManualStop", "AllowIsolate",
+        "IgnoreOnIsolate", "SurviveFinalKillSignal", "DefaultDependencies", "JobTimeoutSec",
+        "JobRunningTimeoutSec", "StartLimitIntervalSec", "StartLimitBurst",
+        "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation", "RequiresMountsFor",
+        "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants", "BindsTo", "PartOf",
+        "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy", "ConsistsOf", "UpheldBy",
+        "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess", "OnSuccessOf", "OnFailure",
+        "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo", "ReloadPropagatedFrom",
+        "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf", "References", "ReferencedBy",
+        "InSlice", "SliceOf", "ConditionArchitecture", "ConditionFirmware",
+        "ConditionVirtualization", "ConditionHost", "ConditionKernelCommandLine",
+        "ConditionVersion", "ConditionCredential", "ConditionSecurity", "ConditionCapability",
+        "ConditionACPower", "ConditionMemory", "ConditionCPUs", "ConditionEnvironment",
+        "ConditionCPUFeature", "ConditionOSRelease", "ConditionMemoryPressure",
+        "ConditionCPUPressure", "ConditionIOPressure", "ConditionNeedsUpdate", "ConditionFirstBoot",
+        "ConditionPathExists", "ConditionPathExistsGlob", "ConditionPathIsDirectory",
+        "ConditionPathIsSymbolicLink", "ConditionPathIsMountPoint", "ConditionPathIsReadWrite",
+        "ConditionPathIsEncrypted", "ConditionPathIsSocket", "ConditionDirectoryNotEmpty",
+        "ConditionFileNotEmpty", "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("target", &[
+        "Description", "SourcePath", "OnFailureJobMode", "JobTimeoutAction",
+        "JobTimeoutRebootArgument", "StartLimitAction", "FailureAction", "SuccessAction",
+        "RebootArgument", "CollectMode", "StopWhenUnneeded", "RefuseManualStart",
+        "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate", "SurviveFinalKillSignal",
+        "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec", "StartLimitIntervalSec",
+        "StartLimitBurst", "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation",
+        "RequiresMountsFor", "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants",
+        "BindsTo", "PartOf", "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy",
+        "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess",
+        "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo",
+        "ReloadPropagatedFrom", "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
+        "References", "ReferencedBy", "InSlice", "SliceOf", "ConditionArchitecture",
+        "ConditionFirmware", "ConditionVirtualization", "ConditionHost",
+        "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("device", &[
+        "Description", "SourcePath", "OnFailureJobMode", "JobTimeoutAction",
+        "JobTimeoutRebootArgument", "StartLimitAction", "FailureAction", "SuccessAction",
+        "RebootArgument", "CollectMode", "StopWhenUnneeded", "RefuseManualStart",
+        "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate", "SurviveFinalKillSignal",
+        "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec", "StartLimitIntervalSec",
+        "StartLimitBurst", "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation",
+        "RequiresMountsFor", "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants",
+        "BindsTo", "PartOf", "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy",
+        "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess",
+        "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo",
+        "ReloadPropagatedFrom", "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
+        "References", "ReferencedBy", "InSlice", "SliceOf", "ConditionArchitecture",
+        "ConditionFirmware", "ConditionVirtualization", "ConditionHost",
+        "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("mount", &[
+        "DevicePolicy", "Slice", "ManagedOOMSwap", "ManagedOOMMemoryPressure",
+        "ManagedOOMPreference", "MemoryPressureWatch", "DelegateSubgroup",
+        "ManagedOOMMemoryPressureLimit", "MemoryAccounting", "MemoryZSwapWriteback", "IOAccounting",
+        "TasksAccounting", "IPAccounting", "CoredumpReceive", "CPUWeight", "StartupCPUWeight",
+        "IOWeight", "StartupIOWeight", "AllowedCPUs", "StartupAllowedCPUs", "AllowedMemoryNodes",
+        "StartupAllowedMemoryNodes", "DisableControllers", "Delegate", "MemoryMin", "MemoryLow",
+        "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryZSwapMax", "TasksMax", "CPUQuota",
+        "CPUQuotaPeriodSec", "DeviceAllow", "IODeviceWeight", "IODeviceLatencyTargetSec",
+        "IPAddressAllow", "IPAddressDeny", "IPIngressFilterPath", "IPEgressFilterPath",
+        "BPFProgram", "SocketBindAllow", "SocketBindDeny", "MemoryPressureThresholdSec", "NFTSet",
+        "BindNetworkInterface", "ManagedOOMMemoryPressureDurationSec", "IOReadBandwidthMax",
+        "IOWriteBandwidthMax", "IOReadIOPSMax", "IOWriteIOPSMax", "User", "Group", "UtmpIdentifier",
+        "UtmpMode", "PAMName", "TTYPath", "WorkingDirectory", "RootDirectory", "SyslogIdentifier",
+        "ProtectSystem", "ProtectHome", "SELinuxContext", "RootImage", "RootVerity", "RootMStack",
+        "RuntimeDirectoryPreserve", "Personality", "KeyringMode", "ProtectProc", "ProcSubset",
+        "NetworkNamespacePath", "UserNamespacePath", "IPCNamespacePath", "LogNamespace",
+        "RootImagePolicy", "MountImagePolicy", "ExtensionImagePolicy", "PrivatePIDs", "PrivateBPF",
+        "BPFDelegateCommands", "BPFDelegateMaps", "BPFDelegatePrograms", "BPFDelegateAttachments",
+        "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "TTYVTDisallocate", "PrivateDevices",
+        "PrivateNetwork", "PrivateMounts", "PrivateIPC", "NoNewPrivileges", "SyslogLevelPrefix",
+        "MemoryDenyWriteExecute", "RestrictRealtime", "DynamicUser", "RemoveIPC",
+        "ProtectKernelTunables", "ProtectKernelModules", "ProtectKernelLogs", "ProtectClock",
+        "MountAPIVFS", "BindLogSockets", "CPUSchedulingResetOnFork", "LockPersonality", "MemoryKSM",
+        "MemoryTHP", "RestrictSUIDSGID", "RootEphemeral", "SetLoginEnvironment",
+        "ReadWriteDirectories", "ReadOnlyDirectories", "InaccessibleDirectories", "ReadWritePaths",
+        "ReadOnlyPaths", "InaccessiblePaths", "ExecPaths", "NoExecPaths", "ExecSearchPath",
+        "ExtensionDirectories", "ConfigurationDirectory", "SupplementaryGroups",
+        "SystemCallArchitectures", "SyslogLevel", "LogLevelMax", "SyslogFacility", "SecureBits",
+        "CPUSchedulingPolicy", "CPUSchedulingPriority", "OOMScoreAdjust", "CoredumpFilter", "Nice",
+        "SystemCallErrorNumber", "IOSchedulingClass", "IOSchedulingPriority",
+        "RuntimeDirectoryMode", "StateDirectoryMode", "CacheDirectoryMode", "LogsDirectoryMode",
+        "ConfigurationDirectoryMode", "UMask", "TimerSlackNSec", "LogRateLimitIntervalSec",
+        "LogRateLimitBurst", "TTYRows", "TTYColumns", "MountFlags", "Environment",
+        "UnsetEnvironment", "PassEnvironment", "EnvironmentFile", "SetCredential",
+        "SetCredentialEncrypted", "LoadCredential", "LoadCredentialEncrypted", "ImportCredential",
+        "LogExtraFields", "LogFilterPatterns", "StandardInput", "StandardOutput", "StandardError",
+        "StandardInputText", "StandardInputData", "AppArmorProfile", "SmackProcessLabel",
+        "CapabilityBoundingSet", "AmbientCapabilities", "CPUAffinity", "NUMAPolicy", "NUMAMask",
+        "RestrictAddressFamilies", "RestrictFileSystems", "SystemCallFilter", "SystemCallLog",
+        "RestrictNetworkInterfaces", "RestrictNamespaces", "DelegateNamespaces", "BindPaths",
+        "BindReadOnlyPaths", "TemporaryFileSystem", "RootHash", "RootHashSignature",
+        "RootImageOptions", "MountImages", "ExtensionImages", "StateDirectory", "RuntimeDirectory",
+        "CacheDirectory", "LogsDirectory", "ProtectHostname", "PrivateTmp", "ProtectControlGroups",
+        "PrivateUsers", "StateDirectoryQuota", "CacheDirectoryQuota", "LogsDirectoryQuota",
+        "StateDirectoryAccounting", "CacheDirectoryAccounting", "LogsDirectoryAccounting",
+        "LimitCPU", "LimitFSIZE", "LimitDATA", "LimitSTACK", "LimitCORE", "LimitRSS", "LimitNPROC",
+        "LimitNOFILE", "LimitMEMLOCK", "LimitAS", "LimitLOCKS", "LimitSIGPENDING", "LimitMSGQUEUE",
+        "LimitNICE", "LimitRTPRIO", "LimitRTTIME", "KillMode", "SendSIGHUP", "SendSIGKILL",
+        "KillSignal", "RestartKillSignal", "FinalKillSignal", "WatchdogSignal", "What", "Where",
+        "Options", "Type", "TimeoutSec", "DirectoryMode", "SloppyOptions", "LazyUnmount",
+        "ForceUnmount", "ReadwriteOnly", "Description", "SourcePath", "OnFailureJobMode",
+        "JobTimeoutAction", "JobTimeoutRebootArgument", "StartLimitAction", "FailureAction",
+        "SuccessAction", "RebootArgument", "CollectMode", "StopWhenUnneeded", "RefuseManualStart",
+        "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate", "SurviveFinalKillSignal",
+        "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec", "StartLimitIntervalSec",
+        "StartLimitBurst", "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation",
+        "RequiresMountsFor", "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants",
+        "BindsTo", "PartOf", "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy",
+        "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess",
+        "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo",
+        "ReloadPropagatedFrom", "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
+        "References", "ReferencedBy", "InSlice", "SliceOf", "ConditionArchitecture",
+        "ConditionFirmware", "ConditionVirtualization", "ConditionHost",
+        "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("automount", &[
+        "Where", "ExtraOptions", "DirectoryMode", "TimeoutIdleSec", "Description", "SourcePath",
+        "OnFailureJobMode", "JobTimeoutAction", "JobTimeoutRebootArgument", "StartLimitAction",
+        "FailureAction", "SuccessAction", "RebootArgument", "CollectMode", "StopWhenUnneeded",
+        "RefuseManualStart", "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate",
+        "SurviveFinalKillSignal", "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec",
+        "StartLimitIntervalSec", "StartLimitBurst", "SuccessActionExitStatus",
+        "FailureActionExitStatus", "Documentation", "RequiresMountsFor", "WantsMountsFor",
+        "Markers", "Requires", "Requisite", "Wants", "BindsTo", "PartOf", "Upholds", "RequiredBy",
+        "RequisiteOf", "WantedBy", "BoundBy", "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy",
+        "Before", "After", "OnSuccess", "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers",
+        "TriggeredBy", "PropagatesReloadTo", "ReloadPropagatedFrom", "PropagatesStopTo",
+        "StopPropagatedFrom", "JoinsNamespaceOf", "References", "ReferencedBy", "InSlice",
+        "SliceOf", "ConditionArchitecture", "ConditionFirmware", "ConditionVirtualization",
+        "ConditionHost", "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("timer", &[
+        "WakeSystem", "RemainAfterElapse", "Persistent", "OnTimezoneChange", "OnClockChange",
+        "FixedRandomDelay", "DeferReactivation", "AccuracySec", "RandomizedDelaySec",
+        "RandomizedOffsetSec", "OnActiveSec", "OnBootSec", "OnStartupSec", "OnUnitActiveSec",
+        "OnUnitInactiveSec", "OnCalendar", "Description", "SourcePath", "OnFailureJobMode",
+        "JobTimeoutAction", "JobTimeoutRebootArgument", "StartLimitAction", "FailureAction",
+        "SuccessAction", "RebootArgument", "CollectMode", "StopWhenUnneeded", "RefuseManualStart",
+        "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate", "SurviveFinalKillSignal",
+        "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec", "StartLimitIntervalSec",
+        "StartLimitBurst", "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation",
+        "RequiresMountsFor", "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants",
+        "BindsTo", "PartOf", "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy",
+        "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess",
+        "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo",
+        "ReloadPropagatedFrom", "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
+        "References", "ReferencedBy", "InSlice", "SliceOf", "ConditionArchitecture",
+        "ConditionFirmware", "ConditionVirtualization", "ConditionHost",
+        "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("swap", &[
+        "Description", "SourcePath", "OnFailureJobMode", "JobTimeoutAction",
+        "JobTimeoutRebootArgument", "StartLimitAction", "FailureAction", "SuccessAction",
+        "RebootArgument", "CollectMode", "StopWhenUnneeded", "RefuseManualStart",
+        "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate", "SurviveFinalKillSignal",
+        "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec", "StartLimitIntervalSec",
+        "StartLimitBurst", "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation",
+        "RequiresMountsFor", "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants",
+        "BindsTo", "PartOf", "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy",
+        "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess",
+        "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo",
+        "ReloadPropagatedFrom", "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
+        "References", "ReferencedBy", "InSlice", "SliceOf", "ConditionArchitecture",
+        "ConditionFirmware", "ConditionVirtualization", "ConditionHost",
+        "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("path", &[
+        "MakeDirectory", "DirectoryMode", "PathExists", "PathExistsGlob", "PathChanged",
+        "PathModified", "DirectoryNotEmpty", "TriggerLimitBurst", "PollLimitBurst",
+        "TriggerLimitIntervalSec", "PollLimitIntervalSec", "Description", "SourcePath",
+        "OnFailureJobMode", "JobTimeoutAction", "JobTimeoutRebootArgument", "StartLimitAction",
+        "FailureAction", "SuccessAction", "RebootArgument", "CollectMode", "StopWhenUnneeded",
+        "RefuseManualStart", "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate",
+        "SurviveFinalKillSignal", "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec",
+        "StartLimitIntervalSec", "StartLimitBurst", "SuccessActionExitStatus",
+        "FailureActionExitStatus", "Documentation", "RequiresMountsFor", "WantsMountsFor",
+        "Markers", "Requires", "Requisite", "Wants", "BindsTo", "PartOf", "Upholds", "RequiredBy",
+        "RequisiteOf", "WantedBy", "BoundBy", "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy",
+        "Before", "After", "OnSuccess", "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers",
+        "TriggeredBy", "PropagatesReloadTo", "ReloadPropagatedFrom", "PropagatesStopTo",
+        "StopPropagatedFrom", "JoinsNamespaceOf", "References", "ReferencedBy", "InSlice",
+        "SliceOf", "ConditionArchitecture", "ConditionFirmware", "ConditionVirtualization",
+        "ConditionHost", "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("slice", &[
+        "DevicePolicy", "Slice", "ManagedOOMSwap", "ManagedOOMMemoryPressure",
+        "ManagedOOMPreference", "MemoryPressureWatch", "DelegateSubgroup",
+        "ManagedOOMMemoryPressureLimit", "MemoryAccounting", "MemoryZSwapWriteback", "IOAccounting",
+        "TasksAccounting", "IPAccounting", "CoredumpReceive", "CPUWeight", "StartupCPUWeight",
+        "IOWeight", "StartupIOWeight", "AllowedCPUs", "StartupAllowedCPUs", "AllowedMemoryNodes",
+        "StartupAllowedMemoryNodes", "DisableControllers", "Delegate", "MemoryMin", "MemoryLow",
+        "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryZSwapMax", "TasksMax", "CPUQuota",
+        "CPUQuotaPeriodSec", "DeviceAllow", "IODeviceWeight", "IODeviceLatencyTargetSec",
+        "IPAddressAllow", "IPAddressDeny", "IPIngressFilterPath", "IPEgressFilterPath",
+        "BPFProgram", "SocketBindAllow", "SocketBindDeny", "MemoryPressureThresholdSec", "NFTSet",
+        "BindNetworkInterface", "ManagedOOMMemoryPressureDurationSec", "IOReadBandwidthMax",
+        "IOWriteBandwidthMax", "IOReadIOPSMax", "IOWriteIOPSMax", "Description", "SourcePath",
+        "OnFailureJobMode", "JobTimeoutAction", "JobTimeoutRebootArgument", "StartLimitAction",
+        "FailureAction", "SuccessAction", "RebootArgument", "CollectMode", "StopWhenUnneeded",
+        "RefuseManualStart", "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate",
+        "SurviveFinalKillSignal", "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec",
+        "StartLimitIntervalSec", "StartLimitBurst", "SuccessActionExitStatus",
+        "FailureActionExitStatus", "Documentation", "RequiresMountsFor", "WantsMountsFor",
+        "Markers", "Requires", "Requisite", "Wants", "BindsTo", "PartOf", "Upholds", "RequiredBy",
+        "RequisiteOf", "WantedBy", "BoundBy", "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy",
+        "Before", "After", "OnSuccess", "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers",
+        "TriggeredBy", "PropagatesReloadTo", "ReloadPropagatedFrom", "PropagatesStopTo",
+        "StopPropagatedFrom", "JoinsNamespaceOf", "References", "ReferencedBy", "InSlice",
+        "SliceOf", "ConditionArchitecture", "ConditionFirmware", "ConditionVirtualization",
+        "ConditionHost", "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+    ("scope", &[
+        "DevicePolicy", "Slice", "ManagedOOMSwap", "ManagedOOMMemoryPressure",
+        "ManagedOOMPreference", "MemoryPressureWatch", "DelegateSubgroup",
+        "ManagedOOMMemoryPressureLimit", "MemoryAccounting", "MemoryZSwapWriteback", "IOAccounting",
+        "TasksAccounting", "IPAccounting", "CoredumpReceive", "CPUWeight", "StartupCPUWeight",
+        "IOWeight", "StartupIOWeight", "AllowedCPUs", "StartupAllowedCPUs", "AllowedMemoryNodes",
+        "StartupAllowedMemoryNodes", "DisableControllers", "Delegate", "MemoryMin", "MemoryLow",
+        "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryZSwapMax", "TasksMax", "CPUQuota",
+        "CPUQuotaPeriodSec", "DeviceAllow", "IODeviceWeight", "IODeviceLatencyTargetSec",
+        "IPAddressAllow", "IPAddressDeny", "IPIngressFilterPath", "IPEgressFilterPath",
+        "BPFProgram", "SocketBindAllow", "SocketBindDeny", "MemoryPressureThresholdSec", "NFTSet",
+        "BindNetworkInterface", "ManagedOOMMemoryPressureDurationSec", "IOReadBandwidthMax",
+        "IOWriteBandwidthMax", "IOReadIOPSMax", "IOWriteIOPSMax", "KillMode", "SendSIGHUP",
+        "SendSIGKILL", "KillSignal", "RestartKillSignal", "FinalKillSignal", "WatchdogSignal",
+        "RuntimeMaxSec", "RuntimeRandomizedExtraSec", "TimeoutStopSec", "OOMPolicy", "User",
+        "Group", "Description", "SourcePath", "OnFailureJobMode", "JobTimeoutAction",
+        "JobTimeoutRebootArgument", "StartLimitAction", "FailureAction", "SuccessAction",
+        "RebootArgument", "CollectMode", "StopWhenUnneeded", "RefuseManualStart",
+        "RefuseManualStop", "AllowIsolate", "IgnoreOnIsolate", "SurviveFinalKillSignal",
+        "DefaultDependencies", "JobTimeoutSec", "JobRunningTimeoutSec", "StartLimitIntervalSec",
+        "StartLimitBurst", "SuccessActionExitStatus", "FailureActionExitStatus", "Documentation",
+        "RequiresMountsFor", "WantsMountsFor", "Markers", "Requires", "Requisite", "Wants",
+        "BindsTo", "PartOf", "Upholds", "RequiredBy", "RequisiteOf", "WantedBy", "BoundBy",
+        "ConsistsOf", "UpheldBy", "Conflicts", "ConflictedBy", "Before", "After", "OnSuccess",
+        "OnSuccessOf", "OnFailure", "OnFailureOf", "Triggers", "TriggeredBy", "PropagatesReloadTo",
+        "ReloadPropagatedFrom", "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
+        "References", "ReferencedBy", "InSlice", "SliceOf", "ConditionArchitecture",
+        "ConditionFirmware", "ConditionVirtualization", "ConditionHost",
+        "ConditionKernelCommandLine", "ConditionVersion", "ConditionCredential",
+        "ConditionSecurity", "ConditionCapability", "ConditionACPower", "ConditionMemory",
+        "ConditionCPUs", "ConditionEnvironment", "ConditionCPUFeature", "ConditionOSRelease",
+        "ConditionMemoryPressure", "ConditionCPUPressure", "ConditionIOPressure",
+        "ConditionNeedsUpdate", "ConditionFirstBoot", "ConditionPathExists",
+        "ConditionPathExistsGlob", "ConditionPathIsDirectory", "ConditionPathIsSymbolicLink",
+        "ConditionPathIsMountPoint", "ConditionPathIsReadWrite", "ConditionPathIsEncrypted",
+        "ConditionPathIsSocket", "ConditionDirectoryNotEmpty", "ConditionFileNotEmpty",
+        "ConditionFileIsExecutable", "ConditionUser", "ConditionGroup",
+        "ConditionControlGroupController", "ConditionKernelModuleLoaded", "AssertArchitecture",
+        "AssertFirmware", "AssertVirtualization", "AssertHost", "AssertKernelCommandLine",
+        "AssertVersion", "AssertCredential", "AssertSecurity", "AssertCapability", "AssertACPower",
+        "AssertMemory", "AssertCPUs", "AssertEnvironment", "AssertCPUFeature", "AssertOSRelease",
+        "AssertMemoryPressure", "AssertCPUPressure", "AssertIOPressure", "AssertNeedsUpdate",
+        "AssertFirstBoot", "AssertPathExists", "AssertPathExistsGlob", "AssertPathIsDirectory",
+        "AssertPathIsSymbolicLink", "AssertPathIsMountPoint", "AssertPathIsReadWrite",
+        "AssertPathIsEncrypted", "AssertPathIsSocket", "AssertDirectoryNotEmpty",
+        "AssertFileNotEmpty", "AssertFileIsExecutable", "AssertUser", "AssertGroup",
+        "AssertControlGroupController", "AssertKernelModuleLoaded"
+    ]),
+];
+
+fn cmd_transient_settings(types: &[String]) {
+    // C's verb requires at least one unit type; the Verb dispatcher reports
+    // "Too few arguments." when none is given.
+    if types.is_empty() {
+        eprintln!("Too few arguments.");
+        std::process::exit(1);
+    }
+    // C validates each unit type first (erroring before printing anything for
+    // it), then separates multiple types with a blank line.
+    for (i, t) in types.iter().enumerate() {
+        let props = match TRANSIENT_SETTINGS.iter().find(|(name, _)| *name == t.as_str()) {
+            Some(&(_, props)) => props,
+            None => {
+                eprintln!("Invalid unit type '{t}'.");
                 std::process::exit(1);
             }
         };
-        // Print capabilities matching the mask
-        let mut found = false;
-        for &(name, num) in CAPABILITY_TABLE {
-            if num < 64 && (mask_val & (1u64 << num)) != 0 {
-                if found {
-                    print!(" ");
-                }
-                print!("{name}");
-                found = true;
-            }
-        }
-        if found {
+        if i > 0 {
             println!();
         }
-        return;
-    }
-
-    println!("{:<28} {:>6}", "NAME", "NUMBER");
-
-    if capabilities.is_empty() {
-        for &(name, num) in CAPABILITY_TABLE {
-            println!("{:<28} {:>6}", name, num);
+        for p in props {
+            println!("{p}");
         }
-        return;
-    }
-
-    let mut had_error = false;
-    for s in capabilities {
-        if let Ok(num) = s.parse::<u32>() {
-            if let Some(&(name, n)) = CAPABILITY_TABLE.iter().find(|&&(_, n)| n == num) {
-                println!("{:<28} {:>6}", name, n);
-            } else {
-                eprintln!("Unknown capability: {s}");
-                had_error = true;
-            }
-        } else {
-            let lower = s.to_lowercase();
-            let search = if lower.starts_with("cap_") {
-                lower.clone()
-            } else {
-                format!("cap_{lower}")
-            };
-            if let Some(&(name, num)) = CAPABILITY_TABLE.iter().find(|&&(n, _)| n == search) {
-                println!("{:<28} {:>6}", name, num);
-            } else {
-                eprintln!("Unknown capability: {s}");
-                had_error = true;
-            }
-        }
-    }
-    if had_error {
-        std::process::exit(1);
     }
 }
 
@@ -3245,6 +5031,147 @@ fn cmd_capability(capabilities: &[String], mask: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_arch_table() {
+        // 33 architectures in enum order (matches C's _ARCHITECTURE_MAX).
+        assert_eq!(ARCH_NAMES.len(), 33);
+        assert_eq!(ARCH_NAMES[0], "alpha");
+        assert_eq!(ARCH_NAMES[32], "x86-64");
+        // The enum order is not alphabetical: the arm64 group precedes arm-be.
+        let pos = |n: &str| ARCH_NAMES.iter().position(|&x| x == n).unwrap();
+        assert!(pos("arm64-be") < pos("arm-be"));
+        // On the x86_64 build/host the native/secondary personalities are known.
+        if cfg!(target_arch = "x86_64") {
+            let (native, secondary) = native_and_secondary_arch();
+            assert_eq!(ARCH_NAMES[native], "x86-64");
+            assert_eq!(secondary.map(|s| ARCH_NAMES[s]), Some("x86"));
+        }
+    }
+
+    #[test]
+    fn test_format_timespan_full() {
+        // Microsecond accuracy (matches `systemd-analyze timespan`): a whole
+        // second has no decimal, a fractional sub-minute value shows 6 decimals,
+        // and a single microsecond is not lost.
+        assert_eq!(format_timespan_full(1_000_000, 1), "1s");
+        assert_eq!(format_timespan_full(1_500_000, 1), "1.500000s");
+        assert_eq!(format_timespan_full(1_000_001, 1), "1.000001s");
+        assert_eq!(format_timespan_full(500_000, 1), "500ms");
+        assert_eq!(format_timespan_full(1, 1), "1us");
+        assert_eq!(format_timespan_full(90_000_000, 1), "1min 30s");
+        assert_eq!(format_timespan_full(0, 1), "0");
+        assert_eq!(format_timespan_full(u64::MAX, 1), "infinity");
+        // Coarser (millisecond) accuracy trims the decimal to 3 places.
+        assert_eq!(format_timespan_full(1_500_000, USEC_PER_MSEC), "1.500s");
+    }
+
+    #[test]
+    fn test_timestamp_year_bounds() {
+        // Out of C's [1970, 9999] range must be rejected, not overflow-panic.
+        assert!(parse_timestamp("1969-06-15 00:00:00 UTC").is_err());
+        assert!(parse_timestamp("10000-01-01 00:00:00 UTC").is_err());
+        assert!(parse_timestamp("999999999999-01-01 00:00:00").is_err());
+        // The boundaries are accepted.
+        assert!(parse_timestamp("1970-01-01 00:00:00 UTC").is_ok());
+        assert!(parse_timestamp("9999-12-31 23:59:59 UTC").is_ok());
+    }
+
+    #[test]
+    fn test_compare_kernel_versions_strverscmp() {
+        // strverscmp_improved semantics (matches C, verified differentially).
+        // The '~' pre-release and '-'/'.' segment rules the old naive impl missed:
+        assert!(compare_kernel_versions("1~rc1", "1") < 0);
+        assert!(compare_kernel_versions("1.0-1", "1.0-2") < 0);
+        assert!(compare_kernel_versions("4.5~alpha1", "4.5") < 0);
+        assert_eq!(compare_kernel_versions("2.0", "2.0"), 0);
+        assert!(compare_kernel_versions("1", "2") < 0);
+        assert!(compare_kernel_versions("2", "1") > 0);
+        // Leading zeros are ignored: 007 == 7.
+        assert_eq!(compare_kernel_versions("007", "7"), 0);
+        // The documented ascending sort order from string-util-fundamental.c.
+        let ascending = [
+            "122.1",
+            "123~rc1-1",
+            "123",
+            "123-a",
+            "123-a.1",
+            "123-1",
+            "123-1.1",
+            "123^post1",
+            "123.a-1",
+            "123.1-1",
+            "123a-1",
+            "124-1",
+        ];
+        for pair in ascending.windows(2) {
+            assert!(
+                compare_kernel_versions(pair[0], pair[1]) < 0,
+                "expected {} < {}",
+                pair[0],
+                pair[1]
+            );
+            assert!(
+                compare_kernel_versions(pair[1], pair[0]) > 0,
+                "expected {} > {}",
+                pair[1],
+                pair[0]
+            );
+        }
+        // Typical kernel versions still order numerically.
+        assert!(compare_kernel_versions("5.11.0", "5.11.1") < 0);
+        assert!(compare_kernel_versions("6.1", "6.1.0") < 0);
+    }
+
+    #[test]
+    fn fuzz_time_parsers_never_panic() {
+        // parse_timestamp and TimeSpan::parse take user/unit-file strings and do
+        // arithmetic that must not overflow-panic (an out-of-range year, a huge
+        // "+N" offset, and a huge "@epoch" all did). Fuzz both with random
+        // time-ish strings under catch_unwind, with a 30s wall-clock guard.
+        const TOKENS: &[&str] = &[
+            "-", ":", ".", " ", "T", "UTC", "@", "+", "!", "/", "ago", "now",
+            "today", "tomorrow", "yesterday", "epoch", "0", "1970", "2024", "9999",
+            "10000", "999999999999", "-5", "01", "12", "31", "24", "60",
+            "18446744073709551615", "s", "min", "h", "d", "w", "month", "y", "ms",
+            "us", "5min", "1h30", "Mon", "500000", "1.5", "@0", "@1704110400",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x71e5_7a3b_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let ntok = (next() % 8) as usize;
+                let mut input = String::new();
+                for _ in 0..ntok {
+                    if next() % 6 == 0 {
+                        input.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        input.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let buf = input.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = parse_timestamp(&input);
+                    let _ = TimeSpan::parse(&input);
+                });
+                assert!(res.is_ok(), "time parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "time-parser fuzz did not finish in 30s -- an input hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
 
     // ── Plot tests ────────────────────────────────────────────────────────
 
@@ -3518,8 +5445,10 @@ mod tests {
 
     #[test]
     fn test_timespan_parse_bare_number() {
+        // A bare number is seconds, matching C `systemd-analyze timespan`
+        // (verified against the C binary in tests/differential_vs_c.rs).
         let ts = TimeSpan::parse("5000000").unwrap();
-        assert_eq!(ts.usec, 5_000_000);
+        assert_eq!(ts.usec, 5_000_000 * USEC_PER_SEC);
     }
 
     #[test]
@@ -3680,12 +5609,67 @@ mod tests {
     }
 
     #[test]
+    fn test_timestamp_bare_time_is_today() {
+        // A date-less time is "today at that time" (C parses these). Assert the
+        // time-of-day only, so the test does not depend on today's date.
+        let tod = |s: &str| {
+            parse_timestamp(s)
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                % 86400
+        };
+        assert_eq!(tod("12:00:00"), 12 * 3600);
+        assert_eq!(tod("01:02"), 3600 + 2 * 60);
+        assert_eq!(tod("23:59:59"), 23 * 3600 + 59 * 60 + 59);
+    }
+
+    #[test]
     fn test_timestamp_datetime() {
         let ts = parse_timestamp("2023-11-14 12:00:00").unwrap();
         let dur = ts.duration_since(UNIX_EPOCH).unwrap();
         // 2023-11-14 12:00:00 UTC = 1699963200
         assert!(dur.as_secs() > 1_699_900_000);
         assert!(dur.as_secs() < 1_700_100_000);
+    }
+
+    #[test]
+    fn test_timestamp_utc_suffix_keeps_seconds() {
+        // Regression: a trailing " UTC" used to glue onto the seconds field and
+        // zero it out ("23:59:59 UTC" -> 23:59:00). Verified against C.
+        let ts = parse_timestamp("2024-12-31 23:59:59 UTC").unwrap();
+        let dur = ts.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(dur.as_secs(), 1_735_689_599);
+    }
+
+    #[test]
+    fn test_timestamp_fractional_seconds() {
+        let ts = parse_timestamp("2024-01-01 12:00:00.5 UTC").unwrap();
+        let dur = ts.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(dur.as_secs(), 1_704_110_400);
+        assert_eq!(dur.subsec_micros(), 500_000);
+    }
+
+    #[test]
+    fn test_timestamp_epoch_fractional() {
+        let ts = parse_timestamp("@1704110400.25").unwrap();
+        let dur = ts.duration_since(UNIX_EPOCH).unwrap();
+        assert_eq!(dur.as_secs(), 1_704_110_400);
+        assert_eq!(dur.subsec_micros(), 250_000);
+    }
+
+    #[test]
+    fn test_timestamp_leading_weekday() {
+        // 2024-01-01 is a Monday: the correct weekday is accepted, ...
+        let ts = parse_timestamp("Mon 2024-01-01 12:00:00 UTC").unwrap();
+        assert_eq!(ts.duration_since(UNIX_EPOCH).unwrap().as_secs(), 1_704_110_400);
+    }
+
+    #[test]
+    fn test_timestamp_wrong_weekday_rejected() {
+        // ... and a wrong weekday is rejected, matching C.
+        assert!(parse_timestamp("Tue 2024-01-01 12:00:00 UTC").is_err());
     }
 
     #[test]
@@ -3816,6 +5800,40 @@ mod tests {
         assert!(issues[0].contains("Cannot open"));
     }
 
+    #[test]
+    fn test_verify_privatepids_forking_incompatible() {
+        let path = std::env::temp_dir().join("test-verify-ppfork.service");
+        std::fs::write(
+            &path,
+            "[Service]\nExecStart=echo hi\nPrivatePIDs=yes\nType=forking\n",
+        )
+        .unwrap();
+        let issues = verify_unit_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("forking") && i.contains("PrivatePIDs")),
+            "expected a PrivatePIDs/forking incompatibility issue, got {issues:?}"
+        );
+    }
+
+    #[test]
+    fn test_verify_privatepids_oneshot_ok() {
+        let path = std::env::temp_dir().join("test-verify-pponeshot.service");
+        std::fs::write(
+            &path,
+            "[Service]\nExecStart=echo hi\nPrivatePIDs=yes\nType=oneshot\n",
+        )
+        .unwrap();
+        let issues = verify_unit_file(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            issues.iter().any(|i| i.ends_with(": OK")),
+            "expected OK for a valid PrivatePIDs=yes oneshot, got {issues:?}"
+        );
+    }
+
     // Condition tests
 
     #[test]
@@ -3858,6 +5876,32 @@ mod tests {
         let (met, reason) = evaluate_condition("ConditionFoo=bar");
         assert!(!met);
         assert!(reason.contains("Unknown"));
+    }
+
+    #[test]
+    fn test_condition_first_boot_handled() {
+        // Regression: FirstBoot used to fall through to "Unknown condition
+        // type". It must now be recognized and produce a real verdict.
+        for expr in ["ConditionFirstBoot=no", "AssertFirstBoot=yes"] {
+            let (_, reason) = evaluate_condition(expr);
+            assert!(
+                reason == "met" || reason == "not met",
+                "{expr} should be handled, got: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_boolean_c() {
+        for t in ["1", "yes", "y", "true", "t", "on"] {
+            assert_eq!(parse_boolean_c(t), Some(true), "{t}");
+        }
+        for f in ["0", "no", "n", "false", "f", "off"] {
+            assert_eq!(parse_boolean_c(f), Some(false), "{f}");
+        }
+        // Case-sensitive and strict, like C's parse_boolean().
+        assert_eq!(parse_boolean_c("Yes"), None);
+        assert_eq!(parse_boolean_c("maybe"), None);
     }
 
     // Boot timing tests
@@ -3945,8 +5989,9 @@ mod tests {
 
     #[test]
     fn test_parse_time_unit_empty() {
+        // No unit defaults to seconds, matching C `systemd-analyze timespan`.
         let (mult, len) = parse_time_unit("").unwrap();
-        assert_eq!(mult, 1);
+        assert_eq!(mult, USEC_PER_SEC);
         assert_eq!(len, 0);
     }
 

@@ -168,12 +168,25 @@ fn parse_environment(raw_line: &str) -> Result<EnvVars, ParsingErrorReason> {
 /// - `/var/log` → `var-log.mount`
 #[allow(dead_code)]
 pub(crate) fn path_to_mount_unit_name(path: &str) -> String {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        "-.mount".to_owned()
+    // Use systemd's path escaping (`/` → `-`, `-` → `\x2d`, leading `.` →
+    // `\x2e`, etc.), not a naive `/`→`-` replace. Otherwise a path with a `-` in
+    // a component — e.g. `/sysroot/nix/.rw-store` — produces
+    // `sysroot-nix-.rw-store.mount` instead of the real unit name
+    // `sysroot-nix-.rw\x2dstore.mount`, so RequiresMountsFor= deps (and the
+    // native fstab mount units) reference a nonexistent unit and are ignored —
+    // which let rw-sysroot-nix-store.service's mkdir run before the rw-store was
+    // mounted, breaking the /nix/store overlay in the initrd.
+    let abs = if path.starts_with('/') {
+        path.to_owned()
     } else {
-        format!("{}.mount", trimmed.replace('/', "-"))
-    }
+        format!("/{path}")
+    };
+    let name = format!("{}.mount", crate::unit_name::unit_name_path_escape(&abs));
+    // A path whose escaped name would exceed UNIT_NAME_MAX is hashed rather than
+    // rejected, matching C's unit_name_from_path (which falls back to
+    // unit_name_hash_long). Every caller routes through here, so a long mount
+    // path yields one stable hashed name across sync, dep resolution and mangle.
+    crate::unit_name::unit_name_hash_long(&name).unwrap_or(name)
 }
 
 /// Return mount unit names for every prefix of the given absolute path,
@@ -187,13 +200,15 @@ pub(crate) fn mount_units_for_path(path: &str) -> Vec<String> {
     if trimmed.is_empty() {
         return units;
     }
-    let mut accumulated = String::new();
+    // Build each path prefix and escape it into the real mount unit name (so
+    // `/sysroot/nix/.rw-store/upper` yields the actual
+    // `sysroot-nix-.rw\x2dstore.mount` for the covering rw-store mount, which
+    // this unit then Requires=/After=).
+    let mut prefix = String::new();
     for component in trimmed.split('/') {
-        if !accumulated.is_empty() {
-            accumulated.push('-');
-        }
-        accumulated.push_str(component);
-        let name = format!("{accumulated}.mount");
+        prefix.push('/');
+        prefix.push_str(component);
+        let name = path_to_mount_unit_name(&prefix);
         if !units.contains(&name) {
             units.push(name);
         }
@@ -201,7 +216,7 @@ pub(crate) fn mount_units_for_path(path: &str) -> Vec<String> {
     units
 }
 
-fn parse_unit_action(value: &str) -> Result<UnitAction, ParsingErrorReason> {
+pub(crate) fn parse_unit_action(value: &str) -> Result<UnitAction, ParsingErrorReason> {
     match value.to_lowercase().replace('-', "").as_str() {
         "none" => Ok(UnitAction::None),
         "exit" => Ok(UnitAction::Exit),
@@ -247,6 +262,7 @@ pub fn parse_unit_section(
     let condition_kernel_module_loaded = section.remove("CONDITIONKERNELMODULELOADED");
     let condition_directory_not_empty = section.remove("CONDITIONDIRECTORYNOTEMPTY");
     let condition_kernel_command_line = section.remove("CONDITIONKERNELCOMMANDLINE");
+    let condition_kernel_version = section.remove("CONDITIONKERNELVERSION");
     let condition_control_group_controller = section.remove("CONDITIONCONTROLGROUPCONTROLLER");
     let condition_path_is_read_write = section.remove("CONDITIONPATHISREADWRITE");
     let condition_needs_update = section.remove("CONDITIONNEEDSUPDATE");
@@ -279,6 +295,7 @@ pub fn parse_unit_section(
     let assert_kernel_module_loaded = section.remove("ASSERTKERNELMODULELOADED");
     let assert_directory_not_empty = section.remove("ASSERTDIRECTORYNOTEMPTY");
     let assert_kernel_command_line = section.remove("ASSERTKERNELCOMMANDLINE");
+    let assert_kernel_version = section.remove("ASSERTKERNELVERSION");
     let assert_control_group_controller = section.remove("ASSERTCONTROLGROUPCONTROLLER");
     let assert_path_is_read_write = section.remove("ASSERTPATHISREADWRITE");
     let assert_needs_update = section.remove("ASSERTNEEDSUPDATE");
@@ -481,6 +498,7 @@ pub fn parse_unit_section(
         condition_path_is_symbolic_link,
         condition_user,
         condition_group,
+        condition_kernel_version,
     );
 
     let assertions = parse_condition_or_assert_entries(
@@ -513,6 +531,7 @@ pub fn parse_unit_section(
         assert_path_is_symbolic_link,
         assert_user,
         assert_group,
+        assert_kernel_version,
     );
 
     let success_action = match success_action {
@@ -709,13 +728,6 @@ pub fn parse_unit_section(
 
     // Merge explicit deps with implicit mount deps from RequiresMountsFor=
     let mut requires_list = map_tuples_to_second(split_list_values(requires.unwrap_or_default()));
-    // Add Requisite= deps to requires (they also need After= semantics at runtime,
-    // but for ordering purposes they go into the requires list here)
-    for name in &requisite_list {
-        if !requires_list.contains(name) {
-            requires_list.push(name.clone());
-        }
-    }
     for name in mount_unit_requires {
         if !requires_list.contains(&name) {
             requires_list.push(name);
@@ -726,6 +738,13 @@ pub fn parse_unit_section(
     for name in mount_unit_after {
         if !after_list.contains(&name) {
             after_list.push(name);
+        }
+    }
+    // Requisite= implies After= ordering, but (unlike Requires=) does NOT pull
+    // the dep in. Whether it is already active is enforced at activation time.
+    for name in &requisite_list {
+        if !after_list.contains(name) {
+            after_list.push(name.clone());
         }
     }
 
@@ -822,6 +841,7 @@ fn parse_condition_or_assert_entries(
     path_is_symbolic_link: Option<Vec<(u32, String)>>,
     user: Option<Vec<(u32, String)>>,
     group: Option<Vec<(u32, String)>>,
+    kernel_version: Option<Vec<(u32, String)>>,
 ) -> Vec<super::UnitCondition> {
     let mut out = Vec::new();
 
@@ -1109,6 +1129,17 @@ fn parse_condition_or_assert_entries(
             out.push(super::UnitCondition::Group { value, negate });
         }
     }
+    for (_, raw) in kernel_version.unwrap_or_default() {
+        let trimmed = raw.trim();
+        let (expression, negate) = if let Some(stripped) = trimmed.strip_prefix('!') {
+            (stripped.trim().to_owned(), true)
+        } else {
+            (trimmed.to_owned(), false)
+        };
+        if !expression.is_empty() {
+            out.push(super::UnitCondition::KernelVersion { expression, negate });
+        }
+    }
 
     out
 }
@@ -1244,11 +1275,82 @@ fn parse_space_separated_list(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
     }
 }
 
+/// Merge `StandardInputText=` and `StandardInputData=` directives into a single
+/// list ordered by their position in the (already fragment+drop-in merged)
+/// unit file.  systemd feeds both kinds into one stdin buffer in appearance
+/// order, and an empty value of either resets everything accumulated so far.
+/// The `u32` in each entry is the source line index, so sorting by it recovers
+/// the true directive order across the fragment and its drop-ins.
+fn build_stdin_inputs(
+    text: Option<&[(u32, String)]>,
+    data: Option<&[(u32, String)]>,
+) -> Vec<super::StdinInput> {
+    let mut merged: Vec<(u32, bool, &str)> = Vec::new();
+    if let Some(text) = text {
+        for (idx, line) in text {
+            merged.push((*idx, false, line.trim()));
+        }
+    }
+    if let Some(data) = data {
+        for (idx, line) in data {
+            merged.push((*idx, true, line.trim()));
+        }
+    }
+    // Stable sort by line index preserves within-line order for equal keys.
+    merged.sort_by_key(|(idx, _, _)| *idx);
+
+    let mut out: Vec<super::StdinInput> = Vec::new();
+    for (_idx, is_data, value) in merged {
+        if value.is_empty() {
+            out.clear();
+            continue;
+        }
+        if is_data {
+            // StandardInputData=: whitespace-separated base64 blobs.
+            for token in value.split_whitespace() {
+                out.push(super::StdinInput::Data(token.to_owned()));
+            }
+        } else {
+            // StandardInputText=: the whole line is one entry — embedded spaces are
+            // part of the text and must NOT be whitespace-split (only a trailing
+            // newline is added when materialized). C-escape decoding not applied yet.
+            out.push(super::StdinInput::Text(value.to_owned()));
+        }
+    }
+    out
+}
+
 /// Like `parse_space_separated_list` but handles backslash-escaped spaces and
 /// colons in path entries (matching C systemd's `extract_first_word` with
 /// `EXTRACT_UNQUOTE`).  Backslash-space (`\ `) keeps the space in the token,
 /// backslash-colon (`\:`) keeps the colon literal, and `\\` produces a single
 /// backslash.  Used for BindPaths, ReadOnlyPaths, etc.
+/// Parse an `ExecSearchPath=`-style colon-separated absolute-path list.
+///
+/// Mirrors systemd's `config_parse_colon_separated_paths`: each assignment's
+/// value is split on ':' and the pieces accumulated across repeats; an empty
+/// assignment resets the accumulated list. Only absolute paths are kept.
+fn parse_colon_separated_paths(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
+    let mut entries = Vec::new();
+    let Some(vec) = vec else {
+        return entries;
+    };
+    for (_idx, line) in &vec {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            entries.clear();
+            continue;
+        }
+        for part in trimmed.split(':') {
+            let p = part.trim();
+            if p.starts_with('/') {
+                entries.push(p.to_string());
+            }
+        }
+    }
+    entries
+}
+
 fn parse_escaped_space_separated_list(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
     match vec {
         Some(vec) => {
@@ -1340,6 +1442,8 @@ pub fn parse_exec_section(
     let runtime_directory = section.remove("RUNTIMEDIRECTORY");
     let runtime_directory_preserve = section.remove("RUNTIMEDIRECTORYPRESERVE");
     let tty_path = section.remove("TTYPATH");
+    let tty_columns = section.remove("TTYCOLUMNS");
+    let tty_rows = section.remove("TTYROWS");
     let tty_reset = section.remove("TTYRESET");
     let tty_vhangup = section.remove("TTYVHANGUP");
     let tty_vt_disallocate = section.remove("TTYVTDISALLOCATE");
@@ -1359,7 +1463,9 @@ pub fn parse_exec_section(
     let system_call_filter = section.remove("SYSTEMCALLFILTER");
     let system_call_log = section.remove("SYSTEMCALLLOG");
     let protect_system = section.remove("PROTECTSYSTEM");
+    let memory_thp = section.remove("MEMORYTHP");
     let restrict_namespaces = section.remove("RESTRICTNAMESPACES");
+    let delegate_namespaces = section.remove("DELEGATENAMESPACES");
     let restrict_realtime = section.remove("RESTRICTREALTIME");
     let restrict_address_families = section.remove("RESTRICTADDRESSFAMILIES");
     let restrict_file_systems = section.remove("RESTRICTFILESYSTEMS");
@@ -1378,6 +1484,7 @@ pub fn parse_exec_section(
     let protect_hostname = section.remove("PROTECTHOSTNAME");
     let system_call_architectures = section.remove("SYSTEMCALLARCHITECTURES");
     let read_write_paths = section.remove("READWRITEPATHS");
+    let exec_search_path = section.remove("EXECSEARCHPATH");
     let memory_deny_write_execute = section.remove("MEMORYDENYWRITEEXECUTE");
     let lock_personality = section.remove("LOCKPERSONALITY");
     let protect_proc = section.remove("PROTECTPROC");
@@ -1464,6 +1571,7 @@ pub fn parse_exec_section(
     let private_pids = section.remove("PRIVATEPIDS");
     let ipc_namespace_path = section.remove("IPCNAMESPACEPATH");
     let network_namespace_path = section.remove("NETWORKNAMESPACEPATH");
+    let user_namespace_path = section.remove("USERNAMESPACEPATH");
 
     // ── Security directives ──────────────────────────────────────────
     let secure_bits = section.remove("SECUREBITS");
@@ -1517,12 +1625,19 @@ pub fn parse_exec_section(
         None => super::StandardInput::Null,
         Some(mut vec) => {
             if vec.len() == 1 {
-                match vec.remove(0).1.to_lowercase().as_str() {
+                // Keep the original-case value: `file:PATH` must preserve the
+                // path's case, so match on a lowercased copy but slice the path
+                // out of the untouched string (mirrors make_stdio_option).
+                let val = vec.remove(0).1;
+                match val.to_lowercase().as_str() {
                     "null" | "" => super::StandardInput::Null,
                     "tty" => super::StandardInput::Tty,
                     "tty-force" => super::StandardInput::TtyForce,
                     "tty-fail" => super::StandardInput::TtyFail,
                     "socket" => super::StandardInput::Socket,
+                    lower if lower.starts_with("file:") => {
+                        super::StandardInput::File(val["file:".len()..].to_string())
+                    }
                     other => {
                         trace!("Unsupported StandardInput={}, falling back to null", other);
                         super::StandardInput::Null
@@ -1553,6 +1668,47 @@ pub fn parse_exec_section(
                 None
             }
         }
+    };
+
+    // TTYColumns=/TTYRows=: an empty or unparseable value leaves the size unset
+    // (leave the terminal as-is), matching C's config_parse_tty_size default of
+    // UINT_MAX; a value is capped at u16 (upstream's USHRT_MAX ceiling).
+    let tty_columns = match tty_columns {
+        Some(vec) => {
+            if vec.len() == 1 {
+                vec[0]
+                    .1
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .map(|v| v.min(u16::MAX as u32) as u16)
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "TTYColumns".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
+    };
+
+    let tty_rows = match tty_rows {
+        Some(vec) => {
+            if vec.len() == 1 {
+                vec[0]
+                    .1
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .map(|v| v.min(u16::MAX as u32) as u16)
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "TTYRows".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
     };
 
     let tty_reset = match tty_reset {
@@ -2121,6 +2277,8 @@ pub fn parse_exec_section(
             }
         },
         tty_path,
+        tty_columns,
+        tty_rows,
         tty_reset,
         tty_vhangup,
         tty_vt_disallocate,
@@ -2187,12 +2345,15 @@ pub fn parse_exec_section(
                         creds.clear();
                         continue;
                     }
-                    if let Some((id, path)) = trimmed.split_once(':') {
-                        let id = id.trim();
-                        let path = path.trim();
-                        if !id.is_empty() && !path.is_empty() {
-                            creds.push((id.to_owned(), path.to_owned()));
-                        }
+                    // `LoadCredential=ID:PATH`, or bare `LoadCredential=ID` where
+                    // the path defaults to the ID (resolved from the credential
+                    // stores, e.g. /run/credstore/<ID>).
+                    let (id, path) = match trimmed.split_once(':') {
+                        Some((id, path)) => (id.trim(), path.trim()),
+                        None => (trimmed, trimmed),
+                    };
+                    if !id.is_empty() && !path.is_empty() {
+                        creds.push((id.to_owned(), path.to_owned()));
                     }
                 }
                 creds
@@ -2211,12 +2372,13 @@ pub fn parse_exec_section(
                         creds.clear();
                         continue;
                     }
-                    if let Some((id, path)) = trimmed.split_once(':') {
-                        let id = id.trim();
-                        let path = path.trim();
-                        if !id.is_empty() && !path.is_empty() {
-                            creds.push((id.to_owned(), path.to_owned()));
-                        }
+                    // `ID:PATH`, or bare `ID` where the path defaults to the ID.
+                    let (id, path) = match trimmed.split_once(':') {
+                        Some((id, path)) => (id.trim(), path.trim()),
+                        None => (trimmed, trimmed),
+                    };
+                    if !id.is_empty() && !path.is_empty() {
+                        creds.push((id.to_owned(), path.to_owned()));
                     }
                 }
                 creds
@@ -2350,7 +2512,14 @@ pub fn parse_exec_section(
             None => Vec::new(),
         },
         log_extra_fields: match log_extra_fields {
-            Some(vec) => vec.into_iter().map(|(_, val)| val).collect(),
+            Some(vec) => {
+                // systemd caps the number of extra log fields at
+                // ENTRY_FIELD_COUNT_MAX (1024) - 10; excess fields are ignored.
+                vec.into_iter()
+                    .map(|(_, val)| val)
+                    .take(super::LOG_EXTRA_FIELDS_MAX)
+                    .collect()
+            }
             None => Vec::new(),
         },
         protect_system: match protect_system {
@@ -2376,6 +2545,21 @@ pub fn parse_exec_section(
                 }
             }
             None => super::ProtectSystem::default(),
+        },
+        memory_thp: match memory_thp {
+            Some(vec) => match vec.last().map(|(_, v)| v.trim().to_lowercase()).as_deref() {
+                Some("inherit") | None => super::MemoryThp::Inherit,
+                Some("disable") => super::MemoryThp::Disable,
+                Some("madvise") => super::MemoryThp::Madvise,
+                Some("system") => super::MemoryThp::System,
+                Some(other) => {
+                    return Err(ParsingErrorReason::UnknownSetting(
+                        "MemoryTHP".to_owned(),
+                        other.to_owned(),
+                    ));
+                }
+            },
+            None => super::MemoryThp::default(),
         },
         restrict_namespaces: match restrict_namespaces {
             Some(vec) => {
@@ -2410,6 +2594,20 @@ pub fn parse_exec_section(
                 }
             }
             None => super::RestrictNamespaces::default(),
+        },
+        delegate_namespaces: match delegate_namespaces {
+            Some(vec) => {
+                let raw = vec.last().map(|(_, v)| v.trim()).unwrap_or("");
+                match raw.to_lowercase().as_str() {
+                    "" | "no" | "false" | "0" => Vec::new(),
+                    "yes" | "true" | "1" => ["mnt", "net", "pid", "uts", "ipc", "cgroup"]
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
+                    _ => raw.split_whitespace().map(str::to_lowercase).collect(),
+                }
+            }
+            None => Vec::new(),
         },
         restrict_realtime,
         restrict_address_families: match restrict_address_families {
@@ -2777,6 +2975,7 @@ pub fn parse_exec_section(
             None => Vec::new(),
         },
         read_write_paths: parse_escaped_space_separated_list(read_write_paths),
+        exec_search_path: parse_colon_separated_paths(exec_search_path),
         memory_deny_write_execute,
         lock_personality,
         protect_proc: match protect_proc {
@@ -3136,6 +3335,10 @@ pub fn parse_exec_section(
             "NetworkNamespacePath",
             network_namespace_path,
         )?,
+        user_namespace_path: parse_optional_single_string(
+            "UserNamespacePath",
+            user_namespace_path,
+        )?,
 
         // ── Security directives ──────────────────────────────────────
         secure_bits: parse_space_separated_list(secure_bits),
@@ -3153,6 +3356,10 @@ pub fn parse_exec_section(
 
         // ── Misc directives ─────────────────────────────────────────
         timer_slack_nsec: parse_optional_single_string("TimerSlackNSec", timer_slack_nsec)?,
+        stdin_inputs: build_stdin_inputs(
+            standard_input_text.as_deref(),
+            standard_input_data.as_deref(),
+        ),
         standard_input_text: parse_space_separated_list(standard_input_text),
         standard_input_data: parse_space_separated_list(standard_input_data),
         set_login_environment: parse_optional_bool("SetLoginEnvironment", set_login_environment)?,
@@ -3295,6 +3502,71 @@ pub fn parse_section(lines: &[&str]) -> ParsedSection {
 mod tests {
     use super::*;
     use crate::units::{RLimitValue, ResourceLimit};
+
+    #[test]
+    fn fuzz_unit_parser_never_panics() {
+        // Robustness net: parse_file + parse_service run over unit files that a
+        // corrupt or hostile drop-in could supply; a panic there is a PID 1 DoS.
+        // Assemble random unit-file text from interesting tokens (section
+        // headers, keys, operators, specifiers, escapes) plus stray bytes, and
+        // assert neither parser panics or hangs.
+        const TOKENS: &[&str] = &[
+            "[Unit]", "[Service]", "[Install]", "[Socket]", "[Timer]", "[Mount]",
+            "[Path]", "[Slice]", "[Scope]", "[Automount]", "[Swap]", "[]", "[",
+            "Description=", "ExecStart=", "ExecStop=", "ExecStartPre=", "Type=",
+            "Type=oneshot", "Type=notify", "Type=bogus", "WantedBy=", "After=",
+            "Requires=", "Wants=", "RemainAfterExit=", "Restart=", "RestartSec=",
+            "TimeoutSec=", "Environment=", "EnvironmentFile=", "User=", "Group=",
+            "ConditionPathExists=", "ConditionKernelVersion=", "ConditionFirstBoot=",
+            "AssertPathExists=", "ConditionKernelVersion=>=5.10",
+            "ConditionKernelVersion=!<4.0", "ConditionCPUs=>=1", "ConditionMemory=1G",
+            "OnCalendar=", "ListenStream=", "What=", "Where=", "=", "!", ">=", "<=",
+            "<>", "!=", "/bin/true", "%i", "%n", "%%", "yes", "no", "0", "999", "-",
+            ":", ";", "#c", "\\", "\"", "'", "..", "  ", "\t", "\n", "\n\n", "@", "€",
+            "MemoryMax=", "MemoryHigh=", "LimitAS=", "LimitNOFILE=", "TasksMax=",
+            "RestartSec=", "999999999999999999999", "E", "P", "Ti", "Gi", "K",
+            "infinity", "50%", "100000000000000000000000000000000",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x51ed_1234_dead_beef;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let ntok = (next() % 40) as usize;
+                let mut content = String::new();
+                for _ in 0..ntok {
+                    if next() % 6 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let buf = content.clone();
+                let res = std::panic::catch_unwind(move || {
+                    if let Ok(parsed) = parse_file(&content) {
+                        let _ = crate::units::parse_service(
+                            parsed,
+                            &std::path::PathBuf::from("/x.service"),
+                        );
+                    }
+                });
+                assert!(res.is_ok(), "unit parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "unit-parser fuzz did not finish in 30s -- a malformed unit hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
 
     // ── Helper to build the Option<Vec<(u32, String)>> input ──────────
     fn single_val(s: &str) -> Option<Vec<(u32, String)>> {

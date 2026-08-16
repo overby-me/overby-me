@@ -793,18 +793,16 @@ fn cmd_list(system: bool, quiet: bool, no_legend: bool, json_mode: &str) {
     };
 
     if dir.is_none() && enc_dir.is_none() {
-        if system {
-            if !no_legend && !quiet {
-                println!("No credentials passed to system.");
-            }
-            return;
-        }
+        // C's verb_list returns ENXIO when no credentials resolve, for both
+        // --system and plain (src/creds/creds.c:322-331). rust previously
+        // printed the message on stdout and returned 0 for --system, which let
+        // scripts and TEST-54-CREDS traverse past an unsatisfiable point.
         if !quiet {
-            eprintln!(
-                "No credentials directory set.\n\
-                 Hint: $CREDENTIALS_DIRECTORY is not set. This command is intended \
-                 to be run from within a service context."
-            );
+            if system {
+                eprintln!("No credentials passed to system.");
+            } else {
+                eprintln!("No credentials passed. (i.e. $CREDENTIALS_DIRECTORY not set.)");
+            }
         }
         process::exit(1);
     }

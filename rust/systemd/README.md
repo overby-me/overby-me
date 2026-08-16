@@ -15,269 +15,113 @@
 
 A pure Rust rewrite and drop-in replacement for [systemd](https://github.com/systemd/systemd).
 
-## Overview
+Binary-for-binary compatible: same binary names, same paths, same D-Bus interfaces, same
+socket protocols, same file formats. Existing unit files, configuration and tooling are
+meant to work unmodified. The implementation follows the C reference implementation's
+architecture rather than reimagining it.
 
-`rust-systemd` is a fully compatible, binary-for-binary replacement for the entire systemd suite, written entirely in Rust.
-The goal is to produce a set of binaries that can replace every systemd component on a Linux system
-with zero configuration changes — existing unit files, configuration, and tooling should work unmodified.
+## Status
 
-The implementation is modeled after [systemd](https://github.com/systemd/systemd)
-(the C reference implementation maintained by Lennart Poettering et al.),
-following its architecture for the service manager, unit dependency graph, D-Bus APIs,
-journal binary log format, and all other public interfaces.
-This is a **full drop-in replacement**, not a reimagining — the same way
-[rust-pkg-config](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) replaces pkg-config.
+NixOS boots with rust-systemd as PID 1 and reaches `multi-user.target` with a login
+prompt in about 6 seconds under cloud-hypervisor, with networking via networkd and
+resolved.
 
-## Features
+- 93 crates, roughly 370,000 lines of Rust
+- About 9,700 unit test functions
+- 440 upstream systemd integration tests registered; 37 still carry a real override
 
-- **Full unit file parsing** with all section types, specifier expansion, drop-in overrides, template instantiation, and `.d/` directories
-- **All unit types**: service, socket, target, mount, automount, swap, timer, path, slice, scope, device
-- **Complete dependency graph** with `Requires=`, `Wants=`, `After=`, `Before=`, `BindsTo=`, `PartOf=`, `Conflicts=`, `Requisite=`, and all ordering/requirement semantics
-- **All service types**: `simple`, `exec`, `forking`, `oneshot`, `dbus`, `notify`, `notify-reload`, `idle`
-- **Full sd_notify protocol** including `READY=1`, `RELOADING=1`, `STOPPING=1`, `STATUS=`, `ERRNO=`, `MAINPID=`, `WATCHDOG=`, `FDSTORE=`, `FDNAME=`, `BARRIER=`
-- **Socket activation** with all socket types (stream, datagram, sequential-packet, FIFO, special, netlink, USB FFS) and inetd-style pass-through
-- **Journal logging** with binary log format, structured fields, forward-secure sealing, field indexing, and full `journalctl` query language
-- **D-Bus API compatibility** implementing all systemd D-Bus interfaces (`org.freedesktop.systemd1`, `org.freedesktop.login1`, `org.freedesktop.hostname1`, etc.)
-- **cgroup v2 resource control** with `MemoryMax=`, `CPUQuota=`, `IOWeight=`, `TasksMax=`, `Delegate=`, and all `systemd.resource-control` directives
-- **Execution environment** with all `systemd.exec` options: namespaces, capabilities, seccomp filters, credential passing, `DynamicUser=`, `RootDirectory=`, `PrivateTmp=`, etc.
-- **Network configuration** with `.network`, `.netdev`, and `.link` files, DHCP client/server, IPv6 RA, WireGuard, VLAN, bridge, bond, and all networkd features
-- **DNS resolution** with DNS-over-TLS, DNSSEC, mDNS, LLMNR, split DNS, per-link configuration
-- **Container management** via `systemd-nspawn` with full OCI runtime compatibility
-- **Boot performance analysis** with `systemd-analyze` blame, critical-chain, plot, dot, security audit
-- **Full `systemctl` interface** with all subcommands, output modes, and `--user` / `--system` scoping
+The gap lists are [docs/TEST-OVERRIDES.md](docs/TEST-OVERRIDES.md) (functional) and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (structural). Neither is optimistic; read
+them before trusting a green check.
 
-## Design Principles
+## Design principles
 
-1. **Drop-in compatible** — every binary, D-Bus interface, socket protocol, file format, and CLI flag must match systemd behavior exactly. Existing unit files, configuration, and tooling must work without modification.
-2. **No C dependencies** — pure Rust with direct syscall usage via `nix`/`rustix` where needed. No `libsystemd`, `libdbus`, `libudev`, or other C library dependencies.
-3. **Same binary names** — install as `systemd`, `systemctl`, `journalctl`, `systemd-journald`, etc. with identical paths, so package managers and other software find them automatically.
-4. **Safe by default** — leverage Rust's type system and ownership model to eliminate the classes of memory safety bugs that have historically affected systemd (CVE-2018-15688, CVE-2019-3842, CVE-2021-33910, etc.).
-5. **Incremental adoption** — individual components can be swapped in one at a time. Run the Rust `journald` with the C `systemd` PID 1, or vice versa.
-
-## Current Status
-
-**🟢 NixOS boots successfully with rust-systemd as PID 1** — reaches `multi-user.target` with login prompt in ~8 seconds (cloud-hypervisor VM, full networking via networkd + resolved). **4,310 unit tests passing** across 64 crates.
-
-| Phase | Status | Highlights |
-|-------|--------|------------|
-| Phase 0 — Foundation | ✅ Complete | Cargo workspace, `libsystemd` core library, unit parser, dependency graph |
-| Phase 1 — Core System | ✅ Complete | PID 1, `systemctl`, `journald`, `journalctl`, `shutdown`, `sleep`, and 10 utility binaries |
-| Phase 2 — Essential Services | 🔶 In progress | `tmpfiles`, `sysusers`, `logind`, `user-sessions`, `random-seed`, `pstore`, `machine-id-setup`, and more |
-| Phase 3 — Network Stack | 🔶 Partial | `networkd` (DHCPv4), `resolved` (stub DNS), `timesyncd`, `timedated`, `hostnamed`, `localed` |
-| Phase 4 — Extended Services | 🔶 Partial | `machined`, `portabled`, `homed`, `oomd`, `coredump`, `sysext`, `dissect`, `firstboot`, `creds` |
-| Phase 5 — Utilities & Polish | 🔶 Partial | `analyze`, `cgls`, `cgtop`, `mount`, `socket-activate`, generator framework |
-
-### Unit File Directive Coverage
-
-189 of 425 upstream systemd directives supported (44%):
-
-| Section | Supported | Total | Coverage |
-|---------|-----------|-------|----------|
-| systemd.service | 25 | 34 | 74% |
-| systemd.unit | 45 | 88 | 51% |
-| systemd.exec | 74 | 147 | 50% |
-| systemd.socket | 27 | 60 | 45% |
-| systemd.kill | 3 | 7 | 43% |
-| systemd.resource-control | 11 | 48 | 23% |
-
-See [PLAN.md](PLAN.md) for the full phased roadmap and per-component details. See [CHANGELOG.md](CHANGELOG.md) for recent changes.
-
-## Project Structure
-
-The project is organized as a Cargo workspace:
-
-```text
-crates/
-├── libsystemd/     # Core library: unit parsing, dependency graph, sd_notify,
-│                   # socket activation, platform abstractions, service lifecycle,
-│                   # unit name escaping/unescaping, configuration loading,
-│                   # journal entry model and on-disk storage engine
-├── systemd/        # PID 1 service manager (init system)
-├── systemctl/      # CLI control tool for the service manager
-├── journald/       # Journal logging daemon (systemd-journald)
-├── journalctl/     # Journal query tool
-├── shutdown/       # System shutdown/reboot (systemd-shutdown)
-├── sleep/          # Suspend/hibernate handler (systemd-sleep)
-├── id128/          # 128-bit ID tool (systemd-id128)
-├── escape/         # Unit name escaping tool (systemd-escape)
-├── notify/         # Notification sender (systemd-notify)
-├── path/           # Runtime path query tool (systemd-path)
-├── cat/            # Journal cat tool (systemd-cat)
-├── detect-virt/    # Virtualization detector (systemd-detect-virt)
-├── delta/          # Unit file override viewer (systemd-delta)
-├── run/            # Transient unit runner (systemd-run)
-└── ac-power/       # AC power detection (systemd-ac-power)
-```
-
-See [PLAN.md](PLAN.md) for the full 64-crate workspace layout including all Phase 2–5 components (`udevd`, `logind`, `networkd`, `resolved`, `machined`, `portabled`, `homed`, etc.).
+1. **Drop-in compatible.** Every binary, D-Bus interface, socket protocol, file format
+   and CLI flag matches systemd behaviour.
+2. **No C dependencies.** Pure Rust with direct syscalls via `nix`/`rustix`. No
+   `libsystemd`, `libdbus`, `libudev`.
+3. **Same binary names.** Installs as `systemd`, `systemctl`, `journalctl`,
+   `systemd-journald` and so on, at the same paths, so package managers and other
+   software find them.
+4. **Safe by default.** The type system rules out the memory-safety bug classes that
+   have historically affected systemd.
+5. **Incremental adoption.** Components can be swapped in one at a time: rust journald
+   under C PID 1, or the reverse.
 
 ## Building
 
 ```sh
-# Build the entire workspace (all binaries)
-cargo build --release
-
-# Build just the service manager
-cargo build --release -p systemd
-
-# Build just the control tool
+cargo build --release                  # whole workspace
+cargo build --release -p systemd       # just PID 1
 cargo build --release -p systemctl
-
-# Build the journal daemon and query tool
-cargo build --release -p systemd-journald
-cargo build --release -p journalctl
-
-# Build shutdown and sleep handlers
-cargo build --release -p systemd-shutdown
-cargo build --release -p systemd-sleep
-
-# Build individual utilities
-cargo build --release -p systemd-id128
-cargo build --release -p systemd-escape
-cargo build --release -p systemd-notify
-cargo build --release -p systemd-path
-cargo build --release -p systemd-cat
-cargo build --release -p systemd-detect-virt
-cargo build --release -p systemd-delta
-cargo build --release -p systemd-run
-cargo build --release -p systemd-ac-power
-
-# Build with optional features
-cargo build --release -p libsystemd --features dbus_support,cgroups,linux_eventfd
+just build
 ```
 
 ## Testing
 
 ```sh
-# Run all tests
-cargo test --workspace
-
-# Run library tests only
-cargo test -p libsystemd
-
-# Run journal-related tests
-cargo test -p libsystemd -- journal
-cargo test -p systemd-journald
-cargo test -p journalctl
-
-# Run individual component tests
-cargo test -p systemd-shutdown
-cargo test -p systemd-sleep
+cargo test --workspace                                       # unit tests
+just difftest                                                # vs real systemd
+nix build .#checks.x86_64-linux.rust-systemd-test-01-basic -L # one integration test
 ```
 
-### Boot Testing with rust-nixos
+Never run plain `nix flake check` in this repo: it OOMs. Use `just check`.
 
-The [rust-nixos](../nixos) project provides end-to-end boot testing by building a minimal NixOS image with `rust-systemd` as PID 1 and booting it in a [cloud-hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) VM. Serial console output is captured so you can see every unit start, every log line, and any panics or failures during the boot process.
+See [docs/TESTING.md](docs/TESTING.md) for the integration harness, the C systemd
+oracle, and how to debug early boot failures.
 
-From the `rust-nixos/` directory:
-
-```sh
-# Interactive boot (serial output on your terminal)
-just run
-
-# Automated boot test — streams output and reports pass/fail
-just test
-
-# Automated test with a custom timeout (seconds)
-just test-timeout 180
-
-# Save the full boot log to a file
-just test-log /tmp/boot.log
-
-# Quiet mode (no streaming, just exit code)
-just test-quiet
-
-# Boot test, then keep the VM running for interactive debugging
-just test-keep
-```
-
-See [PLAN.md — Integration Testing](PLAN.md#integration-testing-with-rust-nixos) for details on what the boot test validates and the development workflow.
-
-### Debugging Early Boot Failures
-
-When a service crashes during early boot (e.g. SIGABRT before `READY=1`), stderr and journal are usually unavailable because the mount namespace has already hidden `/dev/console` and the journal socket. The exec helper uses a dedicated `KmsgLogger` (`libsystemd::kmsg_log`) that writes structured messages to `/dev/kmsg` (the kernel ring buffer), which survives mount namespace changes and is visible on the serial console via `dmesg`.
-
-**Enable tracing for a specific unit** by adding `SYSTEMD_LOG_LEVEL` to its environment:
-
-```ini
-# In the unit's [Service] section (or via a drop-in override)
-[Service]
-Environment=SYSTEMD_LOG_LEVEL=trace
-```
-
-This produces detailed output at every exec-helper stage (mount namespace setup, privilege drop, credential loading, execv) on the serial console. You can also use `debug`, `info`, `warn`, or `error`.
-
-When booting via rust-nixos, watch the serial output:
-
-```sh
-# From rust-nixos/
-just run          # interactive — scroll through serial output
-just test-log /tmp/boot.log   # save full boot log for post-mortem
-```
-
-Then grep the log for the failing unit:
-
-```sh
-grep 'rust-systemd\[systemd-timesyncd\]' /tmp/boot.log
-```
-
-**How the log level flows** (mirrors real systemd's `--log-level` to `sd-executor`):
+## Layout
 
 ```text
-service_manager (PID 1)
-  │
-  │  ExecHelperConfig { log_level: "info", ... }   ← manager's own level
-  │  serialized as JSON over shmem fd
-  ▼
-exec_helper (forked child)
-  │
-  │  KmsgLogger::init(unit_name, manager_level)
-  │    1. SYSTEMD_LOG_LEVEL env var  (highest priority)
-  │    2. log_level from config      (from manager)
-  │    3. built-in default: warn     (lowest priority)
-  │
-  │  log::trace!("mount_ns: PrivateDevices=true...")  → /dev/kmsg
-  │  log::trace!("mount_ns: ProtectKernelLogs=true...") → /dev/kmsg
-  │  ...
-  ▼
-execv(service_binary)
+crates/
+├── libsystemd/     # core: unit parsing, dependency graph, sd_notify, socket activation,
+│                   # journal format and storage, cgroups, exec context, platform layer
+├── systemd/        # PID 1 service manager
+├── systemctl/      # control tool
+├── journald/       # journal daemon        journalctl/  # journal query
+├── udevd/          # device manager        udevadm/     # udev administration
+├── logind/         # sessions and seats    networkd/    # network configuration
+├── resolved/       # DNS                   ...
 ```
 
-After `ProtectKernelLogs=` hides `/dev/kmsg`, the logger silently degrades — writes to kmsg fail and only stderr (warnings and above) remains. This is by design: the trace messages up to that point are the ones that matter for diagnosing sandbox setup crashes.
+93 crates in total. Full inventory in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Quick reference:**
+## Documentation
 
-| What you want | How |
-|---------------|-----|
-| Trace a single unit | `Environment=SYSTEMD_LOG_LEVEL=trace` in the unit |
-| Trace all units | Set `SYSTEMD_LOG_LEVEL=trace` in the manager's environment |
-| See only warnings | Default behavior (no config needed) |
-| Filter serial output | `grep 'rust-systemd\[<unit>\]' <logfile>` |
-| Numeric syslog levels | `0`–`7` are accepted (`7` = debug, `4` = warn) |
+| File | Contents |
+|------|----------|
+| [docs/TESTING.md](docs/TESTING.md) | How to run every test layer; harness mechanics; boot debugging |
+| [docs/TEST-OVERRIDES.md](docs/TEST-OVERRIDES.md) | Every place a test is weakened or skipped, and what it needs |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The PID 1 concurrency model, its divergence from upstream, and the open invariants |
+| [docs/EVENT-LOOP.md](docs/EVENT-LOOP.md) | The jobs-plus-dispatcher convergence design and its seven migration increments |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Component inventory, directive coverage, differential-testing plan |
+| [CHANGELOG.md](CHANGELOG.md) | Change history |
 
 ## Contributing
 
-This is an ambitious project and contributions are very welcome. Good starting points:
+Good starting points, in rough order of value:
 
-1. **Phase 2 services** — implement `udevd`, `tmpfiles`, `sysusers`, `logind`, and other essential system services
-2. **Unit file parsing** — add support for missing directives (see the [directive coverage table](#unit-file-directive-coverage) above)
-3. **New unit types** — implement timer, mount, automount, swap, path, scope units
-4. **systemctl** — build out the full CLI with all systemctl subcommands
-5. **Test coverage** — port systemd's integration test suite
-6. **Documentation** — document behavior differences and compatibility notes
+1. Pick an entry from [docs/TEST-OVERRIDES.md](docs/TEST-OVERRIDES.md) Tier 1. Removing
+   an override and recording the real failure is the cheapest useful contribution.
+2. Work on one of the open invariants in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+   These retire whole hang classes rather than single tests.
+3. Add missing unit-file directives (see the coverage table in the roadmap).
+4. Implement a missing component: `systemd-importd`, `systemd-storagetm`,
+   `systemd-sysupdate`.
 
-### Coding Conventions
+### Coding conventions
 
-#### D-Bus: use `zbus` only
+**D-Bus: `zbus` only.** Do not add `dbus` or `dbus-crossroads`; the project moved off
+those C-backed crates to eliminate `libdbus` initialization failures in sandboxes.
 
-All D-Bus functionality **must** use the pure Rust [`zbus`](https://docs.rs/zbus) crate. Do not add `dbus` or `dbus-crossroads` as dependencies — the project migrated away from those C-based crates to eliminate `libdbus` initialization failures in sandboxed environments.
-
-Key patterns:
-
-- Define D-Bus interfaces with `#[zbus::interface]` on impl blocks.
+- Define interfaces with `#[zbus::interface]` on impl blocks.
 - Use `zbus::blocking::Connection` for synchronous connections.
-- Use `zbus::object_server::SignalEmitter` (not the deprecated `SignalContext`) for signal parameters in `#[zbus(signal)]` methods.
-- Use `zbus::blocking::fdo::DBusProxy` for standard D-Bus operations (name ownership, signal subscription).
+- Use `zbus::object_server::SignalEmitter`, not the deprecated `SignalContext`.
+- Use `zbus::blocking::fdo::DBusProxy` for name ownership and signal subscription.
+
+**Locking.** Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before touching PID 1's
+activation path. Holding the `RuntimeInfo` guard across a blocking call is the single
+most common way to wedge the manager.
 
 ## License
 

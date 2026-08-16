@@ -17,9 +17,12 @@
     ExecStart=/run/current-system/sw/bin/true
     EOF
     systemctl daemon-reload
-    systemctl add-wants multi-user.target "$UNIT.service" || true
-    # Verify the wants directory or the property
+    systemctl add-wants multi-user.target "$UNIT.service"
+    # The .wants symlink must now exist under the target's drop-in dir.
+    test -L "/etc/systemd/system/multi-user.target.wants/$UNIT.service"
     systemctl daemon-reload
+    # The manager must load that symlink as an effective Wants dependency.
+    systemctl show -P WantedBy "$UNIT.service" | grep -q "multi-user.target"
     rm -f "/run/systemd/system/$UNIT.service"
     rm -f "/etc/systemd/system/multi-user.target.wants/$UNIT.service" 2>/dev/null || true
     systemctl daemon-reload

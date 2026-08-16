@@ -112,6 +112,16 @@ fn read_object_header(data: &[u8], offset: u64) -> io::Result<(u8, u8, u64)> {
     let obj_type = data[off];
     let flags = data[off + 1];
     let size = r64(data, off + 8);
+    // The object's stored size includes its own 16-byte header. A malformed
+    // journal claiming a smaller size would underflow the `size - header`
+    // arithmetic every caller does (panic in debug, wrap in release), so reject
+    // it here at the single choke point.
+    if (size as usize) < OBJECT_HEADER_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("object at {offset} claims size {size} below the {OBJECT_HEADER_SIZE}-byte header"),
+        ));
+    }
     Ok((obj_type, flags, size))
 }
 
@@ -430,6 +440,75 @@ pub fn read_c_journal(path: &Path) -> io::Result<Vec<JournalEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_size_below_header_is_rejected_not_underflow() {
+        // A malformed object claiming size < OBJECT_HEADER_SIZE must be rejected
+        // by read_object_header, not underflow `size - OBJECT_HEADER_SIZE` in a
+        // caller (panic in debug, wrap in release). Reproduce via
+        // collect_entry_offsets pointed at an ENTRY_ARRAY object of size 0.
+        let mut data = vec![0u8; OBJECT_HEADER_SIZE];
+        data[0] = OBJECT_ENTRY_ARRAY; // obj_type; the size field (bytes 8..16) is 0
+        assert!(read_object_header(&data, 0).is_err());
+        let res = collect_entry_offsets(&data, 0, false);
+        assert!(res.is_ok(), "{res:?}");
+        assert!(res.unwrap().is_empty());
+    }
+
+    #[test]
+    fn fuzz_c_journal_parsers_never_panic() {
+        // Robustness net (task #22): read_c_journal parses untrusted binary
+        // .journal files (journalctl --file / journal-remote output). The object
+        // parsers must never panic or hang on malformed bytes + attacker
+        // offsets. Random data, sometimes with the magic and a planted small-
+        // size object at the fuzzed offset to stress the size arithmetic.
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xc0ff_ee00_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let len = (next() % 512) as usize;
+                let mut data: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+                if next() % 2 == 0 && data.len() >= 8 {
+                    data[0..8].copy_from_slice(C_JOURNAL_MAGIC);
+                }
+                let offset = (next() as u64) % (len as u64 + 32).max(1);
+                let uoff = offset as usize;
+                if next() % 2 == 0 && uoff + OBJECT_HEADER_SIZE <= data.len() {
+                    data[uoff] =
+                        [OBJECT_DATA, OBJECT_ENTRY, OBJECT_ENTRY_ARRAY][(next() % 3) as usize];
+                    let small = u64::from(next() % 20); // straddles the 16-byte boundary
+                    data[uoff + 8..uoff + 16].copy_from_slice(&small.to_le_bytes());
+                }
+                let compact = next() % 2 == 0;
+                let buf = data.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = parse_header(&data);
+                    let _ = read_object_header(&data, offset);
+                    let _ = collect_entry_offsets(&data, offset, compact);
+                    let _ = parse_entry(&data, offset, compact);
+                    let _ = read_data_object(&data, offset);
+                });
+                assert!(
+                    res.is_ok(),
+                    "c_journal parser panicked: offset={offset} compact={compact} data={buf:?}"
+                );
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "c_journal fuzz did not finish in 30s -- a malformed object hangs a parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
 
     #[test]
     fn test_magic_check() {

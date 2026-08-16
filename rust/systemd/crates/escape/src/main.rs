@@ -126,6 +126,21 @@ fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
             let escaped = unit_name::unit_name_path_escape_checked(input)
                 .ok_or_else(|| format!("Invalid path: {input}"))?;
 
+            // Mirror C's escape-tool: when the escape succeeds for an input that
+            // isn't a valid or isn't an absolute file system path, warn that it
+            // is not reversible. C checks path_is_valid first (only the empty
+            // string fails that here), then path_is_absolute (any relative path
+            // like "foo"). A valid absolute path escapes without a warning.
+            if input.is_empty() {
+                eprintln!(
+                    "Input '{input}' is not a valid file system path, escaping is likely not going to be reversible."
+                );
+            } else if !input.starts_with('/') {
+                eprintln!(
+                    "Input '{input}' is not an absolute file system path, escaping is likely not going to be reversible."
+                );
+            }
+
             // Apply --template if given
             if let Some(template) = &cli.template {
                 if !unit_name::is_template(template) {
@@ -195,45 +210,62 @@ fn strip_unit_suffix(name: &str) -> &str {
 fn main() {
     let cli = Cli::parse();
 
-    // Validate conflicting options
-    if cli.unescape && cli.mangle {
-        eprintln!("Error: --unescape and --mangle cannot be used together.");
-        process::exit(1);
-    }
-    if cli.mangle && cli.template.is_some() {
-        eprintln!("Error: --mangle and --template cannot be used together.");
-        process::exit(1);
-    }
-    if cli.mangle && cli.suffix.is_some() {
-        eprintln!("Error: --mangle and --suffix cannot be used together.");
-        process::exit(1);
-    }
-    if cli.suffix.is_some() && cli.template.is_some() {
-        eprintln!("Error: --suffix and --template cannot be used together.");
-        process::exit(1);
-    }
-    if cli.instance && !cli.unescape {
-        eprintln!("Error: --instance can only be used with --unescape.");
-        process::exit(1);
-    }
+    // Option validation mirrors C's escape-tool, using its exact messages and
+    // order (with no "Error: " prefix, which C never prints). C validates the
+    // template and suffix at parse time, so those come first; the rest follow
+    // the post-getopt order at escape-tool.c:129-155. The one rust-specific
+    // guard is --unescape with --mangle: C's single arg_action enum makes the
+    // last of the two win silently, which clap's independent bool flags cannot
+    // reproduce, so rust rejects the combination (checked last so a message that
+    // C would emit still wins).
     if let Some(template) = &cli.template
         && (template.is_empty() || !unit_name::is_template(template))
     {
-        eprintln!("Error: Not a valid template unit name: {template}");
+        eprintln!("Template name {template} is not valid.");
+        process::exit(1);
+    }
+    if let Some(suffix) = &cli.suffix
+        && !VALID_SUFFIXES.contains(&suffix.as_str())
+    {
+        // C validates the suffix via unit_type_from_string: it must be an exact
+        // unit type name like "service", never ".service" or empty.
+        eprintln!("Invalid unit suffix type \"{suffix}\".");
+        process::exit(1);
+    }
+    if cli.strings.is_empty() {
+        eprintln!("Not enough arguments.");
+        process::exit(1);
+    }
+    if cli.template.is_some() && cli.suffix.is_some() {
+        eprintln!("--suffix= and --template= may not be combined.");
+        process::exit(1);
+    }
+    if (cli.template.is_some() || cli.suffix.is_some()) && cli.mangle {
+        eprintln!("--suffix= and --template= are not compatible with --mangle.");
+        process::exit(1);
+    }
+    if cli.suffix.is_some() && cli.unescape {
+        eprintln!("--suffix is not compatible with --unescape.");
+        process::exit(1);
+    }
+    if cli.path && cli.mangle {
+        eprintln!("--path may not be combined with --mangle.");
+        process::exit(1);
+    }
+    if cli.instance && !cli.unescape {
+        eprintln!("--instance must be used in conjunction with --unescape.");
+        process::exit(1);
+    }
+    if cli.instance && cli.template.is_some() {
+        eprintln!("--instance may not be combined with --template.");
+        process::exit(1);
+    }
+    if cli.unescape && cli.mangle {
+        eprintln!("--unescape and --mangle cannot be used together.");
         process::exit(1);
     }
 
-    let inputs = if cli.strings.is_empty() {
-        eprintln!("Error: no input strings provided.");
-        process::exit(1);
-    } else {
-        cli.strings.clone()
-    };
-
-    if inputs.is_empty() {
-        eprintln!("Error: no input strings provided.");
-        process::exit(1);
-    }
+    let inputs = cli.strings.clone();
 
     let mut exit_code = 0;
     let mut results = Vec::new();

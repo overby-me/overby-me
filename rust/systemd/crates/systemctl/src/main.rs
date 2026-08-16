@@ -97,220 +97,282 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--message",
 ];
 
+/// The grouped state catalog printed by `--state=help`, mirroring C 260's
+/// per-enum string tables in enum order: unit-def.h UnitLoadState /
+/// UnitActiveState / unit-file states, then each unit type's *_state_to_string
+/// substates. Group order, headers, and member order match `systemctl
+/// --state=help` byte-for-byte (verified against the C binary).
+const STATE_HELP_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "Available unit load states:",
+        &[
+            "stub",
+            "loaded",
+            "not-found",
+            "bad-setting",
+            "error",
+            "merged",
+            "masked",
+        ],
+    ),
+    (
+        "Available unit active states:",
+        &[
+            "active",
+            "reloading",
+            "inactive",
+            "failed",
+            "activating",
+            "deactivating",
+            "maintenance",
+            "refreshing",
+        ],
+    ),
+    (
+        "Available unit file states:",
+        &[
+            "enabled",
+            "enabled-runtime",
+            "linked",
+            "linked-runtime",
+            "alias",
+            "masked",
+            "masked-runtime",
+            "static",
+            "disabled",
+            "indirect",
+            "generated",
+            "transient",
+            "bad",
+        ],
+    ),
+    (
+        "Available automount unit substates:",
+        &["dead", "waiting", "running", "failed"],
+    ),
+    (
+        "Available device unit substates:",
+        &["dead", "tentative", "plugged"],
+    ),
+    (
+        "Available mount unit substates:",
+        &[
+            "dead",
+            "mounting",
+            "mounting-done",
+            "mounted",
+            "remounting",
+            "unmounting",
+            "remounting-sigterm",
+            "remounting-sigkill",
+            "unmounting-sigterm",
+            "unmounting-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    (
+        "Available path unit substates:",
+        &["dead", "waiting", "running", "failed"],
+    ),
+    (
+        "Available scope unit substates:",
+        &[
+            "dead",
+            "start-chown",
+            "running",
+            "abandoned",
+            "stop-sigterm",
+            "stop-sigkill",
+            "failed",
+        ],
+    ),
+    (
+        "Available service unit substates:",
+        &[
+            "dead",
+            "condition",
+            "start-pre",
+            "start",
+            "start-post",
+            "running",
+            "exited",
+            "refresh-extensions",
+            "refresh-credentials",
+            "reload",
+            "reload-signal",
+            "reload-notify",
+            "reload-post",
+            "mounting",
+            "stop",
+            "stop-watchdog",
+            "stop-sigterm",
+            "stop-sigkill",
+            "stop-post",
+            "final-watchdog",
+            "final-sigterm",
+            "final-sigkill",
+            "failed",
+            "dead-before-auto-restart",
+            "failed-before-auto-restart",
+            "dead-resources-pinned",
+            "auto-restart",
+            "auto-restart-queued",
+            "cleaning",
+        ],
+    ),
+    ("Available slice unit substates:", &["dead", "active"]),
+    (
+        "Available socket unit substates:",
+        &[
+            "dead",
+            "start-pre",
+            "start-open",
+            "start-chown",
+            "start-post",
+            "listening",
+            "deferred",
+            "running",
+            "stop-pre",
+            "stop-pre-sigterm",
+            "stop-pre-sigkill",
+            "stop-post",
+            "final-sigterm",
+            "final-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    (
+        "Available swap unit substates:",
+        &[
+            "dead",
+            "activating",
+            "activating-done",
+            "active",
+            "deactivating",
+            "deactivating-sigterm",
+            "deactivating-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    ("Available target unit substates:", &["dead", "active"]),
+    (
+        "Available timer unit substates:",
+        &["dead", "waiting", "running", "elapsed", "failed"],
+    ),
+];
+
 fn print_state_help() {
-    println!("Available unit active states:");
-    for s in [
-        "active",
-        "reloading",
-        "inactive",
-        "failed",
-        "activating",
-        "deactivating",
-        "maintenance",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable unit load states:");
-    for s in [
-        "loaded",
-        "not-found",
-        "bad-setting",
-        "error",
-        "masked",
-        "stub",
-        "merged",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable unit file states:");
-    for s in [
-        "enabled",
-        "enabled-runtime",
-        "linked",
-        "linked-runtime",
-        "alias",
-        "masked",
-        "masked-runtime",
-        "static",
-        "disabled",
-        "indirect",
-        "generated",
-        "transient",
-        "bad",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable automount unit substates:");
-    for s in ["dead", "waiting", "running", "failed"] {
-        println!("{s}");
-    }
-    println!("\nAvailable device unit substates:");
-    for s in ["dead", "tentative", "plugged"] {
-        println!("{s}");
-    }
-    println!("\nAvailable mount unit substates:");
-    for s in [
-        "dead",
-        "mounting",
-        "mounting-done",
-        "mounted",
-        "remounting",
-        "unmounting",
-        "remounting-sigterm",
-        "remounting-sigkill",
-        "unmounting-sigterm",
-        "unmounting-sigkill",
-        "failed",
-        "cleaning",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable path unit substates:");
-    for s in ["dead", "waiting", "running", "failed"] {
-        println!("{s}");
-    }
-    println!("\nAvailable scope unit substates:");
-    for s in [
-        "dead",
-        "start-chown",
-        "running",
-        "abandoned",
-        "stop-sigterm",
-        "stop-sigkill",
-        "failed",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable service unit substates:");
-    for s in [
-        "dead",
-        "condition",
-        "start-pre",
-        "start",
-        "start-post",
-        "running",
-        "exited",
-        "reload",
-        "stop",
-        "stop-watchdog",
-        "stop-sigterm",
-        "stop-sigkill",
-        "stop-post",
-        "final-watchdog",
-        "final-sigterm",
-        "final-sigkill",
-        "failed",
-        "auto-restart",
-        "cleaning",
-        "dead-before-auto-restart",
-        "dead-resources-pinned",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable slice unit substates:");
-    for s in ["dead", "active"] {
-        println!("{s}");
-    }
-    println!("\nAvailable socket unit substates:");
-    for s in [
-        "dead",
-        "start-chown",
-        "start-pre",
-        "start-post",
-        "listening",
-        "running",
-        "stop-pre",
-        "stop-pre-sigterm",
-        "stop-pre-sigkill",
-        "stop-post",
-        "final-sigterm",
-        "final-sigkill",
-        "failed",
-        "cleaning",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable swap unit substates:");
-    for s in [
-        "dead",
-        "activating",
-        "activating-done",
-        "active",
-        "deactivating",
-        "deactivating-sigterm",
-        "deactivating-sigkill",
-        "failed",
-        "cleaning",
-    ] {
-        println!("{s}");
-    }
-    println!("\nAvailable target unit substates:");
-    for s in ["dead", "active"] {
-        println!("{s}");
-    }
-    println!("\nAvailable timer unit substates:");
-    for s in ["dead", "waiting", "running", "elapsed", "failed"] {
-        println!("{s}");
+    // C separates the groups with a blank line and prints no leading or
+    // trailing blank; reproduce that exactly.
+    for (i, (header, members)) in STATE_HELP_GROUPS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        println!("{header}");
+        for s in *members {
+            println!("{s}");
+        }
     }
 }
 
+/// Standard signal short names (no "SIG" prefix), indexed by signal number.
+/// Index 0 and any gap are empty and fall through to the numeric/RT rendering.
+/// This matches C's per-arch static signal table on Linux (x86_64/generic).
+const SIGNAL_STATIC_NAMES: [&str; 32] = [
+    "", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV", "USR2",
+    "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU",
+    "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS",
+];
+
+/// Render a signal number exactly as C `signal_to_string` (basic/signal-util.c)
+/// does: the bare short name for the standard signals, "RTMIN+n" for the
+/// realtime range SIGRTMIN..=SIGRTMAX, and the raw number for everything else
+/// (signal 0, and the glibc-reserved slots between __SIGRTMIN and SIGRTMIN, i.e.
+/// 32 and 33 on x86_64).
+fn signal_to_string(signo: i32) -> String {
+    if signo >= 1 && (signo as usize) < SIGNAL_STATIC_NAMES.len() {
+        let name = SIGNAL_STATIC_NAMES[signo as usize];
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    if signo >= libc::SIGRTMIN() && signo <= libc::SIGRTMAX() {
+        return format!("RTMIN+{}", signo - libc::SIGRTMIN());
+    }
+    signo.to_string()
+}
+
 fn print_signal_help() {
-    println!("Available signals:");
-    let signals = [
-        ("SIGHUP", 1),
-        ("SIGINT", 2),
-        ("SIGQUIT", 3),
-        ("SIGILL", 4),
-        ("SIGTRAP", 5),
-        ("SIGABRT", 6),
-        ("SIGBUS", 7),
-        ("SIGFPE", 8),
-        ("SIGKILL", 9),
-        ("SIGUSR1", 10),
-        ("SIGSEGV", 11),
-        ("SIGUSR2", 12),
-        ("SIGPIPE", 13),
-        ("SIGALRM", 14),
-        ("SIGTERM", 15),
-        ("SIGSTKFLT", 16),
-        ("SIGCHLD", 17),
-        ("SIGCONT", 18),
-        ("SIGSTOP", 19),
-        ("SIGTSTP", 20),
-        ("SIGTTIN", 21),
-        ("SIGTTOU", 22),
-        ("SIGURG", 23),
-        ("SIGXCPU", 24),
-        ("SIGXFSZ", 25),
-        ("SIGVTALRM", 26),
-        ("SIGPROF", 27),
-        ("SIGWINCH", 28),
-        ("SIGIO", 29),
-        ("SIGPWR", 30),
-        ("SIGSYS", 31),
-    ];
-    for (name, num) in &signals {
-        println!("{num:>2}) {name}");
+    // C `systemctl --signal=help` dumps the signal string table via
+    // DUMP_STRING_TABLE(signal, int, _NSIG): one entry per line for numbers
+    // 0..=SIGRTMAX, with no header. Match it byte-for-byte.
+    for signo in 0..=libc::SIGRTMAX() {
+        println!("{}", signal_to_string(signo));
     }
 }
 
 fn print_type_help() {
     println!("Available unit types:");
-    for t in [
-        "service",
-        "socket",
-        "target",
-        "device",
-        "mount",
-        "automount",
-        "swap",
-        "timer",
-        "path",
-        "slice",
-        "scope",
-    ] {
+    // C `systemctl --type=help` dumps the unit-type string table in UnitType
+    // enum order (unit-def.h): service, mount, swap, socket, target, device,
+    // automount, timer, path, slice, scope. Match it exactly.
+    for t in UNIT_TYPES_IN_ENUM_ORDER {
         println!("{t}");
     }
+}
+
+/// Unit type names in C's `UnitType` enum order, as printed by `--type=help`.
+const UNIT_TYPES_IN_ENUM_ORDER: [&str; 11] = [
+    "service",
+    "mount",
+    "swap",
+    "socket",
+    "target",
+    "device",
+    "automount",
+    "timer",
+    "path",
+    "slice",
+    "scope",
+];
+
+/// Build the interactive drop-in scaffold handed to `$EDITOR` for a fresh
+/// override. Mirrors upstream `edit-util.c` (`create_edit_temp_file`): the two
+/// `###` markers wrap an EMPTY content area, with no `[Service]` (or any other)
+/// section header pre-seeded. That emptiness is load-bearing: an unmodified
+/// edit (e.g. `EDITOR=true`) must trim back to nothing and be discarded, so the
+/// scaffold itself must contribute no real content. (A prior version seeded a
+/// literal `[Service]` line here, which survived the marker strip and caused a
+/// no-op edit to write a bogus `override.conf` — TEST-26 line 49-50.)
+fn dropin_edit_scaffold(unit_name: &str) -> String {
+    format!(
+        "### Editing drop-in override for {unit_name}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n\n### Lines below this comment will be discarded\n"
+    )
+}
+
+/// Extract the real drop-in body from an edited scaffold: drop the `### ` marker
+/// lines and trim surrounding whitespace. Returns `None` when only markers and
+/// whitespace remain, i.e. the edit introduced no real change and the override
+/// must be discarded (upstream `trim_edit_markers` returns 0 == "file is
+/// empty"). Otherwise returns the body with a single trailing newline.
+fn dropin_edit_extract(edited: &str) -> Option<String> {
+    let clean: String = edited
+        .lines()
+        .filter(|l| !l.starts_with("### "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed = clean.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut final_content = trimmed.to_owned();
+    if !final_content.ends_with('\n') {
+        final_content.push('\n');
+    }
+    Some(final_content)
 }
 
 fn main() {
@@ -351,6 +413,32 @@ fn main() {
 
     if args[0] == "--version" {
         println!("systemctl (rust-systemd) 258");
+        // Build feature-flags line, mirroring `systemd --version`. Features
+        // rust-systemd does not implement are reported with a leading '-' so
+        // upstream tests that gate on them behave as on a build compiled without
+        // that feature (e.g. TEST-62-RESTRICT-IFACES and TEST-07-PID1 check
+        // `-BPF_FRAMEWORK` to skip their cgroup-BPF sections).
+        println!(
+            "+ACL +BLKID +KMOD +PAM +SECCOMP +TPM2 +OPENSSL +LZ4 +XZ +ZSTD +ZLIB \
+             -BPF_FRAMEWORK -BPF_LSM -APPARMOR -SMACK -SELINUX -IMA -IPE"
+        );
+        return;
+    }
+
+    // `systemctl list-machines` is a systemd-machined feature; rust-systemd has
+    // no machined, so the only machine is the local host. Handle it client-side,
+    // mirroring real `systemctl list-machines` output on a container-less system.
+    if let Some(sub) = args.iter().find(|a| !a.starts_with('-'))
+        && sub == "list-machines"
+    {
+        let no_legend = args.iter().any(|a| a == "--no-legend");
+        if !no_legend {
+            println!("{:<12} {:<8} {:<7} {}", "NAME", "STATE", "FAILED", "JOBS");
+        }
+        println!("{:<12} {:<8} {:<7} {}", ".host", "running", "0", "0");
+        if !no_legend {
+            println!("\n1 machines listed.");
+        }
         return;
     }
 
@@ -360,6 +448,18 @@ fn main() {
     } else if args.len() >= 2 && (args[0].contains(':') || args[0].starts_with('/')) {
         // First arg looks like an address (host:port or /path/to/socket)
         args.remove(0)
+    } else if args.iter().any(|a| a == "--user") {
+        // `--user` connects to the per-user manager's control socket under
+        // $XDG_RUNTIME_DIR (see run_user_manager in libsystemd). Without this,
+        // `systemctl --user ...` would talk to the system manager, which does
+        // not know the user's units: e.g. `systemctl stop --user <svc>` would
+        // silently no-op and the service (and its cgroup) would leak. Mirrors
+        // the socket resolution in systemd-run --user.
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+        format!("{runtime_dir}/systemd/control.socket")
     } else {
         // Default to the rust-systemd control socket
         "/run/systemd/rust-systemd-notify/control.socket".to_owned()
@@ -371,6 +471,7 @@ fn main() {
     let mut positional: Vec<String> = Vec::new();
     let mut property_filter: Vec<String> = Vec::new();
     let mut value_only = false;
+    let mut timestamp_unix = false;
     let mut state_filter: Option<String> = None;
     let mut type_filter: Option<String> = None;
 
@@ -389,6 +490,7 @@ fn main() {
     let mut bind_read_only = false;
     let mut preset_mode: Option<String> = None;
     let mut kill_whom: Option<String> = None;
+    let mut kill_subgroup: Option<String> = None;
     let mut kill_value: Option<i32> = None;
     let mut kill_signal_str: Option<String> = None;
     let mut job_mode: Option<String> = None;
@@ -461,6 +563,20 @@ fn main() {
             .or_else(|| arg.strip_prefix("--kill-who="))
         {
             kill_whom = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-subgroup flag (for `kill --kill-subgroup=app.slice/foo.service`)
+        if arg == "--kill-subgroup" {
+            if i + 1 < args.len() {
+                kill_subgroup = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--kill-subgroup=") {
+            kill_subgroup = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -647,6 +763,22 @@ fn main() {
             continue;
         }
 
+        // Capture --timestamp=STYLE.  Only "unix" changes the output
+        // (timestamps become @<epoch-seconds>); other styles keep the
+        // default formatting.
+        if let Some(style) = arg.strip_prefix("--timestamp=") {
+            timestamp_unix = style == "unix";
+            i += 1;
+            continue;
+        }
+        if arg == "--timestamp" {
+            if i + 1 < args.len() {
+                timestamp_unix = args[i + 1] == "unix";
+            }
+            i += 2;
+            continue;
+        }
+
         // Capture --state value for list-units filtering.
         if arg == "--state" {
             if i + 1 < args.len() {
@@ -751,12 +883,21 @@ fn main() {
     // Matches upstream systemd's `unit_name_mangle_with_suffix`.
     // Skip positional[0] since that's the subcommand.
     for arg in positional.iter_mut().skip(1) {
-        if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
-            *arg = format!(
-                "{}.device",
-                libsystemd::unit_name::unit_name_path_escape(arg),
-            );
-        }
+        let suffix = if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
+            ".device"
+        } else if arg.starts_with('/') {
+            // Any other absolute path is a mount point: resolve it to the
+            // corresponding `.mount` unit (e.g. `/tmp/x` -> `tmp-x.mount`), as
+            // upstream `systemctl show /tmp/x` does.
+            ".mount"
+        } else {
+            continue;
+        };
+        let name = format!("{}{suffix}", libsystemd::unit_name::unit_name_path_escape(arg));
+        // Hash an over-long name exactly as the manager does (unit_name_from_path
+        // → unit_name_hash_long), so `systemctl show /very/long/path` resolves to
+        // the same hashed unit the mount monitor synthesized for that mount.
+        *arg = libsystemd::unit_name::unit_name_hash_long(&name).unwrap_or(name);
     }
 
     // Parse signal name from --signal / -s flag captured in first pass
@@ -889,7 +1030,7 @@ fn main() {
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert, clean commands — pass through
         "list-timers" | "list-sockets" | "list-paths" | "list-jobs" | "set-property" | "edit"
-        | "revert" | "clean" | "bind" => &positional[0],
+        | "revert" | "clean" | "bind" | "switch-root" | "isolate" => &positional[0],
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         // is-failed with no unit = is-system-running (system state check)
@@ -1213,9 +1354,7 @@ fn main() {
 
                     let tmp_path = format!("{override_path}.tmp");
                     let initial_content = if existing.is_empty() {
-                        format!(
-                            "### Editing drop-in override for {unit_name}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\n\n### Lines below this comment will be discarded\n"
-                        )
+                        dropin_edit_scaffold(unit_name)
                     } else {
                         existing
                     };
@@ -1231,28 +1370,28 @@ fn main() {
                         .or_else(|_| std::env::var("VISUAL"))
                         .unwrap_or_else(|_| "vi".to_owned());
 
-                    let status = std::process::Command::new(&editor).arg(&tmp_path).status();
+                    // Invoke the editor as `$EDITOR +<line> <path>`, matching
+                    // upstream `run_editor` (edit-util.c: e->line == 4 for a
+                    // fresh drop-in, the first line of the content area between
+                    // the markers). A real editor opens at that line; the
+                    // `EDITOR=mv` test hack relies on the `+4` positional (it
+                    // runs `mv +4 <path>` to swap in a prepared "+4" file).
+                    let status = std::process::Command::new(&editor)
+                        .arg("+4")
+                        .arg(&tmp_path)
+                        .status();
 
                     match status {
                         Ok(s) if s.success() => {
                             match std::fs::read_to_string(&tmp_path) {
-                                Ok(edited) => {
-                                    let clean: String = edited
-                                        .lines()
-                                        .filter(|l| !l.starts_with("### "))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    let trimmed = clean.trim();
-                                    if trimmed.is_empty() {
+                                Ok(edited) => match dropin_edit_extract(&edited) {
+                                    None => {
                                         let _ = std::fs::remove_file(&override_path);
                                         if !quiet {
                                             eprintln!("Removed empty override for {unit_name}.");
                                         }
-                                    } else {
-                                        let mut final_content = trimmed.to_owned();
-                                        if !final_content.ends_with('\n') {
-                                            final_content.push('\n');
-                                        }
+                                    }
+                                    Some(final_content) => {
                                         if let Err(e) =
                                             std::fs::write(&override_path, &final_content)
                                         {
@@ -1262,7 +1401,7 @@ fn main() {
                                             std::process::exit(1);
                                         }
                                     }
-                                }
+                                },
                                 Err(e) => {
                                     if !quiet {
                                         eprintln!("Failed to read {tmp_path}: {e}");
@@ -1469,6 +1608,21 @@ fn main() {
             arr.push(Value::String("--runtime".to_string()));
         }
         Some(Value::Array(arr))
+    } else if method == "isolate" {
+        // isolate TARGET — forward the target to PID 1.
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: isolate requires a target unit.");
+            }
+            std::process::exit(1);
+        }
+        Some(Value::String(positional[1].clone()))
+    } else if method == "switch-root" {
+        // switch-root [NEWROOT [INIT]] — forward the (optional) args to PID 1,
+        // which performs the mount moves + chroot + exec of the new init.
+        Some(Value::Array(
+            positional[1..].iter().cloned().map(Value::String).collect(),
+        ))
     } else if method == "revert" {
         // revert <unit>
         if positional.len() < 2 {
@@ -1522,14 +1676,23 @@ fn main() {
         } else {
             arr.push(Value::String("15".to_string())); // SIGTERM default
         }
-        arr.push(Value::String(
-            kill_whom.unwrap_or_else(|| "all".to_string()),
-        ));
+        // Upstream defaults --kill-whom to "cgroup" once a subgroup is named,
+        // and to "all" otherwise.
+        arr.push(Value::String(kill_whom.unwrap_or_else(|| {
+            if kill_subgroup.is_some() {
+                "cgroup".to_string()
+            } else {
+                "all".to_string()
+            }
+        })));
         if let Some(val) = kill_value {
             arr.push(Value::String(val.to_string()));
         }
         if wait {
             arr.push(Value::String("--wait".to_string()));
+        }
+        if let Some(sub) = kill_subgroup {
+            arr.push(Value::String(format!("--subgroup={sub}")));
         }
         Some(Value::Array(arr))
     } else if method == "suspend"
@@ -1692,7 +1855,13 @@ fn main() {
 
     // --no-block: use a separate method so the server can run it asynchronously
     // --wait: use a separate method so the server blocks until units deactivate
-    let method = if no_block && (method == "start" || method == "restart" || method == "stop") {
+    let method = if no_block
+        && (method == "start"
+            || method == "restart"
+            || method == "stop"
+            || method == "isolate"
+            || method == "switch-root")
+    {
         format!("{method}-noblock")
     } else if wait && method == "start" {
         "start-wait".to_string()
@@ -1743,6 +1912,7 @@ fn main() {
                         output_format.as_deref(),
                         &property_filter,
                         true,
+                        timestamp_unix,
                     );
                 }
                 Err(e) => {
@@ -1792,6 +1962,7 @@ fn main() {
                 output_format.as_deref(),
                 &property_filter,
                 has_unit_args,
+                timestamp_unix,
             );
             // --now: after enable → start units, after disable → stop units
             if now
@@ -1884,6 +2055,54 @@ fn main() {
 /// Handle the JSON-RPC response, with special exit code logic for
 /// `is-active`, `is-enabled`, and `is-failed`.
 #[allow(clippy::too_many_arguments)]
+/// With `--timestamp=unix`, convert a formatted UTC timestamp property value
+/// ("Sat 2026-07-18 00:00:00 UTC") to upstream's `@<epoch-seconds>` form.
+/// Non-timestamp values pass through unchanged.
+fn maybe_unix_timestamp(val: &str, enabled: bool) -> String {
+    if !enabled {
+        return val.to_owned();
+    }
+    let parts: Vec<&str> = val.split_whitespace().collect();
+    // Accept "Dow YYYY-MM-DD HH:MM:SS UTC" and "YYYY-MM-DD HH:MM:SS UTC".
+    let (date, time, tz) = match parts.as_slice() {
+        [_dow, date, time, tz] => (*date, *time, *tz),
+        [date, time, tz] => (*date, *time, *tz),
+        _ => return val.to_owned(),
+    };
+    if tz != "UTC" {
+        return val.to_owned();
+    }
+    let mut d = date.split('-');
+    let (Some(y), Some(mo), Some(da)) = (d.next(), d.next(), d.next()) else {
+        return val.to_owned();
+    };
+    let mut t = time.split(':');
+    let (Some(h), Some(mi), Some(sec)) = (t.next(), t.next(), t.next()) else {
+        return val.to_owned();
+    };
+    let (Ok(y), Ok(mo), Ok(da), Ok(h), Ok(mi), Ok(sec)) = (
+        y.parse::<i64>(),
+        mo.parse::<i64>(),
+        da.parse::<i64>(),
+        h.parse::<i64>(),
+        mi.parse::<i64>(),
+        sec.parse::<i64>(),
+    ) else {
+        return val.to_owned();
+    };
+    // days_from_civil (Hinnant): days since 1970-01-01 in the proleptic
+    // Gregorian calendar.
+    let y_adj = if mo <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+    let yoe = y_adj - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + da - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    format!("@{}", days * 86400 + h * 3600 + mi * 60 + sec)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn handle_response(
     command: &str,
     resp: &Value,
@@ -1894,6 +2113,7 @@ fn handle_response(
     output_format: Option<&str>,
     property_filter: &[String],
     has_unit_args: bool,
+    timestamp_unix: bool,
 ) {
     // Check for JSON-RPC error responses.
     if let Some(error) = resp.get("error") {
@@ -1945,7 +2165,15 @@ fn handle_response(
 
     match command {
         "is-active" => {
-            let state = result.and_then(|v| v.as_str()).unwrap_or("active");
+            // A success response whose result field is missing or not a
+            // string means the unit's state could not be read (e.g. a
+            // contended control-socket reply after a just-edited unit's
+            // daemon-reload). is-active must fail closed there: an
+            // unreadable state is not active, so default to inactive
+            // (exit 3), never active (exit 0), matching upstream's
+            // conservative answer. The old "active" default surfaced as
+            // the load-sensitive 26-SYSTEMCTL is-active flake.
+            let state = result.and_then(|v| v.as_str()).unwrap_or("inactive");
             if !quiet {
                 println!("{}", state);
             }
@@ -2028,7 +2256,15 @@ fn handle_response(
                     // --value mode: print only the values, one per line
                     for line in text.lines() {
                         if let Some((_key, val)) = line.split_once('=') {
-                            println!("{val}");
+                            println!("{}", maybe_unix_timestamp(val, timestamp_unix));
+                        }
+                    }
+                } else if timestamp_unix {
+                    for line in text.lines() {
+                        if let Some((key, val)) = line.split_once('=') {
+                            println!("{key}={}", maybe_unix_timestamp(val, timestamp_unix));
+                        } else {
+                            println!("{line}");
                         }
                     }
                 } else {
@@ -2194,7 +2430,13 @@ fn handle_response(
                     println!("{id:>6} {unit:<48} {jtype:<15} {state}");
                 }
                 if !no_legend {
-                    println!("\n{} jobs listed.", arr.len());
+                    if arr.is_empty() {
+                        // Mirror upstream systemctl-list-jobs.c: an empty job
+                        // list prints "No jobs running." rather than a count.
+                        println!("No jobs running.");
+                    } else {
+                        println!("\n{} jobs listed.", arr.len());
+                    }
                 }
             }
         }
@@ -2256,11 +2498,21 @@ fn handle_response(
             }
         }
         "status" => {
-            // Print the result
+            // Print the result as systemd's human-readable status block (or as
+            // JSON when --output=json was requested).
             if !quiet && let Some(result) = result {
                 let is_empty = result.is_null() || result.as_array().is_some_and(|a| a.is_empty());
                 if !is_empty {
-                    println!("{}", serde_json::to_string_pretty(result).unwrap());
+                    if output_format == Some("json") {
+                        println!("{}", serde_json::to_string_pretty(result).unwrap());
+                    } else if let Some(arr) = result.as_array() {
+                        for (i, unit) in arr.iter().enumerate() {
+                            if i > 0 {
+                                println!();
+                            }
+                            print_status_block(unit);
+                        }
+                    }
                 }
             }
             // Exit 3 if the service is not active (matching C systemd behavior).
@@ -2288,6 +2540,50 @@ fn handle_response(
                 }
             }
         }
+    }
+}
+
+/// Render one unit's `systemctl status` header block, human-readable, from the
+/// fields the status query returns. Mirrors the head of real systemd output:
+///   ● name - Description
+///        Loaded: loaded
+///        Active: active (running)
+fn print_status_block(unit: &Value) {
+    let name = unit.get("Name").and_then(|v| v.as_str()).unwrap_or("");
+    let raw_status = unit.get("Status").and_then(|v| v.as_str()).unwrap_or("");
+    let (active, sub) = status_to_active_sub(raw_status);
+    let bullet = match active {
+        "active" | "activating" => "●",
+        "failed" => "×",
+        _ => "○",
+    };
+    let desc = unit
+        .get("Description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if desc.is_empty() {
+        println!("{bullet} {name}");
+    } else {
+        println!("{bullet} {name} - {desc}");
+    }
+    println!("     Loaded: loaded");
+    println!("     Active: {active} ({sub})");
+}
+
+/// Map rust-systemd's internal unit Status string (the Debug form of
+/// UnitStatus, e.g. "Started(Running)") to systemd's ActiveState/SubState
+/// vocabulary shown by `systemctl status`.
+fn status_to_active_sub(status: &str) -> (&'static str, &'static str) {
+    if status.starts_with("Started") {
+        ("active", "running")
+    } else if status.starts_with("Starting") {
+        ("activating", "start")
+    } else if status.starts_with("Stopping") {
+        ("deactivating", "stop")
+    } else if status.contains("Failed") || status.contains("failed") {
+        ("failed", "failed")
+    } else {
+        ("inactive", "dead")
     }
 }
 
@@ -2485,4 +2781,142 @@ fn send_tcp(addr: &str, payload: &str) -> Result<Value, Box<dyn std::error::Erro
     stream.shutdown(std::net::Shutdown::Write)?;
     let resp: Value = serde_json::from_reader(&mut stream)?;
     Ok(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dropin_edit_scaffold_noop_is_discarded() {
+        // A no-op interactive edit (e.g. `EDITOR=true`) leaves the scaffold
+        // byte-for-byte. Feeding it back through the marker strip must yield
+        // None (== upstream "file is empty, no real changes"), so `systemctl
+        // edit` writes no override.conf. Regression for TEST-26 line 49-50: the
+        // scaffold used to seed a `[Service]` header that survived the strip.
+        let scaffold = dropin_edit_scaffold("systemctl-test.service");
+        assert!(
+            !scaffold.contains("[Service]"),
+            "scaffold must not pre-seed a section header: {scaffold:?}"
+        );
+        assert_eq!(dropin_edit_extract(&scaffold), None);
+    }
+
+    #[test]
+    fn test_dropin_edit_extract_keeps_real_content() {
+        // A real edit (content typed into the marked area) is kept verbatim,
+        // marker lines dropped, and normalized to a single trailing newline.
+        let edited = "### Editing drop-in override for foo.service\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\nExecStart=\nExecStart=sleep 10d\n\n### Lines below this comment will be discarded\n";
+        assert_eq!(
+            dropin_edit_extract(edited).as_deref(),
+            Some("[Service]\nExecStart=\nExecStart=sleep 10d\n")
+        );
+    }
+
+    #[test]
+    fn test_unit_types_help_matches_c_enum_order() {
+        // C `systemctl --type=help` dumps the unit-type string table in UnitType
+        // enum order (unit-def.h). Pin that exact order so it cannot drift back
+        // to an arbitrary sequence.
+        assert_eq!(
+            UNIT_TYPES_IN_ENUM_ORDER,
+            [
+                "service",
+                "mount",
+                "swap",
+                "socket",
+                "target",
+                "device",
+                "automount",
+                "timer",
+                "path",
+                "slice",
+                "scope",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_signal_to_string_matches_c() {
+        // Bare short names for the standard signals (no "SIG" prefix).
+        assert_eq!(signal_to_string(1), "HUP");
+        assert_eq!(signal_to_string(9), "KILL");
+        assert_eq!(signal_to_string(15), "TERM");
+        assert_eq!(signal_to_string(31), "SYS");
+        // Signal 0 and the glibc-reserved slots render as raw numbers.
+        assert_eq!(signal_to_string(0), "0");
+        assert_eq!(signal_to_string(32), "32");
+        assert_eq!(signal_to_string(33), "33");
+        // Realtime range renders as RTMIN+n from SIGRTMIN upward.
+        let rtmin = libc::SIGRTMIN();
+        let rtmax = libc::SIGRTMAX();
+        assert_eq!(signal_to_string(rtmin), "RTMIN+0");
+        assert_eq!(signal_to_string(rtmin + 1), "RTMIN+1");
+        assert_eq!(signal_to_string(rtmax), format!("RTMIN+{}", rtmax - rtmin));
+    }
+
+    #[test]
+    fn test_state_help_groups_match_c() {
+        // C `systemctl --state=help` prints 14 groups: load/active/file states
+        // then per-type substates. Pin the group order, the members that rust
+        // had previously omitted, and the exact rendered line count.
+        assert_eq!(STATE_HELP_GROUPS.len(), 14);
+
+        // Load states come first (rust used to print active first) with `stub`
+        // leading the UnitLoadState enum.
+        assert_eq!(STATE_HELP_GROUPS[0].0, "Available unit load states:");
+        assert_eq!(STATE_HELP_GROUPS[0].1[0], "stub");
+        assert_eq!(STATE_HELP_GROUPS[1].0, "Available unit active states:");
+        assert!(STATE_HELP_GROUPS[1].1.contains(&"refreshing"));
+
+        let group = |header: &str| {
+            STATE_HELP_GROUPS
+                .iter()
+                .find(|(h, _)| *h == header)
+                .unwrap()
+                .1
+        };
+        // Service substates rust had been missing (all real systemd 260 states).
+        let service = group("Available service unit substates:");
+        for s in [
+            "refresh-extensions",
+            "refresh-credentials",
+            "reload-signal",
+            "reload-notify",
+            "reload-post",
+            "mounting",
+            "failed-before-auto-restart",
+            "auto-restart-queued",
+        ] {
+            assert!(service.contains(&s), "service substates missing {s}");
+        }
+        // Socket substates rust had been missing.
+        let socket = group("Available socket unit substates:");
+        assert!(socket.contains(&"start-open"));
+        assert!(socket.contains(&"deferred"));
+
+        // The full render is 14 headers + 13 inter-group blanks + all members,
+        // which must equal the 148 lines C emits.
+        let members: usize = STATE_HELP_GROUPS.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(14 + 13 + members, 148);
+    }
+
+    #[test]
+    fn test_signal_help_list_shape() {
+        // The full --signal=help list is numbers 0..=SIGRTMAX, no "SIG" prefix,
+        // no header, no "N)" numbering (the old rust format had all three).
+        let list: Vec<String> = (0..=libc::SIGRTMAX()).map(signal_to_string).collect();
+        assert_eq!(list.len(), (libc::SIGRTMAX() + 1) as usize);
+        assert_eq!(list[0], "0");
+        assert_eq!(list[1], "HUP");
+        for entry in &list {
+            assert!(!entry.starts_with("SIG"), "no SIG prefix: {entry:?}");
+            assert!(!entry.contains(')'), "no N) numbering: {entry:?}");
+            assert!(!entry.is_empty());
+        }
+        // Last entry is the top of the realtime range.
+        let rtmin = libc::SIGRTMIN();
+        let rtmax = libc::SIGRTMAX();
+        assert_eq!(list[rtmax as usize], format!("RTMIN+{}", rtmax - rtmin));
+    }
 }

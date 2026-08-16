@@ -33,6 +33,22 @@ pub trait RwLockExt<T> {
 
     /// Acquire a write lock, recovering from a poisoned state.
     fn write_poisoned(&self) -> RwLockWriteGuard<'_, T>;
+
+    /// Acquire a write lock WITHOUT registering as a blocking pending writer.
+    ///
+    /// glibc's `RwLock` is writer-preferring: a thread blocked in `write()`
+    /// registers a pending writer that blocks ALL subsequent `read()` requests
+    /// until it acquires the lock. On PID 1's single-threaded control-socket
+    /// loop that is a deadlock hazard — activation worker threads hold read
+    /// locks on the `RuntimeInfo` for extended periods and may need to acquire
+    /// further read locks to make progress (and release the ones they hold); a
+    /// blocking writer there freezes the whole activation, which in turn stalls
+    /// udevd (its `udev-event` notifications go unread) and drops device
+    /// uevents. Poll `try_write()` with a short sleep instead: `try_write()`
+    /// never registers a pending writer, so readers keep flowing and we simply
+    /// retry until the lock is momentarily free. Recovers from poisoning like
+    /// [`write_poisoned`](RwLockExt::write_poisoned).
+    fn write_poisoned_nonblocking(&self) -> RwLockWriteGuard<'_, T>;
 }
 
 impl<T> MutexExt<T> for Mutex<T> {
@@ -61,5 +77,22 @@ impl<T> RwLockExt<T> for RwLock<T> {
             );
             e.into_inner()
         })
+    }
+
+    fn write_poisoned_nonblocking(&self) -> RwLockWriteGuard<'_, T> {
+        loop {
+            match self.try_write() {
+                Ok(guard) => return guard,
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    log::warn!(
+                        "Recovered poisoned RwLock (write) (a thread panicked while holding this lock)"
+                    );
+                    return e.into_inner();
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+        }
     }
 }

@@ -18,10 +18,10 @@
 //! A key prefixed with '-' means errors applying that setting are ignored.
 //! Glob patterns in keys are supported (e.g. net.ipv4.conf.*.rp_filter).
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{self, BufRead};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -58,7 +58,14 @@ struct Cli {
     #[arg(long)]
     strict: bool,
 
-    /// Specific sysctl.d config files to read (instead of scanning directories)
+    /// Treat the positional arguments as literal `key=value` settings rather
+    /// than as file paths (e.g. `systemd-sysctl --inline "net.ipv4.ip_forward=1"`).
+    #[arg(long)]
+    inline: bool,
+
+    /// Specific sysctl.d config files to read (instead of scanning directories).
+    /// A single `-` reads settings from standard input. With `--inline`, these
+    /// are literal `key=value` settings instead.
     files: Vec<PathBuf>,
 }
 
@@ -264,72 +271,109 @@ fn discover_config_files() -> Vec<PathBuf> {
     result
 }
 
-/// Parse a single sysctl.d config file and return sysctl entries.
-fn parse_config_file(path: &Path) -> io::Result<Vec<SysctlEntry>> {
-    let file = fs::File::open(path)?;
-    let reader = io::BufReader::new(file);
-    let mut entries = Vec::new();
+/// Parse a single `key=value` sysctl setting (as found on a config-file line,
+/// on stdin, or as an `--inline` argument). A leading `-` on the key means
+/// errors applying it are ignored. Returns `None` for blank, comment, or
+/// malformed lines (with a diagnostic for the malformed case).
+fn parse_config_line(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    fatal: &mut bool,
+) -> Option<SysctlEntry> {
+    let trimmed = line.trim();
 
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line = line?;
-        let line_number = line_idx + 1;
-        let trimmed = line.trim();
-
-        // Skip empty lines and comments
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
-            continue;
-        }
-
-        // Parse key=value or key = value
-        let (key_part, value_part) = if let Some(pos) = trimmed.find('=') {
-            let k = trimmed[..pos].trim();
-            let v = trimmed[pos + 1..].trim();
-            (k, v)
-        } else {
-            eprintln!(
-                "systemd-sysctl: {}:{}: line is not a valid key=value pair, ignoring: {}",
-                path.display(),
-                line_number,
-                trimmed
-            );
-            continue;
-        };
-
-        if key_part.is_empty() {
-            eprintln!(
-                "systemd-sysctl: {}:{}: empty key, ignoring.",
-                path.display(),
-                line_number,
-            );
-            continue;
-        }
-
-        // Check for '-' prefix (ignore errors)
-        let (key, ignore_error) = if let Some(stripped) = key_part.strip_prefix('-') {
-            (stripped.trim(), true)
-        } else {
-            (key_part, false)
-        };
-
-        if key.is_empty() {
-            eprintln!(
-                "systemd-sysctl: {}:{}: empty key after prefix, ignoring.",
-                path.display(),
-                line_number,
-            );
-            continue;
-        }
-
-        entries.push(SysctlEntry {
-            key: key.to_string(),
-            value: value_part.to_string(),
-            ignore_error,
-            source: path.to_path_buf(),
-            line_number,
-        });
+    // Skip empty lines and comments
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+        return None;
     }
 
+    // Parse key=value or key = value
+    let (key_part, value_part) = if let Some(pos) = trimmed.find('=') {
+        (trimmed[..pos].trim(), trimmed[pos + 1..].trim())
+    } else {
+        // A line with no '=' that does not start with '-' is a hard syntax error
+        // in C systemd-sysctl: parse_line returns -EINVAL ("Line is not an
+        // assignment"), which the caller accumulates with RET_GATHER into a
+        // non-zero exit while still applying the other lines. A leading '-' with
+        // no '=' is a valid negative-match option there, not an error, so it
+        // must not be marked fatal (both C and rust exit 0 for it).
+        if !trimmed.starts_with('-') {
+            *fatal = true;
+        }
+        eprintln!(
+            "systemd-sysctl: {}:{}: line is not a valid key=value pair, ignoring: {}",
+            source.display(),
+            line_number,
+            trimmed
+        );
+        return None;
+    };
+
+    if key_part.is_empty() {
+        eprintln!(
+            "systemd-sysctl: {}:{}: empty key, ignoring.",
+            source.display(),
+            line_number,
+        );
+        return None;
+    }
+
+    // Check for '-' prefix (ignore errors)
+    let (key, ignore_error) = if let Some(stripped) = key_part.strip_prefix('-') {
+        (stripped.trim(), true)
+    } else {
+        (key_part, false)
+    };
+
+    if key.is_empty() {
+        eprintln!(
+            "systemd-sysctl: {}:{}: empty key after prefix, ignoring.",
+            source.display(),
+            line_number,
+        );
+        return None;
+    }
+
+    Some(SysctlEntry {
+        key: key.to_string(),
+        value: value_part.to_string(),
+        ignore_error,
+        source: source.to_path_buf(),
+        line_number,
+    })
+}
+
+/// Parse sysctl settings from a buffered reader (a file or stdin).
+fn parse_config_reader<R: io::BufRead>(
+    reader: R,
+    source: &Path,
+    fatal: &mut bool,
+) -> io::Result<Vec<SysctlEntry>> {
+    let mut entries = Vec::new();
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line = line?;
+        if let Some(entry) = parse_config_line(&line, source, line_idx + 1, fatal) {
+            entries.push(entry);
+        }
+    }
     Ok(entries)
+}
+
+/// Test-only 1-argument wrapper so the unit tests below don't each have to
+/// thread the fatal-config flag through every call.
+#[cfg(test)]
+fn parse_config_file(path: &Path) -> io::Result<Vec<SysctlEntry>> {
+    read_config_file(path, &mut false)
+}
+
+/// Parse a single sysctl.d config file and return sysctl entries.
+///
+/// Sets `*fatal` if any line is a hard syntax error (see `parse_config_line`),
+/// so the caller can exit non-zero like C while still applying valid settings.
+fn read_config_file(path: &Path, fatal: &mut bool) -> io::Result<Vec<SysctlEntry>> {
+    let file = fs::File::open(path)?;
+    parse_config_reader(io::BufReader::new(file), path, fatal)
 }
 
 /// Normalize a prefix from /path/style to dot.style.
@@ -405,6 +449,24 @@ fn apply_sysctl(entry: &SysctlEntry, verbose: bool, strict: bool, prefixes: &[St
     all_ok
 }
 
+/// Merge parsed entries into the ordered settings map. Later entries for the
+/// same key override earlier ones (last writer wins), but the first-seen
+/// position is preserved so application order is stable.
+fn merge_entries(
+    entries: Vec<SysctlEntry>,
+    order: &mut Vec<String>,
+    settings: &mut HashMap<String, SysctlEntry>,
+) {
+    for entry in entries {
+        // For glob patterns, use the pattern itself as the key (expanded at
+        // apply time). Preserve first-seen position; update value in place.
+        if !settings.contains_key(&entry.key) {
+            order.push(entry.key.clone());
+        }
+        settings.insert(entry.key.clone(), entry);
+    }
+}
+
 fn run() -> u8 {
     let cli = Cli::parse();
 
@@ -412,42 +474,78 @@ fn run() -> u8 {
         .map(|v| v == "debug" || v == "info")
         .unwrap_or(false);
 
-    // Collect config files to read
-    let config_files = if !cli.files.is_empty() {
-        cli.files.clone()
+    // Parse all sources and collect entries.
+    //
+    // Settings are applied in the order they are read (config files in sorted
+    // order, then line order within each file) — NOT sorted by key. Some
+    // settings are order-dependent: e.g. kernel.core_pattern must be applied
+    // before fs.suid_dumpable=2, otherwise the kernel marks the coredump pipe
+    // unsafe. A key-sorted map applied "fs.*" before "kernel.*" and broke this.
+    let mut order: Vec<String> = Vec::new();
+    let mut settings: HashMap<String, SysctlEntry> = HashMap::new();
+
+    // Set when any source has a hard syntax error; makes the exit non-zero even
+    // if every valid setting applies, matching C systemd-sysctl's RET_GATHER.
+    let mut fatal_parse = false;
+
+    if cli.inline {
+        // Positional arguments are literal `key=value` settings, parsed with
+        // the same rules as config-file lines (including the '-' ignore prefix).
+        let source = PathBuf::from("(command line)");
+        let entries: Vec<SysctlEntry> = cli
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(i, arg)| {
+                parse_config_line(&arg.to_string_lossy(), &source, i + 1, &mut fatal_parse)
+            })
+            .collect();
+        merge_entries(entries, &mut order, &mut settings);
     } else {
-        discover_config_files()
-    };
+        // Collect config files to read (a single `-` means standard input).
+        let config_files = if !cli.files.is_empty() {
+            cli.files.clone()
+        } else {
+            discover_config_files()
+        };
 
-    if verbose {
-        eprintln!(
-            "systemd-sysctl: Found {} configuration file(s).",
-            config_files.len()
-        );
-    }
+        if verbose {
+            eprintln!(
+                "systemd-sysctl: Found {} configuration file(s).",
+                config_files.len()
+            );
+        }
 
-    // Parse all files and collect entries. Later entries for the same key
-    // override earlier ones (last writer wins), matching systemd behavior.
-    let mut settings: BTreeMap<String, SysctlEntry> = BTreeMap::new();
-
-    for path in &config_files {
-        match parse_config_file(path) {
-            Ok(entries) => {
-                if verbose {
-                    eprintln!(
-                        "systemd-sysctl: Read {} setting(s) from {}",
-                        entries.len(),
-                        path.display()
-                    );
+        for path in &config_files {
+            let is_stdin = path.as_os_str() == "-";
+            let label = if is_stdin {
+                "(standard input)".to_string()
+            } else {
+                path.display().to_string()
+            };
+            let parsed = if is_stdin {
+                parse_config_reader(
+                    io::stdin().lock(),
+                    Path::new("(standard input)"),
+                    &mut fatal_parse,
+                )
+            } else {
+                read_config_file(path, &mut fatal_parse)
+            };
+            match parsed {
+                Ok(entries) => {
+                    if verbose {
+                        eprintln!(
+                            "systemd-sysctl: Read {} setting(s) from {}",
+                            entries.len(),
+                            label
+                        );
+                    }
+                    merge_entries(entries, &mut order, &mut settings);
                 }
-                for entry in entries {
-                    // For glob patterns, use the pattern itself as the key
-                    // (they'll be expanded at apply time)
-                    settings.insert(entry.key.clone(), entry);
+                Err(e) => {
+                    eprintln!("systemd-sysctl: Failed to read {}: {}", label, e);
                 }
-            }
-            Err(e) => {
-                eprintln!("systemd-sysctl: Failed to read {}: {}", path.display(), e);
             }
         }
     }
@@ -456,7 +554,13 @@ fn run() -> u8 {
         if verbose {
             eprintln!("systemd-sysctl: No sysctl settings to apply.");
         }
-        return EXIT_SUCCESS;
+        // A config with only a syntax error and no valid settings must still
+        // fail, like C (e.g. a lone "not an assignment" line).
+        return if fatal_parse {
+            EXIT_FAILURE
+        } else {
+            EXIT_SUCCESS
+        };
     }
 
     // Normalize prefixes: convert /path/style to dot.style
@@ -465,7 +569,7 @@ fn run() -> u8 {
 
     // Prefix filtering now happens inside apply_sysctl (after glob expansion),
     // but we can still skip entries whose non-glob keys clearly don't match.
-    let entries_to_apply: Vec<&SysctlEntry> = settings.values().collect();
+    let entries_to_apply: Vec<&SysctlEntry> = order.iter().map(|k| &settings[k]).collect();
 
     if verbose {
         eprintln!(
@@ -481,7 +585,8 @@ fn run() -> u8 {
         }
     }
 
-    if any_failed {
+    // A syntax error is fatal even when every valid setting applied cleanly.
+    if any_failed || fatal_parse {
         EXIT_FAILURE
     } else {
         EXIT_SUCCESS
@@ -495,6 +600,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::io::Write;
 
     #[test]
@@ -590,6 +696,45 @@ mod tests {
         assert!(!entries[2].ignore_error);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fatal_flag_matches_c_classification() {
+        // C systemd-sysctl treats exactly one config syntax error as fatal: a
+        // line with no '=' that does not start with '-' ("Line is not an
+        // assignment", parse_line returns -EINVAL). It still applies the other
+        // lines but exits non-zero. A leading '-' with no '=' is a valid
+        // negative-match option (not an error), an empty key is not a parse
+        // error (only a later write may fail), and valid/blank/comment lines are
+        // clean. Verify the fatal flag mirrors that.
+        let src = Path::new("test.conf");
+        let fatal = |line: &str| {
+            let mut f = false;
+            let _ = parse_config_line(line, src, 1, &mut f);
+            f
+        };
+
+        // Fatal: no '=' and no leading '-'.
+        assert!(fatal("badnoeq"), "non-assignment line must be fatal");
+        assert!(fatal("kernel core pattern"), "spaced junk must be fatal");
+
+        // Not fatal: negative-match option with no '='.
+        assert!(!fatal("-kernel.nonexistent"), "negative match not fatal");
+        // Not fatal: empty key (C errors only at write time, not at parse).
+        assert!(!fatal("= 5"), "empty key is not a parse error");
+        assert!(!fatal("- = 5"), "empty key after prefix is not a parse error");
+        // Not fatal: valid assignments, blanks, and comments.
+        assert!(!fatal("vm.swappiness = 60"), "valid line not fatal");
+        assert!(!fatal("-net.ipv4.ip_forward = 1"), "valid ignore-prefix line");
+        assert!(!fatal(""), "empty line not fatal");
+        assert!(!fatal("   "), "whitespace line not fatal");
+        assert!(!fatal("# comment"), "hash comment not fatal");
+        // NOTE a divergence, not parity: rust treats a leading ';' as a comment,
+        // but C systemd-sysctl does not and reports "; ..." as "Line is not an
+        // assignment" (exit 1). This is the same rust-accepts-a-superset
+        // leniency class as invalid octal modes / CIDRs (task #31), deliberately
+        // left as-is; the exit-code fix above does not touch comment parsing.
+        assert!(!fatal("; comment"), "rust treats semicolon as a comment (#31)");
     }
 
     #[test]

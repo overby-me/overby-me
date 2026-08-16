@@ -14,7 +14,7 @@
     systemd-run --unit="$UNIT" --slice=system --remain-after-exit true
     sleep 1
     SLICE="$(systemctl show -P Slice "$UNIT.service")"
-    [[ "$SLICE" == "system.slice" || "$SLICE" == "system" ]]
+    [[ "$SLICE" == "system.slice" ]]
     systemctl stop "$UNIT.service" 2>/dev/null || true
     RSEOF
     chmod +x TEST-74-AUX-UTILS.run-slice.sh

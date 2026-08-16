@@ -149,6 +149,26 @@ impl ManagedLink {
         }
         OperState::Configured
     }
+
+    /// Operational-state string for the `OPER_STATE=` field of the per-link
+    /// state file, using systemd's operational-state vocabulary
+    /// (off/no-carrier/carrier/degraded/routable). networkd's internal
+    /// `OperState` is a setup-oriented model (configuring/configured/pending)
+    /// whose Display strings are NOT recognised by consumers such as
+    /// systemd-networkd-wait-online (which map anything unknown to "missing").
+    /// Translate so that, e.g., a link that has carrier reports at least
+    /// "carrier" and a fully-configured link reports "routable".
+    pub fn operational_state_str(&self) -> &'static str {
+        match self.oper_state() {
+            OperState::Unmanaged => "off",
+            OperState::NoCarrier => "no-carrier",
+            // Carrier is present but layer-3 configuration is not finished yet
+            // (still applying addresses, or waiting for a DHCP lease).
+            OperState::Configuring | OperState::Pending => "carrier",
+            OperState::Degraded => "degraded",
+            OperState::Configured => "routable",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +195,13 @@ pub struct NetworkManager {
     /// Global IPv6 DNS servers (aggregated from RA RDNSS).
     pub dns6_servers: Vec<Ipv6Addr>,
 
+    /// Runtime per-link NTP servers, keyed by interface index, set via the
+    /// network1 `SetLinkNTP` D-Bus method (used by `timedatectl ntp-servers`).
+    /// A present entry overrides the `NTP=` servers from the link's `.network`
+    /// configuration; absent means fall back to the configured servers. Each
+    /// value entry is a server string (an IP literal or a hostname), verbatim.
+    pub link_ntp: HashMap<u32, Vec<String>>,
+
     /// Whether we've completed initial configuration.
     pub initial_config_done: bool,
 }
@@ -189,6 +216,7 @@ impl NetworkManager {
             dns_servers: Vec::new(),
             search_domains: Vec::new(),
             dns6_servers: Vec::new(),
+            link_ntp: HashMap::new(),
             initial_config_done: false,
         }
     }
@@ -368,6 +396,32 @@ impl NetworkManager {
         self.update_global_dns();
 
         Ok(())
+    }
+
+    /// Re-read managed links' carrier (running) state from the kernel and
+    /// update `has_carrier`. The kernel sets IFF_RUNNING slightly after IFF_UP
+    /// (asynchronously, via the linkwatch work queue), so a link that
+    /// `configure_link` has just brought up only reports carrier a moment
+    /// later. Refreshing here on each main-loop iteration keeps the exported
+    /// per-link state files in sync with reality without waiting for the next
+    /// full reload; `systemd-networkd-wait-online` reads those state files to
+    /// decide when a link has carrier. Returns true if any link changed.
+    pub fn refresh_carrier_states(&mut self) -> bool {
+        let system_links = match link::list_links() {
+            Ok(l) => l,
+            Err(_) => return false,
+        };
+        let mut changed = false;
+        for li in &system_links {
+            if let Some(managed) = self.links.get_mut(&li.index) {
+                let carrier = li.is_running() || li.is_loopback();
+                if managed.has_carrier != carrier {
+                    managed.has_carrier = carrier;
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     /// Configure a single link.
@@ -1131,6 +1185,87 @@ impl NetworkManager {
         }
     }
 
+    /// List drop-ins for a config file as `<name>.d/*.conf` across the network
+    /// config directories, deduped by filename (highest-precedence dir wins)
+    /// and sorted by filename. Mirrors networkctl's `list_dropins` so the
+    /// `*_FILE_DROPINS` fields written to the link state file match exactly what
+    /// `networkctl cat <name>` produces from the filesystem.
+    fn config_dropins(config_file: &std::path::Path) -> Vec<std::path::PathBuf> {
+        const NETWORK_DIRS: [&str; 3] = [
+            "/etc/systemd/network",
+            "/run/systemd/network",
+            "/usr/lib/systemd/network",
+        ];
+        let Some(name) = config_file.file_name() else {
+            return Vec::new();
+        };
+        let name = name.to_string_lossy();
+        let mut m: std::collections::BTreeMap<String, std::path::PathBuf> =
+            std::collections::BTreeMap::new();
+        for dir in NETWORK_DIRS {
+            let dropin_dir = std::path::Path::new(dir).join(format!("{name}.d"));
+            if let Ok(rd) = std::fs::read_dir(&dropin_dir) {
+                for e in rd.flatten() {
+                    let fname = e.file_name().to_string_lossy().into_owned();
+                    if fname.ends_with(".conf") {
+                        m.entry(fname).or_insert_with(|| e.path());
+                    }
+                }
+            }
+        }
+        m.into_values().collect()
+    }
+
+    /// Format a drop-in path list as the colon-separated value used by the
+    /// `*_FILE_DROPINS` state-file fields.
+    fn dropins_field(dropins: &[std::path::PathBuf]) -> String {
+        dropins
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
+    /// Read the `.link` file (and its drop-ins) that systemd-udevd applied to a
+    /// network interface, from its udev database entry
+    /// `/run/udev/data/n<ifindex>` (properties `E:ID_NET_LINK_FILE` and
+    /// `E:ID_NET_LINK_FILE_DROPINS`, set by udev's `net_setup_link` builtin).
+    fn udev_link_file(ifindex: u32) -> Option<(String, Vec<std::path::PathBuf>)> {
+        let content = std::fs::read_to_string(format!("/run/udev/data/n{ifindex}")).ok()?;
+        let mut file: Option<String> = None;
+        let mut dropins: Vec<std::path::PathBuf> = Vec::new();
+        for line in content.lines() {
+            if let Some(v) = line.strip_prefix("E:ID_NET_LINK_FILE=") {
+                file = Some(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("E:ID_NET_LINK_FILE_DROPINS=") {
+                dropins = v
+                    .trim()
+                    .split(':')
+                    .filter(|x| !x.is_empty())
+                    .map(std::path::PathBuf::from)
+                    .collect();
+            }
+        }
+        file.map(|f| (f, dropins))
+    }
+
+    /// Set the runtime NTP servers for a link (network1 `SetLinkNTP`). The
+    /// override is recorded even when empty, so an explicit empty list means
+    /// "no link NTP" rather than "fall back to the configured servers" (use
+    /// [`Self::revert_link_ntp`] for the latter). Returns whether the link is
+    /// currently managed.
+    pub fn set_link_ntp(&mut self, ifindex: u32, servers: Vec<String>) -> bool {
+        let managed = self.links.contains_key(&ifindex);
+        self.link_ntp.insert(ifindex, servers);
+        managed
+    }
+
+    /// Clear the runtime NTP override for a link (network1 `RevertLinkNTP`),
+    /// reverting to the `NTP=` servers from the link's `.network` config.
+    pub fn revert_link_ntp(&mut self, ifindex: u32) {
+        self.link_ntp.remove(&ifindex);
+    }
+
     /// Write runtime state files to `/run/systemd/netif/`.
     pub fn write_state_files(&self) {
         let state_dir = std::path::Path::new("/run/systemd/netif/links");
@@ -1148,9 +1283,46 @@ impl NetworkManager {
             let mut content = String::new();
             content.push_str("# systemd-networkd state file\n");
             content.push_str(&format!("ADMIN_STATE={}\n", managed.admin_state));
-            content.push_str(&format!("OPER_STATE={}\n", managed.oper_state()));
+            content.push_str(&format!("OPER_STATE={}\n", managed.operational_state_str()));
             if let Some(ref cfg) = managed.config {
                 content.push_str(&format!("NETWORK_FILE={}\n", cfg.path.display()));
+                let dropins = Self::config_dropins(&cfg.path);
+                if !dropins.is_empty() {
+                    content.push_str(&format!(
+                        "NETWORK_FILE_DROPINS={}\n",
+                        Self::dropins_field(&dropins)
+                    ));
+                }
+            }
+            // Record the .netdev file that created this interface (matched by
+            // the configured device name), so `networkctl cat @IF:netdev` can
+            // resolve it from the state file.
+            if let Some(ndev) = self
+                .netdev_configs
+                .iter()
+                .find(|c| c.netdev_section.name == managed.link.name)
+            {
+                content.push_str(&format!("NETDEV_FILE={}\n", ndev.path.display()));
+                let dropins = Self::config_dropins(&ndev.path);
+                if !dropins.is_empty() {
+                    content.push_str(&format!(
+                        "NETDEV_FILE_DROPINS={}\n",
+                        Self::dropins_field(&dropins)
+                    ));
+                }
+            }
+            // Record the .link file that systemd-udevd applied to this
+            // interface, read from the network device's udev database entry
+            // (property ID_NET_LINK_FILE), so `networkctl cat @IF:link` can
+            // resolve it.
+            if let Some((link_file, dropins)) = Self::udev_link_file(managed.link.index) {
+                content.push_str(&format!("LINK_FILE={link_file}\n"));
+                if !dropins.is_empty() {
+                    content.push_str(&format!(
+                        "LINK_FILE_DROPINS={}\n",
+                        Self::dropins_field(&dropins)
+                    ));
+                }
             }
             for dns in &managed.dns_servers {
                 content.push_str(&format!("DNS={dns}\n"));
@@ -1164,6 +1336,20 @@ impl NetworkManager {
             }
             for domain6 in &managed.search6_domains {
                 content.push_str(&format!("DOMAINS={domain6}\n"));
+            }
+            // Per-link NTP servers. A runtime override set via the network1
+            // SetLinkNTP D-Bus method (timedatectl ntp-servers) takes precedence
+            // over the configured NTP= servers. timesyncd reads these NTP= lines
+            // to build its per-link LinkNTPServers property.
+            let ntp: Vec<String> = if let Some(rt) = self.link_ntp.get(&managed.link.index) {
+                rt.clone()
+            } else if let Some(ref cfg) = managed.config {
+                cfg.network_section.ntp.clone()
+            } else {
+                Vec::new()
+            };
+            for server in &ntp {
+                content.push_str(&format!("NTP={server}\n"));
             }
             // Include delegated prefixes from DHCPv6-PD.
             if let Some(ref dhcpv6_lease) = managed.dhcpv6_lease

@@ -222,6 +222,12 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
             let mut last_fired: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
 
+            // For DeferReactivation= timers: track whether the triggered unit
+            // was seen active since the last fire, so we can re-anchor the
+            // calendar reference to its deactivation time.
+            let mut defer_seen_active: std::collections::HashMap<String, bool> =
+                std::collections::HashMap::new();
+
             loop {
                 // Detect clock/timezone changes before checking timers
                 let tz_changed = change_detector.timezone_changed(&run_info);
@@ -238,6 +244,7 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
                     &run_info,
                     boot_instant,
                     &mut last_fired,
+                    &mut defer_seen_active,
                     tz_changed,
                     clock_changed,
                     pre_jump_wallclock,
@@ -256,6 +263,7 @@ fn check_and_fire_timers(
     run_info: &ArcMutRuntimeInfo,
     boot_instant: Instant,
     last_fired: &mut std::collections::HashMap<String, Instant>,
+    defer_seen_active: &mut std::collections::HashMap<String, bool>,
     timezone_changed: bool,
     clock_changed: bool,
     pre_jump_wallclock: Option<SystemTime>,
@@ -285,7 +293,69 @@ fn check_and_fire_timers(
                 let timer_name = &unit.id.name;
                 let target_unit = &conf.unit;
 
-                if should_fire_timer(
+                // Persistent= timers whose saved last-trigger predates this boot
+                // must rebase their reference to boot time, so RandomizedDelaySec=
+                // still applies during boot and the timer does not fire
+                // immediately for the elapsed-while-off run (matches upstream).
+                // Seed last_fired to boot the first time we see such a timer so
+                // should_fire_timer computes the next elapse from boot rather
+                // than from the ancient stamp (which would elapse at once).
+                if conf.persistent && !last_fired.contains_key(timer_name) {
+                    let stamp_usec = timer_specific.state.read_poisoned().last_trigger_usec;
+                    if let Some(usec) = stamp_usec {
+                        let boot_wall = SystemTime::now()
+                            .checked_sub(elapsed_since_boot)
+                            .unwrap_or(SystemTime::UNIX_EPOCH);
+                        let stamp_wall =
+                            SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(usec);
+                        if stamp_wall < boot_wall {
+                            last_fired.insert(timer_name.clone(), boot_instant);
+                        }
+                    }
+                }
+
+                // DeferReactivation=: gate a repeating timer on the triggered
+                // unit's lifecycle. The next elapse is re-anchored to when the
+                // triggered unit deactivates rather than when the timer fired,
+                // and the timer will not fire again while it is still active.
+                if conf.defer_reactivation {
+                    let target_active = ri
+                        .unit_table
+                        .values()
+                        .find(|u| u.id.name == *target_unit)
+                        .map(|u| {
+                            !matches!(
+                                &*u.common.status.read_poisoned(),
+                                UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                            )
+                        })
+                        .unwrap_or(false);
+
+                    if !defer_seen_active.contains_key(timer_name) {
+                        // First time we see this armed timer: anchor the
+                        // calendar reference to now so the first elapse is the
+                        // next calendar boundary rather than an immediate,
+                        // boot-referenced fire.
+                        defer_seen_active.insert(timer_name.clone(), false);
+                        last_fired.insert(timer_name.clone(), now);
+                        continue;
+                    }
+                    if target_active {
+                        // Triggered unit still running — defer the next elapse.
+                        defer_seen_active.insert(timer_name.clone(), true);
+                        continue;
+                    }
+                    if defer_seen_active.get(timer_name).copied().unwrap_or(false) {
+                        // Triggered unit just deactivated — re-anchor the
+                        // calendar reference to now so the next elapse is
+                        // measured from the deactivation.
+                        last_fired.insert(timer_name.clone(), now);
+                        defer_seen_active.insert(timer_name.clone(), false);
+                        continue;
+                    }
+                }
+
+                let fire = should_fire_timer(
                     conf,
                     timer_name,
                     elapsed_since_boot,
@@ -294,7 +364,8 @@ fn check_and_fire_timers(
                     timezone_changed,
                     clock_changed,
                     pre_jump_wallclock,
-                ) {
+                );
+                if fire {
                     timers_to_fire.push((unit.id.clone(), target_unit.clone()));
                 }
             }
@@ -331,6 +402,28 @@ fn check_and_fire_timers(
                         warn!(
                             "Timer {}: failed to write stamp file {}: {}",
                             timer_id.name, stamp_path, e
+                        );
+                    }
+                }
+
+                // RemainAfterElapse=no: a one-shot timer (only OnActiveSec=/
+                // OnBootSec=/OnStartupSec=, which fire exactly once) deactivates
+                // once it has elapsed. Timers with a recurring source
+                // (OnCalendar=/OnUnitActiveSec=/OnUnitInactiveSec=) keep waiting
+                // and stay active regardless.
+                let recurring = !tmr.conf.on_calendar.is_empty()
+                    || !tmr.conf.on_unit_active_sec.is_empty()
+                    || !tmr.conf.on_unit_inactive_sec.is_empty();
+                if !recurring && !tmr.conf.remain_after_elapse {
+                    let mut status = unit.common.status.write_poisoned();
+                    if status.is_started() {
+                        trace!(
+                            "Timer {}: RemainAfterElapse=no and elapsed, deactivating",
+                            timer_id.name
+                        );
+                        *status = UnitStatus::Stopped(
+                            crate::units::StatusStopped::StoppedFinal,
+                            vec![],
                         );
                     }
                 }
@@ -572,9 +665,14 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                         "Timer target {} is already running, attempting restart",
                         target_unit_name
                     );
+                    let id = unit.id.clone();
                     match unit.reactivate(&ri, ActivationSource::TriggerActivation) {
                         Ok(()) => {
                             info!("Timer fired: restarted {}", target_unit_name);
+                            // The restarted service's start wait may have been
+                            // deferred (unit left Starting) — hand completion
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
                         }
                         Err(e) => {
                             warn!("Timer failed to restart {}: {}", target_unit_name, e);
@@ -586,12 +684,16 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                     let id = unit.id.clone();
                     drop(ri);
                     match crate::units::activate_unit(
-                        id,
+                        id.clone(),
                         &run_info.read_poisoned(),
                         ActivationSource::TriggerActivation,
                     ) {
                         Ok(_) => {
                             info!("Timer fired: started {}", target_unit_name);
+                            // If the start wait was deferred (unit left
+                            // Starting), hand completion + timeout enforcement
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
                         }
                         Err(e) => {
                             warn!("Timer failed to start {}: {}", target_unit_name, e);
@@ -619,11 +721,14 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                 let id = unit.id.clone();
                 drop(ri);
                 match crate::units::activate_unit(
-                    id,
+                    id.clone(),
                     &run_info.read_poisoned(),
                     ActivationSource::TriggerActivation,
                 ) {
-                    Ok(_) => info!("Timer fired: started {} (on-demand)", target_unit_name),
+                    Ok(_) => {
+                        info!("Timer fired: started {} (on-demand)", target_unit_name);
+                        crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
+                    }
                     Err(e) => warn!(
                         "Timer failed to start {} (on-demand): {}",
                         target_unit_name, e
@@ -742,6 +847,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -776,6 +882,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -810,6 +917,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -845,6 +953,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -884,6 +993,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -923,6 +1033,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -962,6 +1073,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1004,6 +1116,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1038,6 +1151,7 @@ mod tests {
             persistent: true,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1111,6 +1225,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1146,6 +1261,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1182,6 +1298,7 @@ mod tests {
                 persistent: false,
                 wake_system: false,
                 remain_after_elapse: true,
+            defer_reactivation: false,
                 on_clock_change: false,
                 on_timezone_change: false,
                 unit: "test.service".into(),
@@ -1203,6 +1320,7 @@ mod tests {
                 persistent: false,
                 wake_system: false,
                 remain_after_elapse: true,
+            defer_reactivation: false,
                 on_clock_change: false,
                 on_timezone_change: false,
                 unit: "test.service".into(),

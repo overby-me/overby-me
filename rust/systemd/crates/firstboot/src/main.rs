@@ -214,12 +214,34 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             "--prompt-root-password" => parsed.prompt_root_password = true,
             "--prompt-root-shell" => parsed.prompt_root_shell = true,
 
+            // Upstream's ARG_COPY sets exactly these five. Unlike --reset,
+            // which leaves the root account alone, --copy does include the
+            // root password and shell.
+            "--copy" => {
+                parsed.copy_locale = true;
+                parsed.copy_keymap = true;
+                parsed.copy_timezone = true;
+                parsed.copy_root_password = true;
+                parsed.copy_root_shell = true;
+            }
             "--copy-locale" => parsed.copy_locale = true,
             "--copy-keymap" => parsed.copy_keymap = true,
             "--copy-timezone" => parsed.copy_timezone = true,
             "--copy-root-password" => parsed.copy_root_password = true,
             "--copy-root-shell" => parsed.copy_root_shell = true,
 
+            // Upstream's process_reset() removes exactly locale.conf,
+            // vconsole.conf, hostname, machine-id, kernel/cmdline and
+            // localtime. It deliberately leaves the root account alone, so
+            // this is NOT simply every --reset-* flag at once.
+            "--reset" => {
+                parsed.reset_locale = true;
+                parsed.reset_keymap = true;
+                parsed.reset_timezone = true;
+                parsed.reset_hostname = true;
+                parsed.reset_machine_id = true;
+                parsed.reset_kernel_cmdline = true;
+            }
             "--reset-locale" => parsed.reset_locale = true,
             "--reset-keymap" => parsed.reset_keymap = true,
             "--reset-timezone" => parsed.reset_timezone = true,
@@ -533,6 +555,41 @@ fn load_settings_from_credentials(settings: &mut Settings) {
 // Copy from host
 // ---------------------------------------------------------------------------
 
+/// Format C's firstboot copy line: "<root>: Copied host's /<relative>." (the
+/// "<root>: " prefix is dropped when root is "/", like written_message).
+fn copied_message(root: &Path, relative: &str) -> String {
+    if root == Path::new("/") {
+        format!("Copied host's /{relative}.")
+    } else {
+        format!("{}: Copied host's /{relative}.", root.display())
+    }
+}
+
+/// Copy `/<relative>` from the host into `<root>/<relative>`, byte for byte.
+///
+/// Returns false when there is nothing to copy, either because the host has no
+/// such file or because the target is already configured and --force was not
+/// given, so the caller can fall back to reconstructing the file from parsed
+/// values.
+fn copy_host_file_verbatim(root: &Path, relative: &str, force: bool) -> io::Result<bool> {
+    let host = Path::new("/").join(relative);
+    let Ok(content) = fs::read(&host) else {
+        return Ok(false);
+    };
+    if !should_apply(root, relative, force) {
+        return Ok(false);
+    }
+    let dest = root.join(relative);
+    ensure_parent_dir(&dest)?;
+    fs::write(&dest, content)?;
+    #[cfg(target_os = "linux")]
+    {
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o644))?;
+    }
+    eprintln!("{}", copied_message(root, relative));
+    Ok(true)
+}
+
 fn copy_locale_from_host(settings: &mut Settings) {
     if settings.locale.is_some() {
         return;
@@ -581,21 +638,26 @@ fn copy_root_password_from_host(settings: &mut Settings) {
     if settings.root_password.is_some() {
         return;
     }
-    if let Some(hash) = read_root_password_hash("/etc/shadow") {
-        settings.root_password = Some(hash);
+    // Copy the field VERBATIM, including a locked or empty one.
+    // read_root_password_hash() deliberately skips those, which is right when
+    // asking "does root have a usable password", but wrong here: a copy that
+    // silently drops a locked password leaves the account to be filled in with
+    // something else, and the test diffs the copied field against the host's.
+    if let Some(field) = read_root_password_field_raw("/etc/shadow") {
+        settings.root_password = Some(field);
         settings.root_password_hashed = Some(true);
     }
 }
 
-fn copy_root_shell_from_host(settings: &mut Settings) {
-    if settings.root_shell.is_some() {
-        return;
-    }
-    if let Some(shell) = read_root_shell("/etc/passwd") {
-        settings.root_shell = Some(shell);
-    }
-}
-
+/// The root password hash, if root has a usable one.
+///
+/// This is the "is root's password usable" predicate: locked and placeholder
+/// values are not hashes and are skipped. No longer on the binary's path,
+/// since the only former caller was the --copy-root-password path and a copy
+/// must reproduce even a locked field, but kept with its unit coverage because
+/// it answers a different question from read_root_password_field_raw() below
+/// and the distinction is exactly what caused a bug once already.
+#[allow(dead_code)]
 fn read_root_password_hash(path: &str) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
     for line in content.lines() {
@@ -610,6 +672,26 @@ fn read_root_password_hash(path: &str) -> Option<String> {
     }
     None
 }
+
+/// The root password field from a shadow file exactly as written, with no
+/// judgement about whether it is a usable hash.
+fn read_root_password_field_raw(path: &str) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    content.lines().find_map(|line| {
+        let fields: Vec<&str> = line.split(':').collect();
+        (fields.len() >= 2 && fields[0] == "root").then(|| fields[1].to_string())
+    })
+}
+
+fn copy_root_shell_from_host(settings: &mut Settings) {
+    if settings.root_shell.is_some() {
+        return;
+    }
+    if let Some(shell) = read_root_shell("/etc/passwd") {
+        settings.root_shell = Some(shell);
+    }
+}
+
 
 fn read_root_shell(path: &str) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
@@ -855,7 +937,7 @@ fn apply_locale(root: &Path, settings: &Settings, force: bool) -> io::Result<boo
     let path = root.join("etc/locale.conf");
     ensure_parent_dir(&path)?;
     fs::write(&path, format_env_file(&vars))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -879,15 +961,38 @@ fn apply_keymap(root: &Path, settings: &Settings, force: bool) -> io::Result<boo
     }
     vars.insert("KEYMAP".to_string(), keymap.clone());
 
-    let mut content = String::new();
+    // C (systemd-localed's write_vconsole_conf, shared by firstboot) prefixes
+    // vconsole.conf with this fixed header; locale.conf gets none.
+    let mut content = String::from(
+        "# Written by systemd-localed(8) or systemd-firstboot(1), read by systemd-localed\n\
+         # and systemd-vconsole-setup(8). Use localectl(1) to update this file.\n",
+    );
     let mut keys: Vec<&String> = vars.keys().collect();
     keys.sort();
     for key in keys {
         content.push_str(&format!("{}={}\n", key, vars[key]));
     }
     fs::write(&path, content)?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
+}
+
+/// Format the "written" line the way C's systemd-firstboot does. C logs
+/// "<etc-path> written." and systemd's logging prepends "<root>: " when a
+/// `--root` other than `/` is in effect. The localtime symlink drops the
+/// trailing period (a separate C code path).
+fn written_message(root: &Path, path: &Path, trailing_period: bool) -> String {
+    let etc = path
+        .strip_prefix(root)
+        .ok()
+        .map(|p| format!("/{}", p.display()))
+        .unwrap_or_else(|| path.display().to_string());
+    let dot = if trailing_period { "." } else { "" };
+    if root == Path::new("/") {
+        format!("{etc} written{dot}")
+    } else {
+        format!("{}: {etc} written{dot}", root.display())
+    }
 }
 
 fn apply_timezone(root: &Path, settings: &Settings, force: bool) -> io::Result<bool> {
@@ -908,7 +1013,7 @@ fn apply_timezone(root: &Path, settings: &Settings, force: bool) -> io::Result<b
 
     let target = format!("../usr/share/zoneinfo/{}", tz);
     symlink(&target, &link_path)?;
-    eprintln!("Created symlink {} → {}.", link_path.display(), target);
+    eprintln!("{}", written_message(root, &link_path, false));
     Ok(true)
 }
 
@@ -925,7 +1030,7 @@ fn apply_hostname(root: &Path, settings: &Settings, force: bool) -> io::Result<b
     let path = root.join("etc/hostname");
     ensure_parent_dir(&path)?;
     fs::write(&path, format!("{}\n", hostname))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -949,7 +1054,7 @@ fn apply_machine_id(root: &Path, settings: &Settings, force: bool) -> io::Result
     let path = root.join("etc/machine-id");
     ensure_parent_dir(&path)?;
     fs::write(&path, format!("{}\n", machine_id))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -972,11 +1077,10 @@ fn apply_root_password(
         return Ok(false);
     };
 
-    if !should_apply(root, "etc/shadow", force) && !force {
-        // Even if shadow exists, we may need to update it
-        if !delete && settings.root_password.is_none() {
-            return Ok(false);
-        }
+    // Leave an already-provisioned root account alone. Deleting a password is
+    // an explicit request, so it is not gated on this.
+    if !delete && !should_configure_root(root, force) {
+        return Ok(false);
     }
 
     let shadow_path = root.join("etc/shadow");
@@ -1020,12 +1124,116 @@ fn apply_root_password(
         fs::set_permissions(&shadow_path, fs::Permissions::from_mode(0o640))?;
     }
 
-    if delete {
-        eprintln!("Deleted root password in {}.", shadow_path.display());
-    } else {
-        eprintln!("Set root password in {}.", shadow_path.display());
-    }
+    // A password in shadow is useless without the matching passwd entry, and
+    // the account may not exist yet: TEST-74-AUX-UTILS.firstboot deletes both
+    // files and then expects --root-password= alone to recreate them. Upstream
+    // does the same, writing passwd and shadow together in
+    // process_root_account() via write_root_passwd(), and logs both (passwd
+    // first, then shadow, each as "<path> written.") for set and delete alike.
+    write_root_passwd_entry(root, settings.root_shell.as_deref())?;
+    eprintln!("{}", written_message(root, &shadow_path, true));
+
     Ok(true)
+}
+
+/// `struct passwd`'s password field meaning "look in the shadow file".
+const PASSWORD_SEE_SHADOW: &str = "x";
+/// What sysusers leaves in shadow to mean "firstboot should fill this in".
+/// Note this is NOT the same as a locked password ("!*"): a root entry locked
+/// with anything else, say "!test", counts as already configured.
+const PASSWORD_UNPROVISIONED: &str = "!unprovisioned";
+
+/// Whether the root account should be (re)configured, mirroring upstream's
+/// should_configure() for passwd/shadow.
+///
+/// An already-provisioned root password must survive `--root-password=` unless
+/// --force is given: TEST-74-AUX-UTILS.firstboot seeds `root:!test:` and then
+/// requires it to still be there afterwards.
+fn should_configure_root(root: &Path, force: bool) -> bool {
+    if force {
+        return true;
+    }
+    let Ok(passwd) = fs::read_to_string(root.join("etc/passwd")) else {
+        return true; // missing
+    };
+    let mut saw_root = false;
+    for line in passwd.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.first() != Some(&"root") {
+            continue;
+        }
+        saw_root = true;
+        // A root password held directly in passwd, rather than delegated to
+        // shadow, means the account is already configured.
+        if f.get(1).copied() != Some(PASSWORD_SEE_SHADOW) {
+            return false;
+        }
+        break;
+    }
+    if !saw_root {
+        return true;
+    }
+    let Ok(shadow) = fs::read_to_string(root.join("etc/shadow")) else {
+        return true; // missing
+    };
+    for line in shadow.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.first() != Some(&"root") {
+            continue;
+        }
+        return f.get(1).copied() == Some(PASSWORD_UNPROVISIONED);
+    }
+    true
+}
+
+/// Shell used for a freshly created root account when none was configured.
+/// Upstream resolves this per-root via default_root_shell_at(); /bin/sh is the
+/// portable fallback it ends up at when nothing else is configured.
+const DEFAULT_ROOT_SHELL: &str = "/bin/sh";
+
+/// Ensure `<root>/etc/passwd` has a root account, creating the file if needed.
+///
+/// An existing root line keeps its GECOS and home so only what firstboot owns
+/// changes: the password field becomes "x" (the real hash lives in shadow) and
+/// the shell is replaced when one was configured. Other accounts are left
+/// untouched. Mirrors upstream's write_root_passwd().
+fn write_root_passwd_entry(root: &Path, shell: Option<&str>) -> io::Result<()> {
+    let passwd_path = root.join("etc/passwd");
+    ensure_parent_dir(&passwd_path)?;
+
+    let existing = fs::read_to_string(&passwd_path).unwrap_or_default();
+    let mut lines: Vec<String> = Vec::new();
+    let mut found_root = false;
+
+    for line in existing.lines() {
+        if line.starts_with("root:") {
+            found_root = true;
+            // name:passwd:uid:gid:gecos:dir:shell
+            let f: Vec<&str> = line.split(':').collect();
+            let gecos = f.get(4).copied().unwrap_or("");
+            let dir = f.get(5).copied().unwrap_or("/root");
+            let old_shell = f.get(6).copied().unwrap_or(DEFAULT_ROOT_SHELL);
+            let sh = shell.unwrap_or(old_shell);
+            lines.push(format!("root:x:0:0:{gecos}:{dir}:{sh}"));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !found_root {
+        let sh = shell.unwrap_or(DEFAULT_ROOT_SHELL);
+        // Upstream puts root first when it creates the file.
+        lines.insert(0, format!("root:x:0:0::/root:{sh}"));
+    }
+
+    let content = lines.join("\n") + "\n";
+    fs::write(&passwd_path, content)?;
+    #[cfg(target_os = "linux")]
+    {
+        fs::set_permissions(&passwd_path, fs::Permissions::from_mode(0o644))?;
+    }
+    eprintln!("{}", written_message(root, &passwd_path, true));
+    Ok(())
 }
 
 fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result<bool> {
@@ -1034,12 +1242,23 @@ fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result
         None => return Ok(false),
     };
 
-    let passwd_path = root.join("etc/passwd");
-
-    if !passwd_path.exists() && !force {
+    // Gate on the same rule as the password, which is what upstream does:
+    // process_root_account() decides once via should_configure() and then
+    // writes the shell and the password together.
+    //
+    // This replaced a `!passwd_path.exists() && !force` early return that was
+    // wrong in both directions. A missing passwd means the account still needs
+    // creating, not that there is nothing to do, so `--root-shell=X` against a
+    // tree with no passwd silently dropped the shell. But simply dropping that
+    // check went too far the other way and let an already-configured root shell
+    // be overwritten, which the test catches: it configures /bin/fooshell, then
+    // runs firstboot again with --root-shell=shell-overwrite and requires
+    // /bin/fooshell to survive.
+    if !should_configure_root(root, force) {
         return Ok(false);
     }
 
+    let passwd_path = root.join("etc/passwd");
     ensure_parent_dir(&passwd_path)?;
 
     let existing = fs::read_to_string(&passwd_path).unwrap_or_default();
@@ -1058,6 +1277,7 @@ fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result
         }
     }
 
+    let created_root = !found_root;
     if !found_root {
         // Create minimal root entry
         lines.push(format!("root:x:0:0:root:/root:{}", shell));
@@ -1066,7 +1286,46 @@ fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result
     let content = lines.join("\n") + "\n";
     fs::write(&passwd_path, content)?;
     eprintln!("Set root shell to {} in {}.", shell, passwd_path.display());
+
+    // An account created here has no password, and passwd only says "see
+    // shadow". Leaving shadow without a matching entry would describe a root
+    // account whose password is simply unknown, so give it an explicitly
+    // locked, invalid one, as upstream does when no password was requested.
+    if created_root {
+        ensure_root_shadow_locked(root)?;
+    }
     Ok(true)
+}
+
+/// A locked *and* invalid password, upstream's PASSWORD_LOCKED_AND_INVALID.
+const PASSWORD_LOCKED_AND_INVALID: &str = "!*";
+
+/// Give root a locked shadow entry, but only if it has none: an existing
+/// password, provisioned or not, is left exactly as it is.
+fn ensure_root_shadow_locked(root: &Path) -> io::Result<()> {
+    let shadow_path = root.join("etc/shadow");
+    let existing = fs::read_to_string(&shadow_path).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|l| l.split(':').next() == Some("root"))
+    {
+        return Ok(());
+    }
+
+    ensure_parent_dir(&shadow_path)?;
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86400;
+    let mut lines: Vec<String> = existing.lines().map(|l| l.to_string()).collect();
+    lines.push(format!("root:{PASSWORD_LOCKED_AND_INVALID}:{days}:0:99999:7:::"));
+    fs::write(&shadow_path, lines.join("\n") + "\n")?;
+    #[cfg(target_os = "linux")]
+    {
+        fs::set_permissions(&shadow_path, fs::Permissions::from_mode(0o640))?;
+    }
+    Ok(())
 }
 
 fn apply_kernel_cmdline(root: &Path, settings: &Settings, force: bool) -> io::Result<bool> {
@@ -1082,7 +1341,7 @@ fn apply_kernel_cmdline(root: &Path, settings: &Settings, force: bool) -> io::Re
     let path = root.join("etc/kernel/cmdline");
     ensure_parent_dir(&path)?;
     fs::write(&path, format!("{}\n", cmdline))?;
-    eprintln!("Created {}.", path.display());
+    eprintln!("{}", written_message(root, &path, true));
     Ok(true)
 }
 
@@ -1290,8 +1549,19 @@ fn run(argv: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
-    // Check if system was already booted
-    if system_already_booted(root) && !args.force {
+    // Check if system was already booted.
+    //
+    // Only for the RUNNING system. Applied to an arbitrary --root tree this is
+    // wrong and quietly destructive of intent: the check is "does <root>/etc/
+    // machine-id hold a real id", so as soon as anything sets a machine-id in
+    // that tree, every later firstboot call against it silently does nothing.
+    // TEST-74-AUX-UTILS.firstboot walks straight into that, setting
+    // --machine-id= and then finding --root-password= ignored.
+    //
+    // Upstream has no such blanket guard in firstboot itself; first-boot-ness
+    // gates the SERVICE via ConditionFirstBoot=, while the tool applies what it
+    // was asked for and each step decides on its own file.
+    if root == Path::new("/") && system_already_booted(root) && !args.force {
         eprintln!("System already booted, skipping firstboot configuration.");
         eprintln!("Use --force to override.");
         return Ok(());
@@ -1302,12 +1572,32 @@ fn run(argv: &[String]) -> Result<(), String> {
     // Load credentials
     load_settings_from_credentials(&mut settings);
 
-    // Copy from host
+    // Copy from host.
+    //
+    // For locale and keymap this is a VERBATIM file copy, as upstream does with
+    // copy_file_atomic_at(). Reconstructing the file from the LANG/LC_MESSAGES
+    // or KEYMAP values it happens to parse would drop every other variable, and
+    // any comments and formatting with them; the test diffs the copy against
+    // the host file, so it has to match byte for byte. Parsing into settings
+    // remains the fallback for when the host has no such file.
+    // A successful verbatim copy writes the file directly (bypassing the
+    // apply_* path that sets any_applied), so track it so the "nothing to do"
+    // message is not printed after a copy actually happened.
+    let mut any_copied = false;
     if args.copy_locale {
-        copy_locale_from_host(&mut settings);
+        if copy_host_file_verbatim(root, "etc/locale.conf", args.force).map_err(|e| e.to_string())? {
+            any_copied = true;
+        } else {
+            copy_locale_from_host(&mut settings);
+        }
     }
     if args.copy_keymap {
-        copy_keymap_from_host(&mut settings);
+        if copy_host_file_verbatim(root, "etc/vconsole.conf", args.force).map_err(|e| e.to_string())?
+        {
+            any_copied = true;
+        } else {
+            copy_keymap_from_host(&mut settings);
+        }
     }
     if args.copy_timezone {
         copy_timezone_from_host(&mut settings);
@@ -1334,6 +1624,13 @@ fn run(argv: &[String]) -> Result<(), String> {
 
     if (args.prompt || args.prompt_locale) && settings.locale.is_none() {
         settings.locale = prompt_value("System locale (LANG)", Some("C.UTF-8"));
+    }
+
+    // Upstream asks for LC_MESSAGES straight after LANG, so --prompt-locale
+    // consumes TWO answers, not one. Only asking for LANG left the second line
+    // of input unread and LC_MESSAGES unset.
+    if (args.prompt || args.prompt_locale) && settings.locale_messages.is_none() {
+        settings.locale_messages = prompt_value("System message locale (LC_MESSAGES)", None);
     }
 
     if (args.prompt || args.prompt_keymap) && settings.keymap.is_none() {
@@ -1387,6 +1684,21 @@ fn run(argv: &[String]) -> Result<(), String> {
     // Apply settings
     let mut any_applied = false;
 
+    // Being asked for a root password and declining to give one is still an
+    // answer: upstream creates a LOCKED root account rather than leaving the
+    // tree with no root entry at all. Without this, `--prompt-root-password
+    // </dev/null` succeeded while writing nothing.
+    if (args.prompt || args.prompt_root_password)
+        && settings.root_password.is_none()
+        && !args.delete_root_password
+        && should_configure_root(root, args.force)
+    {
+        write_root_passwd_entry(root, settings.root_shell.as_deref())
+            .map_err(|e| e.to_string())?;
+        ensure_root_shadow_locked(root).map_err(|e| e.to_string())?;
+        any_applied = true;
+    }
+
     if apply_locale(root, &settings, args.force).map_err(|e| e.to_string())? {
         any_applied = true;
     }
@@ -1414,7 +1726,7 @@ fn run(argv: &[String]) -> Result<(), String> {
         any_applied = true;
     }
 
-    if !any_applied && !any_reset && !prompting {
+    if !any_applied && !any_reset && !any_copied && !prompting {
         eprintln!("No settings to apply.");
     }
 
@@ -1926,6 +2238,49 @@ mod tests {
         assert!(result);
         let content = fs::read_to_string(tmp.path().join("etc/vconsole.conf")).unwrap();
         assert!(content.contains("KEYMAP=de"));
+        // C prefixes vconsole.conf with the systemd-localed header; match it.
+        assert!(
+            content.starts_with(
+                "# Written by systemd-localed(8) or systemd-firstboot(1), read by systemd-localed\n"
+            ),
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn test_written_message_matches_c() {
+        // Under --root, C emits "<root>: <etc-path> written." (localtime has no
+        // trailing period); with root "/", the "<root>: " prefix is dropped.
+        let root = Path::new("/mnt/img");
+        assert_eq!(
+            written_message(root, &root.join("etc/hostname"), true),
+            "/mnt/img: /etc/hostname written."
+        );
+        assert_eq!(
+            written_message(root, &root.join("etc/kernel/cmdline"), true),
+            "/mnt/img: /etc/kernel/cmdline written."
+        );
+        assert_eq!(
+            written_message(root, &root.join("etc/localtime"), false),
+            "/mnt/img: /etc/localtime written"
+        );
+        assert_eq!(
+            written_message(Path::new("/"), Path::new("/etc/hostname"), true),
+            "/etc/hostname written."
+        );
+    }
+
+    #[test]
+    fn test_copied_message_matches_c() {
+        // C logs "<root>: Copied host's /<relative>." (prefix dropped for "/").
+        assert_eq!(
+            copied_message(Path::new("/mnt/img"), "etc/locale.conf"),
+            "/mnt/img: Copied host's /etc/locale.conf."
+        );
+        assert_eq!(
+            copied_message(Path::new("/"), "etc/vconsole.conf"),
+            "Copied host's /etc/vconsole.conf."
+        );
     }
 
     #[test]
@@ -2692,7 +3047,16 @@ mod tests {
     }
 
     #[test]
-    fn test_run_already_booted_skips() {
+    /// A machine-id in an explicit --root tree must NOT suppress configuration.
+    ///
+    /// This asserted the opposite until 2026-07-28. The already-booted check is
+    /// about the running system, and applying it to a --root tree meant that
+    /// once anything wrote a machine-id there, every later firstboot call
+    /// against that tree silently did nothing.
+    /// TEST-74-AUX-UTILS.firstboot does exactly that: it sets --machine-id= and
+    /// then finds --root-password= ignored. Upstream has no such blanket guard;
+    /// first-boot-ness gates the service via ConditionFirstBoot=.
+    fn test_run_already_booted_root_still_applies() {
         let tmp = temp_dir();
         setup_root(tmp.path());
         fs::write(
@@ -2704,9 +3068,9 @@ mod tests {
             format!("--root={}", tmp.path().display()),
             "--locale=en_US.UTF-8".to_string(),
         ];
-        // Should not error, just skip
         run(&args).unwrap();
-        assert!(!tmp.path().join("etc/locale.conf").exists());
+        let content = fs::read_to_string(tmp.path().join("etc/locale.conf")).unwrap();
+        assert!(content.contains("en_US.UTF-8"));
     }
 
     #[test]

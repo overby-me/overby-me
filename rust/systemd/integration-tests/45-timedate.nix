@@ -1,8 +1,9 @@
 {
   name = "45-TIMEDATE";
-  # Skip NTP and timesyncd testcases (busctl monitor signal parsing).
+  # testcase_ntp de-weakened (timedatectl set-ntp now goes through timedated
+  # D-Bus, which emits PropertiesChanged). testcase_timesyncd still skipped
+  # (needs networkd dummy-interface link-NTP setup).
   patchScript = ''
-    sed -i '/^testcase_ntp/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
     sed -i '/^testcase_timesyncd/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
   '';
 }

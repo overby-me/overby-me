@@ -39,6 +39,20 @@ pub fn slice_cgroup_path(root: &std::path::Path, slice_name: &str) -> PathBuf {
     path
 }
 
+/// Normalize a slice reference to a canonical `.slice` unit name.
+///
+/// systemd accepts a short slice name such as `system` and mangles it to the
+/// full unit name `system.slice`. A value that already carries the `.slice`
+/// suffix (including the root slice `-.slice`) is returned unchanged, as is an
+/// empty string (which callers treat as "unset").
+pub fn mangle_slice_name(slice: &str) -> String {
+    if slice.is_empty() || slice.ends_with(".slice") {
+        slice.to_string()
+    } else {
+        format!("{slice}.slice")
+    }
+}
+
 #[cfg(feature = "cgroups")]
 fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, String> {
     // The non-creating lookup: this only needs to know where the cgroup will
@@ -49,8 +63,18 @@ fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, Str
     let base = if let Some(slice_name) = slice {
         slice_cgroup_path(&cgroup_root, slice_name)
     } else {
-        // Default to system.slice like real systemd
-        slice_cgroup_path(&cgroup_root, "system.slice")
+        // Default slice: app.slice for a `systemd --user` manager (whose cgroup
+        // root is its delegated user@UID.service subtree), system.slice
+        // otherwise — matching real systemd.
+        let default_slice = if cgroup_root
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("user@"))
+        {
+            "app.slice"
+        } else {
+            "system.slice"
+        };
+        slice_cgroup_path(&cgroup_root, default_slice)
     };
     let service_cgroup = base.join(srvc_name);
     trace!(
@@ -71,6 +95,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
     let platform_specific = PlatformSpecificServiceFields {
         #[cfg(target_os = "linux")]
         cgroup_path: make_cgroup_path(&conf.common.name, conf.srvc.slice.as_deref())?,
+        #[cfg(target_os = "linux")]
+        delegate_subgroup: conf.srvc.delegate_subgroup.clone(),
     };
 
     let fragment_path = conf.common.fragment_path.clone();
@@ -204,10 +230,13 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     process_group: None,
                     signaled_ready: false,
                     reloading: false,
+                    reload_started: None,
                     stopping: false,
+                    stopping_timestamp: None,
                     watchdog_last_ping: None,
                     notify_errno: None,
                     notify_bus_error: None,
+                    notify_varlink_error: None,
                     notify_exit_status: None,
                     notify_monotonic_usec: None,
                     invocation_id: None,
@@ -216,6 +245,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     notify_access_override: None,
                     accepted_fd: None,
                     accepted_peer_uid: None,
+                    stdout_socket: false,
+                    stderr_socket: false,
                     notifications: None,
                     notifications_path: None,
                     stdout: None,
@@ -226,14 +257,18 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     stderr_buffer: Vec::new(),
                     watchdog_timeout_fired: false,
                     runtime_max_timeout_fired: false,
+                    start_limit_hit: false,
                     runtime_started_at: None,
                     main_exit_status: None,
+                    main_exit_termination: None,
                     main_exit_pid: None,
                     trigger_path: None,
                     trigger_unit: None,
                     trigger_timer_realtime_usec: None,
                     trigger_timer_monotonic_usec: None,
                     monitor_env: None,
+                    stop_result_env: None,
+                    dynamic_uid: None,
                     exec_main_start_timestamp: None,
                     exec_main_handoff_timestamp: None,
                     exec_main_exit_timestamp: None,
@@ -289,6 +324,7 @@ pub fn unit_from_parsed_socket(conf: ParsedSocketConfig) -> Result<Unit, String>
                 symlinks: conf.sock.symlinks,
                 timestamping: conf.sock.timestamping,
                 defer_trigger: conf.sock.defer_trigger,
+                defer_trigger_max_sec: conf.sock.defer_trigger_max_sec,
                 writable: conf.sock.writable,
                 backlog: conf.sock.backlog,
                 bind_ipv6_only: conf.sock.bind_ipv6_only,
@@ -337,6 +373,9 @@ pub fn unit_from_parsed_socket(conf: ParsedSocketConfig) -> Result<Unit, String>
                     trigger_timestamps: Vec::new(),
                     poll_timestamps: Vec::new(),
                     poll_limit_paused_until: None,
+                    deferred: false,
+                    deferred_since: None,
+                    deferred_service: None,
                 },
                 result: SocketResult::Success,
             }),
@@ -470,6 +509,7 @@ pub fn unit_from_parsed_timer(conf: ParsedTimerConfig) -> Result<Unit, String> {
         persistent: conf.timer.persistent,
         wake_system: conf.timer.wake_system,
         remain_after_elapse: conf.timer.remain_after_elapse,
+        defer_reactivation: conf.timer.defer_reactivation,
         on_clock_change: conf.timer.on_clock_change,
         on_timezone_change: conf.timer.on_timezone_change,
         unit: target_unit,
@@ -600,10 +640,11 @@ pub fn parse_timespan(input: &str) -> Option<std::time::Duration> {
             chars.next();
         }
 
-        // Parse unit suffix
+        // Parse unit suffix (`µ` is not ASCII-alphabetic but is part of the
+        // `µs` microsecond unit).
         let mut unit = String::new();
         while let Some(&c) = chars.peek() {
-            if c.is_ascii_alphabetic() {
+            if c.is_ascii_alphabetic() || c == 'µ' {
                 unit.push(c);
                 chars.next();
             } else {
@@ -611,16 +652,19 @@ pub fn parse_timespan(input: &str) -> Option<std::time::Duration> {
             }
         }
 
+        // Case-SENSITIVE, matching systemd's time_units table: `m` = minute,
+        // `M` = month; a month is 30.44 days and a year 365.25 days (C's
+        // USEC_PER_MONTH / USEC_PER_YEAR), not the round 30/365.
         let multiplier_us: u64 = match unit.as_str() {
-            "us" | "usec" => 1,
+            "us" | "usec" | "µs" => 1,
             "ms" | "msec" => 1_000,
             "" | "s" | "sec" | "second" | "seconds" | "secs" => 1_000_000,
             "min" | "minute" | "minutes" | "m" => 60 * 1_000_000,
             "h" | "hr" | "hrs" | "hour" | "hours" => 3600 * 1_000_000,
             "d" | "day" | "days" => 86400 * 1_000_000,
             "w" | "week" | "weeks" => 7 * 86400 * 1_000_000,
-            "month" | "months" => 30 * 86400 * 1_000_000, // approximate
-            "y" | "year" | "years" => 365 * 86400 * 1_000_000, // approximate
+            "M" | "month" | "months" => 2_629_800 * 1_000_000,
+            "y" | "year" | "years" => 31_557_600 * 1_000_000,
             _ => return None,
         };
 
@@ -662,6 +706,8 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             runtime_directory: parsed.runtime_directory,
             runtime_directory_preserve: parsed.runtime_directory_preserve,
             tty_path: parsed.tty_path,
+            tty_columns: parsed.tty_columns,
+            tty_rows: parsed.tty_rows,
             tty_reset: parsed.tty_reset,
             tty_vhangup: parsed.tty_vhangup,
             tty_vt_disallocate: parsed.tty_vt_disallocate,
@@ -681,7 +727,9 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             system_call_filter: parsed.system_call_filter,
             system_call_log: parsed.system_call_log,
             protect_system: parsed.protect_system,
+            memory_thp: parsed.memory_thp,
             restrict_namespaces: parsed.restrict_namespaces,
+            delegate_namespaces: parsed.delegate_namespaces,
             restrict_realtime: parsed.restrict_realtime,
             restrict_address_families: parsed.restrict_address_families,
             restrict_file_systems: parsed.restrict_file_systems,
@@ -702,6 +750,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             protect_hostname_name: None, // Extended syntax only via transient units
             system_call_architectures: parsed.system_call_architectures,
             read_write_paths: parsed.read_write_paths,
+            exec_search_path: parsed.exec_search_path,
             memory_deny_write_execute: parsed.memory_deny_write_execute,
             lock_personality: parsed.lock_personality,
             protect_proc: parsed.protect_proc,
@@ -709,6 +758,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             private_devices: parsed.private_devices,
             private_network: parsed.private_network,
             private_users: parsed.private_users,
+            private_users_mode: String::new(),
             private_mounts: parsed.private_mounts,
             mount_flags: None, // Not parsed from unit files yet
             io_scheduling_class: parsed.io_scheduling_class,
@@ -791,6 +841,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             private_pids: parsed.private_pids,
             ipc_namespace_path: parsed.ipc_namespace_path,
             network_namespace_path: parsed.network_namespace_path,
+            user_namespace_path: parsed.user_namespace_path,
 
             // Security directives
             secure_bits: parsed.secure_bits,
@@ -807,6 +858,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             timer_slack_nsec: parsed.timer_slack_nsec,
             standard_input_text: parsed.standard_input_text,
             standard_input_data: parsed.standard_input_data,
+            stdin_inputs: parsed.stdin_inputs,
             set_login_environment: parsed.set_login_environment,
         })
     }
@@ -842,6 +894,7 @@ fn make_common_from_parsed(
     // Also= in [Install] is treated as a soft (wants) dependency
     wants.extend(collect_supported_unit_ids(install.also));
     let requires = collect_supported_unit_ids(unit.requires);
+    let requisite = collect_supported_unit_ids(unit.requisite);
     let binds_to = collect_supported_unit_ids(unit.binds_to);
     let upholds = collect_supported_unit_ids(unit.upholds);
     let propagates_stop_to = collect_supported_unit_ids(unit.propagates_stop_to);
@@ -873,11 +926,14 @@ fn make_common_from_parsed(
             fragment_path,
             refs_by_name,
             default_dependencies: unit.default_dependencies,
+            collect_mode: unit.collect_mode,
             ignore_on_isolate: unit.ignore_on_isolate,
             conditions: unit.conditions,
             assertions: unit.assertions,
             success_action: unit.success_action,
             failure_action: unit.failure_action,
+            success_action_exit_status: unit.success_action_exit_status,
+            failure_action_exit_status: unit.failure_action_exit_status,
             job_timeout_action: unit.job_timeout_action,
             job_timeout_sec: unit.job_timeout_sec,
             allow_isolate: unit.allow_isolate,
@@ -902,6 +958,7 @@ fn make_common_from_parsed(
             wanted_by,
             requires,
             required_by,
+            requisite,
             conflicts,
             conflicted_by: Vec::new(),
             before,

@@ -51,6 +51,21 @@
     sleep 2
     [[ "$(systemctl show -P NRestarts restart-test-no.service)" -eq 0 ]]
 
+    : "Restart=always restarts even after a clean (exit 0) run"
+    cat > /run/systemd/system/restart-test-always.service << EOF
+    [Service]
+    ExecStart=bash -c 'true'
+    Restart=always
+    RestartSec=1
+    EOF
+    systemctl daemon-reload
+    systemctl start restart-test-always.service || true
+    # Type=simple exits 0 immediately; on-failure would NOT restart it, but
+    # Restart=always brings it back, so NRestarts must climb above zero.
+    timeout 15 bash -c 'until [[ "$(systemctl show -P NRestarts restart-test-always.service)" -ge 1 ]]; do sleep 0.5; done'
+    [[ "$(systemctl show -P NRestarts restart-test-always.service)" -ge 1 ]]
+    systemctl stop restart-test-always.service
+
     RESTARTEOF
   '';
 }

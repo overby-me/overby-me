@@ -94,6 +94,10 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
     // act, to avoid holding the RuntimeInfo read lock during signal delivery.
     let mut timed_out: Vec<WatchdogTimeout> = Vec::new();
     let mut runtime_max_timed_out: Vec<RuntimeMaxTimeout> = Vec::new();
+    // Services whose WatchdogSignal= was already sent and whose TimeoutAbortSec=
+    // has since expired: escalate to SIGKILL. (unit_name, pid, process_group)
+    let mut abort_kills: Vec<(String, Option<nix::unistd::Pid>, Option<nix::unistd::Pid>)> =
+        Vec::new();
 
     {
         let ri = match run_info.try_read() {
@@ -125,23 +129,70 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
                 continue;
             }
 
+            // --- Stop-phase timeout (STOPPING=1) enforcement ---
+            // A service that has reported STOPPING=1 is in its stop phase and is
+            // no longer subject to RuntimeMaxSec; TimeoutStopSec applies instead,
+            // measured from when STOPPING=1 arrived. Skipping RuntimeMaxSec here
+            // lets a service legitimately spend up to TimeoutStopSec shutting down
+            // even when its RuntimeMaxSec is shorter. EXTEND_TIMEOUT_USEC extends
+            // (never shortens) the stop deadline, so the effective deadline is the
+            // MAX of the base TimeoutStopSec deadline and the extend deadline.
+            if srvc.stopping {
+                // Base stop deadline: explicit TimeoutStopSec / TimeoutSec, else
+                // the upstream DefaultTimeoutStopSec (90s); Infinity disables it.
+                let stop_dur = match srvc_specific
+                    .conf
+                    .stoptimeout
+                    .as_ref()
+                    .or(srvc_specific.conf.generaltimeout.as_ref())
+                {
+                    Some(Timeout::Duration(d)) => Some(*d),
+                    Some(Timeout::Infinity) => None,
+                    None => Some(std::time::Duration::from_secs(90)),
+                };
+                if let (Some(stopping_ts), Some(stop_dur)) = (srvc.stopping_timestamp, stop_dur) {
+                    let base_elapsed = now.duration_since(stopping_ts) >= stop_dur;
+                    let ext_elapsed = if let (Some(ext_usec), Some(ext_ts)) =
+                        (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
+                    {
+                        now.duration_since(ext_ts) >= std::time::Duration::from_micros(ext_usec)
+                    } else {
+                        true
+                    };
+                    if base_elapsed && ext_elapsed {
+                        let effective_pid = srvc.main_pid.or(srvc.pid);
+                        runtime_max_timed_out.push(RuntimeMaxTimeout {
+                            unit_name: unit.id.name.clone(),
+                            pid: effective_pid,
+                            process_group: srvc.process_group,
+                            elapsed: now.duration_since(stopping_ts),
+                            limit: stop_dur,
+                        });
+                    }
+                }
+                // A stopping service is never subject to RuntimeMaxSec or the
+                // watchdog ping check — skip the rest of this iteration.
+                continue;
+            }
+
             // --- RuntimeMaxSec enforcement ---
-            // If the service has sent EXTEND_TIMEOUT_USEC, use the extended
-            // deadline (extend_timeout_timestamp + extend_timeout_usec) instead
-            // of the original RuntimeMaxSec deadline.
+            // EXTEND_TIMEOUT_USEC extends (never shortens) the RuntimeMaxSec
+            // deadline: the service times out only once BOTH the base deadline
+            // (started_at + RuntimeMaxSec) and any extend deadline
+            // (extend_timeout_timestamp + extend_timeout_usec) have elapsed.
             if let Some(started_at) = srvc.runtime_started_at
                 && let Some(max_dur) = effective_runtime_max(&srvc_specific.conf.runtime_max_sec)
             {
-                let timed_out = if let (Some(ext_usec), Some(ext_ts)) =
+                let base_elapsed = now.duration_since(started_at) >= max_dur;
+                let ext_elapsed = if let (Some(ext_usec), Some(ext_ts)) =
                     (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
                 {
-                    let ext_dur = std::time::Duration::from_micros(ext_usec);
-                    now.duration_since(ext_ts) >= ext_dur
+                    now.duration_since(ext_ts) >= std::time::Duration::from_micros(ext_usec)
                 } else {
-                    now.duration_since(started_at) >= max_dur
+                    true
                 };
                 let elapsed = now.duration_since(started_at);
-                if timed_out {
+                if base_elapsed && ext_elapsed {
                     let effective_pid = srvc.main_pid.or(srvc.pid);
                     runtime_max_timed_out.push(RuntimeMaxTimeout {
                         unit_name: unit.id.name.clone(),
@@ -173,22 +224,54 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
 
             let elapsed = now.duration_since(reference);
             if elapsed >= timeout {
-                // The watchdog has expired.
                 let effective_pid = srvc.main_pid.or(srvc.pid);
-                let signal = srvc_specific
-                    .conf
-                    .watchdog_signal
-                    .and_then(|s| nix::sys::signal::Signal::try_from(s).ok())
-                    .unwrap_or(nix::sys::signal::Signal::SIGABRT);
+                if srvc.watchdog_timeout_fired {
+                    // The WatchdogSignal= was already sent on an earlier cycle; do
+                    // not re-send it every tick. Instead escalate to SIGKILL once
+                    // TimeoutAbortSec= has elapsed since that signal (upstream's
+                    // abort timeout, which gives the service time to write a core
+                    // dump). TimeoutAbortSec= defaults to TimeoutStopSec= (then 90s);
+                    // Infinity disables the SIGKILL escalation entirely.
+                    let abort_timeout = match srvc_specific.conf.timeout_abort_sec.as_ref() {
+                        Some(Timeout::Duration(d)) => Some(*d),
+                        Some(Timeout::Infinity) => None,
+                        None => match srvc_specific
+                            .conf
+                            .stoptimeout
+                            .as_ref()
+                            .or(srvc_specific.conf.generaltimeout.as_ref())
+                        {
+                            Some(Timeout::Duration(d)) => Some(*d),
+                            Some(Timeout::Infinity) => None,
+                            None => Some(std::time::Duration::from_secs(90)),
+                        },
+                    };
+                    if let Some(abort_timeout) = abort_timeout
+                        && elapsed >= timeout + abort_timeout
+                    {
+                        abort_kills.push((
+                            unit.id.name.clone(),
+                            effective_pid,
+                            srvc.process_group,
+                        ));
+                    }
+                } else {
+                    // First expiry: send the configured WatchdogSignal= (SIGABRT).
+                    let signal = srvc_specific
+                        .conf
+                        .watchdog_signal
+                        .and_then(|s| nix::sys::signal::Signal::try_from(s).ok())
+                        .unwrap_or(nix::sys::signal::Signal::SIGABRT);
 
-                timed_out.push(WatchdogTimeout {
-                    unit_name: unit.id.name.clone(),
-                    pid: effective_pid,
-                    process_group: srvc.process_group,
-                    signal,
-                    elapsed,
-                    timeout,
-                });
+                    timed_out.push(WatchdogTimeout {
+                        unit_name: unit.id.name.clone(),
+                        pid: effective_pid,
+                        process_group: srvc.process_group,
+                        signal,
+                        elapsed,
+                        timeout,
+                    });
+                }
             }
         }
     }
@@ -257,6 +340,18 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         }
 
         send_signal_to_service(&wt.unit_name, wt.pid, wt.process_group, wt.signal);
+    }
+
+    // Escalate to SIGKILL for watchdog-signaled services that outlived
+    // TimeoutAbortSec= (upstream sends SIGKILL after the abort timeout).
+    for (unit_name, pid, process_group) in &abort_kills {
+        warn!("Abort timeout (TimeoutAbortSec=) for service {unit_name} — sending SIGKILL");
+        send_signal_to_service(
+            unit_name,
+            *pid,
+            *process_group,
+            nix::sys::signal::Signal::SIGKILL,
+        );
     }
 }
 
@@ -381,10 +476,13 @@ mod tests {
             process_group: None,
             signaled_ready: false,
             reloading: false,
+            reload_started: None,
             stopping: false,
+            stopping_timestamp: None,
             watchdog_last_ping: None,
             notify_errno: None,
             notify_bus_error: None,
+            notify_varlink_error: None,
             notify_exit_status: None,
             notify_monotonic_usec: None,
             invocation_id: None,
@@ -393,6 +491,8 @@ mod tests {
             notify_access_override: None,
             accepted_fd: None,
             accepted_peer_uid: None,
+            stdout_socket: false,
+            stderr_socket: false,
             notifications: None,
             notifications_path: None,
             stdout: None,
@@ -403,14 +503,18 @@ mod tests {
             stderr_buffer: Vec::new(),
             watchdog_timeout_fired: false,
             runtime_max_timeout_fired: false,
+            start_limit_hit: false,
             runtime_started_at: None,
             main_exit_status: None,
+            main_exit_termination: None,
             main_exit_pid: None,
             trigger_path: None,
             trigger_unit: None,
             trigger_timer_realtime_usec: None,
             trigger_timer_monotonic_usec: None,
             monitor_env: None,
+            stop_result_env: None,
+            dynamic_uid: None,
             exec_main_start_timestamp: None,
             exec_main_handoff_timestamp: None,
             exec_main_exit_timestamp: None,

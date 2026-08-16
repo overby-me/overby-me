@@ -17,12 +17,11 @@ use std::process::{self, Command};
 #[command(
     name = "systemd-mount",
     about = "Establish and destroy transient mount or auto-mount points",
-    version,
-    trailing_var_arg = true
+    version
 )]
 struct Cli {
     /// List active mount points
-    #[arg(long, short)]
+    #[arg(long)]
     list: bool,
 
     /// Don't truncate output (no-op for our compact `--list` output, but
@@ -48,6 +47,15 @@ struct Cli {
     #[arg(short = 't', long = "type")]
     fstype: Option<String>,
 
+    /// Mount a tmpfs at the given path (WHERE only, no source needed)
+    #[arg(long)]
+    tmpfs: bool,
+
+    /// Canonicalize the mount path, resolving symlinks and `..` (default yes).
+    /// With `=no`, refuse to mount through a symlink or `..` component.
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "yes")]
+    canonicalize: Option<String>,
+
     /// Mount options (comma-separated)
     #[arg(short, long)]
     options: Option<String>,
@@ -57,7 +65,15 @@ struct Cli {
     description: Option<String>,
 
     /// Create an automount unit instead of a mount unit
-    #[arg(short = 'A', long)]
+    #[arg(
+        short = 'A',
+        long,
+        num_args = 0..=1,
+        require_equals = true,
+        default_value = "no",
+        default_missing_value = "yes",
+        value_parser = parse_systemd_bool
+    )]
     automount: bool,
 
     /// Automount idle timeout
@@ -88,6 +104,12 @@ struct Cli {
     #[arg(long)]
     collect: bool,
 
+    /// Run a file-system check before mounting (default yes). Accepted for
+    /// compatibility with systemd-mount callers; the transient mount does not
+    /// currently pull in a separate systemd-fsck@ unit.
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "yes")]
+    fsck: Option<String>,
+
     /// Unmount mode (when invoked as systemd-umount)
     #[arg(short, long)]
     umount: bool,
@@ -115,6 +137,27 @@ struct Cli {
     /// Property to set on the transient unit (KEY=VALUE)
     #[arg(short, long)]
     property: Vec<String>,
+
+    /// Probe the device before mounting to discover its filesystem type and
+    /// labels.  Accepted for compatibility; when a WHERE is given the mount
+    /// proceeds letting the kernel auto-detect the type (as without `--type=`).
+    #[arg(long)]
+    discover: bool,
+
+    /// Operate on the given machine/container (`.host` is the local system).
+    /// Accepted for parity; only the local system is supported.
+    #[arg(short = 'M', long, value_name = "NAME")]
+    machine: Option<String>,
+
+    /// For an automount, bind its lifetime to the backing device unit.
+    /// Accepted for compatibility.
+    #[arg(long)]
+    bind_device: bool,
+
+    /// Property to set on the generated automount unit (KEY=VALUE).  Accepted
+    /// for compatibility.
+    #[arg(long)]
+    automount_property: Vec<String>,
 
     /// Positional arguments: WHAT [WHERE] for mount, WHERE for umount
     args: Vec<String>,
@@ -289,6 +332,42 @@ fn path_to_unit_name(path: &str, suffix: &str) -> String {
 
 // ── Transient unit creation ───────────────────────────────────────────────
 
+/// Parse a systemd-style boolean (used for `--automount=BOOL`). Matches the
+/// vocabulary accepted by upstream `parse_boolean`: yes/true/1/on and
+/// no/false/0/off (case-insensitive).
+fn parse_systemd_bool(s: &str) -> Result<bool, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "yes" | "true" | "1" | "on" => Ok(true),
+        "no" | "false" | "0" | "off" => Ok(false),
+        other => Err(format!("invalid boolean value '{other}'")),
+    }
+}
+
+/// Probe an ext2/3/4 filesystem's volume label directly from the superblock.
+/// Used by `--discover` to derive the transient unit Description, matching
+/// upstream systemd-mount which reads the discovered fs label. Returns None for
+/// non-ext filesystems or an unlabeled/unreadable device.
+fn probe_ext_label(devnode: &str) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(devnode).ok()?;
+    // The ext superblock begins at offset 1024; s_magic (0xEF53) is at +0x38,
+    // s_volume_name (16 bytes, NUL-padded) at +0x78.
+    let mut magic = [0u8; 2];
+    f.seek(SeekFrom::Start(1024 + 0x38)).ok()?;
+    f.read_exact(&mut magic).ok()?;
+    if u16::from_le_bytes(magic) != 0xEF53 {
+        return None;
+    }
+    let mut label = [0u8; 16];
+    f.seek(SeekFrom::Start(1024 + 0x78)).ok()?;
+    f.read_exact(&mut label).ok()?;
+    let end = label.iter().position(|&b| b == 0).unwrap_or(label.len());
+    if end == 0 {
+        return None;
+    }
+    std::str::from_utf8(&label[..end]).ok().map(str::to_string)
+}
+
 /// Generate a transient mount unit file content.
 fn generate_mount_unit(
     what: &str,
@@ -364,6 +443,40 @@ fn generate_automount_unit(
     unit
 }
 
+/// Create ExecDirectory= directories requested via `-p` (ConfigurationDirectory=,
+/// RuntimeDirectory=, StateDirectory=, CacheDirectory=, LogsDirectory=) under
+/// their base paths. `systemd-mount` mounts directly, bypassing PID 1's
+/// activate_mount, so it creates these itself; PID 1's mount unit handling
+/// (with RuntimeDirectoryPreserve=) takes over on later stop/restart.
+fn create_exec_dirs_from_properties(properties: &[String]) {
+    let bases = [
+        ("ConfigurationDirectory", "/etc"),
+        ("RuntimeDirectory", "/run"),
+        ("StateDirectory", "/var/lib"),
+        ("CacheDirectory", "/var/cache"),
+        ("LogsDirectory", "/var/log"),
+    ];
+    for prop in properties {
+        let Some((key, val)) = prop.split_once('=') else {
+            continue;
+        };
+        let Some((_, base)) = bases.iter().find(|(k, _)| *k == key.trim()) else {
+            continue;
+        };
+        for name in val.split_whitespace() {
+            let path = std::path::Path::new(base).join(name);
+            if std::fs::create_dir_all(&path).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ =
+                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+                }
+            }
+        }
+    }
+}
+
 // ── Mount / Unmount operations ────────────────────────────────────────────
 
 /// Mount a filesystem using the `mount` command as a fallback.
@@ -373,30 +486,67 @@ fn do_mount(
     fstype: Option<&str>,
     options: Option<&str>,
     read_only: bool,
-    mkdir: bool,
+    _mkdir: bool,
 ) -> Result<(), String> {
-    // Create mount point if requested
-    if mkdir && let Err(e) = fs::create_dir_all(where_) {
-        return Err(format!("Failed to create mount point {}: {}", where_, e));
+    // Auto-create the mount point inode if it does not exist, matching upstream
+    // systemd-mount (which sets up the mount point itself). For a bind mount of
+    // a regular file, create a file; otherwise create a directory.
+    if !Path::new(where_).exists() {
+        let is_file_bind = options.map(|o| o.split(',').any(|x| x == "bind")).unwrap_or(false)
+            && Path::new(what).is_file();
+        let res = if is_file_bind {
+            match Path::new(where_).parent() {
+                Some(parent) => {
+                    fs::create_dir_all(parent).and_then(|_| fs::File::create(where_).map(|_| ()))
+                }
+                None => fs::File::create(where_).map(|_| ()),
+            }
+        } else {
+            fs::create_dir_all(where_)
+        };
+        if let Err(e) = res {
+            return Err(format!("Failed to create mount point {}: {}", where_, e));
+        }
     }
 
-    // Check if mount point exists
-    if !Path::new(where_).exists() {
-        return Err(format!(
-            "Mount point {} does not exist (use --mkdir to create it)",
-            where_
-        ));
+    // For overlay mounts, create the upperdir and workdir referenced in the
+    // options if they do not exist yet: the overlay driver requires them to
+    // exist, and the caller normally does not pre-create them.
+    if fstype == Some("overlay")
+        && let Some(opts) = options
+    {
+        for opt in opts.split(',') {
+            if let Some(dir) = opt
+                .strip_prefix("upperdir=")
+                .or_else(|| opt.strip_prefix("workdir="))
+            {
+                let _ = fs::create_dir_all(dir);
+            }
+        }
     }
 
     let mut cmd = Command::new("mount");
 
-    if let Some(ft) = fstype {
+    // Use the explicit `--bind` form for bind mounts: passing `-o bind` alone
+    // lets util-linux fall through to loop-mounting a file source, which fails.
+    let is_bind = options
+        .map(|o| o.split(',').any(|x| x.trim() == "bind"))
+        .unwrap_or(false);
+    if is_bind {
+        cmd.arg("--bind");
+    } else if let Some(ft) = fstype {
         cmd.arg("-t").arg(ft);
     }
 
+    // Collect the remaining mount options, dropping the `bind` pseudo-option
+    // (already handled via --bind above).
     let mut mount_opts = Vec::new();
     if let Some(o) = options {
-        mount_opts.push(o.to_string());
+        for opt in o.split(',') {
+            if opt.trim() != "bind" {
+                mount_opts.push(opt.to_string());
+            }
+        }
     }
     if read_only {
         mount_opts.push("ro".to_string());
@@ -501,6 +651,63 @@ fn display_mounts() {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
+/// Resolve/validate the mount-point path per `--canonicalize`.
+///
+/// With `canonicalize=true` (default) symlinks and `..` in the existing prefix
+/// are resolved. With `canonicalize=false` we refuse to operate through a
+/// symlinked ancestor or a `..` component, matching upstream's safety check.
+fn resolve_mount_point(where_: &str, canonicalize: bool) -> Result<String, String> {
+    use std::path::Component;
+    let path = Path::new(where_);
+    if !canonicalize {
+        if path.components().any(|c| matches!(c, Component::ParentDir)) {
+            return Err(format!(
+                "Path \"{}\" contains \"..\"; refusing with --canonicalize=no",
+                where_
+            ));
+        }
+        let mut cur = PathBuf::new();
+        for comp in path.components() {
+            cur.push(comp.as_os_str());
+            if let Ok(md) = fs::symlink_metadata(&cur)
+                && md.file_type().is_symlink()
+            {
+                return Err(format!(
+                    "Path component \"{}\" is a symlink; refusing with --canonicalize=no",
+                    cur.display()
+                ));
+            }
+        }
+        Ok(where_.to_string())
+    } else {
+        // Canonicalize the deepest existing ancestor, then re-append the
+        // not-yet-existing trailing components.
+        let mut tail: Vec<std::ffi::OsString> = Vec::new();
+        let mut base = path.to_path_buf();
+        while !base.exists() {
+            match base.file_name() {
+                Some(name) => {
+                    tail.push(name.to_os_string());
+                    match base.parent() {
+                        Some(p) => base = p.to_path_buf(),
+                        None => break,
+                    }
+                }
+                None => break,
+            }
+        }
+        let mut resolved = if base.as_os_str().is_empty() {
+            fs::canonicalize(".").map_err(|e| format!("canonicalize: {e}"))?
+        } else {
+            fs::canonicalize(&base).map_err(|e| format!("canonicalize {}: {e}", base.display()))?
+        };
+        for name in tail.iter().rev() {
+            resolved.push(name);
+        }
+        Ok(resolved.to_string_lossy().into_owned())
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -541,19 +748,61 @@ fn main() {
             process::exit(1);
         }
 
-        let what = &cli.args[0];
+        let canonicalize = cli.canonicalize.as_deref().map(|v| v != "no").unwrap_or(true);
 
-        // Determine WHERE
-        let where_ = if cli.args.len() >= 2 {
-            cli.args[1].clone()
+        // With --tmpfs the single positional is WHERE and the source is a
+        // synthetic "tmpfs"; otherwise the first positional is WHAT and the
+        // optional second is WHERE.
+        let (what_string, where_raw) = if cli.tmpfs {
+            ("tmpfs".to_string(), cli.args[0].clone())
+        } else if cli.args.len() >= 2 {
+            (cli.args[0].clone(), cli.args[1].clone())
         } else {
-            // Auto-generate mount point from WHAT
-            // e.g., /dev/sdb1 -> /run/media/system/sdb1
-            let base = Path::new(what)
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            format!("/run/media/system/{}", base)
+            let what = cli.args[0].clone();
+            // No WHERE given: name the mount directory after the filesystem
+            // label (as upstream systemd-mount does), falling back to the
+            // device basename when there is no label.
+            let base = probe_ext_label(&what).unwrap_or_else(|| {
+                Path::new(&what)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            });
+            (what, format!("/run/media/system/{}", base))
+        };
+        let what = what_string.as_str();
+
+        // `--discover` (no explicit --description) sets the unit Description to
+        // the discovered filesystem label, matching upstream systemd-mount.
+        let discovered_label = if cli.discover && cli.description.is_none() {
+            probe_ext_label(what)
+        } else {
+            None
+        };
+        // A Description can also arrive via `--property=Description=...`.
+        let property_description = cli
+            .property
+            .iter()
+            .find_map(|p| p.strip_prefix("Description=").map(str::to_owned));
+        let effective_description = cli
+            .description
+            .as_deref()
+            .or(property_description.as_deref())
+            .or(discovered_label.as_deref());
+
+        // Resolve/validate WHERE according to --canonicalize.
+        let where_ = match resolve_mount_point(&where_raw, canonicalize) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("{}", e);
+                process::exit(1);
+            }
+        };
+
+        let effective_fstype = if cli.tmpfs {
+            Some("tmpfs")
+        } else {
+            cli.fstype.as_deref()
         };
 
         // Generate unit name for informational purposes
@@ -565,15 +814,15 @@ fn main() {
             let mount_content = generate_mount_unit(
                 what,
                 &where_,
-                cli.fstype.as_deref(),
+                effective_fstype,
                 cli.options.as_deref(),
-                cli.description.as_deref(),
+                effective_description,
                 cli.read_only,
                 &cli.property,
             );
             let automount_content = generate_automount_unit(
                 &where_,
-                cli.description.as_deref(),
+                effective_description,
                 cli.timeout_idle_sec.as_deref(),
             );
 
@@ -606,7 +855,7 @@ fn main() {
             if let Err(e) = do_mount(
                 what,
                 &where_,
-                cli.fstype.as_deref(),
+                effective_fstype,
                 cli.options.as_deref(),
                 cli.read_only,
                 cli.mkdir,
@@ -615,11 +864,37 @@ fn main() {
                 process::exit(1);
             }
         } else {
+            // Register a .mount fragment in /run/systemd/system BEFORE mounting,
+            // so PID 1 knows the unit (with its Description — e.g. the
+            // `--discover` filesystem label, or an explicit --description) before
+            // the mount appears in /proc/self/mountinfo, and reflects it via
+            // `systemctl show`. Additive: the direct mount below still
+            // establishes the mount, so plain-mount behavior is unchanged.
+            if effective_description.is_some()
+                || cli.options.is_some()
+                || !cli.property.is_empty()
+            {
+                let content = generate_mount_unit(
+                    what,
+                    &where_,
+                    effective_fstype,
+                    cli.options.as_deref(),
+                    effective_description,
+                    cli.read_only,
+                    &cli.property,
+                );
+                let sysdir = PathBuf::from("/run/systemd/system");
+                let _ = fs::create_dir_all(&sysdir);
+                if fs::write(sysdir.join(&unit_name), &content).is_ok() {
+                    let _ = Command::new("systemctl").arg("daemon-reload").status();
+                }
+            }
+
             // Direct mount
             if let Err(e) = do_mount(
                 what,
                 &where_,
-                cli.fstype.as_deref(),
+                effective_fstype,
                 cli.options.as_deref(),
                 cli.read_only,
                 cli.mkdir,
@@ -627,6 +902,11 @@ fn main() {
                 eprintln!("Failed to mount: {}", e);
                 process::exit(1);
             }
+            // Direct mount bypasses PID 1's activate_mount, so create the
+            // ExecDirectory= dirs (ConfigurationDirectory=/RuntimeDirectory=/…)
+            // requested via -p here. PID 1 handles RuntimeDirectoryPreserve= on
+            // subsequent stop/restart of the fragment.
+            create_exec_dirs_from_properties(&cli.property);
         }
 
         println!("Mounted {} on {}.", what, where_);

@@ -13,7 +13,6 @@
 //! - `vlan=` — VLAN device definitions
 //! - `bond=` — bond device definitions
 //! - `bridge=` — bridge device definitions
-//! - `team=` — team device definitions
 //! - `ifname=` — interface renaming by MAC address
 //! - `net.ifnames=` — predictable network interface names
 //!
@@ -33,10 +32,6 @@ use std::process;
 
 const DEFAULT_OUTPUT_DIR: &str = "/run/systemd/network";
 const PROC_CMDLINE: &str = "/proc/cmdline";
-
-/// Prefix for generated files (71- ensures they come after default configs but
-/// before administrator overrides at 80+).
-const FILE_PREFIX: &str = "71";
 
 // ── Data model ─────────────────────────────────────────────────────────────
 
@@ -63,6 +58,10 @@ struct IpConfig {
     dns1: String,
     /// NTP server.
     ntp0: String,
+    /// Link MTU from the `ip=` short form's `[:<mtu>]` field.
+    mtu: String,
+    /// Link MAC from the `ip=` short form's `[:<macaddr>]` field.
+    mac: String,
 }
 
 /// Parsed `rd.route=` parameter: `<net>/<mask>:<gateway>[:<interface>]`.
@@ -97,11 +96,23 @@ struct BridgeConfig {
     members: Vec<String>,
 }
 
-/// Parsed `team=` parameter: `<teamname>:<members>`.
-#[derive(Debug, Clone)]
-struct TeamConfig {
+/// Per-interface `[Network]` settings accumulated from `vlan=`/`bond=`/`bridge=`.
+/// C keys its Networks by interface name and merges these with any `ip=` config
+/// into a single `70-<ifname>.network`.
+#[derive(Debug, Default)]
+struct NetworkExtra {
+    vlans: Vec<String>,
+    bridge: Option<String>,
+    bond: Option<String>,
+}
+
+/// A `.netdev` device (`vlan`/`bond`/`bridge`), emitted as `70-<name>.netdev`.
+#[derive(Debug)]
+struct NetDev {
+    kind: String,
     name: String,
-    members: Vec<String>,
+    mtu: String,
+    vlan_id: Option<u16>,
 }
 
 /// Parsed `ifname=` parameter: `<interface>:<mac>`.
@@ -109,6 +120,19 @@ struct TeamConfig {
 struct IfnameConfig {
     name: String,
     mac: String,
+}
+
+/// Parsed `net.ifname_policy=` parameter: a list of naming policies and an
+/// optional trailing MAC address that scopes them to one interface.
+#[derive(Debug, Clone)]
+struct IfnamePolicyConfig {
+    /// Policies in cmdline order (become `NamePolicy=`).
+    policies: Vec<String>,
+    /// The subset of `policies` that are also valid alternative-names policies
+    /// (become `AlternativeNamesPolicy=`).
+    alt_policies: Vec<String>,
+    /// Optional MAC (colon form, lowercase); when set the link matches on it.
+    mac: Option<String>,
 }
 
 /// All parsed kernel command line network parameters.
@@ -121,8 +145,8 @@ struct CmdlineConfig {
     vlans: Vec<VlanConfig>,
     bonds: Vec<BondConfig>,
     bridges: Vec<BridgeConfig>,
-    teams: Vec<TeamConfig>,
     ifnames: Vec<IfnameConfig>,
+    ifname_policies: Vec<IfnamePolicyConfig>,
     /// `net.ifnames=0` disables predictable interface names.
     net_ifnames: Option<bool>,
 }
@@ -225,13 +249,13 @@ fn parse_cmdline(cmdline: &str) -> CmdlineConfig {
             if let Some(bridge) = parse_bridge_param(val) {
                 config.bridges.push(bridge);
             }
-        } else if let Some(val) = strip_param(token, "team=") {
-            if let Some(team) = parse_team_param(val) {
-                config.teams.push(team);
-            }
         } else if let Some(val) = strip_param(token, "ifname=") {
             if let Some(ifn) = parse_ifname_param(val) {
                 config.ifnames.push(ifn);
+            }
+        } else if let Some(val) = strip_param(token, "net.ifname_policy=") {
+            if let Some(pol) = parse_ifname_policy_param(val) {
+                config.ifname_policies.push(pol);
             }
         } else if let Some(val) = strip_param(token, "net.ifnames=") {
             config.net_ifnames = parse_bool_param(val);
@@ -243,6 +267,48 @@ fn parse_cmdline(cmdline: &str) -> CmdlineConfig {
 
 fn strip_param<'a>(token: &'a str, prefix: &str) -> Option<&'a str> {
     token.strip_prefix(prefix)
+}
+
+/// Whether `s` is a recognized `ip=` autoconf method. C keys the short form
+/// `ip=<device>:<method>[:<mtu>[:<mac>]]` off the second colon-field being one
+/// of these, so it is what distinguishes the short form from the full
+/// `ip=<client>:<peer>:...` form.
+fn is_autoconf_method(s: &str) -> bool {
+    matches!(
+        s.to_ascii_lowercase().as_str(),
+        "dhcp"
+            | "dhcp6"
+            | "auto6"
+            | "on"
+            | "any"
+            | "off"
+            | "none"
+            | "ibft"
+            | "link6"
+            | "link-local"
+            | "either6"
+    )
+}
+
+/// Split an `ip=` value on ':' while keeping a bracketed IPv6 literal
+/// (`[2001:db8::1]`) as a single field with the brackets stripped. C's
+/// `extract_ip_address` accepts `[...]`-wrapped IPv6 addresses in the
+/// colon-delimited `ip=` form; a naive split on ':' shreds them (the address's
+/// own colons become field separators).
+fn split_ip_fields(val: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut cur = String::new();
+    let mut in_bracket = false;
+    for c in val.chars() {
+        match c {
+            '[' => in_bracket = true,
+            ']' => in_bracket = false,
+            ':' if !in_bracket => fields.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    fields.push(cur);
+    fields
 }
 
 /// Parse `ip=` value.
@@ -258,7 +324,30 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
     }
 
     // Check for simple keyword form (no colons, or single colon device:method).
-    let parts: Vec<&str> = val.split(':').collect();
+    // Split bracket-aware so `[...]`-wrapped IPv6 addresses stay one field.
+    let fields = split_ip_fields(val);
+    let parts: Vec<&str> = fields.iter().map(String::as_str).collect();
+
+    // Short form: ip=<device>:<method>[:<mtu>[:<macaddr>]]. C keys off the
+    // second field being an autoconf method (regardless of whether the first
+    // field looks like an IP), so this must be checked before the full form.
+    // The remainder after the method is [<mtu>][:<macaddr>]: the mtu is the
+    // first colon-delimited word, and everything after it (which may itself
+    // contain the MAC's colons) is the MAC address.
+    if parts.len() >= 2 && is_autoconf_method(parts[1]) {
+        let mut ip = IpConfig {
+            device: parts[0].to_string(),
+            autoconf: parts[1].to_lowercase(),
+            ..Default::default()
+        };
+        if parts.len() > 2 {
+            let rest = parts[2..].join(":");
+            let (mtu, mac) = rest.split_once(':').unwrap_or((rest.as_str(), ""));
+            ip.mtu = mtu.to_string();
+            ip.mac = mac.to_string();
+        }
+        return Some(ip);
+    }
 
     match parts.len() {
         1 => {
@@ -286,27 +375,10 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
                 }
             }
         }
-        2 => {
-            // ip=<device>:<method>
-            let device = parts[0];
-            let method = parts[1].to_lowercase();
-            match method.as_str() {
-                "dhcp" | "dhcp6" | "auto6" | "on" | "any" | "off" | "none" | "ibft" => {
-                    Some(IpConfig {
-                        device: device.to_string(),
-                        autoconf: method,
-                        ..Default::default()
-                    })
-                }
-                _ => {
-                    log::warn!("Unrecognized ip= device method: {}:{}", device, method);
-                    None
-                }
-            }
-        }
-        7..=10 => {
+        7.. => {
             // Full form:
-            // ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>[:<dns0>[:<dns1>[:<ntp0>]]]
+            // ip=<client-ip>:<server-ip>:<gw-ip>:<netmask>:<hostname>:<device>:<autoconf>
+            //   [:<mtu>[:<macaddr>]]  OR  [:<dns0>[:<dns1>[:<ntp0>]]]
             let mut ip = IpConfig {
                 client_ip: parts[0].to_string(),
                 server_ip: parts[1].to_string(),
@@ -317,14 +389,21 @@ fn parse_ip_param(val: &str) -> Option<IpConfig> {
                 autoconf: parts[6].to_lowercase(),
                 ..Default::default()
             };
-            if parts.len() > 7 {
-                ip.dns0 = parts[7].to_string();
-            }
-            if parts.len() > 8 {
-                ip.dns1 = parts[8].to_string();
-            }
-            if parts.len() > 9 {
-                ip.ntp0 = parts[9].to_string();
+            // The fields after <autoconf> are [<mtu>][:<macaddr>] or
+            // [<dns0>[:<dns1>[:<ntp0>]]]. C tries mtu/mac first, so a numeric
+            // first field is the MTU (and the rest, which may carry the MAC's
+            // own colons, is the MAC); otherwise they are DNS then NTP addresses.
+            let trailing = &parts[7..];
+            match trailing.first() {
+                Some(first) if !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()) => {
+                    ip.mtu = (*first).to_string();
+                    ip.mac = trailing[1..].join(":");
+                }
+                _ => {
+                    ip.dns0 = trailing.first().copied().unwrap_or_default().to_string();
+                    ip.dns1 = trailing.get(1).copied().unwrap_or_default().to_string();
+                    ip.ntp0 = trailing.get(2).copied().unwrap_or_default().to_string();
+                }
             }
             // Default autoconf to "none" if client IP is set and autoconf is empty
             if !ip.client_ip.is_empty() && ip.autoconf.is_empty() {
@@ -523,28 +602,6 @@ fn parse_bridge_param(val: &str) -> Option<BridgeConfig> {
     Some(BridgeConfig { name, members })
 }
 
-/// Parse `team=<teamname>:<members>`.
-fn parse_team_param(val: &str) -> Option<TeamConfig> {
-    let parts: Vec<&str> = val.splitn(2, ':').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        log::warn!("Invalid team= value: {}", val);
-        return None;
-    }
-
-    let name = parts[0].to_string();
-    let members: Vec<String> = parts[1]
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-    if members.is_empty() {
-        log::warn!("Team has no members: {}", val);
-        return None;
-    }
-
-    Some(TeamConfig { name, members })
-}
-
 /// Parse `ifname=<interface>:<mac>`.
 fn parse_ifname_param(val: &str) -> Option<IfnameConfig> {
     let parts: Vec<&str> = val.splitn(2, ':').collect();
@@ -556,6 +613,79 @@ fn parse_ifname_param(val: &str) -> Option<IfnameConfig> {
     Some(IfnameConfig {
         name: parts[0].to_string(),
         mac: parts[1].to_string(),
+    })
+}
+
+/// Membership in C's NamePolicy enum (name_policy_from_string).
+fn is_name_policy(word: &str) -> bool {
+    matches!(
+        word,
+        "kernel" | "keep" | "database" | "onboard" | "slot" | "path" | "mac"
+    )
+}
+
+/// Membership in C's AlternativeNamesPolicy enum
+/// (alternative_names_policy_from_string) — a subset of the name policies.
+fn is_alt_names_policy(word: &str) -> bool {
+    matches!(word, "database" | "onboard" | "slot" | "path" | "mac")
+}
+
+/// Normalize a 6-octet colon-separated MAC to lowercase, or None if malformed.
+fn normalize_mac(word: &str) -> Option<String> {
+    let octets: Vec<&str> = word.split(':').collect();
+    if octets.len() != 6 {
+        return None;
+    }
+    if octets
+        .iter()
+        .any(|o| o.len() != 2 || !o.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return None;
+    }
+    Some(word.to_lowercase())
+}
+
+/// Parse `net.ifname_policy=policy1[,policy2,...][,<MAC>]`.
+///
+/// Mirrors C's parse_cmdline_ifname_policy (network-generator.c): comma-separated
+/// words are naming policies; the first word that is not a known policy is taken
+/// as a trailing MAC address and must be last. Returns None (dropping the whole
+/// item, as C errors out) if no policy is present or the MAC is malformed or not
+/// last.
+fn parse_ifname_policy_param(val: &str) -> Option<IfnamePolicyConfig> {
+    let words: Vec<&str> = val.split(',').filter(|w| !w.is_empty()).collect();
+    let mut policies = Vec::new();
+    let mut alt_policies = Vec::new();
+    let mut mac = None;
+    for (i, word) in words.iter().enumerate() {
+        if is_name_policy(word) {
+            if is_alt_names_policy(word) {
+                alt_policies.push((*word).to_string());
+            }
+            policies.push((*word).to_string());
+        } else {
+            // Not a policy: must be the trailing MAC address.
+            if i != words.len() - 1 {
+                log::warn!("Unexpected trailing string in ifname policy: {}", val);
+                return None;
+            }
+            match normalize_mac(word) {
+                Some(m) => mac = Some(m),
+                None => {
+                    log::warn!("Invalid MAC address in ifname policy: {}", word);
+                    return None;
+                }
+            }
+        }
+    }
+    if policies.is_empty() {
+        log::warn!("No ifname policy specified: {}", val);
+        return None;
+    }
+    Some(IfnamePolicyConfig {
+        policies,
+        alt_policies,
+        mac,
     })
 }
 
@@ -580,395 +710,234 @@ fn looks_like_ip(s: &str) -> bool {
 fn generate(config: &CmdlineConfig) -> GeneratedFiles {
     let mut files = GeneratedFiles::new();
 
-    // Track which devices are slaves/members of aggregate devices so we don't
-    // generate standalone .network files for them.
-    let mut aggregate_slaves: BTreeSet<String> = BTreeSet::new();
-    for bond in &config.bonds {
-        for slave in &bond.slaves {
-            aggregate_slaves.insert(slave.clone());
-        }
-    }
-    for bridge in &config.bridges {
-        for member in &bridge.members {
-            aggregate_slaves.insert(member.clone());
-        }
-    }
-    for team in &config.teams {
-        for member in &team.members {
-            aggregate_slaves.insert(member.clone());
-        }
-    }
-
     // Generate .link files for ifname= parameters.
     for ifn in &config.ifnames {
         generate_ifname(&mut files, ifn);
     }
 
-    // Generate net.ifnames=0 .link file if requested.
-    if config.net_ifnames == Some(false) {
-        generate_net_ifnames_off(&mut files);
+    // Generate .link files for net.ifname_policy= parameters.
+    for pol in &config.ifname_policies {
+        generate_ifname_policy(&mut files, pol);
     }
 
-    // Generate VLAN .netdev and .network files.
+    // net.ifnames= is consumed by udev, not this generator; C's
+    // systemd-network-generator writes no file for it, so neither do we.
+
+    // Build netdevs and per-interface [Network] membership from vlan=/bond=/
+    // bridge=. Each creates a 70-<name>.netdev; the parent (vlan) or each member
+    // (bond/bridge) gets a VLAN=/Bond=/Bridge= entry merged into its .network.
+    // team= is NOT a C kernel-command-line option, so C emits nothing for it.
+    let mut netdevs: Vec<NetDev> = Vec::new();
+    let mut extra: BTreeMap<String, NetworkExtra> = BTreeMap::new();
     for vlan in &config.vlans {
-        generate_vlan(&mut files, vlan);
+        netdevs.push(NetDev {
+            kind: "vlan".to_string(),
+            name: vlan.name.clone(),
+            mtu: String::new(),
+            vlan_id: Some(vlan.id),
+        });
+        extra
+            .entry(vlan.parent.clone())
+            .or_default()
+            .vlans
+            .push(vlan.name.clone());
     }
-
-    // Generate bond .netdev, slave .network, and bond .network files.
     for bond in &config.bonds {
-        generate_bond(&mut files, bond);
+        netdevs.push(NetDev {
+            kind: "bond".to_string(),
+            name: bond.name.clone(),
+            mtu: bond.mtu.clone(),
+            vlan_id: None,
+        });
+        for slave in &bond.slaves {
+            extra.entry(slave.clone()).or_default().bond = Some(bond.name.clone());
+        }
     }
-
-    // Generate bridge .netdev, member .network, and bridge .network files.
     for bridge in &config.bridges {
-        generate_bridge(&mut files, bridge);
+        netdevs.push(NetDev {
+            kind: "bridge".to_string(),
+            name: bridge.name.clone(),
+            mtu: String::new(),
+            vlan_id: None,
+        });
+        for member in &bridge.members {
+            extra.entry(member.clone()).or_default().bridge = Some(bridge.name.clone());
+        }
+    }
+    for nd in &netdevs {
+        emit_netdev(&mut files, nd);
     }
 
-    // Generate team .netdev, member .network, and team .network files.
-    for team in &config.teams {
-        generate_team(&mut files, team);
-    }
-
-    // Generate .network files for ip= parameters.
-    for ip in &config.ip_configs {
-        generate_ip_network(
-            &mut files,
-            ip,
-            &config.nameservers,
-            config.peer_dns,
-            &aggregate_slaves,
-        );
-    }
-
-    // Generate .network files for rd.route= without a device (applies to all).
-    let unbound_routes: Vec<&RouteConfig> = config
-        .routes
-        .iter()
-        .filter(|r| r.device.is_empty())
-        .collect();
-    let bound_routes: Vec<&RouteConfig> = config
-        .routes
-        .iter()
-        .filter(|r| !r.device.is_empty())
-        .collect();
-
-    // Bound routes: add to the device's network file or generate a new one.
-    // Group by device.
+    // Group rd.route= by device ("" = unbound / deviceless default network).
     let mut routes_by_device: BTreeMap<String, Vec<&RouteConfig>> = BTreeMap::new();
-    for route in &bound_routes {
+    for route in &config.routes {
         routes_by_device
             .entry(route.device.clone())
             .or_default()
             .push(route);
     }
 
-    for (device, routes) in &routes_by_device {
-        // Only generate if there's no existing ip= config for this device.
-        let has_ip_config = config.ip_configs.iter().any(|ip| ip.device == *device);
-        if !has_ip_config {
-            generate_route_only_network(&mut files, device, routes, &unbound_routes);
-        }
+    // Every interface that needs a .network: any with an ip= config, a
+    // vlan/bond/bridge membership, or a route. C keys its Networks by interface
+    // and merges all of these into one 70-<ifname>.network (or 71-default for
+    // the deviceless set), because systemd applies only one .network per link.
+    let mut ifnames: BTreeSet<String> = BTreeSet::new();
+    for ip in &config.ip_configs {
+        ifnames.insert(ip.device.clone());
+    }
+    for k in extra.keys() {
+        ifnames.insert(k.clone());
+    }
+    for k in routes_by_device.keys() {
+        ifnames.insert(k.clone());
     }
 
-    // If there are unbound routes but no ip= configs, we still need something.
-    // These will be handled as part of ip= generation or need a catch-all.
-    if !unbound_routes.is_empty() && config.ip_configs.is_empty() && routes_by_device.is_empty() {
-        generate_catchall_routes(&mut files, &unbound_routes);
+    // C's context_merge_networks: the deviceless "" bucket holds nameserver= DNS,
+    // unbound rd.route= routes, and rd.peerdns (dhcp_use_dns). When any device
+    // network exists, that bucket's DNS/routes/peerdns are merged into EACH
+    // device network and the bucket is dropped; otherwise it is emitted alone as
+    // 71-default.
+    let default_extra = NetworkExtra::default();
+    let unbound_routes: Vec<&RouteConfig> =
+        routes_by_device.get("").cloned().unwrap_or_default();
+    let deviceless_ip = config.ip_configs.iter().find(|ip| ip.device.is_empty());
+    let device_ifnames: Vec<&String> = ifnames.iter().filter(|n| !n.is_empty()).collect();
+
+    if device_ifnames.is_empty() {
+        // No device network: emit the default bucket if it carries anything.
+        let has_default = deviceless_ip.is_some()
+            || !config.nameservers.is_empty()
+            || !unbound_routes.is_empty()
+            || config.peer_dns.is_some();
+        if has_default {
+            emit_network(
+                &mut files,
+                "",
+                deviceless_ip,
+                &default_extra,
+                &config.nameservers,
+                config.peer_dns,
+                &unbound_routes,
+            );
+        }
+    } else {
+        for ifname in device_ifnames {
+            let ip = config.ip_configs.iter().find(|ip| &ip.device == ifname);
+            let ex = extra.get(ifname).unwrap_or(&default_extra);
+            // The device's own routes, followed by the merged unbound routes.
+            let mut rts: Vec<&RouteConfig> =
+                routes_by_device.get(ifname).cloned().unwrap_or_default();
+            rts.extend(unbound_routes.iter().copied());
+            emit_network(
+                &mut files,
+                ifname,
+                ip,
+                ex,
+                &config.nameservers,
+                config.peer_dns,
+                &rts,
+            );
+        }
     }
 
     files
 }
 
-/// Generate a .link file for `ifname=<name>:<mac>`.
-fn generate_ifname(files: &mut GeneratedFiles, ifn: &IfnameConfig) {
-    let filename = format!("{}-ifname-{}.link", FILE_PREFIX, sanitize_name(&ifn.name));
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: ifname={}:{}",
-        ifn.name, ifn.mac
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "MACAddress={}", ifn.mac).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Link]").unwrap();
-    writeln!(content, "Name={}", ifn.name).unwrap();
-    files.add(filename, content);
-}
-
-/// Generate a .link file that disables predictable interface names when
-/// `net.ifnames=0` is specified.
-fn generate_net_ifnames_off(files: &mut GeneratedFiles) {
-    let filename = format!("{}-net-ifnames.link", FILE_PREFIX);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: net.ifnames=0"
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "OriginalName=*").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Link]").unwrap();
-    writeln!(content, "NamePolicy=kernel").unwrap();
-    files.add(filename, content);
-}
-
-/// Generate .netdev and parent .network files for a VLAN.
-fn generate_vlan(files: &mut GeneratedFiles, vlan: &VlanConfig) {
-    let safe_name = sanitize_name(&vlan.name);
-
-    // .netdev file
-    let netdev_name = format!("{}-vlan-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: vlan={}:{}",
-        vlan.name, vlan.parent
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", vlan.name).unwrap();
-    writeln!(content, "Kind=vlan").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[VLAN]").unwrap();
-    writeln!(content, "Id={}", vlan.id).unwrap();
-    files.add(netdev_name, content);
-
-    // Parent .network file to attach the VLAN.
-    let network_name = format!("{}-vlan-{}-parent.network", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(content, "# Parent network for VLAN {}", vlan.name).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "Name={}", vlan.parent).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Network]").unwrap();
-    writeln!(content, "VLAN={}", vlan.name).unwrap();
-    files.add(network_name, content);
-}
-
-/// Generate .netdev, slave .network, and bond .network files.
-fn generate_bond(files: &mut GeneratedFiles, bond: &BondConfig) {
-    let safe_name = sanitize_name(&bond.name);
-
-    // .netdev file
-    let netdev_name = format!("{}-bond-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: bond={}:{}",
-        bond.name,
-        bond.slaves.join(",")
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", bond.name).unwrap();
-    writeln!(content, "Kind=bond").unwrap();
-    if !bond.mtu.is_empty() {
-        writeln!(content, "MTUBytes={}", bond.mtu).unwrap();
-    }
-
-    // Parse bond options (comma-separated key=value or dracut-style).
-    if !bond.options.is_empty() {
-        writeln!(content).unwrap();
-        writeln!(content, "[Bond]").unwrap();
-        let bond_opts = parse_bond_options(&bond.options);
-        for (key, value) in &bond_opts {
-            writeln!(content, "{}={}", key, value).unwrap();
-        }
-    }
-
-    files.add(netdev_name, content);
-
-    // Slave .network files.
-    for slave in &bond.slaves {
-        let slave_name = format!(
-            "{}-bond-{}-slave-{}.network",
-            FILE_PREFIX,
-            safe_name,
-            sanitize_name(slave)
-        );
-        let mut content = String::new();
-        writeln!(
-            content,
-            "# Automatically generated by systemd-network-generator"
-        )
-        .unwrap();
-        writeln!(content, "# Bond {} slave: {}", bond.name, slave).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Match]").unwrap();
-        writeln!(content, "Name={}", slave).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Network]").unwrap();
-        writeln!(content, "Bond={}", bond.name).unwrap();
-        files.add(slave_name, content);
-    }
-}
-
-/// Generate .netdev, member .network, and bridge .network files.
-fn generate_bridge(files: &mut GeneratedFiles, bridge: &BridgeConfig) {
-    let safe_name = sanitize_name(&bridge.name);
-
-    // .netdev file
-    let netdev_name = format!("{}-bridge-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: bridge={}:{}",
-        bridge.name,
-        bridge.members.join(",")
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", bridge.name).unwrap();
-    writeln!(content, "Kind=bridge").unwrap();
-    files.add(netdev_name, content);
-
-    // Member .network files.
-    for member in &bridge.members {
-        let member_name = format!(
-            "{}-bridge-{}-member-{}.network",
-            FILE_PREFIX,
-            safe_name,
-            sanitize_name(member)
-        );
-        let mut content = String::new();
-        writeln!(
-            content,
-            "# Automatically generated by systemd-network-generator"
-        )
-        .unwrap();
-        writeln!(content, "# Bridge {} member: {}", bridge.name, member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Match]").unwrap();
-        writeln!(content, "Name={}", member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Network]").unwrap();
-        writeln!(content, "Bridge={}", bridge.name).unwrap();
-        files.add(member_name, content);
-    }
-}
-
-/// Generate .netdev, member .network, and team .network files.
-/// Teams in networkd are implemented as bonds (there's no native team kind).
-fn generate_team(files: &mut GeneratedFiles, team: &TeamConfig) {
-    let safe_name = sanitize_name(&team.name);
-
-    // .netdev file — use bond kind as networkd has no native team support
-    let netdev_name = format!("{}-team-{}.netdev", FILE_PREFIX, safe_name);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(
-        content,
-        "# from kernel command line parameter: team={}:{}",
-        team.name,
-        team.members.join(",")
-    )
-    .unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[NetDev]").unwrap();
-    writeln!(content, "Name={}", team.name).unwrap();
-    writeln!(content, "Kind=bond").unwrap();
-    files.add(netdev_name, content);
-
-    // Member .network files.
-    for member in &team.members {
-        let member_name = format!(
-            "{}-team-{}-member-{}.network",
-            FILE_PREFIX,
-            safe_name,
-            sanitize_name(member)
-        );
-        let mut content = String::new();
-        writeln!(
-            content,
-            "# Automatically generated by systemd-network-generator"
-        )
-        .unwrap();
-        writeln!(content, "# Team {} member: {}", team.name, member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Match]").unwrap();
-        writeln!(content, "Name={}", member).unwrap();
-        writeln!(content).unwrap();
-        writeln!(content, "[Network]").unwrap();
-        writeln!(content, "Bond={}", team.name).unwrap();
-        files.add(member_name, content);
-    }
-}
-
-/// Generate a .network file for an `ip=` configuration.
-fn generate_ip_network(
+/// Write a `.link` file matching C's link_dump + link_save (network-generator.c):
+/// filename prefix is `70` when an interface name is given, `71` for a MAC-only
+/// match, `72` otherwise; the base is the ifname, the MAC without colons, or
+/// `default`. The body matches on `Name=`/`MACAddress=`/`OriginalName=*` and
+/// carries the `NamePolicy=`/`AlternativeNamesPolicy=` lists when present.
+fn add_link_file(
     files: &mut GeneratedFiles,
-    ip: &IpConfig,
+    ifname: &str,
+    mac: Option<&str>,
+    policies: &[String],
+    alt_policies: &[String],
+) {
+    let (prefix, base) = if !ifname.is_empty() {
+        ("70", sanitize_name(ifname))
+    } else if let Some(m) = mac {
+        ("71", m.replace(':', ""))
+    } else {
+        ("72", "default".to_string())
+    };
+    let filename = format!("{prefix}-{base}.link");
+
+    let mut content = String::new();
+    writeln!(
+        content,
+        "# Automatically generated by systemd-network-generator"
+    )
+    .unwrap();
+    writeln!(content).unwrap();
+    writeln!(content, "[Match]").unwrap();
+    match mac {
+        Some(m) => writeln!(content, "MACAddress={m}").unwrap(),
+        None => writeln!(content, "OriginalName=*").unwrap(),
+    }
+    writeln!(content).unwrap();
+    writeln!(content, "[Link]").unwrap();
+    if !ifname.is_empty() {
+        writeln!(content, "Name={ifname}").unwrap();
+    }
+    if !policies.is_empty() {
+        writeln!(content, "NamePolicy={}", policies.join(" ")).unwrap();
+    }
+    if !alt_policies.is_empty() {
+        writeln!(content, "AlternativeNamesPolicy={}", alt_policies.join(" ")).unwrap();
+    }
+    files.add(filename, content);
+}
+
+/// Generate a .link file for `ifname=<name>:<mac>` (70-<ifname>.link).
+fn generate_ifname(files: &mut GeneratedFiles, ifn: &IfnameConfig) {
+    add_link_file(files, &ifn.name, Some(&ifn.mac), &[], &[]);
+}
+
+/// Generate a .link file for `net.ifname_policy=<policies>[,<mac>]`
+/// (72-default.link, or 71-<mac>.link when scoped to a MAC).
+fn generate_ifname_policy(files: &mut GeneratedFiles, pol: &IfnamePolicyConfig) {
+    add_link_file(
+        files,
+        "",
+        pol.mac.as_deref(),
+        &pol.policies,
+        &pol.alt_policies,
+    );
+}
+
+/// Emit one merged `70-<ifname>.network` (or `71-default.network` when
+/// deviceless), matching C's network_dump. The `[Network]` section carries the
+/// `ip=` DHCP/DNS/NTP settings, the `VLAN=`/`Bridge=`/`Bond=` membership from
+/// vlan=/bond=/bridge=, and trailing `[Route]` blocks from rd.route=. C keys its
+/// Networks by interface, so all of these merge into a single file per link.
+fn emit_network(
+    files: &mut GeneratedFiles,
+    ifname: &str,
+    ip: Option<&IpConfig>,
+    extra: &NetworkExtra,
     nameservers: &[String],
     peer_dns: Option<bool>,
-    aggregate_slaves: &BTreeSet<String>,
+    routes: &[&RouteConfig],
 ) {
-    // Skip if this device is a bond slave / bridge member.
-    if !ip.device.is_empty() && aggregate_slaves.contains(&ip.device) {
+    // ibft interfaces are brought up by the initrd; C emits no .network.
+    if ip.is_some_and(|ip| ip.autoconf == "ibft") {
         return;
     }
 
-    let is_dhcp = matches!(ip.autoconf.as_str(), "dhcp" | "on" | "any" | "");
-    let is_dhcp6 = ip.autoconf == "dhcp6";
-    let is_auto6 = ip.autoconf == "auto6";
-    let is_off = matches!(ip.autoconf.as_str(), "off" | "none");
-    let is_static = is_off && !ip.client_ip.is_empty();
-    let is_ibft = ip.autoconf == "ibft";
-
-    // Don't generate anything for ibft — it's handled separately.
-    if is_ibft {
-        return;
-    }
-
-    // Determine filename.
-    let suffix = if ip.device.is_empty() {
-        "default".to_string()
+    // "70-<ifname>.network" for a named interface, else "71-default.network"
+    // (the "70" prefix gives a named interface priority over the catch-all).
+    // C uses the raw interface name in the filename (e.g. "70-eth0.100.network").
+    let (prefix, suffix) = if ifname.is_empty() {
+        ("71", "default")
     } else {
-        sanitize_name(&ip.device)
+        ("70", ifname)
     };
-    let filename = format!("{}-ip-{}.network", FILE_PREFIX, suffix);
+    let filename = format!("{prefix}-{suffix}.network");
+
+    let is_off = ip.is_some_and(|ip| matches!(ip.autoconf.as_str(), "off" | "none"));
+    let is_static = is_off && ip.is_some_and(|ip| !ip.client_ip.is_empty());
 
     let mut content = String::new();
     writeln!(
@@ -976,148 +945,142 @@ fn generate_ip_network(
         "# Automatically generated by systemd-network-generator"
     )
     .unwrap();
-    writeln!(content, "# from kernel command line ip= parameter").unwrap();
     writeln!(content).unwrap();
 
     // [Match]
     writeln!(content, "[Match]").unwrap();
-    if ip.device.is_empty() {
-        // Match all non-loopback interfaces.
-        writeln!(content, "Name=*").unwrap();
-        // Exclude loopback.
+    if ifname.is_empty() {
+        writeln!(content, "Kind=!*").unwrap();
         writeln!(content, "Type=!loopback").unwrap();
     } else {
-        writeln!(content, "Name={}", ip.device).unwrap();
-    }
-    writeln!(content).unwrap();
-
-    // [Network]
-    writeln!(content, "[Network]").unwrap();
-
-    if is_dhcp {
-        writeln!(content, "DHCP=yes").unwrap();
-    } else if is_dhcp6 {
-        writeln!(content, "DHCP=ipv6").unwrap();
-    } else if is_auto6 {
-        writeln!(content, "DHCP=no").unwrap();
-        writeln!(content, "IPv6AcceptRA=yes").unwrap();
-    } else if is_off && ip.client_ip.is_empty() {
-        // Explicitly disabled.
-        writeln!(content, "DHCP=no").unwrap();
-        writeln!(content, "LinkLocalAddressing=no").unwrap();
-    } else {
-        // Static configuration.
-        writeln!(content, "DHCP=no").unwrap();
+        writeln!(content, "Name={ifname}").unwrap();
     }
 
-    // DNS servers: from ip= inline + nameserver= parameters.
-    let use_dns = peer_dns.unwrap_or(true);
-    if use_dns {
+    // [Link]: MAC then MTU from an ip= short form (that order matches C's
+    // link_dump); empty otherwise.
+    writeln!(content, "\n[Link]").unwrap();
+    if let Some(ip) = ip {
+        if !ip.mac.is_empty() {
+            writeln!(content, "MACAddress={}", ip.mac).unwrap();
+        }
+        if !ip.mtu.is_empty() {
+            writeln!(content, "MTUBytes={}", ip.mtu).unwrap();
+        }
+    }
+
+    // [Network] — entry order matches C's network_dump: DHCP, LinkLocal, RA,
+    // DNS, VLAN, Bridge, Bond, NTP.
+    writeln!(content, "\n[Network]").unwrap();
+    if let Some(ip) = ip {
+        let dhcp = if ip.autoconf == "dhcp6" {
+            "ipv6"
+        } else if ip.autoconf == "auto6" || is_off {
+            "no"
+        } else if ip.autoconf == "dhcp" {
+            "ipv4"
+        } else {
+            "yes"
+        };
+        writeln!(content, "DHCP={dhcp}").unwrap();
+        if is_off {
+            writeln!(content, "LinkLocalAddressing=no").unwrap();
+            writeln!(content, "IPv6AcceptRA=no").unwrap();
+        }
         if !ip.dns0.is_empty() {
             writeln!(content, "DNS={}", ip.dns0).unwrap();
         }
         if !ip.dns1.is_empty() {
             writeln!(content, "DNS={}", ip.dns1).unwrap();
         }
-        for ns in nameservers {
-            writeln!(content, "DNS={}", ns).unwrap();
-        }
     }
-
-    // NTP servers from ip= inline.
-    if !ip.ntp0.is_empty() {
+    // nameserver= entries apply to every network C emits (including bond/bridge
+    // members and vlan parents that carry no ip= config), so they are listed
+    // outside the ip= block, after any inline ip= DNS and before VLAN/Bond.
+    for ns in nameservers {
+        writeln!(content, "DNS={ns}").unwrap();
+    }
+    for v in &extra.vlans {
+        writeln!(content, "VLAN={v}").unwrap();
+    }
+    if let Some(bridge) = &extra.bridge {
+        writeln!(content, "Bridge={bridge}").unwrap();
+    }
+    if let Some(bond) = &extra.bond {
+        writeln!(content, "Bond={bond}").unwrap();
+    }
+    if let Some(ip) = ip
+        && !ip.ntp0.is_empty()
+    {
         writeln!(content, "NTP={}", ip.ntp0).unwrap();
     }
 
-    // [DHCPv4] section for DHCP options.
-    if is_dhcp {
-        let needs_dhcpv4_section = !use_dns || !ip.hostname.is_empty();
-        if needs_dhcpv4_section {
-            writeln!(content).unwrap();
-            writeln!(content, "[DHCPv4]").unwrap();
-            if !use_dns {
-                writeln!(content, "UseDNS=no").unwrap();
-            }
-            if !ip.hostname.is_empty() {
-                writeln!(content, "SendHostname=yes").unwrap();
-                writeln!(content, "Hostname={}", ip.hostname).unwrap();
-            }
-        }
+    // [DHCP]
+    writeln!(content, "\n[DHCP]").unwrap();
+    if let Some(ip) = ip
+        && !ip.hostname.is_empty()
+    {
+        writeln!(content, "Hostname={}", ip.hostname).unwrap();
+    }
+    // rd.peerdns= (UseDNS) is a global that C merges into every network.
+    match peer_dns {
+        Some(true) => writeln!(content, "UseDNS=yes").unwrap(),
+        Some(false) => writeln!(content, "UseDNS=no").unwrap(),
+        None => {}
     }
 
-    // [Address] section for static addresses.
-    if is_static {
+    // [Address] for a static ip=.
+    if let Some(ip) = ip
+        && is_static
+    {
         let address = format_address(&ip.client_ip, &ip.netmask);
-        writeln!(content).unwrap();
-        writeln!(content, "[Address]").unwrap();
-        writeln!(content, "Address={}", address).unwrap();
+        writeln!(content, "\n[Address]").unwrap();
+        writeln!(content, "Address={address}").unwrap();
     }
 
-    // [Route] section for gateway.
-    if is_static && !ip.gateway.is_empty() {
-        writeln!(content).unwrap();
-        writeln!(content, "[Route]").unwrap();
+    // [Route] blocks for rd.route= entries. C keeps its route list head-first
+    // (LIST_PREPEND), so it emits them in reverse of the command-line order.
+    for route in routes.iter().rev() {
+        writeln!(content, "\n[Route]").unwrap();
+        writeln!(content, "Destination={}", route.destination).unwrap();
+        writeln!(content, "Gateway={}", route.gateway).unwrap();
+    }
+
+    // The ip= default gateway route comes after the rd.route= entries: C stores
+    // it at the head of the same prepended list, so it is emitted last.
+    if let Some(ip) = ip
+        && is_static
+        && !ip.gateway.is_empty()
+    {
+        writeln!(content, "\n[Route]").unwrap();
         writeln!(content, "Gateway={}", ip.gateway).unwrap();
     }
 
     files.add(filename, content);
 }
 
-/// Generate a .network file that only carries routes for a device.
-fn generate_route_only_network(
-    files: &mut GeneratedFiles,
-    device: &str,
-    routes: &[&RouteConfig],
-    unbound_routes: &[&RouteConfig],
-) {
-    let filename = format!("{}-route-{}.network", FILE_PREFIX, sanitize_name(device));
+/// Emit a `70-<name>.netdev` matching C's netdev_dump: Kind, Name, optional
+/// MTUBytes, and a `[VLAN] Id` section for vlan kinds. C emits no `[Bond]`
+/// section, so bond options are dropped.
+fn emit_netdev(files: &mut GeneratedFiles, nd: &NetDev) {
+    // C uses the raw device name (e.g. "70-eth0.100.netdev").
+    let filename = format!("70-{}.netdev", nd.name);
     let mut content = String::new();
     writeln!(
         content,
         "# Automatically generated by systemd-network-generator"
     )
     .unwrap();
-    writeln!(content, "# from kernel command line rd.route= parameters").unwrap();
     writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "Name={}", device).unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Network]").unwrap();
-
-    for route in routes.iter().chain(unbound_routes.iter()) {
-        writeln!(content).unwrap();
-        writeln!(content, "[Route]").unwrap();
-        writeln!(content, "Destination={}", route.destination).unwrap();
-        writeln!(content, "Gateway={}", route.gateway).unwrap();
+    writeln!(content, "[NetDev]").unwrap();
+    writeln!(content, "Kind={}", nd.kind).unwrap();
+    writeln!(content, "Name={}", nd.name).unwrap();
+    if !nd.mtu.is_empty() {
+        writeln!(content, "MTUBytes={}", nd.mtu).unwrap();
     }
-
-    files.add(filename, content);
-}
-
-/// Generate a catch-all .network for unbound routes when there are no ip= configs.
-fn generate_catchall_routes(files: &mut GeneratedFiles, routes: &[&RouteConfig]) {
-    let filename = format!("{}-route-default.network", FILE_PREFIX);
-    let mut content = String::new();
-    writeln!(
-        content,
-        "# Automatically generated by systemd-network-generator"
-    )
-    .unwrap();
-    writeln!(content, "# from kernel command line rd.route= parameters").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Match]").unwrap();
-    writeln!(content, "Name=*").unwrap();
-    writeln!(content, "Type=!loopback").unwrap();
-    writeln!(content).unwrap();
-    writeln!(content, "[Network]").unwrap();
-
-    for route in routes {
-        writeln!(content).unwrap();
-        writeln!(content, "[Route]").unwrap();
-        writeln!(content, "Destination={}", route.destination).unwrap();
-        writeln!(content, "Gateway={}", route.gateway).unwrap();
+    if let Some(id) = nd.vlan_id {
+        writeln!(content, "\n[VLAN]").unwrap();
+        writeln!(content, "Id={id}").unwrap();
     }
-
     files.add(filename, content);
 }
 
@@ -1158,68 +1121,6 @@ fn netmask_to_prefix(mask: &str) -> u32 {
     bits.count_ones()
 }
 
-/// Parse dracut-style bond options.
-///
-/// Dracut format: `mode=balance-rr,miimon=100,xmit_hash_policy=layer3+4`
-/// Maps to networkd [Bond] section keys.
-fn parse_bond_options(opts: &str) -> Vec<(String, String)> {
-    let mut result = Vec::new();
-    for part in opts.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        if let Some((key, value)) = part.split_once('=') {
-            let networkd_key = dracut_bond_key_to_networkd(key.trim());
-            result.push((networkd_key, value.trim().to_string()));
-        }
-    }
-    result
-}
-
-/// Map dracut/kernel bond option names to networkd [Bond] section keys.
-fn dracut_bond_key_to_networkd(key: &str) -> String {
-    // Gratuitous ARP option: "num_" + "gratuitous"[..4] + "_arp"
-    // (constructed at runtime to avoid spell-checker false positive on the abbreviation)
-    let gratuitous_arp_opt: String = format!("num_{}_arp", &"gratuitous"[..4]);
-
-    match key {
-        "mode" => "Mode".to_string(),
-        "miimon" => "MIIMonitorSec".to_string(),
-        "updelay" => "UpDelaySec".to_string(),
-        "downdelay" => "DownDelaySec".to_string(),
-        "primary" => "Primary".to_string(),
-        "primary_reselect" => "PrimaryReselectPolicy".to_string(),
-        "xmit_hash_policy" => "TransmitHashPolicy".to_string(),
-        "lacp_rate" => "LACPTransmitRate".to_string(),
-        "arp_interval" => "ArpIntervalSec".to_string(),
-        "arp_ip_target" => "ArpIpTargets".to_string(),
-        "arp_validate" => "ArpValidate".to_string(),
-        "arp_all_targets" => "ArpAllTargets".to_string(),
-        "ad_select" => "AdSelect".to_string(),
-        "fail_over_mac" => "FailOverMACPolicy".to_string(),
-        k if k == gratuitous_arp_opt => "GratuitousARP".to_string(),
-        "num_unsol_na" => "GratuitousARP".to_string(),
-        "packets_per_slave" => "PacketsPerSlave".to_string(),
-        "resend_igmp" => "ResendIGMP".to_string(),
-        "min_links" => "MinLinks".to_string(),
-        "all_slaves_active" => "AllSlavesActive".to_string(),
-        "lp_interval" => "LPInterval".to_string(),
-        _ => {
-            // Pass through with capitalized first letter as best-effort.
-            let mut chars = key.chars();
-            match chars.next() {
-                Some(c) => {
-                    let mut s = c.to_uppercase().to_string();
-                    s.push_str(chars.as_str());
-                    s
-                }
-                None => key.to_string(),
-            }
-        }
-    }
-}
-
 /// Sanitize a device/interface name for use in filenames.
 fn sanitize_name(name: &str) -> String {
     name.chars()
@@ -1252,58 +1153,123 @@ fn print_version() {
     eprintln!("systemd-network-generator (rust-systemd)");
 }
 
-fn run(cmdline_path: &str, output_dir: &Path) -> i32 {
-    let cmdline = match read_cmdline(cmdline_path) {
-        Ok(s) => s,
-        Err(e) => {
-            // Not having /proc/cmdline is fine (e.g. in containers).
-            log::info!("Could not read {}: {}", cmdline_path, e);
-            return 0;
+/// Copy credential-provided network config into place. For each file in
+/// `$CREDENTIALS_DIRECTORY` whose name starts with one of the table prefixes,
+/// write it to `<target_dir>/<rest><suffix>` (mode 0644). Mirrors upstream
+/// systemd-network-generator's `pick_up_credentials()` (src/shared/creds-util.c),
+/// which runs unconditionally alongside the kernel-command-line handling.
+fn pick_up_credentials() -> io::Result<()> {
+    // (credential name prefix, target directory, target filename suffix)
+    const TABLE: &[(&str, &str, &str)] = &[
+        ("network.conf.", "/run/systemd/networkd.conf.d/", ".conf"),
+        ("network.link.", "/run/systemd/network/", ".link"),
+        ("network.netdev.", "/run/systemd/network/", ".netdev"),
+        ("network.network.", "/run/systemd/network/", ".network"),
+    ];
+
+    let cred_dir = match std::env::var_os("CREDENTIALS_DIRECTORY") {
+        Some(d) => PathBuf::from(d),
+        None => {
+            log::debug!("No credentials directory set, skipping credential pick-up.");
+            return Ok(());
         }
     };
 
-    let config = parse_cmdline(&cmdline);
+    let entries = match fs::read_dir(&cred_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
 
-    // If there are no network parameters, nothing to do.
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        for (prefix, target_dir, suffix) in TABLE {
+            let Some(rest) = name.strip_prefix(prefix) else {
+                continue;
+            };
+            let filename = format!("{rest}{suffix}");
+            // Reject anything that wouldn't resolve to a plain filename.
+            if rest.is_empty() || filename.contains('/') || filename == "." || filename == ".." {
+                log::warn!("Credential '{name}' yields invalid filename '{filename}', ignoring.");
+                break;
+            }
+            fs::create_dir_all(target_dir)?;
+            let target = Path::new(target_dir).join(&filename);
+            fs::copy(entry.path(), &target)?;
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o644));
+            log::info!("Installed {} from credential.", target.display());
+            break; // matched this credential; move on to the next one
+        }
+    }
+
+    Ok(())
+}
+
+fn run(cmdline_path: &str, output_dir: &Path) -> i32 {
+    // Kernel command line → .network files. Not having /proc/cmdline is fine
+    // (e.g. in containers); credentials are still picked up below.
+    let cmdline = match read_cmdline(cmdline_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::info!("Could not read {}: {}", cmdline_path, e);
+            String::new()
+        }
+    };
+    run_cmdline_str(&cmdline, output_dir)
+}
+
+/// Process a kernel-command-line string (from `/proc/cmdline` or, when C's
+/// `systemd-network-generator` is invoked with positional arguments, from those
+/// arguments) into `.network`/`.netdev`/`.link` files under `output_dir`, then
+/// pick up any credentials. Shared by `run` and the argument-driven `main` path.
+fn run_cmdline_str(cmdline: &str, output_dir: &Path) -> i32 {
+    let mut ret = 0;
+
+    let config = parse_cmdline(cmdline);
+    // If there are no network parameters, there is nothing to generate.
     if config.ip_configs.is_empty()
         && config.routes.is_empty()
         && config.nameservers.is_empty()
         && config.vlans.is_empty()
         && config.bonds.is_empty()
         && config.bridges.is_empty()
-        && config.teams.is_empty()
         && config.ifnames.is_empty()
+        && config.ifname_policies.is_empty()
         && config.net_ifnames.is_none()
     {
         log::info!("No network parameters on kernel command line.");
-        return 0;
-    }
-
-    let files = generate(&config);
-
-    if files.files.is_empty() {
-        log::info!("No configuration files to generate.");
-        return 0;
-    }
-
-    match files.write_to(output_dir) {
-        Ok(count) => {
-            log::info!(
-                "Generated {} configuration file(s) in {}",
-                count,
-                output_dir.display()
-            );
-            0
-        }
-        Err(e) => {
+    } else {
+        let files = generate(&config);
+        if files.files.is_empty() {
+            log::info!("No configuration files to generate.");
+        } else if let Err(e) = files.write_to(output_dir) {
             log::error!(
                 "Failed to write configuration files to {}: {}",
                 output_dir.display(),
                 e
             );
-            1
+            ret = 1;
+        } else {
+            log::info!("Generated configuration file(s) in {}", output_dir.display());
         }
     }
+
+    // Credentials → networkd.conf.d/.network/.netdev/.link files. This runs
+    // regardless of the kernel command line, matching upstream.
+    if let Err(e) = pick_up_credentials() {
+        log::warn!("Failed to pick up credentials: {e}");
+        if ret == 0 {
+            ret = 1;
+        }
+    }
+
+    ret
 }
 
 fn setup_logging() {
@@ -1349,9 +1315,15 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    // Parse arguments.
-    let mut output_dir = PathBuf::from(DEFAULT_OUTPUT_DIR);
-    for arg in &args[1..] {
+    // Argument handling mirrors C's systemd-network-generator: `--root=PATH`
+    // selects an alternate filesystem root, and any positional arguments are
+    // parsed as kernel-command-line items (used instead of /proc/cmdline when
+    // present). With no positional item the real /proc/cmdline is read.
+    let mut root: Option<PathBuf> = None;
+    let mut items: Vec<String> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
         match arg.as_str() {
             "--help" | "-h" => {
                 print_help();
@@ -1361,13 +1333,32 @@ fn main() {
                 print_version();
                 process::exit(0);
             }
-            other => {
-                output_dir = PathBuf::from(other);
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(PathBuf::from(&args[i]));
+                }
             }
+            s if s.starts_with("--root=") => {
+                root = Some(PathBuf::from(&s["--root=".len()..]));
+            }
+            other => items.push(other.to_string()),
         }
+        i += 1;
     }
 
-    let code = run(PROC_CMDLINE, &output_dir);
+    // C writes under <root>/run/systemd/network/; without a root it is the
+    // default absolute directory.
+    let output_dir = match &root {
+        Some(r) => r.join("run/systemd/network"),
+        None => PathBuf::from(DEFAULT_OUTPUT_DIR),
+    };
+
+    let code = if items.is_empty() {
+        run(PROC_CMDLINE, &output_dir)
+    } else {
+        run_cmdline_str(&items.join(" "), &output_dir)
+    };
     process::exit(code);
 }
 
@@ -1693,20 +1684,6 @@ mod tests {
         assert!(parse_bridge_param("br0:").is_none());
     }
 
-    // ── team= parsing tests ─────────────────────────────────────────
-
-    #[test]
-    fn test_parse_team_basic() {
-        let team = parse_team_param("team0:eth0,eth1").unwrap();
-        assert_eq!(team.name, "team0");
-        assert_eq!(team.members, vec!["eth0", "eth1"]);
-    }
-
-    #[test]
-    fn test_parse_team_empty() {
-        assert!(parse_team_param("team0:").is_none());
-    }
-
     // ── ifname= parsing tests ───────────────────────────────────────
 
     #[test]
@@ -1921,46 +1898,6 @@ mod tests {
         assert_eq!(extract_vlan_id("myvlan"), None);
     }
 
-    #[test]
-    fn test_parse_bond_options() {
-        let opts = parse_bond_options("mode=802.3ad,miimon=100,xmit_hash_policy=layer3+4");
-        assert_eq!(opts.len(), 3);
-        assert_eq!(opts[0], ("Mode".to_string(), "802.3ad".to_string()));
-        assert_eq!(opts[1], ("MIIMonitorSec".to_string(), "100".to_string()));
-        assert_eq!(
-            opts[2],
-            ("TransmitHashPolicy".to_string(), "layer3+4".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_bond_options_empty() {
-        let opts = parse_bond_options("");
-        assert!(opts.is_empty());
-    }
-
-    #[test]
-    fn test_dracut_bond_key_mapping() {
-        assert_eq!(dracut_bond_key_to_networkd("mode"), "Mode");
-        assert_eq!(dracut_bond_key_to_networkd("miimon"), "MIIMonitorSec");
-        assert_eq!(dracut_bond_key_to_networkd("updelay"), "UpDelaySec");
-        assert_eq!(dracut_bond_key_to_networkd("downdelay"), "DownDelaySec");
-        assert_eq!(dracut_bond_key_to_networkd("primary"), "Primary");
-        assert_eq!(
-            dracut_bond_key_to_networkd("xmit_hash_policy"),
-            "TransmitHashPolicy"
-        );
-        assert_eq!(dracut_bond_key_to_networkd("lacp_rate"), "LACPTransmitRate");
-        assert_eq!(dracut_bond_key_to_networkd("min_links"), "MinLinks");
-        let gratuitous_arp_opt = format!("num_{}_arp", &"gratuitous"[..4]);
-        assert_eq!(
-            dracut_bond_key_to_networkd(&gratuitous_arp_opt),
-            "GratuitousARP"
-        );
-        assert_eq!(dracut_bond_key_to_networkd("num_unsol_na"), "GratuitousARP");
-        assert_eq!(dracut_bond_key_to_networkd("unknown_key"), "Unknown_key");
-    }
-
     // ── File generation tests ───────────────────────────────────────
 
     #[test]
@@ -1974,28 +1911,30 @@ mod tests {
     fn test_generate_dhcp_all() {
         let config = parse_cmdline("ip=dhcp");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-ip-default.network"));
-        let content = &files.files["71-ip-default.network"];
+        assert!(files.files.contains_key("71-default.network"));
+        let content = &files.files["71-default.network"];
         assert!(content.contains("[Match]"));
-        assert!(content.contains("Name=*"));
-        assert!(content.contains("DHCP=yes"));
+        // A device-less ip= matches every physical interface via Kind=!*.
+        assert!(content.contains("Kind=!*"));
+        // "dhcp" maps to IPv4 DHCP specifically (C: DHCP=ipv4, not "yes").
+        assert!(content.contains("DHCP=ipv4"));
     }
 
     #[test]
     fn test_generate_dhcp_device() {
         let config = parse_cmdline("ip=eth0:dhcp");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-ip-eth0.network"));
-        let content = &files.files["71-ip-eth0.network"];
+        assert!(files.files.contains_key("70-eth0.network"));
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("Name=eth0"));
-        assert!(content.contains("DHCP=yes"));
+        assert!(content.contains("DHCP=ipv4"));
     }
 
     #[test]
     fn test_generate_dhcp6() {
         let config = parse_cmdline("ip=eth0:dhcp6");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("DHCP=ipv6"));
     }
 
@@ -2003,16 +1942,17 @@ mod tests {
     fn test_generate_auto6() {
         let config = parse_cmdline("ip=eth0:auto6");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("DHCP=no"));
-        assert!(content.contains("IPv6AcceptRA=yes"));
+        // auto6 leaves RA at the networkd default (C emits no IPv6AcceptRA line).
+        assert!(!content.contains("IPv6AcceptRA"));
     }
 
     #[test]
     fn test_generate_static_ip() {
         let config = parse_cmdline("ip=192.168.1.100::192.168.1.1:255.255.255.0::eth0:none");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("[Address]"));
         assert!(content.contains("Address=192.168.1.100/24"));
         assert!(content.contains("[Route]"));
@@ -2023,7 +1963,7 @@ mod tests {
     fn test_generate_static_no_gateway() {
         let config = parse_cmdline("ip=192.168.1.100:::255.255.255.0::eth0:none");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("[Address]"));
         assert!(!content.contains("[Route]"));
     }
@@ -2032,7 +1972,7 @@ mod tests {
     fn test_generate_with_nameservers() {
         let config = parse_cmdline("ip=eth0:dhcp nameserver=8.8.8.8 nameserver=1.1.1.1");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("DNS=8.8.8.8"));
         assert!(content.contains("DNS=1.1.1.1"));
     }
@@ -2041,24 +1981,28 @@ mod tests {
     fn test_generate_with_inline_dns() {
         let config = parse_cmdline("ip=10.0.0.2::10.0.0.1:24::eth0:none:8.8.8.8:8.8.4.4");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("DNS=8.8.8.8"));
         assert!(content.contains("DNS=8.8.4.4"));
     }
 
     #[test]
-    fn test_generate_peerdns_off_suppresses_dns() {
+    fn test_generate_peerdns_off_disables_dhcp_dns() {
+        // rd.peerdns=0 does not drop an explicit nameserver= (which is always a
+        // static DNS= line); it only turns off DHCP-provided DNS via UseDNS=no,
+        // matching C's systemd-network-generator.
         let config = parse_cmdline("ip=eth0:dhcp nameserver=8.8.8.8 rd.peerdns=0");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
-        assert!(!content.contains("DNS=8.8.8.8"));
+        let content = &files.files["70-eth0.network"];
+        assert!(content.contains("DNS=8.8.8.8"));
+        assert!(content.contains("UseDNS=no"));
     }
 
     #[test]
     fn test_generate_with_ntp() {
         let config = parse_cmdline("ip=10.0.0.2::10.0.0.1:24::eth0:none:::pool.ntp.org");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("NTP=pool.ntp.org"));
     }
 
@@ -2066,7 +2010,7 @@ mod tests {
     fn test_generate_off_no_address() {
         let config = parse_cmdline("ip=eth0:off");
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("DHCP=no"));
         assert!(content.contains("LinkLocalAddressing=no"));
     }
@@ -2083,8 +2027,9 @@ mod tests {
     fn test_generate_ifname() {
         let config = parse_cmdline("ifname=lan0:aa:bb:cc:dd:ee:ff");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-ifname-lan0.link"));
-        let content = &files.files["71-ifname-lan0.link"];
+        // C names the link file 70-<ifname>.link.
+        assert!(files.files.contains_key("70-lan0.link"));
+        let content = &files.files["70-lan0.link"];
         assert!(content.contains("[Match]"));
         assert!(content.contains("MACAddress=aa:bb:cc:dd:ee:ff"));
         assert!(content.contains("[Link]"));
@@ -2092,12 +2037,13 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_net_ifnames_off() {
+    fn test_generate_net_ifnames_off_no_file() {
+        // net.ifnames= is consumed by udev, not this generator; C's
+        // systemd-network-generator writes no file for it (parsed but ignored).
         let config = parse_cmdline("net.ifnames=0");
+        assert_eq!(config.net_ifnames, Some(false));
         let files = generate(&config);
-        assert!(files.files.contains_key("71-net-ifnames.link"));
-        let content = &files.files["71-net-ifnames.link"];
-        assert!(content.contains("NamePolicy=kernel"));
+        assert!(files.files.is_empty());
     }
 
     #[test]
@@ -2108,25 +2054,112 @@ mod tests {
         assert!(!files.files.contains_key("71-net-ifnames.link"));
     }
 
+    // ── net.ifname_policy= tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_ifname_policy_basic() {
+        let config = parse_cmdline("net.ifname_policy=keep,kernel,path");
+        assert_eq!(config.ifname_policies.len(), 1);
+        let p = &config.ifname_policies[0];
+        assert_eq!(p.policies, vec!["keep", "kernel", "path"]);
+        // Only alternative-names policies (path) go to AlternativeNamesPolicy.
+        assert_eq!(p.alt_policies, vec!["path"]);
+        assert_eq!(p.mac, None);
+    }
+
+    #[test]
+    fn test_parse_ifname_policy_with_mac() {
+        let config = parse_cmdline("net.ifname_policy=path,mac,AA:BB:CC:DD:EE:FF");
+        let p = &config.ifname_policies[0];
+        assert_eq!(p.policies, vec!["path", "mac"]);
+        assert_eq!(p.alt_policies, vec!["path", "mac"]);
+        // MAC is normalized to lowercase.
+        assert_eq!(p.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+    }
+
+    #[test]
+    fn test_parse_ifname_policy_invalid() {
+        // No policy at all (bare MAC) -> dropped.
+        assert!(parse_cmdline("net.ifname_policy=aa:bb:cc:dd:ee:ff")
+            .ifname_policies
+            .is_empty());
+        // MAC not last -> dropped.
+        assert!(parse_cmdline("net.ifname_policy=aa:bb:cc:dd:ee:ff,path")
+            .ifname_policies
+            .is_empty());
+        // Malformed MAC (and not a policy) -> dropped.
+        assert!(parse_cmdline("net.ifname_policy=path,bogus")
+            .ifname_policies
+            .is_empty());
+    }
+
+    #[test]
+    fn test_generate_ifname_policy_default() {
+        let config = parse_cmdline("net.ifname_policy=keep,kernel,path");
+        let files = generate(&config);
+        let content = files
+            .files
+            .get("72-default.link")
+            .expect("72-default.link");
+        assert_eq!(
+            content,
+            "# Automatically generated by systemd-network-generator\n\
+             \n\
+             [Match]\n\
+             OriginalName=*\n\
+             \n\
+             [Link]\n\
+             NamePolicy=keep kernel path\n\
+             AlternativeNamesPolicy=path\n"
+        );
+    }
+
+    #[test]
+    fn test_generate_ifname_policy_no_alt() {
+        // A pure NamePolicy (keep) yields no AlternativeNamesPolicy line.
+        let config = parse_cmdline("net.ifname_policy=keep");
+        let content = &generate(&config).files["72-default.link"];
+        assert!(content.contains("NamePolicy=keep\n"));
+        assert!(!content.contains("AlternativeNamesPolicy"));
+    }
+
+    #[test]
+    fn test_generate_ifname_policy_with_mac() {
+        let config = parse_cmdline("net.ifname_policy=path,mac,aa:bb:cc:dd:ee:ff");
+        let files = generate(&config);
+        let content = files
+            .files
+            .get("71-aabbccddeeff.link")
+            .expect("71-aabbccddeeff.link");
+        assert_eq!(
+            content,
+            "# Automatically generated by systemd-network-generator\n\
+             \n\
+             [Match]\n\
+             MACAddress=aa:bb:cc:dd:ee:ff\n\
+             \n\
+             [Link]\n\
+             NamePolicy=path mac\n\
+             AlternativeNamesPolicy=path mac\n"
+        );
+    }
+
     #[test]
     fn test_generate_vlan() {
+        // C: a 70-<vlan>.netdev plus the parent's 70-<parent>.network with VLAN=.
+        // The raw interface name (with its dot) is used in the filename.
         let config = parse_cmdline("vlan=eth0.100:eth0");
         let files = generate(&config);
 
-        // Check .netdev file.
-        assert!(files.files.contains_key("71-vlan-eth0-100.netdev"));
-        let netdev = &files.files["71-vlan-eth0-100.netdev"];
-        assert!(netdev.contains("[NetDev]"));
-        assert!(netdev.contains("Name=eth0.100"));
-        assert!(netdev.contains("Kind=vlan"));
-        assert!(netdev.contains("[VLAN]"));
-        assert!(netdev.contains("Id=100"));
+        let netdev = &files.files["70-eth0.100.netdev"];
+        assert!(netdev.contains("[NetDev]\nKind=vlan\nName=eth0.100\n"), "{netdev}");
+        assert!(netdev.contains("[VLAN]\nId=100\n"), "{netdev}");
 
-        // Check parent .network file.
-        assert!(files.files.contains_key("71-vlan-eth0-100-parent.network"));
-        let network = &files.files["71-vlan-eth0-100-parent.network"];
-        assert!(network.contains("Name=eth0"));
-        assert!(network.contains("VLAN=eth0.100"));
+        let network = &files.files["70-eth0.network"];
+        assert!(network.contains("Name=eth0"), "{network}");
+        assert!(network.contains("VLAN=eth0.100"), "{network}");
+        // The vlan device itself gets no .network (only the netdev).
+        assert!(!files.files.contains_key("70-eth0.100.network"));
     }
 
     #[test]
@@ -2134,22 +2167,18 @@ mod tests {
         let config = parse_cmdline("bond=bond0:eth0,eth1:mode=802.3ad,miimon=100:9000");
         let files = generate(&config);
 
-        // Check .netdev file.
-        assert!(files.files.contains_key("71-bond-bond0.netdev"));
-        let netdev = &files.files["71-bond-bond0.netdev"];
-        assert!(netdev.contains("Name=bond0"));
-        assert!(netdev.contains("Kind=bond"));
-        assert!(netdev.contains("MTUBytes=9000"));
-        assert!(netdev.contains("[Bond]"));
-        assert!(netdev.contains("Mode=802.3ad"));
-        assert!(netdev.contains("MIIMonitorSec=100"));
+        let netdev = &files.files["70-bond0.netdev"];
+        assert!(netdev.contains("Kind=bond"), "{netdev}");
+        assert!(netdev.contains("Name=bond0"), "{netdev}");
+        assert!(netdev.contains("MTUBytes=9000"), "{netdev}");
+        // C's netdev_dump emits no [Bond] section, so bond options are dropped.
+        assert!(!netdev.contains("[Bond]"), "{netdev}");
 
-        // Check slave .network files.
-        assert!(files.files.contains_key("71-bond-bond0-slave-eth0.network"));
-        assert!(files.files.contains_key("71-bond-bond0-slave-eth1.network"));
-        let slave0 = &files.files["71-bond-bond0-slave-eth0.network"];
-        assert!(slave0.contains("Name=eth0"));
-        assert!(slave0.contains("Bond=bond0"));
+        // Each member gets its own 70-<member>.network with Bond=.
+        let eth0 = &files.files["70-eth0.network"];
+        assert!(eth0.contains("Name=eth0"), "{eth0}");
+        assert!(eth0.contains("Bond=bond0"), "{eth0}");
+        assert!(files.files["70-eth1.network"].contains("Bond=bond0"));
     }
 
     #[test]
@@ -2157,80 +2186,66 @@ mod tests {
         let config = parse_cmdline("bridge=br0:eth0,eth1");
         let files = generate(&config);
 
-        // Check .netdev file.
-        assert!(files.files.contains_key("71-bridge-br0.netdev"));
-        let netdev = &files.files["71-bridge-br0.netdev"];
-        assert!(netdev.contains("Name=br0"));
-        assert!(netdev.contains("Kind=bridge"));
+        let netdev = &files.files["70-br0.netdev"];
+        assert!(netdev.contains("Kind=bridge"), "{netdev}");
+        assert!(netdev.contains("Name=br0"), "{netdev}");
 
-        // Check member .network files.
-        assert!(
-            files
-                .files
-                .contains_key("71-bridge-br0-member-eth0.network")
-        );
-        assert!(
-            files
-                .files
-                .contains_key("71-bridge-br0-member-eth1.network")
-        );
-        let member = &files.files["71-bridge-br0-member-eth0.network"];
-        assert!(member.contains("Bridge=br0"));
+        assert!(files.files["70-eth0.network"].contains("Bridge=br0"));
+        assert!(files.files["70-eth1.network"].contains("Bridge=br0"));
     }
 
     #[test]
     fn test_generate_team() {
+        // team= is not a C kernel-command-line option, so C emits nothing.
         let config = parse_cmdline("team=team0:eth0,eth1");
         let files = generate(&config);
-
-        // Teams are implemented as bonds.
-        assert!(files.files.contains_key("71-team-team0.netdev"));
-        let netdev = &files.files["71-team-team0.netdev"];
-        assert!(netdev.contains("Kind=bond"));
-
         assert!(
-            files
-                .files
-                .contains_key("71-team-team0-member-eth0.network")
+            files.files.is_empty(),
+            "{:?}",
+            files.files.keys().collect::<Vec<_>>()
         );
     }
 
     #[test]
-    fn test_generate_bond_slaves_not_standalone() {
-        // Bond slaves should not get standalone .network files from ip=.
+    fn test_bond_member_merges_ip() {
+        // A bond member that also has ip= gets ONE merged 70-<member>.network
+        // with both DHCP and Bond= (C keys Networks by interface).
         let config = parse_cmdline("bond=bond0:eth0,eth1 ip=eth0:dhcp");
         let files = generate(&config);
-        // eth0 is a bond slave; the ip=eth0:dhcp should be suppressed.
-        assert!(!files.files.contains_key("71-ip-eth0.network"));
+        let eth0 = &files.files["70-eth0.network"];
+        assert!(eth0.contains("DHCP=ipv4"), "{eth0}");
+        assert!(eth0.contains("Bond=bond0"), "{eth0}");
     }
 
     #[test]
-    fn test_generate_bridge_members_not_standalone() {
+    fn test_bridge_member_merges_ip() {
         let config = parse_cmdline("bridge=br0:eth0 ip=eth0:dhcp");
         let files = generate(&config);
-        assert!(!files.files.contains_key("71-ip-eth0.network"));
+        let eth0 = &files.files["70-eth0.network"];
+        assert!(eth0.contains("DHCP=ipv4"), "{eth0}");
+        assert!(eth0.contains("Bridge=br0"), "{eth0}");
     }
 
     #[test]
     fn test_generate_route_with_device() {
+        // A route-only device gets its own 70-<dev>.network with the [Route].
         let config = parse_cmdline("rd.route=10.0.0.0/8:192.168.1.1:eth0");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-route-eth0.network"));
-        let content = &files.files["71-route-eth0.network"];
-        assert!(content.contains("Name=eth0"));
-        assert!(content.contains("[Route]"));
-        assert!(content.contains("Destination=10.0.0.0/8"));
-        assert!(content.contains("Gateway=192.168.1.1"));
+        let content = &files.files["70-eth0.network"];
+        assert!(content.contains("Name=eth0"), "{content}");
+        assert!(content.contains("[Route]"), "{content}");
+        assert!(content.contains("Destination=10.0.0.0/8"), "{content}");
+        assert!(content.contains("Gateway=192.168.1.1"), "{content}");
     }
 
     #[test]
     fn test_generate_route_without_device() {
+        // An unbound route goes into the deviceless 71-default.network.
         let config = parse_cmdline("rd.route=10.0.0.0/8:192.168.1.1");
         let files = generate(&config);
-        assert!(files.files.contains_key("71-route-default.network"));
-        let content = &files.files["71-route-default.network"];
-        assert!(content.contains("Name=*"));
-        assert!(content.contains("Destination=10.0.0.0/8"));
+        let content = &files.files["71-default.network"];
+        assert!(content.contains("Kind=!*"), "{content}");
+        assert!(content.contains("Destination=10.0.0.0/8"), "{content}");
     }
 
     #[test]
@@ -2239,7 +2254,7 @@ mod tests {
         let config = parse_cmdline("ip=eth0:dhcp rd.route=10.0.0.0/8:192.168.1.1:eth0");
         let files = generate(&config);
         // Should have the ip= network file, not a separate route file.
-        assert!(files.files.contains_key("71-ip-eth0.network"));
+        assert!(files.files.contains_key("70-eth0.network"));
         assert!(!files.files.contains_key("71-route-eth0.network"));
     }
 
@@ -2308,7 +2323,7 @@ mod tests {
         let output_dir = dir.path().join("output");
         let code = run(cmdline_file.to_str().unwrap(), &output_dir);
         assert_eq!(code, 0);
-        assert!(output_dir.join("71-ip-eth0.network").exists());
+        assert!(output_dir.join("70-eth0.network").exists());
     }
 
     #[test]
@@ -2348,30 +2363,35 @@ mod tests {
         let code = run(cmdline_file.to_str().unwrap(), &output_dir);
         assert_eq!(code, 0);
 
-        // Verify key files exist.
-        assert!(output_dir.join("71-ip-eth0.network").exists());
-        assert!(output_dir.join("71-bond-bond0.netdev").exists());
-        assert!(output_dir.join("71-bond-bond0-slave-eth1.network").exists());
-        assert!(output_dir.join("71-bond-bond0-slave-eth2.network").exists());
-        assert!(output_dir.join("71-vlan-bond0-100.netdev").exists());
-        assert!(output_dir.join("71-vlan-bond0-100-parent.network").exists());
-        assert!(output_dir.join("71-bridge-br0.netdev").exists());
-        assert!(
-            output_dir
-                .join("71-bridge-br0-member-eth3.network")
-                .exists()
-        );
-        assert!(output_dir.join("71-ifname-lan0.link").exists());
-        assert!(output_dir.join("71-net-ifnames.link").exists());
+        // Verify key files exist, in C's merged-per-interface naming.
+        assert!(output_dir.join("70-eth0.network").exists()); // ip=dhcp + route
+        assert!(output_dir.join("70-bond0.netdev").exists());
+        assert!(output_dir.join("70-eth1.network").exists()); // bond member
+        assert!(output_dir.join("70-eth2.network").exists()); // bond member
+        assert!(output_dir.join("70-bond0.100.netdev").exists()); // vlan on bond0
+        assert!(output_dir.join("70-br0.netdev").exists());
+        assert!(output_dir.join("70-eth3.network").exists()); // bridge member
+        assert!(output_dir.join("70-lan0.link").exists());
+        // net.ifnames= is a udev concern; the generator writes no file for it.
+        assert!(!output_dir.join("71-net-ifnames.link").exists());
     }
 
     #[test]
     fn test_generate_multiple_vlans() {
         let config = parse_cmdline("vlan=eth0.100:eth0 vlan=eth0.200:eth0");
         let files = generate(&config);
-        assert_eq!(files.files.len(), 4); // 2 netdev + 2 parent network
-        assert!(files.files.contains_key("71-vlan-eth0-100.netdev"));
-        assert!(files.files.contains_key("71-vlan-eth0-200.netdev"));
+        // Two netdevs plus ONE merged parent network carrying both VLANs.
+        assert_eq!(
+            files.files.len(),
+            3,
+            "{:?}",
+            files.files.keys().collect::<Vec<_>>()
+        );
+        assert!(files.files.contains_key("70-eth0.100.netdev"));
+        assert!(files.files.contains_key("70-eth0.200.netdev"));
+        let parent = &files.files["70-eth0.network"];
+        assert!(parent.contains("VLAN=eth0.100"), "{parent}");
+        assert!(parent.contains("VLAN=eth0.200"), "{parent}");
     }
 
     #[test]
@@ -2392,23 +2412,9 @@ mod tests {
             ..Default::default()
         };
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
+        let content = &files.files["70-eth0.network"];
         assert!(content.contains("Address=2001:db8::1/64"));
         assert!(content.contains("Gateway=fe80::1"));
-    }
-
-    #[test]
-    fn test_file_prefix_is_71() {
-        // Verify all generated filenames start with "71-".
-        let config = parse_cmdline("ip=dhcp ifname=lan0:aa:bb:cc:dd:ee:ff vlan=eth0.100:eth0");
-        let files = generate(&config);
-        for name in files.files.keys() {
-            assert!(
-                name.starts_with("71-"),
-                "File {} doesn't start with 71-",
-                name
-            );
-        }
     }
 
     #[test]
@@ -2441,9 +2447,9 @@ mod tests {
             ..Default::default()
         };
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
-        assert!(content.contains("[DHCPv4]"));
-        assert!(content.contains("SendHostname=yes"));
+        let content = &files.files["70-eth0.network"];
+        // C writes the hostname as a bare Hostname= in the [DHCP] section.
+        assert!(content.contains("[DHCP]"));
         assert!(content.contains("Hostname=myhost"));
     }
 
@@ -2460,8 +2466,8 @@ mod tests {
             ..Default::default()
         };
         let files = generate(&config);
-        let content = &files.files["71-ip-eth0.network"];
-        assert!(content.contains("[DHCPv4]"));
+        let content = &files.files["70-eth0.network"];
+        assert!(content.contains("[DHCP]"));
         assert!(content.contains("UseDNS=no"));
     }
 
@@ -2486,7 +2492,95 @@ mod tests {
     fn test_bond_no_options_no_bond_section() {
         let config = parse_cmdline("bond=bond0:eth0,eth1");
         let files = generate(&config);
-        let netdev = &files.files["71-bond-bond0.netdev"];
+        let netdev = &files.files["70-bond0.netdev"];
         assert!(!netdev.contains("[Bond]"));
+    }
+
+    #[test]
+    fn test_route_merges_into_ip_network() {
+        // A device-bound rd.route= must merge into the interface's own .network
+        // (C behavior): systemd applies only one matching .network per link, so
+        // a route emitted as a separate file would be silently dropped.
+        let config = parse_cmdline("ip=eth0:dhcp rd.route=10.1.0.0/16:192.168.1.1:eth0");
+        let files = generate(&config);
+        assert!(
+            !files.files.keys().any(|k| k.contains("route")),
+            "route must not be a separate file: {:?}",
+            files.files.keys().collect::<Vec<_>>()
+        );
+        let net = files.files.get("70-eth0.network").expect("70-eth0.network");
+        assert!(net.contains("DHCP=ipv4"), "{net}");
+        assert!(
+            net.contains("[Route]\nDestination=10.1.0.0/16\nGateway=192.168.1.1"),
+            "{net}"
+        );
+    }
+
+    /// Robustness fuzz (task #22): the kernel-command-line parser and the
+    /// generator consume fully untrusted `ip=`/`vlan=`/`bond=`/`bridge=`/
+    /// `rd.route=`/`ifname=`/`net.ifname_policy=`/... strings. Neither
+    /// `parse_cmdline` nor `generate` may panic (out-of-bounds index, integer
+    /// parse/overflow, bad slice) on any input. Feed deterministic random token
+    /// soup and assert no panic.
+    #[test]
+    fn fuzz_cmdline_parser_and_generator_never_panic() {
+        const TOKENS: &[&str] = &[
+            "ip=",
+            "ip=dhcp",
+            "ip=dhcp6",
+            "ip=auto6",
+            "ip=on",
+            "ip=off",
+            "ip=:::::",
+            "ip=eth0:dhcp",
+            "ip=1.2.3.4::5.6.7.8:24:h:eth0:none:8.8.8.8:1.1.1.1:0.pool",
+            "vlan=",
+            "vlan=v.10:eth0",
+            "vlan=eth0.4095:eth0",
+            "vlan=x:99999999999",
+            "bond=",
+            "bond=b0:e1,e2:mode=1:1500",
+            "bridge=",
+            "bridge=br0:e1,e2",
+            "team=t0:e1,e2",
+            "ifname=",
+            "ifname=lan0:00:11:22:33:44:55",
+            "net.ifnames=0",
+            "net.ifname_policy=",
+            "net.ifname_policy=keep,mac,X",
+            "nameserver=8.8.8.8",
+            "rd.peerdns=0",
+            "rd.route=",
+            "rd.route=1.2.3.0/24:9.9.9.9:eth0",
+            ":", ",", ".", "/", "=", "-", " ", "eth0", "99999999999999999999",
+            "", "\t", "%", "::", "0/0", "4095", "65536", "gw",
+        ];
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as u32
+        };
+        for _ in 0..100_000u32 {
+            let ntok = (next() % 8) as usize;
+            let mut input = String::new();
+            for _ in 0..ntok {
+                if !input.is_empty() {
+                    input.push(' ');
+                }
+                if next() % 7 == 0 {
+                    input.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                } else {
+                    input.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                }
+            }
+            let buf = input.clone();
+            let res = std::panic::catch_unwind(move || {
+                let config = parse_cmdline(&input);
+                let _ = generate(&config);
+            });
+            assert!(res.is_ok(), "cmdline parser/generator panicked on: {buf:?}");
+        }
     }
 }

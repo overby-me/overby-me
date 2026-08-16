@@ -30,6 +30,7 @@ pub mod link_config;
 pub mod lock_ext;
 pub mod logging;
 pub mod notification_handler;
+pub mod numa;
 pub mod path_watcher;
 pub mod platform;
 pub mod runtime_info;

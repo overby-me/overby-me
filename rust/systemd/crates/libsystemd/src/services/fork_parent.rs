@@ -12,7 +12,7 @@ use crate::units::{CommandlinePrefix, ServiceType};
 
 /// Read a PID from a PIDFile path, retrying a few times to allow the forking
 /// daemon a moment to write the file.
-fn read_pid_file(path: &std::path::Path) -> Option<nix::unistd::Pid> {
+pub(crate) fn read_pid_file(path: &std::path::Path) -> Option<nix::unistd::Pid> {
     // The daemon may not have written the PIDFile yet at the instant
     // the parent exits, so retry with a short back-off.
     for attempt in 0..20 {
@@ -25,6 +25,39 @@ fn read_pid_file(path: &std::path::Path) -> Option<nix::unistd::Pid> {
         {
             return Some(nix::unistd::Pid::from_raw(pid));
         }
+    }
+    None
+}
+
+/// Guess the main PID of a `Type=forking` service that has neither a `PIDFile=`
+/// nor an `sd_notify` MAINPID, mirroring systemd's `GuessMainPID=yes` default:
+/// after the `ExecStart=` parent has exited, the daemon it forked is the sole
+/// process remaining in the service's cgroup. We only guess when exactly one
+/// process is left, matching the confidence systemd requires (it declines to
+/// guess when the cgroup is ambiguous).
+pub(crate) fn guess_main_pid_from_cgroup(cgroup_path: &std::path::Path) -> Option<nix::unistd::Pid> {
+    let procs_file = cgroup_path.join("cgroup.procs");
+    // The just-exited ExecStart= parent may still be listed for a brief moment,
+    // and the forked daemon may not have appeared yet, so retry with a short
+    // back-off until exactly one process remains (systemd settles similarly).
+    for attempt in 0..20 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let Ok(contents) = std::fs::read_to_string(&procs_file) else {
+            continue;
+        };
+        let mut pids = contents
+            .lines()
+            .filter_map(|l| l.trim().parse::<i32>().ok())
+            .filter(|&pid| pid > 0);
+        let Some(first) = pids.next() else {
+            continue; // Empty for now — the daemon may not have appeared yet.
+        };
+        if pids.next().is_none() {
+            return Some(nix::unistd::Pid::from_raw(first));
+        }
+        // More than one process: ambiguous, retry to let the cgroup settle.
     }
     None
 }
@@ -75,17 +108,21 @@ pub fn wait_for_service(
                 }
 
                 if let Some(duration_timeout) = duration_timeout {
-                    // Check EXTEND_TIMEOUT_USEC: if the service has sent an
-                    // extension, measure timeout from the extension timestamp
-                    // using the extension duration instead of the original.
-                    let timed_out = if let (Some(ext_usec), Some(ext_ts)) =
+                    // EXTEND_TIMEOUT_USEC extends the start deadline; it must
+                    // never SHORTEN it below the base TimeoutStartSec. Time out
+                    // only once BOTH the base deadline and the extension deadline
+                    // have elapsed (the later of the two) — a lone/infrequent
+                    // extension shorter than the remaining base time must not
+                    // cause an early kill.
+                    let base_elapsed = start_time.elapsed() > duration_timeout;
+                    let ext_elapsed = if let (Some(ext_usec), Some(ext_ts)) =
                         (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
                     {
-                        let ext_dur = std::time::Duration::from_micros(ext_usec);
-                        ext_ts.elapsed() > ext_dur
+                        ext_ts.elapsed() > std::time::Duration::from_micros(ext_usec)
                     } else {
-                        start_time.elapsed() > duration_timeout
+                        true
                     };
+                    let timed_out = base_elapsed && ext_elapsed;
                     if timed_out {
                         trace!("[FORK_PARENT] Service {name} notification timed out");
                         return Err(RunCmdError::Timeout(
@@ -416,6 +453,35 @@ pub fn wait_for_service(
                                 // PID as the daemon process.
                                 trace!(
                                     "[FORK_PARENT] Using MAINPID {daemon_pid} from notification for {name}"
+                                );
+                                srvc.pid = Some(daemon_pid);
+                                let now = crate::units::UnitTimestamps::now_usec();
+                                srvc.exec_main_start_timestamp = Some(now);
+                                srvc.exec_main_handoff_timestamp = Some(now);
+                                pid_table_locked.insert(
+                                    daemon_pid,
+                                    PidEntry::Service(
+                                        run_info
+                                            .unit_table
+                                            .iter()
+                                            .find(|(_, u)| u.id.name == name)
+                                            .map(|(_, u)| u.id.clone())
+                                            .unwrap(),
+                                        conf.srcv_type,
+                                    ),
+                                );
+                            } else if let Some(daemon_pid) = (conf.guess_main_pid)
+                                .then(|| {
+                                    guess_main_pid_from_cgroup(&conf.platform_specific.cgroup_path)
+                                })
+                                .flatten()
+                            {
+                                // No PIDFile and no MAINPID: guess the main PID as
+                                // the single process remaining in the service's
+                                // cgroup after the ExecStart= parent exited
+                                // (GuessMainPID=, default yes).
+                                trace!(
+                                    "[FORK_PARENT] Guessed main PID {daemon_pid} from cgroup for {name}"
                                 );
                                 srvc.pid = Some(daemon_pid);
                                 let now = crate::units::UnitTimestamps::now_usec();

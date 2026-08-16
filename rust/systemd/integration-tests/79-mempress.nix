@@ -1,14 +1,11 @@
 {
   name = "79-MEMPRESS";
-  # Upstream 79-MEMPRESS exercises MemoryPressureWatch=on which requires
-  # rust-systemd to set MEMORY_PRESSURE_WATCH and MEMORY_PRESSURE_WRITE env
-  # vars on services; not implemented yet.
-  patchScript = ''
-    {
-      echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: MemoryPressureWatch= env vars not set, skipping' >/skipped"
-      echo "exit 77"
-    } > TEST-79-MEMPRESS.sh
-    chmod +x TEST-79-MEMPRESS.sh
-  '';
+  # MemoryPressureWatch= is fully implemented: MEMORY_PRESSURE_WATCH +
+  # MEMORY_PRESSURE_WRITE env vars, the MemoryPressureWatch=/ThresholdSec=
+  # transient properties, chowning the cgroup memory.pressure file to the service
+  # user, and (the last piece) a read-write bind-mount of memory.pressure into
+  # the sandbox after ProtectControlGroups= makes /sys/fs/cgroup read-only, so
+  # the service can still register PSI triggers (matches systemd appending the
+  # pressure path to ReadWritePaths=). De-skipped.
+  patchScript = "";
 }

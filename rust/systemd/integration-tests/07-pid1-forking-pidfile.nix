@@ -36,6 +36,9 @@
     [[ "$MAIN_PID" == "$FILE_PID" ]]
 
     systemctl stop "$UNIT.service"
+    # The forked daemon tracked via PIDFile= must actually be killed on stop.
+    for i in 1 2 3 4 5; do kill -0 "$MAIN_PID" 2>/dev/null || break; sleep 1; done
+    (! kill -0 "$MAIN_PID" 2>/dev/null)
     FPEOF
   '';
 }

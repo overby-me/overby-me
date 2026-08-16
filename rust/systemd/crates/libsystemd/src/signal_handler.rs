@@ -44,9 +44,8 @@
 //! | +23    | Set log level to info (alt)                   |
 //! | +24    | Immediate exit (container mode)               |
 
-use crate::lock_ext::MutexExt;
+use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::{ArcMutPidTable, ArcMutRuntimeInfo, PidEntry};
-use crate::services;
 use log::error;
 use log::info;
 use log::trace;
@@ -77,6 +76,10 @@ pub fn handle_signals(
     pid_table: ArcMutPidTable,
 ) {
     let sigrtmin_base = unsafe { libc::__libc_current_sigrtmin() };
+    // Cloned once up front: the reap path below must never touch the
+    // RuntimeInfo RwLock (see the phase 1 comment), and the handle is
+    // lock-free to use.
+    let dispatcher = run_info.read_poisoned().dispatcher.clone();
 
     loop {
         // Pick up new signals
@@ -93,15 +96,19 @@ pub fn handle_signals(
                                     // This lets `wait_for_service` (which polls the
                                     // PID table under a RuntimeInfo read lock) see
                                     // the `ServiceExited` entry and proceed.
-                                    let unit_id = {
+                                    let resolved = {
                                         let mut pt = pid_table.lock_poisoned();
                                         match pt.get(&pid) {
-                                            Some(PidEntry::Helper(_id, srvc_name)) => {
+                                            Some(PidEntry::Helper(id, srvc_name)) => {
                                                 trace!(
                                                     "Helper process for service: {srvc_name} exited with: {code:?}"
                                                 );
+                                                let id = id.clone();
                                                 pt.insert(pid, PidEntry::HelperExited(code));
-                                                None // no further handling needed
+                                                // Inline waiters poll the table;
+                                                // dispatcher continuations get the
+                                                // event.
+                                                Some(crate::entrypoints::dispatcher::ChildKind::Helper(id))
                                             }
                                             Some(PidEntry::Service(_id, _srvctype)) => {
                                                 // Remove the Service entry and replace
@@ -113,8 +120,14 @@ pub fn handle_signals(
                                                     _ => unreachable!(),
                                                 };
                                                 trace!("Save service as exited. PID: {pid}");
+                                                if !crate::config::in_initrd() {
+                                                    crate::entrypoints::kmsg(&format!(
+                                                        "REAP pid={pid} {} -> ServiceExited",
+                                                        id.name
+                                                    ));
+                                                }
                                                 pt.insert(pid, PidEntry::ServiceExited(code));
-                                                Some(id)
+                                                Some(crate::entrypoints::dispatcher::ChildKind::Service(id))
                                             }
                                             Some(
                                                 PidEntry::HelperExited(_)
@@ -130,20 +143,27 @@ pub fn handle_signals(
                                                     "All processes spawned by rust-systemd have a pid entry. \
                                                      This did not: {pid}. Probably a rerooted orphan."
                                                 );
-                                                None
+                                                // Usually an orphan, but possibly a
+                                                // dispatcher chain child whose exit
+                                                // raced the registering insert; the
+                                                // dispatcher matches by pid.
+                                                Some(crate::entrypoints::dispatcher::ChildKind::Unknown)
                                             }
                                         }
                                     };
 
-                                    // Phase 2: If the exited process was a service,
-                                    // spawn a thread to handle restart/cleanup logic.
-                                    // That thread *will* need the RuntimeInfo read
-                                    // lock, but by now the critical PID-table update
-                                    // is already visible.
-                                    if let Some(id) = unit_id {
-                                        let run_info_clone = run_info.clone();
-                                        services::service_exit_handler_new_thread(
-                                            pid, id, code, run_info_clone,
+                                    // Phase 2: hand the exit to the dispatcher,
+                                    // which runs the non-blocking service head,
+                                    // advances parked oneshot chains, and spawns
+                                    // the blocking tail when needed
+                                    // (docs/EVENT-LOOP.md inc 1 and 2). The
+                                    // critical PID-table update is already
+                                    // visible.
+                                    if let Some(kind) = resolved {
+                                        dispatcher.send_normal(
+                                            crate::entrypoints::dispatcher::Event::ChildExit(
+                                                pid, kind, code,
+                                            ),
                                         );
                                     }
                                 }
@@ -386,6 +406,146 @@ pub fn daemon_reexec(run_info: &ArcMutRuntimeInfo) {
     error!("execve failed during daemon-reexec: {err:?}");
 }
 
+/// Leave the initrd: make `new_root` the root filesystem and exec the new init
+/// there, mirroring upstream systemd's `switch_root` (src/shared/switch-root.c)
+/// and the `switch_root(8)` utility.
+///
+/// The API filesystems (`/dev`, `/proc`, `/sys`, `/run`) are moved into
+/// `new_root` so they survive the transition, then `new_root` is moved onto
+/// `/` and we `chroot` into it and `execve` the new init. As PID 1, exec'ing
+/// the new init makes it the real system manager. Only returns (with `Err`) on
+/// failure; on success it never returns.
+/// True if `path` is a mount point: its underlying device differs from its
+/// parent directory's. Used so switch-root does not relocate API filesystems
+/// that the initrd already bind-mounted under the new root.
+fn is_mount_point(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
+    match std::fs::metadata(parent) {
+        Ok(pmeta) => meta.dev() != pmeta.dev(),
+        Err(_) => false,
+    }
+}
+
+pub fn switch_root(new_root: &str, init: Option<&str>) -> Result<(), String> {
+    use nix::mount::{MsFlags, mount};
+    use std::path::Path;
+
+    crate::entrypoints::kmsg(&format!("switch-root: switching to {new_root}"));
+
+    let new_root_path = Path::new(new_root);
+    if !new_root_path.is_dir() {
+        return Err(format!("switch-root: {new_root} is not a directory"));
+    }
+
+    // Resolve the init to exec in the new root. An empty string counts as
+    // "unset" (the initrd-switch-root.service ExecStart passes no init, so the
+    // client may forward an empty arg). When no init is given, honor the
+    // kernel cmdline's init= first (this is how the real system's init is
+    // selected on NixOS, where the stage-2 init is a /nix/store/<toplevel>/init
+    // path and /sbin/init does not exist until stage-2 activation runs), then
+    // fall back to the standard candidate list systemd probes.
+    let init = init
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            if let Some(cmdline_init) = read_cmdline_init() {
+                if new_root_path
+                    .join(cmdline_init.trim_start_matches('/'))
+                    .exists()
+                {
+                    return cmdline_init;
+                }
+                warn!(
+                    "switch-root: cmdline init={cmdline_init} not found under {new_root}, \
+                     falling back to standard candidates"
+                );
+            }
+            for cand in ["/sbin/init", "/etc/init", "/bin/init", "/bin/sh"] {
+                if new_root_path.join(cand.trim_start_matches('/')).exists() {
+                    return cand.to_string();
+                }
+            }
+            "/sbin/init".to_string()
+        });
+
+    // Move the API filesystems into the new root so they survive the switch.
+    //
+    // If a filesystem is ALREADY mounted under the new root, do NOT move the
+    // initrd's own mount on top of it: NixOS's systemd initrd bind-mounts /run
+    // (and friends) into /sysroot via `sysroot-*.mount`, and the NixOS
+    // activation populates that /run with /run/current-system. Moving the
+    // initrd's /run over it would shadow that content and lose
+    // /run/current-system in stage 2. This matches systemd's switch-root, which
+    // only relocates API mounts that are not already present under the new root.
+    for m in ["/dev", "/proc", "/sys", "/run"] {
+        let target = new_root_path.join(m.trim_start_matches('/'));
+        let _ = std::fs::create_dir_all(&target);
+        // Skip filesystems already mounted under the new root (see the comment
+        // above) — moving the initrd's own mount on top would shadow them.
+        if is_mount_point(&target) {
+            continue;
+        }
+        match mount(
+            Some(m),
+            &target,
+            None::<&str>,
+            MsFlags::MS_MOVE,
+            None::<&str>,
+        ) {
+            Ok(()) => {}
+            Err(e) => {
+                // Non-fatal: some may not be mounted; log and continue.
+                warn!(
+                    "switch-root: could not move {m} -> {}: {e}",
+                    target.display()
+                );
+            }
+        }
+    }
+
+    // Make new_root the root filesystem: cd into it, move it onto /, chroot.
+    nix::unistd::chdir(new_root_path).map_err(|e| format!("switch-root: chdir {new_root}: {e}"))?;
+    mount(Some("."), "/", None::<&str>, MsFlags::MS_MOVE, None::<&str>)
+        .map_err(|e| format!("switch-root: mount --move . /: {e}"))?;
+    nix::unistd::chroot(".").map_err(|e| format!("switch-root: chroot: {e}"))?;
+    nix::unistd::chdir("/").map_err(|e| format!("switch-root: chdir /: {e}"))?;
+
+    crate::entrypoints::kmsg(&format!("switch-root: exec {init}"));
+
+    // Exec the new init. We are PID 1, so it becomes the real system manager.
+    let c_path = std::ffi::CString::new(init.as_bytes())
+        .map_err(|e| format!("switch-root: invalid init path: {e}"))?;
+    let c_argv = vec![c_path.clone()];
+    let c_envp: Vec<std::ffi::CString> = std::env::vars()
+        .filter_map(|(k, v)| std::ffi::CString::new(format!("{k}={v}")).ok())
+        .collect();
+    let err = nix::unistd::execve(&c_path, &c_argv, &c_envp);
+    // execve only returns on failure. Surface it on the kmsg console too (the
+    // caller runs us on a --no-block thread whose Err would otherwise only reach
+    // the journal), so a broken switch-root is diagnosable from the boot log.
+    crate::entrypoints::kmsg(&format!("switch-root: execve {init} failed: {err:?}"));
+    Err(format!("switch-root: execve {init} failed: {err:?}"))
+}
+
+/// Parse `init=` from the kernel command line, returning the requested init
+/// path if present. This mirrors how systemd selects the real system's init
+/// when switching root without an explicit init argument.
+fn read_cmdline_init() -> Option<String> {
+    let cmdline = std::fs::read_to_string("/proc/cmdline").ok()?;
+    for tok in cmdline.split_whitespace() {
+        if let Some(v) = tok.strip_prefix("init=")
+            && !v.is_empty()
+        {
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
 /// Serialize the current running-service state to a file.
 ///
 /// Format: one line per running service, `unit_name\tpid\tServiceType\n`.
@@ -509,6 +669,18 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
     let mut pid_table = ri.pid_table.lock_poisoned();
     let mut restored = 0u32;
 
+    // Names of every unit present in the serialized running-state stream.
+    // Used below to protect against stale-alias corruption: a serialized entry
+    // may only be restored onto a unit via one of its ALIASES if that unit's
+    // canonical name is NOT itself serialized here. Otherwise the canonical
+    // unit restores its own state by name, and the alias entry is stale (e.g.
+    // sus.service symlinked onto a running legit.service) and must not
+    // overwrite it. TEST-07-PID1.alias-corruption.
+    let serialized_names: std::collections::HashSet<&str> = content
+        .lines()
+        .filter_map(|l| l.split('\t').next())
+        .collect();
+
     for line in content.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() < 2 {
@@ -529,8 +701,21 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             continue;
         }
 
-        // Find the unit in the table and get its ServiceType.
-        if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+        // Find the unit in the table and get its ServiceType. Prefer an exact
+        // name match; fall back to an alias match only if the aliased unit's
+        // canonical name is not itself serialized (see serialized_names above),
+        // so a stale alias can't overwrite a running canonical unit's PID.
+        if let Some(unit) = ri
+            .unit_table
+            .values()
+            .find(|u| u.id.name == unit_name)
+            .or_else(|| {
+                ri.unit_table.values().find(|u| {
+                    !serialized_names.contains(u.id.name.as_str())
+                        && u.common.unit.aliases.iter().any(|a| a == unit_name)
+                })
+            })
+        {
             if let crate::units::Specific::Service(srvc) = &unit.specific {
                 pid_table.insert(pid, PidEntry::Service(unit.id.clone(), srvc.conf.srcv_type));
                 restored += 1;
@@ -562,6 +747,12 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
     let status_path = state_path.with_extension("status");
     let mut status_restored = 0u32;
     if let Ok(status_content) = std::fs::read_to_string(&status_path) {
+        // Same stale-alias protection as the PID restore above, keyed on the
+        // status stream's own unit names.
+        let status_names: std::collections::HashSet<&str> = status_content
+            .lines()
+            .filter_map(|l| l.split('\t').next())
+            .collect();
         for line in status_content.lines() {
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() < 2 {
@@ -569,7 +760,17 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             }
             let unit_name = parts[0];
             let target_status = parts[1];
-            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+            if let Some(unit) = ri
+                .unit_table
+                .values()
+                .find(|u| u.id.name == unit_name)
+                .or_else(|| {
+                    ri.unit_table.values().find(|u| {
+                        !status_names.contains(u.id.name.as_str())
+                            && u.common.unit.aliases.iter().any(|a| a == unit_name)
+                    })
+                })
+            {
                 let current = unit.common.status.read_poisoned();
                 // Only restore if the unit wasn't already handled by PID
                 // restoration above (which sets Started(Running) for
@@ -635,7 +836,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 trace!("Reexec: fd {raw_fd} for {unit_name}:{fd_name} is no longer open, skipping");
                 continue;
             }
-            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name)
+            if let Some(unit) = ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name))
                 && let crate::units::Specific::Service(srvc) = &unit.specific
             {
                 let mut state = srvc.state.write_poisoned();
@@ -660,7 +863,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 "frozen-by-parent" => crate::units::FreezerState::FrozenByParent,
                 _ => continue,
             };
-            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+            if let Some(unit) = ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
                 crate::control::unit_properties::set_freezer_state(unit, freezer_state);
                 info!(
                     "Reexec: restored freezer state '{}' for {unit_name}",
@@ -711,14 +916,18 @@ fn set_log_level(level: log::LevelFilter) {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum ChildTermination {
-    Signal(nix::sys::signal::Signal),
+    /// Killed by a signal. The bool is whether the kernel dumped core
+    /// (`WCOREDUMP`), which upstream distinguishes as Result=core-dump vs
+    /// Result=signal.
+    Signal(nix::sys::signal::Signal, bool),
     Exit(i32),
 }
 
 impl std::fmt::Display for ChildTermination {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Signal(sig) => write!(f, "signal {sig}"),
+            Self::Signal(sig, true) => write!(f, "signal {sig} (core dumped)"),
+            Self::Signal(sig, false) => write!(f, "signal {sig}"),
             Self::Exit(code) => write!(f, "exit code {code}"),
         }
     }
@@ -728,9 +937,15 @@ impl ChildTermination {
     #[must_use]
     pub const fn success(&self) -> bool {
         match self {
-            Self::Signal(_) => false,
+            Self::Signal(..) => false,
             Self::Exit(code) => *code == 0,
         }
+    }
+
+    /// Whether death was by a signal that dumped core (`WCOREDUMP`).
+    #[must_use]
+    pub const fn core_dumped(&self) -> bool {
+        matches!(self, Self::Signal(_, true))
     }
 }
 
@@ -744,11 +959,11 @@ fn get_next_exited_child() -> Option<ChildIterElem> {
             nix::sys::wait::WaitStatus::Exited(pid, code) => {
                 Some(Ok((pid, ChildTermination::Exit(code))))
             }
-            nix::sys::wait::WaitStatus::Signaled(pid, signal, _dumped_core) => {
+            nix::sys::wait::WaitStatus::Signaled(pid, signal, dumped_core) => {
                 // signals get handed to the parent if the child got killed by it but didnt handle the
-                // signal itself
-                // we dont care if the service dumped it's core
-                Some(Ok((pid, ChildTermination::Signal(signal))))
+                // signal itself. The core-dump bit distinguishes Result=core-dump
+                // from Result=signal.
+                Some(Ok((pid, ChildTermination::Signal(signal, dumped_core))))
             }
             nix::sys::wait::WaitStatus::StillAlive => {
                 trace!("No more state changes to poll");
@@ -856,7 +1071,7 @@ mod tests {
 
     #[test]
     fn test_child_termination_signal() {
-        let term = ChildTermination::Signal(nix::sys::signal::Signal::SIGTERM);
+        let term = ChildTermination::Signal(nix::sys::signal::Signal::SIGTERM, false);
         assert!(!term.success());
         let display = format!("{term}");
         assert!(
@@ -871,7 +1086,7 @@ mod tests {
         let term2 = term1;
         assert_eq!(term1, term2);
 
-        let term3 = ChildTermination::Signal(nix::sys::signal::Signal::SIGKILL);
+        let term3 = ChildTermination::Signal(nix::sys::signal::Signal::SIGKILL, false);
         let term4 = term3;
         assert_eq!(term3, term4);
         assert_ne!(term1, term3);
@@ -898,9 +1113,10 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
+            jobs: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::units::jobs::JobRegistry::new(),
             )),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -965,9 +1181,10 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
+            jobs: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::units::jobs::JobRegistry::new(),
             )),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1039,9 +1256,10 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
+            jobs: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::units::jobs::JobRegistry::new(),
             )),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),

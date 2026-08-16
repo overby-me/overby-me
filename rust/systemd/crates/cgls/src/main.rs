@@ -341,11 +341,39 @@ fn find_unit_cgroup_in(dir: &Path, unit_name: &str) -> Option<PathBuf> {
         if name_str == unit_name && path.join("cgroup.procs").exists() {
             return Some(path);
         }
-        // Recurse into slices
-        if (name_str.ends_with(".slice") || name_str == "init.scope")
+        // Recurse into slices, and into the per-user manager service
+        // (user@UID.service), whose delegated subtree holds the user's
+        // app.slice / session.slice / init.scope. Without the latter,
+        // `systemd-cgls --user-unit=app.slice` can't find app.slice, which
+        // lives at user.slice/user-UID.slice/user@UID.service/app.slice.
+        if (name_str.ends_with(".slice")
+            || name_str == "init.scope"
+            || (name_str.starts_with("user@") && name_str.ends_with(".service")))
             && let Some(found) = find_unit_cgroup_in(&path, unit_name)
         {
             return Some(found);
+        }
+    }
+    None
+}
+
+/// Resolve a user unit (e.g. `app.slice`) that is an ANCESTOR of cgls's own
+/// cgroup by reading `/proc/self/cgroup` and taking the path prefix up to and
+/// including the matching component. The cgroup-v2 line is
+/// `0::/a/b/app.slice/...`, relative to the process's cgroup-namespace root,
+/// which is where `/sys/fs/cgroup` is mounted, so joining the prefix onto
+/// CGROUP_ROOT yields the correct path in both host and namespaced views.
+fn resolve_user_unit_from_self(unit_name: &str) -> Option<PathBuf> {
+    let content = fs::read_to_string("/proc/self/cgroup").ok()?;
+    let rel = content.lines().find_map(|l| l.strip_prefix("0::"))?.trim();
+    let mut acc = PathBuf::from(CGROUP_ROOT);
+    for comp in rel.trim_start_matches('/').split('/') {
+        if comp.is_empty() {
+            continue;
+        }
+        acc.push(comp);
+        if comp == unit_name && acc.join("cgroup.procs").exists() {
+            return Some(acc);
         }
     }
     None
@@ -371,13 +399,18 @@ fn main() {
             }
         }
     } else if let Some(ref user_unit) = cli.user_unit {
-        // Search in user cgroup hierarchy
-        let user_root = PathBuf::from(CGROUP_ROOT).join("user.slice");
-        let found = if user_root.exists() {
-            find_unit_cgroup_in(&user_root, user_unit)
-        } else {
-            None
-        };
+        // Search the whole cgroup tree for the user unit. The user's app.slice /
+        // session.slice normally live deep under
+        // user.slice/user-UID.slice/user@UID.service, but when cgls itself runs
+        // inside the user manager (systemd-run --user ...) it may be in a cgroup
+        // namespace where /sys/fs/cgroup IS user@UID.service and app.slice is a
+        // direct child. Searching from the root handles both layouts.
+        let found = find_unit_cgroup_in(&PathBuf::from(CGROUP_ROOT), user_unit)
+            // Fallback: when cgls runs as a transient service inside the user
+            // manager, the requested unit (e.g. app.slice) is an ANCESTOR of
+            // cgls's own cgroup, not a descendant, so a downward search misses
+            // it. Resolve it from cgls's own /proc/self/cgroup instead.
+            .or_else(|| resolve_user_unit_from_self(user_unit));
         match found {
             Some(path) => vec![path],
             None => {

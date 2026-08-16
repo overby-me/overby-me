@@ -20,6 +20,11 @@
     systemctl list-units --no-pager --type=target | grep -q "\.target"
     systemctl list-units --no-pager --type=socket | grep -q "\.socket"
 
+    : "systemctl list-units --state filters by state"
+    systemctl list-units --no-pager --state=active | grep -q "multi-user.target"
+    # multi-user.target is active, not failed, so a failed-state filter omits it.
+    (! systemctl list-units --no-pager --state=failed | grep -q "multi-user.target")
+
     : "systemctl list-unit-files lists installed units"
     systemctl list-unit-files --no-pager | grep -q "\.service"
     LUEOF

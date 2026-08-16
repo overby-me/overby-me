@@ -134,6 +134,9 @@ fn parse_timer_section(
             "REMAINAFTERELAPSE" => {
                 timer.remain_after_elapse = parse_bool(value);
             }
+            "DEFERREACTIVATION" => {
+                timer.defer_reactivation = parse_bool(value);
+            }
             "ONCLOCKCHANGE" => {
                 timer.on_clock_change = parse_bool(value);
             }

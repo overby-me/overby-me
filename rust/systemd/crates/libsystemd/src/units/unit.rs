@@ -9,7 +9,8 @@ use crate::units::{
     DevicePolicy, EnvVars, ExitType, FileDescriptorStorePreserve, IOSchedulingClass, IoDeviceLimit,
     IoWeight, KeyringMode, KillMode, MemoryLimit, MemoryPressureWatch, NotifyKind, OOMPolicy,
     OnFailureJobMode, ParsedMountSection, ParsedSliceSection, ParsedSwapSection, ProcSubset,
-    ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit, RestartMode,
+    MemoryThp, ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit,
+    RestartMode,
     RestrictNamespaces, RuntimeDirectoryPreserve, ServiceRestart, ServiceType, StandardInput,
     StatusStarted, StatusStopped, StdIoOption, TasksMax, Timeout, TimeoutFailureMode, Timestamping,
     UnitAction, UnitCondition, UnitId, UnitIdKind, UnitOperationError, UnitOperationErrorReason,
@@ -110,7 +111,16 @@ impl UnitTimestamps {
     }
 
     pub fn record_active_enter(&mut self) {
-        let now = Self::now_usec();
+        self.record_active_enter_at(Self::now_usec());
+    }
+
+    /// Record the active-enter timestamp at an explicit time.  Used when a
+    /// Type=notify service signals READY=1 and then exits almost immediately:
+    /// the timestamp is clamped to the main exit time so the exec timestamps
+    /// stay ordered (start <= handoff <= active <= exit) regardless of the
+    /// interleaving between the notification thread and the SIGCHLD exit
+    /// handler.
+    pub fn record_active_enter_at(&mut self, now: u64) {
         self.active_enter = Some(now);
         self.state_change = Some(now);
     }
@@ -188,6 +198,158 @@ pub struct ServiceSpecific {
     pub state: RwLock<ServiceState>,
 }
 
+/// Run a socket unit's `Exec*=` helper commands (`ExecStartPre=`/`Post=`,
+/// `ExecStopPre=`/`Post=`) in order. Socket units bypass exec_helper, so these run
+/// in the manager's context (as root, inheriting the manager environment) — enough
+/// for the common `ExecStartPost=` chmod/setfacl of the freshly created socket. A
+/// leading `-` ignores failure; any other failure returns `Err` so a start phase
+/// can fail the unit.
+///
+/// The child is registered in the pid_table as a `Helper` and awaited via
+/// [`wait_for_helper_child`]: the PID 1 SIGCHLD reaper `waitpid(-1)`s every child
+/// into the table, so a bare `Command::status()` would race it and get `ECHILD`.
+/// `User=`/`WorkingDirectory=`/sandboxing for socket exec commands are not applied
+/// yet (a socket rarely needs them; noted for follow-up).
+fn run_socket_exec_commands(
+    cmds: &[Commandline],
+    phase: &str,
+    id: &UnitId,
+    run_info: &RuntimeInfo,
+) -> Result<(), String> {
+    for cmd in cmds {
+        let ignore = cmd
+            .prefixes
+            .contains(&crate::units::CommandlinePrefix::Minus);
+        let resolved = match which::which(&cmd.cmd) {
+            Ok(p) => p,
+            Err(e) if ignore => {
+                trace!("{phase} for {}: cannot resolve {:?}: {e} (ignored)", id.name, cmd.cmd);
+                continue;
+            }
+            Err(e) => {
+                return Err(format!("{phase} for {}: cannot resolve {:?}: {e}", id.name, cmd.cmd));
+            }
+        };
+        let child = match std::process::Command::new(&resolved).args(&cmd.args).spawn() {
+            Ok(c) => c,
+            Err(e) if ignore => {
+                trace!("{phase} for {}: {cmd} failed to spawn: {e} (ignored)", id.name);
+                continue;
+            }
+            Err(e) => return Err(format!("{phase} for {}: {cmd} failed to spawn: {e}", id.name)),
+        };
+        run_info.pid_table.lock_poisoned().insert(
+            nix::unistd::Pid::from_raw(child.id() as i32),
+            crate::runtime_info::PidEntry::Helper(id.clone(), id.name.clone()),
+        );
+        let failure: Option<String> = match crate::services::wait_for_helper_child(
+            &child,
+            &run_info.pid_table,
+            Some(std::time::Duration::from_secs(90)),
+        ) {
+            crate::services::WaitResult::InTime(Ok(term)) if term.success() => None,
+            crate::services::WaitResult::InTime(Ok(term)) => {
+                Some(format!("{phase} for {}: {cmd} failed: {term:?}", id.name))
+            }
+            crate::services::WaitResult::InTime(Err(e)) => {
+                Some(format!("{phase} for {}: {cmd} wait error: {e}", id.name))
+            }
+            crate::services::WaitResult::TimedOut => {
+                Some(format!("{phase} for {}: {cmd} timed out", id.name))
+            }
+        };
+        if let Some(msg) = failure {
+            if ignore {
+                log::warn!("{msg} (ignored, '-' prefix)");
+            } else {
+                return Err(msg);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Find the single filesystem path a socket unit's `Symlinks=` should point at.
+/// Mirrors upstream `socket_find_symlink_target`: a target exists only when the
+/// unit has exactly one path-based listen address (an AF_UNIX *path* socket or a
+/// FIFO). Abstract-namespace sockets (no filesystem path) and units with more than
+/// one path listener yield no target (so no symlinks are created).
+fn socket_symlink_target(conf: &SocketConfig) -> Option<String> {
+    let mut found: Option<&str> = None;
+    for s in &conf.sockets {
+        let path = match &s.kind {
+            crate::sockets::SocketKind::Stream(p)
+            | crate::sockets::SocketKind::Sequential(p)
+            | crate::sockets::SocketKind::Datagram(p)
+            | crate::sockets::SocketKind::Fifo(p)
+            | crate::sockets::SocketKind::Special(p) => p.as_str(),
+            crate::sockets::SocketKind::Netlink(_) | crate::sockets::SocketKind::MessageQueue(_) => {
+                continue;
+            }
+        };
+        // Abstract-namespace AF_UNIX sockets (leading '@', or empty) have no path.
+        if path.is_empty() || path.starts_with('@') {
+            continue;
+        }
+        if found.is_some() {
+            return None; // more than one path listener -> no symlink target
+        }
+        found = Some(path);
+    }
+    found.map(str::to_owned)
+}
+
+/// Create the `Symlinks=` symlinks pointing at the socket's path on start. Matches
+/// systemd `socket_symlink`: parent dirs are created, failures are logged and
+/// ignored (best-effort), and an existing file is replaced only when
+/// `RemoveOnStop=` is set.
+fn create_socket_symlinks(conf: &SocketConfig, unit_name: &str) {
+    if conf.symlinks.is_empty() {
+        return;
+    }
+    let Some(target) = socket_symlink_target(conf) else {
+        return;
+    };
+    let dir_mode = conf.directory_mode.unwrap_or(0o755);
+    for link in &conf.symlinks {
+        let link_path = std::path::Path::new(link);
+        if let Some(parent) = link_path.parent() {
+            use std::os::unix::fs::DirBuilderExt;
+            let _ = std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(dir_mode)
+                .create(parent);
+        }
+        match std::os::unix::fs::symlink(&target, link_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if conf.remove_on_stop
+                    && std::fs::remove_file(link_path).is_ok()
+                    && let Err(e2) = std::os::unix::fs::symlink(&target, link_path)
+                {
+                    log::warn!("socket {unit_name}: failed to create symlink {link} -> {target}: {e2}");
+                } else if !conf.remove_on_stop {
+                    log::warn!("socket {unit_name}: symlink {link} already exists, not replacing");
+                }
+            }
+            Err(e) => {
+                log::warn!("socket {unit_name}: failed to create symlink {link} -> {target}: {e}");
+            }
+        }
+    }
+}
+
+/// Remove the `Symlinks=` symlinks on stop — only when `RemoveOnStop=` is set,
+/// matching upstream (otherwise the symlinks persist like any other created file).
+fn remove_socket_symlinks(conf: &SocketConfig) {
+    if !conf.remove_on_stop {
+        return;
+    }
+    for link in &conf.symlinks {
+        let _ = std::fs::remove_file(link);
+    }
+}
+
 impl SocketState {
     fn activate(
         &mut self,
@@ -196,6 +358,20 @@ impl SocketState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<UnitStatus, UnitOperationError> {
+        // ExecStartPre= runs before the socket is opened; a non-'-' failure aborts
+        // the start (systemd.socket(5)). Socket Exec*= commands were parsed and
+        // reported but never executed until this path.
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_start_pre, "ExecStartPre", id, run_info)
+        {
+            let reason = UnitOperationErrorReason::GenericStartError(msg);
+            *status.write_poisoned() =
+                UnitStatus::Stopped(StatusStopped::StoppedUnexpected, vec![reason.clone()]);
+            return Err(UnitOperationError {
+                unit_name: id.name.clone(),
+                unit_id: id.clone(),
+                reason,
+            });
+        }
         let open_res = self
             .sock
             .open_all(
@@ -211,6 +387,32 @@ impl SocketState {
             });
         match open_res {
             Ok(()) => {
+                // Socket units bypass exec_helper, so create their exec
+                // directories (ConfigurationDirectory= etc.) here.
+                create_exec_directories([
+                    &conf.exec_config.configuration_directory,
+                    &conf.exec_config.runtime_directory,
+                    &conf.exec_config.state_directory,
+                    &conf.exec_config.cache_directory,
+                    &conf.exec_config.logs_directory,
+                ]);
+                // Symlinks= point at the socket path; created now that it is bound.
+                create_socket_symlinks(conf, &id.name);
+                // ExecStartPost= runs after the socket is listening.
+                if let Err(msg) =
+                    run_socket_exec_commands(&conf.exec_start_post, "ExecStartPost", id, run_info)
+                {
+                    let reason = UnitOperationErrorReason::GenericStartError(msg);
+                    *status.write_poisoned() = UnitStatus::Stopped(
+                        StatusStopped::StoppedUnexpected,
+                        vec![reason.clone()],
+                    );
+                    return Err(UnitOperationError {
+                        unit_name: id.name.clone(),
+                        unit_id: id.clone(),
+                        reason,
+                    });
+                }
                 let mut status = status.write_poisoned();
                 *status = UnitStatus::Started(StatusStarted::Running);
                 run_info.notify_eventfds();
@@ -232,6 +434,17 @@ impl SocketState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<(), UnitOperationError> {
+        // ExecStopPre= runs before the socket is closed (best-effort on stop).
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_pre, "ExecStopPre", id, run_info) {
+            log::warn!("{msg}");
+        }
+        // RuntimeDirectory= is dropped on stop, like services/mounts — unless
+        // RuntimeDirectoryPreserve=yes, which the service path already honors
+        // (this socket path removed it unconditionally, so a socket with
+        // RuntimeDirectoryPreserve=yes lost /run/<dir> on every stop).
+        if conf.exec_config.runtime_directory_preserve != RuntimeDirectoryPreserve::Yes {
+            remove_runtime_directories(&conf.exec_config.runtime_directory);
+        }
         let close_result = self
             .sock
             .close_all(
@@ -244,6 +457,13 @@ impl SocketState {
                 unit_id: id.clone(),
                 reason: UnitOperationErrorReason::SocketCloseError(e),
             });
+        // ExecStopPost= runs after the socket is closed (best-effort).
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_post, "ExecStopPost", id, run_info)
+        {
+            log::warn!("{msg}");
+        }
+        // Symlinks= are torn down on stop only when RemoveOnStop= is set.
+        remove_socket_symlinks(conf);
         match &close_result {
             Ok(()) => {
                 let mut status = status.write_poisoned();
@@ -318,7 +538,7 @@ impl SocketState {
 /// Flush pending connections/data on all fds belonging to a socket unit.
 /// Called when `FlushPending=yes` is configured, before re-arming a socket
 /// for activation, so that stale traffic doesn't immediately re-trigger.
-fn flush_socket_fds(socket_id: &UnitId, run_info: &RuntimeInfo) {
+pub(crate) fn flush_socket_fds(socket_id: &UnitId, run_info: &RuntimeInfo) {
     let fd_store = run_info.fd_store.read_poisoned();
     if let Some(fds) = fd_store.get_global(&socket_id.name) {
         for (_, _, fd_box) in fds {
@@ -441,6 +661,18 @@ impl ServiceState {
                 run_info.notify_eventfds();
                 Ok(UnitStatus::Starting)
             }
+            Ok(crate::services::StartResult::DeferredOneshotExec) => {
+                // Multi-command oneshot whose preliminary ExecStart= commands
+                // are deferred to deferred_oneshot_exec_drive.  Status stays
+                // Starting (no main PID yet); the pool closure spawns the driver.
+                Ok(UnitStatus::Starting)
+            }
+            Ok(crate::services::StartResult::DeferredPrestart) => {
+                // ExecCondition=/ExecStartPre= deferred to the dispatcher's
+                // start chain.  Status stays Starting; the pool worker sends
+                // the chain event (docs/EVENT-LOOP.md inc 2).
+                Ok(UnitStatus::Starting)
+            }
             Err(e) => {
                 let mut status = status.write_poisoned();
                 // Always set StoppedUnexpected on failure.  The service
@@ -516,6 +748,54 @@ impl ServiceState {
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![e.reason.clone()]);
             }
         }
+
+        // The service is now fully stopped. Remove its cgroup directory, matching
+        // systemd's unit_prune_cgroup on the DEAD transition. The exit handler
+        // skips cleanup while status == Stopping (to avoid racing a restart), so a
+        // deliberate `systemctl stop` of a long-running service would otherwise
+        // leak the cgroup. Recursive because a Delegate=yes payload may have
+        // created child cgroups (possibly chown'd to another uid).
+        #[cfg(target_os = "linux")]
+        {
+            let cgroup_path = &conf.platform_specific.cgroup_path;
+            if cgroup_path.exists() {
+                let mut removed = true;
+                if let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path) {
+                    removed = false;
+                    // A user manager runs unprivileged: it cannot remove a subcgroup
+                    // the payload chown'd to another uid (nor, therefore, the tree
+                    // above it). Escalate to PID 1, which removes it as root. Mirrors
+                    // systemd's unit_prune_cgroup_via_bus.
+                    if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+                        match crate::control::escalate_remove_cgroup(cgroup_path) {
+                            Ok(()) => removed = true,
+                            Err(e2) => log::warn!(
+                                "deactivate: escalated cgroup removal for {} failed: {e2} (local: {e})",
+                                id.name,
+                            ),
+                        }
+                    } else {
+                        log::warn!(
+                            "deactivate: could not remove cgroup {} for {}: {}",
+                            cgroup_path.display(),
+                            id.name,
+                            e
+                        );
+                    }
+                }
+                // Once the unit's own cgroup is gone, the slice above it may have
+                // just lost its last member. systemd prunes such a slice when it
+                // becomes empty; without this an emptied slice lingers forever
+                // (TEST-19-CGROUP.cleanup-slice waits for exactly that).
+                if removed {
+                    crate::platform::cgroups::prune_empty_parent_cgroups(
+                        cgroup_path,
+                        std::path::Path::new("/sys/fs/cgroup"),
+                    );
+                }
+            }
+        }
+
         // Reset socket activated flags so socket activation can restart
         // this service when a new connection arrives on its socket.
         if !conf.sockets.is_empty() {
@@ -674,6 +954,12 @@ impl ServiceState {
                 }
                 Ok(())
             }
+            Ok(crate::services::StartResult::DeferredPrestart) => {
+                // Unreachable from this path (the deferral is gated on the
+                // pool's DeferNotifyWait source), but keep the unit alive in
+                // Starting rather than mislabeling it if that ever changes.
+                Ok(())
+            }
             Ok(crate::services::StartResult::WaitingForSocket) => {
                 {
                     let mut status = status.write_poisoned();
@@ -700,6 +986,11 @@ impl ServiceState {
             Ok(crate::services::StartResult::DeferredNotifyWait) => {
                 // Reactivation with deferred notify wait — keep Starting status.
                 run_info.notify_eventfds();
+                Ok(())
+            }
+            Ok(crate::services::StartResult::DeferredOneshotExec) => {
+                // Reactivation of a multi-command oneshot with deferred
+                // preliminary ExecStart= — keep Starting; the driver completes it.
                 Ok(())
             }
             Err(e) => {
@@ -773,6 +1064,12 @@ pub struct SliceConfig {
     pub io_write_iops_max: Vec<IoDeviceLimit>,
     /// TasksMax= — maximum number of tasks. See systemd.resource-control(5).
     pub tasks_max: Option<TasksMax>,
+    /// ConcurrencySoftMax= sets a soft limit on concurrently-active units; new
+    /// starts queue when reached. None = infinity. See systemd.resource-control(5).
+    pub concurrency_soft_max: Option<u32>,
+    /// ConcurrencyHardMax= sets a hard limit on concurrently-active-or-pending
+    /// units; new starts are refused when reached. None = infinity. See systemd.resource-control(5).
+    pub concurrency_hard_max: Option<u32>,
     /// Delegate= — delegate cgroup subtree. See systemd.resource-control(5).
     pub delegate: Delegate,
     /// CPUAccounting= — enable CPU accounting. See systemd.resource-control(5).
@@ -860,6 +1157,8 @@ impl From<ParsedSliceSection> for SliceConfig {
             io_read_iops_max: s.io_read_iops_max,
             io_write_iops_max: s.io_write_iops_max,
             tasks_max: s.tasks_max,
+            concurrency_soft_max: s.concurrency_soft_max,
+            concurrency_hard_max: s.concurrency_hard_max,
             delegate: s.delegate,
             cpu_accounting: s.cpu_accounting,
             memory_accounting: s.memory_accounting,
@@ -1054,6 +1353,11 @@ pub struct TimerConfig {
     pub wake_system: bool,
     /// RemainAfterElapse= — if true, timer stays loaded after elapsing (default true).
     pub remain_after_elapse: bool,
+    /// DeferReactivation= — if true, the next elapse of a repeating calendar
+    /// timer is computed relative to when the triggered unit last deactivated,
+    /// not when the timer fired, and the timer will not fire again while the
+    /// triggered unit is still active. See systemd.timer(5). Defaults to false.
+    pub defer_reactivation: bool,
     /// OnClockChange= — if true, the timer is triggered when the system clock
     /// jumps relative to the monotonic clock (e.g. DST change, NTP correction).
     /// See systemd.timer(5).
@@ -1141,6 +1445,7 @@ impl From<ParsedSwapSection> for SwapConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct MountConfig {
     /// What= — the device, file, or resource to mount.
     pub what: String,
@@ -1162,6 +1467,18 @@ pub struct MountConfig {
     pub directory_mode: u32,
     /// TimeoutSec= — mount operation timeout.
     pub timeout_sec: Option<u64>,
+    /// ConfigurationDirectory= — directories under /etc created on start.
+    pub configuration_directory: Vec<String>,
+    /// RuntimeDirectory= — directories under /run created on start, removed on stop.
+    pub runtime_directory: Vec<String>,
+    /// StateDirectory= — directories under /var/lib created on start.
+    pub state_directory: Vec<String>,
+    /// CacheDirectory= — directories under /var/cache created on start.
+    pub cache_directory: Vec<String>,
+    /// LogsDirectory= — directories under /var/log created on start.
+    pub logs_directory: Vec<String>,
+    /// RuntimeDirectoryPreserve= — whether RuntimeDirectory= survives stop.
+    pub runtime_directory_preserve: RuntimeDirectoryPreserve,
 }
 
 impl From<ParsedMountSection> for MountConfig {
@@ -1177,6 +1494,12 @@ impl From<ParsedMountSection> for MountConfig {
             force_unmount: parsed.force_unmount,
             directory_mode: parsed.directory_mode,
             timeout_sec: parsed.timeout_sec,
+            configuration_directory: parsed.configuration_directory,
+            runtime_directory: parsed.runtime_directory,
+            state_directory: parsed.state_directory,
+            cache_directory: parsed.cache_directory,
+            logs_directory: parsed.logs_directory,
+            runtime_directory_preserve: parsed.runtime_directory_preserve,
         }
     }
 }
@@ -1845,6 +2168,58 @@ impl Unit {
     }
 }
 
+/// The base directory for each exec-directory kind, paired with a selector for
+/// the matching `MountConfig` field. Shared by create/remove so the base paths
+/// stay in sync.
+const EXEC_DIR_BASES: [&str; 5] = ["/etc", "/run", "/var/lib", "/var/cache", "/var/log"];
+
+/// Create exec directories (configuration/runtime/state/cache/logs, in that
+/// order) under their base paths (/etc, /run, /var/lib, /var/cache, /var/log).
+/// Shared by mount and socket units, which run their operation directly and
+/// bypass exec_helper, so they don't get the exec-directory creation that
+/// services do — this mirrors it for those start paths.
+fn create_exec_directories(dir_lists: [&[String]; 5]) {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    for (base, names) in EXEC_DIR_BASES.iter().zip(dir_lists) {
+        for name in names {
+            let path = std::path::Path::new(base).join(name);
+            if let Err(e) = std::fs::create_dir_all(&path) {
+                log::warn!("Failed to create exec directory {}: {}", path.display(), e);
+                continue;
+            }
+            trace!("Created exec directory {}", path.display());
+            #[cfg(unix)]
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+}
+
+fn create_mount_exec_directories(conf: &MountConfig) {
+    create_exec_directories([
+        &conf.configuration_directory,
+        &conf.runtime_directory,
+        &conf.state_directory,
+        &conf.cache_directory,
+        &conf.logs_directory,
+    ]);
+}
+
+/// Remove a unit's `RuntimeDirectory=` directories (under /run) on stop,
+/// mirroring how services drop their runtime directories when they deactivate.
+/// Configuration/state/cache/logs directories persist across stop (only
+/// `systemctl clean` removes those). Used by mount and socket units.
+fn remove_runtime_directories(runtime: &[String]) {
+    for name in runtime {
+        let path = std::path::Path::new("/run").join(name);
+        if path.exists()
+            && let Err(e) = std::fs::remove_dir_all(&path)
+        {
+            trace!("Failed to remove runtime directory {}: {}", path.display(), e);
+        }
+    }
+}
+
 /// Perform the mount(2) syscall for a mount unit.
 ///
 /// This creates the mount point directory if needed, then calls mount(2)
@@ -1852,7 +2227,7 @@ impl Unit {
 /// status is set to `Started(Running)`; on failure it is set to
 /// `Stopped(StoppedUnexpected)`.
 #[cfg(target_os = "linux")]
-fn activate_mount(
+pub(crate) fn activate_mount(
     id: &UnitId,
     conf: &MountConfig,
     status: &RwLock<UnitStatus>,
@@ -1865,6 +2240,7 @@ fn activate_mount(
             "Mount point {} is already mounted, marking as active",
             conf.where_
         );
+        create_mount_exec_directories(conf);
         let mut status = status.write_poisoned();
         *status = UnitStatus::Started(StatusStarted::Running);
         return Ok(UnitStatus::Started(StatusStarted::Running));
@@ -1955,6 +2331,14 @@ fn activate_mount(
                 | "nofail" => {
                     // These are fstab-only options, not passed to mount(2)
                 }
+                _ if opt.is_empty() || opt.starts_with("x-") || opt.starts_with("comment=") => {
+                    // Userspace-only options (the whole `x-*` namespace:
+                    // x-initrd.mount, x-systemd.*, x-mount.*, x-gvfs-*, …) and
+                    // `comment=` are consumed by systemd/fstab, never passed to
+                    // mount(2). The kernel rejects them (e.g. ext4/tmpfs report
+                    // "Unknown parameter 'x-initrd.mount'"), which would fail the
+                    // mount — including sysroot.mount in the initrd.
+                }
                 _ => {
                     // Pass unknown options through as data for the filesystem driver
                     filtered_options.push(opt.to_owned());
@@ -1990,9 +2374,11 @@ fn activate_mount(
         data
     );
 
-    match nix::mount::mount(what, conf.where_.as_str(), fs_type, flags, data) {
+    let mount_result = nix::mount::mount(what, conf.where_.as_str(), fs_type, flags, data);
+    match mount_result {
         Ok(()) => {
             info!("Successfully mounted {} on {}", conf.what, conf.where_);
+            create_mount_exec_directories(conf);
             let mut status = status.write_poisoned();
             *status = UnitStatus::Started(StatusStarted::Running);
             Ok(UnitStatus::Started(StatusStarted::Running))
@@ -2017,7 +2403,7 @@ fn activate_mount(
 /// Non-Linux stub for mount activation — always succeeds and marks the unit
 /// as started.
 #[cfg(not(target_os = "linux"))]
-fn activate_mount(
+pub(crate) fn activate_mount(
     id: &UnitId,
     _conf: &MountConfig,
     status: &RwLock<UnitStatus>,
@@ -2035,6 +2421,12 @@ fn deactivate_mount(
     conf: &MountConfig,
     status: &RwLock<UnitStatus>,
 ) -> Result<(), UnitOperationError> {
+    // RuntimeDirectory= is dropped on stop unless RuntimeDirectoryPreserve=yes
+    // (which keeps it across restarts); configuration/state/cache/logs
+    // directories persist until `systemctl clean`.
+    if conf.runtime_directory_preserve != RuntimeDirectoryPreserve::Yes {
+        remove_runtime_directories(&conf.runtime_directory);
+    }
     // If not currently mounted, just mark as stopped
     if !is_already_mounted(&conf.where_) {
         trace!(
@@ -2095,7 +2487,7 @@ fn deactivate_mount(
 
 /// Check whether a path is already mounted by reading /proc/mounts.
 #[cfg(target_os = "linux")]
-fn is_already_mounted(path: &str) -> bool {
+pub(crate) fn is_already_mounted(path: &str) -> bool {
     let normalized = path.trim_end_matches('/');
     let check_path = if normalized.is_empty() {
         "/"
@@ -2154,7 +2546,7 @@ fn is_already_swapped(_what: &str) -> bool {
 /// The `Priority=` setting is passed via the `SWAP_FLAG_PREFER` flag and the
 /// priority value encoded in the flags argument to swapon(2).
 #[cfg(target_os = "linux")]
-fn activate_swap(
+pub(crate) fn activate_swap(
     id: &UnitId,
     conf: &SwapConfig,
     status: &RwLock<UnitStatus>,
@@ -2255,7 +2647,7 @@ fn activate_swap(
 /// Non-Linux stub for swap activation — always succeeds and marks the unit
 /// as started.
 #[cfg(not(target_os = "linux"))]
-fn activate_swap(
+pub(crate) fn activate_swap(
     id: &UnitId,
     _conf: &SwapConfig,
     status: &RwLock<UnitStatus>,
@@ -2360,6 +2752,10 @@ pub struct UnitConfig {
     /// Defaults to true, matching systemd behavior.
     pub default_dependencies: bool,
 
+    /// CollectMode= — whether the unit is garbage-collected when it becomes
+    /// inactive (default) or inactive-or-failed (`systemd-run --collect`).
+    pub collect_mode: crate::units::CollectMode,
+
     /// Conditions that must all be true for the unit to activate.
     /// If any condition fails, the unit is skipped (not treated as an error).
     /// Matches systemd's ConditionPathExists=, ConditionPathIsDirectory=, etc.
@@ -2379,6 +2775,14 @@ pub struct UnitConfig {
     /// Action to take when the unit fails.
     /// Matches systemd's `FailureAction=` setting.
     pub failure_action: UnitAction,
+
+    /// Exit status to propagate when `SuccessAction=exit` triggers.
+    /// Matches systemd's `SuccessActionExitStatus=` setting.
+    pub success_action_exit_status: Option<u8>,
+
+    /// Exit status to propagate when `FailureAction=exit` triggers.
+    /// Matches systemd's `FailureActionExitStatus=` setting.
+    pub failure_action_exit_status: Option<u8>,
 
     /// Alternative names for this unit from `Alias=` in the `[Install]` section.
     /// In systemd, these create symlinks when the unit is enabled.
@@ -2493,6 +2897,10 @@ pub struct Dependencies {
     pub wanted_by: Vec<UnitId>,
     pub requires: Vec<UnitId>,
     pub required_by: Vec<UnitId>,
+    /// Units that must be ALREADY active when this unit starts (Requisite=).
+    /// Unlike requires, these are NOT pulled in: if a listed unit is not
+    /// active at start time, this unit's start fails.
+    pub requisite: Vec<UnitId>,
     pub conflicts: Vec<UnitId>,
     pub conflicted_by: Vec<UnitId>,
     pub before: Vec<UnitId>,
@@ -2742,6 +3150,10 @@ pub struct ExecConfig {
     /// stored; no runtime enforcement yet. See systemd.exec(5).
     pub runtime_directory_preserve: RuntimeDirectoryPreserve,
     pub tty_path: Option<std::path::PathBuf>,
+    /// TTYColumns= / TTYRows=: terminal window size applied via TIOCSWINSZ when
+    /// the service connects to a TTY. None = unset (leave the current size).
+    pub tty_columns: Option<u16>,
+    pub tty_rows: Option<u16>,
     /// TTYReset= — reset the TTY to sane defaults before use.
     /// Matches systemd: resets termios, keyboard mode, switches to text mode.
     pub tty_reset: bool,
@@ -2830,12 +3242,19 @@ pub struct ExecConfig {
     /// the OS file system hierarchy. Parsed and stored; no runtime enforcement
     /// yet (requires mount namespace support). See systemd.exec(5).
     pub protect_system: ProtectSystem,
+    /// MemoryTHP= — the transparent-huge-page policy applied to the service's
+    /// processes via prctl(PR_SET_THP_DISABLE). See systemd.exec(5).
+    pub memory_thp: MemoryThp,
     /// RestrictNamespaces= — restricts access to Linux namespace types for the
     /// service. Can be a boolean (`yes` restricts all, `no` allows all) or a
     /// space-separated list of namespace type identifiers (cgroup, ipc, net,
     /// mnt, pid, user, uts). A `~` prefix inverts the list. Parsed and stored;
     /// no runtime seccomp enforcement yet. See systemd.exec(5).
     pub restrict_namespaces: RestrictNamespaces,
+    /// DelegateNamespaces= names namespace types the service may manage itself
+    /// (mnt/net/pid/uts/ipc/cgroup), run inside an owned user namespace. Empty =
+    /// none. See systemd.exec(5).
+    pub delegate_namespaces: Vec<String>,
     /// RestrictFileSystems= — a list of Linux file system type names (e.g.
     /// `ext4`, `tmpfs`, `proc`, `btrfs`) for BPF LSM-based file system type
     /// restriction. Entries prefixed with `~` form a deny-list; without the
@@ -2947,6 +3366,10 @@ pub struct ExecConfig {
     /// the list. Parsed and stored; no runtime mount-namespace enforcement
     /// yet. See systemd.exec(5).
     pub read_write_paths: Vec<String>,
+    /// `ExecSearchPath=` — colon-separated absolute directories searched (in
+    /// order) to resolve a bare `ExecStart=`/`ExecStop=` command name, ahead of
+    /// the default `$PATH`. Empty when unset.
+    pub exec_search_path: Vec<String>,
     /// MemoryDenyWriteExecute= — if true, attempts to create memory mappings
     /// that are both writable and executable, or to change existing writable
     /// mappings to executable, are prohibited. Defaults to false. Parsed and
@@ -2985,6 +3408,9 @@ pub struct ExecConfig {
     /// user/group. Defaults to false. Parsed and stored; no runtime
     /// user-namespace enforcement yet. See systemd.exec(5).
     pub private_users: bool,
+    /// PrivateUsersEx= mode: "self"/"identity"/"full" (empty = PrivateUsers=yes
+    /// style). Selects the uid/gid map written for the private user namespace.
+    pub private_users_mode: String,
     /// PrivateMounts= — if true, the processes of this unit will be run in
     /// their own private file system (mount) namespace with all mount
     /// propagation from the processes towards the host's main file system
@@ -3000,18 +3426,18 @@ pub struct ExecConfig {
     /// IOSchedulingClass= — sets the I/O scheduling class for executed
     /// processes. Takes one of "none" (or "0"), "realtime" (or "1"),
     /// "best-effort" (or "2"), or "idle" (or "3"). Defaults to None
-    /// (kernel default, which is best-effort). Parsed and stored; no
-    /// runtime ioprio_set() enforcement yet. See systemd.exec(5).
+    /// (kernel default, which is best-effort). Applied via ioprio_set() in
+    /// the exec helper. See systemd.exec(5).
     pub io_scheduling_class: IOSchedulingClass,
     /// IOSchedulingPriority= — sets the I/O scheduling priority for executed
     /// processes. Takes an integer between 0 (highest priority) and 7
     /// (lowest priority). The default priority for the best-effort scheduling
-    /// class is 4. Parsed and stored; no runtime enforcement yet.
+    /// class is 4. Applied via ioprio_set() in the exec helper.
     /// See systemd.exec(5).
     pub io_scheduling_priority: Option<u8>,
     /// UMask= — sets the file mode creation mask (umask) for executed
     /// processes. Takes an octal value (e.g. 0022, 0077). Defaults to 0022.
-    /// Parsed and stored; no runtime enforcement yet. See systemd.exec(5).
+    /// Applied via umask() in the exec helper. See systemd.exec(5).
     pub umask: Option<u32>,
     /// ProcSubset= — controls which subset of /proc/ is mounted for the
     /// unit. Takes one of "all" (full /proc, default) or "pid" (only
@@ -3020,8 +3446,8 @@ pub struct ExecConfig {
     pub proc_subset: ProcSubset,
     /// Nice= — sets the default nice level (scheduling priority) for
     /// executed processes. Takes an integer between -20 (highest priority)
-    /// and 19 (lowest priority). Parsed and stored; no runtime enforcement
-    /// yet. See systemd.exec(5).
+    /// and 19 (lowest priority). Applied via setpriority() in the exec
+    /// helper. See systemd.exec(5).
     pub nice: Option<i32>,
     /// RemoveIPC= — if true, all System V and POSIX IPC objects owned by
     /// the user and group of the executed processes are removed when the
@@ -3261,6 +3687,9 @@ pub struct ExecConfig {
     /// NetworkNamespacePath= — run the service in the specified existing
     /// network namespace. See systemd.exec(5).
     pub network_namespace_path: Option<String>,
+    /// UserNamespacePath= — run the service in the specified existing user
+    /// namespace. See systemd.exec(5).
+    pub user_namespace_path: Option<String>,
 
     // ── Security directives ──────────────────────────────────────────
     /// SecureBits= — controls the secure-bits flags of the executed process.
@@ -3305,6 +3734,11 @@ pub struct ExecConfig {
     /// specified in Base64 encoding. Multiple directives accumulate.
     /// See systemd.exec(5).
     pub standard_input_data: Vec<String>,
+    /// StandardInputText=/StandardInputData= directives in the order they
+    /// appear across the fragment and drop-ins.  Preserves the interleaving
+    /// the two legacy vecs above cannot represent, so the merged
+    /// `StandardInputData` property is reconstructed in the correct order.
+    pub stdin_inputs: Vec<crate::units::unit_parsing::StdinInput>,
     /// SetLoginEnvironment= — if true, PAM login session environment
     /// variables are set. See systemd.exec(5).
     pub set_login_environment: Option<bool>,
@@ -3314,6 +3748,10 @@ pub struct ExecConfig {
 #[derive(Clone, Eq, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PlatformSpecificServiceFields {
     pub cgroup_path: std::path::PathBuf,
+    /// DelegateSubgroup= — when set, the service's process runs in this named
+    /// child cgroup beneath `cgroup_path` (kept in sync with the ServiceConfig
+    /// field so the post-fork child, which only sees this struct, can join it).
+    pub delegate_subgroup: Option<String>,
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -3341,7 +3779,7 @@ impl SuccessExitStatus {
             crate::signal_handler::ChildTermination::Exit(code) => {
                 *code == 0 || self.exit_codes.contains(code)
             }
-            crate::signal_handler::ChildTermination::Signal(sig) => self.signals.contains(sig),
+            crate::signal_handler::ChildTermination::Signal(sig, _) => self.signals.contains(sig),
         }
     }
 
@@ -3350,7 +3788,7 @@ impl SuccessExitStatus {
     pub fn is_clean_signal(&self, termination: &crate::signal_handler::ChildTermination) -> bool {
         use nix::sys::signal::Signal;
         match termination {
-            crate::signal_handler::ChildTermination::Signal(sig) => {
+            crate::signal_handler::ChildTermination::Signal(sig, _) => {
                 matches!(
                     sig,
                     Signal::SIGHUP | Signal::SIGINT | Signal::SIGTERM | Signal::SIGPIPE
@@ -3896,9 +4334,12 @@ pub struct SocketConfig {
 
     /// DeferTrigger= — controls whether to defer triggering the associated
     /// service when a connection comes in. Takes a boolean or "patient".
-    /// Defaults to No. Parsed and stored; no runtime enforcement yet.
-    /// See systemd.socket(5).
+    /// Defaults to No. See systemd.socket(5).
     pub defer_trigger: DeferTrigger,
+
+    /// DeferTriggerMaxSec= — maximum time (seconds) the socket may stay in the
+    /// deferred state before it fails. None = no limit. See systemd.socket(5).
+    pub defer_trigger_max_sec: Option<u64>,
 
     /// Writable= — whether to open the FIFO or special file for writing
     /// as well (i.e. O_RDWR rather than O_RDONLY). Defaults to false.

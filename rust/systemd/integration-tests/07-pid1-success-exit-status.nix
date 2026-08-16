@@ -36,6 +36,34 @@
     [[ "$(systemctl show -P Result success-exit-42.service)" == "success" ]]
     systemctl stop success-exit-42.service
 
+    : "SuccessExitStatus= accepts a whitespace-separated list of codes"
+    cat > /run/systemd/system/success-exit-multi.service << EOF
+    [Service]
+    Type=oneshot
+    ExecStart=bash -c 'exit 8'
+    SuccessExitStatus=1 8 42
+    RemainAfterExit=yes
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start success-exit-multi.service
+    systemctl is-active success-exit-multi.service
+    [[ "$(systemctl show -P Result success-exit-multi.service)" == "success" ]]
+    systemctl stop success-exit-multi.service
+
+    : "SuccessExitStatus= accepts a named status (TEMPFAIL = 75)"
+    cat > /run/systemd/system/success-exit-named.service << EOF
+    [Service]
+    Type=oneshot
+    ExecStart=bash -c 'exit 75'
+    SuccessExitStatus=TEMPFAIL
+    RemainAfterExit=yes
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start success-exit-named.service
+    systemctl is-active success-exit-named.service
+    [[ "$(systemctl show -P Result success-exit-named.service)" == "success" ]]
+    systemctl stop success-exit-named.service
+
     : "Without SuccessExitStatus=, exit 42 is failure"
     cat > /run/systemd/system/success-exit-fail.service << EOF
     [Service]

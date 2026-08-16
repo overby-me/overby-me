@@ -791,6 +791,134 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_edns_parsers_never_panic() {
+        // Robustness net (task #22): EDNS option parsing consumes
+        // attacker-controlled OPT-record data. ClientSubnet::parse,
+        // OptRecord::parse and parse_edns_options must never panic or hang on
+        // malformed input (random + mutated blobs; catch_unwind on a worker
+        // thread joined under a wall-clock budget).
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x0ed0_5eed_0ed0_5eed;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let len = (next() % 160) as usize;
+                let mut buf: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+                let muts = (next() % 6) as usize;
+                for _ in 0..muts {
+                    if buf.is_empty() {
+                        break;
+                    }
+                    let i = (next() as usize) % buf.len();
+                    match next() % 3 {
+                        0 => buf[i] ^= (next() & 0xff) as u8,
+                        1 => buf.truncate(i),
+                        _ => buf.insert(i, (next() & 0xff) as u8),
+                    }
+                }
+                let input = buf.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = ClientSubnet::parse(&input);
+                    let _ = OptRecord::parse(&input);
+                    let _ = parse_edns_options(&input);
+                });
+                assert!(res.is_ok(), "edns parser panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "edns fuzz did not finish in 30s -- a malformed option hangs the parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
+    #[test]
+    fn fuzz_edns_message_rewriters_never_panic() {
+        // Robustness net (task #22): the EDNS *message* rewriters run on the
+        // remote upstream response before it is returned to the stub client.
+        // strip_opt_from_message walks every forwarded response whose query
+        // lacked EDNS; has_opt_record / extract_opt_record / append_opt_to_query
+        // walk questions + RRs stepping over attacker-controlled section counts,
+        // names (compression pointers) and RDLENGTHs. The parse-level fuzz test
+        // above only exercises OptRecord/ClientSubnet/parse_edns_options, not
+        // these whole-message walkers, so they get their own never-panics net.
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0x5eed_ed05_5eed_ed05;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            let opt = OptRecord::new().with_udp_size(1232);
+            for _ in 0..40_000u32 {
+                // Half the inputs get a plausible 12-byte header with small,
+                // random section counts (so the record loops actually descend
+                // past the header guards); the rest are fully random.
+                let tail = (next() % 48) as usize;
+                let mut buf: Vec<u8> = Vec::with_capacity(HEADER_SIZE + tail);
+                if next() & 1 == 0 {
+                    buf.push((next() & 0xff) as u8); // ID hi
+                    buf.push((next() & 0xff) as u8); // ID lo
+                    buf.push((next() & 0xff) as u8); // flags1
+                    buf.push((next() & 0xff) as u8); // flags2
+                    for _ in 0..4 {
+                        // QD/AN/NS/AR count in 0..=6 to keep the walk cheap.
+                        buf.push(0);
+                        buf.push((next() % 7) as u8);
+                    }
+                } else {
+                    for _ in 0..HEADER_SIZE {
+                        buf.push((next() & 0xff) as u8);
+                    }
+                }
+                for _ in 0..tail {
+                    buf.push((next() & 0xff) as u8);
+                }
+                let muts = (next() % 6) as usize;
+                for _ in 0..muts {
+                    if buf.is_empty() {
+                        break;
+                    }
+                    let i = (next() as usize) % buf.len();
+                    match next() % 4 {
+                        0 => buf[i] ^= (next() & 0xff) as u8,
+                        1 => buf.truncate(i),
+                        2 => buf.insert(i, 0xc0), // inject a compression-pointer marker
+                        _ => buf.insert(i, (next() & 0xff) as u8),
+                    }
+                }
+                let input = buf.clone();
+                let opt_ref = &opt;
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = has_opt_record(&input);
+                    let _ = strip_opt_from_message(&input);
+                    let _ = extract_opt_record(&input);
+                    let _ = append_opt_to_query(&input, opt_ref);
+                }));
+                assert!(res.is_ok(), "edns message rewriter panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "edns message-rewriter fuzz did not finish in 30s -- a malformed message hangs a walker"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+
+    #[test]
     fn test_edns_flags_do_bit() {
         let flags = EdnsFlags { dnssec_ok: true };
         assert_eq!(flags.to_u16(), 0x8000);

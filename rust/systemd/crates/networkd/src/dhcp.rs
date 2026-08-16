@@ -431,7 +431,16 @@ impl DhcpPacket {
                     }
                     let prefix_len = data[i];
                     i += 1;
-                    // Number of significant octets in the destination.
+                    // RFC 3442: an IPv4 destination prefix length is 0-32. A
+                    // hostile or buggy DHCP server can send a larger value, for
+                    // which `octets` (below) would exceed the 4-byte `dest`
+                    // buffer and panic the `dest[..octets]` copy. Reject it; the
+                    // variable-length encoding cannot be resynced past a bad
+                    // entry, so stop parsing this option.
+                    if prefix_len > 32 {
+                        break;
+                    }
+                    // Number of significant octets in the destination (0-4).
                     let octets = prefix_len.div_ceil(8) as usize;
                     if i + octets + 4 > data.len() {
                         break;
@@ -1448,6 +1457,150 @@ mod tests {
             routes[1],
             (Ipv4Addr::new(10, 0, 0, 0), 8, Ipv4Addr::new(10, 0, 0, 2))
         );
+    }
+
+    #[test]
+    fn test_classless_routes_oversized_prefix_len_does_not_panic() {
+        // RFC 3442 caps an IPv4 prefix length at 32. A hostile DHCP server can
+        // send a larger value; before the guard, octets = ceil(prefix/8) could
+        // reach 32 while `dest` is only [u8; 4], so `dest[..octets]` panicked
+        // out of bounds (an attacker-controlled DoS). It must be rejected, not
+        // crash. Each payload is long enough that the length check passed and
+        // the old code reached the panicking copy.
+        for bad_prefix in [33u8, 40, 64, 200, 255] {
+            let octets = bad_prefix.div_ceil(8) as usize;
+            let mut data = vec![bad_prefix];
+            data.resize(1 + octets + 4, 0xab);
+            let mut pkt = DhcpPacket::new_request(1, &test_mac());
+            pkt.options.push(DhcpOption {
+                code: OPT_CLASSLESS_ROUTES,
+                data,
+            });
+            let routes = pkt.get_classless_routes();
+            assert!(
+                routes.is_empty(),
+                "bad prefix {bad_prefix} should yield no routes"
+            );
+        }
+    }
+
+    #[test]
+    fn test_classless_routes_valid_then_malformed_keeps_valid() {
+        // A valid 10.0.0.0/8 route followed by an oversized-prefix entry: the
+        // valid route parses; the malformed tail is dropped without panicking.
+        let mut data = vec![8, 10, 10, 0, 0, 2]; // /8 via 10.0.0.2
+        data.push(40); // invalid prefix length (> 32)
+        data.resize(data.len() + 9, 0);
+        let mut pkt = DhcpPacket::new_request(1, &test_mac());
+        pkt.options.push(DhcpOption {
+            code: OPT_CLASSLESS_ROUTES,
+            data,
+        });
+        let routes = pkt.get_classless_routes();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0],
+            (Ipv4Addr::new(10, 0, 0, 0), 8, Ipv4Addr::new(10, 0, 0, 2))
+        );
+    }
+
+    #[test]
+    fn fuzz_dhcp_parse_and_interpreters_never_panic() {
+        // Robustness net: DhcpPacket::parse and the option interpreters
+        // (get_classless_routes, get_option_*, to_lease) consume attacker-
+        // controlled lease bytes from a DHCP server and must never panic on
+        // malformed input (the classless-route prefix_len>32 overflow was one
+        // such bug). Deterministically seeded random plus mutated packets, each
+        // run under catch_unwind on a worker thread joined within a wall-clock
+        // budget so an infinite loop fails the test instead of hanging.
+        let handle = std::thread::spawn(|| {
+            let seed = {
+                let mut pkt = DhcpPacket::new_request(0x1234, &test_mac());
+                pkt.options.push(DhcpOption {
+                    code: OPT_MESSAGE_TYPE,
+                    data: vec![DHCP_ACK],
+                });
+                pkt.options.push(DhcpOption {
+                    code: OPT_CLASSLESS_ROUTES,
+                    data: vec![24, 192, 168, 1, 10, 0, 0, 1],
+                });
+                pkt.serialize()
+            };
+            let mut state: u64 = 0x0bad_c0de_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for iter in 0..40_000u32 {
+                let mut buf = if iter % 2 == 0 {
+                    seed.clone()
+                } else {
+                    let len = (next() % 400) as usize;
+                    (0..len).map(|_| (next() & 0xff) as u8).collect::<Vec<u8>>()
+                };
+                let muts = 1 + (next() % 12) as usize;
+                for _ in 0..muts {
+                    if buf.is_empty() {
+                        break;
+                    }
+                    match next() % 4 {
+                        0 => {
+                            let i = (next() as usize) % buf.len();
+                            buf[i] ^= (next() & 0xff) as u8;
+                        }
+                        1 => {
+                            let i = (next() as usize) % buf.len();
+                            buf.remove(i);
+                        }
+                        2 => {
+                            let i = (next() as usize) % (buf.len() + 1);
+                            buf.insert(i, (next() & 0xff) as u8);
+                        }
+                        _ => {
+                            let i = (next() as usize) % buf.len();
+                            buf[i] = (next() & 0xff) as u8;
+                        }
+                    }
+                }
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if let Ok(pkt) = DhcpPacket::parse(&buf) {
+                        let _ = pkt.message_type();
+                        let _ = pkt.get_classless_routes();
+                        for code in [
+                            OPT_SUBNET_MASK,
+                            OPT_ROUTER,
+                            OPT_DNS,
+                            OPT_NTP,
+                            OPT_BROADCAST,
+                            OPT_HOSTNAME,
+                            OPT_DOMAIN_NAME,
+                            OPT_LEASE_TIME,
+                            26u8,
+                            121u8,
+                            43u8,
+                        ] {
+                            let _ = pkt.get_option_ipv4(code);
+                            let _ = pkt.get_option_ipv4_list(code);
+                            let _ = pkt.get_option_u32(code);
+                            let _ = pkt.get_option_string(code);
+                        }
+                        let _ = pkt.to_lease();
+                    }
+                }));
+                assert!(res.is_ok(), "panicked on DHCP input: {buf:02x?}");
+            }
+        });
+        let start = std::time::Instant::now();
+        while !handle.is_finished() {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(60),
+                "DHCP fuzz did not finish in 60s (possible infinite loop)"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().unwrap();
     }
 
     #[test]

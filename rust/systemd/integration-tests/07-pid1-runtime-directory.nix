@@ -40,6 +40,22 @@
     : "RuntimeDirectory= removed on stop"
     systemctl stop runtime-dir-test.service
     [[ ! -d /run/runtime-dir-test ]]
+
+    : "RuntimeDirectoryPreserve=yes keeps the dir across stop"
+    cat > /run/systemd/system/runtime-dir-test.service << EOF
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    RuntimeDirectory=runtime-dir-test
+    RuntimeDirectoryPreserve=yes
+    ExecStart=bash -c 'touch /run/runtime-dir-test/marker'
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start runtime-dir-test.service
+    [[ -d /run/runtime-dir-test && -f /run/runtime-dir-test/marker ]]
+    systemctl stop runtime-dir-test.service
+    # Preserve=yes: the directory (and its contents) outlives the stop.
+    [[ -d /run/runtime-dir-test && -f /run/runtime-dir-test/marker ]]
     RDEOF
   '';
 }

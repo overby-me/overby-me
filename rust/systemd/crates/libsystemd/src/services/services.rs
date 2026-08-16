@@ -3,7 +3,7 @@ use regex::Regex;
 
 use super::start_service::start_service;
 use crate::lock_ext::{MutexExt, RwLockExt};
-use crate::runtime_info::{PidEntry, RuntimeInfo};
+use crate::runtime_info::{ArcMutPidTable, PidEntry, RuntimeInfo};
 use crate::units::{
     ActivationSource, Commandline, CommandlinePrefix, KillMode, NotifyKind, ServiceConfig,
     ServiceType, Specific, Timeout, UnitId, UnitStatus,
@@ -105,7 +105,7 @@ pub fn open_journal_stream(
 /// the service has no directives that change the filesystem view.  This is
 /// the input that helper commands (ExecStartPre=/Post=/StopPost=) use to
 /// match the eventual ExecStart= namespace.
-fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
+pub(crate) fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
     let exec = &conf.exec_config;
     if exec.bind_paths.is_empty()
         && exec.bind_read_only_paths.is_empty()
@@ -118,22 +118,57 @@ fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
         entries
             .iter()
             .filter_map(|e| parse_bind_entry(e))
-            .map(|(src, dst)| {
+            .filter_map(|(src, dst)| {
                 let src_is_dir = std::fs::metadata(&src).map(|m| m.is_dir()).unwrap_or(false);
-                PreparedBindPath {
-                    src,
-                    dst,
-                    src_is_dir,
-                }
+                let c_src = std::ffi::CString::new(src.as_str()).ok()?;
+                let c_dst = std::ffi::CString::new(dst.as_str()).ok()?;
+                // Pre-compute the directories the child must create so the
+                // pre_exec closure never calls the allocator-using
+                // create_dir_all: for a directory source the whole dst path,
+                // for a file source only its parent chain (dst becomes a file).
+                let mkdir_target = if src_is_dir {
+                    dst.as_str()
+                } else {
+                    std::path::Path::new(&dst)
+                        .parent()
+                        .and_then(|p| p.to_str())
+                        .unwrap_or("")
+                };
+                Some(PreparedBindPath {
+                    c_src,
+                    c_dst,
+                    mkdirs: ancestor_dir_cstrings(mkdir_target),
+                    make_file: !src_is_dir,
+                })
             })
             .collect()
     };
     Some(HelperMountNs {
         bind_paths: prepare(&exec.bind_paths),
         bind_read_only_paths: prepare(&exec.bind_read_only_paths),
-        inaccessible_paths: exec.inaccessible_paths.clone(),
+        inaccessible_paths: exec
+            .inaccessible_paths
+            .iter()
+            .filter_map(|p| std::ffi::CString::new(p.as_str()).ok())
+            .collect(),
         private_tmp: exec.private_tmp,
     })
+}
+
+/// Produce a top-down list of ancestor directory paths for `dir` as CStrings,
+/// so the pre_exec child can `mkdir` each in order without the allocator-using
+/// `std::fs::create_dir_all`.  `/a/b/c` -> `["/a", "/a/b", "/a/b/c"]`.
+fn ancestor_dir_cstrings(dir: &str) -> Vec<std::ffi::CString> {
+    let mut out = Vec::new();
+    let mut acc = String::new();
+    for comp in dir.split('/').filter(|c| !c.is_empty()) {
+        acc.push('/');
+        acc.push_str(comp);
+        if let Ok(c) = std::ffi::CString::new(acc.as_str()) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Parse a `BindPaths=` / `BindReadOnlyPaths=` entry of the form
@@ -170,8 +205,6 @@ fn parse_bind_entry(entry: &str) -> Option<(String, String)> {
 ///      `mount(MS_BIND)` has something to bind onto.
 ///   5. InaccessiblePaths= last so it blocks anything bind-mounted above.
 fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
-    use std::ffi::CString;
-
     let ret = unsafe { libc::unshare(libc::CLONE_NEWNS) };
     if ret != 0 {
         return Err(std::io::Error::last_os_error());
@@ -231,10 +264,7 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
     // InaccessiblePaths= last: mount a read-only empty tmpfs over each so
     // the helper cannot bypass the block via earlier bind mounts or the
     // PrivateTmp tmpfs.
-    for p in &ns.inaccessible_paths {
-        let Ok(dst) = CString::new(p.as_str()) else {
-            continue;
-        };
+    for dst in &ns.inaccessible_paths {
         let tmpfs_name = c"tmpfs";
         let ret = unsafe {
             libc::mount(
@@ -261,29 +291,35 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
 /// [`PreparedBindPath`] so the source-type probe is done in the parent
 /// and not in pre_exec context.
 fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Result<()> {
-    use std::ffi::CString;
     let none_p = std::ptr::null::<libc::c_char>();
     for entry in entries {
-        let src = &entry.src;
-        let dst = &entry.dst;
-        if entry.src_is_dir {
-            let _ = std::fs::create_dir_all(dst);
-        } else if let Some(parent) = std::path::Path::new(dst).parent() {
-            let _ = std::fs::create_dir_all(parent);
-            if !std::path::Path::new(dst).exists() {
-                let _ = std::fs::File::create(dst);
+        // Create the destination mountpoint using only async-signal-safe
+        // syscalls with CStrings built in the parent: mkdir every ancestor
+        // (ignoring EEXIST), then create the leaf file if the source is not a
+        // directory.  No allocator runs between fork and execve here.
+        for dir in &entry.mkdirs {
+            unsafe {
+                libc::mkdir(dir.as_ptr(), 0o755);
             }
         }
-        let Ok(c_src) = CString::new(src.as_str()) else {
-            continue;
-        };
-        let Ok(c_dst) = CString::new(dst.as_str()) else {
-            continue;
-        };
+        if entry.make_file {
+            let fd = unsafe {
+                libc::open(
+                    entry.c_dst.as_ptr(),
+                    libc::O_CREAT | libc::O_WRONLY | libc::O_CLOEXEC,
+                    0o644,
+                )
+            };
+            if fd >= 0 {
+                unsafe {
+                    libc::close(fd);
+                }
+            }
+        }
         let ret = unsafe {
             libc::mount(
-                c_src.as_ptr(),
-                c_dst.as_ptr(),
+                entry.c_src.as_ptr(),
+                entry.c_dst.as_ptr(),
                 none_p,
                 (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
                 std::ptr::null(),
@@ -296,7 +332,7 @@ fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Re
             let ret = unsafe {
                 libc::mount(
                     none_p,
-                    c_dst.as_ptr(),
+                    entry.c_dst.as_ptr(),
                     none_p,
                     (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong,
                     std::ptr::null(),
@@ -311,7 +347,7 @@ fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Re
 }
 
 /// Check if a unit is masked (symlink to /dev/null) on disk.
-fn is_unit_masked(name: &str) -> bool {
+pub(crate) fn is_unit_masked(name: &str) -> bool {
     let runtime = std::path::Path::new("/run/systemd/system").join(name);
     if let Ok(target) = std::fs::read_link(&runtime)
         && target == std::path::Path::new("/dev/null")
@@ -409,8 +445,18 @@ pub struct Service {
     /// Set to true when the service sends RELOADING=1 via sd_notify.
     /// Cleared when the service sends READY=1 again after reload completes.
     pub reloading: bool,
+    /// When the current Type=notify-reload reload started (its reload signal
+    /// was sent, or RELOADING=1 was received for a self-initiated reload).
+    /// None when no reload is in progress. Drives the reload-signal/reload-notify
+    /// SubState and lets ReloadResult=timeout be detected lazily at
+    /// property-read time against get_start_timeout(), with no timer thread.
+    pub reload_started: Option<std::time::Instant>,
     /// Set to true when the service sends STOPPING=1 via sd_notify.
     pub stopping: bool,
+    /// When STOPPING=1 arrived. Once a service enters its stop phase it is no
+    /// longer subject to RuntimeMaxSec; TimeoutStopSec (extendable via
+    /// EXTEND_TIMEOUT_USEC) applies instead, measured from this instant.
+    pub stopping_timestamp: Option<std::time::Instant>,
     /// Timestamp of the last WATCHDOG=1 ping from the service.
     /// Used with WatchdogSec= to detect unresponsive services.
     pub watchdog_last_ping: Option<std::time::Instant>,
@@ -422,6 +468,10 @@ pub struct Service {
     /// BUSERROR= from sd_notify — the last D-Bus error name reported by the service
     /// (e.g. `BUSERROR=org.freedesktop.DBus.Error.TimedOut`). Displayed in status.
     pub notify_bus_error: Option<String>,
+    /// VARLINKERROR= from sd_notify: the last Varlink error name reported by the
+    /// service (e.g. `VARLINKERROR=org.varlink.service.InvalidParameter`). Reset
+    /// together with notify_bus_error, mirroring C service.c. Displayed in status.
+    pub notify_varlink_error: Option<String>,
     /// EXIT_STATUS= from sd_notify — the last exit status reported by the service.
     /// Can be a numeric exit code or a signal name. Displayed in status.
     pub notify_exit_status: Option<String>,
@@ -450,6 +500,12 @@ pub struct Service {
     pub accepted_fd: Option<RawFd>,
     /// Peer UID of the accepted connection (for MaxConnectionsPerSource tracking).
     pub accepted_peer_uid: Option<u32>,
+    /// StandardOutput=/StandardError=socket for this service.  Cached from the
+    /// config by `prepare_service` so helper commands (ExecStartPre= etc.),
+    /// which run via `run_cmd` rather than the main exec path, can wire their
+    /// stdout/stderr to the accepted connection fd instead of the capture pipe.
+    pub stdout_socket: bool,
+    pub stderr_socket: bool,
 
     pub notifications: Option<UnixDatagram>,
     pub notifications_path: Option<std::path::PathBuf>,
@@ -473,12 +529,23 @@ pub struct Service {
     /// checks this flag to set the service result to "timeout".
     /// Cleared on service (re)start.
     pub runtime_max_timeout_fired: bool,
+    /// Set to `true` when the service exhausts its start rate limit
+    /// (`StartLimitIntervalSec=`/`StartLimitBurst=`) and automatic restart is
+    /// refused.  The `Result` property reports "start-limit-hit" while set.
+    /// Cleared on service (re)start.
+    pub start_limit_hit: bool,
     /// Timestamp when the service transitioned to Running.
     /// Used by the watchdog thread to enforce `RuntimeMaxSec=`.
     pub runtime_started_at: Option<std::time::Instant>,
     /// The exit status of the main service process (exit code or signal number).
     /// Set by the exit handler when the main process exits.
     pub main_exit_status: Option<i32>,
+    /// The raw termination (exit code vs signal) of the last main process, kept
+    /// in lockstep with `main_exit_status` so oneshot/forking start completion
+    /// can judge success with signal awareness (SuccessExitStatus= signals),
+    /// which the bare status number cannot express (it cannot tell `exit 6`
+    /// from death by SIGABRT).
+    pub main_exit_termination: Option<crate::signal_handler::ChildTermination>,
     /// The PID of the main service process at the time it was started.
     /// Unlike `pid` (which is cleared on stop), this persists for `ExecMainPID`.
     pub main_exit_pid: Option<nix::unistd::Pid>,
@@ -497,6 +564,14 @@ pub struct Service {
     /// MONITOR_* environment variables — set when this service is activated
     /// as an OnSuccess= or OnFailure= handler for another unit.
     pub monitor_env: Option<MonitorEnv>,
+    /// SERVICE_RESULT/EXIT_CODE/EXIT_STATUS for this service's OWN ExecStop=/
+    /// ExecStopPost= commands. Set just before those run so a cleanup command can
+    /// see how the service ended; cleared afterwards (reuses the MonitorEnv shape).
+    pub stop_result_env: Option<MonitorEnv>,
+    /// The UID this service ran as when `DynamicUser=yes` allocated one (which is
+    /// not re-derivable from the config at stop time). Used by `RemoveIPC=` to
+    /// clean the dynamic user's IPC on stop. `None` for static `User=`.
+    pub dynamic_uid: Option<u32>,
     /// Timestamp (usec since epoch) when the main process was started.
     pub exec_main_start_timestamp: Option<u64>,
     /// Timestamp (usec since epoch) when the main process was handed off (exec).
@@ -550,23 +625,32 @@ pub struct Service {
 /// code is not async-signal-safe between `fork` and `execve`.
 #[derive(Clone, Debug, Default)]
 pub struct HelperMountNs {
-    /// `BindPaths=` entries, pre-parsed + src-stat'd.
+    /// `BindPaths=` entries, pre-parsed + src-stat'd + CString-encoded.
     pub bind_paths: Vec<PreparedBindPath>,
-    /// `BindReadOnlyPaths=` entries, pre-parsed + src-stat'd.
+    /// `BindReadOnlyPaths=` entries, pre-parsed + src-stat'd + CString-encoded.
     pub bind_read_only_paths: Vec<PreparedBindPath>,
-    /// `InaccessiblePaths=` absolute paths.
-    pub inaccessible_paths: Vec<String>,
+    /// `InaccessiblePaths=` absolute paths, pre-encoded as CStrings so the
+    /// pre_exec child never allocates.
+    pub inaccessible_paths: Vec<std::ffi::CString>,
     /// `PrivateTmp=yes` — mount fresh tmpfs over /tmp and /var/tmp.
     pub private_tmp: bool,
 }
 
-/// A bind-path entry with the source-type probe already resolved in
-/// the parent so the pre_exec child doesn't need to `stat()`.
+/// A bind-path entry with everything the pre_exec child needs pre-resolved
+/// in the parent: source/destination as CStrings, the mountpoint's ancestor
+/// directories to create, and whether the destination is a plain file.  The
+/// child then uses only async-signal-safe syscalls (no allocator between
+/// `fork` and `execve`).
 #[derive(Clone, Debug)]
 pub struct PreparedBindPath {
-    pub src: String,
-    pub dst: String,
-    pub src_is_dir: bool,
+    /// Source path, pre-encoded as a CString in the parent.
+    pub c_src: std::ffi::CString,
+    /// Destination path, pre-encoded as a CString in the parent.
+    pub c_dst: std::ffi::CString,
+    /// Ancestor directories to `mkdir` in the child, top-down, pre-encoded.
+    pub mkdirs: Vec<std::ffi::CString>,
+    /// Create the destination as an empty file (source is not a directory).
+    pub make_file: bool,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -622,6 +706,18 @@ pub enum StartResult {
     /// Process started but READY=1 wait deferred to a background thread.
     /// Only returned for Type=notify/NotifyReload services with DeferNotifyWait source.
     DeferredNotifyWait,
+    /// Multi-command Type=oneshot service whose preliminary (non-last)
+    /// ExecStart= commands are deferred to `deferred_oneshot_exec_drive` so a
+    /// concurrent `daemon-reload` can commit between commands. The service is
+    /// left in the Starting state with no main PID yet (07-pid1-exec-deserialization).
+    DeferredOneshotExec,
+    /// The service has ExecCondition= or ExecStartPre= commands and the
+    /// activation came from the pool (DeferNotifyWait): the helper phase is
+    /// deferred to the dispatcher's start chain instead of waiting inline
+    /// under the caller's table read guard (docs/EVENT-LOOP.md inc 2). The
+    /// service is left in Starting with no main PID yet; the chain runs the
+    /// helpers and then the main phase.
+    DeferredPrestart,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -716,15 +812,23 @@ impl Service {
         // the Restart= policy again.
         self.manual_stop = false;
 
+        // Clear any SERVICE_RESULT/EXIT_CODE/EXIT_STATUS recorded from a previous
+        // run's exit, so this start's ExecStartPre=/ExecStartPost= do not inherit
+        // a stale stop result. It is repopulated by the exit head when the main
+        // process next exits, just before the stop-phase commands run.
+        self.stop_result_env = None;
+
         // Clear watchdog state from any previous run so that the watchdog
         // enforcement thread doesn't immediately kill the freshly started
         // service based on stale state.
         self.watchdog_timeout_fired = false;
         self.runtime_max_timeout_fired = false;
+        self.start_limit_hit = false;
         self.runtime_started_at = None;
         self.watchdog_last_ping = None;
         self.watchdog_usec_override = None;
         self.main_exit_status = None;
+        self.main_exit_termination = None;
         self.extend_timeout_usec = None;
         self.extend_timeout_timestamp = None;
         // Reset lock-free atomics for the new invocation.
@@ -748,6 +852,17 @@ impl Service {
             &run_info.config.notification_sockets_dir,
         )
         .map_err(ServiceErrorReason::PreparingFailed)?;
+
+        // Pool-path activations defer the ExecCondition=/ExecStartPre=
+        // helper phase to the dispatcher's start chain so nothing waits for
+        // a helper while holding the table read guard (docs/EVENT-LOOP.md
+        // inc 2). Other sources still run the helpers inline below.
+        if (!conf.exec_condition.is_empty() || !conf.startpre.is_empty())
+            && matches!(source, ActivationSource::DeferNotifyWait)
+            && crate::entrypoints::dispatcher::global().is_some()
+        {
+            return Ok(StartResult::DeferredPrestart);
+        }
 
         // ExecCondition= — if any command exits 1-254, skip the service.
         match self.run_exec_condition(conf, id.clone(), name, run_info) {
@@ -773,6 +888,22 @@ impl Service {
                 },
             )?;
 
+        self.start_main_phase(conf, id, name, run_info, source, common)
+    }
+
+    /// The main-fork half of [`Self::start`]: stdio reopen, slice cgroup
+    /// setup and the ExecStart dispatch. Runs after the helper phase
+    /// (ExecCondition=/ExecStartPre=), whether that ran inline in `start`
+    /// or on the dispatcher's start chain (docs/EVENT-LOOP.md inc 2).
+    pub(crate) fn start_main_phase(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+        source: ActivationSource,
+        common: &crate::units::Common,
+    ) -> Result<StartResult, ServiceErrorReason> {
         // Re-open stdout/stderr after ExecStartPre, which may have deleted
         // the output file (e.g. ExecStartPre=rm -f ...). In real systemd,
         // each process invocation gets fresh file descriptors.
@@ -813,6 +944,31 @@ impl Service {
             // position is at the end, we drop out of the preliminary loop
             // and let the main-process path dispatch the now-last command.
             if conf.srcv_type == ServiceType::OneShot && conf.exec.len() > 1 {
+                // Defer the preliminary (non-last) ExecStart= commands to
+                // deferred_oneshot_exec_drive so a concurrent `systemctl
+                // daemon-reload` can commit between commands and the final
+                // command reflects the reloaded config — the synchronous loop
+                // below would hold the RuntimeInfo table read lock across the
+                // run_cmd waits and block daemon-reload
+                // (07-pid1-exec-deserialization).  Only for the thread-pool
+                // activation path (DeferNotifyWait), whose pool closure spawns
+                // the driver; other sources run the loop inline.
+                // kmsg, not log::, because PID 1's log output never reaches
+                // the console. Which branch this takes decides whether the
+                // table read lock is held across the exec waits.
+                crate::entrypoints::kmsg(&format!(
+                    "ONESHOT {name} {} cmds source={source:?} -> {}",
+                    conf.exec.len(),
+                    if matches!(source, ActivationSource::DeferNotifyWait) {
+                        "DEFERRED"
+                    } else {
+                        "INLINE"
+                    }
+                ));
+                if matches!(source, ActivationSource::DeferNotifyWait) {
+                    self.current_exec_argv = None;
+                    return Ok(StartResult::DeferredOneshotExec);
+                }
                 let timeout = self.get_start_timeout(conf);
                 let mut idx: usize = 0;
                 #[allow(clippy::while_let_loop)]
@@ -866,80 +1022,166 @@ impl Service {
                 self.current_exec_argv = None;
             }
 
-            // Fork the last ExecStart command as the main process.
+            // Fork the last ExecStart command as the main process.  Extracted
+            // into fork_main_and_maybe_defer so the deferred multi-command
+            // oneshot driver can invoke the same main-fork for the final command
+            // without holding the RuntimeInfo table lock across the preliminary
+            // ExecStart= waits (07-pid1-exec-deserialization).
+            if let Some(deferred) =
+                self.fork_main_and_maybe_defer(conf, id.clone(), name, run_info, source, common)?
             {
-                let has_minus_prefix = conf
-                    .exec
-                    .last()
-                    .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
-                    .unwrap_or(false);
-                {
-                    let mut pid_table_locked = run_info.pid_table.lock_poisoned();
-                    // This mainly just forks the process. The waiting (if necessary) is done below
-                    // Doing it under the lock of the pid_table prevents races between processes exiting very
-                    // fast and inserting the new pid into the pid table
-                    match start_service(
-                        &run_info.config.self_path,
-                        self,
-                        conf,
-                        name,
-                        &run_info.fd_store.read_poisoned(),
-                    ) {
-                        Ok(()) => {
-                            if let Some(new_pid) = self.pid {
-                                pid_table_locked
-                                    .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
-                            }
+                return Ok(deferred);
+            }
+        } else {
+            // Exec-less oneshot service (e.g. systemd-reboot.service).
+            // No main process to fork — the service succeeds immediately.
+            trace!("Service {name} has no ExecStart, treating as immediately successful oneshot");
+        }
+        self.finish_start_tail(conf, id, name, run_info)
+    }
+
+    /// Fork the last ExecStart= command as the service's main process, copy the
+    /// MainPID/InvocationID to the lock-free Common fields, and either defer the
+    /// completion wait to a background thread (`Ok(Some(DeferredNotifyWait))`) or
+    /// perform it inline. Returns `Ok(None)` when the service is fully started
+    /// inline and the caller should run the post-start tail.
+    pub(crate) fn fork_main_and_maybe_defer(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+        source: ActivationSource,
+        common: &crate::units::Common,
+    ) -> Result<Option<StartResult>, ServiceErrorReason> {
+        {
+            let has_minus_prefix = conf
+                .exec
+                .last()
+                .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
+                .unwrap_or(false);
+            {
+                let mut pid_table_locked = run_info.pid_table.lock_poisoned();
+                // This mainly just forks the process. The waiting (if necessary) is done below
+                // Doing it under the lock of the pid_table prevents races between processes exiting very
+                // fast and inserting the new pid into the pid table
+                match start_service(
+                    &run_info.config.self_path,
+                    self,
+                    conf,
+                    name,
+                    &run_info.fd_store.read_poisoned(),
+                ) {
+                    Ok(()) => {
+                        if let Some(new_pid) = self.pid {
+                            pid_table_locked
+                                .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
                         }
-                        Err(e) if has_minus_prefix => {
-                            // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
-                            // Record the error exit status for ExecMainStatus property.
-                            trace!(
-                                "Ignore spawn error for ExecStart with '-' prefix for {name}: {e}"
-                            );
-                            self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
-                        }
-                        Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                     }
+                    Err(e) if has_minus_prefix => {
+                        // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
+                        // Record the error exit status for ExecMainStatus property.
+                        trace!("Ignore spawn error for ExecStart with '-' prefix for {name}: {e}");
+                        self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
+                        self.main_exit_termination =
+                            Some(crate::signal_handler::ChildTermination::Exit(203));
+                    }
+                    Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                 }
+            }
 
-                // Copy InvocationID to the lock-free Common field so that
-                // `systemctl show -P InvocationID` can read it even while
-                // the service state write-lock is held during wait_for_service.
-                if let Some(ref inv_id) = self.invocation_id {
-                    *common.invocation_id.lock().unwrap() = inv_id.clone();
-                }
+            // Copy InvocationID to the lock-free Common field so that
+            // `systemctl show -P InvocationID` can read it even while
+            // the service state write-lock is held during wait_for_service.
+            if let Some(ref inv_id) = self.invocation_id {
+                *common.invocation_id.lock().unwrap() = inv_id.clone();
+            }
 
-                // Copy MainPID to the lock-free Common field so that
-                // `systemctl show -P MainPID` works during oneshot activation.
-                if let Some(pid) = self.pid {
-                    common
-                        .main_pid
-                        .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
-                    common
-                        .main_exit_pid
-                        .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
-                }
+            // Copy MainPID to the lock-free Common field so that
+            // `systemctl show -P MainPID` works during oneshot activation.
+            if let Some(pid) = self.pid {
+                common
+                    .main_pid
+                    .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
+                common
+                    .main_exit_pid
+                    .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
+            }
 
-                // Only wait for the service if it was actually spawned (has a PID).
-                // NonBlocking: skip the READY=1 wait so the calling thread
-                // releases the RuntimeInfo read lock quickly.  The process is
-                // started (InvocationID set) but Type=notify services remain
-                // in Starting state instead of transitioning to Started.
-                if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
+            // Only wait for the service if it was actually spawned (has a PID).
+            // NonBlocking: skip the READY=1 wait so the calling thread
+            // releases the RuntimeInfo read lock quickly.  The process is
+            // started (InvocationID set) but Type=notify services remain
+            // in Starting state instead of transitioning to Started.
+            if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
                     // DeferNotifyWait: for Type=notify/NotifyReload services,
                     // defer the READY=1 wait to a background thread so the
                     // calling thread (in the activation thread pool) releases
                     // the RuntimeInfo read lock immediately.  The global
                     // notification handler will process READY=1 and set
                     // signaled_ready; a background thread polls for it.
-                    if matches!(source, ActivationSource::DeferNotifyWait)
-                        && matches!(
+                    // Defer the blocking start wait to a background thread for
+                    // every activation whose caller completes the unit
+                    // asynchronously (any non-`NonBlocking` source that spawns
+                    // the deferred handler: the normal thread-pool path via
+                    // `DeferNotifyWait`, and socket/trigger activation).  Holding
+                    // the RuntimeInfo read lock across the wait — whether for
+                    // Type=notify (READY=1) or Type=oneshot (process exit) —
+                    // starves control-socket writers such as `systemctl
+                    // daemon-reload` behind glibc's writer-preferring rwlock, so
+                    // a single hung service (e.g. a socket-activated notify
+                    // daemon, or `linger-users` whose `loginctl` blocks on
+                    // logind) can wedge the whole manager.  The background
+                    // handler polls signaled_ready / main_exit_status via
+                    // `try_read` and never starves writers; the service exit
+                    // handler and the periodic goal re-drive dispatch the
+                    // before-chain once the unit completes.
+                    let defer_wait = if crate::config::in_initrd() {
+                        // In the initrd, only the original narrow notify
+                        // deferral applies.  Deferring boot-critical initrd
+                        // oneshots (e.g. initrd-nixos-activation, which creates
+                        // /run/current-system before switch-root) races the
+                        // switch-root execve that tears the initrd manager down,
+                        // and the initrd has no control-socket writer to starve.
+                        matches!(source, ActivationSource::DeferNotifyWait)
+                            && matches!(
+                                conf.srcv_type,
+                                ServiceType::Notify | ServiceType::NotifyReload
+                            )
+                    } else {
+                        // In stage-2, defer every blocking wait for any
+                        // async-completing source so the calling thread never
+                        // holds the RuntimeInfo read lock across the wait and
+                        // cannot starve control-socket writers such as
+                        // `systemctl daemon-reload`.  This covers every service
+                        // type with a blocking start wait: notify (READY=1),
+                        // oneshot/forking (main process exit), dbus (bus name
+                        // appearing) and exec (exec confirmation window).
+                        // Simple/Idle have no wait and need no deferral.
+                        // Type=exec is excluded: its wait is a bounded ~500ms
+                        // exec-confirmation poll (fork_parent), so it cannot
+                        // wedge the manager, and keeping it inline preserves the
+                        // synchronous exec()-failure detection that
+                        // `systemctl start`/`systemd-run` rely on to report a
+                        // failed User=/binary.  The writer-pending gate already
+                        // prevents its brief read-lock hold from starving
+                        // daemon-reload.
+                        matches!(
+                            source,
+                            ActivationSource::DeferNotifyWait
+                                | ActivationSource::SocketActivation
+                                | ActivationSource::TriggerActivation
+                        ) && matches!(
                             conf.srcv_type,
-                            ServiceType::Notify | ServiceType::NotifyReload
+                            ServiceType::Notify
+                                | ServiceType::NotifyReload
+                                | ServiceType::OneShot
+                                | ServiceType::Forking
+                                | ServiceType::Dbus
                         )
-                    {
-                        return Ok(StartResult::DeferredNotifyWait);
+                    };
+                    if defer_wait {
+                        return Ok(Some(StartResult::DeferredNotifyWait));
                     }
                     super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
                         |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
@@ -951,12 +1193,19 @@ impl Service {
                     )?;
                 }
             }
-        } else {
-            // Exec-less oneshot service (e.g. systemd-reboot.service).
-            // No main process to fork — the service succeeds immediately.
-            trace!("Service {name} has no ExecStart, treating as immediately successful oneshot");
-        }
+        Ok(None)
+    }
 
+    /// Post-start tail shared by the inline start path and the deferred
+    /// multi-command oneshot driver: initialise the watchdog reference
+    /// timestamp, clear MONITOR_* env vars, and run ExecStartPost=.
+    fn finish_start_tail(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+    ) -> Result<StartResult, ServiceErrorReason> {
         // For non-notify services, initialize the watchdog reference
         // timestamp now (the process has been forked and is running).
         // For Type=notify services this will be overwritten when READY=1
@@ -1077,8 +1326,89 @@ impl Service {
         name: &str,
         run_info: &RuntimeInfo,
     ) -> Result<(), RunCmdError> {
+        // ExecStop= sees SERVICE_RESULT/EXIT_CODE/EXIT_STATUS as well, computed
+        // from how the main process terminated (parity with ExecStopPost= in
+        // run_poststop). Only set when a main actually ran and exited.
+        if let Some(term) = self.main_exit_termination {
+            let is_success = conf.success_exit_status.is_success(&term);
+            self.stop_result_env = Some(
+                crate::services::service_exit_handler::build_monitor_env(name, &term, is_success),
+            );
+        }
         self.run_stop_cmd(conf, id, name, run_info)
     }
+
+    /// Send a graceful SIGTERM to the service's main process (per `KillMode=`)
+    /// and wait up to `TimeoutStopSec` for it to exit, mirroring systemd's
+    /// `SIGTERM -> TimeoutStopSec -> SIGKILL` stop sequence. Runs in `kill()`
+    /// after `ExecStop=` and before the SIGKILL fallback: without it a service
+    /// with no `ExecStop=` was SIGKILLed immediately, so SIGTERM cleanup (shell
+    /// `trap`, `systemd-notify --stopping`) never ran (e.g. a `Type=notify-reload`
+    /// unit exited by signal, ExecMainStatus=9, instead of via its handler).
+    fn terminate_gracefully(&mut self, conf: &ServiceConfig, name: &str, run_info: &RuntimeInfo) {
+        if matches!(conf.kill_mode, KillMode::None) {
+            return;
+        }
+        // The sd_notify MAINPID (`main_pid`) overrides the forked `pid` for
+        // signal delivery; prefer it. `pid`/`main_pid` on the Service struct are
+        // cleared on some paths before the stop (e.g. a transient notify unit),
+        // so fall back to the live PID table entry, which still holds the
+        // running process under its `PidEntry::Service(unit_id, _)` until reap.
+        let pid = self.main_pid.or(self.pid).or_else(|| {
+            let pid_table = run_info.pid_table.lock_poisoned();
+            pid_table.iter().find_map(|(p, entry)| match entry {
+                PidEntry::Service(uid, _) if uid.name == name => Some(*p),
+                _ => None,
+            })
+        });
+        let Some(pid) = pid else {
+            trace!("Graceful stop: {name} has no live PID, skipping SIGTERM");
+            return;
+        };
+        {
+            let pid_table = run_info.pid_table.lock_poisoned();
+            match pid_table.get(&pid) {
+                Some(PidEntry::ServiceExited(_)) | None => {
+                    trace!("Graceful stop: {name} pid {pid} already exited, skipping SIGTERM");
+                    return;
+                }
+                _ => {}
+            }
+        }
+        let target = match conf.kill_mode {
+            KillMode::ControlGroup => self.process_group.unwrap_or(pid),
+            _ => pid,
+        };
+        match nix::sys::signal::kill(target, nix::sys::signal::Signal::SIGTERM) {
+            Ok(()) => trace!("Graceful stop: sent SIGTERM to {name} (target {target})"),
+            Err(nix::errno::Errno::ESRCH) => return,
+            Err(e) => {
+                warn!("Graceful stop: failed to send SIGTERM to {name} (target {target}): {e}");
+                return;
+            }
+        }
+        let timeout = self
+            .get_stop_timeout(conf)
+            .unwrap_or_else(|| std::time::Duration::from_secs(90));
+        let start = std::time::Instant::now();
+        loop {
+            {
+                let pid_table = run_info.pid_table.lock_poisoned();
+                match pid_table.get(&pid) {
+                    Some(PidEntry::ServiceExited(_)) | None => break,
+                    _ => {}
+                }
+            }
+            if start.elapsed() >= timeout {
+                log::info!(
+                    "Graceful stop: {name} did not exit within TimeoutStopSec, escalating to SIGKILL"
+                );
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     pub fn kill(
         &mut self,
         conf: &ServiceConfig,
@@ -1103,30 +1433,48 @@ impl Service {
             return Ok(());
         }
 
-        let result = self
-            .stop(conf, id.clone(), name, run_info)
-            .map_err(|stop_err| {
-                trace!(
-                    "Stop process failed with: {stop_err:?} for service: {name}. Running poststop commands"
-                );
-                match self.run_poststop(conf, id.clone(), name, run_info) {
-                    Ok(()) => ServiceErrorReason::StopFailed(stop_err),
-                    Err(poststop_err) => {
-                        ServiceErrorReason::StopAndPoststopFailed(stop_err, poststop_err)
-                    }
-                }
-            })
-            .and_then(|()| {
+        // Run ExecStop= commands first (real systemd runs ExecStop before it
+        // sends the kill signal).
+        let stop_res = self.stop(conf, id.clone(), name, run_info);
+
+        // Mark that this service was explicitly stopped so the exit handler
+        // suppresses automatic restart (Restart=always etc.).
+        self.manual_stop = true;
+
+        // Graceful SIGTERM to the main process (per KillMode) with a
+        // TimeoutStopSec wait, BEFORE run_poststop's SIGKILL fallback. Without
+        // this, run_poststop's kill_all_remaining_processes SIGKILLs the main
+        // process immediately, so its SIGTERM cleanup (shell `trap` handlers,
+        // `systemd-notify --stopping`, graceful shutdown) never runs -- e.g. a
+        // Type=notify-reload unit would exit by SIGKILL with ExecMainStatus=9
+        // instead of running its handler and exiting cleanly. Matches systemd's
+        // ExecStop -> SIGTERM -> TimeoutStopSec -> SIGKILL -> ExecStopPost stop
+        // sequence.
+        self.terminate_gracefully(conf, name, run_info);
+
+        // Run ExecStopPost= commands and SIGKILL any survivors (run_poststop
+        // also clears self.pid/process_group). Preserve the combined
+        // stop/poststop error semantics.
+        let result = match stop_res {
+            Ok(()) => {
                 trace!(
                     "Stop processes for service: {name} ran successfully. Running poststop commands"
                 );
                 self.run_poststop(conf, id.clone(), name, run_info)
                     .map_err(ServiceErrorReason::PoststopFailed)
-            });
-
-        // Mark that this service was explicitly stopped so the exit handler
-        // suppresses automatic restart (Restart=always etc.).
-        self.manual_stop = true;
+            }
+            Err(stop_err) => {
+                trace!(
+                    "Stop process failed with: {stop_err:?} for service: {name}. Running poststop commands"
+                );
+                match self.run_poststop(conf, id.clone(), name, run_info) {
+                    Ok(()) => Err(ServiceErrorReason::StopFailed(stop_err)),
+                    Err(poststop_err) => {
+                        Err(ServiceErrorReason::StopAndPoststopFailed(stop_err, poststop_err))
+                    }
+                }
+            }
+        };
 
         // Kill any remaining processes in the cgroup after ExecStop +
         // ExecStopPost have run, matching real systemd's behavior.
@@ -1187,47 +1535,106 @@ impl Service {
         }
     }
 
-    fn run_cmd(
+    /// Build and spawn a helper child process (ExecStartPre=/Post=, ExecStop=,
+    /// ExecCondition=, and the preliminary ExecStart= commands of multi-command
+    /// oneshots) and insert it into the pid_table as a Helper entry. Returns the
+    /// spawned `Child` WITHOUT waiting, so a caller can wait on it via the
+    /// pid_table Arc without holding the RuntimeInfo table lock.
+    pub(crate) fn spawn_helper_child(
         &mut self,
         cmdline: &Commandline,
         id: UnitId,
         name: &str,
-        timeout: Option<std::time::Duration>,
         run_info: &RuntimeInfo,
         working_directory: Option<&std::path::PathBuf>,
-    ) -> Result<(), RunCmdError> {
-        let mut cmd = Command::new(&cmdline.cmd);
-        if cmdline.prefixes.contains(&CommandlinePrefix::AtSign) {
+    ) -> std::io::Result<std::process::Child> {
+        // '|' login-shell prefix: run the command line through `sh -c "..."`
+        // (argv[0] = "-sh") so shell builtins, PATH resolution, and
+        // redirections work — matching the main ExecStart exec-helper path
+        // (exec_helper.rs login-shell wrapping). Without this, helper commands
+        // like ExecStartPre=|@echo a >/tmp/flag would exec the bare command
+        // directly, so the redirection is lost and bare command names fail to
+        // resolve. The '@' argv0 prefix is subsumed by the shell wrapping.
+        let mut cmd = if cmdline.prefixes.contains(&CommandlinePrefix::Pipe) {
+            use std::os::unix::process::CommandExt;
+            let mut cmd_str = cmdline.cmd.clone();
+            for arg in &cmdline.args {
+                cmd_str.push(' ');
+                cmd_str.push_str(arg);
+            }
+            // systemd env-expands the command (unescaping $$ -> $) before
+            // handing it to the shell, unless the ':' prefix disables
+            // expansion. Match that: without it, ExecStart=|@echo ...$$SHELL
+            // hands a raw $$ to the shell, which expands it to the shell's PID
+            // instead of the intended literal $SHELL (which the shell then
+            // expands itself).
+            let cmd_str = if cmdline.prefixes.contains(&CommandlinePrefix::Colon) {
+                cmd_str
+            } else {
+                crate::entrypoints::exec_helper::expand_env_str(&cmd_str)
+            };
+            let mut c = Command::new("/bin/sh");
+            c.arg0("-sh");
+            c.arg("-c");
+            c.arg(cmd_str);
+            c
+        } else if cmdline.prefixes.contains(&CommandlinePrefix::AtSign) {
             // With '@' prefix: first arg becomes argv[0], remaining args are normal arguments
             use std::os::unix::process::CommandExt;
+            let mut c = Command::new(&cmdline.cmd);
             if let Some(argv0) = cmdline.args.first() {
-                cmd.arg0(argv0);
+                c.arg0(argv0);
             }
             for part in cmdline.args.iter().skip(1) {
-                cmd.arg(part);
+                c.arg(part);
             }
+            c
         } else {
+            let mut c = Command::new(&cmdline.cmd);
             for part in &cmdline.args {
-                cmd.arg(part);
+                c.arg(part);
             }
-        }
+            c
+        };
         if let Some(dir) = working_directory {
             cmd.current_dir(dir);
         }
         use std::os::unix::io::FromRawFd;
-        let stdout = if let Some(stdio) = &self.stdout {
-            unsafe {
-                let duped = nix::unistd::dup(BorrowedFd::borrow_raw(stdio.write_fd())).unwrap();
-                Stdio::from(std::fs::File::from_raw_fd(duped.into_raw_fd()))
+        // Duplicate a raw fd into an owned `Stdio` for the child.  The dup is
+        // owned by the returned `Stdio` and closed once the child is spawned;
+        // it never consumes the source fd (e.g. `accepted_fd`, which the main
+        // exec path still owns and closes after fork).  A dup failure
+        // (EMFILE/EBADF) must never panic PID 1, so fall back to /dev/null.
+        let dup_to_stdio = |fd: RawFd| -> Stdio {
+            match nix::unistd::dup(unsafe { BorrowedFd::borrow_raw(fd) }) {
+                Ok(duped) => {
+                    Stdio::from(unsafe { std::fs::File::from_raw_fd(duped.into_raw_fd()) })
+                }
+                Err(e) => {
+                    warn!("run_cmd({name}): dup of fd {fd} failed ({e}); using /dev/null");
+                    Stdio::null()
+                }
             }
+        };
+        // ExecStartPre= (and the pre-main-fork oneshot commands) with
+        // StandardOutput=socket must write to the accepted connection, like the
+        // main process does — `self.stdout` is only a capture pipe for
+        // socket/journal output, so use the accepted fd directly when present.
+        // ExecStartPost=/ExecStopPost= run after the main fork has taken and
+        // closed `accepted_fd` (see start_service.rs), so they fall back to the
+        // capture pipe here; routing those to the socket too would require
+        // keeping the fd open past the fork, which no current test needs.
+        let stdout = if self.stdout_socket && let Some(fd) = self.accepted_fd {
+            dup_to_stdio(fd)
+        } else if let Some(stdio) = &self.stdout {
+            dup_to_stdio(stdio.write_fd())
         } else {
             Stdio::piped()
         };
-        let stderr = if let Some(stdio) = &self.stderr {
-            unsafe {
-                let duped = nix::unistd::dup(BorrowedFd::borrow_raw(stdio.write_fd())).unwrap();
-                Stdio::from(std::fs::File::from_raw_fd(duped.into_raw_fd()))
-            }
+        let stderr = if self.stderr_socket && let Some(fd) = self.accepted_fd {
+            dup_to_stdio(fd)
+        } else if let Some(stdio) = &self.stderr {
+            dup_to_stdio(stdio.write_fd())
         } else {
             Stdio::piped()
         };
@@ -1262,6 +1669,67 @@ impl Service {
             cmd.env("MONITOR_INVOCATION_ID", "0");
         }
 
+        // Pass SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to the service's own
+        // ExecStop=/ExecStopPost= commands (set only while those run), so a
+        // cleanup command can see how the service ended.
+        if let Some(ref r) = self.stop_result_env {
+            cmd.env("SERVICE_RESULT", &r.service_result);
+            cmd.env("EXIT_CODE", &r.exit_code);
+            cmd.env("EXIT_STATUS", &r.exit_status);
+        }
+
+        // Apply the unit's Environment= to helper commands (ExecStartPre=/Post=,
+        // ExecStop=, and the preliminary ExecStart= of multi-command oneshots).
+        // systemd exports these to helper processes too; e.g. the prefix-shell
+        // test sets SHLVL= and expects the '|'-wrapped login shell to increment
+        // it, which only works if the child actually sees it.
+        if let Some(unit) = run_info.unit_table.get(&id)
+            && let crate::units::Specific::Service(srvc) = &unit.specific
+            && let Some(env_vars) = srvc.conf.exec_config.environment.as_ref()
+        {
+            for (k, v) in &env_vars.vars {
+                cmd.env(k, v);
+            }
+        }
+
+        // ProtectControlGroupsEx=private + DelegateSubgroup=: control commands
+        // (ExecStartPre=/Post=/StopPost=) must run in a `.control` subgroup of the
+        // service cgroup, with the cgroup namespace rooted there, so their
+        // /proc/self/cgroup reads "0::/". This mirrors systemd's no-inner-processes
+        // handling: the delegated cgroup carries controllers in cgroup.subtree_control
+        // and therefore cannot hold processes directly, so helpers land in `.control`
+        // (a sibling of the delegated subgroup) rather than in init.scope. Registered
+        // before the mount-namespace pre_exec below so it runs while the real cgroupfs
+        // is still writable.
+        #[cfg(target_os = "linux")]
+        {
+            let control_cgroup = run_info.unit_table.get(&id).and_then(|unit| {
+                if let crate::units::Specific::Service(srvc) = &unit.specific
+                    && srvc.conf.exec_config.protect_control_groups_ex
+                        == crate::units::ProtectControlGroupsEx::Private
+                    && srvc.conf.platform_specific.delegate_subgroup.is_some()
+                {
+                    Some(srvc.conf.platform_specific.cgroup_path.join(".control"))
+                } else {
+                    None
+                }
+            });
+            if let Some(control) = control_cgroup {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    cmd.pre_exec(move || {
+                        let _ = std::fs::create_dir_all(&control);
+                        let _ = std::fs::write(
+                            control.join("cgroup.procs"),
+                            format!("{}\n", std::process::id()),
+                        );
+                        libc::unshare(libc::CLONE_NEWCGROUP);
+                        Ok(())
+                    });
+                }
+            }
+        }
+
         // JoinsNamespaceOf=: join the target service's mount namespace so
         // that preliminary ExecStart= commands in oneshot services see the
         // same filesystem view (e.g. PrivateTmp) as the target.
@@ -1292,22 +1760,43 @@ impl Service {
         }
 
         trace!("Run {cmdline:?} for service: {name}");
-        let spawn_result = {
-            let mut pid_table_locked = run_info.pid_table.lock_poisoned();
-            let res = cmd.spawn();
-            if let Ok(child) = &res {
-                pid_table_locked.insert(
-                    nix::unistd::Pid::from_raw(child.id() as i32),
-                    PidEntry::Helper(id.clone(), name.to_string()),
-                );
-            }
-            res
-        };
+        // Spawn WITHOUT holding the pid_table lock. Command::spawn() blocks on
+        // the exec-sync pipe until the child execs; if the child stalls pre-exec
+        // (e.g. a pre_exec hook allocating while another thread held the malloc
+        // arena lock at fork), holding pid_table across spawn() would pin it
+        // forever, freezing the SIGCHLD reaper and every oneshot/helper wait
+        // that polls pid_table. Insert the pid right after spawn() returns: the
+        // child has already exec'd but the helper has not run long enough to
+        // exit, so there is no reaper race window here.
+        let spawn_result = cmd.spawn();
+        if let Ok(child) = &spawn_result {
+            run_info.pid_table.lock_poisoned().insert(
+                nix::unistd::Pid::from_raw(child.id() as i32),
+                PidEntry::Helper(id.clone(), name.to_string()),
+            );
+        }
+        spawn_result
+    }
+
+    /// Spawn a helper command and wait for it to complete, processing its exit
+    /// status and captured stdout/stderr. Thin wrapper over
+    /// [`Self::spawn_helper_child`] + `wait_for_helper_child`.
+    fn run_cmd(
+        &mut self,
+        cmdline: &Commandline,
+        id: UnitId,
+        name: &str,
+        timeout: Option<std::time::Duration>,
+        run_info: &RuntimeInfo,
+        working_directory: Option<&std::path::PathBuf>,
+    ) -> Result<(), RunCmdError> {
+        let spawn_result =
+            self.spawn_helper_child(cmdline, id.clone(), name, run_info, working_directory);
         match spawn_result {
             Ok(mut child) => {
                 trace!("Wait for {cmdline:?} for service: {name}");
                 let wait_result: Result<(), RunCmdError> = match wait_for_helper_child(
-                    &child, run_info, timeout,
+                    &child, &run_info.pid_table, timeout,
                 ) {
                     WaitResult::InTime(Err(e)) => {
                         return Err(RunCmdError::WaitError(cmdline.to_string(), format!("{e}")));
@@ -1372,6 +1861,49 @@ impl Service {
                     Err(RunCmdError::SpawnError(cmdline.to_string(), format!("{e}")))
                 }
             }
+        }
+    }
+
+    /// Drain a helper child's piped stdout/stderr into the service's
+    /// buffers and forward complete lines to the journal, without blocking:
+    /// the pipes are switched to O_NONBLOCK and read until empty or EOF.
+    /// Used by the dispatcher's start chain after the helper's exit event;
+    /// data buffered by the exited helper is read, while output pipes still
+    /// held open by a grandchild are not waited for (the inline run_cmd
+    /// path blocks on EOF there, which the dispatcher must never do).
+    pub(crate) fn drain_helper_output_nonblocking(
+        &mut self,
+        child: &mut std::process::Child,
+        name: &str,
+        status: &crate::units::UnitStatus,
+    ) {
+        use std::os::fd::AsRawFd;
+        let drain = |raw_fd: i32, out: &mut Vec<u8>| {
+            let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFL) };
+            if flags >= 0 {
+                unsafe { libc::fcntl(raw_fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+            }
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = unsafe { libc::read(raw_fd, buf.as_mut_ptr().cast(), buf.len()) };
+                if n > 0 {
+                    out.extend_from_slice(&buf[..n as usize]);
+                } else {
+                    break;
+                }
+            }
+        };
+        if let Some(stream) = &mut child.stderr {
+            let mut collected = Vec::new();
+            drain(stream.as_raw_fd(), &mut collected);
+            self.stderr_buffer.extend(collected);
+            let _ = self.log_stderr_lines(name, status, None);
+        }
+        if let Some(stream) = &mut child.stdout {
+            let mut collected = Vec::new();
+            drain(stream.as_raw_fd(), &mut collected);
+            self.stdout_buffer.extend(collected);
+            let _ = self.log_stdout_lines(name, status, None);
         }
     }
 
@@ -1488,7 +2020,7 @@ impl Service {
         self.helper_mount_ns = None;
         res
     }
-    fn run_poststart(
+    pub(crate) fn run_poststart(
         &mut self,
         conf: &ServiceConfig,
         id: UnitId,
@@ -1520,6 +2052,18 @@ impl Service {
         run_info: &RuntimeInfo,
     ) -> Result<(), RunCmdError> {
         trace!("Run poststop for {name}");
+        // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=, computed
+        // from how the main process terminated. This is the deactivate()/kill()
+        // stop path; setting it here (from the persistent main_exit_termination
+        // recorded by the exit head) makes the env correct even though an inline
+        // exit-handler run may have cleared the field just before. Only set when a
+        // main actually ran and exited — a start-phase failure leaves it unset.
+        if let Some(term) = self.main_exit_termination {
+            let is_success = conf.success_exit_status.is_success(&term);
+            self.stop_result_env = Some(
+                crate::services::service_exit_handler::build_monitor_env(name, &term, is_success),
+            );
+        }
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stoppost.clone();
         self.helper_mount_ns = helper_mount_ns_from_conf(conf);
@@ -1539,6 +2083,18 @@ impl Service {
         }
         self.pid = None;
         self.process_group = None;
+        // RemoveIPC=yes: remove the (static) User='s IPC now that the processes
+        // are gone (mirrors the dispatcher stop path in finalize_stop_chain).
+        if conf.exec_config.remove_ipc {
+            let uid = self.dynamic_uid.or_else(|| {
+                crate::services::start_service::resolve_uid(&conf.exec_config.user).ok()
+            });
+            if let Some(uid) = uid
+                && uid != 0
+            {
+                crate::services::clean_ipc::clean_ipc_by_uid(uid);
+            }
+        }
         res
     }
 
@@ -1641,7 +2197,7 @@ impl Service {
     }
 }
 
-enum WaitResult {
+pub(crate) enum WaitResult {
     TimedOut,
     InTime(std::io::Result<crate::signal_handler::ChildTermination>),
 }
@@ -1651,9 +2207,9 @@ enum WaitResult {
 /// This might also happen because it was collected by the `signal_handler`.
 /// This could be fixed by using the `waitid()` with WNOWAIT in the signal handler but
 /// that has not been ported to rust
-fn wait_for_helper_child(
+pub(crate) fn wait_for_helper_child(
     child: &std::process::Child,
-    run_info: &RuntimeInfo,
+    pid_table: &ArcMutPidTable,
     time_out: Option<std::time::Duration>,
 ) -> WaitResult {
     let pid = nix::unistd::Pid::from_raw(child.id() as i32);
@@ -1666,22 +2222,33 @@ fn wait_for_helper_child(
             return WaitResult::TimedOut;
         }
         {
-            let mut pid_table_locked = run_info.pid_table.lock_poisoned();
+            let mut pid_table_locked = pid_table.lock_poisoned();
             match pid_table_locked.get(&pid) {
                 Some(entry) => {
                     match entry {
+                        // These two were `unreachable!()`, but they are
+                        // reachable: a helper's pid is registered only after
+                        // Command::spawn() returns (see spawn_helper_child), so
+                        // a short-lived helper can be classified by the reaper
+                        // before that insert lands.
+                        //
+                        // Panicking here is the worst available response. This
+                        // runs on an activation thread holding the RuntimeInfo
+                        // read lock; the panic unwinds silently (PID 1's log
+                        // output does not reach the console) and the lock is
+                        // released only by luck of unwinding, leaving the unit
+                        // wedged in Starting. Claim the status instead: we hold
+                        // this child's handle, so nobody else can claim it, and
+                        // ServiceExited carries the same ChildTermination.
                         PidEntry::ServiceExited(_) => {
-                            // Should never happen
-                            unreachable!(
-                                "Was waiting on helper process but pid got saved as PidEntry::OneshotExited"
-                            );
+                            let entry_owned = pid_table_locked.remove(&pid).unwrap();
+                            if let PidEntry::ServiceExited(termination_owned) = entry_owned {
+                                return WaitResult::InTime(Ok(termination_owned));
+                            }
                         }
-                        PidEntry::Service(_, _) => {
-                            // Should never happen
-                            unreachable!(
-                                "Was waiting on helper process but pid got saved as PidEntry::Service"
-                            );
-                        }
+                        // Same race caught one step earlier: keep waiting, it
+                        // becomes ServiceExited above.
+                        PidEntry::Service(_, _) => {}
                         PidEntry::Helper(_, _) => {
                             // Need to wait longer
                         }
@@ -1694,8 +2261,15 @@ fn wait_for_helper_child(
                     }
                 }
                 None => {
-                    // Should not happen. Either there is an Helper entry or a Exited entry
-                    unreachable!("No entry for child found")
+                    // Also reachable: the reaper discards the exit of a pid it
+                    // does not recognise, which is exactly what happens when a
+                    // helper outruns its own registration. Report a failed wait
+                    // so the caller fails the command, which is recoverable,
+                    // rather than panicking and wedging the unit.
+                    log::warn!(
+                        "No pid_table entry for helper child {pid}; its exit status was lost"
+                    );
+                    return WaitResult::InTime(Err(nix::errno::Errno::ECHILD.into()));
                 }
             }
         }

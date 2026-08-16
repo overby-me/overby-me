@@ -37,7 +37,6 @@
 use clap::Parser;
 use std::ffi::CString;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser, Debug)]
@@ -63,6 +62,10 @@ struct Cli {
     /// Place the transient unit in the specified slice.
     #[arg(long, value_name = "SLICE")]
     slice: Option<String>,
+
+    /// Inherit the slice from the caller, prefixing any --slice= value.
+    #[arg(long)]
+    slice_inherit: bool,
 
     /// Set a unit property. Can be specified multiple times.
     /// Format: NAME=VALUE
@@ -99,12 +102,32 @@ struct Cli {
     wait: bool,
 
     /// Unload the transient unit after it finished, even if it failed.
-    #[arg(long)]
+    ///
+    /// The short form matters beyond brevity: busctl builds a `unixexec:` bus
+    /// address containing `argv2=-PGq`, and a missing `-G` makes the whole
+    /// short-flag cluster fail to parse rather than just that one flag.
+    #[arg(short = 'G', long)]
     collect: bool,
 
     /// Set the working directory for the spawned process.
     #[arg(long, value_name = "DIR")]
-    working_directory: Option<PathBuf>,
+    /// Repeatable: an empty value RESETS it and the last value wins, matching
+    /// upstream. Kept as String rather than PathBuf because clap's PathBuf
+    /// parser rejects an empty value outright ("a value is required ... but
+    /// none was supplied"), which made `--working-directory=` a hard error
+    /// instead of a reset.
+    working_directory: Vec<String>,
+
+    /// Run in the caller's current directory (upstream `-d`).
+    #[arg(short = 'd', long)]
+    same_dir: bool,
+
+    /// Control expansion of $FOO/${FOO} in the command line (default yes).
+    /// --expand-environment=no maps to the same "no-env-expand" flag as the
+    /// `:` ExecStart prefix: the variables are still passed to the service,
+    /// they are just not substituted into its argv.
+    #[arg(long, value_name = "BOOL")]
+    expand_environment: Option<String>,
 
     /// Set an environment variable for the spawned process. Can be
     /// specified multiple times. Format: NAME=VALUE
@@ -329,7 +352,7 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Description: {desc}");
     }
 
-    if let Some(ref slice) = cli.slice {
+    if let Some(ref slice) = effective_slice(cli.slice.as_deref(), cli.slice_inherit) {
         eprintln!("Slice: {slice}");
     }
 
@@ -349,8 +372,8 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Group: {gid}");
     }
 
-    if let Some(ref wd) = cli.working_directory {
-        eprintln!("Working directory: {}", wd.display());
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        eprintln!("Working directory: {wd}");
     }
 
     for env in &cli.setenv {
@@ -442,9 +465,9 @@ fn apply_process_properties(cli: &Cli) -> Result<(), String> {
     }
 
     // Apply working directory
-    if let Some(ref wd) = cli.working_directory {
-        std::env::set_current_dir(wd)
-            .map_err(|e| format!("Failed to change directory to {}: {e}", wd.display()))?;
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        std::env::set_current_dir(&wd)
+            .map_err(|e| format!("Failed to change directory to {wd}: {e}"))?;
     }
 
     // Apply environment variables
@@ -475,7 +498,37 @@ fn try_create_transient_unit(
     use std::io::Write;
     use std::os::unix::net::UnixStream;
 
-    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
+    // `--user` connects to the per-user manager's control socket under
+    // $XDG_RUNTIME_DIR (see run_user_manager); the system manager uses its own
+    // fixed path.
+    //
+    // When a target user is named, as `-M someuser@.host` and `--uid=someuser`
+    // both do, the manager to talk to is THAT user's, not the caller's. Using
+    // the caller's $XDG_RUNTIME_DIR here meant `systemd-run --user -M
+    // someuser@.host` looked for root's socket, never found one, and silently
+    // fell back to running the command directly, so the target user's manager
+    // was never involved at all.
+    let user_socket_path;
+    let socket_path: &str = if cli.user {
+        let target_uid = cli
+            .uid
+            .as_deref()
+            .and_then(|u| match u.parse::<u32>() {
+                Ok(n) => Some(n),
+                Err(_) => lookup_user(u).ok().map(|(uid, _, _, _)| uid),
+            });
+        let runtime_dir = match target_uid {
+            Some(uid) => format!("/run/user/{uid}"),
+            None => std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() })),
+        };
+        user_socket_path = format!("{runtime_dir}/systemd/control.socket");
+        &user_socket_path
+    } else {
+        "/run/systemd/rust-systemd-notify/control.socket"
+    };
 
     let stream = match UnixStream::connect(socket_path) {
         Ok(s) => s,
@@ -489,6 +542,13 @@ fn try_create_transient_unit(
 
     if let Some(desc) = cli.description.last() {
         properties.insert("description".into(), Value::String(desc.clone()));
+    }
+
+    // --expand-environment=no becomes the ':' ExecStart prefix on the transient
+    // unit. Anything unparseable is treated as the default (expand), matching
+    // upstream's parse_boolean_argument fallback rather than failing the run.
+    if cli.expand_environment.as_deref().and_then(parse_tristate) == Some(false) {
+        properties.insert("no_env_expand".into(), Value::Bool(true));
     }
 
     if !cli.command.is_empty() {
@@ -512,11 +572,8 @@ fn try_create_transient_unit(
         properties.insert("nice".into(), Value::Number(nice.into()));
     }
 
-    if let Some(ref wd) = cli.working_directory {
-        properties.insert(
-            "working_directory".into(),
-            Value::String(wd.to_string_lossy().to_string()),
-        );
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        properties.insert("working_directory".into(), Value::String(wd));
     }
 
     if cli.scope {
@@ -534,8 +591,8 @@ fn try_create_transient_unit(
         properties.insert("pipe".into(), Value::Bool(true));
     }
 
-    if let Some(ref slice) = cli.slice {
-        properties.insert("slice".into(), Value::String(slice.clone()));
+    if let Some(slice) = effective_slice(cli.slice.as_deref(), cli.slice_inherit) {
+        properties.insert("slice".into(), Value::String(slice));
     }
 
     if let Some(service_type) = cli.service_type.last() {
@@ -546,14 +603,19 @@ fn try_create_transient_unit(
         properties.insert("remain_after_exit".into(), Value::Bool(true));
     }
 
-    // Pass -p / --property overrides
-    if !cli.property.is_empty() {
-        let props: Vec<Value> = cli
+    // Pass -p / --property overrides, plus --collect (maps to CollectMode=).
+    {
+        let mut props: Vec<Value> = cli
             .property
             .iter()
             .map(|s| Value::String(s.clone()))
             .collect();
-        properties.insert("properties".into(), Value::Array(props));
+        if cli.collect {
+            props.push(Value::String("CollectMode=inactive-or-failed".to_string()));
+        }
+        if !props.is_empty() {
+            properties.insert("properties".into(), Value::Array(props));
+        }
     }
 
     // Pass environment variables (resolve pass-through vars client-side)
@@ -685,13 +747,257 @@ fn try_create_transient_unit(
     Ok(Some(result))
 }
 
+/// The effective working directory, honouring upstream's reset semantics.
+///
+/// `--working-directory` may be repeated; the last occurrence wins and an empty
+/// value means "unset", so `--working-directory= --working-directory=/tmp`
+/// yields /tmp. `--same-dir` (`-d`) means the caller's own cwd, which is what
+/// run.c does with safe_getcwd().
+///
+/// Upstream parses both in one getopt loop, so strictly the last of the two
+/// wins. Here an explicit --working-directory takes precedence whenever it is
+/// given at all, and --same-dir applies only when it is not; the two are not
+/// combined in practice and this avoids depending on clap occurrence ordering.
+fn effective_working_directory(values: &[String], same_dir: bool) -> Option<String> {
+    if !values.is_empty() {
+        return values.last().filter(|s| !s.is_empty()).cloned();
+    }
+    if same_dir {
+        return std::env::current_dir()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
+    }
+    None
+}
+
+/// The slice the calling process itself lives in, e.g. `system.slice`.
+///
+/// Read from the cgroup v2 line in /proc/self/cgroup, taking the LAST path
+/// component ending in `.slice` so a nested slice wins over its parent.
+fn caller_slice() -> Option<String> {
+    let content = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = content.lines().find_map(|l| l.strip_prefix("0::"))?;
+    path.split('/')
+        .filter(|c| c.ends_with(".slice"))
+        .next_back()
+        .map(str::to_owned)
+}
+
+/// Resolve the effective `Slice=` for the transient unit.
+///
+/// Mirrors run.c: with --slice-inherit the caller's slice has its `.slice`
+/// suffix stripped and becomes a prefix, an explicit --slice= is appended after
+/// a `-`, and the result is re-suffixed. So `--slice-inherit --slice=foo` from
+/// inside system.slice gives `system-foo.slice`, which is how slice nesting is
+/// spelled. Without --slice-inherit the value is passed through untouched and
+/// PID 1 mangles it.
+fn effective_slice(slice: Option<&str>, inherit: bool) -> Option<String> {
+    if !inherit {
+        return slice.map(str::to_owned);
+    }
+    let Some(caller) = caller_slice() else {
+        eprintln!("Failed to determine the caller's slice for --slice-inherit");
+        std::process::exit(1);
+    };
+    let base = caller.strip_suffix(".slice").unwrap_or(&caller);
+    Some(match slice.filter(|s| !s.is_empty()) {
+        Some(extra) => {
+            let extra = extra.strip_suffix(".slice").unwrap_or(extra);
+            format!("{base}-{extra}.slice")
+        }
+        None => format!("{base}.slice"),
+    })
+}
+
+/// Parse a `yes`/`no`/`auto` tristate the way upstream's
+/// `parse_tristate_argument_with_auto()` does: `auto` (and anything
+/// unrecognised) leaves the decision to the caller's default.
+fn parse_tristate(v: &str) -> Option<bool> {
+    match v {
+        "1" | "yes" | "true" | "on" => Some(true),
+        "0" | "no" | "false" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Translate a `run0 [OPTIONS] COMMAND...` invocation into the equivalent
+/// `systemd-run` argument vector.  `run0` is upstream a multi-call alias of
+/// systemd-run that elevates: it runs COMMAND as the target user (root by
+/// default, or `--user`/`-u USER`) in a transient unit and forwards its stdio.
+/// We map that onto our existing systemd-run machinery: `--uid=USER` plus
+/// `--pipe --wait` so the command's output is streamed back to the caller.
+/// Options that run0 and systemd-run share (`--property`, `--slice`,
+/// `--setenv`, `--description`, `--working-directory`, `--nice`) pass through
+/// unchanged; the first non-option token begins COMMAND and everything after
+/// it is forwarded verbatim after a `--` separator.
+fn translate_run0(raw: &[String]) -> Vec<String> {
+    let mut out = vec![
+        "systemd-run".to_string(),
+        "--pipe".to_string(),
+        "--wait".to_string(),
+    ];
+
+    // run0 runs its command under a PAM stack so logind registers a session for
+    // it (upstream run.c: `PAMName=systemd-run0`). Without this no session is
+    // created at all and the session class below would have nothing to apply to.
+    out.push("--property".to_string());
+    out.push("PAMName=systemd-run0".to_string());
+
+    // Pre-scan for the target user and for an explicit XDG_SESSION_CLASS: both
+    // decide the session class below, and either can appear after the flag that
+    // needs it.
+    let mut target_user: Option<String> = None;
+    let mut class_preset = false;
+    let mut lightweight: Option<bool> = None;
+    {
+        let mut j = 1;
+        while j < raw.len() {
+            let a = raw[j].as_str();
+            let next = raw.get(j + 1).map(String::as_str);
+            match a {
+                "-u" | "--user" => {
+                    if let Some(v) = next {
+                        target_user = Some(v.to_string());
+                    }
+                }
+                "-E" | "--setenv" => {
+                    if next.is_some_and(|v| v.starts_with("XDG_SESSION_CLASS=")) {
+                        class_preset = true;
+                    }
+                }
+                s if s.starts_with("--user=") => target_user = Some(s["--user=".len()..].to_string()),
+                s if s.starts_with("--setenv=") => {
+                    if s["--setenv=".len()..].starts_with("XDG_SESSION_CLASS=") {
+                        class_preset = true;
+                    }
+                }
+                s if s.starts_with("--lightweight=") => {
+                    lightweight = parse_tristate(&s["--lightweight=".len()..]);
+                }
+                "--lightweight" => {
+                    if let Some(v) = next {
+                        lightweight = parse_tristate(v);
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+    }
+
+    // run0 with no --user targets root.
+    let become_root = target_user
+        .as_deref()
+        .is_none_or(|u| u == "root" || u == "0");
+
+    // Mirrors run.c: escalating to root should NOT pull in a full user service
+    // manager by default, because logind cannot tell run0-style escalation on a
+    // TTY apart from a getty-style login. A regular user transitioning to
+    // another regular user keeps the full environment, so no default there.
+    if lightweight.is_none() && become_root {
+        lightweight = Some(true);
+    }
+
+    if let Some(lw) = lightweight
+        && !class_preset
+    {
+        // Upstream keys the interactive variants off ARG_STDIO_PTY; we allocate
+        // a pty only when stdin is a terminal.
+        let pty = unsafe { libc::isatty(0) } == 1;
+        let class = match (lw, pty, become_root) {
+            (true, true, true) => "user-early-light",
+            (true, true, false) => "user-light",
+            (true, false, _) => "background-light",
+            (false, true, true) => "user-early",
+            (false, true, false) => "user",
+            (false, false, _) => "background",
+        };
+        out.push("--setenv".to_string());
+        out.push(format!("XDG_SESSION_CLASS={class}"));
+    }
+
+    let mut cmd: Vec<String> = Vec::new();
+    let mut i = 1;
+    while i < raw.len() {
+        let a = &raw[i];
+        match a.as_str() {
+            // Consumed by the pre-scan above; never forwarded to systemd-run,
+            // which has no such option.
+            "--lightweight" => {
+                i += if raw.get(i + 1).is_some() { 2 } else { 1 };
+                continue;
+            }
+            s if s.starts_with("--lightweight=") => {
+                i += 1;
+                continue;
+            }
+            "-u" | "--user" => {
+                if i + 1 < raw.len() {
+                    out.push(format!("--uid={}", raw[i + 1]));
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            s if s.starts_with("--user=") => {
+                out.push(format!("--uid={}", &s["--user=".len()..]));
+                i += 1;
+                continue;
+            }
+            // Value-bearing options shared with systemd-run: keep the flag and
+            // its argument together.
+            "-p" | "--property" | "--slice" | "--description" | "--setenv" | "-E"
+            | "--working-directory" | "-D" | "--nice" => {
+                out.push(a.clone());
+                if i + 1 < raw.len() {
+                    out.push(raw[i + 1].clone());
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            s if s.starts_with('-') => {
+                // Other leading flags overlap with systemd-run; pass through.
+                out.push(a.clone());
+                i += 1;
+                continue;
+            }
+            _ => {
+                // First bare token: COMMAND starts here, forward the rest.
+                cmd.extend_from_slice(&raw[i..]);
+                break;
+            }
+        }
+    }
+    if !cmd.is_empty() {
+        out.push("--".to_string());
+        out.extend(cmd);
+    }
+    out
+}
+
 fn main() {
     // Ignore SIGPIPE so piping output to grep/head/etc. doesn't panic.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
-    let mut cli = Cli::parse();
+    // `run0` is a multi-call alias of systemd-run that elevates privileges.
+    // Detect it by argv[0] and rewrite the argument vector before parsing.
+    let raw: Vec<String> = std::env::args().collect();
+    let invoked_as_run0 = raw
+        .first()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|n| n == "run0");
+
+    let mut cli = if invoked_as_run0 {
+        Cli::parse_from(translate_run0(&raw))
+    } else {
+        Cli::parse()
+    };
 
     // -v is shorthand for --pipe --wait --service-type=exec
     if cli.verbose {
@@ -729,6 +1035,28 @@ fn main() {
         {
             cli.uid = Some(user);
         }
+    }
+
+    // Ensure the target user's manager is running before we try to reach it.
+    //
+    // run0 needs this because it approximates a login session: real run0 gets
+    // there via PAM/logind (pam_systemd -> logind -> user@<uid>.service), and
+    // we start the unit directly instead. `systemd-run --user -M someuser@.host`
+    // needs exactly the same thing, since that user has no session and so no
+    // manager of their own; without it the connect below finds no socket and
+    // silently falls back to running the command directly.
+    //
+    // This must run AFTER the -M parsing above: that is what populates cli.uid
+    // for the -M form, so doing it earlier saw None and started nothing.
+    // Best-effort, and skipped for root, who is served by the system manager.
+    if (invoked_as_run0 || cli.user)
+        && let Some(user) = cli.uid.as_deref()
+        && !matches!(user, "0" | "root")
+        && let Ok((uid, _, _, _)) = lookup_user(user)
+    {
+        let _ = std::process::Command::new("systemctl")
+            .args(["start", &format!("user@{uid}.service")])
+            .status();
     }
 
     // Determine the command to run

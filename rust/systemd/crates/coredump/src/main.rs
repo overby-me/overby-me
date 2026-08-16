@@ -58,13 +58,20 @@ const DEFAULT_EXTERNAL_SIZE_MAX: u64 = 2 * 1024 * 1024 * 1024;
 /// Default maximum size of a core dump to process at all (2 GiB).
 const DEFAULT_PROCESS_SIZE_MAX: u64 = 2 * 1024 * 1024 * 1024;
 
-/// Default maximum total disk usage for stored core dumps (default: 10% of
-/// filesystem or 10 GiB, whichever is smaller — we use a fixed 10 GiB).
-const DEFAULT_MAX_USE: u64 = 10 * 1024 * 1024 * 1024;
+/// Sentinel meaning "MaxUse= is unset": resolve it at vacuum time as a fraction
+/// of the filesystem size (10%, capped at 4 GiB), mirroring upstream
+/// systemd-coredump. A fixed byte default here is wrong: on a small disk (e.g.
+/// a test VM) a fixed 10 GiB KeepFree makes every fresh dump get vacuumed away.
+const DEFAULT_MAX_USE: u64 = u64::MAX;
 
-/// Default minimum free disk space to maintain (15% of filesystem or 10 GiB,
-/// whichever is smaller — we use a fixed 10 GiB).
-const DEFAULT_KEEP_FREE: u64 = 10 * 1024 * 1024 * 1024;
+/// Sentinel meaning "KeepFree= is unset": resolve it at vacuum time as 15% of
+/// the filesystem size, mirroring upstream systemd-coredump.
+const DEFAULT_KEEP_FREE: u64 = u64::MAX;
+
+/// Cap for the auto-computed MaxUse (upstream systemd caps at 4 GiB).
+const MAX_USE_UPPER: u64 = 4 * 1024 * 1024 * 1024;
+/// Floor for the auto-computed MaxUse (upstream systemd floors at 1 MiB).
+const MAX_USE_LOWER: u64 = 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -657,6 +664,20 @@ fn enrich_from_proc(meta: &mut CoreDumpMeta) {
     meta.cmdline = read_proc_cmdline(meta.pid);
     meta.cgroup = read_proc_cgroup(meta.pid);
     meta.environ = read_proc_environ(meta.pid);
+    // comm and the executable path are not passed via the kernel core_pattern
+    // argv; read them from /proc/PID/ while the crashed process is still around
+    // (the kernel keeps it until this pipe handler exits). Only fill if empty so
+    // an explicitly-provided value (e.g. --backtrace mode) is preserved.
+    if meta.comm.is_empty()
+        && let Ok(comm) = std::fs::read_to_string(format!("/proc/{}/comm", meta.pid))
+    {
+        meta.comm = comm.trim_end().to_string();
+    }
+    if meta.exe.is_empty()
+        && let Ok(path) = std::fs::read_link(format!("/proc/{}/exe", meta.pid))
+    {
+        meta.exe = path.to_string_lossy().into_owned();
+    }
 }
 
 #[cfg(test)]
@@ -1117,6 +1138,10 @@ fn vacuum(coredump_dir: &Path, config: &Config) {
         return;
     }
 
+    // Resolve MaxUse=/KeepFree= (filesystem-relative when left at their unset
+    // sentinel), so a fresh dump is not vacuumed away on a small filesystem.
+    let (max_use, keep_free) = resolve_disk_limits(coredump_dir, config);
+
     // Calculate total size.
     let mut total_size: u64 = 0;
     for (core_path, meta_path, _) in &entries {
@@ -1129,7 +1154,7 @@ fn vacuum(coredump_dir: &Path, config: &Config) {
     }
 
     // Remove oldest entries while over limits.
-    while total_size > config.max_use && !entries.is_empty() {
+    while total_size > max_use && !entries.is_empty() {
         let (core_path, meta_path, _) = entries.remove(0);
 
         let mut freed: u64 = 0;
@@ -1147,11 +1172,10 @@ fn vacuum(coredump_dir: &Path, config: &Config) {
     }
 
     // Check keep-free against available disk space.
-    if config.keep_free > 0
+    if keep_free > 0
         && let Some(avail) = available_disk_space(coredump_dir)
     {
-        while avail + freed_so_far(&entries, coredump_dir) < config.keep_free && !entries.is_empty()
-        {
+        while avail + freed_so_far(&entries, coredump_dir) < keep_free && !entries.is_empty() {
             let (core_path, meta_path, _) = entries.remove(0);
             let _ = fs::remove_file(&core_path);
             let _ = fs::remove_file(&meta_path);
@@ -1183,6 +1207,51 @@ fn available_disk_space(path: &Path) -> Option<u64> {
     {
         None
     }
+}
+
+/// Total size (bytes) of the filesystem containing `path`, via statvfs.
+fn total_disk_space(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+
+        unsafe {
+            let mut stat: libc::statvfs = std::mem::zeroed();
+            if libc::statvfs(c_path.as_ptr(), &mut stat) == 0 {
+                Some(stat.f_blocks * stat.f_frsize)
+            } else {
+                None
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+/// Resolve the effective `MaxUse=` / `KeepFree=` limits, computing filesystem
+/// relative defaults (10% / 15% of the fs, MaxUse capped at 4 GiB) when the
+/// configured value is the "unset" sentinel — mirroring systemd-coredump.
+fn resolve_disk_limits(coredump_dir: &Path, config: &Config) -> (u64, u64) {
+    let fs_size = total_disk_space(coredump_dir);
+    let max_use = if config.max_use == DEFAULT_MAX_USE {
+        fs_size
+            .map(|s| (s / 10).clamp(MAX_USE_LOWER, MAX_USE_UPPER))
+            .unwrap_or(MAX_USE_UPPER)
+    } else {
+        config.max_use
+    };
+    let keep_free = if config.keep_free == DEFAULT_KEEP_FREE {
+        fs_size.map(|s| s * 15 / 100).unwrap_or(0)
+    } else {
+        config.keep_free
+    };
+    (max_use, keep_free)
 }
 
 /// Helper — not actually used for iterative removal, just a placeholder
@@ -1252,8 +1321,16 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         .map_err(|e| format!("invalid RLIMIT: {e}"))?;
 
     let hostname = iter.next().ok_or("missing HOSTNAME")?.clone();
-    let comm = iter.next().ok_or("missing COMM")?.clone();
-    let exe = iter.next().cloned().unwrap_or_default();
+    // The remaining core_pattern specifiers are %d (dumpable) and %F (pidfd);
+    // both were added to the kernel core_pattern in later versions and so are
+    // optional. Crucially, comm and the executable path are NOT passed via argv
+    // — upstream reads them from /proc/PID/ (see enrich_from_proc). Previously
+    // this code mistook %d/%F for comm/exe, storing e.g. COREDUMP_EXE="3" (a
+    // pidfd number), so `coredumpctl list <exe>` could never match the dump.
+    let _dumpable = iter.next();
+    let _pidfd = iter.next();
+    let comm = String::new();
+    let exe = String::new();
 
     Ok(Args {
         meta: CoreDumpMeta {
@@ -1344,20 +1421,22 @@ fn run() -> Result<(), String> {
         }
     }
 
-    // Send to journal if Storage is Journal or Both.
-    if config.storage == Storage::Journal || config.storage == Storage::Both {
-        // For journal-only storage, we still need to set filename for metadata
-        // even though no file was written to disk.
-        if config.storage == Storage::Journal {
-            meta.core_size = data.len() as u64;
-            meta.filename = build_filename(&meta, Compression::None);
-        }
-        send_to_journal(&meta);
-        eprintln!(
-            "Sent coredump metadata to journal for PID {} ({})",
-            meta.pid, meta.comm
-        );
+    // For journal-only storage, record the size (no external file was written).
+    if config.storage == Storage::Journal {
+        meta.core_size = data.len() as u64;
+        meta.filename = build_filename(&meta, Compression::None);
     }
+
+    // Always send the coredump metadata message to the journal. coredumpctl
+    // enumerates dumps by reading these journal entries (matched by
+    // MESSAGE_ID), so even externally-stored dumps need one — with
+    // Storage=external the entry carries COREDUMP_FILENAME pointing at the file
+    // under /var/lib/systemd/coredump/. (Storage=none already returned early.)
+    send_to_journal(&meta);
+    eprintln!(
+        "Sent coredump metadata to journal for PID {} ({})",
+        meta.pid, meta.comm
+    );
 
     // Vacuum old dumps (only relevant if we store externally).
     if config.storage == Storage::External || config.storage == Storage::Both {
@@ -1936,6 +2015,8 @@ mod tests {
 
     #[test]
     fn test_parse_args_basic() {
+        // Kernel core_pattern args: %P %u %g %s %t %c %h %d %F. The last two are
+        // dumpable and pidfd; comm/exe are NOT in argv (they come from /proc).
         let args: Vec<String> = vec![
             "systemd-coredump",
             "1234",
@@ -1945,8 +2026,8 @@ mod tests {
             "1700000000",
             "18446744073709551615",
             "myhost",
-            "myapp",
-            "/usr/bin/myapp",
+            "1", // %d dumpable
+            "3", // %F pidfd
         ]
         .into_iter()
         .map(String::from)
@@ -1960,8 +2041,9 @@ mod tests {
         assert_eq!(parsed.meta.timestamp, 1700000000);
         assert_eq!(parsed.meta.rlimit, u64::MAX);
         assert_eq!(parsed.meta.hostname, "myhost");
-        assert_eq!(parsed.meta.comm, "myapp");
-        assert_eq!(parsed.meta.exe, "/usr/bin/myapp");
+        // comm/exe are populated later from /proc, not from argv.
+        assert_eq!(parsed.meta.comm, "");
+        assert_eq!(parsed.meta.exe, "");
         assert!(!parsed.meta.backtrace);
     }
 

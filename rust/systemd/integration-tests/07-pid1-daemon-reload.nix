@@ -61,6 +61,22 @@
     EOF
     systemctl daemon-reload
     [[ "$(systemctl show -P Description reload-test-change.service)" == "Updated Description" ]]
+
+    : "daemon-reload preserves a running service (same MainPID, still active)"
+    cat > /run/systemd/system/reload-test-running.service << EOF
+    [Service]
+    ExecStart=sleep infinity
+    EOF
+    systemctl daemon-reload
+    systemctl start reload-test-running.service
+    PID_BEFORE="$(systemctl show -P MainPID reload-test-running.service)"
+    [[ "$PID_BEFORE" -gt 0 ]]
+    systemctl daemon-reload
+    # Reload re-reads config but must not restart running units.
+    systemctl is-active reload-test-running.service
+    [[ "$(systemctl show -P MainPID reload-test-running.service)" == "$PID_BEFORE" ]]
+    systemctl stop reload-test-running.service
+    rm -f /run/systemd/system/reload-test-running.service
     DREOF
   '';
 }

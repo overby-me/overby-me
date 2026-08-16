@@ -936,6 +936,13 @@ struct TimesyncState {
     frequency: i64,
     /// Last NTP message fields for NTPMessage property.
     ntp_message: NtpMessageFields,
+    /// Runtime NTP servers set via the SetRuntimeNTPServers() D-Bus method,
+    /// exposed as the RuntimeNTPServers property.
+    runtime_ntp_servers: Vec<String>,
+    /// Per-link NTP servers aggregated from networkd's link state files under
+    /// /run/systemd/netif/links (the NTP= lines it writes for SetLinkNTP /
+    /// configured NTP=), exposed as the LinkNTPServers property.
+    link_ntp_servers: Vec<String>,
 }
 
 /// Fields from the last NTP exchange, exposed as the NTPMessage property.
@@ -983,6 +990,8 @@ impl Default for TimesyncState {
             server_address: String::new(),
             frequency: 0,
             ntp_message: NtpMessageFields::default(),
+            runtime_ntp_servers: Vec::new(),
+            link_ntp_servers: Vec::new(),
         }
     }
 }
@@ -1075,6 +1084,18 @@ impl Timesync1Manager {
         s.poll_interval_usec
     }
 
+    #[zbus(property, name = "RuntimeNTPServers")]
+    fn runtime_ntp_servers(&self) -> Vec<String> {
+        let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        s.runtime_ntp_servers.clone()
+    }
+
+    #[zbus(property, name = "LinkNTPServers")]
+    fn link_ntp_servers(&self) -> Vec<String> {
+        let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        s.link_ntp_servers.clone()
+    }
+
     // --- Methods ---
 
     // Describe() → s (JSON description)
@@ -1134,6 +1155,25 @@ impl Timesync1Manager {
             ntp.delay_usec,
         )
     }
+
+    // SetRuntimeNTPServers(as): replace the runtime NTP server list and emit a
+    // PropertiesChanged signal for RuntimeNTPServers when it actually changes.
+    #[zbus(name = "SetRuntimeNTPServers")]
+    async fn set_runtime_ntp_servers(
+        &self,
+        servers: Vec<String>,
+        #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        {
+            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if s.runtime_ntp_servers == servers {
+                return Ok(());
+            }
+            s.runtime_ntp_servers = servers;
+        }
+        self.runtime_n_t_p_servers_changed(&emitter).await?;
+        Ok(())
+    }
 }
 
 /// Escape a string for embedding in JSON.
@@ -1169,6 +1209,72 @@ fn setup_dbus(shared: SharedState) -> Result<Connection, String> {
         .build()
         .map_err(|e| format!("D-Bus connection failed: {}", e))?;
     Ok(conn)
+}
+
+/// Spawn a background thread that watches networkd's per-link state files under
+/// `/run/systemd/netif/links` for NTP server changes and emits a
+/// `LinkNTPServers` PropertiesChanged signal when the aggregated list changes.
+/// This mirrors upstream timesyncd tracking link NTP via sd-network, and drives
+/// the `assert_timesyncd_signal LinkNTPServers` half of TEST-45-TIMEDATE.
+fn spawn_link_ntp_watch(conn: Connection, shared: SharedState) {
+    let _ = std::thread::Builder::new()
+        .name("timesyncd-link-ntp".into())
+        .spawn(move || {
+            loop {
+                let current = read_link_ntp_servers();
+                let changed = {
+                    let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.link_ntp_servers != current {
+                        s.link_ntp_servers = current;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if changed
+                    && let Ok(emitter) =
+                        zbus::object_server::SignalEmitter::new(conn.inner(), DBUS_PATH)
+                {
+                    let iface = Timesync1Manager {
+                        state: shared.clone(),
+                    };
+                    let _ = zbus::block_on(iface.link_n_t_p_servers_changed(&emitter));
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        });
+}
+
+/// Aggregate the NTP servers networkd has recorded for every managed link,
+/// reading the `NTP=` lines from each `/run/systemd/netif/links/<ifindex>`
+/// state file in ascending ifindex order.
+fn read_link_ntp_servers() -> Vec<String> {
+    let dir = std::path::Path::new("/run/systemd/netif/links");
+    let mut links: Vec<(u32, std::path::PathBuf)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            if let Some(name) = entry.file_name().to_str()
+                && let Ok(idx) = name.parse::<u32>()
+            {
+                links.push((idx, entry.path()));
+            }
+        }
+    }
+    links.sort_by_key(|(idx, _)| *idx);
+    let mut out = Vec::new();
+    for (_, path) in links {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            for line in content.lines() {
+                if let Some(v) = line.strip_prefix("NTP=") {
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        out.push(v.to_string());
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Read current frequency adjustment from adjtimex (in PPB).
@@ -1298,6 +1404,10 @@ impl TimesyncDaemon {
                 match setup_dbus(self.shared_state.clone()) {
                     Ok(conn) => {
                         log::info!("D-Bus interface registered: {} at {}", DBUS_NAME, DBUS_PATH);
+                        // Watch networkd's link state files for NTP changes and
+                        // emit LinkNTPServers PropertiesChanged (the timesyncd
+                        // half of TEST-45-TIMEDATE testcase_timesyncd).
+                        spawn_link_ntp_watch(conn.clone(), self.shared_state.clone());
                         _dbus_conn = Some(conn);
                     }
                     Err(e) => {

@@ -20,8 +20,12 @@
     UEOF
     systemctl daemon-reload
     systemctl mask "$UNIT.service"
+    systemctl daemon-reload
     STATE="$(systemctl is-enabled "$UNIT.service" 2>&1 || true)"
-    [[ "$STATE" == "masked" || "$STATE" == *"masked"* ]]
+    [[ "$STATE" == "masked" ]]
+    # A masked unit must refuse to start or restart (mask's defining behavior).
+    (! systemctl start "$UNIT.service" 2>/dev/null)
+    (! systemctl restart "$UNIT.service" 2>/dev/null)
     systemctl unmask "$UNIT.service"
     rm -f "/run/systemd/system/$UNIT.service"
     systemctl daemon-reload

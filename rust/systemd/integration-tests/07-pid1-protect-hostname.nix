@@ -14,14 +14,16 @@
 
     LEGACY_HOSTNAME="$(hostname)"
 
-    : "ProtectHostname=yes isolates hostname changes from host"
-    systemd-run --wait -p ProtectHostname=yes \
-        -P bash -xec 'hostname foo; test "$(hostname)" = "foo"'
+    : "ProtectHostname=yes blocks sethostname (seccomp) and isolates from host"
+    (! systemd-run --wait -p ProtectHostname=yes \
+        -P bash -xec 'hostname foo')
     test "$(hostname)" = "$LEGACY_HOSTNAME"
 
-    : "ProtectHostname=yes:hoge sets hostname in UTS namespace"
+    : "ProtectHostname=yes:hoge sets the hostname but blocks further changes"
     systemd-run --wait -p ProtectHostname=yes:hoge \
         -P bash -xec '
+            test "$(hostname)" = "hoge"
+            (! hostname foo)
             test "$(hostname)" = "hoge"
         '
     test "$(hostname)" = "$LEGACY_HOSTNAME"

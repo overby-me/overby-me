@@ -32,6 +32,35 @@ pub fn prune_units(
     let mut ids_to_keep = vec![startunit_id];
     crate::units::collect_unit_start_subgraph(&mut ids_to_keep, unit_table);
 
+    // Also keep the full closure of every AllowIsolate=yes target. Such targets
+    // (e.g. initrd-switch-root.target) are never part of the boot target's
+    // subgraph — they are reached only later via `systemctl isolate` — but their
+    // dependency closure must stay loaded AND fully wired here, while the
+    // multi-pass loader still has every unit in the table. Pruning them and
+    // reloading on demand at isolate time loses the dependencies that only the
+    // full load computes: .requires//.wants/ directory dependencies and the
+    // reverse ordering edges from inline Before=/After=. Concretely,
+    // initrd-switch-root.service Requires= initrd-nixos-activation.service via a
+    // .requires/ directory and is ordered after it; that service runs the NixOS
+    // activation that populates /etc in the real root. Losing it lets switch-root
+    // run before /etc exists, so stage-2 PID 1 finds no default.target and dies.
+    let isolate_target_ids: Vec<UnitId> = unit_table
+        .values()
+        .filter(|u| u.common.unit.allow_isolate)
+        .map(|u| u.id.clone())
+        .collect();
+    let mut added_isolate_root = false;
+    for iso_id in isolate_target_ids {
+        if !ids_to_keep.contains(&iso_id) {
+            ids_to_keep.push(iso_id);
+            added_isolate_root = true;
+        }
+    }
+    if added_isolate_root {
+        // Expand the newly-added isolate targets' subgraphs into ids_to_keep.
+        crate::units::collect_unit_start_subgraph(&mut ids_to_keep, unit_table);
+    }
+
     // Also keep services that are socket-activation targets of surviving sockets.
     // These services are not in the initial start subgraph (they start on-demand
     // when a connection arrives on the socket), but they must remain in the unit
@@ -54,6 +83,29 @@ pub fn prune_units(
     }
     ids_to_keep.extend(socket_activation_services);
 
+    // Also keep D-Bus-activatable services (those declaring BusName=). Like
+    // socket-activation targets, they are not part of the boot start subgraph,
+    // but a bus client can trigger their activation at any time: dbus-daemon
+    // asks PID 1 to start dbus-<busname>.service (an alias of the real unit),
+    // so the unit must remain in the table to be found and started on demand.
+    let mut dbus_activation_services = Vec::new();
+    for (id, unit) in unit_table.iter() {
+        if ids_to_keep.contains(id) {
+            continue;
+        }
+        if let Specific::Service(svc) = &unit.specific
+            && svc.conf.dbus_name.is_some()
+        {
+            trace!(
+                "Keeping D-Bus-activatable service {} (BusName={})",
+                id.name,
+                svc.conf.dbus_name.as_deref().unwrap_or("")
+            );
+            dbus_activation_services.push(id.clone());
+        }
+    }
+    ids_to_keep.extend(dbus_activation_services);
+
     // Remove all units that have been deemed unnecessary
     let mut ids_to_remove = Vec::new();
     for id in unit_table.keys() {
@@ -74,7 +126,10 @@ pub fn prune_units(
                     .conf
                     .sockets
                     .iter()
-                    .filter(|id| ids_to_keep.contains(id))
+                    .filter(|id| {
+                        ids_to_keep.contains(id)
+                            || matches!(id.kind, crate::units::UnitIdKind::Device)
+                    })
                     .cloned()
                     .collect();
             }
@@ -83,7 +138,10 @@ pub fn prune_units(
                     .conf
                     .services
                     .iter()
-                    .filter(|id| ids_to_keep.contains(id))
+                    .filter(|id| {
+                        ids_to_keep.contains(id)
+                            || matches!(id.kind, crate::units::UnitIdKind::Device)
+                    })
                     .cloned()
                     .collect();
             }
@@ -101,7 +159,9 @@ pub fn prune_units(
             .dependencies
             .before
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -110,7 +170,9 @@ pub fn prune_units(
             .dependencies
             .after
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -119,7 +181,9 @@ pub fn prune_units(
             .dependencies
             .requires
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -128,7 +192,9 @@ pub fn prune_units(
             .dependencies
             .wants
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -137,7 +203,9 @@ pub fn prune_units(
             .dependencies
             .required_by
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -146,7 +214,9 @@ pub fn prune_units(
             .dependencies
             .wanted_by
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -155,7 +225,9 @@ pub fn prune_units(
             .dependencies
             .conflicts
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -164,7 +236,9 @@ pub fn prune_units(
             .dependencies
             .conflicted_by
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -210,12 +284,19 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         for id in &conf.after {
             before.push((unit.id.clone(), id.clone()));
         }
-        for id in &conf.wanted_by {
-            wanted_by.push((unit.id.clone(), id.clone()));
-        }
-        for id in &conf.required_by {
-            required_by.push((unit.id.clone(), id.clone()));
-        }
+        // NOTE: conf.wanted_by / conf.required_by come from [Install]
+        // WantedBy=/RequiredBy=, which are enable-time metadata only:
+        // `systemctl enable` writes the .wants/.requires symlink and
+        // directory_deps turns those into real edges. They must NOT be
+        // synthesized into a live `target.wants += unit` here (the loop
+        // below would do exactly that), or a never-enabled unit becomes a
+        // live want of its target and gets started on the next target
+        // activation. This is the residual half of the 26-SYSTEMCTL
+        // is-active failure (the insert_new reload path was fixed earlier;
+        // daemon-reload's full resolve runs THIS path). The reverse index
+        // (unit.wanted_by / unit.required_by) is already set from the
+        // parsed [Install] section by from_parsed_config, so dropping the
+        // synthesis loses nothing for enabled units.
         // PartOf=B on unit A means: when B stops, A stops too.
         // Collect (target, dependent) pairs so we can fill part_of_by on the target.
         for id in &conf.part_of {
@@ -327,20 +408,45 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
     let existing_ids: std::collections::HashSet<UnitId> = units.keys().cloned().collect();
     for unit in units.values_mut() {
         let deps = &mut unit.common.dependencies;
-        deps.wants.retain(|id| existing_ids.contains(id));
-        deps.wanted_by.retain(|id| existing_ids.contains(id));
-        deps.requires.retain(|id| existing_ids.contains(id));
-        deps.required_by.retain(|id| existing_ids.contains(id));
-        deps.conflicts.retain(|id| existing_ids.contains(id));
-        deps.conflicted_by.retain(|id| existing_ids.contains(id));
-        deps.part_of.retain(|id| existing_ids.contains(id));
-        deps.part_of_by.retain(|id| existing_ids.contains(id));
-        deps.binds_to.retain(|id| existing_ids.contains(id));
-        deps.bound_by.retain(|id| existing_ids.contains(id));
-        deps.upholds.retain(|id| existing_ids.contains(id));
-        deps.upheld_by.retain(|id| existing_ids.contains(id));
-        deps.propagates_stop_to
-            .retain(|id| existing_ids.contains(id));
+        deps.wants.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.wanted_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.requires.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.required_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.conflicts.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.conflicted_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.part_of.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.part_of_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.binds_to.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.bound_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.upholds.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.upheld_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.propagates_stop_to.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
         // Keep refs_by_name un-pruned: it preserves the original dependency
         // references from the unit file so that on-demand loading (e.g.
         // `systemctl restart` of a target whose Wants= service didn't exist
@@ -466,14 +572,67 @@ fn add_default_dependency_relations(units: &mut UnitTable) {
                     add_after_to_sysinit.push(unit.id.clone());
                 }
             }
+            UnitIdKind::Mount => {
+                // systemd's mount_add_default_dependencies: order the mount after
+                // its fs-pre target (and backing device) and before the fs
+                // target. Applies to statically-loaded / fstab mount units;
+                // runtime-synthesised mounts get the same deps in mount_monitor.
+                let deps = if let crate::units::Specific::Mount(m) = &unit.specific {
+                    // The root mount and API pseudo-filesystems are ordered
+                    // specially in early boot (the fstab generator puts / BEFORE
+                    // local-fs-pre.target); adding the normal After= there would
+                    // create an ordering cycle, so skip them.
+                    let fstype = m.conf.fs_type.as_deref().unwrap_or("");
+                    let is_api = matches!(
+                        fstype,
+                        "proc" | "sysfs" | "devtmpfs" | "devpts" | "cgroup" | "cgroup2"
+                            | "mqueue" | "hugetlbfs" | "debugfs" | "tracefs" | "securityfs"
+                            | "pstore" | "bpf" | "configfs" | "fusectl" | "efivarfs"
+                            | "binfmt_misc" | "autofs" | "ramfs"
+                    );
+                    if m.conf.where_ == "/" || is_api {
+                        None
+                    } else {
+                        let is_network = crate::units::mount_is_network_static(
+                            Some(fstype),
+                            m.conf.options.as_deref(),
+                        );
+                        Some(crate::units::mount_default_deps(&m.conf.what, is_network))
+                    }
+                } else {
+                    None
+                };
+                if let Some((na, nb, nw, nr)) = deps {
+                    let d = &mut unit.common.dependencies;
+                    for n in na {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.after.push(uid);
+                        }
+                    }
+                    for n in nb {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.before.push(uid);
+                        }
+                    }
+                    for n in nw {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.wants.push(uid);
+                        }
+                    }
+                    for n in nr {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.requires.push(uid);
+                        }
+                    }
+                }
+            }
             UnitIdKind::Target
             | UnitIdKind::Slice
-            | UnitIdKind::Mount
             | UnitIdKind::Swap
             | UnitIdKind::Device
             | UnitIdKind::Timer
             | UnitIdKind::Path => {
-                // Targets, slices, mounts, swaps, devices, timers, and paths only get the
+                // Targets, slices, swaps, devices, timers, and paths only get the
                 // shutdown.target conflict/before (already added above).
             }
         }

@@ -85,6 +85,12 @@ fn main() -> ExitCode {
     let rd_fstab_disabled = cmdline_flag_off(&cmdline, "rd.fstab");
     let swap_disabled = cmdline_flag_off(&cmdline, "systemd.swap");
     let skip_fstab = fstab_disabled || (in_initrd && rd_fstab_disabled);
+    // `root=fstab` means the real root's filesystems are declared in the main
+    // fstab (via x-initrd.mount) and must be mounted under /sysroot in the
+    // initrd.  Without it, the main fstab is the initrd's OWN fstab and its
+    // entries are initrd-local (never /sysroot-prefixed).
+    let root_is_fstab =
+        parse_cmdline_kv(&cmdline, "root=").map(|v| v == "fstab").unwrap_or(false);
 
     // In initrd, we may have TWO fstabs to process:
     //   * SYSTEMD_FSTAB — the initrd's own fstab (treated as regular entries)
@@ -97,7 +103,19 @@ fn main() -> ExitCode {
         match load_fstab(&fstab_path) {
             Ok(entries) => {
                 for e in entries {
-                    all_entries.push((e, false));
+                    // Only with `root=fstab` is the main fstab the real root's
+                    // fstab, whose x-initrd.mount entries are mounted under
+                    // /sysroot (the `/` entry becoming sysroot.mount) before
+                    // switch-root.  Otherwise the main fstab is the initrd's
+                    // OWN fstab: its entries are initrd-local mounts used as-is
+                    // and are NEVER /sysroot-prefixed, even when flagged
+                    // x-initrd.mount.  TEST-81 initrd-initrd-fstab verifies
+                    // `/initrd/mount` → initrd-mount.mount (not sysroot-…);
+                    // the initrd_sysroot.rs test covers the root=fstab case.
+                    let prefix = in_initrd
+                        && root_is_fstab
+                        && parse_csv(&e.options).contains(&"x-initrd.mount");
+                    all_entries.push((e, prefix));
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -141,32 +159,68 @@ fn main() -> ExitCode {
         // in initrd mode.
         let mut entry = entry.clone();
         if *prefix_sysroot {
-            entry.where_ = format!("/sysroot{}", entry.where_);
+            // "/" → "/sysroot" (the root mount, exactly), not "/sysroot/";
+            // "/nix/store" → "/sysroot/nix/store". The exact "/sysroot" is what
+            // routes to initrd-root-fs.target below.
+            entry.where_ = if entry.where_ == "/" {
+                "/sysroot".to_string()
+            } else {
+                format!("/sysroot{}", entry.where_)
+            };
         }
-        // Duplicate mountpoint detection — matches upstream.
-        if seen_mountpoints.contains(&entry.where_) {
-            eprintln!(
-                "systemd-fstab-generator: duplicate mountpoint {} in fstab, failing",
-                entry.where_
-            );
-            had_error = true;
-            continue;
+        // Duplicate mountpoint detection — matches upstream. Only real mount
+        // points (absolute paths) are deduplicated; swap entries carry a
+        // pseudo target (`none`/`swap`) and are keyed by device, so C accepts
+        // many of them.
+        if entry.where_.starts_with('/') {
+            if seen_mountpoints.contains(&entry.where_) {
+                eprintln!(
+                    "systemd-fstab-generator: duplicate mountpoint {} in fstab, failing",
+                    entry.where_
+                );
+                had_error = true;
+                continue;
+            }
+            seen_mountpoints.insert(entry.where_.clone());
         }
-        seen_mountpoints.insert(entry.where_.clone());
 
         if swap_disabled && entry.fstype == "swap" {
             continue;
         }
-        let result = if entry.fstype == "swap" {
-            emit_swap_unit(&normal_dir, &entry)
+        // The unit's SourcePath is the fstab the entry came from: the sysroot
+        // fstab for /sysroot-prefixed (host) entries, otherwise the main fstab.
+        let source = if *prefix_sysroot {
+            sysroot_fstab_path.as_deref().unwrap_or(&fstab_path)
         } else {
-            emit_mount_unit(&normal_dir, &entry, in_initrd)
+            &fstab_path
+        };
+        let result = if entry.fstype == "swap" {
+            emit_swap_unit(&normal_dir, &entry, source)
+        } else {
+            emit_mount_unit(&normal_dir, &entry, in_initrd, source)
         };
         if let Err(e) = result {
             eprintln!(
                 "systemd-fstab-generator: failed to emit unit for {}: {e}",
                 entry.where_
             );
+            had_error = true;
+        }
+    }
+
+    // In a normal boot (not initrd), enable systemd-remount-fs.service so the
+    // root and /usr filesystems are remounted with their fstab options after
+    // the initial mount. C does this unconditionally whenever it processes an
+    // fstab outside the initrd (generator_enable_remount_fs_service).
+    if !in_initrd && !skip_fstab {
+        let wants_dir = normal_dir.join("local-fs.target.wants");
+        let result = fs::create_dir_all(&wants_dir).and_then(|()| {
+            let link = wants_dir.join("systemd-remount-fs.service");
+            let _ = fs::remove_file(&link);
+            unix_fs::symlink("/lib/systemd/system/systemd-remount-fs.service", &link)
+        });
+        if let Err(e) = result {
+            eprintln!("systemd-fstab-generator: cannot enable systemd-remount-fs.service: {e}");
             had_error = true;
         }
     }
@@ -298,6 +352,14 @@ fn resolve_disk_spec(spec: &str) -> String {
     }
 }
 
+/// If `node` is a `/dev/` device path, return its unit-name-escaped form for a
+/// `blockdev@<esc>.target` ordering dependency; otherwise None (tmpfs/network
+/// mounts get none). Mirrors C's generator_write_blockdev_dependency.
+fn blockdev_escape(node: &str) -> Option<String> {
+    node.starts_with("/dev/")
+        .then(|| unit_name_path_escape(node))
+}
+
 fn emit_initrd_usr_mounts(
     out_dir: &Path,
     device: &str,
@@ -370,6 +432,12 @@ fn parse_root_from_cmdline() -> Option<String> {
         if let Some(v) = token.strip_prefix("root=") {
             let v = v.trim_matches('"');
             if v.is_empty() {
+                return None;
+            }
+            // `root=fstab` / `root=gpt-auto` are not devices: they tell the
+            // initrd to take the root mount from /etc/fstab or gpt-auto-generator
+            // instead. Don't synthesize a bogus sysroot.mount for them.
+            if v == "fstab" || v == "gpt-auto" {
                 return None;
             }
             // Accept raw paths, LABEL=, UUID=, PARTUUID=, PARTLABEL=.
@@ -577,13 +645,52 @@ fn has_opt(opts: &[&str], name: &str) -> bool {
     opts.contains(&name)
 }
 
-fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::Result<()> {
+/// Whether a `systemd-fsck@` dependency should be added for this mount,
+/// mirroring C's `generator_write_fsck_deps` structural checks. The
+/// fsck-existence check (`fsck.<fstype>` present) is environmental and omitted:
+/// it holds at real boot where rust and C agree.
+fn fsck_applies(entry: &FstabEntry, node: &str) -> bool {
+    // Only a real device node can be checked. This also covers the non-block
+    // pseudo and network file systems (tmpfs, nfs, cifs, 9p, ...), whose `what`
+    // is not a /dev path.
+    if !node.starts_with("/dev/") {
+        return false;
+    }
+    // Bind mounts have no backing device to check.
+    if parse_csv(&entry.options)
+        .iter()
+        .any(|o| *o == "bind" || *o == "rbind")
+    {
+        return false;
+    }
+    // Network file systems are never block-checked (guards a /dev-shaped nfs=).
+    if is_network_fs(&entry.fstype) {
+        return false;
+    }
+    // Read-only file systems are never checked.
+    !matches!(
+        entry.fstype.as_str(),
+        "DM_verity_hash" | "cramfs" | "erofs" | "iso9660" | "squashfs"
+    )
+}
+
+fn emit_mount_unit(
+    out_dir: &Path,
+    entry: &FstabEntry,
+    in_initrd: bool,
+    source: &str,
+) -> io::Result<()> {
     let is_rootfs = entry.where_ == "/";
     // When running in initrd and the entry has x-initrd.mount, prefix the
     // target with /sysroot so the mount eventually lands in the sysroot.
     // That behavior is NOT exercised yet (no initrd mode tests wired);
     // leaving an inline branch so the hook is obvious.
     let effective_where = entry.where_.clone();
+
+    // Canonicalize UUID=/LABEL=/PARTUUID=/PARTLABEL= to the /dev/disk/by-*/
+    // node (C's fstab_node_to_udev_node). The same node feeds What=, the
+    // blockdev@ ordering, and the fsck instance so they all agree.
+    let node = resolve_disk_spec(&entry.what);
 
     let unit_name = format!("{}.mount", unit_name_path_escape(&effective_where));
     let unit_path = out_dir.join(&unit_name);
@@ -593,9 +700,9 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     let mut unit = String::new();
     unit.push_str("# Automatically generated by systemd-fstab-generator\n\n");
     unit.push_str("[Unit]\n");
-    unit.push_str(
-        "SourcePath=/etc/fstab\nDocumentation=man:fstab(5) man:systemd-fstab-generator(8)\n",
-    );
+    unit.push_str(&format!(
+        "Documentation=man:fstab(5) man:systemd-fstab-generator(8)\nSourcePath={source}\n"
+    ));
     // x-systemd.requires/before/after → explicit deps
     for opt in &systemd_opts {
         if let Some(v) = opt.strip_prefix("x-systemd.requires=") {
@@ -615,7 +722,13 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // the initrd target is what `initrd-switch-root` waits on.
     let is_sysroot_prefixed =
         effective_where == "/sysroot" || effective_where.starts_with("/sysroot/");
-    let target_fs = if in_initrd && is_sysroot_prefixed {
+    let target_fs = if in_initrd && effective_where == "/sysroot" {
+        // The real root mount itself gates the whole initrd → switch-root
+        // sequence: initrd-parse-etc.service Requires initrd-root-fs.target,
+        // which must pull in sysroot.mount. Children (/sysroot/usr, /sysroot/
+        // nix/store, …) hang off initrd-fs.target instead.
+        "initrd-root-fs.target"
+    } else if in_initrd && is_sysroot_prefixed {
         "initrd-fs.target"
     } else if is_network_fs(&entry.fstype) || has_opt(&systemd_opts, "_netdev") {
         "remote-fs.target"
@@ -624,7 +737,23 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     };
     if !is_rootfs {
         unit.push_str(&format!("Before={target_fs}\n"));
-        // Ensure /usr mounts ordering for rootfs; skipping for MVP.
+        // Implicit parent-mount ordering. systemd orders every mount after the
+        // mount that provides its parent directory. In the initrd the real root
+        // is `sysroot.mount`, so `/sysroot/nix/.ro-store`, `/sysroot/nix/store`,
+        // … must wait for it — otherwise they run against the initrd's tmpfs
+        // /sysroot (the mount point ends up on the wrong fs / the mount fails
+        // ENOENT), and the NixOS store (which holds the stage-2 init) never
+        // comes up so switch-root can't exec it.
+        if in_initrd && is_sysroot_prefixed && effective_where != "/sysroot" {
+            unit.push_str("After=sysroot.mount\n");
+            unit.push_str("RequiresMountsFor=/sysroot\n");
+        }
+    }
+    // Order after the device's blockdev@ target so the mount waits for the
+    // kernel to settle the device (C's generator_write_blockdev_dependency).
+    // Device-backed mounts only; applies to the root mount too.
+    if let Some(esc) = blockdev_escape(&node) {
+        unit.push_str(&format!("After=blockdev@{esc}.target\n"));
     }
     if !has_opt(&systemd_opts, "noauto") {
         // The mount is auto-started; recorded via .wants/.requires
@@ -632,7 +761,7 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     }
 
     unit.push_str("\n[Mount]\n");
-    unit.push_str(&format!("What={}\n", entry.what));
+    unit.push_str(&format!("What={node}\n"));
     unit.push_str(&format!("Where={}\n", entry.where_));
     if entry.fstype != "auto" && !entry.fstype.is_empty() {
         unit.push_str(&format!("Type={}\n", entry.fstype));
@@ -650,6 +779,14 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // they stay in Options= so downstream tools (udisks2, check scripts)
     // can still see them — mount(2) ignores unknown `x-` prefixes.
     for opt in &systemd_opts {
+        // x-systemd.device-timeout is fully consumed into the <device>.device.d
+        // drop-in (JobRunningTimeoutSec), so C strips it from Options=. Every
+        // other x-systemd.*/x-initrd.*/comment= marker stays in Options= so
+        // downstream tools (udisks2, check scripts) can still see it; mount(2)
+        // ignores unknown `x-` prefixes.
+        if opt.starts_with("x-systemd.device-timeout=") {
+            continue;
+        }
         if matches!(
             *opt,
             "nofail" | "noauto" | "auto" | "_netdev" | "user" | "users" | "nouser" | "group"
@@ -692,20 +829,20 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
         unit.push_str("ReadWriteOnly=yes\n");
     }
 
-    // fsck: when passno >= 1 and non-root, add Requires=systemd-fsck@<esc>.
-    if entry.passno >= 1 && !is_rootfs && entry.where_ != "/usr" {
-        let fsck_unit = format!(
-            "systemd-fsck@{}.service",
-            unit_name_path_escape(&entry.what)
-        );
+    // fsck: when passno >= 1, add a systemd-fsck@ dependency -- but only for a
+    // real, checkable file system. C's generator_write_fsck_deps structurally
+    // skips non-block-backed (tmpfs/nfs/cifs/...), read-only (squashfs/iso9660/
+    // ...), bind, and non-device mounts; adding systemd-fsck@ for those emits a
+    // dependency that cannot be satisfied and would fail the mount. The instance
+    // is the canonical device node (same as What=), matching C.
+    let want_fsck = entry.passno >= 1 && fsck_applies(entry, &node);
+    if want_fsck && !is_rootfs && entry.where_ != "/usr" {
+        let fsck_unit = format!("systemd-fsck@{}.service", unit_name_path_escape(&node));
         unit.push_str(&format!(
             "\n[Unit]\nRequires={fsck_unit}\nAfter={fsck_unit}\n"
         ));
-    } else if entry.passno >= 1 && entry.where_ == "/usr" {
-        let fsck_unit = format!(
-            "systemd-fsck@{}.service",
-            unit_name_path_escape(&entry.what)
-        );
+    } else if want_fsck && entry.where_ == "/usr" {
+        let fsck_unit = format!("systemd-fsck@{}.service", unit_name_path_escape(&node));
         unit.push_str(&format!("\n[Unit]\nWants={fsck_unit}\nAfter={fsck_unit}\n"));
     }
 
@@ -727,11 +864,10 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // auto-started.  Skip if noauto.
     // Upstream semantics (see TEST-81-GENERATORS.fstab-generator.sh:
     // remote-fs.target for network / _netdev, local-fs.target otherwise;
-    // `.wants` when nofail OR (nfs && bg), else `.requires`):
-    if !is_rootfs
-        && !has_opt(&systemd_opts, "noauto")
-        && !has_opt(&systemd_opts, "x-systemd.automount")
-    {
+    // `.wants` when nofail OR (nfs && bg), else `.requires`).
+    // The root mount is wired in too (C's add_mount links every auto mount,
+    // including -.mount, into local-fs.target.requires).
+    if !has_opt(&systemd_opts, "noauto") && !has_opt(&systemd_opts, "x-systemd.automount") {
         let is_nfs_bg = matches!(entry.fstype.as_str(), "nfs" | "nfs4")
             && parse_csv(&entry.options).contains(&"bg");
         let link_dir = if has_opt(&systemd_opts, "nofail") || is_nfs_bg {
@@ -871,8 +1007,11 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     Ok(())
 }
 
-fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
-    let unit_name = format!("{}.swap", unit_name_path_escape(&entry.what));
+fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry, source: &str) -> io::Result<()> {
+    // Canonicalize UUID=/LABEL=/PARTUUID=/PARTLABEL= to /dev/disk/by-*/ like C;
+    // the swap unit name, What=, and mkswap device all reference this node.
+    let node = resolve_disk_spec(&entry.what);
+    let unit_name = format!("{}.swap", unit_name_path_escape(&node));
     let unit_path = out_dir.join(&unit_name);
 
     let (systemd_opts, _mount_opts) = split_options(&entry.options);
@@ -880,13 +1019,17 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
     let mut unit = String::new();
     unit.push_str("# Automatically generated by systemd-fstab-generator\n\n");
     unit.push_str("[Unit]\n");
-    unit.push_str(
-        "SourcePath=/etc/fstab\nDocumentation=man:fstab(5) man:systemd-fstab-generator(8)\n",
-    );
+    unit.push_str(&format!(
+        "Documentation=man:fstab(5) man:systemd-fstab-generator(8)\nSourcePath={source}\n"
+    ));
     unit.push_str("Before=swap.target\n");
+    // Order after the device's blockdev@ target (C's blockdev dependency).
+    if let Some(esc) = blockdev_escape(&node) {
+        unit.push_str(&format!("After=blockdev@{esc}.target\n"));
+    }
 
     unit.push_str("\n[Swap]\n");
-    unit.push_str(&format!("What={}\n", entry.what));
+    unit.push_str(&format!("What={node}\n"));
     // Upstream emits the raw fstab options verbatim into `Options=` on
     // swap units (unlike mount units, it does not strip `defaults` or
     // x-systemd.*).  TEST-81-GENERATORS.fstab-generator asserts the
@@ -903,7 +1046,7 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
     // `systemd-mkswap@<device>.service` (the swap-specific template —
     // upstream uses a different name than the filesystem `systemd-makefs@`).
     if has_opt(&systemd_opts, "x-systemd.makefs") {
-        let esc_dev = unit_name_path_escape(&entry.what);
+        let esc_dev = unit_name_path_escape(&node);
         let mkswap_unit = format!("systemd-mkswap@{esc_dev}.service");
         let mkswap_path = out_dir.join(&mkswap_unit);
         let mut mkswap = String::new();
@@ -918,8 +1061,7 @@ fn emit_swap_unit(out_dir: &Path, entry: &FstabEntry) -> io::Result<()> {
         mkswap.push_str("Before=shutdown.target\n");
         mkswap.push_str("\n[Service]\nType=oneshot\nRemainAfterExit=yes\n");
         mkswap.push_str(&format!(
-            "ExecStart=/lib/systemd/systemd-makefs swap {}\n",
-            entry.what
+            "ExecStart=/lib/systemd/systemd-makefs swap {node}\n"
         ));
         mkswap.push_str("TimeoutSec=0\n");
         fs::write(&mkswap_path, mkswap)?;
@@ -1028,6 +1170,96 @@ mod tests {
     }
 
     #[test]
+    fn test_device_timeout_stripped_from_options() {
+        // x-systemd.device-timeout is fully consumed into the .device.d drop-in
+        // (JobRunningTimeoutSec), so it must not remain in Options=, matching C.
+        // Every other x-systemd.* stays in Options=.
+        let dir = std::env::temp_dir().join(format!("fstabgen-devto-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = FstabEntry {
+            what: "/dev/sdx".into(),
+            where_: "/mnt/x".into(),
+            fstype: "ext4".into(),
+            options: "ro,x-systemd.device-timeout=5,x-systemd.automount".into(),
+            _dump: 0,
+            passno: 0,
+        };
+        emit_mount_unit(&dir, &entry, false, "/etc/fstab").unwrap();
+
+        let mount = std::fs::read_to_string(dir.join("mnt-x.mount")).unwrap();
+        let opts: Vec<&str> = mount
+            .lines()
+            .filter(|l| l.starts_with("Options="))
+            .collect();
+        assert_eq!(
+            opts,
+            vec!["Options=ro,x-systemd.automount"],
+            "device-timeout must be stripped from Options= (other x-systemd.* kept), got: {opts:?}"
+        );
+
+        let dropin =
+            std::fs::read_to_string(dir.join("dev-sdx.device.d/50-device-timeout.conf")).unwrap();
+        assert!(
+            dropin.contains("JobRunningTimeoutSec=5"),
+            "the timeout must land in the drop-in, got: {dropin}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fsck_structural_skips() {
+        // A systemd-fsck@ dependency is added only for a real, checkable block
+        // file system, not for bind / pseudo / network / read-only mounts
+        // (matching C's generator_write_fsck_deps structural skips). A bogus
+        // fsck dependency would be unsatisfiable and fail the mount.
+        let mk = |what: &str, where_: &str, fstype: &str, options: &str| FstabEntry {
+            what: what.into(),
+            where_: where_.into(),
+            fstype: fstype.into(),
+            options: options.into(),
+            _dump: 0,
+            passno: 2,
+        };
+        let emit = |e: &FstabEntry| -> String {
+            let dir = std::env::temp_dir().join(format!(
+                "fstabgen-fsck-{}-{}",
+                std::process::id(),
+                e.where_.replace('/', "_")
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            emit_mount_unit(&dir, e, false, "/etc/fstab").unwrap();
+            let name = format!("{}.mount", unit_name_path_escape(&e.where_));
+            let s = std::fs::read_to_string(dir.join(&name)).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            s
+        };
+        // A real block file system is checked.
+        assert!(
+            emit(&mk("/dev/sda2", "/home", "ext4", "defaults")).contains("systemd-fsck@"),
+            "ext4"
+        );
+        // Structural skips: no fsck dependency.
+        assert!(
+            !emit(&mk("/src", "/dst", "none", "bind")).contains("systemd-fsck@"),
+            "bind"
+        );
+        assert!(
+            !emit(&mk("tmpfs", "/t", "tmpfs", "defaults")).contains("systemd-fsck@"),
+            "tmpfs"
+        );
+        assert!(
+            !emit(&mk("//srv/s", "/mnt", "cifs", "defaults")).contains("systemd-fsck@"),
+            "cifs"
+        );
+        assert!(
+            !emit(&mk("/dev/sda1", "/b", "squashfs", "defaults")).contains("systemd-fsck@"),
+            "squashfs"
+        );
+    }
+
+    #[test]
     fn test_is_network_fs() {
         assert!(is_network_fs("nfs"));
         assert!(is_network_fs("nfs4"));
@@ -1048,17 +1280,106 @@ mod tests {
             _dump: 0,
             passno: 0,
         };
-        emit_mount_unit(tmp.path(), &entry, false).unwrap();
+        emit_mount_unit(tmp.path(), &entry, false, "/run/my.fstab").unwrap();
         let unit_path = tmp.path().join("home.mount");
         assert!(unit_path.exists());
         let content = fs::read_to_string(&unit_path).unwrap();
         assert!(content.contains("What=/dev/sda1"));
         assert!(content.contains("Where=/home"));
         assert!(content.contains("Type=ext4"));
+        // SourcePath reflects the actual fstab passed in, not a hardcoded path.
+        assert!(content.contains("SourcePath=/run/my.fstab\n"), "{content}");
 
         // Must have local-fs.target.requires symlink to ../home.mount
         let link = tmp.path().join("local-fs.target.requires/home.mount");
         assert!(link.symlink_metadata().is_ok());
+    }
+
+    #[test]
+    fn test_emit_mount_unit_canonicalizes_device_spec() {
+        // UUID=/LABEL=/PARTUUID=/PARTLABEL= must resolve to /dev/disk/by-*/ in
+        // What= (and in the fsck instance name), matching C's
+        // fstab_node_to_udev_node.
+        let cases = [
+            ("UUID=1234", "/dev/disk/by-uuid/1234"),
+            ("LABEL=my-root", "/dev/disk/by-label/my-root"),
+            ("PARTUUID=DEAD99", "/dev/disk/by-partuuid/DEAD99"),
+            ("PARTLABEL=ESP", "/dev/disk/by-partlabel/ESP"),
+            ("/dev/sda5", "/dev/sda5"),
+        ];
+        for (spec, node) in cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry = FstabEntry {
+                what: spec.into(),
+                where_: "/data".into(),
+                fstype: "ext4".into(),
+                options: "defaults".into(),
+                _dump: 0,
+                passno: 2,
+            };
+            emit_mount_unit(tmp.path(), &entry, false, "/etc/fstab").unwrap();
+            let content = fs::read_to_string(tmp.path().join("data.mount")).unwrap();
+            assert!(
+                content.contains(&format!("What={node}\n")),
+                "spec {spec}: missing What={node} in:\n{content}"
+            );
+            // The fsck instance references the same canonical node, never the
+            // raw spec.
+            assert!(
+                !content.contains("systemd-fsck@UUID"),
+                "spec {spec}: fsck used the raw spec:\n{content}"
+            );
+            let fsck = format!(
+                "systemd-fsck@{}.service",
+                unit_name_path_escape(node)
+            );
+            assert!(
+                content.contains(&fsck),
+                "spec {spec}: missing {fsck} in:\n{content}"
+            );
+            // Device-backed mounts order after their blockdev@ target.
+            let blockdev = format!("After=blockdev@{}.target\n", unit_name_path_escape(node));
+            assert!(
+                content.contains(&blockdev),
+                "spec {spec}: missing {blockdev} in:\n{content}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_emit_mount_unit_tmpfs_has_no_blockdev() {
+        // Non-device mounts (tmpfs, network) get no blockdev@ ordering.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = FstabEntry {
+            what: "tmpfs".into(),
+            where_: "/scratch".into(),
+            fstype: "tmpfs".into(),
+            options: "defaults".into(),
+            _dump: 0,
+            passno: 0,
+        };
+        emit_mount_unit(tmp.path(), &entry, false, "/etc/fstab").unwrap();
+        let content = fs::read_to_string(tmp.path().join("scratch.mount")).unwrap();
+        assert!(!content.contains("blockdev@"), "{content}");
+    }
+
+    #[test]
+    fn test_emit_swap_unit_canonicalizes_device_spec() {
+        // Swap unit name and What= are both keyed off the canonical device.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = FstabEntry {
+            what: "UUID=swap-1".into(),
+            where_: "none".into(),
+            fstype: "swap".into(),
+            options: "sw".into(),
+            _dump: 0,
+            passno: 0,
+        };
+        emit_swap_unit(tmp.path(), &entry, "/etc/fstab").unwrap();
+        let unit = tmp.path().join("dev-disk-by\\x2duuid-swap\\x2d1.swap");
+        let content = fs::read_to_string(&unit)
+            .unwrap_or_else(|_| panic!("expected canonical swap unit at {}", unit.display()));
+        assert!(content.contains("What=/dev/disk/by-uuid/swap-1\n"), "{content}");
     }
 
     #[test]
@@ -1072,7 +1393,7 @@ mod tests {
             _dump: 0,
             passno: 0,
         };
-        emit_mount_unit(tmp.path(), &entry, false).unwrap();
+        emit_mount_unit(tmp.path(), &entry, false, "/etc/fstab").unwrap();
         // nofail → wants/ not requires/
         assert!(
             tmp.path()
@@ -1098,7 +1419,7 @@ mod tests {
             _dump: 0,
             passno: 0,
         };
-        emit_mount_unit(tmp.path(), &entry, false).unwrap();
+        emit_mount_unit(tmp.path(), &entry, false, "/etc/fstab").unwrap();
         assert!(
             tmp.path()
                 .join("remote-fs.target.requires/mnt-nfs.mount")
@@ -1118,7 +1439,7 @@ mod tests {
             _dump: 0,
             passno: 0,
         };
-        emit_mount_unit(tmp.path(), &entry, false).unwrap();
+        emit_mount_unit(tmp.path(), &entry, false, "/etc/fstab").unwrap();
         assert!(tmp.path().join("home.mount").exists());
         assert!(
             !tmp.path()
@@ -1139,7 +1460,7 @@ mod tests {
             _dump: 0,
             passno: 0,
         };
-        emit_mount_unit(tmp.path(), &entry, false).unwrap();
+        emit_mount_unit(tmp.path(), &entry, false, "/etc/fstab").unwrap();
         let content = fs::read_to_string(tmp.path().join("home.mount")).unwrap();
         assert!(content.contains("Requires=foo.service"));
         assert!(content.contains("After=foo.service"));
@@ -1156,7 +1477,7 @@ mod tests {
             _dump: 0,
             passno: 0,
         };
-        emit_swap_unit(tmp.path(), &entry).unwrap();
+        emit_swap_unit(tmp.path(), &entry, "/etc/fstab").unwrap();
         let unit = fs::read_to_string(tmp.path().join("dev-sdb1.swap")).unwrap();
         assert!(unit.contains("What=/dev/sdb1"));
         assert!(unit.contains("[Swap]"));
@@ -1166,5 +1487,58 @@ mod tests {
                 .symlink_metadata()
                 .is_ok()
         );
+    }
+
+    /// Robustness fuzz (task #22): fstab content is fully untrusted. `parse_fstab`
+    /// must not panic on any bytes, and emitting the parsed entries must not
+    /// panic either (device canonicalization, unit-name escaping, option
+    /// splitting, passno/fsck handling). Feed deterministic random field soup.
+    #[test]
+    fn fuzz_fstab_parser_and_emit_never_panic() {
+        const TOKENS: &[&str] = &[
+            "/dev/sda1", "UUID=x", "LABEL=y", "PARTUUID=z", "PARTLABEL=w", "tmpfs",
+            "none", "swap", "/", "/home", "/boot", "/usr", "ext4", "vfat", "auto",
+            "nfs", "defaults", "noauto,nofail", "sw", "x-systemd.makefs", "bg",
+            "ro", "rw", "0", "1", "2", "#c", "", " ", ":", ",", "=", "-", "/dev/",
+            "UUID=", "999999999999", "x-systemd.automount", "x-systemd.rw-only",
+        ];
+        let mut state: u64 = 0x0fed_cba9_8765_4321;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as u32
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        for _ in 0..20_000u32 {
+            let nlines = (next() % 3) as usize;
+            let mut content = String::new();
+            for _ in 0..nlines {
+                let nfields = (next() % 8) as usize;
+                for f in 0..nfields {
+                    if f > 0 {
+                        content.push(' ');
+                    }
+                    if next() % 9 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                content.push('\n');
+            }
+            let buf = content.clone();
+            let dir = tmp.path().to_path_buf();
+            let res = std::panic::catch_unwind(move || {
+                for entry in parse_fstab(&content) {
+                    let _ = if entry.fstype == "swap" {
+                        emit_swap_unit(&dir, &entry, "/etc/fstab")
+                    } else {
+                        emit_mount_unit(&dir, &entry, false, "/etc/fstab")
+                    };
+                }
+            });
+            assert!(res.is_ok(), "fstab parser/emit panicked on: {buf:?}");
+        }
     }
 }

@@ -55,6 +55,39 @@
     retry systemctl daemon-reload
     retry systemctl start rlimit-test.service
     [[ "$(cat /tmp/rlimit-test-out)" == "0" ]]
+
+    : "LimitSIGPENDING= sets SIGPENDING rlimit"
+    cat > /run/systemd/system/rlimit-test.service << EOF
+    [Service]
+    Type=oneshot
+    LimitSIGPENDING=511
+    ExecStart=bash -c 'ulimit -i > /tmp/rlimit-test-out'
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start rlimit-test.service
+    [[ "$(cat /tmp/rlimit-test-out)" == "511" ]]
+
+    : "LimitMSGQUEUE= sets MSGQUEUE rlimit"
+    cat > /run/systemd/system/rlimit-test.service << EOF
+    [Service]
+    Type=oneshot
+    LimitMSGQUEUE=8192
+    ExecStart=bash -c 'ulimit -q > /tmp/rlimit-test-out'
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start rlimit-test.service
+    [[ "$(cat /tmp/rlimit-test-out)" == "8192" ]]
+
+    : "LimitRTPRIO= sets RTPRIO rlimit"
+    cat > /run/systemd/system/rlimit-test.service << EOF
+    [Service]
+    Type=oneshot
+    LimitRTPRIO=50
+    ExecStart=bash -c 'ulimit -r > /tmp/rlimit-test-out'
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start rlimit-test.service
+    [[ "$(cat /tmp/rlimit-test-out)" == "50" ]]
     RLEOF
   '';
 }

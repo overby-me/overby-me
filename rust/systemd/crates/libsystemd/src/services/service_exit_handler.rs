@@ -169,7 +169,7 @@ fn trigger_on_success_failure_units(
 }
 
 /// Build a `MonitorEnv` from the source unit's termination status.
-fn build_monitor_env(
+pub(crate) fn build_monitor_env(
     source_name: &str,
     code: &crate::signal_handler::ChildTermination,
     is_success: bool,
@@ -185,7 +185,7 @@ fn build_monitor_env(
                 "exit-code".to_string()
             },
         ),
-        ChildTermination::Signal(s) => (
+        ChildTermination::Signal(s, _) => (
             "killed".to_string(),
             (*s as i32).to_string(),
             if is_success {
@@ -253,7 +253,7 @@ fn should_restart(
                 ChildTermination::Exit(code) => {
                     *code != 0 && !success_exit_status.exit_codes.contains(code)
                 }
-                ChildTermination::Signal(sig) => {
+                ChildTermination::Signal(sig, _) => {
                     !is_clean_signal_value(*sig) && !success_exit_status.signals.contains(sig)
                 }
             }
@@ -266,7 +266,7 @@ fn should_restart(
             // Unclean signal or timeout – not on any exit code.
             match termination {
                 ChildTermination::Exit(_) => false,
-                ChildTermination::Signal(sig) => {
+                ChildTermination::Signal(sig, _) => {
                     !is_clean_signal_value(*sig) && !success_exit_status.signals.contains(sig)
                 }
             }
@@ -275,7 +275,7 @@ fn should_restart(
             // Unclean signal only (watchdog does NOT trigger on-abort).
             match termination {
                 ChildTermination::Exit(_) => false,
-                ChildTermination::Signal(sig) => {
+                ChildTermination::Signal(sig, _) => {
                     !is_clean_signal_value(*sig) && !success_exit_status.signals.contains(sig)
                 }
             }
@@ -312,15 +312,37 @@ pub fn service_exit_handler_new_thread(
     std::thread::spawn(move || {
         let (pending_trigger, pending_restart) = {
             // Use try_read() with retry to yield to pending writers.
+            //
+            // This spin has no deadline. If it never acquires, the unit that
+            // just exited is never completed and the manager looks wedged, so
+            // report a stuck acquisition rather than spinning silently. kmsg()
+            // is deliberate: PID 1's log:: macros do not reach the console.
+            let spin_start = std::time::Instant::now();
+            let mut warned = false;
             let guard = loop {
                 match run_info.try_read() {
                     Ok(g) => break g,
                     Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
                     Err(std::sync::TryLockError::WouldBlock) => {
+                        if !warned && spin_start.elapsed() >= std::time::Duration::from_secs(10) {
+                            warned = true;
+                            crate::entrypoints::kmsg(&format!(
+                                "EXIT-HANDLER STUCK pid={pid} {} waiting >10s for the RuntimeInfo \
+                                 read lock; the unit cannot complete until it is released",
+                                srvc_id.name
+                            ));
+                        }
                         std::thread::sleep(std::time::Duration::from_millis(5));
                     }
                 }
             };
+            if warned {
+                crate::entrypoints::kmsg(&format!(
+                    "EXIT-HANDLER RECOVERED pid={pid} {} acquired the read lock after {:?}",
+                    srvc_id.name,
+                    spin_start.elapsed()
+                ));
+            }
             match service_exit_handler(pid, srvc_id, code, &guard, &run_info) {
                 Ok(result) => result,
                 Err(e) => {
@@ -354,6 +376,100 @@ pub fn service_exit_handler_new_thread(
             handle_pending_restart(restart, &run_info);
         }
     });
+}
+
+/// Apply the failure-time policies a service owes when its *start* fails and
+/// the exit tail is not the owner. A failed start is finalized on the
+/// dispatcher by `deferred_start_fail_cleanup` (e.g. a `Type=notify` main that
+/// exits before `READY=1`, a failed `ExecStartPre=`/`ExecCondition=`), where
+/// the exit tail — which normally owns a service's `OnFailure=` and `Restart=`
+/// — never runs. So this, the single finalizer, fires both:
+///
+///   * `OnFailure=` (a failed start is a failure; `OnSuccess=` is never fired
+///     here), and
+///   * `Restart=`: upstream re-enters `SERVICE_AUTO_RESTART` on a failed start
+///     exactly as on a failed run, so a `Restart=always`/`on-failure` service
+///     that never reached active still restarts.
+///
+/// Both run on spawned threads; the caller is the dispatcher and must not
+/// block. `run_info` is an already-held read guard; `arc_run_info` is cloned
+/// for the threads.
+pub(crate) fn on_service_start_failed(
+    srvc_id: &UnitId,
+    run_info: &RuntimeInfo,
+    arc_run_info: &ArcMutRuntimeInfo,
+) {
+    let Some(unit) = run_info.unit_table.get(srvc_id) else {
+        return;
+    };
+    let Specific::Service(svc) = &unit.specific else {
+        return;
+    };
+
+    // OnFailure=: fire before any restart-policy early return, since it
+    // applies regardless of Restart=. trigger_on_success_failure_units spawns
+    // its own threads, so this does not block the dispatcher.
+    let on_failure = unit.common.unit.on_failure.clone();
+    if !on_failure.is_empty() {
+        let code = ChildTermination::Exit(svc.state.read_poisoned().srvc.main_exit_status.unwrap_or(1));
+        let mon = build_monitor_env(&srvc_id.name, &code, false);
+        trigger_on_success_failure_units(&on_failure, &srvc_id.name, "OnFailure", arc_run_info, mon);
+    }
+
+    // Only the policies that restart on failure apply to a failed start;
+    // Restart=on-success/on-abnormal/on-abort/on-watchdog do not treat a
+    // start failure as their trigger.
+    if !matches!(
+        svc.conf.restart,
+        ServiceRestart::Always | ServiceRestart::OnFailure
+    ) {
+        return;
+    }
+    // An explicit stop mid-start must not be turned into a restart.
+    if svc.state.read_poisoned().srvc.manual_stop {
+        return;
+    }
+
+    let restart_sec = if svc.conf.restart_steps > 0 {
+        let restart_count = svc.state.read_poisoned().common.restart_count;
+        compute_graduated_restart_delay(
+            &svc.conf.restart_sec,
+            &svc.conf.restart_max_delay_sec,
+            svc.conf.restart_steps,
+            restart_count,
+        )
+    } else {
+        svc.conf.restart_sec.clone()
+    };
+
+    // Flip to Restarting so SubState shows "auto-restart", `systemctl start`
+    // can shortcut the pending restart, and handle_pending_restart proceeds.
+    *unit.common.status.write_poisoned() = UnitStatus::Restarting;
+    svc.state.write_poisoned().common.restart_count += 1;
+    unit.common
+        .n_restarts
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let pending = PendingRestart {
+        srvc_id: srvc_id.clone(),
+        name: srvc_id.name.clone(),
+        restart_sec,
+        reactivate_deps: Vec::new(),
+        deactivate_deps: Vec::new(),
+        is_oneshot: false,
+        required_by_deps: Vec::new(),
+    };
+    let arc = arc_run_info.clone();
+    let thread_name = format!("start-fail-restart-{}", srvc_id.name);
+    if let Err(e) = std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || handle_pending_restart(pending, &arc))
+    {
+        error!(
+            "failed to spawn start-failure restart for {}: {e}",
+            srvc_id.name
+        );
+    }
 }
 
 /// Handle the RestartSec sleep and reactivation for a service that needs to
@@ -441,6 +557,12 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         && !crate::units::check_start_rate_limit(unit)
     {
         warn!("Unit {name} hit start rate limit, refusing automatic restart");
+        // Record start-limit-hit so the `Result` property reports
+        // "start-limit-hit" instead of the generic "exit-code" derived from the
+        // failed Stopped status below (mirrors upstream SERVICE_FAILURE_START_LIMIT_HIT).
+        if let Specific::Service(srvc) = &unit.specific {
+            srvc.state.write_poisoned().srvc.start_limit_hit = true;
+        }
         let reason = crate::units::UnitOperationErrorReason::GenericStartError(
             "Start request repeated too quickly".into(),
         );
@@ -457,7 +579,10 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
                 "Unit {name} hit start limit, triggering StartLimitAction={:?}",
                 start_limit_action
             );
-            crate::units::execute_unit_action(start_limit_action, &name);
+            // No status to propagate: upstream passes an explicit
+            // `exit_status = -1` for StartLimitAction= (unit.c:1880-1886),
+            // because hitting the start rate limit is not a child exit.
+            crate::units::execute_unit_action(start_limit_action, &name, None);
         }
         // For oneshot: propagate failure to required_by deps.
         if is_oneshot {
@@ -573,25 +698,32 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
     }
 }
 
-/// Handle the aftermath of a service process exiting.
+/// The non-blocking head of service exit processing, run on the dispatcher
+/// (docs/EVENT-LOOP.md inc 1): utmp bookkeeping, recording the main
+/// process's exit status, and the two decisions that suppress death
+/// processing entirely (Type=forking readiness, ExitType=cgroup draining).
 ///
-/// The PID table has already been updated by the signal handler; this function
-/// deals with utmp records, oneshot process cleanup, restart decisions, and
-/// SuccessAction/FailureAction triggers.
-pub(crate) fn service_exit_handler(
+/// Returns true when the blocking tail ([`service_exit_handler`] on its
+/// continuation thread) still has work to do.
+pub(crate) fn service_exit_head(
     pid: nix::unistd::Pid,
-    srvc_id: UnitId,
-    code: ChildTermination,
+    srvc_id: &UnitId,
+    code: &ChildTermination,
     run_info: &RuntimeInfo,
     arc_run_info: &ArcMutRuntimeInfo,
-) -> Result<(Option<PendingTrigger>, Option<PendingRestart>), String> {
+) -> bool {
     trace!(
-        "Exit handler for service {:?} with pid: {pid} code: {code:?}",
+        "Exit head for service {:?} with pid: {pid} code: {code:?}",
         srvc_id.name
     );
-
-    let Some(unit) = run_info.unit_table.get(&srvc_id) else {
-        panic!("Tried to run a unit that has been removed from the map");
+    let Some(unit) = run_info.unit_table.get(srvc_id) else {
+        // Racing a daemon-reload that removed the unit. Nothing to finish,
+        // and the dispatcher must not panic over it.
+        error!(
+            "Exit of pid {pid} resolved to unit {} which is no longer loaded",
+            srvc_id.name
+        );
+        return false;
     };
 
     // Write DEAD_PROCESS utmp/wtmp record if the service had UtmpIdentifier= set.
@@ -608,11 +740,23 @@ pub(crate) fn service_exit_handler(
     // Record the main process exit status and PID for ExecMainStatus/ExecMainPID properties.
     if let Specific::Service(srvc) = &unit.specific {
         let mut state = srvc.state.write_poisoned();
-        let exit_code = match &code {
+        let exit_code = match code {
             ChildTermination::Exit(c) => *c,
-            ChildTermination::Signal(s) => *s as i32,
+            ChildTermination::Signal(s, _) => *s as i32,
         };
         state.srvc.main_exit_status = Some(exit_code);
+        state.srvc.main_exit_termination = Some(*code);
+        // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to this service's own
+        // stop-phase commands (ExecStop=/ExecStopPost=). The exit head runs first
+        // for every main-process exit, so recording it here makes every downstream
+        // stoppost path see it: the inline exit handler, the dispatcher stop
+        // chain's ForkHelper, and run_poststop. Cleared on the next start() so a
+        // Restart='s ExecStartPre does not inherit a stale result.
+        state.srvc.stop_result_env = Some(build_monitor_env(
+            &srvc_id.name,
+            code,
+            srvc.conf.success_exit_status.is_success(code),
+        ));
         state.srvc.main_exit_pid = Some(pid);
         state.srvc.exec_main_exit_timestamp = Some(crate::units::UnitTimestamps::now_usec());
         // Update lock-free atomics so property queries work without the state lock.
@@ -626,6 +770,48 @@ pub(crate) fn service_exit_handler(
         unit.common
             .main_pid
             .store(0, std::sync::atomic::Ordering::Release);
+    }
+
+    // Type=forking: the ExecStart parent exiting while the unit is still
+    // Starting is the type's readiness signal, not a service death.  The
+    // deferred start completion handler consumes the main_exit_status
+    // recorded above, picks up the daemon PID from PIDFile/MAINPID and
+    // transitions the unit to Started (or failed), so death processing is
+    // suppressed here.  With the inline (non-deferred) wait this branch is
+    // unreachable: the activating thread holds the service state write lock
+    // across the wait, so the recording above blocks until activation has
+    // already moved the unit out of Starting.
+    if let Specific::Service(srvc) = &unit.specific
+        && srvc.conf.srcv_type == ServiceType::Forking
+        && matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting)
+    {
+        trace!(
+            "Service {}: forking parent exited while Starting, leaving completion to the deferred start handler",
+            srvc_id.name
+        );
+        return false;
+    }
+
+    // Type=notify/notify-reload: the main process exiting while the unit is
+    // still Starting without ever sending READY=1 is a failed start
+    // (upstream's 'protocol' result), owned by the parked start wait for
+    // deferred starts and by the inline waiter's error path otherwise.
+    // Suppress death processing so the failure owner is deterministic and
+    // ExecStopPost= runs on the failure path instead of a clean
+    // deactivation racing it.
+    if let Specific::Service(srvc) = &unit.specific
+        && matches!(
+            srvc.conf.srcv_type,
+            ServiceType::Notify | ServiceType::NotifyReload
+        )
+        && matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting)
+        && !srvc.state.read_poisoned().srvc.signaled_ready
+    {
+        trace!(
+            "Service {}: notify main exited while Starting before READY=1, leaving the failure to the start owner",
+            srvc_id.name
+        );
+        return false;
     }
 
     let success_exit_status = get_success_exit_status(unit);
@@ -658,8 +844,8 @@ pub(crate) fn service_exit_handler(
             }
 
             // Record the exit code from the main process for later use.
-            let main_code = code;
-            let main_success = success_exit_status.is_success(&code);
+            let main_code = *code;
+            let main_success = success_exit_status.is_success(code);
 
             // Poll the cgroup until it's empty, then deactivate the service.
             let cg = cgroup_path.clone();
@@ -696,7 +882,7 @@ pub(crate) fn service_exit_handler(
                         ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
                             format!("process exited with status {c}"),
                         ),
-                        ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                        ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
                             format!("process killed by signal {s}"),
                         ),
                     };
@@ -707,7 +893,7 @@ pub(crate) fn service_exit_handler(
                     );
                     let fail_reason = match &main_code {
                         ChildTermination::Exit(c) => format!("exit-code (status {c})"),
-                        ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                        ChildTermination::Signal(s, _) => format!("signal (signal {s})"),
                     };
                     let desc = &unit.common.unit.description;
                     let msg = if desc.is_empty() {
@@ -728,9 +914,37 @@ pub(crate) fn service_exit_handler(
                     let _ = std::fs::remove_dir(&cg);
                 }
             });
-            return Ok((None, None));
+            return false;
         }
     }
+
+    true
+}
+
+/// Handle the aftermath of a service process exiting.
+///
+/// The PID table has already been updated by the signal handler and the
+/// non-blocking head ([`service_exit_head`]) has run on the dispatcher;
+/// this tail deals with oneshot process cleanup, restart decisions, and
+/// SuccessAction/FailureAction triggers, and may block on stop followups.
+pub(crate) fn service_exit_handler(
+    pid: nix::unistd::Pid,
+    srvc_id: UnitId,
+    code: ChildTermination,
+    run_info: &RuntimeInfo,
+    arc_run_info: &ArcMutRuntimeInfo,
+) -> Result<(Option<PendingTrigger>, Option<PendingRestart>), String> {
+    trace!(
+        "Exit handler for service {:?} with pid: {pid} code: {code:?}",
+        srvc_id.name
+    );
+    let Some(unit) = run_info.unit_table.get(&srvc_id) else {
+        // The unit can vanish on a daemon-reload between the dispatcher's
+        // head and this continuation thread; there is nothing left to do.
+        return Ok((None, None));
+    };
+
+    let success_exit_status = get_success_exit_status(unit);
 
     // Handle oneshot service exit: clean up remaining processes and decide
     // whether to keep the service active (RemainAfterExit=yes) or deactivate it.
@@ -758,6 +972,80 @@ pub(crate) fn service_exit_handler(
                     "Oneshot service {} exited cleanly with RemainAfterExit=yes, staying active",
                     unit.id.name
                 );
+                // rust-systemd's activation is a forward walk with no global
+                // "a unit just became active, re-evaluate everything waiting on
+                // it" pass. A oneshot started via a side path (e.g. udev re-
+                // activating a device's dependents) leaves units that deferred
+                // while it ran stuck. Re-drive the boot target so the whole
+                // dependency graph is re-evaluated with this unit now active:
+                // `activate_needed_units` skips already-active units and starts
+                // whatever just became reachable, cascading up. In the initrd
+                // this is how the `systemd-fsck@<dev>` oneshot completing lets
+                // `sysroot.mount → initrd-root-fs.target → initrd-parse-etc → …
+                // switch-root` proceed. Only bother if a direct waiter is still
+                // inactive, to avoid needless re-drives during normal boot.
+                // Units waiting on this oneshot: things that Require=/Want= it
+                // (reverse deps) OR that this unit is Before= (ordered after it).
+                // The initrd overlay case is the latter:
+                // rw-sysroot-nix-store.service has Before=sysroot-nix-store.mount
+                // and mkdir's the overlay's upper/work dirs.
+                let before_units: Vec<crate::units::UnitId> =
+                    unit.common.dependencies.before.clone();
+                let has_waiting_dep = {
+                    let d = &unit.common.dependencies;
+                    d.required_by
+                        .iter()
+                        .chain(d.wanted_by.iter())
+                        .chain(d.before.iter())
+                        .any(|id| {
+                            run_info
+                                .unit_table
+                                .get(id)
+                                .map(|u| !u.common.status.read_poisoned().is_started())
+                                .unwrap_or(false)
+                        })
+                };
+                if has_waiting_dep {
+                    let arc = arc_run_info.clone();
+                    std::thread::spawn(move || {
+                        // A mount ordered After= this oneshot may have already run
+                        // and *failed* before the oneshot created what it needed
+                        // (e.g. the overlay mount failed ENOENT because its
+                        // upper/work dirs did not exist yet). Failed units are not
+                        // retried by activate_needed_units, so reset the mounts we
+                        // are Before= back to NeverStarted first, then re-drive.
+                        {
+                            let ri = arc.read_poisoned();
+                            for id in &before_units {
+                                if let Some(u) = ri.unit_table.get(id)
+                                    && matches!(u.specific, crate::units::Specific::Mount(_))
+                                {
+                                    let mut st = u.common.status.write_poisoned();
+                                    if matches!(
+                                        &*st,
+                                        crate::units::UnitStatus::Stopped(
+                                            crate::units::StatusStopped::StoppedUnexpected,
+                                            _
+                                        )
+                                    ) {
+                                        *st = crate::units::UnitStatus::NeverStarted;
+                                    }
+                                }
+                            }
+                        }
+                        let target_name = arc.read_poisoned().config.target_unit.clone();
+                        match crate::control::find_or_load_unit(&target_name, &arc) {
+                            Ok(target_id) => {
+                                let _ = crate::units::activate_needed_units(target_id, arc.clone());
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "oneshot re-drive: could not load boot target {target_name}: {e}"
+                                );
+                            }
+                        }
+                    });
+                }
                 return Ok((None, None));
             }
 
@@ -768,6 +1056,9 @@ pub(crate) fn service_exit_handler(
                 let name = &unit.id.name;
                 trace!("Running ExecStopPost for oneshot service {name}");
                 let mut state = srvc.state.write_poisoned();
+                // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=.
+                state.srvc.stop_result_env =
+                    Some(build_monitor_env(name, &code, success_exit_status.is_success(&code)));
                 let timeout = state.srvc.get_stop_timeout(&srvc.conf);
                 let cmds = srvc.conf.stoppost.clone();
                 if let Err(e) = state.srvc.run_all_cmds(
@@ -780,6 +1071,7 @@ pub(crate) fn service_exit_handler(
                 ) {
                     warn!("ExecStopPost for oneshot service {name} failed: {e:?}");
                 }
+                state.srvc.stop_result_env = None;
             }
 
             // RemainAfterExit=no (default): deactivate the oneshot service
@@ -797,14 +1089,67 @@ pub(crate) fn service_exit_handler(
                         "Service {} exited successfully, triggering SuccessAction={:?}",
                         name, success_action
                     );
-                    crate::units::execute_unit_action(success_action, name);
+                    crate::units::execute_unit_action(
+                        success_action,
+                        name,
+                        crate::units::resolve_action_exit_status(
+                            unit.common.unit.success_action_exit_status,
+                            &code,
+                        ),
+                    );
+                }
+                // Same re-drive as the RemainAfterExit=yes branch, but for the
+                // default RemainAfterExit=no oneshot: rw-sysroot-nix-store.service
+                // (mkdir of the /nix/store overlay's upper/work dirs) is
+                // Before=sysroot-nix-store.mount and does not remain active, so
+                // its completion must still retry the overlay mount, which ran
+                // and failed ENOENT before the dirs existed. Reset the failed
+                // mounts we are Before= to NeverStarted, then re-drive the boot
+                // target so activate_needed_units retries them.
+                let before_units: Vec<crate::units::UnitId> =
+                    unit.common.dependencies.before.clone();
+                if !before_units.is_empty() {
+                    let arc = arc_run_info.clone();
+                    std::thread::spawn(move || {
+                        {
+                            let ri = arc.read_poisoned();
+                            for id in &before_units {
+                                if let Some(u) = ri.unit_table.get(id)
+                                    && matches!(u.specific, crate::units::Specific::Mount(_))
+                                {
+                                    let mut st = u.common.status.write_poisoned();
+                                    if matches!(
+                                        &*st,
+                                        crate::units::UnitStatus::Stopped(
+                                            crate::units::StatusStopped::StoppedUnexpected,
+                                            _
+                                        )
+                                    ) {
+                                        *st = crate::units::UnitStatus::NeverStarted;
+                                    }
+                                }
+                            }
+                        }
+                        let target_name = arc.read_poisoned().config.target_unit.clone();
+                        if let Ok(target_id) = crate::control::find_or_load_unit(&target_name, &arc)
+                        {
+                            let _ = crate::units::activate_needed_units(target_id, arc.clone());
+                        }
+                    });
                 }
             } else if *failure_action != UnitAction::None {
                 info!(
                     "Service {} failed ({:?}), triggering FailureAction={:?}",
                     name, code, failure_action
                 );
-                crate::units::execute_unit_action(failure_action, name);
+                crate::units::execute_unit_action(
+                    failure_action,
+                    name,
+                    crate::units::resolve_action_exit_status(
+                        unit.common.unit.failure_action_exit_status,
+                        &code,
+                    ),
+                );
             }
 
             // For failed oneshot services, check if we should restart.
@@ -813,14 +1158,14 @@ pub(crate) fn service_exit_handler(
                     let rps = &srvc.conf.restart_prevent_exit_status;
                     match &code {
                         ChildTermination::Exit(c) => rps.exit_codes.contains(c),
-                        ChildTermination::Signal(s) => rps.signals.contains(s),
+                        ChildTermination::Signal(s, _) => rps.signals.contains(s),
                     }
                 };
                 let force_restart = {
                     let rfs = &srvc.conf.restart_force_exit_status;
                     match &code {
                         ChildTermination::Exit(c) => rfs.exit_codes.contains(c),
-                        ChildTermination::Signal(s) => rfs.signals.contains(s),
+                        ChildTermination::Signal(s, _) => rfs.signals.contains(s),
                     }
                 };
                 !prevent_restart
@@ -943,7 +1288,7 @@ pub(crate) fn service_exit_handler(
                     ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
                         format!("process exited with status {c}"),
                     ),
-                    ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                    ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
                         format!("process killed by signal {s}"),
                     ),
                 };
@@ -957,7 +1302,7 @@ pub(crate) fn service_exit_handler(
                 );
                 let fail_reason = match &code {
                     ChildTermination::Exit(c) => format!("exit-code (status {c})"),
-                    ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                    ChildTermination::Signal(s, _) => format!("signal (signal {s})"),
                 };
                 let desc = &unit.common.unit.description;
                 let msg = if desc.is_empty() {
@@ -1013,14 +1358,28 @@ pub(crate) fn service_exit_handler(
                 "Service {} exited successfully, triggering SuccessAction={:?}",
                 unit.id.name, success_action
             );
-            crate::units::execute_unit_action(success_action, &unit.id.name);
+            crate::units::execute_unit_action(
+                success_action,
+                &unit.id.name,
+                crate::units::resolve_action_exit_status(
+                    unit.common.unit.success_action_exit_status,
+                    &code,
+                ),
+            );
         }
     } else if *failure_action != UnitAction::None {
         info!(
             "Service {} failed ({:?}), triggering FailureAction={:?}",
             unit.id.name, code, failure_action
         );
-        crate::units::execute_unit_action(failure_action, &unit.id.name);
+        crate::units::execute_unit_action(
+            failure_action,
+            &unit.id.name,
+            crate::units::resolve_action_exit_status(
+                unit.common.unit.failure_action_exit_status,
+                &code,
+            ),
+        );
     }
 
     trace!("Check if we want to restart the unit");
@@ -1077,7 +1436,7 @@ pub(crate) fn service_exit_handler(
                 let rps = &srvc.conf.restart_prevent_exit_status;
                 match &code {
                     ChildTermination::Exit(c) => rps.exit_codes.contains(c),
-                    ChildTermination::Signal(s) => rps.signals.contains(s),
+                    ChildTermination::Signal(s, _) => rps.signals.contains(s),
                 }
             };
 
@@ -1094,7 +1453,7 @@ pub(crate) fn service_exit_handler(
                     let rfs = &srvc.conf.restart_force_exit_status;
                     match &code {
                         ChildTermination::Exit(c) => rfs.exit_codes.contains(c),
-                        ChildTermination::Signal(s) => rfs.signals.contains(s),
+                        ChildTermination::Signal(s, _) => rfs.signals.contains(s),
                     }
                 };
 
@@ -1164,6 +1523,9 @@ pub(crate) fn service_exit_handler(
     {
         trace!("Running ExecStopPost for service {name}");
         let mut state = srvc.state.write_poisoned();
+        // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=.
+        state.srvc.stop_result_env =
+            Some(build_monitor_env(name, &code, success_exit_status.is_success(&code)));
         let timeout = state.srvc.get_stop_timeout(&srvc.conf);
         let cmds = srvc.conf.stoppost.clone();
         if let Err(e) = state.srvc.run_all_cmds(
@@ -1176,6 +1538,7 @@ pub(crate) fn service_exit_handler(
         ) {
             warn!("ExecStopPost for service {name} failed: {e:?}");
         }
+        state.srvc.stop_result_env = None;
     }
 
     if restart_unit {
@@ -1347,7 +1710,7 @@ pub(crate) fn service_exit_handler(
                 ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(format!(
                     "process exited with status {c}"
                 )),
-                ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
                     format!("process killed by signal {s}",),
                 ),
             };
@@ -1356,7 +1719,7 @@ pub(crate) fn service_exit_handler(
             info!("Service {name} failed with {:?}, marked as failed", code);
             let fail_reason = match &code {
                 ChildTermination::Exit(c) => format!("exit-code (status {c})"),
-                ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                ChildTermination::Signal(s, _) => format!("signal (signal {s})"),
             };
             let desc = &unit.common.unit.description;
             let msg = if desc.is_empty() {
@@ -1397,37 +1760,90 @@ pub(crate) fn service_exit_handler(
                     .map(|s| s.trim().is_empty())
                     .unwrap_or(true);
                 if is_empty {
-                    if let Err(e) = std::fs::remove_dir(cgroup_path) {
+                    // Recursive: a Delegate=yes payload may have created child
+                    // cgroups (including ones chown'd to another user) under the
+                    // service cgroup; a plain remove_dir would fail ENOTEMPTY and
+                    // leak the tree. See TEST-19-CGROUP.delegate testcase_user_unpriv.
+                    // Prune the slice above it too once it is empty, so a
+                    // slice does not outlive its last member.
+                    let pruned_from = cgroup_path.clone();
+                    if let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path) {
                         trace!(
                             "Could not remove cgroup dir {}: {}",
                             cgroup_path.display(),
                             e
                         );
                     } else {
+                        crate::platform::cgroups::prune_empty_parent_cgroups(
+                            &pruned_from,
+                            std::path::Path::new("/sys/fs/cgroup"),
+                        );
                         trace!(
                             "Cleaned up cgroup dir {} for {}",
                             cgroup_path.display(),
                             srvc_id.name
                         );
-                        // Try to remove the parent slice cgroup dir if empty.
-                        if let Some(parent) = cgroup_path.parent() {
-                            let parent_procs = parent.join("cgroup.procs");
-                            let parent_empty = std::fs::read_to_string(&parent_procs)
-                                .map(|s| s.trim().is_empty())
-                                .unwrap_or(false);
-                            if parent_empty {
-                                // Check no child dirs remain
-                                let has_children = std::fs::read_dir(parent)
-                                    .map(|entries| {
-                                        entries.filter_map(|e| e.ok()).any(|e| e.path().is_dir())
-                                    })
-                                    .unwrap_or(false);
-                                if !has_children {
-                                    let _ = std::fs::remove_dir(parent);
-                                }
-                            }
-                        }
                     }
+                }
+            }
+
+            // Controller-mask realization for `io`: this runs regardless of
+            // whether the service's own (leaf) cgroup still exists — by the time
+            // the exit handler reaches here the leaf is often already gone, but
+            // its ancestor slices still carry `io` in their cgroup.subtree_control.
+            // Once no active service under an ancestor slice still needs io,
+            // disable it there so `io` vanishes from that slice's
+            // cgroup.controllers (matching upstream; TEST-19-CGROUP.delegate
+            // testcase_controllers). Walk bottom-up because the kernel rejects
+            // `-io` (EBUSY) while a child still delegates io; ignore errors.
+            {
+                let io_paths: Vec<std::path::PathBuf> = run_info
+                    .unit_table
+                    .values()
+                    .filter_map(|u| {
+                        let Specific::Service(s) = &u.specific else {
+                            return None;
+                        };
+                        if !matches!(*u.common.status.read_poisoned(), UnitStatus::Started(_)) {
+                            return None;
+                        }
+                        let c = &s.conf;
+                        let needs_io = c.io_accounting == Some(true)
+                            || c.io_weight.is_some()
+                            || c.startup_io_weight.is_some()
+                            || !c.io_device_weight.is_empty()
+                            || !c.io_read_bandwidth_max.is_empty()
+                            || !c.io_write_bandwidth_max.is_empty()
+                            || !c.io_read_iops_max.is_empty()
+                            || !c.io_write_iops_max.is_empty()
+                            || matches!(c.delegate, crate::units::Delegate::Yes)
+                            || matches!(
+                                &c.delegate,
+                                crate::units::Delegate::Controllers(ctrls)
+                                    if ctrls.iter().any(|x| x == "io")
+                            );
+                        needs_io.then(|| c.platform_specific.cgroup_path.clone())
+                    })
+                    .collect();
+
+                let cgroup_root = std::path::Path::new("/sys/fs/cgroup");
+                let mut cur = cgroup_path.parent();
+                while let Some(p) = cur {
+                    let subtree = p.join("cgroup.subtree_control");
+                    let still_needed = io_paths
+                        .iter()
+                        .any(|ip| ip.as_path() != p && ip.starts_with(p));
+                    if !still_needed
+                        && std::fs::read_to_string(&subtree)
+                            .map(|s| s.split_whitespace().any(|c| c == "io"))
+                            .unwrap_or(false)
+                    {
+                        let _ = std::fs::write(&subtree, "-io");
+                    }
+                    if p == cgroup_root {
+                        break;
+                    }
+                    cur = p.parent();
                 }
             }
         }
@@ -1615,7 +2031,7 @@ mod tests {
         ));
         assert!(!should_restart(
             &ServiceRestart::No,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
@@ -1638,13 +2054,13 @@ mod tests {
         ));
         assert!(should_restart(
             &ServiceRestart::Always,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         assert!(should_restart(
             &ServiceRestart::Always,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -1675,14 +2091,14 @@ mod tests {
         // SIGTERM is a clean signal
         assert!(should_restart(
             &ServiceRestart::OnSuccess,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
         // SIGKILL is not a clean signal
         assert!(!should_restart(
             &ServiceRestart::OnSuccess,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
@@ -1728,14 +2144,14 @@ mod tests {
         // SIGKILL is unclean — should restart
         assert!(should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         // SIGTERM is clean — should not restart
         assert!(!should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -1762,14 +2178,14 @@ mod tests {
         // on-abnormal: unclean signal → restart
         assert!(should_restart(
             &ServiceRestart::OnAbnormal,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         // on-abnormal: clean signal → no restart
         assert!(!should_restart(
             &ServiceRestart::OnAbnormal,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -1794,14 +2210,14 @@ mod tests {
         // on-abort: unclean signal → restart
         assert!(should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
         // on-abort: clean signal → no restart
         assert!(!should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             false,
         ));
@@ -1826,7 +2242,7 @@ mod tests {
         ));
         assert!(!should_restart(
             &ServiceRestart::OnWatchdog,
-            &ChildTermination::Signal(Signal::SIGKILL),
+            &ChildTermination::Signal(Signal::SIGKILL, false),
             &ses,
             false,
         ));
@@ -1838,7 +2254,7 @@ mod tests {
         // on-watchdog should restart when watchdog_fired is true
         assert!(should_restart(
             &ServiceRestart::OnWatchdog,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -1864,7 +2280,7 @@ mod tests {
         // Even a clean exit with watchdog_fired is a failure
         assert!(should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             true,
         ));
@@ -1882,7 +2298,7 @@ mod tests {
         ));
         assert!(should_restart(
             &ServiceRestart::OnAbnormal,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -1902,14 +2318,14 @@ mod tests {
         // Clean signal + watchdog → no restart for on-abort
         assert!(!should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGTERM),
+            &ChildTermination::Signal(Signal::SIGTERM, false),
             &ses,
             true,
         ));
         // Unclean signal + watchdog → restart (because of the signal, not watchdog)
         assert!(should_restart(
             &ServiceRestart::OnAbort,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -1940,7 +2356,7 @@ mod tests {
         // Restart=no never restarts, even with watchdog
         assert!(!should_restart(
             &ServiceRestart::No,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -1952,7 +2368,7 @@ mod tests {
         // Restart=always restarts with or without watchdog
         assert!(should_restart(
             &ServiceRestart::Always,
-            &ChildTermination::Signal(Signal::SIGABRT),
+            &ChildTermination::Signal(Signal::SIGABRT, false),
             &ses,
             true,
         ));
@@ -1979,14 +2395,14 @@ mod tests {
         // SIGUSR1 is in SuccessExitStatus — on-failure should NOT restart
         assert!(!should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGUSR1),
+            &ChildTermination::Signal(Signal::SIGUSR1, false),
             &ses,
             false,
         ));
         // SIGUSR2 is not — on-failure should restart
         assert!(should_restart(
             &ServiceRestart::OnFailure,
-            &ChildTermination::Signal(Signal::SIGUSR2),
+            &ChildTermination::Signal(Signal::SIGUSR2, false),
             &ses,
             false,
         ));

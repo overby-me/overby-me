@@ -42,6 +42,18 @@
     systemctl stop remain-test.service
     [[ -f /tmp/remain-stop-marker ]]
     (! systemctl is-active remain-test.service)
+
+    : "Without RemainAfterExit=, a oneshot goes inactive once ExecStart exits"
+    cat > /run/systemd/system/remain-test.service << EOF
+    [Service]
+    Type=oneshot
+    ExecStart=bash -c 'true'
+    EOF
+    retry systemctl daemon-reload
+    retry systemctl start remain-test.service
+    # start blocks until ExecStart finishes; with no RemainAfterExit the unit
+    # deactivates immediately, so it must not report active afterwards.
+    (! systemctl is-active remain-test.service)
     RAEEOF
   '';
 }

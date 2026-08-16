@@ -344,6 +344,10 @@ pub struct LinkSettingsSection {
     /// current udev event environment. For rust-systemd this is currently
     /// treated the same as a no-op (the property is already in the env).
     pub import_properties: Vec<String>,
+
+    /// `Alias=` — the interface alias (IFLA_IFALIAS), shown by `ip link` as
+    /// `alias <value>`.
+    pub alias: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -709,6 +713,9 @@ fn parse_link_settings_entry(key: &str, value: &str, section: &mut LinkSettingsS
                     section.import_properties.push(entry);
                 }
             }
+        }
+        "Alias" => {
+            section.alias = Some(value.to_string());
         }
         _ => {}
     }

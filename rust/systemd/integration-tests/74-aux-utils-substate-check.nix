@@ -17,10 +17,9 @@
     [[ "$SS" == "running" ]]
     systemctl stop "$UNIT.service"
 
-    : "SubState=dead for stopped service"
+    : "SubState=dead for cleanly stopped service (not failed)"
     SS="$(systemctl show -P SubState "$UNIT.service")"
-    [[ "$SS" == "dead" || "$SS" == "failed" ]]
-    systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+    [[ "$SS" == "dead" ]]
     SBEOF
     chmod +x TEST-74-AUX-UTILS.substate-check.sh
   '';

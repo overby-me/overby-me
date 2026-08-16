@@ -88,6 +88,7 @@ enum Command {
     Poweroff,
     Reboot,
     Kill,
+    Start,
     Login,
     Shell,
     Bind,
@@ -275,6 +276,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         }
         "reboot" => {
             args.command = Command::Reboot;
+            args.machine = positional.get(1).cloned();
+        }
+        "start" => {
+            args.command = Command::Start;
             args.machine = positional.get(1).cloned();
         }
         "kill" => {
@@ -831,6 +836,36 @@ fn cmd_show(args: &Args) -> i32 {
                     1
                 }
             }
+        }
+    }
+}
+
+/// `machinectl start NAME` boots a container by starting its
+/// `systemd-nspawn@NAME.service` via the manager. This mirrors upstream, which
+/// asks the manager to StartUnit the nspawn template rather than routing the
+/// start through machined (machined only tracks already-running machines).
+fn cmd_start(args: &Args) -> i32 {
+    let name = match &args.machine {
+        Some(n) => n,
+        None => {
+            eprintln!("Machine name required");
+            return 1;
+        }
+    };
+    let unit = format!("systemd-nspawn@{name}.service");
+    match process::Command::new("systemctl")
+        .arg("start")
+        .arg(&unit)
+        .status()
+    {
+        Ok(status) if status.success() => 0,
+        Ok(status) => {
+            eprintln!("Failed to start {unit}: systemctl exited with {status}");
+            1
+        }
+        Err(e) => {
+            eprintln!("Failed to invoke systemctl to start {unit}: {e}");
+            1
         }
     }
 }
@@ -1730,6 +1765,7 @@ fn print_usage() {
     println!("  list                        List running VMs and containers");
     println!("  status NAME...              Show machine status");
     println!("  show [NAME...]              Show properties of one or more machines");
+    println!("  start NAME                  Start a container as a machine");
     println!("  terminate NAME...           Terminate one or more machines");
     println!("  kill NAME...                Send signal to processes of a machine");
     println!("  poweroff NAME...            Power off one or more machines");
@@ -1792,6 +1828,7 @@ fn run(argv: &[String]) -> i32 {
         Command::Status => cmd_status(&args),
         Command::Show => cmd_show(&args),
         Command::Terminate | Command::Poweroff | Command::Reboot => cmd_terminate(&args),
+        Command::Start => cmd_start(&args),
         Command::Kill => cmd_kill(&args),
         Command::Clean => cmd_clean(),
         Command::ImageList => cmd_image_list(&args),
@@ -1909,6 +1946,13 @@ mod tests {
     fn test_parse_args_reboot() {
         let a = parse_args(&args("reboot myvm")).unwrap();
         assert_eq!(a.command, Command::Reboot);
+    }
+
+    #[test]
+    fn test_parse_args_start() {
+        let a = parse_args(&args("start myvm")).unwrap();
+        assert_eq!(a.command, Command::Start);
+        assert_eq!(a.machine.as_deref(), Some("myvm"));
     }
 
     #[test]

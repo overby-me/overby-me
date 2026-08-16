@@ -51,6 +51,888 @@ use clap::Parser;
 
 const EXIT_SUCCESS: u8 = 0;
 const EXIT_FAILURE: u8 = 1;
+/// `EX_DATAERR` (sysexits.h): C exits with this when a config line has a syntax
+/// error, even though it keeps processing the rest.
+const EX_DATAERR: u8 = 65;
+
+// ── libacl FFI (foundation) ─────────────────────────────────────────────────
+//
+// The `a`/`A` item types apply POSIX ACLs. Today they shell out to `setfacl`
+// (SETFACL above); C systemd-tmpfiles uses libacl directly. These bindings
+// dlopen libacl at runtime (via the baked ACL_LIB path, mirroring PAM_LIB in
+// libsystemd/exec_helper.rs) so a later change can drop the external setfacl
+// dependency and be faithful to C. NOT YET wired into the SetACL arm -- setfacl
+// still does the work -- so these are #[allow(dead_code)] for now. The next step
+// is porting C's parse_acl (split access vs default `d:` entries) and
+// path_set_acl (merge for `a+` via acl_get_file, acl_calc_mask, then
+// acl_set_file with ACL_TYPE_ACCESS/ACL_TYPE_DEFAULT).
+
+/// Absolute path to libacl, baked from the Nix build (`ACL_LIB`), else the soname.
+const ACL_LIB_PATH: &str = match option_env!("ACL_LIB") {
+    Some(p) => p,
+    None => "libacl.so.1",
+};
+
+/// `acl_type_t` values from `<sys/acl.h>`.
+const ACL_TYPE_ACCESS: libc::c_uint = 0x8000;
+const ACL_TYPE_DEFAULT: libc::c_uint = 0x4000;
+
+/// `acl_tag_t` values from `<sys/acl.h>` (the type is `int`).
+const ACL_USER_OBJ: libc::c_int = 0x01;
+const ACL_USER: libc::c_int = 0x02;
+const ACL_GROUP_OBJ: libc::c_int = 0x04;
+const ACL_GROUP: libc::c_int = 0x08;
+const ACL_MASK: libc::c_int = 0x10;
+const ACL_OTHER: libc::c_int = 0x20;
+/// `acl_get_entry` iteration selectors.
+const ACL_FIRST_ENTRY: libc::c_int = 0;
+const ACL_NEXT_ENTRY: libc::c_int = 1;
+/// `acl_perm_t` bit for the execute permission (`<sys/acl.h>`).
+const ACL_EXECUTE: libc::c_uint = 0x01;
+
+/// `acl_t` and `acl_entry_t` are opaque handles.
+type AclT = *mut libc::c_void;
+type AclEntryT = *mut libc::c_void;
+type AclFromTextFn = unsafe extern "C" fn(*const libc::c_char) -> AclT;
+type AclSetFileFn = unsafe extern "C" fn(*const libc::c_char, libc::c_uint, AclT) -> libc::c_int;
+type AclFreeFn = unsafe extern "C" fn(*mut libc::c_void) -> libc::c_int;
+// Entry-walk and mask/base machinery for the faithful path_set_acl port.
+type AclGetEntryFn = unsafe extern "C" fn(AclT, libc::c_int, *mut AclEntryT) -> libc::c_int;
+type AclGetTagTypeFn = unsafe extern "C" fn(AclEntryT, *mut libc::c_int) -> libc::c_int;
+type AclCreateEntryFn = unsafe extern "C" fn(*mut AclT, *mut AclEntryT) -> libc::c_int;
+type AclCopyEntryFn = unsafe extern "C" fn(AclEntryT, AclEntryT) -> libc::c_int;
+type AclFromModeFn = unsafe extern "C" fn(libc::mode_t) -> AclT;
+type AclCalcMaskFn = unsafe extern "C" fn(*mut AclT) -> libc::c_int;
+// Conditional-execute (`X`) machinery: read the existing ACL and inspect/clear
+// the execute permission bit. `acl_permset_t` is an opaque handle.
+type AclPermsetT = *mut libc::c_void;
+type AclInitFn = unsafe extern "C" fn(libc::c_int) -> AclT;
+type AclGetFileFn = unsafe extern "C" fn(*const libc::c_char, libc::c_uint) -> AclT;
+type AclGetPermsetFn = unsafe extern "C" fn(AclEntryT, *mut AclPermsetT) -> libc::c_int;
+type AclGetPermFn = unsafe extern "C" fn(AclPermsetT, libc::c_uint) -> libc::c_int;
+type AclDeletePermFn = unsafe extern "C" fn(AclPermsetT, libc::c_uint) -> libc::c_int;
+// Merge machinery for the `a+` (modify) path: match entries by tag + qualifier.
+// `acl_get_qualifier` returns a heap `uid_t`/`gid_t` that must be `acl_free`d.
+type AclGetQualifierFn = unsafe extern "C" fn(AclEntryT) -> *mut libc::c_void;
+
+/// Apply a complete POSIX ACL (setfacl text form) to `path` via libacl, with no
+/// external binary. `acl_type` is [`ACL_TYPE_ACCESS`] or [`ACL_TYPE_DEFAULT`].
+///
+/// The text must be a full, valid ACL for the type (base user/group/other
+/// entries plus a mask when there are named entries). The tmpfiles arm uses the
+/// richer [`libacl_apply_acls`] instead; this thin primitive is retained only
+/// to exercise the FFI directly in unit tests.
+#[allow(dead_code)]
+fn acl_set_file_from_text(path: &Path, acl_type: libc::c_uint, text: &str) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_lib = std::ffi::CString::new(ACL_LIB_PATH)
+        .map_err(|_| "ACL_LIB path contains a NUL byte".to_string())?;
+    let c_text =
+        std::ffi::CString::new(text).map_err(|_| "ACL text contains a NUL byte".to_string())?;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "path contains a NUL byte".to_string())?;
+
+    let handle = unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_NOW) };
+    if handle.is_null() {
+        return Err(format!("dlopen({ACL_LIB_PATH}) failed"));
+    }
+
+    macro_rules! sym {
+        ($name:literal, $ty:ty) => {{
+            let s = unsafe {
+                libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char)
+            };
+            if s.is_null() {
+                unsafe { libc::dlclose(handle) };
+                return Err(format!("dlsym({}) failed", $name));
+            }
+            unsafe { std::mem::transmute::<*mut libc::c_void, $ty>(s) }
+        }};
+    }
+
+    let acl_from_text = sym!("acl_from_text", AclFromTextFn);
+    let acl_set_file = sym!("acl_set_file", AclSetFileFn);
+    let acl_free = sym!("acl_free", AclFreeFn);
+
+    let acl = unsafe { acl_from_text(c_text.as_ptr()) };
+    if acl.is_null() {
+        let e = std::io::Error::last_os_error();
+        unsafe { libc::dlclose(handle) };
+        return Err(format!("acl_from_text({text:?}) failed: {e}"));
+    }
+
+    let rc = unsafe { acl_set_file(c_path.as_ptr(), acl_type, acl) };
+    // Capture errno before the cleanup calls can reset it.
+    let err = (rc != 0).then(std::io::Error::last_os_error);
+
+    unsafe {
+        acl_free(acl);
+        libc::dlclose(handle);
+    }
+
+    match err {
+        Some(e) => Err(format!("acl_set_file({}) failed: {e}", path.display())),
+        None => Ok(()),
+    }
+}
+
+/// The three categories C's `parse_acl` (src/shared/acl-util.c) splits a
+/// tmpfiles `a`/`A` ACL argument into, each as comma-joined text ready for
+/// `acl_from_text` (or `None` when that category is empty).
+///
+/// A tmpfiles ACL argument is a comma-separated list of entries, each
+/// `type:qualifier:perms` (three colon-separated fields), optionally prefixed
+/// with `default:` / `d:` to target the default ACL (four fields). An uppercase
+/// `X` in the permission field means "execute only where it already applies"
+/// and is resolved per inode, so such access entries are kept apart from the
+/// rest and their mask is computed only after that decision.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ParsedAcl {
+    /// Plain access entries: `acl_from_text` then [`ACL_TYPE_ACCESS`].
+    access: Option<String>,
+    /// Access entries whose permission field carried an uppercase `X`, lowered
+    /// to `x` here; the execute bit is applied conditionally per inode.
+    access_exec: Option<String>,
+    /// Default entries, `default:` / `d:` prefix removed: `acl_from_text` then
+    /// [`ACL_TYPE_DEFAULT`].
+    default: Option<String>,
+}
+
+/// Split a tmpfiles ACL argument into access / access-exec / default text,
+/// faithfully to C systemd's `parse_acl`.
+///
+/// Mirrors the C control flow: the outer split on `,` coalesces separators (C
+/// uses `strv_split`, i.e. `EXTRACT_RETAIN_ESCAPE`, so empty entries are
+/// dropped); the inner split on `:` keeps empty fields (C adds
+/// `EXTRACT_DONT_COALESCE_SEPARATORS`, so `u::rwx` stays three fields); the
+/// uppercase-`X`-to-`x` substitution runs on the permission field of every
+/// entry; a three-field entry whose text changed under that substitution is an
+/// exec entry, otherwise a plain access entry; a four-field entry must begin
+/// with `default` or `d` and becomes a default entry with that prefix dropped.
+/// Returns an error (C's `-EINVAL`) for an entry with fewer than three or more
+/// than four fields, or a four-field entry with a bad prefix.
+///
+/// Intentional simplification: C splits with `EXTRACT_RETAIN_ESCAPE`, so a
+/// backslash-escaped colon inside a field would not act as a separator. POSIX
+/// user and group names cannot contain `:` or `\`, and `acl_from_text` rejects
+/// such text regardless, so this port splits on the raw `:`; the only
+/// observable difference is which layer reports the error, and both reject.
+fn parse_acl_text(text: &str) -> Result<ParsedAcl, String> {
+    let mut access: Vec<String> = Vec::new();
+    let mut access_exec: Vec<String> = Vec::new();
+    let mut default: Vec<String> = Vec::new();
+
+    // The outer split coalesces separators, so drop empty entries (leading,
+    // trailing, and doubled commas), matching C's `strv_split`.
+    for entry in text.split(',').filter(|e| !e.is_empty()) {
+        let fields: Vec<&str> = entry.split(':').collect();
+        let n = fields.len();
+        if !(3..=4).contains(&n) {
+            return Err(format!(
+                "invalid ACL entry {entry:?}: expected 3 or 4 colon-separated fields, got {n}"
+            ));
+        }
+
+        // Lower `X` to `x` in the permission field (always the last one). A
+        // change means the entry carried an uppercase, conditional `X`.
+        let perms = fields[n - 1].replace('X', "x");
+        let had_upper_x = perms != fields[n - 1];
+
+        if n == 4 {
+            if !matches!(fields[0], "default" | "d") {
+                return Err(format!(
+                    "invalid ACL entry {entry:?}: a 4-field entry must start with \"default\" or \"d\""
+                ));
+            }
+            // Drop the default prefix; keep the remaining three fields.
+            default.push(format!("{}:{}:{}", fields[1], fields[2], perms));
+        } else if had_upper_x {
+            access_exec.push(format!("{}:{}:{}", fields[0], fields[1], perms));
+        } else {
+            access.push(format!("{}:{}:{}", fields[0], fields[1], perms));
+        }
+    }
+
+    let join = |v: Vec<String>| (!v.is_empty()).then(|| v.join(","));
+    Ok(ParsedAcl {
+        access: join(access),
+        access_exec: join(access_exec),
+        default: join(default),
+    })
+}
+
+/// libacl entry points bound once via `dlsym`, for the faithful path_set_acl
+/// port (mirrors C's `dlopen_libacl` + `sym_*` indirection).
+struct AclFns {
+    from_text: AclFromTextFn,
+    set_file: AclSetFileFn,
+    free: AclFreeFn,
+    get_entry: AclGetEntryFn,
+    get_tag_type: AclGetTagTypeFn,
+    create_entry: AclCreateEntryFn,
+    copy_entry: AclCopyEntryFn,
+    from_mode: AclFromModeFn,
+    calc_mask: AclCalcMaskFn,
+    init: AclInitFn,
+    get_file: AclGetFileFn,
+    get_permset: AclGetPermsetFn,
+    get_perm: AclGetPermFn,
+    delete_perm: AclDeletePermFn,
+    get_qualifier: AclGetQualifierFn,
+}
+
+/// Bind every libacl symbol the port needs from an open `dlopen` handle. Errors
+/// on a missing symbol; the caller owns the handle and closes it.
+fn load_acl_fns(handle: *mut libc::c_void) -> Result<AclFns, String> {
+    macro_rules! sym {
+        ($name:literal, $ty:ty) => {{
+            let s = unsafe {
+                libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char)
+            };
+            if s.is_null() {
+                return Err(format!("dlsym({}) failed", $name));
+            }
+            unsafe { std::mem::transmute::<*mut libc::c_void, $ty>(s) }
+        }};
+    }
+    Ok(AclFns {
+        from_text: sym!("acl_from_text", AclFromTextFn),
+        set_file: sym!("acl_set_file", AclSetFileFn),
+        free: sym!("acl_free", AclFreeFn),
+        get_entry: sym!("acl_get_entry", AclGetEntryFn),
+        get_tag_type: sym!("acl_get_tag_type", AclGetTagTypeFn),
+        create_entry: sym!("acl_create_entry", AclCreateEntryFn),
+        copy_entry: sym!("acl_copy_entry", AclCopyEntryFn),
+        from_mode: sym!("acl_from_mode", AclFromModeFn),
+        calc_mask: sym!("acl_calc_mask", AclCalcMaskFn),
+        init: sym!("acl_init", AclInitFn),
+        get_file: sym!("acl_get_file", AclGetFileFn),
+        get_permset: sym!("acl_get_permset", AclGetPermsetFn),
+        get_perm: sym!("acl_get_perm", AclGetPermFn),
+        delete_perm: sym!("acl_delete_perm", AclDeletePermFn),
+        get_qualifier: sym!("acl_get_qualifier", AclGetQualifierFn),
+    })
+}
+
+/// Port of C's `calc_acl_mask_if_needed`: compute a mask entry (via
+/// `acl_calc_mask`) when the ACL has named user/group entries but no explicit
+/// mask. A pre-existing mask is left untouched.
+fn calc_mask_if_needed(f: &AclFns, acl: &mut AclT) -> Result<(), String> {
+    let mut entry: AclEntryT = std::ptr::null_mut();
+    let mut need = false;
+    let mut r = unsafe { (f.get_entry)(*acl, ACL_FIRST_ENTRY, &mut entry) };
+    while r > 0 {
+        let mut tag: libc::c_int = 0;
+        if unsafe { (f.get_tag_type)(entry, &mut tag) } < 0 {
+            return Err(format!(
+                "acl_get_tag_type failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if tag == ACL_MASK {
+            return Ok(()); // explicit mask already present
+        }
+        if tag == ACL_USER || tag == ACL_GROUP {
+            need = true;
+        }
+        r = unsafe { (f.get_entry)(*acl, ACL_NEXT_ENTRY, &mut entry) };
+    }
+    if r < 0 {
+        return Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if need && unsafe { (f.calc_mask)(acl) } < 0 {
+        return Err(format!(
+            "acl_calc_mask failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Port of C's `add_base_acls_if_needed`: ensure the ACL carries the three base
+/// entries (owner, owning group, other). Missing ones are copied from an ACL
+/// built from the inode's mode, which is stat'd live -- so applying the access
+/// ACL first (which rewrites the group-class bits to the mask) is reflected in
+/// a default ACL applied afterwards, exactly as C does.
+fn add_base_if_needed(f: &AclFns, acl: &mut AclT, path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let (mut have_user, mut have_group, mut have_other) = (false, false, false);
+    let mut entry: AclEntryT = std::ptr::null_mut();
+    let mut r = unsafe { (f.get_entry)(*acl, ACL_FIRST_ENTRY, &mut entry) };
+    while r > 0 {
+        let mut tag: libc::c_int = 0;
+        if unsafe { (f.get_tag_type)(entry, &mut tag) } < 0 {
+            return Err(format!(
+                "acl_get_tag_type failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if tag == ACL_USER_OBJ {
+            have_user = true;
+        } else if tag == ACL_GROUP_OBJ {
+            have_group = true;
+        } else if tag == ACL_OTHER {
+            have_other = true;
+        }
+        if have_user && have_group && have_other {
+            return Ok(());
+        }
+        r = unsafe { (f.get_entry)(*acl, ACL_NEXT_ENTRY, &mut entry) };
+    }
+    if r < 0 {
+        return Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let mode = std::fs::metadata(path)
+        .map_err(|e| format!("stat({}) failed: {e}", path.display()))?
+        .mode() as libc::mode_t;
+    let basic = unsafe { (f.from_mode)(mode) };
+    if basic.is_null() {
+        return Err(format!(
+            "acl_from_mode failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let mut result = Ok(());
+    let mut src: AclEntryT = std::ptr::null_mut();
+    let mut r = unsafe { (f.get_entry)(basic, ACL_FIRST_ENTRY, &mut src) };
+    while r > 0 {
+        let mut tag: libc::c_int = 0;
+        if unsafe { (f.get_tag_type)(src, &mut tag) } < 0 {
+            result = Err(format!(
+                "acl_get_tag_type failed: {}",
+                std::io::Error::last_os_error()
+            ));
+            break;
+        }
+        let skip = (tag == ACL_USER_OBJ && have_user)
+            || (tag == ACL_GROUP_OBJ && have_group)
+            || (tag == ACL_OTHER && have_other);
+        if !skip {
+            let mut dst: AclEntryT = std::ptr::null_mut();
+            if unsafe { (f.create_entry)(acl, &mut dst) } < 0 {
+                result = Err(format!(
+                    "acl_create_entry failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+                break;
+            }
+            if unsafe { (f.copy_entry)(dst, src) } < 0 {
+                result = Err(format!(
+                    "acl_copy_entry failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+                break;
+            }
+        }
+        r = unsafe { (f.get_entry)(basic, ACL_NEXT_ENTRY, &mut src) };
+    }
+    if r < 0 && result.is_ok() {
+        result = Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    unsafe { (f.free)(basic) };
+    result
+}
+
+/// Port of C's `acl_entry_equal`: two entries are equal when they share a tag,
+/// and (for named user/group entries) the same numeric qualifier. The
+/// single-instance tags (owner, owning group, mask, other) match on tag alone.
+fn acl_entry_equal(f: &AclFns, a: AclEntryT, b: AclEntryT) -> Result<bool, String> {
+    let mut tag_a: libc::c_int = 0;
+    let mut tag_b: libc::c_int = 0;
+    if unsafe { (f.get_tag_type)(a, &mut tag_a) } < 0 {
+        return Err(format!(
+            "acl_get_tag_type failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if unsafe { (f.get_tag_type)(b, &mut tag_b) } < 0 {
+        return Err(format!(
+            "acl_get_tag_type failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if tag_a != tag_b {
+        return Ok(false);
+    }
+    if tag_a == ACL_USER_OBJ || tag_a == ACL_GROUP_OBJ || tag_a == ACL_MASK || tag_a == ACL_OTHER {
+        return Ok(true);
+    }
+    if tag_a == ACL_USER || tag_a == ACL_GROUP {
+        // The qualifier is a heap uid_t/gid_t (both u32) owned by us to free.
+        let qa = unsafe { (f.get_qualifier)(a) };
+        if qa.is_null() {
+            return Err(format!(
+                "acl_get_qualifier failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let qb = unsafe { (f.get_qualifier)(b) };
+        if qb.is_null() {
+            unsafe { (f.free)(qa) };
+            return Err(format!(
+                "acl_get_qualifier failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let ida = unsafe { *(qa as *const libc::uid_t) };
+        let idb = unsafe { *(qb as *const libc::uid_t) };
+        unsafe {
+            (f.free)(qa);
+            (f.free)(qb);
+        }
+        return Ok(ida == idb);
+    }
+    Ok(false)
+}
+
+/// Port of C's `find_acl_entry`: return the entry of `acl` equal to `entry`
+/// (by [`acl_entry_equal`]), or `None` when there is none.
+fn find_acl_entry(f: &AclFns, acl: AclT, entry: AclEntryT) -> Result<Option<AclEntryT>, String> {
+    let mut i: AclEntryT = std::ptr::null_mut();
+    let mut r = unsafe { (f.get_entry)(acl, ACL_FIRST_ENTRY, &mut i) };
+    while r > 0 {
+        if acl_entry_equal(f, i, entry)? {
+            return Ok(Some(i));
+        }
+        r = unsafe { (f.get_entry)(acl, ACL_NEXT_ENTRY, &mut i) };
+    }
+    if r < 0 {
+        return Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(None)
+}
+
+/// Port of C's `acls_for_file`: read the ACL currently on `path` (for `type`)
+/// and overlay every entry of `new_acl` onto it -- overwriting a matching entry
+/// or appending a new one. Returns the merged ACL, which the caller frees. This
+/// is the `a+` (modify) merge: existing entries not named in `new_acl` survive.
+fn acls_for_file(
+    f: &AclFns,
+    c_path: &std::ffi::CStr,
+    acl_type: libc::c_uint,
+    new_acl: AclT,
+) -> Result<AclT, String> {
+    let mut applied = unsafe { (f.get_file)(c_path.as_ptr(), acl_type) };
+    if applied.is_null() {
+        return Err(format!(
+            "acl_get_file(type={acl_type:#x}) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let mut result = Ok(());
+    let mut src: AclEntryT = std::ptr::null_mut();
+    let mut r = unsafe { (f.get_entry)(new_acl, ACL_FIRST_ENTRY, &mut src) };
+    while r > 0 {
+        let dst = match find_acl_entry(f, applied, src) {
+            Ok(Some(j)) => j,
+            Ok(None) => {
+                let mut nj: AclEntryT = std::ptr::null_mut();
+                if unsafe { (f.create_entry)(&mut applied, &mut nj) } < 0 {
+                    result = Err(format!(
+                        "acl_create_entry failed: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                    break;
+                }
+                nj
+            }
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
+        };
+        if unsafe { (f.copy_entry)(dst, src) } < 0 {
+            result = Err(format!(
+                "acl_copy_entry failed: {}",
+                std::io::Error::last_os_error()
+            ));
+            break;
+        }
+        r = unsafe { (f.get_entry)(new_acl, ACL_NEXT_ENTRY, &mut src) };
+    }
+    if r < 0 && result.is_ok() {
+        result = Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    match result {
+        Ok(()) => Ok(applied),
+        Err(e) => {
+            unsafe { (f.free)(applied) };
+            Err(e)
+        }
+    }
+}
+
+/// Build the ACL for one type and `acl_set_file` it. For the replace (`a`)
+/// case the mask is computed over the given entries; for the modify (`a+`)
+/// case -- the inverse of `want_mask` -- the entries are merged onto the ACL
+/// already on the inode and the mask is recomputed. Base entries are then
+/// filled. Split out so the caller frees `acl` on every path.
+fn build_and_set_acl(
+    f: &AclFns,
+    acl: &mut AclT,
+    c_path: &std::ffi::CStr,
+    acl_type: libc::c_uint,
+    path: &Path,
+    want_mask: bool,
+) -> Result<(), String> {
+    if want_mask {
+        // Replace (`a`): the mask is computed over these entries alone.
+        calc_mask_if_needed(f, acl)?;
+    } else {
+        // Modify (`a+`): merge onto the ACL already on the inode, then
+        // recompute the mask (deferred at parse time).
+        let merged = acls_for_file(f, c_path, acl_type, *acl)?;
+        unsafe { (f.free)(*acl) };
+        *acl = merged;
+        calc_mask_if_needed(f, acl)?;
+    }
+    add_base_if_needed(f, acl, path)?;
+    let rc = unsafe { (f.set_file)(c_path.as_ptr(), acl_type, *acl) };
+    if rc != 0 {
+        return Err(format!(
+            "acl_set_file({}, type={acl_type:#x}) failed: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Apply one parsed ACL type to `path` (C's path_set_acl): `acl_from_text`,
+/// then build-and-set, freeing the ACL on every exit.
+fn apply_one_acl(
+    f: &AclFns,
+    path: &Path,
+    acl_type: libc::c_uint,
+    text: &str,
+    want_mask: bool,
+) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_text =
+        std::ffi::CString::new(text).map_err(|_| "ACL text contains a NUL byte".to_string())?;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "path contains a NUL byte".to_string())?;
+
+    let mut acl = unsafe { (f.from_text)(c_text.as_ptr()) };
+    if acl.is_null() {
+        return Err(format!(
+            "acl_from_text({text:?}) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let outcome = build_and_set_acl(f, &mut acl, &c_path, acl_type, path, want_mask);
+    unsafe { (f.free)(acl) };
+    outcome
+}
+
+/// Whether any entry of `acl` grants execute, ignoring entries for which
+/// `skip(tag)` is true. The mask is inspected via `acl_get_perm`, matching C.
+fn entry_has_exec(
+    f: &AclFns,
+    acl: AclT,
+    skip: impl Fn(libc::c_int) -> bool,
+) -> Result<bool, String> {
+    let mut entry: AclEntryT = std::ptr::null_mut();
+    let mut r = unsafe { (f.get_entry)(acl, ACL_FIRST_ENTRY, &mut entry) };
+    while r > 0 {
+        let mut tag: libc::c_int = 0;
+        if unsafe { (f.get_tag_type)(entry, &mut tag) } < 0 {
+            return Err(format!(
+                "acl_get_tag_type failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if !skip(tag) {
+            let mut permset: AclPermsetT = std::ptr::null_mut();
+            if unsafe { (f.get_permset)(entry, &mut permset) } < 0 {
+                return Err(format!(
+                    "acl_get_permset failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            let p = unsafe { (f.get_perm)(permset, ACL_EXECUTE) };
+            if p < 0 {
+                return Err(format!(
+                    "acl_get_perm failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if p > 0 {
+                return Ok(true);
+            }
+        }
+        r = unsafe { (f.get_entry)(acl, ACL_NEXT_ENTRY, &mut entry) };
+    }
+    if r < 0 {
+        return Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(false)
+}
+
+/// Port of C's `parse_acl_cond_exec` execute decision: whether uppercase-`X`
+/// entries keep their execute bit. Always true for a directory; otherwise true
+/// if the inode's existing access ACL already grants execute (skipping the mask
+/// always, and named entries in replace mode since they are about to be
+/// dropped), or if the new access entries (`parsed_access`) grant execute.
+fn compute_has_exec(
+    f: &AclFns,
+    path: &Path,
+    parsed_access: AclT,
+    append: bool,
+) -> Result<bool, String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    if path.is_dir() {
+        return Ok(true);
+    }
+
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "path contains a NUL byte".to_string())?;
+    let old = unsafe { (f.get_file)(c_path.as_ptr(), ACL_TYPE_ACCESS) };
+    if old.is_null() {
+        return Err(format!(
+            "acl_get_file({}) failed: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    let from_old = entry_has_exec(f, old, |tag| {
+        tag == ACL_MASK || (!append && (tag == ACL_USER || tag == ACL_GROUP))
+    });
+    unsafe { (f.free)(old) };
+    if from_old? {
+        return Ok(true);
+    }
+
+    // Otherwise, does anything in the new access ACL grant execute?
+    entry_has_exec(f, parsed_access, |_| false)
+}
+
+/// Copy each entry of `src` into `dst`, dropping the execute bit when
+/// `!has_exec` -- the conditional-`X` resolution from `parse_acl_cond_exec`.
+fn copy_exec_entries(f: &AclFns, dst: &mut AclT, src: AclT, has_exec: bool) -> Result<(), String> {
+    let mut entry: AclEntryT = std::ptr::null_mut();
+    let mut r = unsafe { (f.get_entry)(src, ACL_FIRST_ENTRY, &mut entry) };
+    while r > 0 {
+        let mut dst_entry: AclEntryT = std::ptr::null_mut();
+        if unsafe { (f.create_entry)(dst, &mut dst_entry) } < 0 {
+            return Err(format!(
+                "acl_create_entry failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if unsafe { (f.copy_entry)(dst_entry, entry) } < 0 {
+            return Err(format!(
+                "acl_copy_entry failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if !has_exec {
+            let mut permset: AclPermsetT = std::ptr::null_mut();
+            if unsafe { (f.get_permset)(dst_entry, &mut permset) } < 0 {
+                return Err(format!(
+                    "acl_get_permset failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if unsafe { (f.delete_perm)(permset, ACL_EXECUTE) } < 0 {
+                return Err(format!(
+                    "acl_delete_perm failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+        }
+        r = unsafe { (f.get_entry)(src, ACL_NEXT_ENTRY, &mut entry) };
+    }
+    if r < 0 {
+        return Err(format!(
+            "acl_get_entry failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Compute the mask over the plain access entries, resolve and merge the
+/// conditional-execute entries, recompute the mask (a no-op when one already
+/// exists), fill base entries, and set the access ACL. Split from
+/// [`apply_access_acl`] so the caller frees `parsed` on every path.
+fn build_access_and_set(
+    f: &AclFns,
+    parsed: &mut AclT,
+    c_path: &std::ffi::CStr,
+    path: &Path,
+    access_exec: Option<&str>,
+    want_mask: bool,
+) -> Result<(), String> {
+    // Mask over the plain access entries first (parse_acl's want_mask). Because
+    // calc_mask_if_needed skips when a mask exists, the later recompute is a
+    // no-op, so the mask reflects only the plain access entries -- as in C.
+    if want_mask {
+        calc_mask_if_needed(f, parsed)?;
+    }
+
+    if let Some(text) = access_exec {
+        // want_mask == !append_or_force, so append is its inverse.
+        let has_exec = compute_has_exec(f, path, *parsed, !want_mask)?;
+
+        let c_text =
+            std::ffi::CString::new(text).map_err(|_| "ACL text contains a NUL byte".to_string())?;
+        let exec_acl = unsafe { (f.from_text)(c_text.as_ptr()) };
+        if exec_acl.is_null() {
+            return Err(format!(
+                "acl_from_text({text:?}) failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let merged = copy_exec_entries(f, parsed, exec_acl, has_exec);
+        unsafe { (f.free)(exec_acl) };
+        merged?;
+
+        if want_mask {
+            calc_mask_if_needed(f, parsed)?;
+        }
+    }
+
+    // Modify (`a+`): merge the built access ACL onto the one already on the
+    // inode (preserving its other named entries), then recompute the mask.
+    if !want_mask {
+        let merged = acls_for_file(f, c_path, ACL_TYPE_ACCESS, *parsed)?;
+        unsafe { (f.free)(*parsed) };
+        *parsed = merged;
+        calc_mask_if_needed(f, parsed)?;
+    }
+
+    add_base_if_needed(f, parsed, path)?;
+    let rc = unsafe { (f.set_file)(c_path.as_ptr(), ACL_TYPE_ACCESS, *parsed) };
+    if rc != 0 {
+        return Err(format!(
+            "acl_set_file({}, ACCESS) failed: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Apply the access ACL (C's `parse_acl_cond_exec` + `path_set_acl(ACCESS)`)
+/// for the non-modify (`a`) case: build the plain access entries (an empty ACL
+/// when there are none, e.g. an `X`-only argument), then hand off to
+/// [`build_access_and_set`], freeing `parsed` on every exit.
+fn apply_access_acl(
+    f: &AclFns,
+    path: &Path,
+    access: Option<&str>,
+    access_exec: Option<&str>,
+    want_mask: bool,
+) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "path contains a NUL byte".to_string())?;
+
+    let mut parsed = match access {
+        Some(text) => {
+            let c_text = std::ffi::CString::new(text)
+                .map_err(|_| "ACL text contains a NUL byte".to_string())?;
+            let a = unsafe { (f.from_text)(c_text.as_ptr()) };
+            if a.is_null() {
+                return Err(format!(
+                    "acl_from_text({text:?}) failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            a
+        }
+        None => {
+            let a = unsafe { (f.init)(0) };
+            if a.is_null() {
+                return Err(format!(
+                    "acl_init failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            a
+        }
+    };
+
+    let outcome = build_access_and_set(f, &mut parsed, &c_path, path, access_exec, want_mask);
+    unsafe { (f.free)(parsed) };
+    outcome
+}
+
+/// Faithful port of C tmpfiles' ACL application (`fix_acl` -> `path_set_acl`),
+/// via libacl with no external `setfacl`. The access ACL (including any
+/// conditional-execute entries) is applied first -- which rewrites the inode's
+/// group-class bits to the mask -- then, for a directory, the default entries.
+///
+/// `want_mask` selects the mode: `true` is the replace (`a`) case (build the
+/// ACL from the given entries), `false` is the modify (`a+`) case (merge the
+/// entries onto the ACL already on the inode, preserving its other entries).
+fn libacl_apply_acls(
+    path: &Path,
+    access: Option<&str>,
+    access_exec: Option<&str>,
+    default: Option<&str>,
+    want_mask: bool,
+) -> Result<(), String> {
+    let c_lib = std::ffi::CString::new(ACL_LIB_PATH)
+        .map_err(|_| "ACL_LIB path contains a NUL byte".to_string())?;
+    let handle = unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_NOW) };
+    if handle.is_null() {
+        return Err(format!("dlopen({ACL_LIB_PATH}) failed"));
+    }
+    let result = libacl_apply_all(handle, path, access, access_exec, default, want_mask);
+    unsafe { libc::dlclose(handle) };
+    result
+}
+
+/// The work of [`libacl_apply_acls`] against an already-open handle, split out
+/// so the single `dlclose` covers every exit.
+fn libacl_apply_all(
+    handle: *mut libc::c_void,
+    path: &Path,
+    access: Option<&str>,
+    access_exec: Option<&str>,
+    default: Option<&str>,
+    want_mask: bool,
+) -> Result<(), String> {
+    let f = load_acl_fns(handle)?;
+    if access.is_some() || access_exec.is_some() {
+        apply_access_acl(&f, path, access, access_exec, want_mask)?;
+    }
+    // Default ACLs only apply to directories.
+    if let Some(text) = default
+        && path.is_dir()
+    {
+        apply_one_acl(&f, path, ACL_TYPE_DEFAULT, text, want_mask)?;
+    }
+    Ok(())
+}
 
 /// Directories to search for tmpfiles.d configuration, in priority order.
 /// Earlier directories take precedence when the same filename exists in multiple.
@@ -59,6 +941,19 @@ const CONFIG_DIRS: &[&str] = &[
     "/run/tmpfiles.d",
     "/usr/lib/tmpfiles.d",
     "/lib/tmpfiles.d",
+];
+
+/// System-wide directories searched for per-user (`--user`) tmpfiles.d
+/// configuration, in priority order. The per-user XDG directories
+/// (`$XDG_CONFIG_HOME/user-tmpfiles.d`, `$XDG_RUNTIME_DIR/user-tmpfiles.d`) are
+/// prepended at runtime and take precedence over these.
+const USER_CONFIG_DIRS: &[&str] = &[
+    "/etc/user-tmpfiles.d",
+    "/run/user-tmpfiles.d",
+    "/usr/local/share/user-tmpfiles.d",
+    "/usr/share/user-tmpfiles.d",
+    "/usr/local/lib/user-tmpfiles.d",
+    "/usr/lib/user-tmpfiles.d",
 ];
 
 /// systemd-tmpfiles — Create, delete, and clean up temporary files and directories
@@ -80,6 +975,10 @@ struct Cli {
     /// Also execute lines with an exclamation mark (for early boot)
     #[arg(long)]
     boot: bool,
+
+    /// Execute rules for the per-user instance (read user-tmpfiles.d)
+    #[arg(long)]
+    user: bool,
 
     /// Only apply rules with paths that start with the specified prefix
     #[arg(long = "prefix")]
@@ -579,11 +1478,23 @@ fn expand_specifiers(s: &str, root: Option<&Path>) -> String {
 }
 
 /// Parse a single tmpfiles.d configuration line.
+/// Thin wrapper used by tests: parse a line without tracking the fatal flag.
+#[cfg(test)]
 fn parse_line(
     line: &str,
     source: &Path,
     line_number: usize,
     root: Option<&Path>,
+) -> Option<TmpfilesItem> {
+    parse_line_inner(line, source, line_number, root, &mut false)
+}
+
+fn parse_line_inner(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    root: Option<&Path>,
+    fatal: &mut bool,
 ) -> Option<TmpfilesItem> {
     let trimmed = line.trim();
 
@@ -599,6 +1510,8 @@ fn parse_line(
             source.display(),
             line_number,
         );
+        // C treats a syntax error as fatal to the exit code (EX_DATAERR).
+        *fatal = true;
         return None;
     }
 
@@ -637,6 +1550,7 @@ fn parse_line(
                 line_number,
                 type_str,
             );
+            *fatal = true;
             return None;
         }
     };
@@ -717,6 +1631,7 @@ fn parse_line(
                 line_number,
                 age_field,
             );
+            *fatal = true;
         }
         result
     } else {
@@ -797,7 +1712,7 @@ fn parse_line(
 }
 
 /// Parse a tmpfiles.d config file.
-fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
+fn parse_config_stdin(root: Option<&Path>, fatal: &mut bool) -> io::Result<Vec<TmpfilesItem>> {
     let stdin = io::stdin();
     let reader = stdin.lock();
     let mut items = Vec::new();
@@ -823,7 +1738,7 @@ fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
             line
         };
 
-        if let Some(item) = parse_line(&full_line, &source, line_number, root) {
+        if let Some(item) = parse_line_inner(&full_line, &source, line_number, root, fatal) {
             items.push(item);
         }
     }
@@ -831,7 +1746,11 @@ fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
     Ok(items)
 }
 
-fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
+fn parse_config_file(
+    path: &Path,
+    root: Option<&Path>,
+    fatal: &mut bool,
+) -> io::Result<Vec<TmpfilesItem>> {
     let file = fs::File::open(path)?;
     let reader = io::BufReader::new(file);
     let mut items = Vec::new();
@@ -858,7 +1777,7 @@ fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<Tmpfile
             line
         };
 
-        if let Some(item) = parse_line(&full_line, path, line_number, root) {
+        if let Some(item) = parse_line_inner(&full_line, path, line_number, root, fatal) {
             items.push(item);
         }
     }
@@ -868,14 +1787,31 @@ fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<Tmpfile
 
 /// Discover all .conf files across the config directories, respecting priority.
 /// Files in earlier directories shadow files with the same name in later directories.
-fn discover_config_files() -> Vec<PathBuf> {
+fn discover_config_files(user: bool) -> Vec<PathBuf> {
     let mut seen_names: BTreeSet<String> = BTreeSet::new();
     let mut result = Vec::new();
 
-    // Collect files from directories in priority order (etc > run > usr/lib > lib).
+    // Build the search path. In --user mode the per-user XDG directories take
+    // precedence over the system-wide user-tmpfiles.d directories.
+    let dirs: Vec<PathBuf> = if user {
+        let mut d = Vec::new();
+        if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+            d.push(PathBuf::from(config_home).join("user-tmpfiles.d"));
+        } else if let Ok(home) = std::env::var("HOME") {
+            d.push(PathBuf::from(home).join(".config/user-tmpfiles.d"));
+        }
+        if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+            d.push(PathBuf::from(runtime).join("user-tmpfiles.d"));
+        }
+        d.extend(USER_CONFIG_DIRS.iter().map(PathBuf::from));
+        d
+    } else {
+        CONFIG_DIRS.iter().map(PathBuf::from).collect()
+    };
+
+    // Collect files from directories in priority order (highest first).
     // When the same filename exists in multiple directories, the highest-priority one wins.
-    for dir in CONFIG_DIRS {
-        let dir_path = Path::new(dir);
+    for dir_path in &dirs {
         if !dir_path.is_dir() {
             continue;
         }
@@ -887,7 +1823,11 @@ fn discover_config_files() -> Vec<PathBuf> {
                 .filter(|p| p.extension().map(|ext| ext == "conf").unwrap_or(false))
                 .collect(),
             Err(e) => {
-                eprintln!("systemd-tmpfiles: Failed to read directory {}: {}", dir, e);
+                eprintln!(
+                    "systemd-tmpfiles: Failed to read directory {}: {}",
+                    dir_path.display(),
+                    e
+                );
                 continue;
             }
         };
@@ -1916,46 +2856,67 @@ fn execute_create(item: &TmpfilesItem, graceful: bool, root: Option<&Path>) -> b
                 return true;
             }
 
-            // 'a' (no +) clears extended ACLs first; 'a+' appends/modifies
-            if !item.force {
-                let _ = std::process::Command::new("setfacl")
-                    .arg("-b")
-                    .arg(path)
-                    .output();
-            }
-
-            let mut cmd = std::process::Command::new("setfacl");
-            if item.item_type == ItemType::SetACLRecursively {
-                cmd.arg("-R");
-            }
-            cmd.arg("-m").arg(acl_spec).arg(path);
-
-            match cmd.output() {
-                Ok(output) if output.status.success() => true,
-                Ok(output) => {
-                    if !graceful && !item.minus {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        eprintln!(
-                            "systemd-tmpfiles: Failed to set ACL on {}: {}",
-                            path.display(),
-                            stderr.trim()
-                        );
-                        return false;
-                    }
-                    true
-                }
+            // Parse the ACL argument (faithful to C parse_acl) and apply it via
+            // libacl directly, with no external setfacl. 'a' replaces the ACL
+            // (want_mask, dropping pre-existing extended entries); 'a+' merges
+            // the new entries onto the existing ACL.
+            let parsed = match parse_acl_text(acl_spec) {
+                Ok(p) => p,
                 Err(e) => {
                     if !graceful && !item.minus {
                         eprintln!(
-                            "systemd-tmpfiles: Failed to run setfacl on {}: {}",
-                            path.display(),
-                            e
+                            "systemd-tmpfiles: {}:{}: invalid ACL {acl_spec:?}: {e}",
+                            item.source.display(),
+                            item.line_number,
                         );
                         return false;
                     }
-                    true
+                    return true;
                 }
+            };
+            let want_mask = !item.force;
+
+            // Apply to one inode; returns false only on a hard (non-graceful) error.
+            let apply = |p: &Path| -> bool {
+                match libacl_apply_acls(
+                    p,
+                    parsed.access.as_deref(),
+                    parsed.access_exec.as_deref(),
+                    parsed.default.as_deref(),
+                    want_mask,
+                ) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        if !graceful && !item.minus {
+                            eprintln!(
+                                "systemd-tmpfiles: Failed to set ACL on {}: {e}",
+                                p.display(),
+                            );
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                }
+            };
+
+            let mut ok = apply(path);
+            if item.item_type == ItemType::SetACLRecursively
+                && path.is_dir()
+                && let Err(e) = walk_dir(path, &mut |p| {
+                    if !apply(p) {
+                        ok = false;
+                    }
+                })
+                && !graceful
+                && !item.minus
+            {
+                eprintln!(
+                    "systemd-tmpfiles: Failed to walk directory {}: {e}",
+                    path.display(),
+                );
             }
+            ok
         }
 
         // Types that are only relevant for --remove or --clean
@@ -2545,7 +3506,7 @@ fn run() -> u8 {
             .cloned()
             .collect()
     } else {
-        discover_config_files()
+        discover_config_files(cli.user)
     };
 
     if verbose {
@@ -2558,10 +3519,12 @@ fn run() -> u8 {
 
     // Parse all configuration
     let mut items = Vec::new();
+    // Set when a config line has a syntax error; C exits EX_DATAERR (65) for it.
+    let mut fatal_config_error = false;
 
     // Read from stdin if "-" was specified
     if has_stdin {
-        match parse_config_stdin(cli.root.as_deref()) {
+        match parse_config_stdin(cli.root.as_deref(), &mut fatal_config_error) {
             Ok(stdin_items) => {
                 if verbose {
                     eprintln!(
@@ -2578,7 +3541,7 @@ fn run() -> u8 {
     }
 
     for path in &config_files {
-        match parse_config_file(path, cli.root.as_deref()) {
+        match parse_config_file(path, cli.root.as_deref(), &mut fatal_config_error) {
             Ok(file_items) => {
                 if verbose {
                     eprintln!(
@@ -2595,15 +3558,24 @@ fn run() -> u8 {
         }
     }
 
-    // Deduplicate items: for types other than w+ (WriteFile with force/append),
-    // only the first entry per (path, type) is kept.  This matches systemd behaviour
-    // where earlier (higher-priority) config files win for the same path and type.
+    // Deduplicate items: for most types only the first entry per (path, type)
+    // is kept, matching systemd, which reports "Duplicate line for path,
+    // ignoring" and keeps the earlier (higher-priority) line. Two exceptions
+    // accumulate rather than dedup, again matching C:
+    //   - w+ (WriteFile with force) appends, so every entry is applied;
+    //   - ACL items (a/A, with or without +) are applied in order -- each 'a'
+    //     replaces the ACL, each 'a+' merges onto it -- so all are kept.
     {
         let mut seen: std::collections::HashSet<(PathBuf, ItemType)> =
             std::collections::HashSet::new();
         items.retain(|item| {
-            // w+ (WriteFile with force flag) entries are always kept — they append.
             if item.item_type == ItemType::WriteFile && item.force {
+                return true;
+            }
+            if matches!(
+                item.item_type,
+                ItemType::SetACL | ItemType::SetACLRecursively
+            ) {
                 return true;
             }
             // For all other types, keep only the first entry per (path, type).
@@ -2835,6 +3807,8 @@ fn run() -> u8 {
 
     if any_failed {
         EXIT_FAILURE
+    } else if fatal_config_error {
+        EX_DATAERR
     } else {
         EXIT_SUCCESS
     }
@@ -3143,12 +4117,48 @@ mod tests {
         writeln!(f, "L /etc/localtime - - - - /usr/share/zoneinfo/UTC").unwrap();
         drop(f);
 
-        let items = parse_config_file(&path, None).unwrap();
+        let items = parse_config_file(&path, None, &mut false).unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].item_type, ItemType::CreateDirectory);
         assert_eq!(items[1].item_type, ItemType::CreateFile);
         assert_eq!(items[2].item_type, ItemType::CreateSymlink);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fatal_flag_matches_c_classification() {
+        // C exits EX_DATAERR (65) for syntax errors but 0 for a bare unknown
+        // type. parse_config_file sets `fatal` exactly for the syntax cases.
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-fatal");
+        let _ = fs::create_dir_all(&dir);
+        let write = |name: &str, body: &str| {
+            let p = dir.join(name);
+            fs::write(&p, body).unwrap();
+            p
+        };
+        let check = |p: &Path| {
+            let mut fatal = false;
+            let _ = parse_config_file(p, None, &mut fatal).unwrap();
+            fatal
+        };
+        assert!(check(&write("a.conf", "d\n")), "too few fields is fatal");
+        assert!(
+            check(&write("b.conf", "+ /p 0755 root root -\n")),
+            "no type char is fatal"
+        );
+        assert!(
+            check(&write("c.conf", "d /p 0755 root root notanage\n")),
+            "invalid age is fatal"
+        );
+        assert!(
+            !check(&write("d.conf", "X /p 0755 root root -\n")),
+            "unknown type is not fatal"
+        );
+        assert!(
+            !check(&write("e.conf", "d /p 0755 root root -\n")),
+            "valid line is not fatal"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3204,7 +4214,8 @@ mod tests {
 
     #[test]
     fn test_discover_config_files_no_crash() {
-        let _files = discover_config_files();
+        let _system = discover_config_files(false);
+        let _user = discover_config_files(true);
     }
 
     #[test]
@@ -3235,6 +4246,659 @@ mod tests {
 
         assert!(execute_create(&item, true, None));
         assert!(dir.is_dir());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_libacl_set_file_from_text() {
+        // Foundation for the setfacl->libacl port: apply a complete POSIX ACL via
+        // the libacl FFI (dlopen) and confirm with getfacl. Skips gracefully when
+        // libacl cannot be dlopened (no ACL_LIB baked and no libacl.so.1 on the
+        // loader path) or getfacl is unavailable, so it stays green in minimal
+        // environments; it runs for real when ACL_LIB is baked (the Nix build).
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_libacl_set_file_from_text: getfacl unavailable");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-libacl");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acl-target");
+        fs::write(&file, b"x").unwrap();
+
+        // A complete access ACL: base user/group/other entries + a mask + a
+        // named user (root). libacl requires the full valid ACL to set it.
+        let text = "u::rw-,g::r--,o::r--,u:0:rwx,m::rwx";
+        match acl_set_file_from_text(&file, ACL_TYPE_ACCESS, text) {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_libacl_set_file_from_text: {e}");
+                let _ = fs::remove_dir_all(&dir);
+                return;
+            }
+            Err(e) => panic!("acl_set_file_from_text failed: {e}"),
+        }
+
+        let out = std::process::Command::new("getfacl")
+            .arg("-n")
+            .arg(&file)
+            .output()
+            .expect("run getfacl");
+        let acl = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            acl.contains("user:0:rwx"),
+            "expected 'user:0:rwx' via libacl, got:\n{acl}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_parse_acl_text_categorization() {
+        // Faithful to C parse_acl: split a tmpfiles ACL argument into access /
+        // access-exec / default text pieces. Pure, needs no libacl.
+        let p = |s: &str| parse_acl_text(s).expect("valid ACL text");
+
+        // Plain access entries pass through unchanged, comma-joined.
+        let a = p("u:0:rwx,g:100:r-x,m::rwx");
+        assert_eq!(a.access.as_deref(), Some("u:0:rwx,g:100:r-x,m::rwx"));
+        assert_eq!(a.access_exec, None);
+        assert_eq!(a.default, None);
+
+        // An owner entry with an empty qualifier keeps its three fields.
+        assert_eq!(p("u::rw-").access.as_deref(), Some("u::rw-"));
+
+        // Both default prefixes drop to the same three-field entry.
+        assert_eq!(p("d:g:0:r-x").default.as_deref(), Some("g:0:r-x"));
+        assert_eq!(p("default:g:0:r-x").default.as_deref(), Some("g:0:r-x"));
+
+        // An uppercase X routes the entry to access_exec, lowered to x.
+        let x = p("u:0:rwX");
+        assert_eq!(x.access, None);
+        assert_eq!(x.access_exec.as_deref(), Some("u:0:rwx"));
+
+        // A default entry with uppercase X is lowered but stays a default
+        // (defaults have no per-inode exec handling).
+        let dx = p("d:u:0:rwX");
+        assert_eq!(dx.default.as_deref(), Some("u:0:rwx"));
+        assert_eq!(dx.access_exec, None);
+
+        // Mixed input lands in all three buckets.
+        let m = p("u:0:rwx,d:g:0:r-x,u:100:rwX");
+        assert_eq!(m.access.as_deref(), Some("u:0:rwx"));
+        assert_eq!(m.default.as_deref(), Some("g:0:r-x"));
+        assert_eq!(m.access_exec.as_deref(), Some("u:100:rwx"));
+
+        // The outer split coalesces separators (empty entries dropped).
+        assert_eq!(
+            p("u:0:rwx,,g:0:r-x").access.as_deref(),
+            Some("u:0:rwx,g:0:r-x")
+        );
+        assert_eq!(p(",u:0:rwx,").access.as_deref(), Some("u:0:rwx"));
+
+        // Empty text is not an error: no entries in any bucket.
+        assert_eq!(parse_acl_text("").unwrap(), ParsedAcl::default());
+    }
+
+    #[test]
+    fn test_parse_acl_text_errors() {
+        // Too few fields, too many fields, and a 4-field entry with a bad
+        // prefix are all rejected (C returns -EINVAL).
+        assert!(parse_acl_text("u:0").is_err());
+        assert!(parse_acl_text("u:0:rwx:extra:more").is_err());
+        assert!(parse_acl_text("bogus:u:0:rwx").is_err());
+        // A malformed entry anywhere in the list fails the whole parse.
+        assert!(parse_acl_text("u:0:rwx,g:0").is_err());
+    }
+
+    #[test]
+    fn test_parse_acl_text_feeds_libacl() {
+        // The access text parse_acl_text emits must be valid acl_from_text
+        // input: parse a complete access ACL, apply the access piece via the
+        // libacl FFI, and confirm with getfacl. Skips like the FFI test.
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_parse_acl_text_feeds_libacl: getfacl unavailable");
+            return;
+        }
+        let parsed = parse_acl_text("u::rw-,g::r--,o::r--,u:0:rwx,m::rwx").expect("valid");
+        assert_eq!(parsed.default, None);
+        assert_eq!(parsed.access_exec, None);
+        let access = parsed.access.expect("access entries");
+
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-parse-acl");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acl-target");
+        fs::write(&file, b"x").unwrap();
+
+        match acl_set_file_from_text(&file, ACL_TYPE_ACCESS, &access) {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_parse_acl_text_feeds_libacl: {e}");
+                let _ = fs::remove_dir_all(&dir);
+                return;
+            }
+            Err(e) => panic!("acl_set_file_from_text failed: {e}"),
+        }
+
+        let out = std::process::Command::new("getfacl")
+            .arg("-n")
+            .arg(&file)
+            .output()
+            .expect("run getfacl");
+        let acl = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            acl.contains("user:0:rwx"),
+            "expected 'user:0:rwx' from the parsed access piece, got:\n{acl}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_libacl_apply_acls_matches_c_oracle() {
+        // Apply ACLs through the libacl path and confirm the result matches what
+        // C systemd-tmpfiles 260 produces. The expected getfacl entry sets were
+        // captured from the C binary itself. This exercises two subtleties:
+        //   - the mask is computed from the named entries BEFORE base entries
+        //     are filled (case A: mask r--, unlike `setfacl -m`'s mask rw-);
+        //   - access is applied before default on a directory, and the access
+        //     mask rewrites the dir's group-class bits, which the default ACL's
+        //     base fill then observes (case D: default:group::rwx, not r-x).
+        // Skips when getfacl or libacl (dlopen) is unavailable.
+        use std::os::unix::fs::PermissionsExt;
+
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_libacl_apply_acls_matches_c_oracle: getfacl unavailable");
+            return;
+        }
+
+        let root = std::env::temp_dir().join("systemd-tmpfiles-test-apply-acls");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        // getfacl -n entry lines (tag:qualifier:perms), sorted, with getfacl's
+        // "#effective:" suffix and comment/blank lines stripped.
+        let getfacl_entries = |p: &Path| -> Vec<String> {
+            let out = std::process::Command::new("getfacl")
+                .arg("-n")
+                .arg(p)
+                .output()
+                .expect("run getfacl");
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut v: Vec<String> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.split('\t').next().unwrap_or(l).trim().to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        let want = |xs: &[&str]| {
+            let mut v: Vec<String> = xs.iter().map(|s| s.to_string()).collect();
+            v.sort();
+            v
+        };
+
+        let mk_file = |name: &str, mode: u32| -> std::path::PathBuf {
+            let p = root.join(name);
+            fs::write(&p, b"x").unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+        let mk_dir = |name: &str, mode: u32| -> std::path::PathBuf {
+            let p = root.join(name);
+            fs::create_dir_all(&p).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+
+        // Apply the first case; if libacl can't be dlopened, skip the whole test.
+        let file_a = mk_file("a", 0o664);
+        match libacl_apply_acls(&file_a, Some("u:0:r--"), None, None, true) {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_libacl_apply_acls_matches_c_oracle: {e}");
+                let _ = fs::remove_dir_all(&root);
+                return;
+            }
+            Err(e) => panic!("apply case A failed: {e}"),
+        }
+        assert_eq!(
+            getfacl_entries(&file_a),
+            want(&[
+                "user::rw-",
+                "user:0:r--",
+                "group::rw-",
+                "mask::r--",
+                "other::r--"
+            ]),
+            "case A (u:0:r-- on 0664): mask must be r-- (C mask-before-base)"
+        );
+
+        // Case B: named user with full perms on a 0644 file.
+        let file_b = mk_file("b", 0o644);
+        libacl_apply_acls(&file_b, Some("u:0:rwx"), None, None, true).expect("apply case B");
+        assert_eq!(
+            getfacl_entries(&file_b),
+            want(&[
+                "user::rw-",
+                "user:0:rwx",
+                "group::r--",
+                "mask::rwx",
+                "other::r--"
+            ]),
+            "case B (u:0:rwx on 0644)"
+        );
+
+        // Case C: named group on a 0644 file.
+        let file_c = mk_file("c", 0o644);
+        libacl_apply_acls(&file_c, Some("g:0:rwx"), None, None, true).expect("apply case C");
+        assert_eq!(
+            getfacl_entries(&file_c),
+            want(&[
+                "user::rw-",
+                "group::r--",
+                "group:0:rwx",
+                "mask::rwx",
+                "other::r--"
+            ]),
+            "case C (g:0:rwx on 0644)"
+        );
+
+        // Case D: access + default on a 0755 directory.
+        let dir_d = mk_dir("d", 0o755);
+        libacl_apply_acls(&dir_d, Some("u:0:rwx"), None, Some("u:0:rwx"), true)
+            .expect("apply case D");
+        assert_eq!(
+            getfacl_entries(&dir_d),
+            want(&[
+                "user::rwx",
+                "user:0:rwx",
+                "group::r-x",
+                "mask::rwx",
+                "other::r-x",
+                "default:user::rwx",
+                "default:user:0:rwx",
+                "default:group::rwx",
+                "default:mask::rwx",
+                "default:other::r-x",
+            ]),
+            "case D (u:0:rwx + d:u:0:rwx on 0755 dir): default:group::rwx from the access mask"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_libacl_apply_acls_conditional_exec() {
+        // Uppercase-X conditional-execute resolution (C parse_acl_cond_exec):
+        // the X entry keeps its execute bit only on a directory, on a file that
+        // already has execute, or when the new access entries grant execute;
+        // otherwise it is dropped. Expected getfacl entry sets were captured
+        // from C systemd-tmpfiles 260. Applies via parse_acl_text +
+        // libacl_apply_acls (the real integration path). Skips when getfacl or
+        // libacl (dlopen) is unavailable.
+        use std::os::unix::fs::PermissionsExt;
+
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_libacl_apply_acls_conditional_exec: getfacl unavailable");
+            return;
+        }
+
+        let root = std::env::temp_dir().join("systemd-tmpfiles-test-cond-exec");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let getfacl_entries = |p: &Path| -> Vec<String> {
+            let out = std::process::Command::new("getfacl")
+                .arg("-n")
+                .arg(p)
+                .output()
+                .expect("run getfacl");
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut v: Vec<String> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.split('\t').next().unwrap_or(l).trim().to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        let want = |xs: &[&str]| {
+            let mut v: Vec<String> = xs.iter().map(|s| s.to_string()).collect();
+            v.sort();
+            v
+        };
+        // Parse the tmpfiles ACL spec, then apply it (the `a`/replace case).
+        let apply = |p: &Path, spec: &str| -> Result<(), String> {
+            let parsed = parse_acl_text(spec).expect("valid ACL spec");
+            libacl_apply_acls(
+                p,
+                parsed.access.as_deref(),
+                parsed.access_exec.as_deref(),
+                parsed.default.as_deref(),
+                true,
+            )
+        };
+        let mk_file = |name: &str, mode: u32| -> std::path::PathBuf {
+            let p = root.join(name);
+            fs::write(&p, b"x").unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+        let mk_dir = |name: &str, mode: u32| -> std::path::PathBuf {
+            let p = root.join(name);
+            fs::create_dir_all(&p).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+
+        // Non-exec regular file: X drops to rw-. This first apply also gates the
+        // whole test on libacl being dlopen-able.
+        let f644 = mk_file("f644", 0o644);
+        match apply(&f644, "u:0:rwX") {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_libacl_apply_acls_conditional_exec: {e}");
+                let _ = fs::remove_dir_all(&root);
+                return;
+            }
+            Err(e) => panic!("apply f644 failed: {e}"),
+        }
+        assert_eq!(
+            getfacl_entries(&f644),
+            want(&[
+                "user::rw-",
+                "user:0:rw-",
+                "group::r--",
+                "mask::rw-",
+                "other::r--"
+            ]),
+            "u:0:rwX on a non-exec 0644 file: X drops to rw-"
+        );
+
+        // Directory: X is kept.
+        let d755 = mk_dir("d755", 0o755);
+        apply(&d755, "u:0:rwX").expect("apply d755");
+        assert_eq!(
+            getfacl_entries(&d755),
+            want(&[
+                "user::rwx",
+                "user:0:rwx",
+                "group::r-x",
+                "mask::rwx",
+                "other::r-x"
+            ]),
+            "u:0:rwX on a directory: X kept"
+        );
+
+        // Regular file that already has an execute bit (0755): X is kept.
+        let f755 = mk_file("f755", 0o755);
+        apply(&f755, "u:0:rwX").expect("apply f755");
+        assert_eq!(
+            getfacl_entries(&f755),
+            want(&[
+                "user::rwx",
+                "user:0:rwx",
+                "group::r-x",
+                "mask::rwx",
+                "other::r-x"
+            ]),
+            "u:0:rwX on an already-executable 0755 file: X kept"
+        );
+
+        // A new access entry (g:0:r-x) grants execute, so has_exec is true and
+        // the conditional u:0 keeps rwx (the mask r-x makes it effective r-x).
+        let mix = mk_file("mix", 0o644);
+        apply(&mix, "u:0:rwX,g:0:r-x").expect("apply mix");
+        assert_eq!(
+            getfacl_entries(&mix),
+            want(&[
+                "user::rw-",
+                "user:0:rwx",
+                "group::r--",
+                "group:0:r-x",
+                "mask::r-x",
+                "other::r--",
+            ]),
+            "u:0:rwX,g:0:r-x: g's execute keeps u:0 rwx, mask stays r-x from the plain access"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_libacl_apply_acls_modify_merge() {
+        // The a+ (modify) path merges the new entries onto the ACL already on
+        // the inode, preserving its other named entries; the a (replace) path
+        // rebuilds from scratch and drops them. Expected getfacl entry sets were
+        // captured from C systemd-tmpfiles 260. Skips when getfacl or libacl
+        // (dlopen) is unavailable.
+        use std::os::unix::fs::PermissionsExt;
+
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_libacl_apply_acls_modify_merge: getfacl unavailable");
+            return;
+        }
+
+        let root = std::env::temp_dir().join("systemd-tmpfiles-test-modify-merge");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let getfacl_entries = |p: &Path| -> Vec<String> {
+            let out = std::process::Command::new("getfacl")
+                .arg("-n")
+                .arg(p)
+                .output()
+                .expect("run getfacl");
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut v: Vec<String> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.split('\t').next().unwrap_or(l).trim().to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        let want = |xs: &[&str]| {
+            let mut v: Vec<String> = xs.iter().map(|s| s.to_string()).collect();
+            v.sort();
+            v
+        };
+        // want_mask == true is `a` (replace); false is `a+` (modify/merge).
+        let apply = |p: &Path, spec: &str, want_mask: bool| -> Result<(), String> {
+            let parsed = parse_acl_text(spec).expect("valid ACL spec");
+            libacl_apply_acls(
+                p,
+                parsed.access.as_deref(),
+                parsed.access_exec.as_deref(),
+                parsed.default.as_deref(),
+                want_mask,
+            )
+        };
+        let mk_file = |name: &str, mode: u32| -> std::path::PathBuf {
+            let p = root.join(name);
+            fs::write(&p, b"x").unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+        let mk_dir = |name: &str, mode: u32| -> std::path::PathBuf {
+            let p = root.join(name);
+            fs::create_dir_all(&p).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+
+        // a+ ACCESS merge: set u:0:rwx (replace), then a+ g:0:rwx; both survive.
+        let m = mk_file("m", 0o644);
+        match apply(&m, "u:0:rwx", true) {
+            Ok(()) => {}
+            Err(e) if e.contains("dlopen") => {
+                eprintln!("skip test_libacl_apply_acls_modify_merge: {e}");
+                let _ = fs::remove_dir_all(&root);
+                return;
+            }
+            Err(e) => panic!("apply u:0:rwx failed: {e}"),
+        }
+        apply(&m, "g:0:rwx", false).expect("a+ merge g:0:rwx");
+        assert_eq!(
+            getfacl_entries(&m),
+            want(&[
+                "user::rw-",
+                "user:0:rwx",
+                "group::r--",
+                "group:0:rwx",
+                "mask::rwx",
+                "other::r--",
+            ]),
+            "a+ merge must preserve the pre-existing user:0 entry"
+        );
+
+        // a REPLACE contrast: set u:0:rwx (replace), then a g:0:rwx (replace);
+        // the prior named user is dropped.
+        let r = mk_file("r", 0o644);
+        apply(&r, "u:0:rwx", true).expect("apply u:0:rwx");
+        apply(&r, "g:0:rwx", true).expect("a replace g:0:rwx");
+        let got = getfacl_entries(&r);
+        assert!(
+            !got.iter().any(|e| e.starts_with("user:0:")),
+            "a (replace) must drop the prior named user, got: {got:?}"
+        );
+        assert_eq!(
+            got,
+            want(&[
+                "user::rw-",
+                "group::rwx",
+                "group:0:rwx",
+                "mask::rwx",
+                "other::r--",
+            ]),
+            "a replace"
+        );
+
+        // a+ DEFAULT merge on a directory: two default entries accumulate.
+        let d = mk_dir("d", 0o755);
+        apply(&d, "d:u:0:rwx", false).expect("a+ default u");
+        apply(&d, "d:g:0:r-x", false).expect("a+ default g");
+        assert_eq!(
+            getfacl_entries(&d),
+            want(&[
+                "user::rwx",
+                "group::r-x",
+                "other::r-x",
+                "default:user::rwx",
+                "default:user:0:rwx",
+                "default:group::r-x",
+                "default:group:0:r-x",
+                "default:mask::rwx",
+                "default:other::r-x",
+            ]),
+            "a+ default merge accumulates both named default entries"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_execute_set_acl() {
+        // The a/a+ (SetACL) type applies a POSIX ACL to an existing path via
+        // libacl (through execute_create's SetACL arm). Skip when getfacl is
+        // unavailable or libacl cannot be dlopened, so the test stays green in
+        // minimal environments; it runs for real where libacl is present.
+        if std::process::Command::new("getfacl")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skip test_execute_set_acl: getfacl unavailable");
+            return;
+        }
+        {
+            let probe_dir = std::env::temp_dir().join("systemd-tmpfiles-test-set-acl-probe");
+            let _ = fs::remove_dir_all(&probe_dir);
+            fs::create_dir_all(&probe_dir).unwrap();
+            let probe = probe_dir.join("p");
+            fs::write(&probe, b"x").unwrap();
+            let skip = matches!(
+                libacl_apply_acls(&probe, Some("u:0:rwx"), None, None, true),
+                Err(ref e) if e.contains("dlopen")
+            );
+            let _ = fs::remove_dir_all(&probe_dir);
+            if skip {
+                eprintln!("skip test_execute_set_acl: libacl unavailable");
+                return;
+            }
+        }
+
+        let dir = std::env::temp_dir().join("systemd-tmpfiles-test-set-acl");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acl-target");
+        fs::write(&file, b"x").unwrap();
+
+        // a+ grants root (uid 0) rwx on a file we own; no name resolution needed.
+        let item = TmpfilesItem {
+            item_type: ItemType::SetACL,
+            force: true, // '+' : merge/append rather than replace
+            boot_only: false,
+            minus: false,
+            purgeable: false,
+            conditional: false,
+            path: file.clone(),
+            mode: None,
+            user: None,
+            group: None,
+            age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
+            argument: Some("u:0:rwx".to_string()),
+            source: PathBuf::from("test.conf"),
+            line_number: 1,
+        };
+
+        assert!(
+            execute_create(&item, false, None),
+            "SetACL apply should succeed"
+        );
+
+        let out = std::process::Command::new("getfacl")
+            .arg("-n")
+            .arg(&file)
+            .output()
+            .expect("run getfacl");
+        let acl = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            acl.contains("user:0:rwx"),
+            "expected 'user:0:rwx' in ACL, got:\n{acl}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3560,7 +5224,7 @@ mod tests {
         writeln!(f, "  1777 root root - -").unwrap();
         drop(f);
 
-        let items = parse_config_file(&path, None).unwrap();
+        let items = parse_config_file(&path, None, &mut false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].item_type, ItemType::CreateDirectory);
         assert_eq!(items[0].path, PathBuf::from("/tmp/test"));

@@ -404,6 +404,13 @@ struct Args {
     verity_data: Option<String>,
     json_mode: JsonMode,
     no_legend: bool,
+    /// --mkdir: create the mount point directory before mounting.
+    mkdir: bool,
+    /// --rmdir: remove the mount point directory after unmounting.
+    rmdir: bool,
+    /// --loop-ref=NAME: free-form reference stored in the loop device's
+    /// lo_file_name, exposed by udev as /dev/disk/by-loop-ref/NAME.
+    loop_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -416,6 +423,8 @@ enum Command {
     CopyTo,
     Discover,
     Validate,
+    Attach,
+    Detach,
     Help,
 }
 
@@ -439,6 +448,9 @@ impl Default for Args {
             verity_data: None,
             json_mode: JsonMode::Off,
             no_legend: false,
+            mkdir: false,
+            rmdir: false,
+            loop_ref: None,
         }
     }
 }
@@ -477,6 +489,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--copy-to" => args.command = Command::CopyTo,
             "--discover" => args.command = Command::Discover,
             "--validate" => args.command = Command::Validate,
+            "--attach" => args.command = Command::Attach,
+            "--detach" => args.command = Command::Detach,
+            "--loop-ref" => {
+                let v = value_or_next(argv, &mut i, value, "--loop-ref")?;
+                args.loop_ref = Some(v);
+            }
             "--root-hash" => {
                 let v = value_or_next(argv, &mut i, value, "--root-hash")?;
                 args.root_hash = Some(v);
@@ -500,6 +518,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "--no-pager" => { /* accepted and ignored */ }
             "--no-legend" => args.no_legend = true,
+            "--mkdir" => args.mkdir = true,
+            "--rmdir" => args.rmdir = true,
             _ if !arg.starts_with('-') => {
                 positionals.push(arg.clone());
             }
@@ -513,7 +533,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 
     // Assign positionals based on command
     match args.command {
-        Command::Show | Command::List | Command::Validate => {
+        Command::Show | Command::List | Command::Validate | Command::Attach | Command::Detach => {
+            // --attach IMAGE ; --detach IMAGE-or-LOOPDEV
             if let Some(p) = positionals.first() {
                 args.image = Some(PathBuf::from(p));
             }
@@ -1138,6 +1159,32 @@ fn json_escape(s: &str) -> String {
 // Output: discover
 // ---------------------------------------------------------------------------
 
+/// Resolve a versioned (`NAME.v/`) directory to its best entry, trying a raw
+/// disk image first (`*.raw`, regular file) then a directory tree. Returns the
+/// `(type, resolved_path)` or `None` when nothing suitable was found.
+fn resolve_versioned_dir(path: &Path) -> Option<(&'static str, PathBuf)> {
+    use vpick_core::{PickFilter, dt_bit, path_pick, PICK_DEFAULT};
+
+    let raw_filter = PickFilter {
+        type_mask: dt_bit(libc::DT_REG as u32),
+        suffix: Some(".raw".to_string()),
+        ..Default::default()
+    };
+    if let Ok(Some(r)) = path_pick(path, &raw_filter, PICK_DEFAULT) {
+        return Some(("raw", r.path));
+    }
+
+    let dir_filter = PickFilter {
+        type_mask: dt_bit(libc::DT_DIR as u32),
+        ..Default::default()
+    };
+    if let Ok(Some(r)) = path_pick(path, &dir_filter, PICK_DEFAULT) {
+        return Some(("directory", r.path));
+    }
+
+    None
+}
+
 fn cmd_discover(no_legend: bool) {
     if !no_legend {
         println!("{:<12} {:<10} {:<40} PATH", "TYPE", "SIZE", "NAME");
@@ -1162,6 +1209,25 @@ fn cmd_discover(no_legend: bool) {
 
             // Skip hidden files
             if name.starts_with('.') {
+                continue;
+            }
+
+            // A versioned (`NAME.v/`) directory is resolved to its best entry:
+            // first as a raw disk image, then as a directory tree.
+            if path.is_dir() && name.ends_with(".v") {
+                if let Some((img_type, resolved)) = resolve_versioned_dir(&path) {
+                    let size_str = if img_type == "raw" {
+                        format_size(fs::metadata(&resolved).map(|m| m.len()).unwrap_or(0))
+                    } else {
+                        "-".to_string()
+                    };
+                    let rname = resolved
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| name.clone());
+                    println!("{:<12} {:<10} {:<40} {}", img_type, size_str, rname, resolved.display());
+                    found += 1;
+                }
                 continue;
             }
 
@@ -1269,6 +1335,15 @@ fn cmd_mount(image: &Path, mount_path: &Path) -> Result<(), String> {
 
     // Analyze the image to verify it's valid
     let info = analyze_image(image)?;
+
+    // Partitioned image: set it up on a loop device and mount the discoverable
+    // partitions (root at the mount point, /usr, /home, ESP, … beneath it),
+    // mirroring systemd-dissect assembling an OS tree.
+    #[cfg(target_os = "linux")]
+    if !info.gpt_partitions.is_empty() {
+        return mount_partitioned_image(image, mount_path, &info);
+    }
+
     if info.table_type == PartitionTableType::None && info.gpt_partitions.is_empty() {
         eprintln!("Warning: No partition table detected. Attempting raw filesystem mount.");
     }
@@ -1308,6 +1383,90 @@ fn cmd_mount(image: &Path, mount_path: &Path) -> Result<(), String> {
     Err("Mount is only supported on Linux.".to_string())
 }
 
+/// Mount a partitioned image via a loop device. Attaches the image with
+/// partition scanning, then mounts each partition whose GPT type has a
+/// well-known mount point (root at the mount point itself, /usr, /home, ESP,
+/// … at sub-paths). Kernel partition N corresponds to GPT slot N-1.
+#[cfg(target_os = "linux")]
+fn mount_partitioned_image(
+    image: &Path,
+    mount_path: &Path,
+    info: &ImageInfo,
+) -> Result<(), String> {
+    use std::process::Command;
+    let types = known_partition_types();
+
+    let out = Command::new("losetup")
+        .args(["--find", "--show", "--partscan", "--nooverlap"])
+        .arg(image)
+        .output()
+        .map_err(|e| format!("Failed to run losetup: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "losetup failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let loopdev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let _ = Command::new("udevadm")
+        .args(["settle", "--timeout=10"])
+        .status();
+
+    // Collect (kernel partition number, mount point) for the partitions we can
+    // place, shallowest first so parent mount points are mounted before their
+    // children (e.g. "/" before "/usr").
+    let mut targets: Vec<(usize, String)> = Vec::new();
+    for (i, p) in info.gpt_partitions.iter().enumerate() {
+        if let Some(mp) = types.get(&p.type_guid).and_then(|t| t.mount_point) {
+            targets.push((i + 1, mp.to_string()));
+        }
+    }
+    // Mount by increasing path depth so a parent is always mounted before its
+    // children: "/" (depth 0) first, then "/usr", "/home" (depth 1), etc.
+    // Otherwise a child mounted first would be shadowed when the root mounts
+    // over the mount point.
+    targets.sort_by_key(|(_, mp)| mp.trim_matches('/').split('/').filter(|s| !s.is_empty()).count());
+
+    let mut mount_err: Option<String> = None;
+    for (partnum, mp) in &targets {
+        let dev = format!("{loopdev}p{partnum}");
+        for _ in 0..30 {
+            if Path::new(&dev).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let target = if mp == "/" {
+            mount_path.to_path_buf()
+        } else {
+            mount_path.join(mp.trim_start_matches('/'))
+        };
+        if mp != "/" {
+            let _ = fs::create_dir_all(&target);
+        }
+        match Command::new("mount").arg(&dev).arg(&target).status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                mount_err = Some(format!("mount {dev} at {}: {s}", target.display()));
+                break;
+            }
+            Err(e) => {
+                mount_err = Some(format!("mount {dev}: {e}"));
+                break;
+            }
+        }
+    }
+
+    if let Some(e) = mount_err {
+        let _ = Command::new("umount").arg("-R").arg(mount_path).status();
+        let _ = Command::new("losetup").args(["-d", &loopdev]).status();
+        return Err(e);
+    }
+
+    eprintln!("Mounted {} at {}.", image.display(), mount_path.display());
+    Ok(())
+}
+
 fn cmd_umount(mount_path: &Path) -> Result<(), String> {
     if !mount_path.exists() {
         return Err(format!("Mount point not found: {}", mount_path.display()));
@@ -1315,17 +1474,42 @@ fn cmd_umount(mount_path: &Path) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        let mount_c = std::ffi::CString::new(mount_path.to_string_lossy().as_bytes())
-            .map_err(|e| e.to_string())?;
+        use std::process::Command;
 
-        let ret = unsafe { libc::umount2(mount_c.as_ptr(), 0) };
-        if ret != 0 {
-            let err = io::Error::last_os_error();
-            return Err(format!(
-                "Failed to unmount {}: {}",
-                mount_path.display(),
-                err
-            ));
+        // Resolve the backing loop device (if any) before unmounting, so it can
+        // be detached afterwards. /dev/loopNpM -> /dev/loopN.
+        let loopdev = Command::new("findmnt")
+            .args(["-n", "-o", "SOURCE", "--target"])
+            .arg(mount_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| s.starts_with("/dev/loop"))
+            .map(|s| match s.rsplit_once('p') {
+                Some((base, num)) if num.chars().all(|c| c.is_ascii_digit()) => base.to_string(),
+                _ => s,
+            });
+
+        // Recursively unmount so partition sub-mounts (/usr, /home, …) go first.
+        let status = Command::new("umount")
+            .arg("-R")
+            .arg(mount_path)
+            .status()
+            .map_err(|e| format!("Failed to run umount: {e}"))?;
+        if !status.success() {
+            // Fall back to a direct umount of just this path.
+            let mount_c = std::ffi::CString::new(mount_path.to_string_lossy().as_bytes())
+                .map_err(|e| e.to_string())?;
+            let ret = unsafe { libc::umount2(mount_c.as_ptr(), 0) };
+            if ret != 0 {
+                let err = io::Error::last_os_error();
+                return Err(format!("Failed to unmount {}: {}", mount_path.display(), err));
+            }
+        }
+
+        if let Some(ld) = loopdev {
+            let _ = Command::new("losetup").args(["-d", &ld]).status();
         }
 
         eprintln!("Unmounted {}.", mount_path.display());
@@ -1426,6 +1610,8 @@ Commands:
   (default)       Show image partition table and info
   --mount         Mount the image at a given path
   --umount        Unmount a previously mounted image
+  --mkdir         Create the mount point directory before mounting
+  --rmdir         Remove the mount point directory after unmounting
   --list          List partitions in the image
   --copy-from     Copy a file out of the image
   --copy-to       Copy a file into the image
@@ -1451,6 +1637,119 @@ well-known partition types per the Discoverable Partitions Specification."
 // Main
 // ---------------------------------------------------------------------------
 
+// Loopback device ioctls (from <linux/loop.h>) for --attach/--detach.
+const LOOP_SET_FD: libc::c_ulong = 0x4C00;
+const LOOP_CLR_FD: libc::c_ulong = 0x4C01;
+const LOOP_SET_STATUS64: libc::c_ulong = 0x4C04;
+const LOOP_CTL_GET_FREE: libc::c_ulong = 0x4C82;
+const LO_FLAGS_PARTSCAN: u32 = 8;
+
+#[repr(C)]
+struct LoopInfo64 {
+    lo_device: u64,
+    lo_inode: u64,
+    lo_rdev: u64,
+    lo_offset: u64,
+    lo_sizelimit: u64,
+    lo_number: u32,
+    lo_encrypt_type: u32,
+    lo_encrypt_key_size: u32,
+    lo_flags: u32,
+    lo_file_name: [u8; 64],
+    lo_crypt_name: [u8; 64],
+    lo_encrypt_key: [u8; 32],
+    lo_init: [u64; 2],
+}
+
+impl Default for LoopInfo64 {
+    fn default() -> Self {
+        // SAFETY: LoopInfo64 is a plain C struct of integers/byte arrays, so an
+        // all-zero bit pattern is a valid value.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+/// `systemd-dissect --attach IMAGE [--loop-ref=NAME]` — attach IMAGE to a free
+/// loop device with partition scanning and print its path. The loop device
+/// persists after exit (no LO_FLAGS_AUTOCLEAR). When `--loop-ref` is given its
+/// value is stored in the loop device's `lo_file_name`, which udev exposes as
+/// `/dev/disk/by-loop-ref/NAME`.
+fn cmd_attach(image: &Path, loop_ref: Option<&str>) -> Result<String, String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let ctrl = unsafe { libc::open(c"/dev/loop-control".as_ptr(), libc::O_RDWR) };
+    if ctrl < 0 {
+        return Err("Failed to open /dev/loop-control".to_string());
+    }
+    let nr = unsafe { libc::ioctl(ctrl, LOOP_CTL_GET_FREE as _) };
+    unsafe { libc::close(ctrl) };
+    if nr < 0 {
+        return Err("LOOP_CTL_GET_FREE failed".to_string());
+    }
+    let dev = format!("/dev/loop{nr}");
+
+    let cdev = std::ffi::CString::new(dev.as_bytes()).map_err(|_| "bad loop path")?;
+    let loop_fd = unsafe { libc::open(cdev.as_ptr(), libc::O_RDWR) };
+    if loop_fd < 0 {
+        return Err(format!("Failed to open {dev}"));
+    }
+    let cimg = std::ffi::CString::new(image.as_os_str().as_bytes()).map_err(|_| "bad image path")?;
+    let img_fd = unsafe { libc::open(cimg.as_ptr(), libc::O_RDWR) };
+    if img_fd < 0 {
+        unsafe { libc::close(loop_fd) };
+        return Err(format!("Failed to open image {}", image.display()));
+    }
+    if unsafe { libc::ioctl(loop_fd, LOOP_SET_FD as _, img_fd) } < 0 {
+        unsafe {
+            libc::close(img_fd);
+            libc::close(loop_fd);
+        }
+        return Err(format!("LOOP_SET_FD failed for {dev}"));
+    }
+    let mut info = LoopInfo64 {
+        lo_flags: LO_FLAGS_PARTSCAN,
+        ..Default::default()
+    };
+    if let Some(r) = loop_ref {
+        let b = r.as_bytes();
+        let n = b.len().min(info.lo_file_name.len() - 1);
+        info.lo_file_name[..n].copy_from_slice(&b[..n]);
+    }
+    if unsafe { libc::ioctl(loop_fd, LOOP_SET_STATUS64 as _, &info as *const LoopInfo64) } < 0 {
+        unsafe {
+            libc::ioctl(loop_fd, LOOP_CLR_FD as _);
+            libc::close(img_fd);
+            libc::close(loop_fd);
+        }
+        return Err(format!("LOOP_SET_STATUS64 failed for {dev}"));
+    }
+    unsafe {
+        libc::close(img_fd);
+        libc::close(loop_fd);
+    }
+    // Let udev process the new device so its /dev/disk/by-* symlinks appear.
+    let _ = std::process::Command::new("udevadm")
+        .args(["trigger", "--settle", "--action=add", &dev])
+        .status();
+    Ok(dev)
+}
+
+/// `systemd-dissect --detach LOOPDEV` — detach a loop device.
+fn cmd_detach(dev: &Path) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+    let cdev = std::ffi::CString::new(dev.as_os_str().as_bytes()).map_err(|_| "bad path")?;
+    let fd = unsafe { libc::open(cdev.as_ptr(), libc::O_RDWR) };
+    if fd < 0 {
+        return Err(format!("Failed to open {}", dev.display()));
+    }
+    let r = unsafe { libc::ioctl(fd, LOOP_CLR_FD as _) };
+    unsafe { libc::close(fd) };
+    if r < 0 {
+        return Err(format!("LOOP_CLR_FD failed for {}", dev.display()));
+    }
+    Ok(())
+}
+
 fn run(argv: &[String]) -> Result<(), String> {
     let args = parse_args(argv)?;
 
@@ -1469,7 +1768,12 @@ fn run(argv: &[String]) -> Result<(), String> {
                 .mount_path
                 .as_ref()
                 .ok_or("--umount requires a mount point path")?;
-            return cmd_umount(mount_path);
+            cmd_umount(mount_path)?;
+            // --rmdir: remove the (now-empty) mount point directory.
+            if args.rmdir {
+                let _ = std::fs::remove_dir(mount_path);
+            }
+            return Ok(());
         }
         _ => {}
     }
@@ -1495,6 +1799,11 @@ fn run(argv: &[String]) -> Result<(), String> {
                 .mount_path
                 .as_ref()
                 .ok_or("--mount requires a mount point path after the image")?;
+            // --mkdir: create the mount point (and parents) before mounting.
+            if args.mkdir {
+                std::fs::create_dir_all(mount_path)
+                    .map_err(|e| format!("Failed to create mount point {mount_path:?}: {e}"))?;
+            }
             cmd_mount(image, mount_path)?;
         }
         Command::CopyFrom => {
@@ -1510,6 +1819,13 @@ fn run(argv: &[String]) -> Result<(), String> {
                 .as_ref()
                 .ok_or("--copy-to requires a source path")?;
             cmd_copy_to(image, source, args.dest.as_deref())?;
+        }
+        Command::Attach => {
+            let dev = cmd_attach(image, args.loop_ref.as_deref())?;
+            println!("{dev}");
+        }
+        Command::Detach => {
+            cmd_detach(image)?;
         }
         _ => unreachable!(),
     }

@@ -3,16 +3,20 @@ use std::convert::TryInto;
 
 #[test]
 fn test_unit_ordering() {
+    // Express the start chain with live [Unit] Requires= edges rather than
+    // [Install] RequiredBy=. RequiredBy/WantedBy are enable-time metadata
+    // (they only create .requires//.wants/ symlinks on `systemctl enable`)
+    // and must not pull a unit into the start subgraph on their own; a live
+    // pull is what Requires= expresses. The original chain was "2 requires
+    // 1, 3 requires 2" written as reverse RequiredBy on 1 and 2; here it is
+    // the equivalent forward Requires= on 2 and 3.
     let target1_str = format!(
         "
     [Unit]
     Description = {}
     Before = {}
-
-    [Install]
-    RequiredBy = {}
     ",
-        "Target", "2.target", "2.target",
+        "Target", "2.target",
     );
 
     let parsed_file = crate::units::parse_file(&target1_str).unwrap();
@@ -25,11 +29,9 @@ fn test_unit_ordering() {
     [Unit]
     Description = {}
     After = {}
-
-    [Install]
-    RequiredBy = {}
+    Requires = {}
     ",
-        "Target", "1.target", "3.target",
+        "Target", "1.target", "1.target",
     );
 
     let parsed_file = crate::units::parse_file(&target2_str).unwrap();
@@ -43,9 +45,9 @@ fn test_unit_ordering() {
     Description = {}
     After = {}
     After = {}
-
+    Requires = {}
     ",
-        "Target", "1.target", "2.target"
+        "Target", "1.target", "2.target", "2.target"
     );
 
     let parsed_file = crate::units::parse_file(&target3_str).unwrap();

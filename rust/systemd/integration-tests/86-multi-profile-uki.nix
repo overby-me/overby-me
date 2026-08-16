@@ -1,5 +1,8 @@
 {
   name = "86-MULTI-PROFILE-UKI";
+  # Skips rather than passes: the VM boots kernel+initrd directly, not a UKI
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # 86-MULTI-PROFILE-UKI requires an actual UKI boot (Unified Kernel Image)
   # with a stub binary; the NixOS test VM boots via legacy kernel + initrd.
   patchScript = ''

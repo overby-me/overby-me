@@ -12,9 +12,10 @@ fn find_new_unit_path(unit_dirs: &[PathBuf], find_name: &str) -> Result<Option<P
     for dir in unit_dirs {
         let read_dir = match fs::read_dir(dir) {
             Ok(rd) => rd,
-            Err(e) => {
-                return Err(format!("Error while opening dir {dir:?}: {e}"));
-            }
+            // A search-path entry may be absent (e.g. the system.control
+            // override dirs before the first `systemctl set-property`); skip it
+            // rather than failing the whole lookup.
+            Err(_) => continue,
         };
         for entry in read_dir {
             let entry = match entry {
@@ -146,6 +147,29 @@ pub fn find_symlink_aliases(
             if !meta.file_type().is_symlink() {
                 continue;
             }
+            let target_name = fs::read_link(entry.path())
+                .ok()
+                .and_then(|t| t.file_name().map(|f| f.to_string_lossy().to_string()))
+                .unwrap_or_default();
+            // A symlink whose target is a *template* (e.g. bar-alias@2.service
+            // -> yup@.service) aliases the target template instantiated with
+            // the CANDIDATE symlink's OWN instance (yup@2), not this find_name
+            // in general.  Match it only against that specific instance —
+            // otherwise the canonical-path check below spuriously attaches it
+            // to every yup@N, because a non-existent instance's unit_path falls
+            // back to the shared template file that both canonicalize to.
+            if let Some((tgt_prefix, tgt_suffix)) = target_name.split_once("@.") {
+                if let Some((_, cand_inst)) =
+                    crate::units::loading::directory_deps::parse_template_instance(&name)
+                    && !cand_inst.is_empty()
+                {
+                    let resolved = format!("{tgt_prefix}@{cand_inst}.{tgt_suffix}");
+                    if resolved == find_name && !aliases.contains(&name) {
+                        aliases.push(name);
+                    }
+                }
+                continue;
+            }
             // Check by canonical path (works for regular files)
             if let Some(ref canonical) = canonical
                 && let Ok(c) = fs::canonicalize(entry.path())
@@ -157,14 +181,8 @@ pub fn find_symlink_aliases(
             }
             // Check by symlink target name (works for template instances
             // where the target file doesn't exist on disk)
-            if let Ok(target) = fs::read_link(entry.path()) {
-                let target_name = target
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                if target_name == find_name && !aliases.contains(&name) {
-                    aliases.push(name);
-                }
+            if !target_name.is_empty() && target_name == find_name && !aliases.contains(&name) {
+                aliases.push(name);
             }
         }
     }
@@ -552,6 +570,68 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
             existing.common.dependencies.wants.push(new_id.clone());
             unit.common.dependencies.wanted_by.push(existing.id.clone());
         }
+
+        // Implicit same-name socket<->service association (foo.socket <->
+        // foo.service), mirroring apply_sockets_to_services' names_match rule.
+        // The batch resolver (fill_dependencies) runs only at boot/daemon-reload,
+        // so establish it here for on-demand (find_or_load_unit) loads too —
+        // otherwise a socket-activated service loaded on demand never learns
+        // about its socket (empty conf.sockets), which breaks re-arming the
+        // socket when the service stops and passing the socket fd to the service.
+        if unit.id.name_without_suffix() == existing.id.name_without_suffix() {
+            let new_is_socket = matches!(&unit.specific, units::Specific::Socket(_))
+                && matches!(&existing.specific, units::Specific::Service(_));
+            let new_is_service = matches!(&unit.specific, units::Specific::Service(_))
+                && matches!(&existing.specific, units::Specific::Socket(_));
+            if new_is_socket {
+                if let units::Specific::Socket(s) = &mut unit.specific
+                    && !s.conf.services.contains(&existing.id)
+                {
+                    s.conf.services.push(existing.id.clone());
+                }
+                if let units::Specific::Service(s) = &mut existing.specific
+                    && !s.conf.sockets.contains(&new_id)
+                {
+                    s.conf.sockets.push(new_id.clone());
+                }
+                // socket Before/RequiredBy service; service After/Requires socket
+                if !unit.common.dependencies.before.contains(&existing.id) {
+                    unit.common.dependencies.before.push(existing.id.clone());
+                }
+                if !unit.common.dependencies.required_by.contains(&existing.id) {
+                    unit.common.dependencies.required_by.push(existing.id.clone());
+                }
+                if !existing.common.dependencies.after.contains(&new_id) {
+                    existing.common.dependencies.after.push(new_id.clone());
+                }
+                if !existing.common.dependencies.requires.contains(&new_id) {
+                    existing.common.dependencies.requires.push(new_id.clone());
+                }
+            } else if new_is_service {
+                if let units::Specific::Service(s) = &mut unit.specific
+                    && !s.conf.sockets.contains(&existing.id)
+                {
+                    s.conf.sockets.push(existing.id.clone());
+                }
+                if let units::Specific::Socket(s) = &mut existing.specific
+                    && !s.conf.services.contains(&new_id)
+                {
+                    s.conf.services.push(new_id.clone());
+                }
+                if !unit.common.dependencies.after.contains(&existing.id) {
+                    unit.common.dependencies.after.push(existing.id.clone());
+                }
+                if !unit.common.dependencies.requires.contains(&existing.id) {
+                    unit.common.dependencies.requires.push(existing.id.clone());
+                }
+                if !existing.common.dependencies.before.contains(&new_id) {
+                    existing.common.dependencies.before.push(new_id.clone());
+                }
+                if !existing.common.dependencies.required_by.contains(&new_id) {
+                    existing.common.dependencies.required_by.push(new_id.clone());
+                }
+            }
+        }
     }
 
     trace!("Leniently inserted unit: {}", unit.id.name);
@@ -605,8 +685,8 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
             dep_before,
             dep_requires,
             dep_wants,
-            dep_required_by,
-            dep_wanted_by,
+            _dep_required_by,
+            _dep_wanted_by,
             dep_conflicts,
             dep_conflicted_by,
             dep_binds_to,
@@ -631,12 +711,18 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
                 if dep_wants.contains(&unit.id) {
                     unit.common.dependencies.wanted_by.push(new_id.clone());
                 }
-                if dep_required_by.contains(&unit.id) {
-                    unit.common.dependencies.requires.push(new_id.clone());
-                }
-                if dep_wanted_by.contains(&unit.id) {
-                    unit.common.dependencies.wants.push(new_id.clone());
-                }
+                // NOTE: [Install] WantedBy=/RequiredBy= must NOT create a live
+                // forward dependency on the target. They are enable-time
+                // metadata: `systemctl enable` writes the `.wants/`/`.requires/`
+                // symlink (control.rs enable), and directory_deps scans those
+                // symlinks into real edges. Wiring `target.wants += new` here
+                // made a never-enabled unit (e.g. one created by `systemctl
+                // edit --full` with WantedBy=multi-user.target) a live want of
+                // the target, so it got started whenever the target
+                // re-activated — surfacing as the intermittent 26-SYSTEMCTL
+                // is-active failure. The reverse-index maintenance below
+                // (dep_wants -> wanted_by, dep_requires -> required_by) stays;
+                // only the forward-edge synthesis is removed.
                 if dep_conflicts.contains(&unit.id) {
                     unit.common.dependencies.conflicted_by.push(new_id.clone());
                 }

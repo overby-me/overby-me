@@ -31,7 +31,7 @@
     systemctl daemon-reload
     systemctl mask is-enabled-test.service
     STATE="$(systemctl is-enabled is-enabled-test.service)" || true
-    [[ "$STATE" == "masked" || "$STATE" == "masked-runtime" ]]
+    [[ "$STATE" == "masked" ]]
 
     systemctl unmask is-enabled-test.service
     IEEOF

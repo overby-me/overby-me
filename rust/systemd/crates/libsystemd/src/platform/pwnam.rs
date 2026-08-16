@@ -142,3 +142,52 @@ pub fn getpwnam_r(username: &str) -> Result<PwEntry, String> {
 pub fn getpwnam_r(_username: &str) -> Result<PwEntry, String> {
     compile_error!("getpwnam_r is not yet implemented for this platform");
 }
+
+/// Look up a passwd entry by numeric UID. Needed so a unit that sets User= to a
+/// bare UID (e.g. user@%i.service, whose %i is the numeric UID) can still land
+/// in that user's primary group rather than the manager's GID.
+#[cfg(any(target_os = "freebsd", target_os = "linux"))]
+pub fn getpwuid_r(uid: libc::uid_t) -> Result<PwEntry, String> {
+    let mut buf_size = 32;
+    let mut user = make_new_pw();
+    loop {
+        let mut buf = vec![0i8; buf_size];
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+
+        let rc = unsafe {
+            libc::getpwuid_r(uid, &mut user, buf.as_mut_ptr(), buf_size, &mut result)
+        };
+
+        if rc == libc::ERANGE {
+            // Buffer too small, retry with a larger one
+            buf_size *= 2;
+            continue;
+        }
+
+        if rc != 0 {
+            return Err(format!(
+                "Error calling getpwuid_r for uid '{uid}': errno {rc}"
+            ));
+        }
+
+        if result.is_null() {
+            return Err(format!("No entry found for uid: {uid}"));
+        }
+
+        // The canonical name comes from the record itself (pw_name); fall back
+        // to the numeric UID if the platform leaves it null.
+        let name = if user.pw_name.is_null() {
+            uid.to_string()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(user.pw_name) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        return make_user_from_libc(&name, &user);
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+pub fn getpwuid_r(_uid: libc::uid_t) -> Result<PwEntry, String> {
+    compile_error!("getpwuid_r is not yet implemented for this platform");
+}

@@ -1,8 +1,29 @@
 {
   name = "59-RELOADING-RESTART";
-  # Custom rewrite: test RELOADING=1 failure handling (implemented).
-  # Skip reload rate limiting (ReloadLimitBurst not implemented),
-  # Type=notify-reload (not implemented), and RestartMode=debug (not implemented).
+  # Custom rewrite: test RELOADING=1 failure handling (implemented) and the
+  # full Type=notify-reload lifecycle (reload via SIGHUP, then a clean SIGTERM
+  # stop that runs the unit's `trap leave` handler and exits 109 -- upstream
+  # TEST-59-RELOADING-RESTART.sh notify-reload subtest).
+  #
+  # Still skipped: reload rate limiting (ReloadLimitBurst not implemented) and
+  # RestartMode=debug (not implemented).
+  #
+  # The notify-reload subtest exercises the graceful-SIGTERM stop fix: kill()
+  # sends SIGTERM to the main process and waits up to TimeoutStopSec before
+  # run_poststop's SIGKILL fallback, matching systemd's
+  # ExecStop -> SIGTERM -> TimeoutStopSec -> SIGKILL -> ExecStopPost sequence.
+  # Previously run_poststop's kill_all_remaining_processes SIGKILLed the main
+  # process immediately, so the `trap leave SIGTERM` handler never ran and the
+  # unit exited by signal (ExecMainStatus=9) instead of 109.
+  #
+  # GREEN as of 2026-08-02. The long-open ExecMainStatus-reads-empty failure
+  # on the final assertion was the transient unit's LIFETIME, exactly where
+  # the 2026-07-28 kmsg probe pointed after clearing the kill path: the Stop
+  # handler unloaded stopped transient units from the unit table immediately,
+  # so `systemctl show` right after `systemctl stop` queried a unit that no
+  # longer existed and printed an empty property. Stopped transient units now
+  # linger loaded (fragment still deleted) until reset-failed unloads them or
+  # daemon-reload prunes them, matching upstream, and the assertion reads 109.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -113,6 +134,51 @@
     sleep 5
     systemctl is-active testservice-reload-ok-59.service
     systemctl stop testservice-reload-ok-59.service
+
+    : "Type=notify-reload full lifecycle: reload (SIGHUP=+11) then clean stop"
+    : "(SIGTERM->leave=+7, +3 final = 109) exercises the graceful-SIGTERM fix"
+    cat >/run/notify-reload-test.sh <<EOF
+    #!/usr/bin/env bash
+    set -eux
+    set -o pipefail
+
+    EXIT_STATUS=88
+    LEAVE=0
+
+    function reload() {
+        systemd-notify --reloading --status="Adding 11 to exit status"
+        EXIT_STATUS=\$((EXIT_STATUS + 11))
+        systemd-notify --ready --status="Back running"
+    }
+
+    function leave() {
+        systemd-notify --stopping --status="Adding 7 to exit status"
+        EXIT_STATUS=\$((EXIT_STATUS + 7))
+        LEAVE=1
+        return 0
+    }
+
+    trap reload SIGHUP
+    trap leave SIGTERM
+
+    systemd-notify --ready
+    systemd-notify --status="Running now"
+
+    while [ \$LEAVE = 0 ] ; do
+        sleep 1
+    done
+
+    systemd-notify --status="Adding 3 to exit status"
+    EXIT_STATUS=\$((EXIT_STATUS + 3))
+    exit \$EXIT_STATUS
+    EOF
+    chmod +x /run/notify-reload-test.sh
+
+    systemd-run --unit notify-reload-test -p Type=notify-reload -p KillMode=process /run/notify-reload-test.sh
+    systemctl reload notify-reload-test
+    systemctl stop notify-reload-test
+    test "$(systemctl show -p ExecMainStatus --value notify-reload-test)" = 109
+    systemctl reset-failed notify-reload-test
 
     rm -f /run/systemd/system/testservice-*-59.service
     systemctl daemon-reload

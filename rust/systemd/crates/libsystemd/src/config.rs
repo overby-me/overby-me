@@ -33,6 +33,11 @@ pub struct Config {
 /// order.  This matches the paths systemd itself searches.
 const SYSTEM_UNIT_DIRS: &[&str] = &[
     "/run/systemd/transient",
+    // `systemctl set-property` persists per-property drop-ins under
+    // system.control/<unit>.d/; they must be on the search path so
+    // daemon-reload re-applies them (highest precedence, runtime overrides).
+    "/etc/systemd/system.control",
+    "/run/systemd/system.control",
     "/etc/systemd/system",
     "/run/systemd/system",
     "/usr/local/lib/systemd/system",
@@ -168,31 +173,50 @@ pub fn augment_path_from_unit_dirs(unit_dirs: &[PathBuf]) {
 ///
 /// This function reads from `/proc/cmdline`.  If the file cannot be read
 /// (e.g. in a test environment), `None` is returned.
+/// Whether we are running inside the initramfs, matching upstream systemd's
+/// `in_initrd()`: the initramfs is marked by `/etc/initrd-release`. In the
+/// initrd the manager honors `rd.systemd.unit=` and defaults to
+/// `initrd.target`; in the real root it honors `systemd.unit=` and defaults to
+/// `default.target`.
+pub fn in_initrd() -> bool {
+    std::path::Path::new("/etc/initrd-release").exists()
+}
+
 pub fn target_unit_from_kernel_cmdline() -> Option<String> {
-    target_unit_from_cmdline_str(&std::fs::read_to_string("/proc/cmdline").ok()?)
+    target_unit_from_cmdline_str_impl(&std::fs::read_to_string("/proc/cmdline").ok()?, in_initrd())
+}
+
+/// Real-root cmdline parse (in_initrd = false). Kept as a thin wrapper so the
+/// existing test suite exercises real-root semantics unchanged.
+#[cfg(test)]
+fn target_unit_from_cmdline_str(cmdline: &str) -> Option<String> {
+    target_unit_from_cmdline_str_impl(cmdline, false)
 }
 
 /// Inner implementation that works on an already-read command line string.
-/// Separated for testability.
-fn target_unit_from_cmdline_str(cmdline: &str) -> Option<String> {
-    // `systemd.unit=` takes highest priority — use the last occurrence
-    // (matching systemd behaviour where later parameters override earlier).
+/// `in_initrd` selects which override parameter applies: `rd.systemd.unit=`
+/// (initrd) or `systemd.unit=` + SysV keywords (real root), matching systemd.
+fn target_unit_from_cmdline_str_impl(cmdline: &str, in_initrd: bool) -> Option<String> {
+    // The applicable `*.unit=` takes highest priority — use the last
+    // occurrence (matching systemd behaviour where later parameters override).
     let mut explicit_target: Option<String> = None;
-    // SysV compat keywords are only used when no explicit `systemd.unit=`
-    // is present.
+    // SysV compat keywords are only used when no explicit unit is present, and
+    // only in the real root (they have no meaning in the initrd).
     let mut sysv_target: Option<&str> = None;
 
     for param in cmdline.split_whitespace() {
         if let Some(unit) = param.strip_prefix("systemd.unit=") {
-            if !unit.is_empty() {
+            // systemd.unit= applies to the real root only.
+            if !in_initrd && !unit.is_empty() {
                 explicit_target = Some(unit.to_owned());
             }
         } else if let Some(unit) = param.strip_prefix("rd.systemd.unit=") {
-            // rd.systemd.unit= is for initrd only — ignore in the real root,
-            // but we still parse it so we don't fall through to SysV compat.
-            let _ = unit;
-        } else {
-            // SysV compatibility keywords
+            // rd.systemd.unit= applies to the initrd only.
+            if in_initrd && !unit.is_empty() {
+                explicit_target = Some(unit.to_owned());
+            }
+        } else if !in_initrd {
+            // SysV compatibility keywords (real root only).
             match param {
                 "emergency" => sysv_target = Some("emergency.target"),
                 "rescue" | "single" | "s" | "S" => sysv_target = Some("rescue.target"),
@@ -205,9 +229,9 @@ fn target_unit_from_cmdline_str(cmdline: &str) -> Option<String> {
         }
     }
 
-    // Explicit systemd.unit= always wins over SysV keywords.
+    // Explicit unit= always wins over SysV keywords.
     if let Some(target) = explicit_target {
-        info!("Kernel command line: systemd.unit={target}");
+        info!("Kernel command line: unit={target}");
         Some(target)
     } else if let Some(target) = sysv_target {
         info!("Kernel command line: SysV compat keyword → {target}");
@@ -223,7 +247,11 @@ pub fn load_config() -> (LoggingConfig, Config) {
     let mut unit_dirs: Vec<PathBuf> = SYSTEM_UNIT_DIRS
         .iter()
         .map(PathBuf::from)
-        .filter(|p| p.is_dir())
+        // The system.control dirs are created at runtime by `systemctl
+        // set-property`, so they may not exist at boot; keep them on the search
+        // path unconditionally so a later daemon-reload re-applies those
+        // overrides (the loader skips them while they are absent).
+        .filter(|p| p.is_dir() || p.ends_with("system.control"))
         .collect();
 
     if let Some(pkg_dir) = package_unit_dir()
@@ -235,10 +263,16 @@ pub fn load_config() -> (LoggingConfig, Config) {
     let self_path = std::env::current_exe().expect("Could not determine own executable path");
 
     // Determine the boot target:
-    //   1. Kernel command line override (systemd.unit=, emergency, rescue, single, …)
-    //   2. default.target (the standard systemd default)
+    //   1. Kernel command line override (systemd.unit=/rd.systemd.unit=, SysV, …)
+    //   2. the default target for the context — initrd.target in the initramfs,
+    //      default.target in the real root (matching upstream systemd).
+    let default_target = if in_initrd() {
+        "initrd.target"
+    } else {
+        "default.target"
+    };
     let target_unit =
-        target_unit_from_kernel_cmdline().unwrap_or_else(|| "default.target".to_owned());
+        target_unit_from_kernel_cmdline().unwrap_or_else(|| default_target.to_owned());
 
     let config = Config {
         unit_dirs,
@@ -393,6 +427,34 @@ mod tests {
         // in the real root filesystem.
         assert_eq!(
             target_unit_from_cmdline_str("rd.systemd.unit=initrd.target"),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_rd_systemd_unit_honored_in_initrd() {
+        // In the initrd, rd.systemd.unit= selects the target.
+        assert_eq!(
+            target_unit_from_cmdline_str_impl("quiet rd.systemd.unit=rescue.target", true),
+            Some("rescue.target".to_owned()),
+        );
+    }
+
+    #[test]
+    fn test_systemd_unit_ignored_in_initrd() {
+        // systemd.unit= is for the real root; the initrd ignores it (and falls
+        // back to the initrd.target default chosen in load_config).
+        assert_eq!(
+            target_unit_from_cmdline_str_impl("systemd.unit=multi-user.target", true),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_sysv_keywords_ignored_in_initrd() {
+        // SysV runlevel keywords have no meaning in the initrd.
+        assert_eq!(
+            target_unit_from_cmdline_str_impl("quiet emergency", true),
             None,
         );
     }

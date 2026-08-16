@@ -1,5 +1,8 @@
 {
   name = "02-UNITTESTS";
+  # Skips rather than passes: the C test-* binaries do not exist in a Rust port
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 02-UNITTESTS runs hundreds of individual C test-* binaries that
   # are not shipped with rust-systemd.  Skip the whole suite.
   patchScript = ''

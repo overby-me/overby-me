@@ -39,6 +39,23 @@ use clap::Parser;
 const EXIT_SUCCESS: u8 = 0;
 const EXIT_FAILURE: u8 = 1;
 
+/// Directory holding the shadow tools (useradd/groupadd/chage), baked in from
+/// the Nix build (`SHADOW_BIN`). Unlike C systemd-sysusers, which writes
+/// /etc/passwd and friends directly, this port shells out to those tools, so it
+/// needs them resolvable from a minimal boot service `$PATH`. Falling back to
+/// None resolves the bare name via `$PATH` for non-Nix builds. Mirrors the
+/// `ACL_SETFACL` handling in systemd-tmpfiles.
+const SHADOW_BIN: Option<&str> = option_env!("SHADOW_BIN");
+
+/// Resolve a shadow tool (`useradd`, `groupadd`, `chage`) to an absolute path
+/// when `SHADOW_BIN` was baked in, else return the bare name for `$PATH` lookup.
+fn shadow_tool(name: &str) -> String {
+    match SHADOW_BIN {
+        Some(dir) => format!("{dir}/{name}"),
+        None => name.to_string(),
+    }
+}
+
 /// Directories to search for sysusers.d configuration, in priority order.
 /// Earlier directories take precedence when the same filename exists in multiple.
 const CONFIG_DIRS: &[&str] = &[
@@ -168,6 +185,9 @@ struct SysusersEntry {
     entry_type: EntryType,
     /// Whether the '+' modifier was present (only create if not existing).
     plus: bool,
+    /// Whether the '!' modifier was present (create the user with a locked
+    /// account, i.e. shadow expiration set so `userdbctl` reports locked=true).
+    locked: bool,
     /// The user or group name.
     name: String,
     /// The ID specification.
@@ -233,7 +253,26 @@ fn split_fields(line: &str) -> Vec<String> {
 }
 
 /// Parse a single sysusers.d line.
+/// Test-only 3-argument shim so the unit tests below don't each have to thread
+/// a `&mut bool` invalid-config flag through every call.
+#[cfg(test)]
 fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersEntry> {
+    parse_line_inner(line, source, line_number, &mut false)
+}
+
+/// Parse a single sysusers.d line.
+///
+/// On a config syntax error (too few fields, unknown type, invalid ID) this
+/// sets `*invalid` so the caller can abort before writing anything and exit
+/// non-zero, matching C `systemd-sysusers`, which propagates the parse error out
+/// of `read_config_file`/`parse_arguments` (`if (r < 0) return r;`) before any
+/// account is created. Empty lines and comments are skipped without setting it.
+fn parse_line_inner(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    invalid: &mut bool,
+) -> Option<SysusersEntry> {
     let trimmed = line.trim();
 
     // Skip empty lines and comments
@@ -248,25 +287,26 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
             source.display(),
             line_number,
         );
+        *invalid = true;
         return None;
     }
 
     // Parse type field
     let type_str = &fields[0];
-    let (entry_type, plus) = match type_str.as_str() {
-        // `u`: create system user, `u+`: ensure system user (don't error if
-        // already exists with different fields), `u!`: create system user
-        // and lock the password (no login).  `u!+` combines both modifiers.
-        // We don't currently implement password locking, so `u!` and `u!+`
-        // create the user identically to `u` / `u+`.
-        "u" => (EntryType::CreateUser, false),
-        "u+" => (EntryType::CreateUser, true),
-        "u!" => (EntryType::CreateUser, false),
-        "u!+" | "u+!" => (EntryType::CreateUser, true),
-        "g" => (EntryType::CreateGroup, false),
-        "g+" => (EntryType::CreateGroup, true),
-        "m" => (EntryType::AddToGroup, false),
-        "r" => (EntryType::ReserveRange, false),
+    // `u`: create system user, `u+`: ensure system user (don't error if it
+    // already exists with different fields), `u!`: create system user with a
+    // locked account, `u!+`/`u+!`: both modifiers.  The `!` lock is applied by
+    // setting the shadow expiration so `userdbctl` reports locked=true (see
+    // create_user); it matches upstream sysusers' `sp_expire = 1`.
+    let (entry_type, plus, locked) = match type_str.as_str() {
+        "u" => (EntryType::CreateUser, false, false),
+        "u+" => (EntryType::CreateUser, true, false),
+        "u!" => (EntryType::CreateUser, false, true),
+        "u!+" | "u+!" => (EntryType::CreateUser, true, true),
+        "g" => (EntryType::CreateGroup, false, false),
+        "g+" => (EntryType::CreateGroup, true, false),
+        "m" => (EntryType::AddToGroup, false, false),
+        "r" => (EntryType::ReserveRange, false, false),
         other => {
             eprintln!(
                 "systemd-sysusers: {}:{}: unknown type '{}', ignoring.",
@@ -274,6 +314,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
                 line_number,
                 other,
             );
+            *invalid = true;
             return None;
         }
     };
@@ -292,6 +333,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
                 line_number,
                 id_str,
             );
+            *invalid = true;
             return None;
         }
     };
@@ -329,6 +371,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
     Some(SysusersEntry {
         entry_type,
         plus,
+        locked,
         name,
         id,
         gecos,
@@ -342,7 +385,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
 /// Parse a sysusers.d config file.
 ///
 /// A path of `-` reads from stdin (matches upstream `systemd-sysusers -`).
-fn parse_config_file(path: &Path) -> io::Result<Vec<SysusersEntry>> {
+fn parse_config_file(path: &Path, invalid: &mut bool) -> io::Result<Vec<SysusersEntry>> {
     let reader: Box<dyn BufRead> = if path == Path::new("-") {
         Box::new(io::BufReader::new(io::stdin()))
     } else {
@@ -354,7 +397,7 @@ fn parse_config_file(path: &Path) -> io::Result<Vec<SysusersEntry>> {
         let line = line?;
         let line_number = line_idx + 1;
 
-        if let Some(entry) = parse_line(&line, path, line_number) {
+        if let Some(entry) = parse_line_inner(&line, path, line_number, invalid) {
             entries.push(entry);
         }
     }
@@ -499,7 +542,7 @@ fn create_group(name: &str, gid: Option<u32>, root: &Path, dry_run: bool, verbos
         return true;
     }
 
-    let mut cmd = Command::new("groupadd");
+    let mut cmd = Command::new(shadow_tool("groupadd"));
     cmd.arg("--system");
 
     if let Some(gid) = gid {
@@ -520,8 +563,12 @@ fn create_group(name: &str, gid: Option<u32>, root: &Path, dry_run: bool, verbos
                 }
                 true
             } else {
-                // Exit code 9 means group already exists (race condition)
-                if status.code() == Some(9) {
+                // groupadd is idempotent for an already-existing group, like C
+                // systemd-sysusers: exit 9 = group NAME already in use, exit 4 =
+                // GID already in use (e.g. a user whose primary group was created
+                // by a preceding `g` rule, or a re-run). Both mean the desired
+                // group exists, so treat them as success.
+                if matches!(status.code(), Some(9) | Some(4)) {
                     true
                 } else {
                     eprintln!(
@@ -577,7 +624,7 @@ fn create_user(
         return true;
     }
 
-    let mut cmd = Command::new("useradd");
+    let mut cmd = Command::new(shadow_tool("useradd"));
     cmd.arg("--system");
 
     if let Some(uid) = uid {
@@ -617,6 +664,31 @@ fn create_user(
                         "systemd-sysusers: Successfully created user '{}'.",
                         entry.name
                     );
+                }
+                // For `u!` entries, lock the account. `useradd --system` does
+                // not apply an expiration, so set the shadow expiration to day 1
+                // (1970-01-02) afterwards with chage. Upstream sysusers encodes
+                // the lock as sp_expire=1, which `userdbctl` reports as
+                // locked=true (an unlocked account leaves the field unset).
+                if entry.locked {
+                    let mut chage = Command::new(shadow_tool("chage"));
+                    chage.arg("-E").arg("1970-01-02");
+                    if root != Path::new("/") {
+                        chage.arg("--root").arg(root);
+                    }
+                    chage.arg(&entry.name);
+                    match chage.status() {
+                        Ok(st) if st.success() => {}
+                        Ok(st) => eprintln!(
+                            "systemd-sysusers: chage failed to lock user '{}' (exit {}).",
+                            entry.name,
+                            st.code().unwrap_or(-1),
+                        ),
+                        Err(e) => eprintln!(
+                            "systemd-sysusers: failed to run chage to lock user '{}': {}",
+                            entry.name, e
+                        ),
+                    }
                 }
                 true
             } else {
@@ -933,9 +1005,13 @@ fn run() -> u8 {
     // Collect entries from all sources
     let mut all_entries: Vec<SysusersEntry> = Vec::new();
 
+    // Set when any source has a config syntax error; fatal, like C (see below).
+    let mut invalid_config = false;
+
     // Process inline configurations first
     for inline in &cli.inline_config {
-        if let Some(entry) = parse_line(inline, Path::new("<inline>"), 0) {
+        if let Some(entry) = parse_line_inner(inline, Path::new("<inline>"), 0, &mut invalid_config)
+        {
             all_entries.push(entry);
         }
     }
@@ -958,7 +1034,7 @@ fn run() -> u8 {
     }
 
     for path in &config_files {
-        match parse_config_file(path) {
+        match parse_config_file(path, &mut invalid_config) {
             Ok(entries) => {
                 if verbose {
                     eprintln!(
@@ -973,6 +1049,18 @@ fn run() -> u8 {
                 eprintln!("systemd-sysusers: Failed to read {}: {}", path.display(), e);
             }
         }
+    }
+
+    // A config syntax error is fatal in C systemd-sysusers: `parse_line`'s
+    // error propagates out of `read_config_file`/`parse_arguments`
+    // (`if (r < 0) return r;`) before any account is created, and the tool exits
+    // non-zero. sysusers has no soft "note it and continue" mode
+    // (`assert(!invalid_config)` in the C parser), unlike tmpfiles. Match that:
+    // abort before processing rather than skipping the bad line and exiting 0.
+    // This check must precede the empty-entries check so an all-invalid config
+    // (e.g. a single unknown-type line) still fails instead of reporting success.
+    if invalid_config {
+        return EXIT_FAILURE;
     }
 
     if all_entries.is_empty() {
@@ -1160,6 +1248,32 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_flag_matches_c_classification() {
+        // C systemd-sysusers treats every parse error as fatal: `parse_line`
+        // returns a negative errno that aborts the read before any account is
+        // written (exit 1). Verify each syntax error sets the invalid flag while
+        // valid, empty, and comment lines leave it clear.
+        let src = Path::new("test.conf");
+        let check = |line: &str| {
+            let mut invalid = false;
+            let _ = parse_line_inner(line, src, 1, &mut invalid);
+            invalid
+        };
+
+        // Fatal: too few fields, unknown type, invalid ID specification.
+        assert!(check("u"), "too few fields must be fatal");
+        assert!(check("q foo 1234"), "unknown type must be fatal");
+        assert!(check("u foo notanuid"), "invalid ID must be fatal");
+
+        // Not a parse error: well-formed lines, blanks, and comments.
+        assert!(!check("u foo 1234"), "valid line must not be fatal");
+        assert!(!check("g grp -"), "valid group line must not be fatal");
+        assert!(!check(""), "empty line must not be fatal");
+        assert!(!check("   "), "whitespace line must not be fatal");
+        assert!(!check("# comment"), "comment must not be fatal");
+    }
+
+    #[test]
     fn test_parse_line_uid_gid() {
         let entry = parse_line("u myuser 500:600 \"My User\"", Path::new("test.conf"), 1).unwrap();
         assert_eq!(entry.id, IdSpec::UidGid(500, 600));
@@ -1234,7 +1348,7 @@ mod tests {
         writeln!(f, "r - 900-999").unwrap();
         drop(f);
 
-        let entries = parse_config_file(&path).unwrap();
+        let entries = parse_config_file(&path, &mut false).unwrap();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].entry_type, EntryType::CreateGroup);
         assert_eq!(entries[0].name, "myapp-group");

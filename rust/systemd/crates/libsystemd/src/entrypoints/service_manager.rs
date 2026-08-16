@@ -14,8 +14,62 @@ use crate::signal_handler;
 use crate::socket_activation;
 use crate::units;
 
+/// Emit an early-boot progress line to `/dev/kmsg`, the way upstream systemd
+/// logs before journald/console are up. Invaluable in the initrd, where normal
+/// logging has nowhere to go yet — these lines show up in `dmesg`/console.
+/// Best-effort: silently ignored if `/dev/kmsg` isn't available.
+pub fn kmsg(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        let _ = writeln!(f, "<6>rust-systemd[1]: {msg}");
+    }
+}
+
+/// Install a panic hook that routes the panic message and location to
+/// `/dev/kmsg` before chaining to the default hook. As PID 1 in early boot,
+/// and especially in stage-2 right after switch-root, stderr is not connected
+/// to `/dev/console`, so a panic on the main thread would otherwise vanish and
+/// surface only as the kernel's "Attempted to kill init" panic with no cause.
+/// Routing panics to kmsg makes a PID 1 crash diagnosable from the boot log.
+fn install_kmsg_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        kmsg(&format!("PANIC: {info}"));
+        default_hook(info);
+    }));
+}
+
 pub fn run_service_manager() {
+    install_kmsg_panic_hook();
     pid1_specific_setup();
+    let in_initrd = config::in_initrd();
+    kmsg(&format!(
+        "service manager starting (pid={}, in_initrd={in_initrd})",
+        std::process::id(),
+    ));
+
+    // Put SYSTEMD_IN_INITRD in PID 1's own environment, like upstream systemd,
+    // so every child inherits it: generators AND services. The initrd's
+    // initrd-parse-etc.service runs systemd-sysroot-fstab-check, which refuses
+    // to run (exit 1 → emergency.target) unless SYSTEMD_IN_INITRD=1 is set.
+    // Safe here: still single-threaded this early in PID 1 startup.
+    if in_initrd {
+        unsafe { std::env::set_var("SYSTEMD_IN_INITRD", "1") };
+    }
+
+    // Apply ManagerEnvironment= from system.conf to PID 1's own environment,
+    // like upstream systemd, so generators and services inherit it. NixOS's
+    // systemd-initrd passes SYSTEMD_SYSROOT_FSTAB (the real root's fstab) to the
+    // fstab-generator exclusively through this directive; without it the
+    // generator never emits sysroot.mount and the initrd can't mount the real
+    // root. Safe here: still single-threaded this early in PID 1 startup.
+    crate::control::apply_manager_environment_to_process();
+    if let (true, Some(v)) = (in_initrd, std::env::var_os("SYSTEMD_SYSROOT_FSTAB")) {
+        kmsg(&format!(
+            "ManagerEnvironment: SYSTEMD_SYSROOT_FSTAB={}",
+            v.to_string_lossy()
+        ));
+    }
 
     let cli_args = CliArgs::try_parse().unwrap_or_else(|e| {
         unrecoverable_error(e.to_string());
@@ -26,10 +80,24 @@ pub fn run_service_manager() {
     // path (config filters directories by existence at load time).
     let _ = std::fs::create_dir_all("/run/systemd/system");
     let _ = std::fs::create_dir_all("/run/systemd/transient");
+    // The userdb runtime directory is where user-database services drop their
+    // varlink sockets. Tools (and tests) expect it to exist even when no such
+    // service is running, matching upstream systemd.
+    let _ = std::fs::create_dir_all("/run/systemd/userdb");
 
     let (log_conf, mut conf) = config::load_config();
+    kmsg(&format!(
+        "config loaded: target={}, {} unit dir(s)",
+        conf.target_unit,
+        conf.unit_dirs.len()
+    ));
 
     logging::setup_logging(&log_conf).unwrap();
+
+    // Apply PID 1's own NUMA memory policy from [Manager] NUMAPolicy= now, on
+    // TID 1 while still single-threaded (set_mempolicy(2) affects the calling
+    // task). daemon-reload later re-applies it via the main-thread loop below.
+    crate::control::apply_manager_numa_policy();
 
     // Log the selected boot target — especially useful when emergency/rescue
     // mode was requested via kernel command line.
@@ -73,7 +141,15 @@ pub fn run_service_manager() {
 
     #[cfg(feature = "cgroups")]
     {
-        platform::cgroups::move_to_own_cgroup(&std::path::PathBuf::from("/sys/fs/cgroup")).unwrap();
+        // Non-fatal: PID 1 must not die if the cgroup move fails (e.g. the
+        // cgroup2 hierarchy could not be mounted). mount_api_filesystems()
+        // mounts /sys/fs/cgroup during pid1_specific_setup, so this normally
+        // succeeds.
+        if let Err(e) =
+            platform::cgroups::move_to_own_cgroup(&std::path::PathBuf::from("/sys/fs/cgroup"))
+        {
+            log::warn!("could not move to own cgroup: {e}");
+        }
     }
 
     // TODO make configurable
@@ -119,8 +195,11 @@ pub fn run_service_manager() {
             unreachable!("");
         }
     };
+    // The dispatcher must be consuming before the signal thread and the
+    // notification reader start producing events for it.
+    super::dispatcher::spawn_dispatcher(run_info.clone());
     // listen to signals
-    let handle = start_signal_handler_thread(signals, run_info.clone());
+    let _signal_handle = start_signal_handler_thread(signals, run_info.clone());
 
     // If this is a daemon-reexec, restore PID tracking for running services.
     // This must happen after the signal handler is running (so SIGCHLD is
@@ -143,6 +222,9 @@ pub fn run_service_manager() {
     crate::path_watcher::start_path_watcher_thread(run_info.clone());
     crate::watchdog::start_watchdog_thread(run_info.clone());
     crate::dbus_server::start_dbus_server_thread(run_info.clone());
+    // Track manual mount(8) operations via /proc/self/mountinfo and synthesise
+    // active `.mount` units for them (systemctl is-active <path>.mount).
+    crate::units::start_mount_monitor_thread(run_info.clone());
 
     // Rebuild synthetic `.device` units from the udev db.  Device
     // units are created on-the-fly from `udev-event` RPC notifications
@@ -154,6 +236,36 @@ pub fn run_service_manager() {
     // triggered by the replay can reach the notification handler etc.
     // Matches upstream's `manager_enumerate_devices()` at boot.
     crate::units::rebuild_device_units_from_udev_db(&run_info);
+    // Native block-device coldplug: probe block devices directly (ext*
+    // superblock) to synthesize referenced by-label/by-uuid .device units even
+    // when systemd-udevd hasn't pushed the event yet. Critical in the initrd,
+    // where the root device is referenced by label and udevd's push can stall.
+    crate::units::coldplug_referenced_block_devices(&run_info);
+    // Coldplug fallback: synthesize plugged `.device` units for referenced
+    // devices whose nodes already exist in /dev. After switch-root the real
+    // root's /dev is fully populated but the udev db was cleared and stage-2's
+    // udev-trigger may not have (re)notified PID 1 yet, so this ensures
+    // referenced devices (console, root) are present before activation instead
+    // of waiting on an unreliable udevd push.
+    crate::units::synthesize_referenced_present_devices(&run_info);
+    // Some referenced devices (notably the root block device in the initrd)
+    // only appear once their driver probes during activation, which runs AFTER
+    // this point. Re-run the coldplug in the background (non-blocking, so
+    // activation can proceed and load those drivers) so their .device units are
+    // synthesized as soon as the devices show up, unblocking the mounts that
+    // wait on them. Best-effort with a bounded lifetime.
+    {
+        let ri = run_info.clone();
+        let _ = std::thread::Builder::new()
+            .name("coldplug-retry".to_owned())
+            .spawn(move || {
+                for _ in 0..120 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    crate::units::coldplug_referenced_block_devices(&ri);
+                    crate::units::synthesize_referenced_present_devices(&ri);
+                }
+            });
+    }
     // Cleanup the reexec .status file now that rebuild has consumed
     // it (see note in check_and_restore_reexec_state about the
     // deferred deletion).
@@ -193,11 +305,311 @@ pub fn run_service_manager() {
         // Skip full activation — it would block threads waiting for READY=1
         // from notify services that already sent it to the old instance.
         info!("daemon-reexec: skipped full activation, statuses restored from state file");
+    } else if crate::units::jobs::job_graph_enabled() {
+        // Increment 4: bring the boot closure up through the single dispatcher's
+        // run-queue drive (bounded-pool activation, writer-yielding reads)
+        // instead of the fixpoint sweep. The graph's requeue replaces the
+        // active-goal redrive.
+        kmsg(&format!("activating target {} via job graph", target_id.name));
+        let _ = in_initrd;
+        units::activate_needed_units_via_job_graph(target_id, run_info);
     } else {
+        kmsg(&format!("activating target {}", target_id.name));
+        let _ = in_initrd;
+        units::set_active_goal(&target_id.name);
+        spawn_active_goal_redrive(run_info.clone());
         units::activate_needed_units(target_id, run_info);
     }
 
+    kmsg("initial activation returned; entering main-thread task loop");
+    // The main thread (TID 1) now services tasks that must run on PID 1 itself:
+    // re-applying the Manager NUMA memory policy on `daemon-reload`.
+    // set_mempolicy(2) affects the calling task, and the reload runs on a worker
+    // thread which hands the re-apply here (blocking until it completes). This
+    // blocks the main thread the way the previous `handle.join()` did; process
+    // shutdown is driven by the signal-handler thread, so it runs until exit.
+    control::run_manager_numa_reapply_loop();
+}
+
+/// Entry point for the per-user service manager (`systemd --user`).
+///
+/// Unlike [`run_service_manager`], this boots a lightweight manager for a
+/// single user: it performs NO PID 1 / system setup (no API-filesystem
+/// mounting, no cgroup-root move, no generators, no device coldplug) and does
+/// NOT start the varlink server (its path is the hardcoded system socket
+/// `/run/systemd/io.systemd.Manager`, which a user manager must never touch).
+/// It reuses the shared machinery — signal handling, the control socket, the
+/// notification/stdout/stderr handlers, socket activation and the
+/// timer/path/watchdog threads — driven by a user-mode [`config::Config`] whose
+/// paths live under `$XDG_RUNTIME_DIR` and the XDG user unit directories.
+///
+/// Started by `user@<uid>.service`; clients reach it via
+/// `$XDG_RUNTIME_DIR/systemd/control.socket` (`systemctl --user`,
+/// `systemd-run --user`).
+pub fn run_user_manager() {
+    // Mark this process — and its exec_helper children, which inherit the
+    // environment — as a user manager, so ExecDirectory= handling uses the XDG
+    // base directories ($HOME/.local/state, $HOME/.config, …) instead of the
+    // system /var/lib, /etc, … Set while still single-threaded, since
+    // std::env::set_var is not thread-safe.
+    unsafe { std::env::set_var("SYSTEMD_USER_MANAGER", "1") };
+    let conf = build_user_config();
+
+    // A user manager logs to stderr; the journal captures it via user@.service.
+    let log_conf = config::LoggingConfig {
+        log_to_stdout: true,
+        log_to_disk: false,
+        log_dir: std::path::PathBuf::from("/dev/null"),
+    };
+    let _ = logging::setup_logging(&log_conf);
+
+    info!(
+        "systemd --user starting (uid={}, {} unit dir(s), runtime={})",
+        nix::unistd::Uid::current().as_raw(),
+        conf.unit_dirs.len(),
+        conf.notification_sockets_dir.display(),
+    );
+
+    // Ensure the runtime dirs the manager writes into exist: the sockets dir
+    // (holds the control socket) and the transient dir (`systemd-run --user`).
+    let _ = std::fs::create_dir_all(&conf.notification_sockets_dir);
+    let _ = std::fs::create_dir_all(conf.notification_sockets_dir.join("transient"));
+
+    // A user manager reaps its own service descendants.
+    crate::platform::become_subreaper(true);
+
+    let run_info = prepare_runtimeinfo(&conf, false);
+
+    // Reset the signal mask before registering handlers (see the identical note
+    // in run_service_manager: an inherited non-empty mask would swallow SIGCHLD).
+    {
+        let empty = nix::sys::signal::SigSet::empty();
+        let _ = nix::sys::signal::sigprocmask(
+            nix::sys::signal::SigmaskHow::SIG_SETMASK,
+            Some(&empty),
+            None,
+        );
+    }
+
+    let mut sig_list = vec![
+        signal_hook::consts::SIGCHLD,
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGQUIT,
+    ];
+    sig_list.extend(signal_handler::sigrtmin_signals());
+    let signals = match Signals::new(sig_list) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("systemd --user: could not set up signal handling: {e}");
+            return;
+        }
+    };
+    super::dispatcher::spawn_dispatcher(run_info.clone());
+    let handle = start_signal_handler_thread(signals, run_info.clone());
+
+    // Bind the user control socket ($XDG_RUNTIME_DIR/systemd/control.socket)
+    // and serve control connections. Deliberately no varlink server here (see
+    // the doc comment above).
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        let control_sock_path = conf.notification_sockets_dir.join("control.socket");
+        if control_sock_path.exists() {
+            let _ = std::fs::remove_file(&control_sock_path);
+        }
+        match UnixListener::bind(&control_sock_path) {
+            Ok(unixsock) => {
+                let _ = std::fs::set_permissions(
+                    &control_sock_path,
+                    std::fs::Permissions::from_mode(0o666),
+                );
+                control::accept_control_connections_unix_socket(run_info.clone(), unixsock);
+            }
+            Err(e) => {
+                error!(
+                    "systemd --user: failed to bind control socket {}: {e}",
+                    control_sock_path.display()
+                );
+                return;
+            }
+        }
+    }
+
+    start_notification_handler_thread(run_info.clone());
+    start_stdout_handler_thread(run_info.clone());
+    start_stderr_handler_thread(run_info.clone());
+    socket_activation::start_socketactivation_thread(run_info.clone());
+    crate::timer_scheduler::start_timer_scheduler_thread(run_info.clone());
+    crate::path_watcher::start_path_watcher_thread(run_info.clone());
+    crate::watchdog::start_watchdog_thread(run_info.clone());
+
+    // Signal readiness to the system manager. user@<uid>.service is
+    // Type=notify-reload, so without this `systemctl start user@<uid>.service`
+    // blocks for TimeoutStartSec (~90s) and is then killed. Send READY=1 now —
+    // the control socket and handlers are up, so the manager can already serve
+    // `systemctl --user` / `systemd-run --user` — rather than after the
+    // possibly slow default.target activation below.
+    sd_notify_user_manager("READY=1\n");
+
+    // Activate the user's default.target if present. A user manager with no
+    // default.target is still useful (it idles, serving transient units from
+    // `systemd-run --user`), so a missing target must not be fatal.
+    let target_name = conf.target_unit.clone();
+    let target_id: Option<units::UnitId> = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .find(|u| u.id.name == target_name)
+            .or_else(|| {
+                ri.unit_table
+                    .values()
+                    .find(|u| u.common.unit.aliases.iter().any(|a| a == &target_name))
+            })
+            .map(|u| u.id.clone())
+    };
+    if let Some(target_id) = target_id {
+        units::set_active_goal(&target_id.name);
+        spawn_active_goal_redrive(run_info.clone());
+        units::activate_needed_units(target_id, run_info);
+    } else {
+        info!("systemd --user: no {target_name} present; idling for transient units");
+    }
+
     handle.join().unwrap();
+}
+
+/// Build a user-mode [`config::Config`] rooted at the XDG base directories.
+///
+/// `notification_sockets_dir` becomes `$XDG_RUNTIME_DIR/systemd` so the control
+/// socket lands at `$XDG_RUNTIME_DIR/systemd/control.socket`, matching where
+/// `systemctl --user` / `systemd-run --user` look.
+fn build_user_config() -> config::Config {
+    let uid = nix::unistd::Uid::current().as_raw();
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("/run/user/{uid}"));
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/root".to_owned());
+    let config_home = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{home}/.config"));
+    let self_path =
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/proc/self/exe"));
+
+    let sockets_dir = std::path::PathBuf::from(format!("{runtime_dir}/systemd"));
+
+    // Create the runtime unit dirs this manager owns, so they exist before the
+    // existence filter below and give `systemd-run --user` somewhere to drop
+    // transient units.
+    for sub in ["transient", "user.control", "user"] {
+        let _ = std::fs::create_dir_all(sockets_dir.join(sub));
+    }
+
+    // User unit search dirs, highest priority first (mirrors systemd's user
+    // manager search path): transient + runtime control units, then per-user
+    // config, then system-wide user units. Only existing directories are kept —
+    // the unit loader errors on a missing search path, and the optional
+    // system-wide user dirs (/etc/systemd/user, /usr/lib/systemd/user, …) may be
+    // absent.
+    let unit_dirs: Vec<std::path::PathBuf> = [
+        sockets_dir.join("transient"),
+        sockets_dir.join("user.control"),
+        std::path::PathBuf::from(format!("{config_home}/systemd/user")),
+        std::path::PathBuf::from("/etc/systemd/user"),
+        sockets_dir.join("user"),
+        std::path::PathBuf::from("/usr/local/lib/systemd/user"),
+        std::path::PathBuf::from("/usr/lib/systemd/user"),
+    ]
+    .into_iter()
+    .filter(|p| p.is_dir())
+    .collect();
+
+    config::Config {
+        unit_dirs,
+        target_unit: "default.target".to_owned(),
+        notification_sockets_dir: sockets_dir,
+        self_path,
+    }
+}
+
+/// Send an `sd_notify` message to `$NOTIFY_SOCKET`, if set.
+///
+/// A user manager is itself a service (`user@<uid>.service`) and must signal
+/// readiness to the system manager that started it, exactly like any other
+/// `Type=notify` service. Best-effort: a missing or unreachable socket is
+/// silently ignored.
+fn sd_notify_user_manager(msg: &str) {
+    let Ok(sock_path) = std::env::var("NOTIFY_SOCKET") else {
+        return;
+    };
+    // Abstract sockets are named with a leading '@' (mapped to a NUL byte);
+    // rust-systemd uses filesystem paths, but handle both like sd_notify(3).
+    let path = if let Some(stripped) = sock_path.strip_prefix('@') {
+        format!("\0{stripped}")
+    } else {
+        sock_path
+    };
+    if let Ok(sock) = std::os::unix::net::UnixDatagram::unbound() {
+        let _ = sock.send_to(msg.as_bytes(), &path);
+    }
+}
+
+/// Background re-drive for the current activation goal.
+///
+/// rust-systemd's activation is a forward walk that can return before its goal
+/// is reached: at a given moment no unit may be startable (all remaining ones
+/// are blocked on asynchronous mount/device/oneshot completions), and the
+/// targeted async re-drive paths re-evaluate the static boot target rather than
+/// the CURRENT goal. After `systemctl isolate` (e.g. the initrd isolating to
+/// `initrd-switch-root.target`, or any stage-2 target chain) that leaves the
+/// new goal stalled nondeterministically. This thread periodically re-runs
+/// activation for whatever goal is currently active (see
+/// `units::set_active_goal`) until it is reached, so a unit that became active
+/// asynchronously reliably unblocks its waiters. `activate_unit` is idempotent,
+/// so re-drives that make no progress are cheap, and once the goal is active we
+/// stop calling activation and just idle.
+fn spawn_active_goal_redrive(run_info: runtime_info::ArcMutRuntimeInfo) {
+    spawn_critical_thread("goal-redrive", move || {
+        // Up to ~120s of re-drives; stops issuing activations once the goal is
+        // active. In the initrd the switch-root execve tears this thread down.
+        for _ in 0..400 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            // Never launch a concurrent activation: if the initial activation
+            // (or another re-drive/control/exit-handler pass) is already
+            // running, skip this tick. Each activate_needed_units spins up a
+            // 32-thread pool; running several at once just contends locks and
+            // starves real progress (observed: boot crawling, nothing starting).
+            if units::activation_in_flight() {
+                continue;
+            }
+            // Yield to a pending table-wide writer (daemon-reload).
+            if units::writer_pending() {
+                continue;
+            }
+            let Some(goal_name) = units::active_goal() else {
+                continue;
+            };
+            let goal = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table
+                    .values()
+                    .find(|u| u.id.name == goal_name || u.common.unit.aliases.contains(&goal_name))
+                    .map(|u| (u.id.clone(), u.common.status.read_poisoned().is_started()))
+            };
+            match goal {
+                // Goal reached — idle (a later isolate may set a new goal).
+                Some((_, true)) | None => continue,
+                Some((id, false)) => {
+                    let _ = units::activate_needed_units(id, run_info.clone());
+                }
+            }
+        }
+    });
 }
 
 fn find_shell_path() -> Option<std::path::PathBuf> {
@@ -211,7 +623,7 @@ fn find_shell_path() -> Option<std::path::PathBuf> {
     possible_paths.into_iter().find(|p| p.exists())
 }
 
-fn unrecoverable_error(error: String) {
+pub(crate) fn unrecoverable_error(error: String) {
     if nix::unistd::getpid().as_raw() == 1 {
         eprintln!("Unrecoverable error: {error}");
         if let Some(shell_path) = find_shell_path() {
@@ -266,11 +678,137 @@ fn move_to_new_session() -> bool {
     }
 }
 
+/// Mount the core API filesystems the way upstream systemd's `mount_setup()`
+/// does, so rust-systemd works when the kernel execs it as PID 1 in an
+/// otherwise-bare environment — notably systemd-in-initrd, where nothing has
+/// mounted `/proc`, `/sys`, `/dev`, `/run` or the cgroup hierarchy yet.
+///
+/// Idempotent: each mount is skipped if something is already mounted there
+/// (`EBUSY`), so this is a no-op on a normal boot where stage-1 already set
+/// these up, and any other failure is logged rather than fatal (PID 1 must not
+/// die). The order matters — `/proc`, `/sys` and `/dev` first, then the mounts
+/// that live under them.
+#[cfg(target_os = "linux")]
+fn mount_api_filesystems() {
+    use nix::mount::{MsFlags, mount};
+
+    let nsdev = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
+    // (source, target, fstype, flags, data)
+    let table: &[(&str, &str, &str, MsFlags, Option<&str>)] = &[
+        ("proc", "/proc", "proc", nsdev, None),
+        ("sysfs", "/sys", "sysfs", nsdev, None),
+        (
+            "devtmpfs",
+            "/dev",
+            "devtmpfs",
+            MsFlags::MS_NOSUID,
+            Some("mode=755"),
+        ),
+        (
+            "tmpfs",
+            "/run",
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+            Some("mode=755"),
+        ),
+        (
+            "devpts",
+            "/dev/pts",
+            "devpts",
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
+            Some("mode=620,gid=5"),
+        ),
+        (
+            "tmpfs",
+            "/dev/shm",
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+            Some("mode=1777"),
+        ),
+        (
+            "cgroup2",
+            "/sys/fs/cgroup",
+            "cgroup2",
+            nsdev,
+            Some("nsdelegate"),
+        ),
+    ];
+
+    for (source, target, fstype, flags, data) in table {
+        // Create the mount point. Entries under /dev and /sys come after their
+        // parent in the table, so the parent is mounted by the time we get here.
+        let _ = std::fs::create_dir_all(target);
+        // Skip if something is already mounted here. Relying on EBUSY is wrong
+        // for stackable filesystems: mounting a fresh `tmpfs` over an
+        // already-mounted /run (or /dev/shm, …) SUCCEEDS and stacks an empty
+        // tmpfs on top, shadowing whatever was there. In stage-2 that hides the
+        // /run carried over from the initrd — including the NixOS activation's
+        // /run/current-system, which /etc/profile needs for the system PATH.
+        // Real systemd skips API mounts that are already present, so match that.
+        if is_mount_point(target) {
+            continue;
+        }
+        match mount(Some(*source), *target, Some(*fstype), *flags, *data) {
+            Ok(()) => {}
+            Err(nix::errno::Errno::EBUSY) => {} // already mounted — fine
+            Err(e) => log::warn!("mount_api_filesystems: {target} ({fstype}): {e}"),
+        }
+    }
+}
+
+/// Whether `path` is a mount point — true if its device id differs from its
+/// parent's. Used to avoid stacking a second mount over an already-mounted API
+/// filesystem (e.g. re-mounting /run in stage-2 would shadow the initrd's /run).
+#[cfg(target_os = "linux")]
+/// Create the standard `/dev` symlinks that systemd's `dev_setup()` creates so
+/// the global `/dev` provides `/dev/fd`, `/dev/stdin/stdout/stderr` and
+/// `/dev/core`. Best-effort: only creates a link if it does not already exist.
+fn create_standard_dev_symlinks() {
+    let links = [
+        ("/proc/self/fd", "/dev/fd"),
+        ("/proc/self/fd/0", "/dev/stdin"),
+        ("/proc/self/fd/1", "/dev/stdout"),
+        ("/proc/self/fd/2", "/dev/stderr"),
+        ("/proc/kcore", "/dev/core"),
+    ];
+    for (target, link) in links {
+        if std::fs::symlink_metadata(link).is_err() {
+            let _ = std::os::unix::fs::symlink(target, link);
+        }
+    }
+}
+
+fn is_mount_point(path: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let p = std::path::Path::new(path);
+    let Ok(meta) = std::fs::symlink_metadata(p) else {
+        return false;
+    };
+    let parent = p.parent().unwrap_or_else(|| std::path::Path::new("/"));
+    match std::fs::metadata(parent) {
+        Ok(pmeta) => meta.dev() != pmeta.dev(),
+        Err(_) => false,
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn pid1_specific_setup() {
     if nix::unistd::getpid().as_raw() != 1 {
         return;
     }
+
+    // Ensure the API filesystems are mounted before we touch /dev/console,
+    // /proc, /sys or the cgroup tree below. On a normal boot stage-1 already
+    // mounted them (this is then a no-op); in the initrd we are the first init
+    // and must do it ourselves, like upstream systemd.
+    mount_api_filesystems();
+
+    // Create the standard /dev symlinks (matching systemd's dev_setup()):
+    // /dev/fd, /dev/stdin, /dev/stdout, /dev/stderr and /dev/core. Shell
+    // process substitution (`diff <(a) <(b)`) and `/dev/stdin` redirects open
+    // /dev/fd/N via these; without them such constructs fail with "No such file
+    // or directory" on the global /dev.
+    create_standard_dev_symlinks();
 
     // When running as PID 1, the inherited stdin/stdout/stderr may be broken
     // pipes (e.g. the NixOS stage-2 init script redirects stdout through a
@@ -418,9 +956,9 @@ fn pid1_specific_setup() {
     // Real systemd generates this file very early (via systemd-machine-id-setup
     // or first-boot logic).  We generate a random one if it doesn't exist.
     let machine_id_path = std::path::Path::new("/etc/machine-id");
-    if !machine_id_path.exists()
-        || std::fs::metadata(machine_id_path).map_or(true, |m| m.len() == 0)
-    {
+    let is_first_boot = !machine_id_path.exists()
+        || std::fs::metadata(machine_id_path).map_or(true, |m| m.len() == 0);
+    if is_first_boot {
         // Generate a random 128-bit ID formatted as 32 hex chars + newline
         let mut buf = [0u8; 16];
         if let Ok(f) = std::fs::File::open("/dev/urandom") {
@@ -432,6 +970,17 @@ fn pid1_specific_setup() {
                     eprintln!("rust-systemd: generated /etc/machine-id");
                 }
             }
+        }
+
+        // Record first-boot-ness in the flag file that ConditionFirstBoot=
+        // reads, matching C's in_first_boot(). Once machine-id exists the
+        // machine-id heuristic no longer holds, so the persistent flag on the
+        // /run tmpfs (gone by the next boot) is what carries first-boot-ness
+        // through the rest of this boot. Best-effort: never fail the boot over
+        // it, and skip on re-exec (the original boot already wrote it).
+        if !is_reexec {
+            let _ = std::fs::create_dir_all("/run/systemd");
+            let _ = std::fs::write("/run/systemd/first-boot", []);
         }
     }
 
@@ -684,6 +1233,21 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
     .expect("loading unit files");
     trace!("Finished loading units");
 
+    // Register init.scope as a (service-shaped) active unit so `systemctl
+    // is-active/status init.scope` work (task #12 slice B, gated on
+    // SYSTEMD_RS_INIT_SCOPE=1). Must run before dependency processing below.
+    #[cfg(target_os = "linux")]
+    register_init_scope_unit(&mut unit_table);
+
+    // Apply init.scope.d/*.conf resource controls to PID 1's own init.scope
+    // cgroup (task #12 slice A, gated on SYSTEMD_RS_INIT_SCOPE=1). The cgroup
+    // was created earlier by move_to_own_cgroup; this is best-effort.
+    #[cfg(target_os = "linux")]
+    platform::cgroups::apply_init_scope_resource_controls(
+        std::path::Path::new("/sys/fs/cgroup"),
+        &conf.unit_dirs,
+    );
+
     // Break dependency cycles instead of aborting, matching systemd behavior.
     // systemd warns about cycles and removes ordering edges to break them.
     let broken_cycles = units::break_dependency_cycles(&mut unit_table);
@@ -714,9 +1278,10 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
         stderr_eventfd: platform::make_event_fd().unwrap(),
         notification_eventfd: platform::make_event_fd().unwrap(),
         socket_activation_eventfd: platform::make_event_fd().unwrap(),
-        pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashSet::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::units::jobs::JobRegistry::new(),
         )),
+        dispatcher: super::dispatcher::DispatcherHandle::new(),
         manager_environment: {
             let mut env = std::collections::HashMap::new();
             for (k, v) in std::env::vars() {
@@ -756,18 +1321,46 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
     }))
 }
 
+/// Spawn one of the threads the manager cannot run without.
+///
+/// A failed spawn is fatal here: without these the manager cannot reap its
+/// children or receive readiness notifications, so continuing would leave a
+/// half-initialised init that never makes progress. Fail loudly instead, and
+/// report through `/dev/kmsg` as well as the log, because as PID 1 that is
+/// what actually reaches the console.
+///
+/// The bare `std::thread::spawn` this replaces unwrapped internally, so a
+/// spawn failure surfaced as a panic at `library/std` that did not say which
+/// thread failed. Naming the threads also makes them identifiable in
+/// `/proc/<pid>/task/*/comm` and in a debugger.
+pub(crate) fn spawn_critical_thread<F>(name: &str, f: F) -> std::thread::JoinHandle<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    match std::thread::Builder::new().name(name.to_owned()).spawn(f) {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("Failed to spawn the {name} thread: {e}");
+            kmsg(&format!(
+                "Failed to spawn the {name} thread: {e}. The manager cannot run without it, exiting."
+            ));
+            std::process::exit(1);
+        }
+    }
+}
+
 fn start_notification_handler_thread(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("notify-handler", move || {
         notification_handler::handle_all_streams(run_info);
     });
 }
 fn start_stdout_handler_thread(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("stdout-handler", move || {
         notification_handler::handle_all_std_out(run_info);
     });
 }
 fn start_stderr_handler_thread(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("stderr-handler", move || {
         notification_handler::handle_all_std_err(run_info);
     });
 }
@@ -780,7 +1373,7 @@ fn start_signal_handler_thread(
     // (Service → ServiceExited) without acquiring the RuntimeInfo read lock,
     // breaking the 3-way deadlock described in signal_handler.rs.
     let pid_table = run_info.read_poisoned().pid_table.clone();
-    std::thread::spawn(move || {
+    spawn_critical_thread("signal-handler", move || {
         // listen on signals from the child processes
         signal_handler::handle_signals(signals, run_info, pid_table);
     })
@@ -792,4 +1385,47 @@ use clap::Parser;
 struct CliArgs {
     #[arg(short, long)]
     dry_run: bool,
+}
+
+/// Register `init.scope` (the scope PID 1 lives in) as a unit in the table,
+/// already active, so `systemctl is-active/status init.scope` work. rust has no
+/// Scope unit variant, so init.scope is modelled as a no-ExecStart service (as
+/// transient scopes are); it is active because PID 1 is in it, not because the
+/// manager started it. Gated on SYSTEMD_RS_INIT_SCOPE=1 (task #12 slice B).
+#[cfg(target_os = "linux")]
+fn register_init_scope_unit(unit_table: &mut std::collections::HashMap<units::UnitId, units::Unit>) {
+    if std::env::var("SYSTEMD_RS_INIT_SCOPE").as_deref() != Ok("1") {
+        return;
+    }
+    let content = "[Unit]\n\
+        Description=System and Service Manager\n\
+        [Service]\n\
+        Type=oneshot\n\
+        RemainAfterExit=yes\n";
+    let Ok(parsed) = units::parse_file(content) else {
+        return;
+    };
+    let Ok(pconf) = units::parse_service(
+        parsed,
+        &std::path::PathBuf::from("/run/systemd/init.scope"),
+    ) else {
+        return;
+    };
+    let Ok(mut unit) = units::from_parsed_config::unit_from_parsed_service(pconf) else {
+        return;
+    };
+    if unit_table.contains_key(&unit.id) {
+        return;
+    }
+    // A scope adopts an already-running process, so it is active as constructed.
+    *unit.common.status.write().unwrap() =
+        units::UnitStatus::Started(units::StatusStarted::Running);
+    // Point the cgroup at the real init.scope: make_cgroup_path would put it
+    // under system.slice, but init.scope lives at the cgroup root.
+    if let units::Specific::Service(s) = &mut unit.specific {
+        s.conf.platform_specific.cgroup_path =
+            std::path::PathBuf::from("/sys/fs/cgroup/init.scope");
+    }
+    eprintln!("rust-systemd: registered init.scope unit");
+    unit_table.insert(unit.id.clone(), unit);
 }

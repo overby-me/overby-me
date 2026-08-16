@@ -112,6 +112,7 @@ fn check_notify_access(
 
 pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
     let eventfd = { run_info.read_poisoned().notification_eventfd };
+    let dispatcher = run_info.read_poisoned().dispatcher.clone();
     loop {
         if crate::shutdown::is_shutting_down() {
             trace!("Notification handler exiting: shutdown in progress");
@@ -178,18 +179,30 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                     if mut_state.srvc.notifications.is_none() {
                         continue;
                     }
-                    let old_flags =
-                        nix::fcntl::fcntl(unsafe { borrow_fd(*fd) }, nix::fcntl::FcntlArg::F_GETFL)
-                            .unwrap();
-
-                    let old_flags = nix::fcntl::OFlag::from_bits(old_flags).unwrap();
-                    let mut new_flags = old_flags;
+                    // The service's notification fd may already be closed (e.g.
+                    // the service exited), so fcntl can return EBADF. Skip the
+                    // fd rather than panicking — a panic here would take down
+                    // PID 1's notification thread and stall every service still
+                    // waiting to send READY=1.
+                    let old_flags = match nix::fcntl::fcntl(
+                        unsafe { borrow_fd(*fd) },
+                        nix::fcntl::FcntlArg::F_GETFL,
+                    ) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            log::debug!("notify: F_GETFL on fd {fd} failed: {e}; skipping");
+                            continue;
+                        }
+                    };
+                    let mut new_flags = nix::fcntl::OFlag::from_bits_truncate(old_flags);
                     new_flags.insert(nix::fcntl::OFlag::O_NONBLOCK);
-                    nix::fcntl::fcntl(
+                    if let Err(e) = nix::fcntl::fcntl(
                         unsafe { borrow_fd(*fd) },
                         nix::fcntl::FcntlArg::F_SETFL(new_flags),
-                    )
-                    .unwrap();
+                    ) {
+                        log::debug!("notify: F_SETFL on fd {fd} failed: {e}; skipping");
+                        continue;
+                    }
 
                     // Use recvmsg() instead of recv() to capture
                     // SCM_RIGHTS ancillary data (file descriptors)
@@ -203,11 +216,14 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                             | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
                     );
 
-                    nix::fcntl::fcntl(
+                    // Restore the original flags (best-effort — the fd may have
+                    // been closed by the peer between the read and now).
+                    let _ = nix::fcntl::fcntl(
                         unsafe { borrow_fd(*fd) },
-                        nix::fcntl::FcntlArg::F_SETFL(old_flags),
-                    )
-                    .unwrap();
+                        nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::from_bits_truncate(
+                            old_flags,
+                        )),
+                    );
 
                     match recv_result {
                         Ok(msg) => {
@@ -266,23 +282,20 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                                 mut_state.srvc.notifications_buffer.push('\n');
                             }
 
-                            // Process text notifications first so FDNAME= is parsed
-                            // before we handle the received FDs.
-                            crate::notification_handler::handle_notifications_from_buffer(
-                                &mut mut_state.srvc,
-                                &srvc_unit.id.name,
-                            );
-
-                            // Now handle FDSTORE with any received file descriptors.
-                            if !received_fds.is_empty() {
-                                handle_received_fds(
-                                    &note_str,
+                            // Application (buffer drain, READY=/MAINPID=
+                            // transitions, timestamps, FDSTORE) happens on the
+                            // dispatcher (docs/EVENT-LOOP.md inc 1): the HIGH
+                            // queue guarantees a doomed process's final
+                            // datagram is applied before its ChildExit is
+                            // processed. Ownership of the received fds
+                            // transfers with the event.
+                            dispatcher.send_high(
+                                crate::entrypoints::dispatcher::Event::Notify {
+                                    unit: srvc_unit.id.clone(),
+                                    datagram: note_str.clone(),
                                     received_fds,
-                                    &mut mut_state.srvc,
-                                    &srvc_unit.id.name,
-                                    &srvc_unit.specific,
-                                );
-                            }
+                                },
+                            );
                         }
                         Err(nix::errno::Errno::EAGAIN) => {
                             // No data available — normal for non-blocking.
@@ -308,6 +321,187 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                 warn!("Error while selecting: {e}");
             }
         }
+    }
+}
+
+/// Task #25: recvmsg a single service's notify socket right now and apply it.
+/// Used on the dispatcher's start-timeout path to rescue a sent-but-unread
+/// EXTEND_TIMEOUT_USEC / READY when the notification reader was starved by the
+/// activation storm and never collected the datagram. By the base start deadline
+/// the storm has subsided, so the yield-to-writers spinning read acquires
+/// quickly; it drains every pending datagram into the buffer, then applies it
+/// via [`apply_notify`]. FDSTORE fds are closed rather than stored — this path
+/// only cares about the timeout-relevant READY/EXTEND transitions.
+pub(crate) fn drain_unit_notify_socket(unit_id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    {
+        // Yield to writers, like the reader, until the table is readable.
+        let run_info_locked = loop {
+            match run_info.try_read() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        };
+        let Some(srvc_unit) = run_info_locked.unit_table.get(unit_id) else {
+            return;
+        };
+        let Specific::Service(srvc) = &srvc_unit.specific else {
+            return;
+        };
+        let mut_state = &mut *srvc.state.write_poisoned();
+        let Some(fd) = mut_state.srvc.notifications.as_ref().map(|s| s.as_raw_fd()) else {
+            return;
+        };
+
+        let old_flags = match nix::fcntl::fcntl(
+            unsafe { borrow_fd(fd) },
+            nix::fcntl::FcntlArg::F_GETFL,
+        ) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut nb = nix::fcntl::OFlag::from_bits_truncate(old_flags);
+        nb.insert(nix::fcntl::OFlag::O_NONBLOCK);
+        if nix::fcntl::fcntl(unsafe { borrow_fd(fd) }, nix::fcntl::FcntlArg::F_SETFL(nb)).is_err() {
+            return;
+        }
+
+        let mut buf = [0u8; 4096];
+        let mut cmsg_buf = nix::cmsg_space!([RawFd; 8], libc::ucred);
+        loop {
+            let mut iov = [std::io::IoSliceMut::new(&mut buf[..])];
+            match nix::sys::socket::recvmsg::<()>(
+                fd,
+                &mut iov,
+                Some(&mut cmsg_buf),
+                nix::sys::socket::MsgFlags::MSG_CMSG_CLOEXEC
+                    | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
+            ) {
+                Ok(msg) => {
+                    let bytes = msg.bytes;
+                    if bytes == 0 {
+                        break;
+                    }
+                    let mut sender_pid: Option<libc::pid_t> = None;
+                    if let Ok(cmsgs) = msg.cmsgs() {
+                        for cmsg in cmsgs {
+                            match cmsg {
+                                nix::sys::socket::ControlMessageOwned::ScmRights(fds) => {
+                                    for f in fds {
+                                        let _ = nix::unistd::close(f);
+                                    }
+                                }
+                                nix::sys::socket::ControlMessageOwned::ScmCredentials(cred) => {
+                                    sender_pid = Some(cred.pid());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    let access =
+                        crate::services::effective_notify_access(&mut_state.srvc, &srvc.conf);
+                    if !check_notify_access(access, sender_pid, &mut_state.srvc, &srvc_unit.id.name) {
+                        continue;
+                    }
+                    let note = String::from_utf8_lossy(&buf[..bytes]).to_string();
+                    mut_state.srvc.notifications_buffer.push_str(&note);
+                    if !note.ends_with('\n') {
+                        mut_state.srvc.notifications_buffer.push('\n');
+                    }
+                }
+                Err(nix::errno::Errno::EAGAIN) => break,
+                Err(_) => break,
+            }
+        }
+        let _ = nix::fcntl::fcntl(
+            unsafe { borrow_fd(fd) },
+            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::from_bits_truncate(old_flags)),
+        );
+    }
+    // Drain the now-populated buffer (READY=/EXTEND_TIMEOUT_USEC= transitions).
+    apply_notify(unit_id, "", Vec::new(), run_info);
+}
+
+/// Apply one forwarded notification event on the dispatcher: drain the
+/// service's notifications_buffer (state transitions such as READY=1,
+/// MAINPID= and RELOADING=), keep the active-enter timestamp consistent,
+/// then apply FDSTORE/FDSTOREREMOVE from the raw datagram. The reader has
+/// already enforced NotifyAccess= and appended the datagram to the buffer;
+/// draining may consume datagrams from later events of the same service,
+/// which preserves per-service ordering (their own events find an empty
+/// buffer and only apply their fds).
+pub fn apply_notify(
+    unit_id: &UnitId,
+    datagram: &str,
+    received_fds: Vec<RawFd>,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    // Yield-to-writers acquisition, mirroring the reader's.
+    let run_info_locked = loop {
+        match run_info.try_read() {
+            Ok(guard) => break guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    };
+    let close_all = |fds: Vec<RawFd>| {
+        for fd in fds {
+            let _ = nix::unistd::close(fd);
+        }
+    };
+    let Some(srvc_unit) = run_info_locked.unit_table.get(unit_id) else {
+        close_all(received_fds);
+        return;
+    };
+    let Specific::Service(srvc) = &srvc_unit.specific else {
+        close_all(received_fds);
+        return;
+    };
+    let mut_state = &mut *srvc.state.write_poisoned();
+
+    // Process text notifications first so FDNAME= is parsed before the
+    // received FDs are handled.
+    handle_notifications_from_buffer(&mut mut_state.srvc, &srvc_unit.id.name);
+
+    // A Type=notify service that signals READY=1 and then exits almost
+    // immediately (e.g. `systemd-notify --ready; exit 1`) can have its
+    // deferred activation bail out when the SIGCHLD exit handler moves the
+    // unit out of Starting before the activation path records
+    // ActiveEnterTimestamp, leaving it unset (0). Record it here, the point
+    // where READY=1 is definitively processed, so the exec timestamps stay
+    // consistent (start <= handoff <= active <= exit). Clamp to the
+    // recorded main exit time when the service has already exited so
+    // active-enter never exceeds exit regardless of the interleaving with
+    // exit processing.
+    if mut_state.srvc.signaled_ready {
+        // Check-and-set under a single timestamps write guard so we don't
+        // race the deferred activation thread (which also records
+        // active_enter via record_active_enter) between a separate read
+        // and write.
+        let mut ts = srvc_unit.common.timestamps.write_poisoned();
+        if ts.active_enter.is_none() {
+            let now = crate::units::UnitTimestamps::now_usec();
+            let active_ts = match mut_state.srvc.exec_main_exit_timestamp {
+                Some(exit_ts) if exit_ts < now => exit_ts,
+                _ => now,
+            };
+            ts.record_active_enter_at(active_ts);
+        }
+    }
+
+    // Now handle FDSTORE with any received file descriptors.
+    if !received_fds.is_empty() {
+        handle_received_fds(
+            datagram,
+            received_fds,
+            &mut mut_state.srvc,
+            &srvc_unit.id.name,
+            &srvc_unit.specific,
+        );
     }
 }
 
@@ -531,34 +725,50 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                             let mut_state = &mut *srvc.state.write_poisoned();
                             let status = srvc_unit.common.status.read_poisoned();
 
-                            let old_flags = nix::fcntl::fcntl(
+                            // The service's stdout/stderr fd may already be
+                            // closed (the service exited), so fcntl/read can
+                            // return EBADF. Skip the fd rather than panicking —
+                            // a panic here takes down PID 1's stdout/stderr
+                            // handler thread and stops journal capture for every
+                            // service.
+                            let old_flags = match nix::fcntl::fcntl(
                                 unsafe { borrow_fd(*fd) },
                                 nix::fcntl::FcntlArg::F_GETFL,
-                            )
-                            .unwrap();
-                            let old_flags = nix::fcntl::OFlag::from_bits(old_flags).unwrap();
-                            let mut new_flags = old_flags;
+                            ) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    log::debug!("stdout: F_GETFL on fd {fd} failed: {e}; skipping");
+                                    continue;
+                                }
+                            };
+                            let mut new_flags = nix::fcntl::OFlag::from_bits_truncate(old_flags);
                             new_flags.insert(nix::fcntl::OFlag::O_NONBLOCK);
-                            nix::fcntl::fcntl(
+                            if let Err(e) = nix::fcntl::fcntl(
                                 unsafe { borrow_fd(*fd) },
                                 nix::fcntl::FcntlArg::F_SETFL(new_flags),
-                            )
-                            .unwrap();
+                            ) {
+                                log::debug!("stdout: F_SETFL on fd {fd} failed: {e}; skipping");
+                                continue;
+                            }
 
-                            ////
                             let bytes =
                                 match nix::unistd::read(unsafe { borrow_fd(*fd) }, &mut buf[..]) {
                                     Ok(b) => b,
                                     Err(nix::Error::EWOULDBLOCK) => 0,
-                                    Err(e) => panic!("{}", e),
+                                    Err(e) => {
+                                        log::debug!("stdout: read fd {fd} failed: {e}; skipping");
+                                        continue;
+                                    }
                                 };
-                            ////
 
-                            nix::fcntl::fcntl(
+                            // Restore the original flags (best-effort — the fd
+                            // may have been closed by the peer in the meantime).
+                            let _ = nix::fcntl::fcntl(
                                 unsafe { borrow_fd(*fd) },
-                                nix::fcntl::FcntlArg::F_SETFL(old_flags),
-                            )
-                            .unwrap();
+                                nix::fcntl::FcntlArg::F_SETFL(
+                                    nix::fcntl::OFlag::from_bits_truncate(old_flags),
+                                ),
+                            );
 
                             if bytes == 0 {
                                 // EOF: the write end of the pipe was closed.
@@ -836,10 +1046,19 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
                 srvc.reloading = false;
                 trace!("Service {name}: reload complete (READY=1 after RELOADING=1)");
             }
+            // A completed reload clears the reload-in-progress anchor, so
+            // SubState returns to running and the reload timeout stops.
+            srvc.reload_started = None;
         }
         "RELOADING" => {
             if split.len() > 1 && split[1] == "1" {
                 srvc.reloading = true;
+                // Anchor the reload timeout if this RELOADING= was not already
+                // anchored by a `systemctl reload` (which sets it when it sends
+                // the reload signal), e.g. a service reloading itself.
+                if srvc.reload_started.is_none() {
+                    srvc.reload_started = Some(std::time::Instant::now());
+                }
                 // Per sd_notify(3), RELOADING=1 implies the service is not
                 // ready during reload. The service will send READY=1 again
                 // when reload completes.
@@ -849,6 +1068,13 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
         }
         "STOPPING" => {
             if split.len() > 1 && split[1] == "1" {
+                // Record when the service entered its stop phase on the first
+                // STOPPING=1 so the watchdog can enforce TimeoutStopSec from here
+                // (and stop applying RuntimeMaxSec). Don't reset the clock on a
+                // repeated STOPPING=1.
+                if !srvc.stopping {
+                    srvc.stopping_timestamp = Some(std::time::Instant::now());
+                }
                 srvc.stopping = true;
                 trace!("Service {name}: entering stopping state (STOPPING=1)");
             }
@@ -954,6 +1180,15 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
                 if !error.is_empty() {
                     srvc.notify_bus_error = Some(error.to_owned());
                     trace!("Service {name}: BUSERROR={error}");
+                }
+            }
+        }
+        "VARLINKERROR" => {
+            if split.len() > 1 {
+                let error = split[1].trim();
+                if !error.is_empty() {
+                    srvc.notify_varlink_error = Some(error.to_owned());
+                    trace!("Service {name}: VARLINKERROR={error}");
                 }
             }
         }
@@ -1074,10 +1309,13 @@ mod tests {
             process_group: None,
             signaled_ready: false,
             reloading: false,
+            reload_started: None,
             stopping: false,
+            stopping_timestamp: None,
             watchdog_last_ping: None,
             notify_errno: None,
             notify_bus_error: None,
+            notify_varlink_error: None,
             notify_exit_status: None,
             notify_monotonic_usec: None,
             invocation_id: None,
@@ -1086,6 +1324,8 @@ mod tests {
             notify_access_override: None,
             accepted_fd: None,
             accepted_peer_uid: None,
+            stdout_socket: false,
+            stderr_socket: false,
             notifications: None,
             notifications_path: None,
             stdout: None,
@@ -1096,14 +1336,18 @@ mod tests {
             stderr_buffer: Vec::new(),
             watchdog_timeout_fired: false,
             runtime_max_timeout_fired: false,
+            start_limit_hit: false,
             runtime_started_at: None,
             main_exit_status: None,
+            main_exit_termination: None,
             main_exit_pid: None,
             trigger_path: None,
             trigger_unit: None,
             trigger_timer_realtime_usec: None,
             trigger_timer_monotonic_usec: None,
             monitor_env: None,
+            stop_result_env: None,
+            dynamic_uid: None,
             exec_main_start_timestamp: None,
             exec_main_handoff_timestamp: None,
             exec_main_exit_timestamp: None,
@@ -1837,6 +2081,7 @@ mod tests {
             "READY=1",
             "ERRNO=2",
             "BUSERROR=org.test.Error",
+            "VARLINKERROR=org.varlink.service.InvalidParameter",
             "EXIT_STATUS=42",
             "MONOTONIC_USEC=99999",
             "INVOCATION_ID=abcdef123456",
@@ -1848,6 +2093,10 @@ mod tests {
         assert!(srvc.signaled_ready);
         assert_eq!(srvc.notify_errno, Some(2));
         assert_eq!(srvc.notify_bus_error.as_deref(), Some("org.test.Error"));
+        assert_eq!(
+            srvc.notify_varlink_error.as_deref(),
+            Some("org.varlink.service.InvalidParameter")
+        );
         assert_eq!(srvc.notify_exit_status.as_deref(), Some("42"));
         assert_eq!(srvc.notify_monotonic_usec, Some(99999));
         assert_eq!(srvc.invocation_id.as_deref(), Some("abcdef123456"));
@@ -2115,11 +2364,15 @@ mod tests {
         handle_notification_message("RELOADING=1", &mut srvc, "test.service");
         assert!(srvc.reloading);
         assert!(!srvc.signaled_ready);
+        // RELOADING=1 anchors the reload so SubState/ReloadResult can be derived.
+        assert!(srvc.reload_started.is_some());
 
         // 6. Service finishes reload
         handle_notification_message("READY=1", &mut srvc, "test.service");
         handle_notification_message("STATUS=Running (reloaded)", &mut srvc, "test.service");
         assert!(!srvc.reloading);
+        // A completed reload clears the anchor (SubState returns to running).
+        assert!(srvc.reload_started.is_none());
         assert!(srvc.signaled_ready);
 
         // 7. Service stops gracefully

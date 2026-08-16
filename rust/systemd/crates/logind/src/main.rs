@@ -576,6 +576,10 @@ pub struct LoginManager {
     /// When the caller drops their write-end, the read-end becomes readable
     /// and we can auto-release the inhibitor.
     inhibitor_pipes: HashMap<u64, OwnedFd>,
+    /// Session fifo read-ends, keyed by session id. CreateSession hands the
+    /// write-end to the caller (pam_systemd); we keep the read-end so the pipe
+    /// stays open for the session's lifetime (mirrors systemd's session fifo).
+    session_fifos: HashMap<String, OwnedFd>,
     /// VT_PROCESS monitors keyed by VT number.  Each monitor holds the tty
     /// fd open with VT_PROCESS mode so the kernel sends SIGUSR1/SIGUSR2
     /// instead of switching automatically.
@@ -647,6 +651,7 @@ impl LoginManager {
             power_button_devices: Vec::new(),
             config,
             inhibitor_pipes: HashMap::new(),
+            session_fifos: HashMap::new(),
             vt_monitors: HashMap::new(),
         };
 
@@ -800,6 +805,9 @@ impl LoginManager {
         });
         user_entry.sessions.push(id.clone());
         user_entry.state = "active".to_string();
+
+        // Start the per-user service manager, if this session's class wants one.
+        start_user_manager_if_wanted(uid, class);
 
         // Write session file
         self.write_session_file(&session);
@@ -2300,6 +2308,72 @@ fn check_seat0_graphical() -> bool {
 }
 
 /// Resolve a user's primary GID from /etc/passwd
+impl LoginManager {
+    /// Drop sessions whose leader process is gone.
+    ///
+    /// The stale-session-file check at load time only covers sessions inherited
+    /// from a previous logind; a session created in this process stayed in the
+    /// table forever once its leader exited. That made `loginctl` report dead
+    /// sessions as live, so a caller checking for a session of some class could
+    /// match one belonging to a service that had already been stopped.
+    ///
+    /// Sessions with no recorded leader (leader == 0) are left alone: there is
+    /// nothing to test liveness against.
+    fn gc_dead_sessions(&mut self) {
+        let dead: Vec<String> = self
+            .sessions
+            .values()
+            .filter(|s| s.leader > 0 && unsafe { libc::kill(s.leader as i32, 0) } != 0)
+            .map(|s| s.id.clone())
+            .collect();
+
+        for id in dead {
+            log::debug!("Reaping session {id}: leader exited");
+            self.release_session(&id);
+        }
+    }
+}
+
+/// Whether a session of this class should get a per-user service manager.
+///
+/// Mirrors SESSION_CLASS_WANTS_SERVICE_MANAGER (src/login/logind-session.h):
+/// user, user-early, greeter, lock-screen and background get one. The "-light"
+/// classes exist precisely to opt out of it, and "none"/"manager" never get one.
+fn session_class_wants_service_manager(class: &str) -> bool {
+    matches!(
+        class,
+        "user" | "user-early" | "greeter" | "lock-screen" | "background"
+    )
+}
+
+/// Start `user@<uid>.service` for a newly created session, if its class wants a
+/// service manager.
+///
+/// Runs on a detached thread: this is called from the CreateSession D-Bus
+/// handler, which pam_systemd invokes from inside the very service PID 1 is
+/// still starting. Blocking here to wait for the job would deadlock a
+/// Type=exec/notify service against PID 1's own start handling, so the reply
+/// goes out first and the unit start proceeds behind it.
+fn start_user_manager_if_wanted(uid: u32, class: &str) {
+    if !session_class_wants_service_manager(class) {
+        log::debug!("session class '{class}' wants no service manager for uid {uid}");
+        return;
+    }
+    let unit = format!("user@{uid}.service");
+    thread::spawn(move || {
+        log::info!("Starting {unit} for the new session");
+        match std::process::Command::new("systemctl")
+            .arg("start")
+            .arg(&unit)
+            .status()
+        {
+            Ok(s) if s.success() => log::info!("{unit} started"),
+            Ok(s) => log::error!("{unit} failed to start: {:?}", s.code()),
+            Err(e) => log::error!("could not start {unit}: {e}"),
+        }
+    });
+}
+
 fn resolve_user_gid(uid: u32) -> u32 {
     if let Ok(content) = fs::read_to_string("/etc/passwd") {
         for line in content.lines() {
@@ -2741,10 +2815,11 @@ impl Login1Manager {
     fn create_session(
         &self,
         uid: u32,
-        _pid: u32,
+        pid: u32,
         _service: String,
         stype: String,
         class: String,
+        _desktop: String,
         seat_id: String,
         vtnr: u32,
         tty: String,
@@ -2752,7 +2827,17 @@ impl Login1Manager {
         _remote: bool,
         _remote_user: String,
         _remote_host: String,
-    ) -> zbus::fdo::Result<(String, String, String, bool, u32, String, u32, bool)> {
+        _properties: Vec<(String, zbus::zvariant::OwnedValue)>,
+    ) -> zbus::fdo::Result<(
+        String,
+        zbus::zvariant::OwnedObjectPath,
+        String,
+        ZOwnedFd,
+        u32,
+        String,
+        u32,
+        bool,
+    )> {
         let mut mgr = self.mgr.lock().unwrap_or_else(|e| e.into_inner());
         let user = resolve_uid_to_name(uid);
         let seat = if seat_id.is_empty() {
@@ -2760,7 +2845,7 @@ impl Login1Manager {
         } else {
             Some(seat_id.as_str())
         };
-        let id = mgr.create_session(uid, &user, seat, vtnr, &stype, &class, &tty, _pid);
+        let id = mgr.create_session(uid, &user, seat, vtnr, &stype, &class, &tty, pid);
         mgr.sync_runtime_state();
         log::info!(
             "New session {} of user {} on {}",
@@ -2768,9 +2853,35 @@ impl Login1Manager {
             user,
             seat.unwrap_or("(no seat)")
         );
-        let obj_path = session_object_path(&id);
+
+        // Session fifo: hand the write-end to the caller (pam_systemd holds it
+        // for the session's lifetime), keep the read-end so the pipe stays
+        // open. Mirrors systemd's CreateSession "h" return; see inhibit().
+        let mut fds = [0 as RawFd; 2];
+        let rc = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+        if rc != 0 {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "pipe2 failed: {}",
+                io::Error::last_os_error()
+            )));
+        }
+        let read_end = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+        let write_end = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+        mgr.session_fifos.insert(id.clone(), read_end);
+
+        let obj_path = zbus::zvariant::OwnedObjectPath::try_from(session_object_path(&id))
+            .map_err(|e| zbus::fdo::Error::Failed(format!("invalid session object path: {e}")))?;
         let runtime_path = format!("/run/user/{}", uid);
-        Ok((id, obj_path, runtime_path, false, uid, seat_id, vtnr, false))
+        Ok((
+            id,
+            obj_path,
+            runtime_path,
+            ZOwnedFd::from(write_end),
+            uid,
+            seat_id,
+            vtnr,
+            false,
+        ))
     }
 
     fn release_session(&self, session_id: String) -> zbus::fdo::Result<()> {
@@ -4209,6 +4320,7 @@ fn handle_control_command(mgr: &mut LoginManager, cmd: &str) -> String {
         "status" => mgr.format_status(),
 
         "list-sessions" => {
+            mgr.gc_dead_sessions();
             let sessions: Vec<&Session> = mgr.sessions.values().collect();
             match serde_json::to_string_pretty(&sessions) {
                 Ok(json) => json,

@@ -54,44 +54,59 @@ struct Cli {
     list: bool,
 }
 
-/// Known VM virtualization technologies, in detection priority order.
-const KNOWN_VMS: &[(&str, &str)] = &[
-    ("qemu", "QEMU/KVM"),
-    ("kvm", "KVM"),
-    ("amazon", "Amazon EC2"),
-    ("zvm", "IBM z/VM"),
-    ("vmware", "VMware"),
-    ("microsoft", "Hyper-V"),
-    ("oracle", "Oracle VirtualBox"),
-    ("powervm", "IBM PowerVM"),
-    ("xen", "Xen"),
-    ("bochs", "Bochs"),
-    ("uml", "User-Mode Linux"),
-    ("parallels", "Parallels Desktop"),
-    ("bhyve", "bhyve"),
-    ("qnx", "QNX Hypervisor"),
-    ("acrn", "ACRN"),
-    ("apple", "Apple Virtualization.framework"),
-    ("sre", "LMHS SRE"),
-    ("google", "Google Compute Engine"),
-    ("cloud-hypervisor", "Cloud Hypervisor"),
-    ("firecracker", "Firecracker"),
+/// Known VM identifiers, ordered to match C's `Virtualization` enum so `--list`
+/// prints them in the same sequence as `systemd-detect-virt --list`. These feed
+/// only `--list`; detection returns its identifiers directly. `cloud-hypervisor`
+/// and `firecracker` are rust-only forward-ports (systemd 260's enum has
+/// neither, using a single `vm-other` fallback that rust's detection never
+/// emits), so they are appended where `vm-other` sits in C.
+const KNOWN_VMS: &[&str] = &[
+    "kvm",
+    "amazon",
+    "qemu",
+    "bochs",
+    "xen",
+    "uml",
+    "vmware",
+    "oracle",
+    "microsoft",
+    "zvm",
+    "parallels",
+    "bhyve",
+    "qnx",
+    "acrn",
+    "powervm",
+    "apple",
+    "sre",
+    "google",
+    "cloud-hypervisor",
+    "firecracker",
 ];
 
-/// Known container virtualization technologies.
-const KNOWN_CONTAINERS: &[(&str, &str)] = &[
-    ("systemd-nspawn", "systemd-nspawn"),
-    ("docker", "Docker"),
-    ("podman", "Podman"),
-    ("lxc", "LXC"),
-    ("lxc-libvirt", "LXC (libvirt)"),
-    ("rkt", "rkt"),
-    ("wsl", "Windows Subsystem for Linux"),
-    ("proot", "PRoot"),
-    ("pouch", "Pouch"),
-    ("openvz", "OpenVZ"),
-    ("container-other", "Other container"),
+/// Known container identifiers, ordered to match C's `Virtualization` enum.
+const KNOWN_CONTAINERS: &[&str] = &[
+    "systemd-nspawn",
+    "lxc-libvirt",
+    "lxc",
+    "openvz",
+    "docker",
+    "podman",
+    "rkt",
+    "wsl",
+    "proot",
+    "pouch",
+    "container-other",
 ];
+
+/// The full sequence printed by `--list`: `none`, then VMs, then containers, in
+/// C enum order. Kept as a function so the exact sequence can be unit-tested.
+fn known_technologies() -> Vec<&'static str> {
+    let mut list = Vec::with_capacity(1 + KNOWN_VMS.len() + KNOWN_CONTAINERS.len());
+    list.push("none");
+    list.extend_from_slice(KNOWN_VMS);
+    list.extend_from_slice(KNOWN_CONTAINERS);
+    list
+}
 
 /// Try to read a file to a string, trimming trailing whitespace.
 fn read_trimmed(path: &str) -> Option<String> {
@@ -391,6 +406,22 @@ fn detect_container() -> Option<&'static str> {
         }
     }
 
+    // 8. The root PID namespace has a hardcoded inode number of 0xEFFFFFFC
+    //    (PROC_PID_INIT_INO, stable since kernel 3.8).  If our PID namespace
+    //    inode differs, we are in a non-root PID namespace, which systemd
+    //    reports as an unknown container manager — this is detect_container()'s
+    //    final fallback (running_in_pidns()) and is what makes
+    //    `unshare --pid systemd-detect-virt --container` succeed.
+    {
+        use std::os::unix::fs::MetadataExt;
+        const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
+        if let Ok(meta) = fs::metadata("/proc/self/ns/pid")
+            && meta.ino() != PROC_PID_INIT_INO
+        {
+            return Some("container-other");
+        }
+    }
+
     None
 }
 
@@ -445,18 +476,12 @@ fn detect_private_users() -> bool {
 fn main() {
     let cli = Cli::parse();
 
-    // --list: enumerate known technologies
+    // --list: enumerate known technologies, one identifier per line, matching C
+    // `systemd-detect-virt --list`, which dumps the Virtualization string table
+    // in enum order via puts (no header, grouping, or descriptions).
     if cli.list {
-        println!("Known virtualization technologies:");
-        println!();
-        println!("  VMs:");
-        for (id, desc) in KNOWN_VMS {
-            println!("    {id:<20} {desc}");
-        }
-        println!();
-        println!("  Containers:");
-        for (id, desc) in KNOWN_CONTAINERS {
-            println!("    {id:<20} {desc}");
+        for id in known_technologies() {
+            println!("{id}");
         }
         process::exit(0);
     }
@@ -528,6 +553,41 @@ mod tests {
     fn test_detect_vm_does_not_panic() {
         // Should return Some or None without panicking
         let _ = detect_vm();
+    }
+
+    #[test]
+    fn test_list_matches_c_format_and_order() {
+        // C `systemd-detect-virt --list` dumps the Virtualization string table
+        // via puts: plain identifiers, one per line, `none` first, VMs then
+        // containers in enum order. Verify our list has that shape and order.
+        let list = known_technologies();
+        assert_eq!(list[0], "none", "none must be listed first, as in C");
+
+        let pos = |s: &str| list.iter().position(|&x| x == s).unwrap();
+        // Shared entries follow C's enum order (a representative sample).
+        assert!(pos("kvm") < pos("amazon"));
+        assert!(pos("amazon") < pos("qemu"));
+        assert!(pos("qemu") < pos("bochs"));
+        assert!(pos("google") < pos("systemd-nspawn"), "VMs precede containers");
+        assert!(pos("systemd-nspawn") < pos("lxc-libvirt"));
+        assert!(pos("lxc-libvirt") < pos("lxc"));
+        assert!(pos("lxc") < pos("openvz"));
+        assert!(pos("openvz") < pos("docker"));
+        assert!(pos("docker") < pos("podman"));
+        assert!(pos("pouch") < pos("container-other"));
+
+        // No decoration leaks into the identifiers (the old grouped table had
+        // "  VMs:" headers and "name  description" columns).
+        for id in &list {
+            assert!(!id.is_empty(), "identifier must be non-empty");
+            assert!(!id.contains(' '), "identifier must be plain: {id:?}");
+            assert!(!id.contains(':'), "identifier must be plain: {id:?}");
+        }
+
+        // Forward-port identifiers rust detects (C 260's enum lacks these and
+        // uses a single vm-other fallback rust does not emit).
+        assert!(list.contains(&"cloud-hypervisor"));
+        assert!(list.contains(&"firecracker"));
     }
 
     #[test]

@@ -65,12 +65,28 @@ fn init_logging() {
 
 use clap::{Parser, Subcommand};
 
+mod verify;
+
 /// udevadm — udev management tool
 #[derive(Parser, Debug)]
-#[command(name = "udevadm", version, about = "udev management tool")]
+// `disable_version_flag`: udevadm defines its own `-V/--version` bool below
+// (also accepted by subcommands via `global = true`); without this, clap's
+// auto-generated `--version` collides with it and Cli::command() panics at
+// startup. That aborted `udevadm trigger` in the initrd, so no coldplug ran
+// and no /dev/disk/by-* symlinks were ever created.
+#[command(
+    name = "udevadm",
+    disable_version_flag = true,
+    about = "udev management tool"
+)]
 struct Cli {
     /// Enable debug output
-    #[arg(long, short = 'd', global = true)]
+    // No `short = 'd'`: as a global flag it would collide with `info`'s
+    // `-d/--device-id-of-file`, and clap's builder debug_assert panics on the
+    // duplicate short, aborting every `udevadm info` invocation. Upstream
+    // udevadm's global option is `--debug` (long only); `-d` belongs to
+    // `info --device-id-of-file`.
+    #[arg(long, global = true)]
     debug: bool,
 
     /// Print version and exit (subcommands accept this too)
@@ -630,6 +646,15 @@ fn cmd_info(
         // path that resolves under /dev (e.g. just `null` from /dev).
         if dev.starts_with("/dev/") {
             if let Some(sp) = devname_to_syspath(dev) {
+                syspaths.push(sp);
+            } else if let Ok(canon) = std::fs::canonicalize(dev)
+                && canon.starts_with("/dev/")
+                && let Some(sp) = devname_to_syspath(&canon.to_string_lossy())
+            {
+                // A symlink under /dev names a device just as well as the node
+                // it points at: /dev/mapper/<name>, /dev/disk/by-uuid/<uuid>
+                // and friends are all accepted by upstream, which resolves
+                // them before the lookup.
                 syspaths.push(sp);
             }
         } else if let Some(sp) = device_id_to_syspath(dev) {
@@ -2930,6 +2955,16 @@ fn handle_cat_arg(arg: &str) -> bool {
         return true;
     }
 
+    // Absolute path to an existing special file (e.g. /dev/null, which is a
+    // character device, not a regular file). Upstream `udevadm cat` chases any
+    // explicit path and cats it as a rules file — /dev/null reads as empty and
+    // is a success. Handle it here so the arg doesn't fall through to the
+    // basename search (which would fail with "no rules file matching").
+    if p.is_absolute() && p.exists() {
+        print_rules_file(p);
+        return true;
+    }
+
     // Basename — search standard dirs.  Accept with or without `.rules`.
     let target = if arg.ends_with(".rules") {
         arg.to_owned()
@@ -3129,6 +3164,16 @@ fn main() -> ExitCode {
     }
 
     init_logging();
+
+    // `verify` follows upstream getopt semantics (e.g. `-N help` exits 0,
+    // unknown options exit 1, its own `-h`/`-V`) that clap cannot express, so
+    // handle it before clap ever sees the arguments.
+    {
+        let raw: Vec<String> = std::env::args().collect();
+        if raw.get(1).map(String::as_str) == Some("verify") {
+            return verify::verify_main(&raw[2..]);
+        }
+    }
 
     let cli = Cli::parse();
 
