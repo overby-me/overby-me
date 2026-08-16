@@ -16,27 +16,6 @@
         "type": "github"
       }
     },
-    "flakelight": {
-      "inputs": {
-        "nixpkgs": [
-          "project",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786367861,
-        "narHash": "sha256-6SuLCSsEx1lpL5/TXdU/HPK0f4QeELLqmOlmUPHmW4s=",
-        "owner": "accelbread",
-        "repo": "flakelight",
-        "rev": "aa55b43cc4fda05655083ff846b99b5abf69252a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "accelbread",
-        "repo": "flakelight",
-        "type": "github"
-      }
-    },
     "git-hooks": {
       "inputs": {
         "flake-compat": "flake-compat",
@@ -77,16 +56,15 @@
     },
     "project": {
       "inputs": {
-        "flakelight": "flakelight",
         "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786913075,
-        "narHash": "sha256-IaEAQS05RPWYzZi5iDs1LRmXxMJuBpxaucOZ/YKQw64=",
+        "lastModified": 1786914078,
+        "narHash": "sha256-0LgysXfzihGFyifwUrQy4YPc1oXe3VEqUELt/r9LSgU=",
         "ref": "refs/heads/main",
-        "rev": "a9665eda58d1603bbda2f0bafc61ca02dcd09ad3",
-        "revCount": 21,
+        "rev": "8074575ff47056415467ffdf1059a5edf6c500eb",
+        "revCount": 23,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-project"
       },
