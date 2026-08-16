@@ -19,6 +19,7 @@
     "flakelight": {
       "inputs": {
         "nixpkgs": [
+          "project",
           "nixpkgs"
         ]
       },
@@ -76,20 +77,16 @@
     },
     "project": {
       "inputs": {
-        "flakelight": [
-          "flakelight"
-        ],
+        "flakelight": "flakelight",
         "git-hooks": "git-hooks",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
+        "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786900787,
-        "narHash": "sha256-kV3+bk6b33aRpKgrF+i1boz+aqLLiUigAjv9L3Ib2Uw=",
+        "lastModified": 1786901992,
+        "narHash": "sha256-GP5x5RDrpNtXGCg1EVUlWy1LtrLtLpMnuVJrErNe0G4=",
         "owner": "overby-me",
         "repo": "nix-project",
-        "rev": "ece63689a313f3d3fc9e9d9bf07b48237ace93bc",
+        "rev": "c9c59a5f8519448c10407f67417f8b9dbd26b31e",
         "type": "github"
       },
       "original": {
@@ -100,8 +97,6 @@
     },
     "root": {
       "inputs": {
-        "flakelight": "flakelight",
-        "nixpkgs": "nixpkgs",
         "project": "project"
       }
     }
