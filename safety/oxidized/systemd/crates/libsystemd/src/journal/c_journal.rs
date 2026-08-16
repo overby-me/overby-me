@@ -119,7 +119,9 @@ fn read_object_header(data: &[u8], offset: u64) -> io::Result<(u8, u8, u64)> {
     if (size as usize) < OBJECT_HEADER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("object at {offset} claims size {size} below the {OBJECT_HEADER_SIZE}-byte header"),
+            format!(
+                "object at {offset} claims size {size} below the {OBJECT_HEADER_SIZE}-byte header"
+            ),
         ));
     }
     Ok((obj_type, flags, size))

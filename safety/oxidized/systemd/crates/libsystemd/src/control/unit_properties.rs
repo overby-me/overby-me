@@ -184,10 +184,7 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
     // is-active waits for; Stopped by deactivate_mount during the stop itself),
     // so keying off it keeps `After` correct and synchronous in both directions.
     let mount_inactive = matches!(&unit.specific, crate::units::Specific::Mount(_))
-        && !matches!(
-            &*unit.common.status.read_poisoned(),
-            UnitStatus::Started(_)
-        );
+        && !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Started(_));
     match &unit.specific {
         crate::units::Specific::Mount(m) if mount_inactive => {
             let is_net = crate::units::mount_is_network_static(
@@ -389,7 +386,11 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                         .find_map(|l| l.strip_prefix("usage_usec "))
                         .and_then(|v| v.trim().parse::<u64>().ok())
                 {
-                    insert(&mut props, "CPUUsageNSec", &(usec.saturating_mul(1000)).to_string());
+                    insert(
+                        &mut props,
+                        "CPUUsageNSec",
+                        &(usec.saturating_mul(1000)).to_string(),
+                    );
                 }
             }
             insert_service_config(&mut props, &svc.conf);

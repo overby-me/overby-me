@@ -836,10 +836,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 trace!("Reexec: fd {raw_fd} for {unit_name}:{fd_name} is no longer open, skipping");
                 continue;
             }
-            if let Some(unit) = ri.unit_table
-            .values()
-            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name))
-                && let crate::units::Specific::Service(srvc) = &unit.specific
+            if let Some(unit) = ri.unit_table.values().find(|u| {
+                u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)
+            }) && let crate::units::Specific::Service(srvc) = &unit.specific
             {
                 let mut state = srvc.state.write_poisoned();
                 state.srvc.stored_fds.push((fd_name.to_owned(), raw_fd));
@@ -863,9 +862,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 "frozen-by-parent" => crate::units::FreezerState::FrozenByParent,
                 _ => continue,
             };
-            if let Some(unit) = ri.unit_table
-            .values()
-            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
+            if let Some(unit) = ri.unit_table.values().find(|u| {
+                u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)
+            }) {
                 crate::control::unit_properties::set_freezer_state(unit, freezer_state);
                 info!(
                     "Reexec: restored freezer state '{}' for {unit_name}",
@@ -1113,9 +1112,9 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            jobs: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::units::jobs::JobRegistry::new(),
-            )),
+            jobs: std::sync::Arc::new(
+                std::sync::Mutex::new(crate::units::jobs::JobRegistry::new()),
+            ),
             dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1181,9 +1180,9 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            jobs: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::units::jobs::JobRegistry::new(),
-            )),
+            jobs: std::sync::Arc::new(
+                std::sync::Mutex::new(crate::units::jobs::JobRegistry::new()),
+            ),
             dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1256,9 +1255,9 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            jobs: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::units::jobs::JobRegistry::new(),
-            )),
+            jobs: std::sync::Arc::new(
+                std::sync::Mutex::new(crate::units::jobs::JobRegistry::new()),
+            ),
             dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),

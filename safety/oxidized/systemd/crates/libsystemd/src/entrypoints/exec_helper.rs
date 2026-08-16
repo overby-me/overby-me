@@ -237,9 +237,8 @@ unsafe extern "C" fn pam_noop_conv(
     if num_msg <= 0 || resp.is_null() {
         return PAM_SUCCESS;
     }
-    let arr =
-        unsafe { libc::calloc(num_msg as libc::size_t, std::mem::size_of::<PamResponse>()) }
-            as *mut PamResponse;
+    let arr = unsafe { libc::calloc(num_msg as libc::size_t, std::mem::size_of::<PamResponse>()) }
+        as *mut PamResponse;
     if arr.is_null() {
         return 5; // PAM_BUF_ERR
     }
@@ -269,8 +268,7 @@ type PamPutenvFn = unsafe extern "C" fn(*mut libc::c_void, *const libc::c_char) 
 fn run_pam_session(service: &str, user: &str, env: &[(String, String)]) -> Result<(), String> {
     use std::ffi::CString;
 
-    let c_service =
-        CString::new(service).map_err(|_| "PAMName contains a NUL byte".to_string())?;
+    let c_service = CString::new(service).map_err(|_| "PAMName contains a NUL byte".to_string())?;
     let c_user = CString::new(user).map_err(|_| "user name contains a NUL byte".to_string())?;
     let c_lib =
         CString::new(PAM_LIB_PATH).map_err(|_| "PAM_LIB path contains a NUL byte".to_string())?;
@@ -283,7 +281,9 @@ fn run_pam_session(service: &str, user: &str, env: &[(String, String)]) -> Resul
 
     macro_rules! sym {
         ($name:literal, $ty:ty) => {{
-            let s = unsafe { libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char) };
+            let s = unsafe {
+                libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char)
+            };
             if s.is_null() {
                 return Err(format!("dlsym({}) failed", $name));
             }
@@ -2122,198 +2122,208 @@ pub fn run_exec_helper() {
     // symlink <base>/<name> → private/<name> (matching real systemd).
     // Returns the path the service should use (the symlink for dynamic,
     // the direct path otherwise).
-    let create_managed_dir_ex = |base: &Path,
-                                 dir_name: &str,
-                                 mode: u32,
-                                 dynamic: bool,
-                                 only_create: bool|
-     -> String {
-        let uid = nix::unistd::Uid::from_raw(config.user);
-        let gid = nix::unistd::Gid::from_raw(config.group);
-        if dynamic {
-            // `private/` is a deliberate security boundary, not an
-            // implementation detail: mode 0700 owned root:root so unprivileged
-            // host users cannot look into the state of a dynamic user whose UID
-            // may later be reused (upstream exec-invoke.c documents the same
-            // trick container managers use).  The mode is set explicitly rather
-            // than left to the inherited umask.
-            //
-            // The service itself reaches its directory because the mount
-            // namespace replaces `private/` with a tmpfs into which only that
-            // service's directory is bound; see `private_dir_tmpfs` below.
-            let private_dir = base.join("private");
-            let _ = std::fs::create_dir_all(&private_dir);
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(
-                    &private_dir,
-                    std::fs::Permissions::from_mode(0o700),
-                );
-                let _ = nix::unistd::chown(
-                    &private_dir,
-                    Some(nix::unistd::Uid::from_raw(0)),
-                    Some(nix::unistd::Gid::from_raw(0)),
-                );
-            }
-            let full_path = private_dir.join(dir_name);
-            let link_path = base.join(dir_name);
-            // Intermediates between the private root and the leaf, at 0755.
-            if let Some(parent) = full_path.parent()
-                && parent != private_dir
-                && !parent.exists()
-            {
-                let _ = std::fs::create_dir_all(parent);
-                let mut p = private_dir.clone();
-                for comp in Path::new(dir_name).components().collect::<Vec<_>>().iter().rev().skip(1).rev() {
-                    p = p.join(comp);
-                    set_dir_mode(&p, 0o755);
+    let create_managed_dir_ex =
+        |base: &Path, dir_name: &str, mode: u32, dynamic: bool, only_create: bool| -> String {
+            let uid = nix::unistd::Uid::from_raw(config.user);
+            let gid = nix::unistd::Gid::from_raw(config.group);
+            if dynamic {
+                // `private/` is a deliberate security boundary, not an
+                // implementation detail: mode 0700 owned root:root so unprivileged
+                // host users cannot look into the state of a dynamic user whose UID
+                // may later be reused (upstream exec-invoke.c documents the same
+                // trick container managers use).  The mode is set explicitly rather
+                // than left to the inherited umask.
+                //
+                // The service itself reaches its directory because the mount
+                // namespace replaces `private/` with a tmpfs into which only that
+                // service's directory is bound; see `private_dir_tmpfs` below.
+                let private_dir = base.join("private");
+                let _ = std::fs::create_dir_all(&private_dir);
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &private_dir,
+                        std::fs::Permissions::from_mode(0o700),
+                    );
+                    let _ = nix::unistd::chown(
+                        &private_dir,
+                        Some(nix::unistd::Uid::from_raw(0)),
+                        Some(nix::unistd::Gid::from_raw(0)),
+                    );
                 }
-            }
-
-            // DynamicUser=0 -> 1 migration.  A previous non-dynamic run left a
-            // real directory at <base>/<name>; upstream moves it under
-            // private/ and leaves a symlink behind, so the service keeps its
-            // data across the switch (TEST-34-DYNAMICUSERMIGRATE).  Only move
-            // when there is nothing at the destination: a populated private/
-            // copy is the newer state and must win.
-            if let Ok(md) = std::fs::symlink_metadata(&link_path)
-                && md.is_dir()
-                && !full_path.exists()
-            {
-                match std::fs::rename(&link_path, &full_path) {
-                    Ok(()) => log::info!(
-                        "DynamicUser=yes: migrated {:?} into {:?}",
-                        link_path,
-                        full_path
-                    ),
-                    Err(e) => log::warn!(
-                        "DynamicUser=yes: could not migrate {:?} into {:?}: {}",
-                        link_path,
-                        full_path,
-                        e
-                    ),
-                }
-            }
-
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!("Failed to create private directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                let _ = std::fs::set_permissions(&full_path, perms);
-            }
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!("Failed to chown directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            // Link it up from the public place. A nested name (`aaa/bbb`) makes
-            // this more than a one-liner:
-            //
-            //  - the target must be relative to the LINK's directory, not to
-            //    `base`. For `/var/lib/aaa/bbb` that is `../private/aaa/bbb`;
-            //    a flat `private/aaa/bbb` would resolve to
-            //    `/var/lib/aaa/private/aaa/bbb`.
-            //  - when a parent was itself configured (`StateDirectory=aaa
-            //    aaa/bbb`), `/var/lib/aaa` is already a symlink into private/,
-            //    so the link path and the private path are the SAME inode. We
-            //    must not create a symlink then, and must not delete what is
-            //    there (upstream issue #24783).
-            let already_linked = match (
-                std::fs::canonicalize(&link_path),
-                std::fs::canonicalize(&full_path),
-            ) {
-                (Ok(a), Ok(b)) => a == b,
-                _ => false,
-            };
-            // ONLY_CREATE: a configured parent already provides the symlink that
-            // covers this path, and link and target are the same inode.
-            if !only_create && !already_linked {
-                if let Some(parent) = link_path.parent()
+                let full_path = private_dir.join(dir_name);
+                let link_path = base.join(dir_name);
+                // Intermediates between the private root and the leaf, at 0755.
+                if let Some(parent) = full_path.parent()
+                    && parent != private_dir
                     && !parent.exists()
                 {
                     let _ = std::fs::create_dir_all(parent);
-                    set_dir_mode(parent, 0o755);
+                    let mut p = private_dir.clone();
+                    for comp in Path::new(dir_name)
+                        .components()
+                        .collect::<Vec<_>>()
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .rev()
+                    {
+                        p = p.join(comp);
+                        set_dir_mode(&p, 0o755);
+                    }
                 }
-                let target = match link_path.parent() {
-                    Some(parent) => path_make_relative(parent, &full_path),
-                    None => full_path.clone(),
-                };
-                let _ = std::fs::remove_file(&link_path); // stale symlink
-                if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
-                    log::warn!(
-                        "Failed to create symlink {:?} → {:?}: {}",
-                        link_path,
-                        target,
-                        e
-                    );
-                }
-            }
-            log::info!(
-                "DynamicUser=yes exec dir: {:?} -> {:?} (uid={} gid={} mode={:o})",
-                link_path,
-                full_path,
-                config.user,
-                config.group,
-                mode
-            );
-            full_path.to_string_lossy().into_owned()
-        } else {
-            let full_path = base.join(dir_name);
 
-            // DynamicUser=1 -> 0 migration, the mirror of the branch above.
-            // <base>/<name> is the symlink a dynamic run left behind; drop it
-            // and move the real directory back out, so the service keeps its
-            // data and <base>/<name> is a directory again.
-            //
-            // Only fires when the link actually points at private/<name>: an
-            // unrelated symlink an admin put there is left alone rather than
-            // being replaced by a directory.
-            let private_path = base.join("private").join(dir_name);
-            if std::fs::read_link(&full_path)
-                .is_ok_and(|t| t == Path::new("private").join(dir_name) || t == private_path)
-            {
-                let _ = std::fs::remove_file(&full_path);
-                if private_path.exists()
-                    && let Err(e) = std::fs::rename(&private_path, &full_path)
+                // DynamicUser=0 -> 1 migration.  A previous non-dynamic run left a
+                // real directory at <base>/<name>; upstream moves it under
+                // private/ and leaves a symlink behind, so the service keeps its
+                // data across the switch (TEST-34-DYNAMICUSERMIGRATE).  Only move
+                // when there is nothing at the destination: a populated private/
+                // copy is the newer state and must win.
+                if let Ok(md) = std::fs::symlink_metadata(&link_path)
+                    && md.is_dir()
+                    && !full_path.exists()
                 {
-                    log::warn!(
-                        "DynamicUser=no: could not migrate {:?} back to {:?}: {}",
-                        private_path,
-                        full_path,
-                        e
-                    );
+                    match std::fs::rename(&link_path, &full_path) {
+                        Ok(()) => log::info!(
+                            "DynamicUser=yes: migrated {:?} into {:?}",
+                            link_path,
+                            full_path
+                        ),
+                        Err(e) => log::warn!(
+                            "DynamicUser=yes: could not migrate {:?} into {:?}: {}",
+                            link_path,
+                            full_path,
+                            e
+                        ),
+                    }
                 }
-            }
 
-            if let Some(parent) = full_path.parent()
-                && parent != base
-                && !parent.exists()
-            {
-                let _ = std::fs::create_dir_all(parent);
-                let mut p = base.to_path_buf();
-                for comp in Path::new(dir_name).components().collect::<Vec<_>>().iter().rev().skip(1).rev() {
-                    p = p.join(comp);
-                    set_dir_mode(&p, 0o755);
+                if let Err(e) = std::fs::create_dir_all(&full_path) {
+                    log::error!("Failed to create private directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
                 }
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(mode);
+                    let _ = std::fs::set_permissions(&full_path, perms);
+                }
+                if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
+                    log::error!("Failed to chown directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
+                }
+                // Link it up from the public place. A nested name (`aaa/bbb`) makes
+                // this more than a one-liner:
+                //
+                //  - the target must be relative to the LINK's directory, not to
+                //    `base`. For `/var/lib/aaa/bbb` that is `../private/aaa/bbb`;
+                //    a flat `private/aaa/bbb` would resolve to
+                //    `/var/lib/aaa/private/aaa/bbb`.
+                //  - when a parent was itself configured (`StateDirectory=aaa
+                //    aaa/bbb`), `/var/lib/aaa` is already a symlink into private/,
+                //    so the link path and the private path are the SAME inode. We
+                //    must not create a symlink then, and must not delete what is
+                //    there (upstream issue #24783).
+                let already_linked = match (
+                    std::fs::canonicalize(&link_path),
+                    std::fs::canonicalize(&full_path),
+                ) {
+                    (Ok(a), Ok(b)) => a == b,
+                    _ => false,
+                };
+                // ONLY_CREATE: a configured parent already provides the symlink that
+                // covers this path, and link and target are the same inode.
+                if !only_create && !already_linked {
+                    if let Some(parent) = link_path.parent()
+                        && !parent.exists()
+                    {
+                        let _ = std::fs::create_dir_all(parent);
+                        set_dir_mode(parent, 0o755);
+                    }
+                    let target = match link_path.parent() {
+                        Some(parent) => path_make_relative(parent, &full_path),
+                        None => full_path.clone(),
+                    };
+                    let _ = std::fs::remove_file(&link_path); // stale symlink
+                    if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
+                        log::warn!(
+                            "Failed to create symlink {:?} → {:?}: {}",
+                            link_path,
+                            target,
+                            e
+                        );
+                    }
+                }
+                log::info!(
+                    "DynamicUser=yes exec dir: {:?} -> {:?} (uid={} gid={} mode={:o})",
+                    link_path,
+                    full_path,
+                    config.user,
+                    config.group,
+                    mode
+                );
+                full_path.to_string_lossy().into_owned()
+            } else {
+                let full_path = base.join(dir_name);
+
+                // DynamicUser=1 -> 0 migration, the mirror of the branch above.
+                // <base>/<name> is the symlink a dynamic run left behind; drop it
+                // and move the real directory back out, so the service keeps its
+                // data and <base>/<name> is a directory again.
+                //
+                // Only fires when the link actually points at private/<name>: an
+                // unrelated symlink an admin put there is left alone rather than
+                // being replaced by a directory.
+                let private_path = base.join("private").join(dir_name);
+                if std::fs::read_link(&full_path)
+                    .is_ok_and(|t| t == Path::new("private").join(dir_name) || t == private_path)
+                {
+                    let _ = std::fs::remove_file(&full_path);
+                    if private_path.exists()
+                        && let Err(e) = std::fs::rename(&private_path, &full_path)
+                    {
+                        log::warn!(
+                            "DynamicUser=no: could not migrate {:?} back to {:?}: {}",
+                            private_path,
+                            full_path,
+                            e
+                        );
+                    }
+                }
+
+                if let Some(parent) = full_path.parent()
+                    && parent != base
+                    && !parent.exists()
+                {
+                    let _ = std::fs::create_dir_all(parent);
+                    let mut p = base.to_path_buf();
+                    for comp in Path::new(dir_name)
+                        .components()
+                        .collect::<Vec<_>>()
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .rev()
+                    {
+                        p = p.join(comp);
+                        set_dir_mode(&p, 0o755);
+                    }
+                }
+                if let Err(e) = std::fs::create_dir_all(&full_path) {
+                    log::error!("Failed to create directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
+                }
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(mode);
+                    let _ = std::fs::set_permissions(&full_path, perms);
+                }
+                if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
+                    log::error!("Failed to chown directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
+                }
+                full_path.to_string_lossy().into_owned()
             }
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!("Failed to create directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                let _ = std::fs::set_permissions(&full_path, perms);
-            }
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!("Failed to chown directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            full_path.to_string_lossy().into_owned()
-        }
-    };
+        };
 
     let dynamic = config.dynamic_user;
 
@@ -2348,11 +2358,7 @@ pub fn run_exec_helper() {
     fn path_make_relative(from: &Path, to: &Path) -> std::path::PathBuf {
         let from_c: Vec<_> = from.components().collect();
         let to_c: Vec<_> = to.components().collect();
-        let common = from_c
-            .iter()
-            .zip(&to_c)
-            .take_while(|(a, b)| a == b)
-            .count();
+        let common = from_c.iter().zip(&to_c).take_while(|(a, b)| a == b).count();
         let mut rel = std::path::PathBuf::new();
         for _ in common..from_c.len() {
             rel.push("..");
@@ -2636,9 +2642,7 @@ pub fn run_exec_helper() {
             .iter()
             .any(|b| src.starts_with(b) && src != b.as_path())
         {
-            config
-                .exec_dir_binds
-                .push((source.clone(), source.clone()));
+            config.exec_dir_binds.push((source.clone(), source.clone()));
         }
     }
 
@@ -2698,8 +2702,7 @@ pub fn run_exec_helper() {
     // The user namespace is created further below, so for a delegated service
     // defer the mount-namespace setup until after it (see below); otherwise set
     // it up here as usual.
-    let defer_mount_ns_for_delegation =
-        needs_mount_ns && !config.delegate_namespaces.is_empty();
+    let defer_mount_ns_for_delegation = needs_mount_ns && !config.delegate_namespaces.is_empty();
 
     if needs_mount_ns && !defer_mount_ns_for_delegation {
         if let Some(ns_pid) = config.join_namespace_pid {
@@ -4790,7 +4793,6 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     }
 
     log::trace!("mount_ns: ALL STEPS COMPLETE");
-
 }
 
 /// Bind-mount a path on top of itself with MS_RDONLY.
@@ -4847,7 +4849,11 @@ unsafe fn write_proc_file_raw(path: *const std::os::raw::c_char, data: &[u8]) ->
 ///
 /// Returns true if the namespace was created and the helper reported writing
 /// the maps.
-fn unshare_userns_with_helper_written_map(uid_map: &str, gid_map: &str, deny_setgroups: bool) -> bool {
+fn unshare_userns_with_helper_written_map(
+    uid_map: &str,
+    gid_map: &str,
+    deny_setgroups: bool,
+) -> bool {
     let my_pid = unsafe { libc::getpid() };
 
     // Prepare paths and payloads BEFORE forking: the helper child must stay
@@ -5053,7 +5059,11 @@ fn create_mapped_userns(uid: u32, gid: u32) -> Option<std::os::fd::OwnedFd> {
 /// cannot be a plain bind followed by mount_setattr. The sequence is therefore
 /// open_tree(OPEN_TREE_CLONE) to get a detached copy, mount_setattr on that,
 /// and move_mount to put it in place.
-fn idmapped_bind(source: &str, dest: &str, userns_fd: std::os::fd::BorrowedFd<'_>) -> std::io::Result<()> {
+fn idmapped_bind(
+    source: &str,
+    dest: &str,
+    userns_fd: std::os::fd::BorrowedFd<'_>,
+) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
 
     const OPEN_TREE_CLONE: libc::c_uint = 1;
@@ -5568,7 +5578,7 @@ fn seccomp_block_hostname() {
         f(0x06, 0, 0, deny),
         f(0x15, 0, 1, SYS_SETDOMAINNAME), // nr==setdomainname -> deny, else skip
         f(0x06, 0, 0, deny),
-        f(0x06, 0, 0, ALLOW),             // allow everything else
+        f(0x06, 0, 0, ALLOW), // allow everything else
     ];
     let prog = libc::sock_fprog {
         len: filter.len() as u16,
@@ -5680,10 +5690,10 @@ fn build_seccomp_deny_filter(blocked: &[i64], action: u32) -> Vec<libc::sock_fil
     let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
     // seccomp_data: nr @ offset 0, arch @ offset 4.
     let mut prog = vec![
-        f(0x20, 0, 0, 4), // BPF_LD|W|ABS arch
+        f(0x20, 0, 0, 4),                 // BPF_LD|W|ABS arch
         f(0x15, 1, 0, AUDIT_ARCH_X86_64), // JEQ arch==x86_64 -> load nr, else allow
-        f(0x06, 0, 0, ALLOW), // other arch: allow (filter is x86_64-only)
-        f(0x20, 0, 0, 0), // BPF_LD|W|ABS nr
+        f(0x06, 0, 0, ALLOW),             // other arch: allow (filter is x86_64-only)
+        f(0x20, 0, 0, 0),                 // BPF_LD|W|ABS nr
     ];
     for &nr in blocked {
         // JEQ nr: on match fall through to the RET action; else skip it.
@@ -5707,10 +5717,10 @@ fn build_seccomp_allow_filter(allowed: &[i64], action: u32) -> Vec<libc::sock_fi
     const ALLOW: u32 = 0x7fff_0000; // SECCOMP_RET_ALLOW
     let f = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
     let mut prog = vec![
-        f(0x20, 0, 0, 4), // BPF_LD|W|ABS arch
+        f(0x20, 0, 0, 4),                 // BPF_LD|W|ABS arch
         f(0x15, 1, 0, AUDIT_ARCH_X86_64), // JEQ arch==x86_64 -> load nr, else allow
-        f(0x06, 0, 0, ALLOW), // other arch: allow
-        f(0x20, 0, 0, 0), // BPF_LD|W|ABS nr
+        f(0x06, 0, 0, ALLOW),             // other arch: allow
+        f(0x20, 0, 0, 0),                 // BPF_LD|W|ABS nr
     ];
     for &nr in allowed {
         // JEQ nr: on match fall through to RET ALLOW; else skip it. Using jf=1
@@ -6416,11 +6426,7 @@ fn restrict_namespaces_retain(value: &str) -> Option<u32> {
     } else {
         flags_of(v) // allow-list: retain only the listed
     };
-    if retain == all {
-        None
-    } else {
-        Some(retain)
-    }
+    if retain == all { None } else { Some(retain) }
 }
 
 /// Apply `RestrictNamespaces=`: block creating or joining the forbidden namespace
@@ -6464,8 +6470,7 @@ fn install_restrict_namespaces(config: &ExecHelperConfig) {
             }
         }
     }
-    if !rules.is_empty()
-        && install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, eperm))
+    if !rules.is_empty() && install_seccomp_program(&build_seccomp_arg_masked_filter(&rules, eperm))
     {
         log::debug!(
             "RestrictNamespaces: installed namespace filter ({} rules) for {}",
@@ -7438,9 +7443,8 @@ mod tests {
             if !install_seccomp_deny_filter(&[libc::SYS_mkdir], action) {
                 unsafe { libc::_exit(10) };
             }
-            let r = unsafe {
-                libc::syscall(libc::SYS_mkdir, c"/tmp/rs-seccomp-test".as_ptr(), 0o755)
-            };
+            let r =
+                unsafe { libc::syscall(libc::SYS_mkdir, c"/tmp/rs-seccomp-test".as_ptr(), 0o755) };
             let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             if r != -1 || e != libc::EPERM {
                 unsafe { libc::_exit(11) };
@@ -7538,16 +7542,14 @@ mod tests {
             let param = libc::sched_param { sched_priority: 0 };
             // SCHED_OTHER (policy 0) is permitted: setting it on self succeeds,
             // proving the filter does not over-block sched_setscheduler().
-            let r = unsafe {
-                libc::syscall(libc::SYS_sched_setscheduler, 0, 0, &param as *const _)
-            };
+            let r =
+                unsafe { libc::syscall(libc::SYS_sched_setscheduler, 0, 0, &param as *const _) };
             if r != 0 {
                 unsafe { libc::_exit(11) };
             }
             // SCHED_FIFO (policy 1, realtime) is denied with EPERM.
-            let r2 = unsafe {
-                libc::syscall(libc::SYS_sched_setscheduler, 0, 1, &param as *const _)
-            };
+            let r2 =
+                unsafe { libc::syscall(libc::SYS_sched_setscheduler, 0, 1, &param as *const _) };
             if r2 != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
                 unsafe { libc::_exit(12) };
             }
@@ -7740,9 +7742,7 @@ mod tests {
                 unsafe { libc::_exit(11) };
             }
             // A syscall outside the allow-list is blocked (EPERM).
-            let r = unsafe {
-                libc::syscall(libc::SYS_mkdir, c"/tmp/rs-scf-allow".as_ptr(), 0o755)
-            };
+            let r = unsafe { libc::syscall(libc::SYS_mkdir, c"/tmp/rs-scf-allow".as_ptr(), 0o755) };
             let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             if r != -1 || e != libc::EPERM {
                 unsafe { libc::_exit(12) };

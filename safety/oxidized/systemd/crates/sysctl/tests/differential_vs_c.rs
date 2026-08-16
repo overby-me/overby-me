@@ -46,7 +46,10 @@ fn syntax_error_exit_codes_match_c_systemd() {
     // negative-match option, and a comment (both exit 0).
     let cases: &[(&str, &str)] = &[
         ("noeqsign\n", "not an assignment (fatal)"),
-        ("-kernel.rs_diff_nonexistent\n", "negative-match option (exit 0)"),
+        (
+            "-kernel.rs_diff_nonexistent\n",
+            "negative-match option (exit 0)",
+        ),
         ("# a comment\n", "comment (exit 0)"),
     ];
 

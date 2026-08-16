@@ -421,10 +421,8 @@ fn check_and_fire_timers(
                             "Timer {}: RemainAfterElapse=no and elapsed, deactivating",
                             timer_id.name
                         );
-                        *status = UnitStatus::Stopped(
-                            crate::units::StatusStopped::StoppedFinal,
-                            vec![],
-                        );
+                        *status =
+                            UnitStatus::Stopped(crate::units::StatusStopped::StoppedFinal, vec![]);
                     }
                 }
             }
@@ -1298,7 +1296,7 @@ mod tests {
                 persistent: false,
                 wake_system: false,
                 remain_after_elapse: true,
-            defer_reactivation: false,
+                defer_reactivation: false,
                 on_clock_change: false,
                 on_timezone_change: false,
                 unit: "test.service".into(),
@@ -1320,7 +1318,7 @@ mod tests {
                 persistent: false,
                 wake_system: false,
                 remain_after_elapse: true,
-            defer_reactivation: false,
+                defer_reactivation: false,
                 on_clock_change: false,
                 on_timezone_change: false,
                 unit: "test.service".into(),

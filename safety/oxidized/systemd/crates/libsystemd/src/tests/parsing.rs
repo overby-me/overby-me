@@ -8523,12 +8523,14 @@ fn test_success_exit_status_is_success_extra_signal() {
     };
     assert!(
         ses.is_success(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1, false
+            nix::sys::signal::Signal::SIGUSR1,
+            false
         ))
     );
     assert!(
         !ses.is_success(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR2, false
+            nix::sys::signal::Signal::SIGUSR2,
+            false
         ))
     );
 }
@@ -8539,33 +8541,39 @@ fn test_success_exit_status_is_clean_signal_defaults() {
     // Built-in clean signals
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGHUP, false
+            nix::sys::signal::Signal::SIGHUP,
+            false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGINT, false
+            nix::sys::signal::Signal::SIGINT,
+            false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGTERM, false
+            nix::sys::signal::Signal::SIGTERM,
+            false
         ))
     );
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGPIPE, false
+            nix::sys::signal::Signal::SIGPIPE,
+            false
         ))
     );
     // Not clean by default
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1, false
+            nix::sys::signal::Signal::SIGUSR1,
+            false
         ))
     );
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGKILL, false
+            nix::sys::signal::Signal::SIGKILL,
+            false
         ))
     );
 }
@@ -8579,19 +8587,22 @@ fn test_success_exit_status_is_clean_signal_extra() {
     // Extra signal is now clean
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR1, false
+            nix::sys::signal::Signal::SIGUSR1,
+            false
         ))
     );
     // Built-in clean signals still work
     assert!(
         ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGTERM, false
+            nix::sys::signal::Signal::SIGTERM,
+            false
         ))
     );
     // Other signals still not clean
     assert!(
         !ses.is_clean_signal(&crate::signal_handler::ChildTermination::Signal(
-            nix::sys::signal::Signal::SIGUSR2, false
+            nix::sys::signal::Signal::SIGUSR2,
+            false
         ))
     );
 }

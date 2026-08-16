@@ -682,9 +682,9 @@ mod tests {
         // time; a malformed specifier (a trailing '%', '%' before a non-ASCII
         // byte, a long run of '%') must not panic -- a unit file drives it.
         const TOKENS: &[&str] = &[
-            "%", "%%", "%i", "%n", "%N", "%p", "%P", "%f", "%s", "%u", "%U", "%g",
-            "%G", "%H", "%m", "%b", "%v", "%h", "%t", "%T", "%V", "%j", "%J", "%x",
-            "%Z", "%", "\\", "foo", "bar-baz", "/path/%i", " ", "\t", "@", "€", "..",
+            "%", "%%", "%i", "%n", "%N", "%p", "%P", "%f", "%s", "%u", "%U", "%g", "%G", "%H",
+            "%m", "%b", "%v", "%h", "%t", "%T", "%V", "%j", "%J", "%x", "%Z", "%", "\\", "foo",
+            "bar-baz", "/path/%i", " ", "\t", "@", "€", "..",
         ];
         let c = ctx();
         let handle = std::thread::spawn(move || {
@@ -704,8 +704,8 @@ mod tests {
                         content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
                     }
                 }
-                let unit = ["foo.service", "a@b.service", "x", "", "@.service"]
-                    [(next() as usize) % 5];
+                let unit =
+                    ["foo.service", "a@b.service", "x", "", "@.service"][(next() as usize) % 5];
                 let inst = ["", "inst", "a-b", "%n", "€"][(next() as usize) % 5];
                 let buf = content.clone();
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

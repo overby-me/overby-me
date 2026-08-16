@@ -1163,7 +1163,7 @@ fn json_escape(s: &str) -> String {
 /// disk image first (`*.raw`, regular file) then a directory tree. Returns the
 /// `(type, resolved_path)` or `None` when nothing suitable was found.
 fn resolve_versioned_dir(path: &Path) -> Option<(&'static str, PathBuf)> {
-    use vpick_core::{PickFilter, dt_bit, path_pick, PICK_DEFAULT};
+    use vpick_core::{PICK_DEFAULT, PickFilter, dt_bit, path_pick};
 
     let raw_filter = PickFilter {
         type_mask: dt_bit(libc::DT_REG as u32),
@@ -1225,7 +1225,13 @@ fn cmd_discover(no_legend: bool) {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| name.clone());
-                    println!("{:<12} {:<10} {:<40} {}", img_type, size_str, rname, resolved.display());
+                    println!(
+                        "{:<12} {:<10} {:<40} {}",
+                        img_type,
+                        size_str,
+                        rname,
+                        resolved.display()
+                    );
                     found += 1;
                 }
                 continue;
@@ -1425,7 +1431,12 @@ fn mount_partitioned_image(
     // children: "/" (depth 0) first, then "/usr", "/home" (depth 1), etc.
     // Otherwise a child mounted first would be shadowed when the root mounts
     // over the mount point.
-    targets.sort_by_key(|(_, mp)| mp.trim_matches('/').split('/').filter(|s| !s.is_empty()).count());
+    targets.sort_by_key(|(_, mp)| {
+        mp.trim_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .count()
+    });
 
     let mut mount_err: Option<String> = None;
     for (partnum, mp) in &targets {
@@ -1504,7 +1515,11 @@ fn cmd_umount(mount_path: &Path) -> Result<(), String> {
             let ret = unsafe { libc::umount2(mount_c.as_ptr(), 0) };
             if ret != 0 {
                 let err = io::Error::last_os_error();
-                return Err(format!("Failed to unmount {}: {}", mount_path.display(), err));
+                return Err(format!(
+                    "Failed to unmount {}: {}",
+                    mount_path.display(),
+                    err
+                ));
             }
         }
 
@@ -1693,7 +1708,8 @@ fn cmd_attach(image: &Path, loop_ref: Option<&str>) -> Result<String, String> {
     if loop_fd < 0 {
         return Err(format!("Failed to open {dev}"));
     }
-    let cimg = std::ffi::CString::new(image.as_os_str().as_bytes()).map_err(|_| "bad image path")?;
+    let cimg =
+        std::ffi::CString::new(image.as_os_str().as_bytes()).map_err(|_| "bad image path")?;
     let img_fd = unsafe { libc::open(cimg.as_ptr(), libc::O_RDWR) };
     if img_fd < 0 {
         unsafe { libc::close(loop_fd) };

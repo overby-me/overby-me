@@ -113,8 +113,8 @@ fn escape_path_warnings_match_c() {
     let rust_bin = env!("CARGO_BIN_EXE_systemd-escape");
 
     let cases: &[&[&str]] = &[
-        &["--path", ""],       // -> "-" with a "not a valid" warning
-        &["--path", "foo"],    // -> "foo" with a "not an absolute" warning
+        &["--path", ""],    // -> "-" with a "not a valid" warning
+        &["--path", "foo"], // -> "foo" with a "not an absolute" warning
         &["--path", "foo/bar"],
         &["--path", "./foo"],
         &["--path", "foo/"],
@@ -166,17 +166,17 @@ fn escape_option_errors_match_c() {
     let rust_bin = env!("CARGO_BIN_EXE_systemd-escape");
 
     let cases: &[&[&str]] = &[
-        &[],                                                     // Not enough arguments.
-        &["--template", "foo.service", "a"],                    // Template name ... is not valid.
-        &["--suffix", ".service", "foo"],                       // Invalid unit suffix type ".service".
-        &["--suffix", "", "foo"],                               // Invalid unit suffix type "".
+        &[],                                                           // Not enough arguments.
+        &["--template", "foo.service", "a"], // Template name ... is not valid.
+        &["--suffix", ".service", "foo"],    // Invalid unit suffix type ".service".
+        &["--suffix", "", "foo"],            // Invalid unit suffix type "".
         &["--template", "getty@.service", "--suffix", "service", "x"], // may not be combined
-        &["--mangle", "--template", "getty@.service", "x"],     // not compatible with --mangle
-        &["--mangle", "--suffix", "service", "x"],              // not compatible with --mangle
-        &["--unescape", "--suffix", "service", "x"],            // --suffix is not compatible with --unescape
-        &["--path", "--mangle", "x"],                           // --path may not be combined with --mangle
-        &["--instance", "x"],                                   // must be used in conjunction with --unescape
-        &["--instance", "--template", "getty@.service", "x"],   // may not be combined with --template
+        &["--mangle", "--template", "getty@.service", "x"], // not compatible with --mangle
+        &["--mangle", "--suffix", "service", "x"], // not compatible with --mangle
+        &["--unescape", "--suffix", "service", "x"], // --suffix is not compatible with --unescape
+        &["--path", "--mangle", "x"],        // --path may not be combined with --mangle
+        &["--instance", "x"],                // must be used in conjunction with --unescape
+        &["--instance", "--template", "getty@.service", "x"], // may not be combined with --template
     ];
 
     let mut div = Vec::new();

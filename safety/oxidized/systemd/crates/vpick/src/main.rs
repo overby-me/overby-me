@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use vpick_core::{
-    Arch, PickFilter, PickResult, arch_from_string, arch_to_string, dt_bit, filename_part_is_valid,
-    inode_type_from_string, inode_type_to_string, mode_to_dt, native_arch, path_pick, secondary_arch,
-    version_is_valid, PICK_ARCHITECTURE, PICK_RESOLVE, PICK_TRIES,
+    Arch, PICK_ARCHITECTURE, PICK_RESOLVE, PICK_TRIES, PickFilter, PickResult, arch_from_string,
+    arch_to_string, dt_bit, filename_part_is_valid, inode_type_from_string, inode_type_to_string,
+    mode_to_dt, native_arch, path_pick, secondary_arch, version_is_valid,
 };
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -325,7 +325,11 @@ fn main() -> ExitCode {
 
     for arg in std::mem::take(&mut opts.paths) {
         let ap = Path::new(&arg);
-        let p = if ap.is_absolute() { ap.to_path_buf() } else { cwd.join(ap) };
+        let p = if ap.is_absolute() {
+            ap.to_path_buf()
+        } else {
+            cwd.join(ap)
+        };
 
         let filter = PickFilter {
             type_mask: opts.filter_type_mask,
@@ -367,7 +371,10 @@ fn print_result(result: &PickResult, print: Print) -> bool {
         Print::Filename => match result.path.file_name() {
             Some(f) => println!("{}", f.to_string_lossy()),
             None => {
-                eprintln!("Failed to extract filename from path '{}'.", result.path.display());
+                eprintln!(
+                    "Failed to extract filename from path '{}'.",
+                    result.path.display()
+                );
                 return false;
             }
         },

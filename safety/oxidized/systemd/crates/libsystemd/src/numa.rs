@@ -112,8 +112,7 @@ impl NumaPolicy {
     /// the kernel never reads past the buffer).
     fn to_mempolicy(&self) -> (Vec<libc::c_ulong>, libc::c_ulong) {
         let t = self.get_type();
-        if matches!(t, MPOL_DEFAULT | MPOL_LOCAL)
-            || (t == MPOL_PREFERRED && self.nodes.is_empty())
+        if matches!(t, MPOL_DEFAULT | MPOL_LOCAL) || (t == MPOL_PREFERRED && self.nodes.is_empty())
         {
             return (Vec::new(), 0);
         }
@@ -286,49 +285,129 @@ mod tests {
     #[test]
     fn test_get_type() {
         // Unset type with a node mask => PREFERRED.
-        let p = NumaPolicy { type_: -1, nodes: vec![0] };
+        let p = NumaPolicy {
+            type_: -1,
+            nodes: vec![0],
+        };
         assert_eq!(p.get_type(), MPOL_PREFERRED);
         // Unset with no mask => invalid.
-        let p = NumaPolicy { type_: -1, nodes: vec![] };
+        let p = NumaPolicy {
+            type_: -1,
+            nodes: vec![],
+        };
         assert_eq!(p.get_type(), -1);
         // Explicit type wins.
-        let p = NumaPolicy { type_: MPOL_BIND, nodes: vec![0] };
+        let p = NumaPolicy {
+            type_: MPOL_BIND,
+            nodes: vec![0],
+        };
         assert_eq!(p.get_type(), MPOL_BIND);
     }
 
     #[test]
     fn test_is_valid() {
         // default/local without mask are valid.
-        assert!(NumaPolicy { type_: MPOL_DEFAULT, nodes: vec![] }.is_valid());
-        assert!(NumaPolicy { type_: MPOL_LOCAL, nodes: vec![] }.is_valid());
+        assert!(
+            NumaPolicy {
+                type_: MPOL_DEFAULT,
+                nodes: vec![]
+            }
+            .is_valid()
+        );
+        assert!(
+            NumaPolicy {
+                type_: MPOL_LOCAL,
+                nodes: vec![]
+            }
+            .is_valid()
+        );
         // bind/interleave require a mask.
-        assert!(!NumaPolicy { type_: MPOL_BIND, nodes: vec![] }.is_valid());
-        assert!(!NumaPolicy { type_: MPOL_INTERLEAVE, nodes: vec![] }.is_valid());
-        assert!(NumaPolicy { type_: MPOL_BIND, nodes: vec![0] }.is_valid());
+        assert!(
+            !NumaPolicy {
+                type_: MPOL_BIND,
+                nodes: vec![]
+            }
+            .is_valid()
+        );
+        assert!(
+            !NumaPolicy {
+                type_: MPOL_INTERLEAVE,
+                nodes: vec![]
+            }
+            .is_valid()
+        );
+        assert!(
+            NumaPolicy {
+                type_: MPOL_BIND,
+                nodes: vec![0]
+            }
+            .is_valid()
+        );
         // preferred accepts exactly one node when a mask is given.
-        assert!(NumaPolicy { type_: MPOL_PREFERRED, nodes: vec![0] }.is_valid());
-        assert!(!NumaPolicy { type_: MPOL_PREFERRED, nodes: vec![0, 1] }.is_valid());
+        assert!(
+            NumaPolicy {
+                type_: MPOL_PREFERRED,
+                nodes: vec![0]
+            }
+            .is_valid()
+        );
+        assert!(
+            !NumaPolicy {
+                type_: MPOL_PREFERRED,
+                nodes: vec![0, 1]
+            }
+            .is_valid()
+        );
         // preferred with no mask is valid (resets to default).
-        assert!(NumaPolicy { type_: MPOL_PREFERRED, nodes: vec![] }.is_valid());
+        assert!(
+            NumaPolicy {
+                type_: MPOL_PREFERRED,
+                nodes: vec![]
+            }
+            .is_valid()
+        );
     }
 
     #[test]
     fn test_to_mempolicy() {
         // DEFAULT/LOCAL => NULL mask.
-        let (m, mn) = NumaPolicy { type_: MPOL_DEFAULT, nodes: vec![] }.to_mempolicy();
+        let (m, mn) = NumaPolicy {
+            type_: MPOL_DEFAULT,
+            nodes: vec![],
+        }
+        .to_mempolicy();
         assert!(m.is_empty() && mn == 0);
-        let (m, mn) = NumaPolicy { type_: MPOL_LOCAL, nodes: vec![0] }.to_mempolicy();
+        let (m, mn) = NumaPolicy {
+            type_: MPOL_LOCAL,
+            nodes: vec![0],
+        }
+        .to_mempolicy();
         assert!(m.is_empty() && mn == 0);
         // PREFERRED with no mask => NULL.
-        let (m, mn) = NumaPolicy { type_: MPOL_PREFERRED, nodes: vec![] }.to_mempolicy();
+        let (m, mn) = NumaPolicy {
+            type_: MPOL_PREFERRED,
+            nodes: vec![],
+        }
+        .to_mempolicy();
         assert!(m.is_empty() && mn == 0);
         // BIND node 0 => single c_ulong [0x1], maxnode = one word of bits.
-        let (m, mn) = NumaPolicy { type_: MPOL_BIND, nodes: vec![0] }.to_mempolicy();
+        let (m, mn) = NumaPolicy {
+            type_: MPOL_BIND,
+            nodes: vec![0],
+        }
+        .to_mempolicy();
         assert_eq!(m, vec![1 as libc::c_ulong]);
         assert_eq!(mn, libc::c_ulong::BITS as libc::c_ulong);
         // BIND node 65 => two words, bit set in the second.
-        let (m, _mn) = NumaPolicy { type_: MPOL_BIND, nodes: vec![65] }.to_mempolicy();
+        let (m, _mn) = NumaPolicy {
+            type_: MPOL_BIND,
+            nodes: vec![65],
+        }
+        .to_mempolicy();
         assert_eq!(m.len(), 2);
-        assert_eq!(m[1], (1 as libc::c_ulong) << (65 % libc::c_ulong::BITS as usize));
+        assert_eq!(
+            m[1],
+            (1 as libc::c_ulong) << (65 % libc::c_ulong::BITS as usize)
+        );
     }
 }

@@ -64,7 +64,11 @@ pub fn arch_from_string(s: &str) -> Option<Arch> {
 }
 
 pub fn arch_to_string(a: Arch) -> &'static str {
-    ARCH_TABLE.iter().find(|(_, x)| *x == a).map(|(n, _)| *n).unwrap_or("")
+    ARCH_TABLE
+        .iter()
+        .find(|(_, x)| *x == a)
+        .map(|(n, _)| *n)
+        .unwrap_or("")
 }
 
 /// The native architecture, derived from `uname(2)`, mapped the same way
@@ -244,8 +248,7 @@ fn cmp<T: Ord>(a: T, b: T) -> i32 {
 
 // ── Validity helpers ────────────────────────────────────────────────────────
 
-const VERSION_CHARS: &str =
-    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.~_-+^";
+const VERSION_CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.~_-+^";
 
 pub fn version_is_valid(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| VERSION_CHARS.contains(c))
@@ -367,10 +370,16 @@ pub fn pick_result_compare(a: &PickResult, b: &PickResult, flags: u32) -> i32 {
 
     if flags & PICK_TRIES != 0 {
         if d == 0 {
-            d = cmp(a.tries_left.unwrap_or(u32::MAX), b.tries_left.unwrap_or(u32::MAX));
+            d = cmp(
+                a.tries_left.unwrap_or(u32::MAX),
+                b.tries_left.unwrap_or(u32::MAX),
+            );
         }
         if d == 0 {
-            d = -cmp(a.tries_done.unwrap_or(u32::MAX), b.tries_done.unwrap_or(u32::MAX));
+            d = -cmp(
+                a.tries_done.unwrap_or(u32::MAX),
+                b.tries_done.unwrap_or(u32::MAX),
+            );
         }
     }
 
@@ -495,7 +504,8 @@ fn make_choice(dir: &Path, filter: &PickFilter, flags: u32) -> Result<Option<Pic
         }
 
         let entry_path = dir.join(&dname);
-        let (mode, resolved) = match stat_and_maybe_resolve(&entry_path, flags & PICK_RESOLVE != 0) {
+        let (mode, resolved) = match stat_and_maybe_resolve(&entry_path, flags & PICK_RESOLVE != 0)
+        {
             Ok(v) => v,
             Err(_) => continue,
         };
@@ -528,7 +538,11 @@ fn make_choice(dir: &Path, filter: &PickFilter, flags: u32) -> Result<Option<Pic
 
 /// Resolve one path, handling `.v/` directory logic. Returns `Ok(None)` when
 /// nothing matched. `path` should be absolute.
-pub fn path_pick(path: &Path, filter: &PickFilter, flags: u32) -> Result<Option<PickResult>, String> {
+pub fn path_pick(
+    path: &Path,
+    filter: &PickFilter,
+    flags: u32,
+) -> Result<Option<PickResult>, String> {
     // Explicit basename: treat `path` as a `.v` dir regardless of its name.
     if filter.basename.is_some() {
         return make_choice(path, filter, flags);

@@ -3349,7 +3349,10 @@ mod tests {
         let units = log_namespace_units("foobar");
         assert!(units.contains(&"systemd-journald@foobar.service".to_owned()));
         for dep in log_namespace_dependencies("foobar") {
-            assert!(units.contains(&dep), "{dep} missing from log_namespace_units");
+            assert!(
+                units.contains(&dep),
+                "{dep} missing from log_namespace_units"
+            );
         }
         assert!(
             !log_namespace_dependencies("foobar")
@@ -3389,7 +3392,11 @@ mod tests {
     #[test]
     fn dropin_specifiers_resolve_against_the_instance() {
         let dropin = "[Service]\nExecStart=-agetty --noclear %I $TERM\n";
-        let out = resolve_specifiers(dropin, "getty@tty2.service", instance_of("getty@tty2.service"));
+        let out = resolve_specifiers(
+            dropin,
+            "getty@tty2.service",
+            instance_of("getty@tty2.service"),
+        );
         assert!(
             out.contains("--noclear tty2"),
             "%I must expand to the instance, got: {out}"

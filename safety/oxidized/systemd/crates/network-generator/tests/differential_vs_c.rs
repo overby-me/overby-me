@@ -85,13 +85,17 @@ fn network_generator_matches_c() {
         &["net.ifname_policy=keep,kernel,path"], // -> 72-default.link
         &["net.ifname_policy=onboard,slot"],
         &["net.ifname_policy=path,mac,aa:bb:cc:dd:ee:ff"], // -> 71-<mac>.link
-        &["net.ifnames=0"],                               // -> nothing (udev concern)
+        &["net.ifnames=0"],                                // -> nothing (udev concern)
         &["net.ifnames=1"],
         // rd.route= merges into the interface's .network (not a separate file),
         // so a route combined with ip= for the same device is not dropped.
         &["ip=eth0:dhcp", "rd.route=10.1.0.0/16:192.168.1.1:eth0"],
         &["ip=dhcp", "rd.route=10.9.0.0/16:1.2.3.4"], // -> merged into 71-default
-        &["ip=eth0:dhcp", "rd.route=10.1.0.0/16:192.168.1.1:eth0", "rd.route=10.2.0.0/16:192.168.1.1:eth0"],
+        &[
+            "ip=eth0:dhcp",
+            "rd.route=10.1.0.0/16:192.168.1.1:eth0",
+            "rd.route=10.2.0.0/16:192.168.1.1:eth0",
+        ],
         // vlan/bond/bridge: merged per-interface 70-<ifname>.netdev/.network.
         &["vlan=vlan10:eth0"],
         &["vlan=eth0.100:eth0"], // dotted device name kept in the filename
@@ -99,7 +103,11 @@ fn network_generator_matches_c() {
         &["bridge=br0:eth3,eth4"],
         &["team=team0:eth5,eth6"], // not a C option -> nothing generated
         &["bond=bond0:eth1,eth2", "ip=eth1:dhcp"], // member merges DHCP + Bond=
-        &["vlan=vlan10:eth0", "ip=eth0:dhcp", "rd.route=10.0.0.0/8:1.2.3.4:eth0"], // triple merge
+        &[
+            "vlan=vlan10:eth0",
+            "ip=eth0:dhcp",
+            "rd.route=10.0.0.0/8:1.2.3.4:eth0",
+        ], // triple merge
         // context_merge_networks: the deviceless nameserver=/rd.route=/rd.peerdns
         // bucket merges into every device network (or is emitted alone).
         &["nameserver=8.8.8.8"], // -> 71-default with DNS

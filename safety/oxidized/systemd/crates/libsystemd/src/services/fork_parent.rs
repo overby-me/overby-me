@@ -35,7 +35,9 @@ pub(crate) fn read_pid_file(path: &std::path::Path) -> Option<nix::unistd::Pid> 
 /// process remaining in the service's cgroup. We only guess when exactly one
 /// process is left, matching the confidence systemd requires (it declines to
 /// guess when the cgroup is ambiguous).
-pub(crate) fn guess_main_pid_from_cgroup(cgroup_path: &std::path::Path) -> Option<nix::unistd::Pid> {
+pub(crate) fn guess_main_pid_from_cgroup(
+    cgroup_path: &std::path::Path,
+) -> Option<nix::unistd::Pid> {
     let procs_file = cgroup_path.join("cgroup.procs");
     // The just-exited ExecStart= parent may still be listed for a brief moment,
     // and the forked daemon may not have appeared yet, so retry with a short

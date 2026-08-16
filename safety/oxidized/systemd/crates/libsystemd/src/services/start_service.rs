@@ -197,7 +197,11 @@ fn resolve_root_directory(root_directory: &Option<String>) -> Option<String> {
         type_mask: vpick_core::dt_bit(libc::DT_DIR as u32),
         ..Default::default()
     };
-    match vpick_core::path_pick(p, &filter, vpick_core::PICK_DEFAULT | vpick_core::PICK_RESOLVE) {
+    match vpick_core::path_pick(
+        p,
+        &filter,
+        vpick_core::PICK_DEFAULT | vpick_core::PICK_RESOLVE,
+    ) {
         Ok(Some(r)) => {
             let resolved = r.path.to_string_lossy().into_owned();
             trace!("Resolved RootDirectory .v path '{orig}' to '{resolved}'");
@@ -1280,8 +1284,8 @@ fn start_service_with_filedescriptors(
         if conf.exec_config.user.is_none() {
             // Reuse the UID allocated before pre_fork_os_specific so cgroup
             // delegation and the service process share the same dynamic user.
-            let dynamic_id = dynamic_uid
-                .expect("dynamic_uid is allocated when dynamic_user && user is unset");
+            let dynamic_id =
+                dynamic_uid.expect("dynamic_uid is allocated when dynamic_user && user is unset");
             exec_helper_conf.user = dynamic_id;
             if conf.exec_config.group.is_none() {
                 exec_helper_conf.group = dynamic_id;
@@ -1455,9 +1459,30 @@ mod env_file_fuzz {
         // must not panic, and its hand-rolled peekable char loop must not spin
         // forever on an input that fails to advance.
         const TOKENS: &[&str] = &[
-            "KEY=", "=", "export ", "FOO=bar", "\"", "'", "\\", "\\\n", "#c", ";c",
-            "\n", "\n\n", " ", "\t", "=val", "A=\"unbalanced", "B='", "C=a b c",
-            "%", "€", "\\x", "==", "KEY", "\r",
+            "KEY=",
+            "=",
+            "export ",
+            "FOO=bar",
+            "\"",
+            "'",
+            "\\",
+            "\\\n",
+            "#c",
+            ";c",
+            "\n",
+            "\n\n",
+            " ",
+            "\t",
+            "=val",
+            "A=\"unbalanced",
+            "B='",
+            "C=a b c",
+            "%",
+            "€",
+            "\\x",
+            "==",
+            "KEY",
+            "\r",
         ];
         let handle = std::thread::spawn(|| {
             let mut state: u64 = 0xe0f1_1e5f_1234_5678;

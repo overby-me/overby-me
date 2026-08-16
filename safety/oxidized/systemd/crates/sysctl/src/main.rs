@@ -18,8 +18,8 @@
 //! A key prefixed with '-' means errors applying that setting are ignored.
 //! Glob patterns in keys are supported (e.g. net.ipv4.conf.*.rp_filter).
 
-use std::collections::HashMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -722,10 +722,16 @@ mod tests {
         assert!(!fatal("-kernel.nonexistent"), "negative match not fatal");
         // Not fatal: empty key (C errors only at write time, not at parse).
         assert!(!fatal("= 5"), "empty key is not a parse error");
-        assert!(!fatal("- = 5"), "empty key after prefix is not a parse error");
+        assert!(
+            !fatal("- = 5"),
+            "empty key after prefix is not a parse error"
+        );
         // Not fatal: valid assignments, blanks, and comments.
         assert!(!fatal("vm.swappiness = 60"), "valid line not fatal");
-        assert!(!fatal("-net.ipv4.ip_forward = 1"), "valid ignore-prefix line");
+        assert!(
+            !fatal("-net.ipv4.ip_forward = 1"),
+            "valid ignore-prefix line"
+        );
         assert!(!fatal(""), "empty line not fatal");
         assert!(!fatal("   "), "whitespace line not fatal");
         assert!(!fatal("# comment"), "hash comment not fatal");
@@ -734,7 +740,10 @@ mod tests {
         // assignment" (exit 1). This is the same rust-accepts-a-superset
         // leniency class as invalid octal modes / CIDRs (task #31), deliberately
         // left as-is; the exit-code fix above does not touch comment parsing.
-        assert!(!fatal("; comment"), "rust treats semicolon as a comment (#31)");
+        assert!(
+            !fatal("; comment"),
+            "rust treats semicolon as a comment (#31)"
+        );
     }
 
     #[test]

@@ -673,7 +673,9 @@ fn vl_method_ask(params: &serde_json::Value) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(cli.timeout);
     let question = match QuestionFile::create(&cli, deadline) {
         Ok(q) => q,
-        Err(_) => return serde_json::json!({ "error": "io.systemd.AskPassword.NoPasswordAvailable" }),
+        Err(_) => {
+            return serde_json::json!({ "error": "io.systemd.AskPassword.NoPasswordAvailable" });
+        }
     };
     match question.wait_for_response(Duration::from_secs(cli.timeout)) {
         Ok(Some(pw)) => serde_json::json!({ "parameters": {"passwords": [pw]} }),

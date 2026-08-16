@@ -76,7 +76,8 @@ pub(crate) fn is_path_mounted(path: &str) -> bool {
 pub(crate) fn fstype_is_network(fstype: &str) -> bool {
     matches!(
         fstype,
-        "nfs" | "nfs4"
+        "nfs"
+            | "nfs4"
             | "cifs"
             | "smb3"
             | "smbfs"

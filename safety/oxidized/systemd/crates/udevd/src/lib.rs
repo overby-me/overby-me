@@ -1717,8 +1717,7 @@ fn match_program(token: &RuleToken, event: &UEvent, program_result: &mut String)
             std::thread::spawn(move || {
                 let _ = tx.send(child.wait_with_output());
             });
-            let timeout =
-                std::time::Duration::from_secs(EVENT_TIMEOUT.load(Ordering::Relaxed));
+            let timeout = std::time::Duration::from_secs(EVENT_TIMEOUT.load(Ordering::Relaxed));
             match rx.recv_timeout(timeout) {
                 Ok(r) => r,
                 Err(_) => {
@@ -3583,7 +3582,8 @@ fn builtin_net_setup_link(event: &mut UEvent) {
         if let Err(e) = std::fs::write(&ifalias_path, alias) {
             log::debug!(
                 "net_setup_link: could not set ifalias for '{}': {}",
-                original_name, e
+                original_name,
+                e
             );
         }
     }
@@ -4257,12 +4257,11 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                         .env
                         .insert("ID_LOOP_BACKING_INODE".into(), inode.to_string());
                     if let Some(fname) = fname {
-                        event
-                            .env
-                            .insert("ID_LOOP_BACKING_FILENAME_ENC".into(), udev_encode(fname.as_bytes()));
-                        event
-                            .env
-                            .insert("ID_LOOP_BACKING_FILENAME".into(), fname);
+                        event.env.insert(
+                            "ID_LOOP_BACKING_FILENAME_ENC".into(),
+                            udev_encode(fname.as_bytes()),
+                        );
+                        event.env.insert("ID_LOOP_BACKING_FILENAME".into(), fname);
                     }
                 }
             }
@@ -4857,13 +4856,12 @@ fn apply_symlink(link_path: &Path, winner: Option<&Path>) {
     }
 
     // Use a relative symlink where possible
-    let target = if let (Some(link_parent), true) =
-        (link_path.parent(), devnode.starts_with("/dev"))
-    {
-        pathdiff(devnode, link_parent).unwrap_or_else(|_| devnode.to_path_buf())
-    } else {
-        devnode.to_path_buf()
-    };
+    let target =
+        if let (Some(link_parent), true) = (link_path.parent(), devnode.starts_with("/dev")) {
+            pathdiff(devnode, link_parent).unwrap_or_else(|_| devnode.to_path_buf())
+        } else {
+            devnode.to_path_buf()
+        };
 
     if let Ok(existing) = fs::read_link(link_path)
         && existing == target
@@ -4921,8 +4919,7 @@ fn create_device_symlinks(event: &UEvent, symlinks: &[String], priority: i32) {
         };
 
         stack_directory_update(&dir, &id, &devnode, priority, true);
-        let winner =
-            stack_directory_find_prioritized(&dir, &id, Some((devnode.clone(), priority)));
+        let winner = stack_directory_find_prioritized(&dir, &id, Some((devnode.clone(), priority)));
         apply_symlink(&link_path, winner.as_deref());
     }
 }

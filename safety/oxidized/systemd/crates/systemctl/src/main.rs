@@ -283,8 +283,8 @@ fn print_state_help() {
 /// This matches C's per-arch static signal table on Linux (x86_64/generic).
 const SIGNAL_STATIC_NAMES: [&str; 32] = [
     "", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV", "USR2",
-    "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU",
-    "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS",
+    "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG",
+    "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS",
 ];
 
 /// Render a signal number exactly as C `signal_to_string` (basic/signal-util.c)
@@ -893,7 +893,10 @@ fn main() {
         } else {
             continue;
         };
-        let name = format!("{}{suffix}", libsystemd::unit_name::unit_name_path_escape(arg));
+        let name = format!(
+            "{}{suffix}",
+            libsystemd::unit_name::unit_name_path_escape(arg)
+        );
         // Hash an over-long name exactly as the manager does (unit_name_from_path
         // → unit_name_hash_long), so `systemctl show /very/long/path` resolves to
         // the same hashed unit the mount monitor synthesized for that mount.

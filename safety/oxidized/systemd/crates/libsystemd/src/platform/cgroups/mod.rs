@@ -537,12 +537,19 @@ pub fn prune_empty_parent_cgroups(start: &std::path::Path, root: &std::path::Pat
 pub fn pids_in_cgroup_recursive(cgroup_path: &std::path::Path) -> Vec<i32> {
     let mut pids = Vec::new();
     if let Ok(contents) = fs::read_to_string(cgroup_path.join("cgroup.procs")) {
-        pids.extend(contents.lines().filter_map(|l| l.trim().parse::<i32>().ok()));
+        pids.extend(
+            contents
+                .lines()
+                .filter_map(|l| l.trim().parse::<i32>().ok()),
+        );
     }
     if let Ok(entries) = fs::read_dir(cgroup_path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() && !fs::symlink_metadata(&path).map(|m| m.is_symlink()).unwrap_or(true)
+            if path.is_dir()
+                && !fs::symlink_metadata(&path)
+                    .map(|m| m.is_symlink())
+                    .unwrap_or(true)
             {
                 pids.extend(pids_in_cgroup_recursive(&path));
             }
@@ -558,7 +565,10 @@ pub fn remove_cgroup_recursive(cgroup_path: &std::path::Path) -> Result<(), Cgro
             // Only real cgroup subdirectories need recursion; the controller
             // pseudo-files (cgroup.procs, cgroup.subtree_control, ...) are
             // removed together with the directory itself.
-            if path.is_dir() && !fs::symlink_metadata(&path).map(|m| m.is_symlink()).unwrap_or(true)
+            if path.is_dir()
+                && !fs::symlink_metadata(&path)
+                    .map(|m| m.is_symlink())
+                    .unwrap_or(true)
             {
                 let _ = remove_cgroup_recursive(&path);
             }

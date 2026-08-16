@@ -599,7 +599,10 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
                     unit.common.dependencies.before.push(existing.id.clone());
                 }
                 if !unit.common.dependencies.required_by.contains(&existing.id) {
-                    unit.common.dependencies.required_by.push(existing.id.clone());
+                    unit.common
+                        .dependencies
+                        .required_by
+                        .push(existing.id.clone());
                 }
                 if !existing.common.dependencies.after.contains(&new_id) {
                     existing.common.dependencies.after.push(new_id.clone());
@@ -628,7 +631,11 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
                     existing.common.dependencies.before.push(new_id.clone());
                 }
                 if !existing.common.dependencies.required_by.contains(&new_id) {
-                    existing.common.dependencies.required_by.push(new_id.clone());
+                    existing
+                        .common
+                        .dependencies
+                        .required_by
+                        .push(new_id.clone());
                 }
             }
         }

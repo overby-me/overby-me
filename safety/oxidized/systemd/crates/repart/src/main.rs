@@ -176,8 +176,7 @@ fn type_knows_growfs(type_uuid: &str) -> bool {
     match type_uuid_to_identifier(&type_uuid.to_lowercase()) {
         Some(id) => {
             matches!(id, "home" | "srv" | "var" | "tmp" | "xbootldr")
-                || ((id.starts_with("root-") || id.starts_with("usr-"))
-                    && !id.ends_with("-verity"))
+                || ((id.starts_with("root-") || id.starts_with("usr-")) && !id.ends_with("-verity"))
         }
         None => false,
     }
@@ -771,9 +770,7 @@ fn parse_partition_definition(path: &Path, arch: &str) -> Result<PartitionDefini
                 // name nobody asked for. A definition may legitimately offer a
                 // long label and a short fallback in that order.
                 if value.encode_utf16().count() > GPT_LABEL_MAX_UTF16 {
-                    eprintln!(
-                        "Partition label too long for GPT table, ignoring: \"{value}\""
-                    );
+                    eprintln!("Partition label too long for GPT table, ignoring: \"{value}\"");
                 } else {
                     def.label = if value.is_empty() {
                         None
@@ -2399,7 +2396,10 @@ fn write_validatefs_xattrs(
     // reproducible order.
     let mut labels: Vec<String> = Vec::new();
     let mut type_uuids: Vec<String> = Vec::new();
-    let has_sibling_key = def.verity_match_key.as_deref().is_some_and(|k| !k.is_empty());
+    let has_sibling_key = def
+        .verity_match_key
+        .as_deref()
+        .is_some_and(|k| !k.is_empty());
     for (i, d) in defs.iter().enumerate() {
         let is_self = i == def_idx;
         let is_sibling = has_sibling_key && d.verity_match_key == def.verity_match_key;
@@ -3217,8 +3217,7 @@ fn run(argv: &[String]) -> Result<i32, String> {
                 // usable area on its 1 MiB grain rather than immediately after
                 // the entry array, so a new label reports first-lba 2048 at a
                 // 512-byte sector size, not 34.
-                let first_usable =
-                    align_up(2 + entries_sectors, GPT_FIRST_LBA_GRAIN / sector_size);
+                let first_usable = align_up(2 + entries_sectors, GPT_FIRST_LBA_GRAIN / sector_size);
                 let last_usable = disk_size_sectors - 1 - entries_sectors - 1;
                 let guid = derive_uuid(&seed, "disk-uuid");
                 (guid, first_usable, last_usable, Vec::new())
@@ -3399,9 +3398,7 @@ fn run(argv: &[String]) -> Result<i32, String> {
 
     // Format new partitions inside the image via a loop device. Only for image
     // files (a loop device is attached to the whole image and partition-scanned).
-    if is_file
-        && let Err(e) = format_new_partitions(&device_path, &matched, &defs)
-    {
+    if is_file && let Err(e) = format_new_partitions(&device_path, &matched, &defs) {
         eprintln!("Warning: partition formatting failed: {e}");
     }
 
@@ -4022,17 +4019,37 @@ mod tests {
 
         // home, home padding (none), swap, swap padding (92M, no weight).
         let claims = [
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
-            SpanClaim { weight: 0, min: 0, max: 0 },
-            SpanClaim { weight: 1000, min: 0, max: swap_cap },
-            SpanClaim { weight: 0, min: padding, max: padding },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
+            SpanClaim {
+                weight: 0,
+                min: 0,
+                max: 0,
+            },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: swap_cap,
+            },
+            SpanClaim {
+                weight: 0,
+                min: padding,
+                max: padding,
+            },
         ];
         let sizes = grow_claims(&claims, usable, 4096);
 
         assert_eq!(sizes[2], swap_cap, "swap takes exactly its cap");
         assert_eq!(sizes[3], padding, "padding takes exactly its minimum");
         assert_eq!(sizes[0] / 512, 1775576, "home absorbs the surplus");
-        assert_eq!(2048 + sizes[0] / 512, 1777624, "swap starts where home ends");
+        assert_eq!(
+            2048 + sizes[0] / 512,
+            1777624,
+            "swap starts where home ends"
+        );
     }
 
     /// The span for a free area covers the gap AND the extent of the partition
@@ -4046,7 +4063,11 @@ mod tests {
         // rest of the disk is free, and nothing else competes. It grows to fill.
         let gap = (4194270u64 - 2097112 + 1) * 512;
         let current = 188416u64 * 512;
-        let claims = [SpanClaim { weight: 1000, min: current, max: u64::MAX }];
+        let claims = [SpanClaim {
+            weight: 1000,
+            min: current,
+            max: u64::MAX,
+        }];
         let sizes = grow_claims(&claims, gap + align_up(current, GRAIN), GRAIN);
         assert_eq!(sizes[0] / 512, 2285568, "existing partition grows to fill");
 
@@ -4057,8 +4078,16 @@ mod tests {
         let gap = (6291422u64 - 4194264 + 1) * 512;
         let current = 2285568u64 * 512;
         let claims = [
-            SpanClaim { weight: 1000, min: current, max: u64::MAX },
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim {
+                weight: 1000,
+                min: current,
+                max: u64::MAX,
+            },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
         ];
         let sizes = grow_claims(&claims, gap + align_up(current, GRAIN), GRAIN);
         assert_eq!(sizes[0] / 512, 2285568, "existing partition stays put");
@@ -4082,9 +4111,21 @@ mod tests {
     fn test_grow_claims_keeps_grain_remainders() {
         let usable = (102366u64 - 2048 + 1) * 512;
         let claims = [
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
         ];
         let sizes = grow_claims(&claims, usable, 4096);
         let sectors: Vec<u64> = sizes.iter().map(|s| s / 512).collect();
@@ -4095,8 +4136,16 @@ mod tests {
     #[test]
     fn test_grow_claims_proportional_when_unbounded() {
         let claims = [
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
-            SpanClaim { weight: 3000, min: 0, max: u64::MAX },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
+            SpanClaim {
+                weight: 3000,
+                min: 0,
+                max: u64::MAX,
+            },
         ];
         // Grain 1 keeps the arithmetic exact so the ratio is visible.
         assert_eq!(grow_claims(&claims, 4000, 1), vec![1000, 3000]);
@@ -4107,15 +4156,27 @@ mod tests {
     #[test]
     fn test_grow_claims_overcharge_and_degenerate() {
         let claims = [
-            SpanClaim { weight: 1000, min: 3000, max: u64::MAX },
-            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim {
+                weight: 1000,
+                min: 3000,
+                max: u64::MAX,
+            },
+            SpanClaim {
+                weight: 1000,
+                min: 0,
+                max: u64::MAX,
+            },
         ];
         let sizes = grow_claims(&claims, 4000, 1);
         assert_eq!(sizes[0], 3000);
         assert_eq!(sizes[1], 1000);
 
         // A zero-weight claim with no minimum takes nothing.
-        let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
+        let none = [SpanClaim {
+            weight: 0,
+            min: 0,
+            max: 100,
+        }];
         assert_eq!(grow_claims(&none, 500, 1), vec![0]);
         assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
     }
@@ -4165,7 +4226,10 @@ mod tests {
         let mut got = vec![0u8; payload.len()];
         f.seek(SeekFrom::Start(parts[0].first_lba * 512)).unwrap();
         f.read_exact(&mut got).unwrap();
-        assert!(got == payload, "CopyBlocks= contents did not reach the image");
+        assert!(
+            got == payload,
+            "CopyBlocks= contents did not reach the image"
+        );
     }
 
     /// --size= grows an image that already exists, not only one being created.
@@ -4212,7 +4276,10 @@ mod tests {
         assert_eq!(fs::metadata(&img).unwrap().len(), 2 * 1024 * 1024 * 1024);
         let mut f = fs::File::open(&img).unwrap();
         let after = read_gpt_header(&mut f, 512).unwrap().unwrap();
-        assert_eq!(after.last_usable_lba, 4194270, "usable area follows the grow");
+        assert_eq!(
+            after.last_usable_lba, 4194270,
+            "usable area follows the grow"
+        );
 
         // The existing partition grows INTO the new space: its final size is
         // what it already had plus the gap that opened after it, not merely the
@@ -4277,7 +4344,9 @@ mod tests {
         assert!(r.is_ok(), "refill run failed: {r:?}");
 
         let mut f = fs::File::open(&img).unwrap();
-        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let hdr = read_gpt_header(&mut f, 512)
+            .unwrap()
+            .expect("no GPT header");
         let mut parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
         parts.sort_by_key(|p| p.first_lba);
 
@@ -4340,7 +4409,9 @@ mod tests {
         assert!(r.is_ok(), "run failed: {r:?}");
 
         let mut f = fs::File::open(&img).unwrap();
-        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let hdr = read_gpt_header(&mut f, 512)
+            .unwrap()
+            .expect("no GPT header");
         let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
 
         assert_eq!(parts.len(), 1, "only swap should be written");
@@ -4398,7 +4469,9 @@ mod tests {
         assert!(r.is_ok(), "copy-from run failed: {r:?}");
 
         let mut f = fs::File::open(&dst).unwrap();
-        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let hdr = read_gpt_header(&mut f, 512)
+            .unwrap()
+            .expect("no GPT header");
         let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
 
         assert_eq!(parts.len(), 6, "got {} partitions", parts.len());
@@ -4410,7 +4483,11 @@ mod tests {
         let labels = ["home-first", "root-x86-64", "root-x86-64-2"];
         for i in 0..3 {
             assert_eq!(parts[i].name, labels[i], "partition {} label", i + 1);
-            assert_eq!(parts[i].name, parts[i + 3].name, "labels differ between copies");
+            assert_eq!(
+                parts[i].name,
+                parts[i + 3].name,
+                "labels differ between copies"
+            );
             assert_eq!(parts[i].unique_guid, parts[i + 3].unique_guid);
             assert_eq!(parts[i].type_guid, parts[i + 3].type_guid);
             assert_eq!(
@@ -4439,7 +4516,6 @@ mod tests {
                 i + 1
             );
         }
-
     }
 
     /// TEST-58-REPART passes --include-partitions=home,swap over definitions
@@ -4457,8 +4533,14 @@ mod tests {
         a.include_partitions = vec!["home".into(), "swap".into()];
         let kept = filter_definitions_by_type(defs.clone(), &a, "x86-64");
         assert_eq!(kept.len(), 2);
-        assert_eq!(kept[0].type_uuid, partition_type_uuid("home", "x86-64").unwrap());
-        assert_eq!(kept[1].type_uuid, partition_type_uuid("swap", "x86-64").unwrap());
+        assert_eq!(
+            kept[0].type_uuid,
+            partition_type_uuid("home", "x86-64").unwrap()
+        );
+        assert_eq!(
+            kept[1].type_uuid,
+            partition_type_uuid("swap", "x86-64").unwrap()
+        );
 
         // Exclude is the same list with the opposite sense.
         let mut b = Args::default();
@@ -7103,8 +7185,13 @@ Weight=333
         let a = parse_args(&args(&["--empty=create", "--size=1G", "/tmp/x"])).unwrap();
         assert!(!a.dry_run);
         // An explicit --dry-run=yes does not survive it, matching upstream.
-        let a = parse_args(&args(&["--dry-run=yes", "--empty=create", "--size=1G", "/tmp/x"]))
-            .unwrap();
+        let a = parse_args(&args(&[
+            "--dry-run=yes",
+            "--empty=create",
+            "--size=1G",
+            "/tmp/x",
+        ]))
+        .unwrap();
         assert!(!a.dry_run);
         // --can-factory-reset wins, and only reports.
         let a = parse_args(&args(&["--can-factory-reset", "--empty=create"])).unwrap();
@@ -7133,7 +7220,9 @@ Weight=333
 
         let mut f = fs::File::open(&img_path).unwrap();
         assert_eq!(f.metadata().unwrap().len(), 1024 * 1024 * 1024);
-        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let hdr = read_gpt_header(&mut f, 512)
+            .unwrap()
+            .expect("no GPT header");
         // Matches what `sfdisk -d` reports for an upstream-created empty image.
         assert_eq!(hdr.first_usable_lba, 2048);
         assert_eq!(hdr.last_usable_lba, 2097118);

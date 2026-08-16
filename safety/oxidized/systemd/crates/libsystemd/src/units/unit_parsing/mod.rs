@@ -774,7 +774,11 @@ mod first_boot_bool_tests {
 /// can fall back.
 fn parse_single_condition(spec: &str) -> Option<UnitCondition> {
     let (key, raw) = spec.split_once('=')?;
-    let key = key.trim().strip_prefix('|').map(str::trim).unwrap_or(key.trim());
+    let key = key
+        .trim()
+        .strip_prefix('|')
+        .map(str::trim)
+        .unwrap_or(key.trim());
     let name = key
         .strip_prefix("Condition")
         .or_else(|| key.strip_prefix("Assert"))?;
@@ -785,38 +789,108 @@ fn parse_single_condition(spec: &str) -> Option<UnitCondition> {
     };
     let first_boot_bool = || parse_first_boot_bool(&value).unwrap_or(false);
     Some(match name {
-        "PathExists" => UnitCondition::PathExists { path: value, negate },
-        "PathExistsGlob" => UnitCondition::PathExistsGlob { pattern: value, negate },
-        "PathIsDirectory" => UnitCondition::PathIsDirectory { path: value, negate },
-        "PathIsSymbolicLink" => UnitCondition::PathIsSymbolicLink { path: value, negate },
-        "PathIsMountPoint" => UnitCondition::PathIsMountPoint { path: value, negate },
-        "PathIsReadWrite" => UnitCondition::PathIsReadWrite { path: value, negate },
-        "PathIsEncrypted" => UnitCondition::PathIsEncrypted { path: value, negate },
-        "DirectoryNotEmpty" => UnitCondition::DirectoryNotEmpty { path: value, negate },
-        "FileNotEmpty" => UnitCondition::FileNotEmpty { path: value, negate },
-        "FileIsExecutable" => UnitCondition::FileIsExecutable { path: value, negate },
-        "NeedsUpdate" => UnitCondition::NeedsUpdate { path: value, negate },
+        "PathExists" => UnitCondition::PathExists {
+            path: value,
+            negate,
+        },
+        "PathExistsGlob" => UnitCondition::PathExistsGlob {
+            pattern: value,
+            negate,
+        },
+        "PathIsDirectory" => UnitCondition::PathIsDirectory {
+            path: value,
+            negate,
+        },
+        "PathIsSymbolicLink" => UnitCondition::PathIsSymbolicLink {
+            path: value,
+            negate,
+        },
+        "PathIsMountPoint" => UnitCondition::PathIsMountPoint {
+            path: value,
+            negate,
+        },
+        "PathIsReadWrite" => UnitCondition::PathIsReadWrite {
+            path: value,
+            negate,
+        },
+        "PathIsEncrypted" => UnitCondition::PathIsEncrypted {
+            path: value,
+            negate,
+        },
+        "DirectoryNotEmpty" => UnitCondition::DirectoryNotEmpty {
+            path: value,
+            negate,
+        },
+        "FileNotEmpty" => UnitCondition::FileNotEmpty {
+            path: value,
+            negate,
+        },
+        "FileIsExecutable" => UnitCondition::FileIsExecutable {
+            path: value,
+            negate,
+        },
+        "NeedsUpdate" => UnitCondition::NeedsUpdate {
+            path: value,
+            negate,
+        },
         "Virtualization" => UnitCondition::Virtualization { value, negate },
-        "Capability" => UnitCondition::Capability { capability: value, negate },
-        "KernelModuleLoaded" => UnitCondition::KernelModuleLoaded { module: value, negate },
-        "KernelCommandLine" => UnitCondition::KernelCommandLine { argument: value, negate },
-        "KernelVersion" => UnitCondition::KernelVersion { expression: value, negate },
-        "ControlGroupController" => {
-            UnitCondition::ControlGroupController { controller: value, negate }
-        }
-        "Security" => UnitCondition::Security { technology: value, negate },
-        "Architecture" => UnitCondition::Architecture { arch: value, negate },
-        "Environment" => UnitCondition::Environment { expression: value, negate },
+        "Capability" => UnitCondition::Capability {
+            capability: value,
+            negate,
+        },
+        "KernelModuleLoaded" => UnitCondition::KernelModuleLoaded {
+            module: value,
+            negate,
+        },
+        "KernelCommandLine" => UnitCondition::KernelCommandLine {
+            argument: value,
+            negate,
+        },
+        "KernelVersion" => UnitCondition::KernelVersion {
+            expression: value,
+            negate,
+        },
+        "ControlGroupController" => UnitCondition::ControlGroupController {
+            controller: value,
+            negate,
+        },
+        "Security" => UnitCondition::Security {
+            technology: value,
+            negate,
+        },
+        "Architecture" => UnitCondition::Architecture {
+            arch: value,
+            negate,
+        },
+        "Environment" => UnitCondition::Environment {
+            expression: value,
+            negate,
+        },
         "Firmware" => UnitCondition::Firmware { value, negate },
         "Host" => UnitCondition::Host { value, negate },
         "Memory" => UnitCondition::Memory { value, negate },
-        "CPUFeature" => UnitCondition::CPUFeature { feature: value, negate },
-        "CPUs" => UnitCondition::CPUs { expression: value, negate },
-        "OSRelease" => UnitCondition::OSRelease { expression: value, negate },
+        "CPUFeature" => UnitCondition::CPUFeature {
+            feature: value,
+            negate,
+        },
+        "CPUs" => UnitCondition::CPUs {
+            expression: value,
+            negate,
+        },
+        "OSRelease" => UnitCondition::OSRelease {
+            expression: value,
+            negate,
+        },
         "User" => UnitCondition::User { value, negate },
         "Group" => UnitCondition::Group { value, negate },
-        "FirstBoot" => UnitCondition::FirstBoot { value: first_boot_bool(), negate },
-        "ACPower" => UnitCondition::ACPower { value: first_boot_bool(), negate },
+        "FirstBoot" => UnitCondition::FirstBoot {
+            value: first_boot_bool(),
+            negate,
+        },
+        "ACPower" => UnitCondition::ACPower {
+            value: first_boot_bool(),
+            negate,
+        },
         _ => return None,
     })
 }
@@ -1026,11 +1100,23 @@ mod condition_spec_tests {
     fn evaluates_known_conditions() {
         // /proc always exists on Linux; negation flips it; any host has a CPU
         // and a kernel newer than 1.0.
-        assert_eq!(evaluate_condition_spec("ConditionPathExists=/proc"), Some(true));
-        assert_eq!(evaluate_condition_spec("ConditionPathExists=!/proc"), Some(false));
+        assert_eq!(
+            evaluate_condition_spec("ConditionPathExists=/proc"),
+            Some(true)
+        );
+        assert_eq!(
+            evaluate_condition_spec("ConditionPathExists=!/proc"),
+            Some(false)
+        );
         assert_eq!(evaluate_condition_spec("ConditionCPUs=>=1"), Some(true));
-        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=>=1.0"), Some(true));
-        assert_eq!(evaluate_condition_spec("ConditionKernelVersion=<1.0"), Some(false));
+        assert_eq!(
+            evaluate_condition_spec("ConditionKernelVersion=>=1.0"),
+            Some(true)
+        );
+        assert_eq!(
+            evaluate_condition_spec("ConditionKernelVersion=<1.0"),
+            Some(false)
+        );
     }
 
     #[test]
@@ -1119,9 +1205,7 @@ impl UnitCondition {
                 let is_first_boot = std::env::var("SYSTEMD_FIRST_BOOT")
                     .ok()
                     .and_then(|e| parse_first_boot_bool(&e))
-                    .unwrap_or_else(|| {
-                        std::path::Path::new("/run/systemd/first-boot").exists()
-                    });
+                    .unwrap_or_else(|| std::path::Path::new("/run/systemd/first-boot").exists());
                 let result = if *value {
                     is_first_boot
                 } else {

@@ -124,7 +124,10 @@ fn id128_app_specific_matches_c() {
             }
         }
     }
-    assert!(c_successes > 0, "no app-specific derivation succeeded; corpus is vacuous");
+    assert!(
+        c_successes > 0,
+        "no app-specific derivation succeeded; corpus is vacuous"
+    );
 }
 
 /// Run `bin args...` and capture (stdout, stderr, success) verbatim.

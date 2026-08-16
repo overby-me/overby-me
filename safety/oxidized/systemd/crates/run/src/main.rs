@@ -510,13 +510,10 @@ fn try_create_transient_unit(
     // was never involved at all.
     let user_socket_path;
     let socket_path: &str = if cli.user {
-        let target_uid = cli
-            .uid
-            .as_deref()
-            .and_then(|u| match u.parse::<u32>() {
-                Ok(n) => Some(n),
-                Err(_) => lookup_user(u).ok().map(|(uid, _, _, _)| uid),
-            });
+        let target_uid = cli.uid.as_deref().and_then(|u| match u.parse::<u32>() {
+            Ok(n) => Some(n),
+            Err(_) => lookup_user(u).ok().map(|(uid, _, _, _)| uid),
+        });
         let runtime_dir = match target_uid {
             Some(uid) => format!("/run/user/{uid}"),
             None => std::env::var("XDG_RUNTIME_DIR")
@@ -865,7 +862,9 @@ fn translate_run0(raw: &[String]) -> Vec<String> {
                         class_preset = true;
                     }
                 }
-                s if s.starts_with("--user=") => target_user = Some(s["--user=".len()..].to_string()),
+                s if s.starts_with("--user=") => {
+                    target_user = Some(s["--user=".len()..].to_string())
+                }
                 s if s.starts_with("--setenv=") => {
                     if s["--setenv=".len()..].starts_with("XDG_SESSION_CLASS=") {
                         class_preset = true;
@@ -947,8 +946,15 @@ fn translate_run0(raw: &[String]) -> Vec<String> {
             }
             // Value-bearing options shared with systemd-run: keep the flag and
             // its argument together.
-            "-p" | "--property" | "--slice" | "--description" | "--setenv" | "-E"
-            | "--working-directory" | "-D" | "--nice" => {
+            "-p"
+            | "--property"
+            | "--slice"
+            | "--description"
+            | "--setenv"
+            | "-E"
+            | "--working-directory"
+            | "-D"
+            | "--nice" => {
                 out.push(a.clone());
                 if i + 1 < raw.len() {
                     out.push(raw[i + 1].clone());

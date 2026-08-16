@@ -411,9 +411,16 @@ pub(crate) fn on_service_start_failed(
     // its own threads, so this does not block the dispatcher.
     let on_failure = unit.common.unit.on_failure.clone();
     if !on_failure.is_empty() {
-        let code = ChildTermination::Exit(svc.state.read_poisoned().srvc.main_exit_status.unwrap_or(1));
+        let code =
+            ChildTermination::Exit(svc.state.read_poisoned().srvc.main_exit_status.unwrap_or(1));
         let mon = build_monitor_env(&srvc_id.name, &code, false);
-        trigger_on_success_failure_units(&on_failure, &srvc_id.name, "OnFailure", arc_run_info, mon);
+        trigger_on_success_failure_units(
+            &on_failure,
+            &srvc_id.name,
+            "OnFailure",
+            arc_run_info,
+            mon,
+        );
     }
 
     // Only the policies that restart on failure apply to a failed start;
@@ -882,9 +889,11 @@ pub(crate) fn service_exit_head(
                         ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
                             format!("process exited with status {c}"),
                         ),
-                        ChildTermination::Signal(s, _) => UnitOperationErrorReason::GenericStartError(
-                            format!("process killed by signal {s}"),
-                        ),
+                        ChildTermination::Signal(s, _) => {
+                            UnitOperationErrorReason::GenericStartError(format!(
+                                "process killed by signal {s}"
+                            ))
+                        }
                     };
                     let mut status = unit.common.status.write_poisoned();
                     *status = UnitStatus::Stopped(
@@ -1057,8 +1066,11 @@ pub(crate) fn service_exit_handler(
                 trace!("Running ExecStopPost for oneshot service {name}");
                 let mut state = srvc.state.write_poisoned();
                 // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=.
-                state.srvc.stop_result_env =
-                    Some(build_monitor_env(name, &code, success_exit_status.is_success(&code)));
+                state.srvc.stop_result_env = Some(build_monitor_env(
+                    name,
+                    &code,
+                    success_exit_status.is_success(&code),
+                ));
                 let timeout = state.srvc.get_stop_timeout(&srvc.conf);
                 let cmds = srvc.conf.stoppost.clone();
                 if let Err(e) = state.srvc.run_all_cmds(
@@ -1524,8 +1536,11 @@ pub(crate) fn service_exit_handler(
         trace!("Running ExecStopPost for service {name}");
         let mut state = srvc.state.write_poisoned();
         // Expose SERVICE_RESULT/EXIT_CODE/EXIT_STATUS to ExecStopPost=.
-        state.srvc.stop_result_env =
-            Some(build_monitor_env(name, &code, success_exit_status.is_success(&code)));
+        state.srvc.stop_result_env = Some(build_monitor_env(
+            name,
+            &code,
+            success_exit_status.is_success(&code),
+        ));
         let timeout = state.srvc.get_stop_timeout(&srvc.conf);
         let cmds = srvc.conf.stoppost.clone();
         if let Err(e) = state.srvc.run_all_cmds(

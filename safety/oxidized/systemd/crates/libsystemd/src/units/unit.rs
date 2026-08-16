@@ -7,14 +7,13 @@ use crate::sockets::{Socket, SocketKind, SpecializedSocketConfig};
 use crate::units::{
     ActivationSource, BindIPv6Only, Commandline, CpuQuota, CpuWeight, DeferTrigger, Delegate,
     DevicePolicy, EnvVars, ExitType, FileDescriptorStorePreserve, IOSchedulingClass, IoDeviceLimit,
-    IoWeight, KeyringMode, KillMode, MemoryLimit, MemoryPressureWatch, NotifyKind, OOMPolicy,
-    OnFailureJobMode, ParsedMountSection, ParsedSliceSection, ParsedSwapSection, ProcSubset,
-    MemoryThp, ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit,
-    RestartMode,
-    RestrictNamespaces, RuntimeDirectoryPreserve, ServiceRestart, ServiceType, StandardInput,
-    StatusStarted, StatusStopped, StdIoOption, TasksMax, Timeout, TimeoutFailureMode, Timestamping,
-    UnitAction, UnitCondition, UnitId, UnitIdKind, UnitOperationError, UnitOperationErrorReason,
-    UnitStatus, UtmpMode, acquire_locks,
+    IoWeight, KeyringMode, KillMode, MemoryLimit, MemoryPressureWatch, MemoryThp, NotifyKind,
+    OOMPolicy, OnFailureJobMode, ParsedMountSection, ParsedSliceSection, ParsedSwapSection,
+    ProcSubset, ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit,
+    RestartMode, RestrictNamespaces, RuntimeDirectoryPreserve, ServiceRestart, ServiceType,
+    StandardInput, StatusStarted, StatusStopped, StdIoOption, TasksMax, Timeout,
+    TimeoutFailureMode, Timestamping, UnitAction, UnitCondition, UnitId, UnitIdKind,
+    UnitOperationError, UnitOperationErrorReason, UnitStatus, UtmpMode, acquire_locks,
 };
 
 use std::path::PathBuf;
@@ -223,20 +222,37 @@ fn run_socket_exec_commands(
         let resolved = match which::which(&cmd.cmd) {
             Ok(p) => p,
             Err(e) if ignore => {
-                trace!("{phase} for {}: cannot resolve {:?}: {e} (ignored)", id.name, cmd.cmd);
+                trace!(
+                    "{phase} for {}: cannot resolve {:?}: {e} (ignored)",
+                    id.name, cmd.cmd
+                );
                 continue;
             }
             Err(e) => {
-                return Err(format!("{phase} for {}: cannot resolve {:?}: {e}", id.name, cmd.cmd));
+                return Err(format!(
+                    "{phase} for {}: cannot resolve {:?}: {e}",
+                    id.name, cmd.cmd
+                ));
             }
         };
-        let child = match std::process::Command::new(&resolved).args(&cmd.args).spawn() {
+        let child = match std::process::Command::new(&resolved)
+            .args(&cmd.args)
+            .spawn()
+        {
             Ok(c) => c,
             Err(e) if ignore => {
-                trace!("{phase} for {}: {cmd} failed to spawn: {e} (ignored)", id.name);
+                trace!(
+                    "{phase} for {}: {cmd} failed to spawn: {e} (ignored)",
+                    id.name
+                );
                 continue;
             }
-            Err(e) => return Err(format!("{phase} for {}: {cmd} failed to spawn: {e}", id.name)),
+            Err(e) => {
+                return Err(format!(
+                    "{phase} for {}: {cmd} failed to spawn: {e}",
+                    id.name
+                ));
+            }
         };
         run_info.pid_table.lock_poisoned().insert(
             nix::unistd::Pid::from_raw(child.id() as i32),
@@ -283,7 +299,8 @@ fn socket_symlink_target(conf: &SocketConfig) -> Option<String> {
             | crate::sockets::SocketKind::Datagram(p)
             | crate::sockets::SocketKind::Fifo(p)
             | crate::sockets::SocketKind::Special(p) => p.as_str(),
-            crate::sockets::SocketKind::Netlink(_) | crate::sockets::SocketKind::MessageQueue(_) => {
+            crate::sockets::SocketKind::Netlink(_)
+            | crate::sockets::SocketKind::MessageQueue(_) => {
                 continue;
             }
         };
@@ -327,7 +344,9 @@ fn create_socket_symlinks(conf: &SocketConfig, unit_name: &str) {
                     && std::fs::remove_file(link_path).is_ok()
                     && let Err(e2) = std::os::unix::fs::symlink(&target, link_path)
                 {
-                    log::warn!("socket {unit_name}: failed to create symlink {link} -> {target}: {e2}");
+                    log::warn!(
+                        "socket {unit_name}: failed to create symlink {link} -> {target}: {e2}"
+                    );
                 } else if !conf.remove_on_stop {
                     log::warn!("socket {unit_name}: symlink {link} already exists, not replacing");
                 }
@@ -361,7 +380,8 @@ impl SocketState {
         // ExecStartPre= runs before the socket is opened; a non-'-' failure aborts
         // the start (systemd.socket(5)). Socket Exec*= commands were parsed and
         // reported but never executed until this path.
-        if let Err(msg) = run_socket_exec_commands(&conf.exec_start_pre, "ExecStartPre", id, run_info)
+        if let Err(msg) =
+            run_socket_exec_commands(&conf.exec_start_pre, "ExecStartPre", id, run_info)
         {
             let reason = UnitOperationErrorReason::GenericStartError(msg);
             *status.write_poisoned() =
@@ -403,10 +423,8 @@ impl SocketState {
                     run_socket_exec_commands(&conf.exec_start_post, "ExecStartPost", id, run_info)
                 {
                     let reason = UnitOperationErrorReason::GenericStartError(msg);
-                    *status.write_poisoned() = UnitStatus::Stopped(
-                        StatusStopped::StoppedUnexpected,
-                        vec![reason.clone()],
-                    );
+                    *status.write_poisoned() =
+                        UnitStatus::Stopped(StatusStopped::StoppedUnexpected, vec![reason.clone()]);
                     return Err(UnitOperationError {
                         unit_name: id.name.clone(),
                         unit_id: id.clone(),
@@ -435,7 +453,8 @@ impl SocketState {
         run_info: &RuntimeInfo,
     ) -> Result<(), UnitOperationError> {
         // ExecStopPre= runs before the socket is closed (best-effort on stop).
-        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_pre, "ExecStopPre", id, run_info) {
+        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_pre, "ExecStopPre", id, run_info)
+        {
             log::warn!("{msg}");
         }
         // RuntimeDirectory= is dropped on stop, like services/mounts — unless
@@ -458,7 +477,8 @@ impl SocketState {
                 reason: UnitOperationErrorReason::SocketCloseError(e),
             });
         // ExecStopPost= runs after the socket is closed (best-effort).
-        if let Err(msg) = run_socket_exec_commands(&conf.exec_stop_post, "ExecStopPost", id, run_info)
+        if let Err(msg) =
+            run_socket_exec_commands(&conf.exec_stop_post, "ExecStopPost", id, run_info)
         {
             log::warn!("{msg}");
         }
@@ -2215,7 +2235,11 @@ fn remove_runtime_directories(runtime: &[String]) {
         if path.exists()
             && let Err(e) = std::fs::remove_dir_all(&path)
         {
-            trace!("Failed to remove runtime directory {}: {}", path.display(), e);
+            trace!(
+                "Failed to remove runtime directory {}: {}",
+                path.display(),
+                e
+            );
         }
     }
 }

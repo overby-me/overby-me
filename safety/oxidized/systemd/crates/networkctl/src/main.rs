@@ -245,7 +245,10 @@ fn cmd_unmask(names: &[&str]) -> i32 {
             continue; // present but not a mask
         }
         if path.starts_with("/usr") {
-            eprintln!("Cannot unmask network config under /usr/: {}", path.display());
+            eprintln!(
+                "Cannot unmask network config under /usr/: {}",
+                path.display()
+            );
             return 1;
         }
         if let Err(e) = fs::remove_file(&path)
@@ -649,7 +652,10 @@ fn add_config_to_edit(
 ) -> Result<(), i32> {
     // Editing a /run file that /etc overrides is pointless.
     if ea.runtime && ea.drop_in.is_none() && path.starts_with("/etc") {
-        eprintln!("Cannot edit runtime config file: overridden by {}", path.display());
+        eprintln!(
+            "Cannot edit runtime config file: overridden by {}",
+            path.display()
+        );
         return Err(1);
     }
 
@@ -674,7 +680,10 @@ fn add_config_to_edit(
     let need_new_dropin = match &old_dropin {
         Some(od) => {
             if ea.runtime && od.starts_with("/etc") {
-                eprintln!("Cannot edit runtime config file: overridden by {}", od.display());
+                eprintln!(
+                    "Cannot edit runtime config file: overridden by {}",
+                    od.display()
+                );
                 return Err(1);
             }
             od.starts_with("/usr") || (ea.runtime != od.starts_with("/run"))
@@ -791,15 +800,25 @@ fn create_edit_temp_file(e: &mut EditFile, stdin_data: Option<&[u8]>) -> Result<
     if let Some(parent) = e.path.parent()
         && let Err(err) = fs::create_dir_all(parent)
     {
-        eprintln!("Failed to create parent directories for '{}': {err}", e.path.display());
+        eprintln!(
+            "Failed to create parent directories for '{}': {err}",
+            e.path.display()
+        );
         return Err(1);
     }
 
     let temp = make_temp_path(&e.path);
-    let mut f = match fs::OpenOptions::new().write(true).create_new(true).open(&temp) {
+    let mut f = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+    {
         Ok(f) => f,
         Err(err) => {
-            eprintln!("Failed to create temporary file for '{}': {err}", e.path.display());
+            eprintln!(
+                "Failed to create temporary file for '{}': {err}",
+                e.path.display()
+            );
             return Err(1);
         }
     };
@@ -861,7 +880,11 @@ fn run_editor(files: &[EditFile]) -> Result<(), i32> {
         }
     }
     for name in ["editor", "nano", "vim", "vi"] {
-        if std::process::Command::new(name).args(&args).status().is_ok() {
+        if std::process::Command::new(name)
+            .args(&args)
+            .status()
+            .is_ok()
+        {
             return Ok(());
         }
     }

@@ -3087,7 +3087,10 @@ pub fn apply_manager_numa_policy() {
             );
         }
         Err(e) => {
-            let msg = format!("Failed to set NUMA memory policy, ignoring: {}", errno_str(e));
+            let msg = format!(
+                "Failed to set NUMA memory policy, ignoring: {}",
+                errno_str(e)
+            );
             crate::control::varlink::journal_log_with_fields(&msg, 4, &[]);
         }
     }
@@ -3107,8 +3110,12 @@ static MANAGER_NUMA_REAPPLY: std::sync::OnceLock<(
 )> = std::sync::OnceLock::new();
 
 fn numa_reapply_slot() -> &'static (std::sync::Mutex<NumaReapplyState>, std::sync::Condvar) {
-    MANAGER_NUMA_REAPPLY
-        .get_or_init(|| (std::sync::Mutex::new(NumaReapplyState::default()), std::sync::Condvar::new()))
+    MANAGER_NUMA_REAPPLY.get_or_init(|| {
+        (
+            std::sync::Mutex::new(NumaReapplyState::default()),
+            std::sync::Condvar::new(),
+        )
+    })
 }
 
 /// Request a Manager NUMA re-apply and BLOCK until the main thread (TID 1) has
@@ -3446,14 +3453,13 @@ fn create_transient_unit(
     // manager (SYSTEMD_USER_MANAGER=1, set by run_user_manager) runs as the user
     // and cannot write the root-owned system /run/systemd/transient, so it uses
     // its XDG runtime dir instead. The system-manager path is unchanged.
-    let transient_base: std::path::PathBuf =
-        if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
-            std::env::var_os("XDG_RUNTIME_DIR")
-                .map(|r| std::path::Path::new(&r).join("systemd/transient"))
-                .unwrap_or_else(|| std::path::PathBuf::from("/run/systemd/transient"))
-        } else {
-            std::path::PathBuf::from("/run/systemd/transient")
-        };
+    let transient_base: std::path::PathBuf = if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .map(|r| std::path::Path::new(&r).join("systemd/transient"))
+            .unwrap_or_else(|| std::path::PathBuf::from("/run/systemd/transient"))
+    } else {
+        std::path::PathBuf::from("/run/systemd/transient")
+    };
     if params.pipe {
         let _ = std::fs::create_dir_all(&transient_base);
     }
@@ -3925,21 +3931,20 @@ fn create_transient_unit(
                     // to DelegateControllers=[] and PID 1 sets delegate=true.
                     // A boolean toggles delegation; any other value is a
                     // space-separated controller list.
-                    service_conf.delegate = if value.is_empty()
-                        || matches!(value, "yes" | "true" | "on" | "1")
-                    {
-                        Delegate::Yes
-                    } else if matches!(value, "no" | "false" | "off" | "0") {
-                        Delegate::No
-                    } else {
-                        let controllers: Vec<String> =
-                            value.split_whitespace().map(|s| s.to_owned()).collect();
-                        if controllers.is_empty() {
+                    service_conf.delegate =
+                        if value.is_empty() || matches!(value, "yes" | "true" | "on" | "1") {
+                            Delegate::Yes
+                        } else if matches!(value, "no" | "false" | "off" | "0") {
                             Delegate::No
                         } else {
-                            Delegate::Controllers(controllers)
-                        }
-                    };
+                            let controllers: Vec<String> =
+                                value.split_whitespace().map(|s| s.to_owned()).collect();
+                            if controllers.is_empty() {
+                                Delegate::No
+                            } else {
+                                Delegate::Controllers(controllers)
+                            }
+                        };
                 }
                 "OpenFile" => {
                     if value.is_empty() {
@@ -6015,12 +6020,7 @@ pub fn bind_mount_into_unit(
 /// Unit marker bits in upstream rendering order (dbus-unit.c
 /// property_get_markers): needs-reload, needs-restart, needs-start,
 /// needs-stop.
-const UNIT_MARKERS: [&str; 4] = [
-    "needs-reload",
-    "needs-restart",
-    "needs-start",
-    "needs-stop",
-];
+const UNIT_MARKERS: [&str; 4] = ["needs-reload", "needs-restart", "needs-start", "needs-stop"];
 
 fn marker_bit(name: &str) -> Option<u32> {
     UNIT_MARKERS
@@ -6133,7 +6133,9 @@ fn stop_units_via_tree(
             let ri = run_info.read_poisoned();
             if let Some(unit) = ri.unit_table.get(&id) {
                 unit.common.deactivation_in_progress.store(true, SeqCst);
-                unit.common.deactivation_irreversible.store(irreversible, SeqCst);
+                unit.common
+                    .deactivation_irreversible
+                    .store(irreversible, SeqCst);
                 unit.common
                     .start_requested_during_deactivation
                     .store(false, SeqCst);
@@ -6167,10 +6169,7 @@ fn stop_units_via_tree(
         // fragment.
         let ri = run_info.read_poisoned();
         let restart_requested = if let Some(unit) = ri.unit_table.get(&id) {
-            let requested = unit
-                .common
-                .start_requested_during_deactivation
-                .load(SeqCst);
+            let requested = unit.common.start_requested_during_deactivation.load(SeqCst);
             unit.common.deactivation_in_progress.store(false, SeqCst);
             unit.common.deactivation_irreversible.store(false, SeqCst);
             unit.common
@@ -6450,8 +6449,7 @@ pub fn execute_command(
                             | crate::units::ServiceType::NotifyReload
                     )
                 ) {
-                    let deadline =
-                        std::time::Instant::now() + std::time::Duration::from_secs(90);
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
                     loop {
                         let still_starting = {
                             let ri = run_info.read_poisoned();
@@ -7325,7 +7323,10 @@ pub fn execute_command(
                 }
                 written.push(file_base);
             }
-            info!("set-property {unit_name}: wrote drop-in(s) {}", written.join(", "));
+            info!(
+                "set-property {unit_name}: wrote drop-in(s) {}",
+                written.join(", ")
+            );
 
             // Apply properties to the in-memory unit immediately (like real systemd).
             {
@@ -7678,9 +7679,7 @@ pub fn execute_command(
             // A pinned store (FileDescriptorStorePreserve=yes) survives stop and
             // leaves the unit in SubState=dead-resources-pinned; this is how that
             // store is dropped, after which the unit reports plain "dead".
-            if remove_fdstore
-                && let Specific::Service(svc) = &unit.specific
-            {
+            if remove_fdstore && let Specific::Service(svc) = &unit.specific {
                 let mut st = svc.state.write_poisoned();
                 if !st.srvc.stored_fds.is_empty() {
                     for (_, fd) in st.srvc.stored_fds.drain(..) {
@@ -8252,7 +8251,10 @@ pub fn execute_command(
                 // A leading '/' is merely cosmetic upstream, so strip it, but
                 // '..' and empty components are refused outright.
                 let rel = sub.trim_start_matches('/');
-                if rel.split('/').any(|c| c == ".." || c == "." || c.is_empty()) {
+                if rel
+                    .split('/')
+                    .any(|c| c == ".." || c == "." || c.is_empty())
+                {
                     return Err("Specified cgroup sub-path is not valid.".to_string());
                 }
                 let base = match &unit.specific {
@@ -10451,12 +10453,8 @@ pub fn execute_command(
                                                 .iter()
                                                 .chain(u.common.dependencies.requires.iter())
                                                 .collect();
-                                            let working = u
-                                                .common
-                                                .dependencies
-                                                .after
-                                                .iter()
-                                                .any(|dep_id| {
+                                            let working =
+                                                u.common.dependencies.after.iter().any(|dep_id| {
                                                     pulled.contains(dep_id)
                                                         && ri
                                                             .unit_table
@@ -11003,137 +11001,139 @@ pub fn execute_command(
             }
 
             {
-            let run_info = &*run_info.read_poisoned();
-            for unit_name in &actual_names {
-                // Collect unit IDs to stop. For glob patterns, collect all
-                // matches; for exact names, expect at most one.
-                let ids_to_stop: Vec<crate::units::UnitId> = {
-                    let units = find_units_with_name(unit_name, &run_info.unit_table);
-                    if units.is_empty() {
-                        // Silently skip units not found (matches real systemd
-                        // behaviour for multi-unit stop).
-                        continue;
-                    }
-                    if units.len() > 1 && !is_glob_pattern(unit_name) {
-                        let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
-                        return Err(format!(
-                            "More than one unit found with name: {unit_name}: {names:?}"
-                        ));
-                    }
-                    for u in &units {
-                        let freezer_state =
-                            crate::control::unit_properties::get_freezer_state_pub(u);
-                        if matches!(
-                            freezer_state,
-                            crate::units::FreezerState::Frozen
-                                | crate::units::FreezerState::FrozenByParent
-                        ) {
-                            return Err(format!("Unit {} is frozen, cannot stop.", u.id.name));
+                let run_info = &*run_info.read_poisoned();
+                for unit_name in &actual_names {
+                    // Collect unit IDs to stop. For glob patterns, collect all
+                    // matches; for exact names, expect at most one.
+                    let ids_to_stop: Vec<crate::units::UnitId> = {
+                        let units = find_units_with_name(unit_name, &run_info.unit_table);
+                        if units.is_empty() {
+                            // Silently skip units not found (matches real systemd
+                            // behaviour for multi-unit stop).
+                            continue;
                         }
-                    }
-                    units.iter().map(|u| u.id.clone()).collect()
-                };
-
-                for id in &ids_to_stop {
-                    let stop_job = crate::units::jobs::JobHandle::create(
-                        &run_info.jobs,
-                        id.clone(),
-                        crate::units::jobs::JobKind::Stop,
-                        stop_jmode,
-                    )?;
-                    // Set deactivation flags so concurrent StartNoBlock can detect
-                    // the conflict (simulates real systemd's job queue behavior).
-                    if let Some(unit) = run_info.unit_table.get(id) {
-                        unit.common
-                            .deactivation_in_progress
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
-                        unit.common
-                            .deactivation_irreversible
-                            .store(irreversible, std::sync::atomic::Ordering::SeqCst);
-                        unit.common
-                            .start_requested_during_deactivation
-                            .store(false, std::sync::atomic::Ordering::SeqCst);
-                    }
-
-                    let deactivation_result = crate::units::deactivate_unit_recursive(id, run_info)
-                        .map_err(|e| format!("{e}"));
-
-                    // Clear deactivation flags.
-                    let restart_requested = if let Some(unit) = run_info.unit_table.get(id) {
-                        let requested = unit
-                            .common
-                            .start_requested_during_deactivation
-                            .load(std::sync::atomic::Ordering::SeqCst);
-                        unit.common
-                            .deactivation_in_progress
-                            .store(false, std::sync::atomic::Ordering::SeqCst);
-                        unit.common
-                            .deactivation_irreversible
-                            .store(false, std::sync::atomic::Ordering::SeqCst);
-                        unit.common
-                            .start_requested_during_deactivation
-                            .store(false, std::sync::atomic::Ordering::SeqCst);
-                        requested
-                    } else {
-                        false
+                        if units.len() > 1 && !is_glob_pattern(unit_name) {
+                            let names: Vec<_> =
+                                units.iter().map(|unit| unit.id.name.clone()).collect();
+                            return Err(format!(
+                                "More than one unit found with name: {unit_name}: {names:?}"
+                            ));
+                        }
+                        for u in &units {
+                            let freezer_state =
+                                crate::control::unit_properties::get_freezer_state_pub(u);
+                            if matches!(
+                                freezer_state,
+                                crate::units::FreezerState::Frozen
+                                    | crate::units::FreezerState::FrozenByParent
+                            ) {
+                                return Err(format!("Unit {} is frozen, cannot stop.", u.id.name));
+                            }
+                        }
+                        units.iter().map(|u| u.id.clone()).collect()
                     };
 
-                    deactivation_result?;
-
-                    // If a start was requested during a non-irreversible stop,
-                    // the stop should fail (the service is "unstoppable").
-                    // Restore the unit to Started state since in real systemd
-                    // the stop job would have been cancelled (service never stopped).
-                    if restart_requested && !irreversible {
+                    for id in &ids_to_stop {
+                        let stop_job = crate::units::jobs::JobHandle::create(
+                            &run_info.jobs,
+                            id.clone(),
+                            crate::units::jobs::JobKind::Stop,
+                            stop_jmode,
+                        )?;
+                        // Set deactivation flags so concurrent StartNoBlock can detect
+                        // the conflict (simulates real systemd's job queue behavior).
                         if let Some(unit) = run_info.unit_table.get(id) {
-                            let mut status = unit.common.status.write_poisoned();
-                            *status = crate::units::UnitStatus::Started(
-                                crate::units::StatusStarted::Running,
-                            );
+                            unit.common
+                                .deactivation_in_progress
+                                .store(true, std::sync::atomic::Ordering::SeqCst);
+                            unit.common
+                                .deactivation_irreversible
+                                .store(irreversible, std::sync::atomic::Ordering::SeqCst);
+                            unit.common
+                                .start_requested_during_deactivation
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
                         }
-                        stop_job.finish(crate::units::jobs::JobResult::Canceled);
-                        return Err(format!("Job for {} canceled.", id.name,));
-                    }
 
-                    // A stopped transient unit loses its runtime fragment so
-                    // `systemctl cat` fails afterwards (TEST-74-AUX-UTILS.run
-                    // asserts this), but the unit itself stays loaded, like
-                    // upstream, until reset-failed unloads it or daemon-reload
-                    // prunes it: TEST-59 reads ExecMainStatus off the stopped
-                    // unit right after `systemctl stop`, which the previous
-                    // eager unload returned as empty. A later systemd-run with
-                    // the same name replaces the leftover
-                    // (create_transient_unit's stopped/failed replacement).
-                    if let Some(unit) = run_info.unit_table.get(id)
-                        && let Some(path) = unit.common.unit.fragment_path.as_ref()
-                        && path.starts_with("/run/systemd/transient")
-                    {
-                        let _ = std::fs::remove_file(path);
-                    }
-                    // Release the file-descriptor store on a full stop unless it
-                    // is pinned (FileDescriptorStorePreserve=yes). systemd keeps a
-                    // stopped unit's stored fds only when pinned; =restart and =no
-                    // discard them here. A restart goes through reactivate_unit,
-                    // not this Command::Stop path, so restarts keep their fds. A
-                    // pinned, non-empty store leaves the unit in SubState=
-                    // dead-resources-pinned until `systemctl clean --what=fdstore`.
-                    if let Some(unit) = run_info.unit_table.get(id)
-                        && let Specific::Service(svc) = &unit.specific
-                        && svc.conf.file_descriptor_store_preserve
-                            != crate::units::FileDescriptorStorePreserve::Yes
-                    {
-                        let mut st = svc.state.write_poisoned();
-                        if !st.srvc.stored_fds.is_empty() {
-                            let n = st.srvc.stored_fds.len();
-                            for (_, fd) in st.srvc.stored_fds.drain(..) {
-                                let _ = nix::unistd::close(fd);
+                        let deactivation_result =
+                            crate::units::deactivate_unit_recursive(id, run_info)
+                                .map_err(|e| format!("{e}"));
+
+                        // Clear deactivation flags.
+                        let restart_requested = if let Some(unit) = run_info.unit_table.get(id) {
+                            let requested = unit
+                                .common
+                                .start_requested_during_deactivation
+                                .load(std::sync::atomic::Ordering::SeqCst);
+                            unit.common
+                                .deactivation_in_progress
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
+                            unit.common
+                                .deactivation_irreversible
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
+                            unit.common
+                                .start_requested_during_deactivation
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
+                            requested
+                        } else {
+                            false
+                        };
+
+                        deactivation_result?;
+
+                        // If a start was requested during a non-irreversible stop,
+                        // the stop should fail (the service is "unstoppable").
+                        // Restore the unit to Started state since in real systemd
+                        // the stop job would have been cancelled (service never stopped).
+                        if restart_requested && !irreversible {
+                            if let Some(unit) = run_info.unit_table.get(id) {
+                                let mut status = unit.common.status.write_poisoned();
+                                *status = crate::units::UnitStatus::Started(
+                                    crate::units::StatusStarted::Running,
+                                );
                             }
-                            trace!("Released {n} stored fd(s) for {} on stop", id.name);
+                            stop_job.finish(crate::units::jobs::JobResult::Canceled);
+                            return Err(format!("Job for {} canceled.", id.name,));
                         }
-                    }
-                    stop_job.finish(crate::units::jobs::JobResult::Done);
-                } // end for id in &ids_to_stop
-            }
+
+                        // A stopped transient unit loses its runtime fragment so
+                        // `systemctl cat` fails afterwards (TEST-74-AUX-UTILS.run
+                        // asserts this), but the unit itself stays loaded, like
+                        // upstream, until reset-failed unloads it or daemon-reload
+                        // prunes it: TEST-59 reads ExecMainStatus off the stopped
+                        // unit right after `systemctl stop`, which the previous
+                        // eager unload returned as empty. A later systemd-run with
+                        // the same name replaces the leftover
+                        // (create_transient_unit's stopped/failed replacement).
+                        if let Some(unit) = run_info.unit_table.get(id)
+                            && let Some(path) = unit.common.unit.fragment_path.as_ref()
+                            && path.starts_with("/run/systemd/transient")
+                        {
+                            let _ = std::fs::remove_file(path);
+                        }
+                        // Release the file-descriptor store on a full stop unless it
+                        // is pinned (FileDescriptorStorePreserve=yes). systemd keeps a
+                        // stopped unit's stored fds only when pinned; =restart and =no
+                        // discard them here. A restart goes through reactivate_unit,
+                        // not this Command::Stop path, so restarts keep their fds. A
+                        // pinned, non-empty store leaves the unit in SubState=
+                        // dead-resources-pinned until `systemctl clean --what=fdstore`.
+                        if let Some(unit) = run_info.unit_table.get(id)
+                            && let Specific::Service(svc) = &unit.specific
+                            && svc.conf.file_descriptor_store_preserve
+                                != crate::units::FileDescriptorStorePreserve::Yes
+                        {
+                            let mut st = svc.state.write_poisoned();
+                            if !st.srvc.stored_fds.is_empty() {
+                                let n = st.srvc.stored_fds.len();
+                                for (_, fd) in st.srvc.stored_fds.drain(..) {
+                                    let _ = nix::unistd::close(fd);
+                                }
+                                trace!("Released {n} stored fd(s) for {} on stop", id.name);
+                            }
+                        }
+                        stop_job.finish(crate::units::jobs::JobResult::Done);
+                    } // end for id in &ids_to_stop
+                }
             } // read guard released here
         }
         Command::StopNoBlock(unit_names) => {

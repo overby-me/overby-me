@@ -469,8 +469,7 @@ fn create_exec_dirs_from_properties(properties: &[String]) {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ =
-                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
                 }
             }
         }
@@ -492,7 +491,9 @@ fn do_mount(
     // systemd-mount (which sets up the mount point itself). For a bind mount of
     // a regular file, create a file; otherwise create a directory.
     if !Path::new(where_).exists() {
-        let is_file_bind = options.map(|o| o.split(',').any(|x| x == "bind")).unwrap_or(false)
+        let is_file_bind = options
+            .map(|o| o.split(',').any(|x| x == "bind"))
+            .unwrap_or(false)
             && Path::new(what).is_file();
         let res = if is_file_bind {
             match Path::new(where_).parent() {
@@ -748,7 +749,11 @@ fn main() {
             process::exit(1);
         }
 
-        let canonicalize = cli.canonicalize.as_deref().map(|v| v != "no").unwrap_or(true);
+        let canonicalize = cli
+            .canonicalize
+            .as_deref()
+            .map(|v| v != "no")
+            .unwrap_or(true);
 
         // With --tmpfs the single positional is WHERE and the source is a
         // synthetic "tmpfs"; otherwise the first positional is WHAT and the
@@ -870,9 +875,7 @@ fn main() {
             // the mount appears in /proc/self/mountinfo, and reflects it via
             // `systemctl show`. Additive: the direct mount below still
             // establishes the mount, so plain-mount behavior is unchanged.
-            if effective_description.is_some()
-                || cli.options.is_some()
-                || !cli.property.is_empty()
+            if effective_description.is_some() || cli.options.is_some() || !cli.property.is_empty()
             {
                 let content = generate_mount_unit(
                     what,

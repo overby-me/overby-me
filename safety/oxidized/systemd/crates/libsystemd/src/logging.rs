@@ -27,9 +27,7 @@ pub fn setup_logging(conf: &crate::config::LoggingConfig) -> Result<(), String> 
         // Disk logging is not implemented (pipe stdout to a logging solution
         // instead). Do NOT abort the manager on a config that requests it --
         // fall back to stdout so logs are not lost.
-        eprintln!(
-            "rust-systemd: logging to disk is not supported; logging to stdout instead"
-        );
+        eprintln!("rust-systemd: logging to disk is not supported; logging to stdout instead");
         if !conf.log_to_stdout {
             logger = logger.chain(std::io::stdout());
         }

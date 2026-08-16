@@ -236,12 +236,7 @@ fn move_file(
 /// Append a dmesg chunk's content to the reconstructed `dmesg.txt` under
 /// `archive_base[/subdir1[/subdir2]]` (external storage only). Mirrors upstream
 /// `append_dmesg()`.
-fn append_dmesg(
-    archive_base: &Path,
-    subdir1: Option<&str>,
-    subdir2: Option<&str>,
-    content: &[u8],
-) {
+fn append_dmesg(archive_base: &Path, subdir1: Option<&str>, subdir2: Option<&str>, content: &[u8]) {
     if content.is_empty() {
         return;
     }

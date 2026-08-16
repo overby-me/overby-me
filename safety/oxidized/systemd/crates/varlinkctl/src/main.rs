@@ -167,10 +167,7 @@ fn interface_name_is_valid(name: &str) -> bool {
         return false;
     }
     name.split('.').all(|label| {
-        !label.is_empty()
-            && label
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     })
 }
 
@@ -311,10 +308,7 @@ fn resolve_target(target: &str) -> (String, Option<bool>) {
 /// Send a request to a varlink target. The target is either a socket path
 /// (connect to it) or an executable (exec it as a varlink server on fd 3, the
 /// systemd socket-activation convention).
-fn varlink_request(
-    target: &str,
-    request: &serde_json::Value,
-) -> Result<serde_json::Value, String> {
+fn varlink_request(target: &str, request: &serde_json::Value) -> Result<serde_json::Value, String> {
     let (resolved, forced_socket) = resolve_target(target);
     let target = resolved.as_str();
     let is_socket = forced_socket.unwrap_or_else(|| {
@@ -377,10 +371,7 @@ fn spawn_varlink_server(exe: &str) -> Result<(std::process::Child, UnixStream), 
 }
 
 /// Exec `exe` as a varlink server and run one request/response exchange.
-fn exec_and_request(
-    exe: &str,
-    request: &serde_json::Value,
-) -> Result<serde_json::Value, String> {
+fn exec_and_request(exe: &str, request: &serde_json::Value) -> Result<serde_json::Value, String> {
     let (mut server, parent) = spawn_varlink_server(exe)?;
     parent.set_read_timeout(Some(Duration::from_secs(30))).ok();
     parent.set_write_timeout(Some(Duration::from_secs(5))).ok();
@@ -525,8 +516,8 @@ fn varlink_call_more(target: &str, request: &serde_json::Value) -> Result<ExitCo
     });
 
     if is_socket {
-        let stream =
-            UnixStream::connect(target).map_err(|e| format!("Failed to connect to {target}: {e}"))?;
+        let stream = UnixStream::connect(target)
+            .map_err(|e| format!("Failed to connect to {target}: {e}"))?;
         stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
         stream_more(&stream, request)
     } else {
@@ -582,7 +573,10 @@ fn stream_more(stream: &UnixStream, request: &serde_json::Value) -> Result<ExitC
         let _ = out.write_all(compact.as_bytes());
         let _ = out.write_all(b"\n");
         let _ = out.flush();
-        let continues = reply.get("continues").and_then(|v| v.as_bool()).unwrap_or(false);
+        let continues = reply
+            .get("continues")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !continues {
             break;
         }
@@ -619,7 +613,11 @@ fn cmd_introspect(args: &[String]) -> ExitCode {
                     .get("parameters")
                     .and_then(|p| p.get("interfaces"))
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default()
             }
             Err(e) => {

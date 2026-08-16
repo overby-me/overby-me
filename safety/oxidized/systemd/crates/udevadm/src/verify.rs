@@ -495,7 +495,11 @@ fn search_rules_file(
 /// Look up a bare basename in the standard rules directories under `root`.
 /// Returns `true` if it was found and pushed. Mirrors upstream
 /// `search_rules_file_in_conf_dirs`: paths (containing `/`) are not handled here.
-fn search_rules_file_in_conf_dirs(s: &str, root: Option<&str>, out: &mut Vec<(PathBuf, String)>) -> bool {
+fn search_rules_file_in_conf_dirs(
+    s: &str,
+    root: Option<&str>,
+    out: &mut Vec<(PathBuf, String)>,
+) -> bool {
     if s.is_empty() || s.contains('/') {
         return false;
     }
@@ -692,7 +696,10 @@ fn verify_file(path: &Path, ctx: &mut FileCtx) -> Result<(), String> {
     }
 
     if continuation.is_some() {
-        ctx.error(line_nr, "Unexpected EOF after line continuation, line ignored.");
+        ctx.error(
+            line_nr,
+            "Unexpected EOF after line continuation, line ignored.",
+        );
     }
 
     resolve_goto(ctx, &mut lines);
@@ -746,8 +753,16 @@ fn add_line(ctx: &mut FileCtx, line: &str, line_nr: usize, lines: &mut Vec<RuleL
                 is_case_insensitive,
                 next,
             } => {
-                if parse_token(ctx, &mut rl, &key, attr.as_deref(), op, &value, is_case_insensitive)
-                    .is_err()
+                if parse_token(
+                    ctx,
+                    &mut rl,
+                    &key,
+                    attr.as_deref(),
+                    op,
+                    &value,
+                    is_case_insensitive,
+                )
+                .is_err()
                 {
                     return;
                 }
@@ -936,7 +951,13 @@ fn parse_value(bytes: &[u8], start: usize) -> Option<(String, bool, usize)> {
 }
 
 /// Port of `check_token_delimiters` (style checks around commas / whitespace).
-fn check_token_delimiters(ctx: &mut FileCtx, line: &str, pos: usize, full_start: usize, line_nr: usize) {
+fn check_token_delimiters(
+    ctx: &mut FileCtx,
+    line: &str,
+    pos: usize,
+    full_start: usize,
+    line_nr: usize,
+) {
     let bytes = line.as_bytes();
     let mut n_comma = 0usize;
     let mut ws_before_comma = false;
@@ -993,7 +1014,10 @@ fn check_tokens_order(ctx: &mut FileCtx, rl: &RuleLine) {
         if t.is_result {
             has_result = true;
         } else if has_result && t.is_program {
-            ctx.warning(rl.line_number, "Reordering RESULT check after PROGRAM assignment.");
+            ctx.warning(
+                rl.line_number,
+                "Reordering RESULT check after PROGRAM assignment.",
+            );
             break;
         }
     }
@@ -1067,11 +1091,7 @@ enum SubstResult {
     None,
     Escaped(usize),
     Invalid,
-    Ok {
-        kind: u8,
-        attr: String,
-        next: usize,
-    },
+    Ok { kind: u8, attr: String, next: usize },
 }
 
 /// Port of `get_subst_type` (strict mode).
@@ -1139,7 +1159,11 @@ fn get_subst_type(bytes: &[u8], pos: usize) -> SubstResult {
         q = end + 1;
     }
 
-    SubstResult::Ok { kind, attr, next: q }
+    SubstResult::Ok {
+        kind,
+        attr,
+        next: q,
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -1261,13 +1285,22 @@ fn string_is_glob(s: &str) -> bool {
 
 /// Compute match type + nulstr alternatives for a match token, applying the
 /// `?*` -> `!=""` conversion. Returns `(match_type, values, op)`.
-fn compute_match(type_id: u32, is_subsystem: bool, value: &str, mut op: Op) -> (MatchType, Vec<String>, Op) {
+fn compute_match(
+    type_id: u32,
+    is_subsystem: bool,
+    value: &str,
+    mut op: Op,
+) -> (MatchType, Vec<String>, Op) {
     let mut match_type = if is_subsystem && matches!(value, "subsystem" | "bus" | "class") {
         MatchType::Subsystem
     } else if value.is_empty() {
         MatchType::Empty
     } else if value == "?*" {
-        op = if op == Op::Match { Op::Nomatch } else { Op::Match };
+        op = if op == Op::Match {
+            Op::Nomatch
+        } else {
+            Op::Match
+        };
         MatchType::Empty
     } else if string_is_glob(value) {
         MatchType::Glob
@@ -1409,7 +1442,16 @@ fn parse_token(
             if !op.is_match() {
                 return invalid_op(ctx, ln, key);
             }
-            push_match(rl, tid::CONST, op, value, attr.map(|s| s.to_string()), false, false, false);
+            push_match(
+                rl,
+                tid::CONST,
+                op,
+                value,
+                attr.map(|s| s.to_string()),
+                false,
+                false,
+                false,
+            );
             Ok(())
         }
         "TAG" => {
@@ -1418,7 +1460,10 @@ fn parse_token(
             }
             let mut op = op;
             if op == Op::AssignFinal {
-                ctx.warning(ln, "TAG key takes '==', '!=', '=', or '+=' operator, assuming '='.");
+                ctx.warning(
+                    ln,
+                    "TAG key takes '==', '!=', '=', or '+=' operator, assuming '='.",
+                );
                 op = Op::Assign;
             }
             if op.is_match() {
@@ -1437,7 +1482,10 @@ fn parse_token(
                 return invalid_op(ctx, ln, key);
             }
             if value == "bus" || value == "class" {
-                ctx.warning(ln, &format!("\"{value}\" must be specified as \"subsystem\"."));
+                ctx.warning(
+                    ln,
+                    &format!("\"{value}\" must be specified as \"subsystem\"."),
+                );
             }
             push_match(rl, tid::SUBSYSTEM, op, value, None, true, false, false);
             Ok(())
@@ -1490,15 +1538,27 @@ fn invalid_op(ctx: &mut FileCtx, ln: usize, key: &str) -> TokResult {
 
 /// Run the value substitution-format check, emitting on failure. `nonempty`
 /// makes an empty value an error.
-fn check_value_format(ctx: &mut FileCtx, ln: usize, key: &str, value: &str, nonempty: bool) -> TokResult {
+fn check_value_format(
+    ctx: &mut FileCtx,
+    ln: usize,
+    key: &str,
+    value: &str,
+    nonempty: bool,
+) -> TokResult {
     if nonempty && value.is_empty() {
-        ctx.error(ln, &format!("Invalid value \"\" for {key} (char 0: empty value), ignoring."));
+        ctx.error(
+            ln,
+            &format!("Invalid value \"\" for {key} (char 0: empty value), ignoring."),
+        );
         return Ok(()); // non-fatal (logs but continues) upstream
     }
     if let Err((offset, hint)) = udev_check_format(value) {
         ctx.error(
             ln,
-            &format!("Invalid value \"{value}\" for {key} (char {}: {hint}), ignoring.", offset + 1),
+            &format!(
+                "Invalid value \"{value}\" for {key} (char {}: {hint}), ignoring.",
+                offset + 1
+            ),
         );
     }
     Ok(())
@@ -1526,7 +1586,14 @@ fn simple_match(
     Ok(())
 }
 
-fn parse_name(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_name(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1536,7 +1603,10 @@ fn parse_name(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str
         return invalid_op(ctx, ln, key);
     }
     if op == Op::Add {
-        ctx.warning(ln, "NAME key takes '==', '!=', '=', or ':=' operator, assuming '='.");
+        ctx.warning(
+            ln,
+            "NAME key takes '==', '!=', '=', or ':=' operator, assuming '='.",
+        );
         op = Op::Assign;
     }
     if op.is_match() {
@@ -1548,7 +1618,10 @@ fn parse_name(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str
         return Err(());
     }
     if value.is_empty() {
-        ctx.error(ln, "Ignoring NAME=\"\", as udev will not delete any network interfaces.");
+        ctx.error(
+            ln,
+            "Ignoring NAME=\"\", as udev will not delete any network interfaces.",
+        );
         return Err(());
     }
     check_value_format(ctx, ln, key, value, false)?;
@@ -1556,7 +1629,14 @@ fn parse_name(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str
     Ok(())
 }
 
-fn parse_env(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_env(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     let attr = match attr {
         Some(a) if !a.is_empty() => a,
@@ -1567,15 +1647,30 @@ fn parse_env(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>
         return invalid_op(ctx, ln, key);
     }
     if op == Op::AssignFinal {
-        ctx.warning(ln, "ENV key takes '==', '!=', '=', or '+=' operator, assuming '='.");
+        ctx.warning(
+            ln,
+            "ENV key takes '==', '!=', '=', or '+=' operator, assuming '='.",
+        );
         op = Op::Assign;
     }
     if op.is_match() {
-        push_match(rl, tid::ENV, op, value, Some(attr.to_string()), false, false, false);
+        push_match(
+            rl,
+            tid::ENV,
+            op,
+            value,
+            Some(attr.to_string()),
+            false,
+            false,
+            false,
+        );
         return Ok(());
     }
     if !device_property_can_set(attr) {
-        ctx.error(ln, &format!("Invalid ENV attribute. '{attr}' cannot be set."));
+        ctx.error(
+            ln,
+            &format!("Invalid ENV attribute. '{attr}' cannot be set."),
+        );
         return Err(());
     }
     check_value_format(ctx, ln, key, value, false)?;
@@ -1606,11 +1701,23 @@ fn parse_attr_like(
         return invalid_op(ctx, ln, key);
     }
     if op == Op::Add || op == Op::AssignFinal {
-        ctx.warning(ln, &format!("{key} key takes '==', '!=', or '=' operator, assuming '='."));
+        ctx.warning(
+            ln,
+            &format!("{key} key takes '==', '!=', or '=' operator, assuming '='."),
+        );
         op = Op::Assign;
     }
     if op.is_match() {
-        push_match(rl, m_type, op, value, Some(attr.to_string()), false, false, false);
+        push_match(
+            rl,
+            m_type,
+            op,
+            value,
+            Some(attr.to_string()),
+            false,
+            false,
+            false,
+        );
     } else {
         check_value_format(ctx, ln, key, value, false)?;
         push_assign(rl, a_type, value);
@@ -1628,13 +1735,23 @@ fn check_attr_format(ctx: &mut FileCtx, ln: usize, key: &str, attr: &str) -> Res
     if let Err((offset, hint)) = udev_check_format(attr) {
         ctx.error(
             ln,
-            &format!("Invalid attribute \"{attr}\" for {key} (char {}: {hint}), ignoring.", offset + 1),
+            &format!(
+                "Invalid attribute \"{attr}\" for {key} (char {}: {hint}), ignoring.",
+                offset + 1
+            ),
         );
     }
     Ok(true)
 }
 
-fn parse_attrs(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_attrs(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     let attr = attr.unwrap_or("");
     if !check_attr_format(ctx, ln, key, attr)? {
@@ -1647,13 +1764,33 @@ fn parse_attrs(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&st
         ctx.warning(ln, "'device' link may not be available in future kernels.");
     }
     if attr.contains("../") {
-        ctx.warning(ln, "Direct reference to parent sysfs directory, may break in future kernels.");
+        ctx.warning(
+            ln,
+            "Direct reference to parent sysfs directory, may break in future kernels.",
+        );
     }
-    push_match(rl, tid::ATTRS, op, value, Some(attr.to_string()), false, false, false);
+    push_match(
+        rl,
+        tid::ATTRS,
+        op,
+        value,
+        Some(attr.to_string()),
+        false,
+        false,
+        false,
+    );
     Ok(())
 }
 
-fn parse_test(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str, is_ci: bool) -> TokResult {
+fn parse_test(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+    is_ci: bool,
+) -> TokResult {
     let ln = rl.line_number;
     if let Some(a) = attr
         && !a.is_empty()
@@ -1674,7 +1811,15 @@ fn parse_test(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str
     Ok(())
 }
 
-fn parse_program(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str, is_ci: bool) -> TokResult {
+fn parse_program(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+    is_ci: bool,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1692,7 +1837,15 @@ fn parse_program(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&
     Ok(())
 }
 
-fn parse_import(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str, is_ci: bool) -> TokResult {
+fn parse_import(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+    is_ci: bool,
+) -> TokResult {
     let ln = rl.line_number;
     let attr = match attr {
         Some(a) if !a.is_empty() => a,
@@ -1730,7 +1883,14 @@ fn parse_import(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&s
     Ok(())
 }
 
-fn parse_options(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_options(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1755,23 +1915,40 @@ fn parse_options(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&
         return Ok(());
     } else if let Some(rest) = value.strip_prefix("link_priority=") {
         if rest.parse::<i32>().is_err() {
-            ctx.error(ln, &format!("Failed to parse link priority '{rest}': Invalid argument"));
+            ctx.error(
+                ln,
+                &format!("Failed to parse link priority '{rest}': Invalid argument"),
+            );
             return Err(());
         }
     } else if let Some(rest) = value.strip_prefix("log_level=") {
         if rest != "reset" && log_level_from_string(rest).is_none() {
-            ctx.error(ln, &format!("Failed to parse log level '{rest}': Invalid argument"));
+            ctx.error(
+                ln,
+                &format!("Failed to parse log level '{rest}': Invalid argument"),
+            );
             return Err(());
         }
     } else {
-        ctx.warning(ln, &format!("Invalid value for OPTIONS key, ignoring: '{value}'"));
+        ctx.warning(
+            ln,
+            &format!("Invalid value for OPTIONS key, ignoring: '{value}'"),
+        );
         return Ok(());
     }
     push_assign(rl, tid::A_OPTIONS, value);
     Ok(())
 }
 
-fn parse_owner_group(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str, is_owner: bool) -> TokResult {
+fn parse_owner_group(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+    is_owner: bool,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1781,7 +1958,10 @@ fn parse_owner_group(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Opti
         return invalid_op(ctx, ln, key);
     }
     if op == Op::Add {
-        ctx.warning(ln, &format!("{key} key takes '=' or ':=' operator, assuming '='."));
+        ctx.warning(
+            ln,
+            &format!("{key} key takes '=' or ':=' operator, assuming '='."),
+        );
         op = Op::Assign;
     }
     let _ = op;
@@ -1792,13 +1972,24 @@ fn parse_owner_group(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Opti
     if all_digits || (ctx.timing == Timing::Early && plain) {
         if let Err(reason) = resolve_id(ctx, value, is_owner) {
             let noun = if is_owner { "user" } else { "group" };
-            ctx.error(ln, &format!("Failed to resolve {noun} '{value}', ignoring: {reason}"));
+            ctx.error(
+                ln,
+                &format!("Failed to resolve {noun} '{value}', ignoring: {reason}"),
+            );
             return Err(());
         }
-        push_assign(rl, if is_owner { tid::A_OWNER } else { tid::A_GROUP }, value);
+        push_assign(
+            rl,
+            if is_owner { tid::A_OWNER } else { tid::A_GROUP },
+            value,
+        );
     } else if ctx.timing != Timing::Never {
         check_value_format(ctx, ln, key, value, true)?;
-        push_assign(rl, if is_owner { tid::A_OWNER } else { tid::A_GROUP }, value);
+        push_assign(
+            rl,
+            if is_owner { tid::A_OWNER } else { tid::A_GROUP },
+            value,
+        );
     } else {
         // RESOLVE_NAME_NEVER, non-numeric: silently ignored (debug only).
         return Ok(());
@@ -1806,7 +1997,14 @@ fn parse_owner_group(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Opti
     Ok(())
 }
 
-fn parse_mode_key(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_mode_key(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1827,7 +2025,14 @@ fn parse_mode_key(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<
     Ok(())
 }
 
-fn parse_seclabel(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_seclabel(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     match attr {
         Some(a) if !a.is_empty() => {}
@@ -1847,7 +2052,14 @@ fn parse_seclabel(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<
     Ok(())
 }
 
-fn parse_run(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_run(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     if op.is_match() || op == Op::Remove {
         return invalid_op(ctx, ln, key);
@@ -1867,7 +2079,14 @@ fn parse_run(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>
     Ok(())
 }
 
-fn parse_goto(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_goto(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1876,7 +2095,10 @@ fn parse_goto(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str
         return invalid_op(ctx, ln, key);
     }
     if rl.has_goto {
-        ctx.warning(ln, &format!("Contains multiple GOTO keys, ignoring GOTO=\"{value}\"."));
+        ctx.warning(
+            ln,
+            &format!("Contains multiple GOTO keys, ignoring GOTO=\"{value}\"."),
+        );
         return Ok(());
     }
     rl.has_goto = true;
@@ -1884,7 +2106,14 @@ fn parse_goto(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str
     Ok(())
 }
 
-fn parse_label(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&str>, op: Op, value: &str) -> TokResult {
+fn parse_label(
+    ctx: &mut FileCtx,
+    rl: &mut RuleLine,
+    key: &str,
+    attr: Option<&str>,
+    op: Op,
+    value: &str,
+) -> TokResult {
     let ln = rl.line_number;
     if attr.is_some() {
         return invalid_attr(ctx, ln, key);
@@ -1895,7 +2124,10 @@ fn parse_label(ctx: &mut FileCtx, rl: &mut RuleLine, key: &str, attr: Option<&st
     if rl.has_label {
         // Logs the PREVIOUS label, then overwrites.
         let prev = rl.label.clone().unwrap_or_default();
-        ctx.warning(ln, &format!("Contains multiple LABEL keys, ignoring LABEL=\"{prev}\"."));
+        ctx.warning(
+            ln,
+            &format!("Contains multiple LABEL keys, ignoring LABEL=\"{prev}\"."),
+        );
     }
     rl.has_label = true;
     rl.label = Some(value.to_string());
@@ -1942,7 +2174,11 @@ fn log_level_from_string(s: &str) -> Option<i32> {
 /// where `reason` is the strerror-style suffix ("Unknown user" / "Unknown
 /// group" / "Invalid argument").
 fn resolve_id(ctx: &FileCtx, value: &str, is_owner: bool) -> Result<(), String> {
-    let noun_unknown = if is_owner { "Unknown user" } else { "Unknown group" };
+    let noun_unknown = if is_owner {
+        "Unknown user"
+    } else {
+        "Unknown group"
+    };
 
     if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
         // Numeric id: valid if it exists, or falls within the system range.
@@ -1952,7 +2188,11 @@ fn resolve_id(ctx: &FileCtx, value: &str, is_owner: bool) -> Result<(), String> 
         } else {
             unsafe { !libc::getgrgid(id as libc::gid_t).is_null() }
         };
-        let sys_max = if is_owner { ctx.sys_uid_max } else { ctx.sys_gid_max } as u64;
+        let sys_max = if is_owner {
+            ctx.sys_uid_max
+        } else {
+            ctx.sys_gid_max
+        } as u64;
         if exists || id <= sys_max {
             return Ok(());
         }
@@ -2022,7 +2262,10 @@ fn resolve_goto(ctx: &mut FileCtx, lines: &mut [RuleLine]) {
             }
             None => {
                 let ln = lines[i].line_number;
-                ctx.error(ln, &format!("GOTO=\"{target}\" has no matching label, ignoring."));
+                ctx.error(
+                    ln,
+                    &format!("GOTO=\"{target}\" has no matching label, ignoring."),
+                );
                 lines[i].has_goto = false;
                 lines[i].goto_label = None;
                 // If nothing but this GOTO gave the line effect, drop it.
@@ -2038,7 +2281,10 @@ fn resolve_goto(ctx: &mut FileCtx, lines: &mut [RuleLine]) {
 fn check_unused_labels(ctx: &mut FileCtx, line: &RuleLine) {
     if line.has_label && !line.is_referenced {
         let label = line.label.clone().unwrap_or_default();
-        ctx.notice(line.line_number, &format!("style: LABEL=\"{label}\" is unused."));
+        ctx.notice(
+            line.line_number,
+            &format!("style: LABEL=\"{label}\" is unused."),
+        );
     }
 }
 
@@ -2072,7 +2318,10 @@ fn check_conflicts_duplicates(ctx: &mut FileCtx, line: &RuleLine) {
             }
             if new_conflicts {
                 conflicts = true;
-                ctx.error(line.line_number, "conflicting match expressions, the line has no effect.");
+                ctx.error(
+                    line.line_number,
+                    "conflicting match expressions, the line has no effect.",
+                );
             }
             if conflicts && duplicates {
                 return;
@@ -2156,7 +2405,9 @@ fn nulstr_tokens_conflict(a: &Token, b: &Token) -> bool {
 
 /// Length of the non-glob prefix (strcspn against GLOB_CHARS).
 fn glob_prefix_len(s: &str) -> usize {
-    s.bytes().take_while(|b| !matches!(b, b'*' | b'?' | b'[')).count()
+    s.bytes()
+        .take_while(|b| !matches!(b, b'*' | b'?' | b'['))
+        .count()
 }
 
 #[cfg(test)]
@@ -2166,11 +2417,20 @@ mod tests {
     #[test]
     fn check_format_bad_subst() {
         // "%?" is an invalid substitution at char 1 (offset 0).
-        assert_eq!(udev_check_format("%?"), Err((0, "invalid substitution type")));
+        assert_eq!(
+            udev_check_format("%?"),
+            Err((0, "invalid substitution type"))
+        );
         // A bare trailing '%' is invalid at char 1.
-        assert_eq!(udev_check_format("%"), Err((0, "invalid substitution type")));
+        assert_eq!(
+            udev_check_format("%"),
+            Err((0, "invalid substitution type"))
+        );
         // A bad substitution mid-string reports the sigil's offset.
-        assert_eq!(udev_check_format("abc%?"), Err((3, "invalid substitution type")));
+        assert_eq!(
+            udev_check_format("abc%?"),
+            Err((3, "invalid substitution type"))
+        );
     }
 
     #[test]
@@ -2182,9 +2442,15 @@ mod tests {
         assert!(udev_check_format("$$literal").is_ok());
         assert!(udev_check_format("%b{id}").is_ok());
         // env / attr with empty attr -> attribute value missing.
-        assert_eq!(udev_check_format("%s{}"), Err((0, "attribute value missing")));
+        assert_eq!(
+            udev_check_format("%s{}"),
+            Err((0, "attribute value missing"))
+        );
         // result index must be numeric.
-        assert_eq!(udev_check_format("%c{x}"), Err((0, "attribute value not a valid number")));
+        assert_eq!(
+            udev_check_format("%c{x}"),
+            Err((0, "attribute value not a valid number"))
+        );
         assert!(udev_check_format("%c{2}").is_ok());
         assert!(udev_check_format("%c{2+}").is_ok());
     }

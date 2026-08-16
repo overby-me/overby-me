@@ -1114,85 +1114,85 @@ impl Service {
             // started (InvocationID set) but Type=notify services remain
             // in Starting state instead of transitioning to Started.
             if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
-                    // DeferNotifyWait: for Type=notify/NotifyReload services,
-                    // defer the READY=1 wait to a background thread so the
-                    // calling thread (in the activation thread pool) releases
-                    // the RuntimeInfo read lock immediately.  The global
-                    // notification handler will process READY=1 and set
-                    // signaled_ready; a background thread polls for it.
-                    // Defer the blocking start wait to a background thread for
-                    // every activation whose caller completes the unit
-                    // asynchronously (any non-`NonBlocking` source that spawns
-                    // the deferred handler: the normal thread-pool path via
-                    // `DeferNotifyWait`, and socket/trigger activation).  Holding
-                    // the RuntimeInfo read lock across the wait — whether for
-                    // Type=notify (READY=1) or Type=oneshot (process exit) —
-                    // starves control-socket writers such as `systemctl
-                    // daemon-reload` behind glibc's writer-preferring rwlock, so
-                    // a single hung service (e.g. a socket-activated notify
-                    // daemon, or `linger-users` whose `loginctl` blocks on
-                    // logind) can wedge the whole manager.  The background
-                    // handler polls signaled_ready / main_exit_status via
-                    // `try_read` and never starves writers; the service exit
-                    // handler and the periodic goal re-drive dispatch the
-                    // before-chain once the unit completes.
-                    let defer_wait = if crate::config::in_initrd() {
-                        // In the initrd, only the original narrow notify
-                        // deferral applies.  Deferring boot-critical initrd
-                        // oneshots (e.g. initrd-nixos-activation, which creates
-                        // /run/current-system before switch-root) races the
-                        // switch-root execve that tears the initrd manager down,
-                        // and the initrd has no control-socket writer to starve.
-                        matches!(source, ActivationSource::DeferNotifyWait)
-                            && matches!(
-                                conf.srcv_type,
-                                ServiceType::Notify | ServiceType::NotifyReload
-                            )
-                    } else {
-                        // In stage-2, defer every blocking wait for any
-                        // async-completing source so the calling thread never
-                        // holds the RuntimeInfo read lock across the wait and
-                        // cannot starve control-socket writers such as
-                        // `systemctl daemon-reload`.  This covers every service
-                        // type with a blocking start wait: notify (READY=1),
-                        // oneshot/forking (main process exit), dbus (bus name
-                        // appearing) and exec (exec confirmation window).
-                        // Simple/Idle have no wait and need no deferral.
-                        // Type=exec is excluded: its wait is a bounded ~500ms
-                        // exec-confirmation poll (fork_parent), so it cannot
-                        // wedge the manager, and keeping it inline preserves the
-                        // synchronous exec()-failure detection that
-                        // `systemctl start`/`systemd-run` rely on to report a
-                        // failed User=/binary.  The writer-pending gate already
-                        // prevents its brief read-lock hold from starving
-                        // daemon-reload.
-                        matches!(
-                            source,
-                            ActivationSource::DeferNotifyWait
-                                | ActivationSource::SocketActivation
-                                | ActivationSource::TriggerActivation
-                        ) && matches!(
+                // DeferNotifyWait: for Type=notify/NotifyReload services,
+                // defer the READY=1 wait to a background thread so the
+                // calling thread (in the activation thread pool) releases
+                // the RuntimeInfo read lock immediately.  The global
+                // notification handler will process READY=1 and set
+                // signaled_ready; a background thread polls for it.
+                // Defer the blocking start wait to a background thread for
+                // every activation whose caller completes the unit
+                // asynchronously (any non-`NonBlocking` source that spawns
+                // the deferred handler: the normal thread-pool path via
+                // `DeferNotifyWait`, and socket/trigger activation).  Holding
+                // the RuntimeInfo read lock across the wait — whether for
+                // Type=notify (READY=1) or Type=oneshot (process exit) —
+                // starves control-socket writers such as `systemctl
+                // daemon-reload` behind glibc's writer-preferring rwlock, so
+                // a single hung service (e.g. a socket-activated notify
+                // daemon, or `linger-users` whose `loginctl` blocks on
+                // logind) can wedge the whole manager.  The background
+                // handler polls signaled_ready / main_exit_status via
+                // `try_read` and never starves writers; the service exit
+                // handler and the periodic goal re-drive dispatch the
+                // before-chain once the unit completes.
+                let defer_wait = if crate::config::in_initrd() {
+                    // In the initrd, only the original narrow notify
+                    // deferral applies.  Deferring boot-critical initrd
+                    // oneshots (e.g. initrd-nixos-activation, which creates
+                    // /run/current-system before switch-root) races the
+                    // switch-root execve that tears the initrd manager down,
+                    // and the initrd has no control-socket writer to starve.
+                    matches!(source, ActivationSource::DeferNotifyWait)
+                        && matches!(
                             conf.srcv_type,
-                            ServiceType::Notify
-                                | ServiceType::NotifyReload
-                                | ServiceType::OneShot
-                                | ServiceType::Forking
-                                | ServiceType::Dbus
+                            ServiceType::Notify | ServiceType::NotifyReload
                         )
-                    };
-                    if defer_wait {
-                        return Ok(Some(StartResult::DeferredNotifyWait));
-                    }
-                    super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
-                        |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
-                            Ok(()) => ServiceErrorReason::StartFailed(start_err),
-                            Err(poststop_err) => {
-                                ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
-                            }
-                        },
-                    )?;
+                } else {
+                    // In stage-2, defer every blocking wait for any
+                    // async-completing source so the calling thread never
+                    // holds the RuntimeInfo read lock across the wait and
+                    // cannot starve control-socket writers such as
+                    // `systemctl daemon-reload`.  This covers every service
+                    // type with a blocking start wait: notify (READY=1),
+                    // oneshot/forking (main process exit), dbus (bus name
+                    // appearing) and exec (exec confirmation window).
+                    // Simple/Idle have no wait and need no deferral.
+                    // Type=exec is excluded: its wait is a bounded ~500ms
+                    // exec-confirmation poll (fork_parent), so it cannot
+                    // wedge the manager, and keeping it inline preserves the
+                    // synchronous exec()-failure detection that
+                    // `systemctl start`/`systemd-run` rely on to report a
+                    // failed User=/binary.  The writer-pending gate already
+                    // prevents its brief read-lock hold from starving
+                    // daemon-reload.
+                    matches!(
+                        source,
+                        ActivationSource::DeferNotifyWait
+                            | ActivationSource::SocketActivation
+                            | ActivationSource::TriggerActivation
+                    ) && matches!(
+                        conf.srcv_type,
+                        ServiceType::Notify
+                            | ServiceType::NotifyReload
+                            | ServiceType::OneShot
+                            | ServiceType::Forking
+                            | ServiceType::Dbus
+                    )
+                };
+                if defer_wait {
+                    return Ok(Some(StartResult::DeferredNotifyWait));
                 }
+                super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
+                    |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
+                        Ok(()) => ServiceErrorReason::StartFailed(start_err),
+                        Err(poststop_err) => {
+                            ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
+                        }
+                    },
+                )?;
             }
+        }
         Ok(None)
     }
 
@@ -1331,9 +1331,9 @@ impl Service {
         // run_poststop). Only set when a main actually ran and exited.
         if let Some(term) = self.main_exit_termination {
             let is_success = conf.success_exit_status.is_success(&term);
-            self.stop_result_env = Some(
-                crate::services::service_exit_handler::build_monitor_env(name, &term, is_success),
-            );
+            self.stop_result_env = Some(crate::services::service_exit_handler::build_monitor_env(
+                name, &term, is_success,
+            ));
         }
         self.run_stop_cmd(conf, id, name, run_info)
     }
@@ -1469,9 +1469,10 @@ impl Service {
                 );
                 match self.run_poststop(conf, id.clone(), name, run_info) {
                     Ok(()) => Err(ServiceErrorReason::StopFailed(stop_err)),
-                    Err(poststop_err) => {
-                        Err(ServiceErrorReason::StopAndPoststopFailed(stop_err, poststop_err))
-                    }
+                    Err(poststop_err) => Err(ServiceErrorReason::StopAndPoststopFailed(
+                        stop_err,
+                        poststop_err,
+                    )),
                 }
             }
         };
@@ -1624,14 +1625,18 @@ impl Service {
         // closed `accepted_fd` (see start_service.rs), so they fall back to the
         // capture pipe here; routing those to the socket too would require
         // keeping the fd open past the fork, which no current test needs.
-        let stdout = if self.stdout_socket && let Some(fd) = self.accepted_fd {
+        let stdout = if self.stdout_socket
+            && let Some(fd) = self.accepted_fd
+        {
             dup_to_stdio(fd)
         } else if let Some(stdio) = &self.stdout {
             dup_to_stdio(stdio.write_fd())
         } else {
             Stdio::piped()
         };
-        let stderr = if self.stderr_socket && let Some(fd) = self.accepted_fd {
+        let stderr = if self.stderr_socket
+            && let Some(fd) = self.accepted_fd
+        {
             dup_to_stdio(fd)
         } else if let Some(stdio) = &self.stderr {
             dup_to_stdio(stdio.write_fd())
@@ -1796,7 +1801,9 @@ impl Service {
             Ok(mut child) => {
                 trace!("Wait for {cmdline:?} for service: {name}");
                 let wait_result: Result<(), RunCmdError> = match wait_for_helper_child(
-                    &child, &run_info.pid_table, timeout,
+                    &child,
+                    &run_info.pid_table,
+                    timeout,
                 ) {
                     WaitResult::InTime(Err(e)) => {
                         return Err(RunCmdError::WaitError(cmdline.to_string(), format!("{e}")));
@@ -2060,9 +2067,9 @@ impl Service {
         // main actually ran and exited — a start-phase failure leaves it unset.
         if let Some(term) = self.main_exit_termination {
             let is_success = conf.success_exit_status.is_success(&term);
-            self.stop_result_env = Some(
-                crate::services::service_exit_handler::build_monitor_env(name, &term, is_success),
-            );
+            self.stop_result_env = Some(crate::services::service_exit_handler::build_monitor_env(
+                name, &term, is_success,
+            ));
         }
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stoppost.clone();

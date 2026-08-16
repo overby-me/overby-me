@@ -42,7 +42,9 @@ error NoEntries()
 /// Whether we were invoked as a Varlink service (a connected socket passed on
 /// fd 3 via LISTEN_FDS, per the systemd socket-activation convention).
 pub fn invoked_as_varlink() -> bool {
-    let listen_pid: Option<i32> = std::env::var("LISTEN_PID").ok().and_then(|s| s.parse().ok());
+    let listen_pid: Option<i32> = std::env::var("LISTEN_PID")
+        .ok()
+        .and_then(|s| s.parse().ok());
     if listen_pid != Some(std::process::id() as i32) {
         return false;
     }
@@ -157,7 +159,9 @@ fn get_entries(stream: &UnixStream, req: &serde_json::Value) -> std::io::Result<
     };
 
     // priority: a log level 0..=7 (over that is an invalid parameter).
-    let priority = params.and_then(|p| p.get("priority")).and_then(|v| v.as_i64());
+    let priority = params
+        .and_then(|p| p.get("priority"))
+        .and_then(|v| v.as_i64());
     if let Some(pri) = priority
         && !(0..=7).contains(&pri)
     {
@@ -168,7 +172,11 @@ fn get_entries(stream: &UnixStream, req: &serde_json::Value) -> std::io::Result<
         params
             .and_then(|p| p.get(key))
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default()
     };
     let units = str_array("units");

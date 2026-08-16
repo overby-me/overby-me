@@ -1206,7 +1206,11 @@ fn detect_deferred_kind(ri: &RuntimeInfo, id: &UnitId) -> (bool, bool, bool) {
     {
         svc.conf.srcv_type == crate::units::ServiceType::OneShot
             && svc.conf.exec.len() > 1
-            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+            && unit
+                .common
+                .main_pid
+                .load(std::sync::atomic::Ordering::Acquire)
+                == 0
     } else {
         false
     };
@@ -1214,7 +1218,11 @@ fn detect_deferred_kind(ri: &RuntimeInfo, id: &UnitId) -> (bool, bool, bool) {
         && let Specific::Service(svc) = &unit.specific
     {
         (!svc.conf.exec_condition.is_empty() || !svc.conf.startpre.is_empty())
-            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+            && unit
+                .common
+                .main_pid
+                .load(std::sync::atomic::Ordering::Acquire)
+                == 0
     } else {
         false
     };
@@ -1646,8 +1654,13 @@ pub fn drive_run_queue(run_info: &ArcMutRuntimeInfo) {
     // parked-start continuation expects; the job graph hands an empty
     // before-chain, so `filter` only scopes readiness for a continuation that
     // will not dispatch dependents anyway.
-    let filter: Arc<Vec<UnitId>> =
-        Arc::new(jobs.lock().unwrap().iter().map(|j| j.unit.clone()).collect());
+    let filter: Arc<Vec<UnitId>> = Arc::new(
+        jobs.lock()
+            .unwrap()
+            .iter()
+            .map(|j| j.unit.clone())
+            .collect(),
+    );
     let errors: Arc<Mutex<Vec<UnitOperationError>>> = Arc::new(Mutex::new(Vec::new()));
     let pool = JOB_GRAPH_POOL.get_or_init(|| ThreadPool::new(32));
     loop {
@@ -1895,7 +1908,11 @@ pub fn activate_needed_units_via_job_graph(
         // Quiet on a healthy boot (drains before tick 50).
         if tick >= 50 && tick.is_multiple_of(25) {
             let status_tag = |ri: &RuntimeInfo, u: &UnitId| -> &'static str {
-                match ri.unit_table.get(u).map(|x| x.common.status.read_poisoned().clone()) {
+                match ri
+                    .unit_table
+                    .get(u)
+                    .map(|x| x.common.status.read_poisoned().clone())
+                {
                     None => "gone",
                     Some(UnitStatus::NeverStarted) => "NS",
                     Some(UnitStatus::Starting) => "ing",
@@ -1952,8 +1969,10 @@ pub fn activate_needed_units_via_job_graph(
                         pending.push(format!("{}={:?}", j.unit.name, j.state));
                     }
                 }
-                let failed: Vec<String> =
-                    failed.into_iter().map(|(n, r)| format!("{n}: {r}")).collect();
+                let failed: Vec<String> = failed
+                    .into_iter()
+                    .map(|(n, r)| format!("{n}: {r}"))
+                    .collect();
                 (pending, ready_stuck, failed)
             };
             for f in &failed {
@@ -2314,7 +2333,11 @@ pub(crate) fn oneshot_chain_child_exited(
 ) -> OneshotStepOutcome {
     // A preliminary ExecStart= that fails must abort the rest of the
     // oneshot, exactly as Service::run_cmd does for the inline path.
-    if termination.success() || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus) {
+    if termination.success()
+        || cmd
+            .prefixes
+            .contains(&crate::units::CommandlinePrefix::Minus)
+    {
         return oneshot_chain_step(chain, run_info);
     }
     match oneshot_chain_fail(
@@ -2465,8 +2488,7 @@ pub(crate) fn service_start_chain_step(
                     let timeout = st.srvc.get_start_timeout(&svc.conf);
                     // The helper must see the service's filesystem view
                     // (BindPaths=, PrivateTmp=), like the inline phases.
-                    st.srvc.helper_mount_ns =
-                        crate::services::helper_mount_ns_from_conf(&svc.conf);
+                    st.srvc.helper_mount_ns = crate::services::helper_mount_ns_from_conf(&svc.conf);
                     let res = st.srvc.spawn_helper_child(
                         &cmd,
                         chain.id.clone(),
@@ -2532,10 +2554,7 @@ pub(crate) fn service_start_chain_step(
                         });
                         // Route through the chain's own poststop phase so
                         // ExecStopPost= runs before the failure finalizes.
-                        chain_error_to_poststop(
-                            chain,
-                            "main ExecStart dispatch failed".to_owned(),
-                        );
+                        chain_error_to_poststop(chain, "main ExecStart dispatch failed".to_owned());
                     }
                 }
             }
@@ -2560,17 +2579,18 @@ pub(crate) fn service_start_chain_child_exited(
             && let Specific::Service(svc) = &unit.specific
         {
             let status = unit.common.status.read_poisoned().clone();
-            svc.state.write_poisoned().srvc.drain_helper_output_nonblocking(
-                &mut child,
-                &chain.id.name,
-                &status,
-            );
+            svc.state
+                .write_poisoned()
+                .srvc
+                .drain_helper_output_nonblocking(&mut child, &chain.id.name, &status);
         }
     }
     drop(child);
 
     let ok = termination.success()
-        || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus);
+        || cmd
+            .prefixes
+            .contains(&crate::units::CommandlinePrefix::Minus);
     match &chain.phase {
         StartChainPhase::Condition(_) => {
             if ok {
@@ -2689,8 +2709,7 @@ fn apply_condition_skip(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
             if let Some(sock_unit) = ri.unit_table.get(socket_id)
                 && let Specific::Socket(sock) = &sock_unit.specific
             {
-                if sock.state.read_poisoned().result
-                    == crate::units::SocketResult::TriggerLimitHit
+                if sock.state.read_poisoned().result == crate::units::SocketResult::TriggerLimitHit
                 {
                     continue;
                 }
@@ -2716,8 +2735,7 @@ pub(crate) fn apply_waiting_for_socket(id: &UnitId, run_info: &ArcMutRuntimeInfo
     {
         let mut status = unit.common.status.write_poisoned();
         if matches!(&*status, UnitStatus::Starting) {
-            *status =
-                UnitStatus::Started(crate::units::StatusStarted::WaitingForSocket);
+            *status = UnitStatus::Started(crate::units::StatusStarted::WaitingForSocket);
         }
     }
     if let Specific::Service(svc) = &unit.specific {
@@ -2725,8 +2743,7 @@ pub(crate) fn apply_waiting_for_socket(id: &UnitId, run_info: &ArcMutRuntimeInfo
             if let Some(sock_unit) = ri.unit_table.get(socket_id)
                 && let Specific::Socket(sock) = &sock_unit.specific
             {
-                if sock.state.read_poisoned().result
-                    == crate::units::SocketResult::TriggerLimitHit
+                if sock.state.read_poisoned().result == crate::units::SocketResult::TriggerLimitHit
                 {
                     continue;
                 }
@@ -2778,9 +2795,7 @@ pub(crate) fn fail_deferred_start(
                 // steps still own the unit.
                 Specific::Service(svc) if !svc.conf.stoppost.is_empty() => {
                     let mut state = svc.state.write_poisoned();
-                    state
-                        .srvc
-                        .kill_all_remaining_processes(&svc.conf, &id.name);
+                    state.srvc.kill_all_remaining_processes(&svc.conf, &id.name);
                     state.srvc.pid = None;
                     state.srvc.process_group = None;
                     true
@@ -2870,7 +2885,10 @@ pub struct StartWaitSetup {
 /// One brief guard: bail out if the unit is gone or (when requested) no
 /// longer Starting, wake the notification reader so it collects the new
 /// service's socket, and copy out the type-relevant config.
-pub(crate) fn start_wait_setup(params: &StartWaitParams, run_info: &ArcMutRuntimeInfo) -> Option<StartWaitSetup> {
+pub(crate) fn start_wait_setup(
+    params: &StartWaitParams,
+    run_info: &ArcMutRuntimeInfo,
+) -> Option<StartWaitSetup> {
     let ri = dispatcher_read(run_info);
     let unit = ri.unit_table.get(&params.id)?;
     if params.check_starting
@@ -3054,9 +3072,7 @@ pub(crate) fn evaluate_start_wait(
             if state.srvc.signaled_ready || state.srvc.reloading {
                 StartWaitVerdict::Ready
             } else if state.srvc.main_exit_status.is_some() {
-                StartWaitVerdict::Fail(
-                    "Service exited before sending READY=1".to_owned(),
-                )
+                StartWaitVerdict::Fail("Service exited before sending READY=1".to_owned())
             } else {
                 StartWaitVerdict::Pending
             }

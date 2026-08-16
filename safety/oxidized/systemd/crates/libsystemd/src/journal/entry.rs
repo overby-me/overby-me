@@ -512,7 +512,10 @@ pub fn from_export_format<R: BufRead>(reader: &mut R) -> io::Result<Option<Journ
             // take()+read_to_end grows the buffer only as the data actually
             // arrives, matching how C systemd-journal-remote reads incrementally.
             let mut data = Vec::new();
-            let got = reader.by_ref().take(data_len as u64).read_to_end(&mut data)?;
+            let got = reader
+                .by_ref()
+                .take(data_len as u64)
+                .read_to_end(&mut data)?;
             if got != data_len {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,

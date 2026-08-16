@@ -310,7 +310,10 @@ pub fn run_service_manager() {
         // run-queue drive (bounded-pool activation, writer-yielding reads)
         // instead of the fixpoint sweep. The graph's requeue replaces the
         // active-goal redrive.
-        kmsg(&format!("activating target {} via job graph", target_id.name));
+        kmsg(&format!(
+            "activating target {} via job graph",
+            target_id.name
+        ));
         let _ = in_initrd;
         units::activate_needed_units_via_job_graph(target_id, run_info);
     } else {
@@ -1278,9 +1281,7 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
         stderr_eventfd: platform::make_event_fd().unwrap(),
         notification_eventfd: platform::make_event_fd().unwrap(),
         socket_activation_eventfd: platform::make_event_fd().unwrap(),
-        jobs: std::sync::Arc::new(std::sync::Mutex::new(
-            crate::units::jobs::JobRegistry::new(),
-        )),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(crate::units::jobs::JobRegistry::new())),
         dispatcher: super::dispatcher::DispatcherHandle::new(),
         manager_environment: {
             let mut env = std::collections::HashMap::new();
@@ -1393,7 +1394,9 @@ struct CliArgs {
 /// transient scopes are); it is active because PID 1 is in it, not because the
 /// manager started it. Gated on SYSTEMD_RS_INIT_SCOPE=1 (task #12 slice B).
 #[cfg(target_os = "linux")]
-fn register_init_scope_unit(unit_table: &mut std::collections::HashMap<units::UnitId, units::Unit>) {
+fn register_init_scope_unit(
+    unit_table: &mut std::collections::HashMap<units::UnitId, units::Unit>,
+) {
     if std::env::var("SYSTEMD_RS_INIT_SCOPE").as_deref() != Ok("1") {
         return;
     }
@@ -1405,10 +1408,9 @@ fn register_init_scope_unit(unit_table: &mut std::collections::HashMap<units::Un
     let Ok(parsed) = units::parse_file(content) else {
         return;
     };
-    let Ok(pconf) = units::parse_service(
-        parsed,
-        &std::path::PathBuf::from("/run/systemd/init.scope"),
-    ) else {
+    let Ok(pconf) =
+        units::parse_service(parsed, &std::path::PathBuf::from("/run/systemd/init.scope"))
+    else {
         return;
     };
     let Ok(mut unit) = units::from_parsed_config::unit_from_parsed_service(pconf) else {

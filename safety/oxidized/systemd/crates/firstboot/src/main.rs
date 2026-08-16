@@ -692,7 +692,6 @@ fn copy_root_shell_from_host(settings: &mut Settings) {
     }
 }
 
-
 fn read_root_shell(path: &str) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
     for line in content.lines() {
@@ -1319,7 +1318,9 @@ fn ensure_root_shadow_locked(root: &Path) -> io::Result<()> {
         .as_secs()
         / 86400;
     let mut lines: Vec<String> = existing.lines().map(|l| l.to_string()).collect();
-    lines.push(format!("root:{PASSWORD_LOCKED_AND_INVALID}:{days}:0:99999:7:::"));
+    lines.push(format!(
+        "root:{PASSWORD_LOCKED_AND_INVALID}:{days}:0:99999:7:::"
+    ));
     fs::write(&shadow_path, lines.join("\n") + "\n")?;
     #[cfg(target_os = "linux")]
     {
@@ -1585,14 +1586,17 @@ fn run(argv: &[String]) -> Result<(), String> {
     // message is not printed after a copy actually happened.
     let mut any_copied = false;
     if args.copy_locale {
-        if copy_host_file_verbatim(root, "etc/locale.conf", args.force).map_err(|e| e.to_string())? {
+        if copy_host_file_verbatim(root, "etc/locale.conf", args.force)
+            .map_err(|e| e.to_string())?
+        {
             any_copied = true;
         } else {
             copy_locale_from_host(&mut settings);
         }
     }
     if args.copy_keymap {
-        if copy_host_file_verbatim(root, "etc/vconsole.conf", args.force).map_err(|e| e.to_string())?
+        if copy_host_file_verbatim(root, "etc/vconsole.conf", args.force)
+            .map_err(|e| e.to_string())?
         {
             any_copied = true;
         } else {
@@ -1693,8 +1697,7 @@ fn run(argv: &[String]) -> Result<(), String> {
         && !args.delete_root_password
         && should_configure_root(root, args.force)
     {
-        write_root_passwd_entry(root, settings.root_shell.as_deref())
-            .map_err(|e| e.to_string())?;
+        write_root_passwd_entry(root, settings.root_shell.as_deref()).map_err(|e| e.to_string())?;
         ensure_root_shadow_locked(root).map_err(|e| e.to_string())?;
         any_applied = true;
     }

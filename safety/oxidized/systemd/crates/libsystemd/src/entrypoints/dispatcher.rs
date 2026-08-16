@@ -282,7 +282,12 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
             // change to the min) whenever nothing is enqueued, i.e. always with
             // the flag off.
             let job_deadline = if crate::units::jobs::job_graph_enabled() {
-                run_info.read_poisoned().jobs.lock().unwrap().next_deadline()
+                run_info
+                    .read_poisoned()
+                    .jobs
+                    .lock()
+                    .unwrap()
+                    .next_deadline()
             } else {
                 None
             };
@@ -406,11 +411,8 @@ fn dispatch_one(
             // elapsed) start deadline.
             if let Some(mut wait) = start_waits.remove(&unit) {
                 if wait.term_sent_at.is_none() {
-                    let refreshed = crate::units::effective_start_deadline(
-                        &unit,
-                        wait.base_deadline,
-                        run_info,
-                    );
+                    let refreshed =
+                        crate::units::effective_start_deadline(&unit, wait.base_deadline, run_info);
                     // An extension only ever pushes the deadline out.
                     wait.armed_deadline = match (wait.armed_deadline, refreshed) {
                         (Some(current), Some(new)) => Some(current.max(new)),
@@ -680,9 +682,7 @@ fn spawn_start_finisher_parts(
     let spawned = std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
-            crate::units::finish_deferred_start(
-                &id, &name, next, filter, run_info, errors, source,
-            );
+            crate::units::finish_deferred_start(&id, &name, next, filter, run_info, errors, source);
         });
     if let Err(e) = spawned {
         log::error!("failed to spawn start finisher for {log_name}: {e}");
@@ -692,34 +692,32 @@ fn spawn_start_finisher_parts(
 /// One watcher thread per Type=dbus start: runs the existing blocking bus
 /// name wait and reports the outcome as an event. A NameOwnerChanged
 /// subscription can replace this without changing the event contract.
-fn spawn_dbus_name_watcher(
-    unit: UnitId,
-    bus_name: String,
-    timeout: Option<std::time::Duration>,
-) {
+fn spawn_dbus_name_watcher(unit: UnitId, bus_name: String, timeout: Option<std::time::Duration>) {
     let thread_name = format!("dbus-wait-{}", unit.name);
-    let spawned = std::thread::Builder::new().name(thread_name).spawn(move || {
-        let event = match crate::dbus_wait::wait_for_name_system_bus(&bus_name, timeout) {
-            Ok(crate::dbus_wait::WaitResult::Ok) => Event::DbusNameResult {
-                unit,
-                ok: true,
-                message: String::new(),
-            },
-            Ok(crate::dbus_wait::WaitResult::Timedout) => Event::DbusNameResult {
-                unit,
-                ok: false,
-                message: format!("Timed out waiting for bus name {bus_name} ({timeout:?})"),
-            },
-            Err(e) => Event::DbusNameResult {
-                unit,
-                ok: false,
-                message: format!("Error waiting for bus name {bus_name}: {e}"),
-            },
-        };
-        if let Some(handle) = global() {
-            handle.send_normal(event);
-        }
-    });
+    let spawned = std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            let event = match crate::dbus_wait::wait_for_name_system_bus(&bus_name, timeout) {
+                Ok(crate::dbus_wait::WaitResult::Ok) => Event::DbusNameResult {
+                    unit,
+                    ok: true,
+                    message: String::new(),
+                },
+                Ok(crate::dbus_wait::WaitResult::Timedout) => Event::DbusNameResult {
+                    unit,
+                    ok: false,
+                    message: format!("Timed out waiting for bus name {bus_name} ({timeout:?})"),
+                },
+                Err(e) => Event::DbusNameResult {
+                    unit,
+                    ok: false,
+                    message: format!("Error waiting for bus name {bus_name}: {e}"),
+                },
+            };
+            if let Some(handle) = global() {
+                handle.send_normal(event);
+            }
+        });
     if let Err(e) = spawned {
         log::error!("failed to spawn dbus name watcher: {e}");
     }
@@ -836,8 +834,7 @@ fn expire_due_start_waits(
                     // flight. Re-evaluate now (a notify main-exit resolves to
                     // the protocol failure immediately) and otherwise give the
                     // events a short window instead of failing blind.
-                    wait.armed_deadline =
-                        Some(now + std::time::Duration::from_millis(500));
+                    wait.armed_deadline = Some(now + std::time::Duration::from_millis(500));
                     progress_start_wait(wait, false, run_info, chains, start_waits);
                     continue;
                 }
@@ -921,7 +918,11 @@ fn expire_due_chains(
             continue;
         };
         match pending.kind {
-            PendingHelper::Oneshot { chain, cmd, timeout } => {
+            PendingHelper::Oneshot {
+                chain,
+                cmd,
+                timeout,
+            } => {
                 let outcome = crate::units::oneshot_chain_timed_out(
                     &chain,
                     &cmd,
@@ -1000,8 +1001,7 @@ fn begin_stop_tree(
     {
         let ri = crate::units::dispatcher_read(run_info);
         let mut queue = std::collections::VecDeque::from([root.clone()]);
-        let mut visited: std::collections::HashSet<UnitId> =
-            std::collections::HashSet::new();
+        let mut visited: std::collections::HashSet<UnitId> = std::collections::HashSet::new();
         while let Some(id) = queue.pop_front() {
             if !visited.insert(id.clone()) {
                 continue;
@@ -1011,8 +1011,7 @@ fn begin_stop_tree(
             };
             let already_stopped = matches!(
                 &*unit.common.status.read_poisoned(),
-                crate::units::UnitStatus::Stopped(..)
-                    | crate::units::UnitStatus::NeverStarted
+                crate::units::UnitStatus::Stopped(..) | crate::units::UnitStatus::NeverStarted
             );
             if already_stopped {
                 continue;

@@ -529,7 +529,12 @@ mod tests {
         }
     }
 
-    fn create(reg: &mut JobRegistry, name: &str, kind: JobKind, mode: JobMode) -> Result<u32, String> {
+    fn create(
+        reg: &mut JobRegistry,
+        name: &str,
+        kind: JobKind,
+        mode: JobMode,
+    ) -> Result<u32, String> {
         reg.create(uid(name), kind, ActivationSource::Regular, mode)
     }
 
@@ -571,7 +576,10 @@ mod tests {
         create(&mut reg, "a.service", JobKind::Start, JobMode::Replace).unwrap();
         let err = create(&mut reg, "a.service", JobKind::Stop, JobMode::Fail).unwrap_err();
         assert!(err.contains("destructive"), "unexpected error: {err}");
-        assert_eq!(reg.job_for_unit(&uid("a.service")).unwrap().kind, JobKind::Start);
+        assert_eq!(
+            reg.job_for_unit(&uid("a.service")).unwrap().kind,
+            JobKind::Start
+        );
     }
 
     #[test]
@@ -715,7 +723,10 @@ mod tests {
         assert_eq!(first, vec![a]);
         // Already queued: a second finish of the same dep must not re-report it.
         let second = reg.requeue_after_finish(&uid("x.service"), &neighbours, |_| true);
-        assert!(second.is_empty(), "an already-queued job is not woken again");
+        assert!(
+            second.is_empty(),
+            "an already-queued job is not woken again"
+        );
         assert_eq!(reg.pop_ready(), Some(a));
         assert_eq!(reg.pop_ready(), None);
     }
@@ -769,7 +780,10 @@ mod tests {
         let woken = reg.requeue_after_finish(&uid("m1.service"), &ordered_after, |v| {
             ready_with(&finished, v)
         });
-        assert!(woken.is_empty(), "target must not wake on a partial member set");
+        assert!(
+            woken.is_empty(),
+            "target must not wake on a partial member set"
+        );
 
         // m2 finishes: the target is now ready and must be enqueued.
         reg.finish(m2, JobResult::Done);
@@ -907,7 +921,10 @@ mod tests {
         let expired = reg.pop_expired(base + Duration::from_millis(100));
         assert_eq!(expired, vec![a, b]);
         // Cleared on report: a second pop at the same instant finds nothing new.
-        assert!(reg.pop_expired(base + Duration::from_millis(100)).is_empty());
+        assert!(
+            reg.pop_expired(base + Duration::from_millis(100))
+                .is_empty()
+        );
         // c's deadline stands and is now the earliest.
         assert_eq!(reg.next_deadline(), Some(base + Duration::from_secs(3600)));
     }

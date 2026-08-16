@@ -1213,7 +1213,9 @@ fn process_unit_credentials(dest: &Path) {
                 continue;
             }
             if dropin.is_empty() {
-                warn!("generators: empty drop-in name for '{unit}' in credential '{name}', ignoring");
+                warn!(
+                    "generators: empty drop-in name for '{unit}' in credential '{name}', ignoring"
+                );
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(entry.path()) else {
@@ -1229,7 +1231,9 @@ fn process_unit_credentials(dest: &Path) {
             if let Err(e) = std::fs::write(&path, content) {
                 warn!("generators: could not write drop-in {path:?} from credential '{name}': {e}");
             } else {
-                debug!("generators: wrote drop-in '{dropin}' for unit '{unit}' from credential '{name}'");
+                debug!(
+                    "generators: wrote drop-in '{dropin}' for unit '{unit}' from credential '{name}'"
+                );
             }
         }
     }
@@ -1240,11 +1244,7 @@ fn process_unit_credentials(dest: &Path) {
 /// Guards against a credential steering writes outside the generator
 /// directory; the full unit-name grammar is enforced later by the parser.
 fn credential_unit_name_is_valid(unit: &str) -> bool {
-    !unit.is_empty()
-        && !unit.contains('/')
-        && unit != "."
-        && unit != ".."
-        && unit.contains('.')
+    !unit.is_empty() && !unit.contains('/') && unit != "." && unit != ".." && unit.contains('.')
 }
 
 #[cfg(test)]
@@ -1278,7 +1278,11 @@ mod credential_unit_tests {
         )
         .unwrap();
         // The `~` suffix picks the drop-in file name.
-        std::fs::write(creds.join("systemd.unit-dropin.foo.service~10-my"), "[Service]\n").unwrap();
+        std::fs::write(
+            creds.join("systemd.unit-dropin.foo.service~10-my"),
+            "[Service]\n",
+        )
+        .unwrap();
         std::fs::write(creds.join("systemd.extra-unit.bar.service"), "[Service]\n").unwrap();
         // Neither prefix: must be ignored entirely.
         std::fs::write(creds.join("unrelated.cred"), "nope").unwrap();
@@ -1288,9 +1292,14 @@ mod credential_unit_tests {
         unsafe { std::env::remove_var("CREDENTIALS_DIRECTORY") };
 
         let dropin = dest.join("init.scope.d/50-credential.conf");
-        assert!(dropin.is_file(), "default drop-in name should be 50-credential");
         assert!(
-            std::fs::read_to_string(&dropin).unwrap().contains("MemoryHigh=infinity"),
+            dropin.is_file(),
+            "default drop-in name should be 50-credential"
+        );
+        assert!(
+            std::fs::read_to_string(&dropin)
+                .unwrap()
+                .contains("MemoryHigh=infinity"),
             "drop-in content should be the credential's content"
         );
         assert!(dest.join("foo.service.d/10-my.conf").is_file());

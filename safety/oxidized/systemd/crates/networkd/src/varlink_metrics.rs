@@ -32,13 +32,41 @@ error NoSuchMetric()
 
 /// Metric family (name suffix, description, type) for `Describe`.
 const FAMILIES: &[(&str, &str, &str)] = &[
-    ("AddressState", "Per interface metric: address state", "string"),
-    ("AdministrativeState", "Per interface metric: administrative state", "string"),
-    ("CarrierState", "Per interface metric: carrier state", "string"),
-    ("IPv4AddressState", "Per interface metric: IPv4 address state", "string"),
-    ("IPv6AddressState", "Per interface metric: IPv6 address state", "string"),
-    ("ManagedInterfaces", "Number of network interfaces managed by systemd-networkd", "gauge"),
-    ("OperationalState", "Per interface metric: operational state", "string"),
+    (
+        "AddressState",
+        "Per interface metric: address state",
+        "string",
+    ),
+    (
+        "AdministrativeState",
+        "Per interface metric: administrative state",
+        "string",
+    ),
+    (
+        "CarrierState",
+        "Per interface metric: carrier state",
+        "string",
+    ),
+    (
+        "IPv4AddressState",
+        "Per interface metric: IPv4 address state",
+        "string",
+    ),
+    (
+        "IPv6AddressState",
+        "Per interface metric: IPv6 address state",
+        "string",
+    ),
+    (
+        "ManagedInterfaces",
+        "Number of network interfaces managed by systemd-networkd",
+        "gauge",
+    ),
+    (
+        "OperationalState",
+        "Per interface metric: operational state",
+        "string",
+    ),
 ];
 
 /// Create the socket and spawn the accept loop. Best-effort: failures are
@@ -111,9 +139,7 @@ fn find_listen_fd() -> Option<i32> {
 fn fd_bound_to(fd: i32, path: &str) -> bool {
     let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t;
-    let rc = unsafe {
-        libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len)
-    };
+    let rc = unsafe { libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len) };
     if rc != 0 || addr.sun_family != libc::AF_UNIX as libc::sa_family_t {
         return false;
     }
@@ -205,7 +231,10 @@ fn dispatch(stream: &UnixStream, req: &serde_json::Value) -> bool {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if iface == "io.systemd.Metrics" {
-                send(stream, &serde_json::json!({ "parameters": { "description": METRICS_IDL } }))
+                send(
+                    stream,
+                    &serde_json::json!({ "parameters": { "description": METRICS_IDL } }),
+                )
             } else {
                 send(
                     stream,
@@ -230,11 +259,17 @@ fn dispatch(stream: &UnixStream, req: &serde_json::Value) -> bool {
 fn stream_replies(stream: &UnixStream, items: Vec<serde_json::Value>, more: bool) -> bool {
     if !more {
         // A plain call to a streaming method: return the first item (or empty).
-        let params = items.into_iter().next().unwrap_or_else(|| serde_json::json!({}));
+        let params = items
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| serde_json::json!({}));
         return send(stream, &serde_json::json!({ "parameters": params }));
     }
     if items.is_empty() {
-        return send(stream, &serde_json::json!({ "parameters": {}, "continues": false }));
+        return send(
+            stream,
+            &serde_json::json!({ "parameters": {}, "continues": false }),
+        );
     }
     let last = items.len() - 1;
     for (i, item) in items.into_iter().enumerate() {
@@ -289,14 +324,34 @@ fn build_list() -> Vec<serde_json::Value> {
         };
         out.push(metric("OperationalState", Some(i), serde_json::json!(oper)));
         out.push(metric("CarrierState", Some(i), serde_json::json!(carrier)));
-        out.push(metric("AdministrativeState", Some(i), serde_json::json!("configured")));
-        out.push(metric("AddressState", Some(i), serde_json::json!("routable")));
-        out.push(metric("IPv4AddressState", Some(i), serde_json::json!("routable")));
-        out.push(metric("IPv6AddressState", Some(i), serde_json::json!("routable")));
+        out.push(metric(
+            "AdministrativeState",
+            Some(i),
+            serde_json::json!("configured"),
+        ));
+        out.push(metric(
+            "AddressState",
+            Some(i),
+            serde_json::json!("routable"),
+        ));
+        out.push(metric(
+            "IPv4AddressState",
+            Some(i),
+            serde_json::json!("routable"),
+        ));
+        out.push(metric(
+            "IPv6AddressState",
+            Some(i),
+            serde_json::json!("routable"),
+        ));
     }
 
     // Global gauge: number of managed interfaces.
-    out.push(metric("ManagedInterfaces", None, serde_json::json!(ifaces.len())));
+    out.push(metric(
+        "ManagedInterfaces",
+        None,
+        serde_json::json!(ifaces.len()),
+    ));
     out
 }
 
@@ -368,7 +423,10 @@ mod tests {
         assert_eq!(r.len(), FAMILIES.len());
         assert_eq!(r.last().unwrap()["continues"], json!(false));
         assert_eq!(r[0]["continues"], json!(true));
-        assert_eq!(r[0]["parameters"]["name"], json!("io.systemd.Network.AddressState"));
+        assert_eq!(
+            r[0]["parameters"]["name"],
+            json!("io.systemd.Network.AddressState")
+        );
     }
 
     #[test]
@@ -413,16 +471,19 @@ mod tests {
         b.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         {
             let mut w = &b;
-            let mut m =
-                serde_json::to_vec(&json!({"method": "org.varlink.service.GetInfo", "parameters": {}}))
-                    .unwrap();
+            let mut m = serde_json::to_vec(
+                &json!({"method": "org.varlink.service.GetInfo", "parameters": {}}),
+            )
+            .unwrap();
             m.push(0);
             w.write_all(&m).unwrap();
         }
         b.shutdown(std::net::Shutdown::Write).unwrap();
         let mut reader = BufReader::new(&b);
         let mut buf = Vec::new();
-        let n = reader.read_until(0, &mut buf).expect("must read a reply, not EAGAIN");
+        let n = reader
+            .read_until(0, &mut buf)
+            .expect("must read a reply, not EAGAIN");
         assert!(n > 0, "server sent no response");
         if buf.last() == Some(&0) {
             buf.pop();
@@ -440,9 +501,14 @@ mod tests {
 
     #[test]
     fn list_streams_managed_interfaces_gauge() {
-        let r = roundtrip(&json!({"method": "io.systemd.Metrics.List", "parameters": {}, "more": true}));
+        let r = roundtrip(
+            &json!({"method": "io.systemd.Metrics.List", "parameters": {}, "more": true}),
+        );
         // At least the ManagedInterfaces gauge is always present.
-        assert!(r.iter().any(|m| m["parameters"]["name"] == "io.systemd.Network.ManagedInterfaces"));
+        assert!(
+            r.iter()
+                .any(|m| m["parameters"]["name"] == "io.systemd.Network.ManagedInterfaces")
+        );
         assert_eq!(r.last().unwrap()["continues"], json!(false));
     }
 }

@@ -158,7 +158,10 @@ fn readdir_sources(opts: &Options) -> Vec<Source> {
         if !test_service_matches(&opts.matches, &name) {
             continue;
         }
-        out.push(Source { name, path: ent.path() });
+        out.push(Source {
+            name,
+            path: ent.path(),
+        });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
@@ -242,7 +245,10 @@ fn metrics_call(source: &Source, method: &str) -> Vec<serde_json::Value> {
                 metrics.push(params.clone());
             }
         }
-        let continues = reply.get("continues").and_then(|v| v.as_bool()).unwrap_or(false);
+        let continues = reply
+            .get("continues")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !continues {
             break;
         }
@@ -255,7 +261,9 @@ fn metric_matches(matches: &[String], name: &str) -> bool {
     if matches.is_empty() {
         return true;
     }
-    matches.iter().any(|m| name == m || metric_startswith_prefix(name, m))
+    matches
+        .iter()
+        .any(|m| name == m || metric_startswith_prefix(name, m))
 }
 
 // ── Verbs ───────────────────────────────────────────────────────────────────
@@ -326,7 +334,12 @@ fn print_metrics_table(metrics: &[serde_json::Value], describe: bool, legend: bo
             println!("{:<40} {:<10} DESCRIPTION", "FAMILY", "TYPE");
         }
         for m in metrics {
-            println!("{:<40} {:<10} {}", field(m, "name"), field(m, "type"), field(m, "description"));
+            println!(
+                "{:<40} {:<10} {}",
+                field(m, "name"),
+                field(m, "type"),
+                field(m, "description")
+            );
         }
     } else {
         if legend {
@@ -361,7 +374,10 @@ fn verb_list_sources(opts: &Options) -> ExitCode {
                 })
             })
             .collect();
-        println!("{}", serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()));
+        println!(
+            "{}",
+            serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -507,7 +523,10 @@ fn parse_argv(args: &[String]) -> ParseOutcome {
     }
 
     // First positional is the verb; the rest are match args.
-    let verb_str = positionals.first().cloned().unwrap_or_else(|| "help".to_string());
+    let verb_str = positionals
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "help".to_string());
     let verb = match verb_str.as_str() {
         "help" => Verb::Help,
         "metrics" => Verb::Metrics,
@@ -594,7 +613,10 @@ mod tests {
     #[test]
     fn prefix_matching() {
         assert!(metric_startswith_prefix("io.systemd", "io"));
-        assert!(metric_startswith_prefix("io.systemd.Network.rx", "io.systemd.Network"));
+        assert!(metric_startswith_prefix(
+            "io.systemd.Network.rx",
+            "io.systemd.Network"
+        ));
         assert!(!metric_startswith_prefix("io", "io"));
         assert!(!metric_startswith_prefix("ioctl", "io"));
     }
@@ -603,15 +625,27 @@ mod tests {
     fn match_args_all_accepted() {
         // The specific args from the test must all be accepted (not errors).
         for m in ["io", "io.systemd", "piff"] {
-            assert!(metrics_name_valid(m) || interface_name_is_valid(m), "{m} rejected");
+            assert!(
+                metrics_name_valid(m) || interface_name_is_valid(m),
+                "{m} rejected"
+            );
         }
     }
 
     #[test]
     fn service_prefilter() {
         assert!(test_service_matches(&[], "io.systemd.Network"));
-        assert!(test_service_matches(&["io".to_string()], "io.systemd.Network"));
-        assert!(test_service_matches(&["io.systemd.Network.rx".to_string()], "io.systemd.Network"));
-        assert!(!test_service_matches(&["com.example".to_string()], "io.systemd.Network"));
+        assert!(test_service_matches(
+            &["io".to_string()],
+            "io.systemd.Network"
+        ));
+        assert!(test_service_matches(
+            &["io.systemd.Network.rx".to_string()],
+            "io.systemd.Network"
+        ));
+        assert!(!test_service_matches(
+            &["com.example".to_string()],
+            "io.systemd.Network"
+        ));
     }
 }

@@ -289,13 +289,11 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                             // datagram is applied before its ChildExit is
                             // processed. Ownership of the received fds
                             // transfers with the event.
-                            dispatcher.send_high(
-                                crate::entrypoints::dispatcher::Event::Notify {
-                                    unit: srvc_unit.id.clone(),
-                                    datagram: note_str.clone(),
-                                    received_fds,
-                                },
-                            );
+                            dispatcher.send_high(crate::entrypoints::dispatcher::Event::Notify {
+                                unit: srvc_unit.id.clone(),
+                                datagram: note_str.clone(),
+                                received_fds,
+                            });
                         }
                         Err(nix::errno::Errno::EAGAIN) => {
                             // No data available — normal for non-blocking.
@@ -355,13 +353,11 @@ pub(crate) fn drain_unit_notify_socket(unit_id: &UnitId, run_info: &ArcMutRuntim
             return;
         };
 
-        let old_flags = match nix::fcntl::fcntl(
-            unsafe { borrow_fd(fd) },
-            nix::fcntl::FcntlArg::F_GETFL,
-        ) {
-            Ok(f) => f,
-            Err(_) => return,
-        };
+        let old_flags =
+            match nix::fcntl::fcntl(unsafe { borrow_fd(fd) }, nix::fcntl::FcntlArg::F_GETFL) {
+                Ok(f) => f,
+                Err(_) => return,
+            };
         let mut nb = nix::fcntl::OFlag::from_bits_truncate(old_flags);
         nb.insert(nix::fcntl::OFlag::O_NONBLOCK);
         if nix::fcntl::fcntl(unsafe { borrow_fd(fd) }, nix::fcntl::FcntlArg::F_SETFL(nb)).is_err() {
@@ -402,7 +398,8 @@ pub(crate) fn drain_unit_notify_socket(unit_id: &UnitId, run_info: &ArcMutRuntim
                     }
                     let access =
                         crate::services::effective_notify_access(&mut_state.srvc, &srvc.conf);
-                    if !check_notify_access(access, sender_pid, &mut_state.srvc, &srvc_unit.id.name) {
+                    if !check_notify_access(access, sender_pid, &mut_state.srvc, &srvc_unit.id.name)
+                    {
                         continue;
                     }
                     let note = String::from_utf8_lossy(&buf[..bytes]).to_string();

@@ -926,15 +926,30 @@ mod tests {
         // A packet to ::1 loaded as four LE words must match ::1/128.
         let lo = ipv6_words_le(&std::net::Ipv6Addr::LOCALHOST.octets());
         assert!((0..4).all(|i| lo[i] & mask[i] == net[i]));
-        let other = ipv6_words_le(&"2001:db8::1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+        let other = ipv6_words_le(
+            &"2001:db8::1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
+        );
         assert!((0..4).any(|i| other[i] & mask[i] != net[i]));
 
         // fe80::/64 matches any fe80:: address on the high 64 bits only.
         let (n64, m64, l64) = parse_ipv6_cidr("fe80::/64").unwrap();
         assert_eq!(l64, 64);
-        let ll = ipv6_words_le(&"fe80::abcd:1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+        let ll = ipv6_words_le(
+            &"fe80::abcd:1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
+        );
         assert!((0..4).all(|i| ll[i] & m64[i] == n64[i]));
-        let g = ipv6_words_le(&"2001:db8::1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+        let g = ipv6_words_le(
+            &"2001:db8::1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
+        );
         assert!(g[0] & m64[0] != n64[0]);
 
         // Special names resolve to their IPv6 halves; bare IPv4 has no v6 prefix.

@@ -249,11 +249,7 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
                     if let Some(abort_timeout) = abort_timeout
                         && elapsed >= timeout + abort_timeout
                     {
-                        abort_kills.push((
-                            unit.id.name.clone(),
-                            effective_pid,
-                            srvc.process_group,
-                        ));
+                        abort_kills.push((unit.id.name.clone(), effective_pid, srvc.process_group));
                     }
                 } else {
                     // First expiry: send the configured WatchdogSignal= (SIGABRT).

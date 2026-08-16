@@ -154,9 +154,8 @@ pub fn getpwuid_r(uid: libc::uid_t) -> Result<PwEntry, String> {
         let mut buf = vec![0i8; buf_size];
         let mut result: *mut libc::passwd = std::ptr::null_mut();
 
-        let rc = unsafe {
-            libc::getpwuid_r(uid, &mut user, buf.as_mut_ptr(), buf_size, &mut result)
-        };
+        let rc =
+            unsafe { libc::getpwuid_r(uid, &mut user, buf.as_mut_ptr(), buf_size, &mut result) };
 
         if rc == libc::ERANGE {
             // Buffer too small, retry with a larger one

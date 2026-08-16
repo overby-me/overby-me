@@ -78,7 +78,12 @@ struct Muter {
 
 impl Muter {
     fn new(mute_pid1: bool, mute_kernel: bool) -> Self {
-        Muter { mute_pid1, mute_kernel, muted_pid1: false, saved_kernel: None }
+        Muter {
+            mute_pid1,
+            mute_kernel,
+            muted_pid1: false,
+            saved_kernel: None,
+        }
     }
 
     fn mute(&mut self) {
@@ -195,7 +200,10 @@ fn vl_server() -> ExitCode {
                 muter.mute();
                 // Keep the call open (notify, not a final reply): the console
                 // stays muted for the lifetime of the connection.
-                let notified = send(&write_stream, &serde_json::json!({"parameters": {}, "continues": true}));
+                let notified = send(
+                    &write_stream,
+                    &serde_json::json!({"parameters": {}, "continues": true}),
+                );
                 if notified {
                     // Block until the client disconnects, then restore.
                     let mut b = [0u8; 64];
@@ -225,7 +233,9 @@ fn vl_server() -> ExitCode {
 /// Whether we were invoked as a Varlink service (a socket passed on fd 3 via
 /// LISTEN_FDS, per the systemd socket-activation convention).
 fn invoked_as_varlink() -> bool {
-    let listen_pid: Option<i32> = std::env::var("LISTEN_PID").ok().and_then(|s| s.parse().ok());
+    let listen_pid: Option<i32> = std::env::var("LISTEN_PID")
+        .ok()
+        .and_then(|s| s.parse().ok());
     if listen_pid != Some(std::process::id() as i32) {
         return false;
     }
@@ -250,7 +260,10 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "--version" => {
-                println!("systemd {} (systemd-mute-console)", env!("CARGO_PKG_VERSION"));
+                println!(
+                    "systemd {} (systemd-mute-console)",
+                    env!("CARGO_PKG_VERSION")
+                );
                 return ExitCode::SUCCESS;
             }
             "--kernel" | "--pid1" => {
@@ -335,7 +348,10 @@ fn sd_notify(msg: &str) {
         } else {
             sock.into_bytes()
         };
-        let _ = d.send_to(msg.as_bytes(), std::path::Path::new(&String::from_utf8_lossy(&path).into_owned()));
+        let _ = d.send_to(
+            msg.as_bytes(),
+            std::path::Path::new(&String::from_utf8_lossy(&path).into_owned()),
+        );
     }
 }
 

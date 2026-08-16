@@ -26,12 +26,17 @@ fn help() {
 }
 
 fn version() {
-    println!("systemd {} (systemd-battery-check)", env!("CARGO_PKG_VERSION"));
+    println!(
+        "systemd {} (systemd-battery-check)",
+        env!("CARGO_PKG_VERSION")
+    );
 }
 
 /// Read a trimmed sysfs attribute.
 fn read_attr(dir: &Path, name: &str) -> Option<String> {
-    std::fs::read_to_string(dir.join(name)).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(dir.join(name))
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// Whether the system is running on AC power. Mirrors systemd's `on_ac_power()`
@@ -52,7 +57,14 @@ fn on_ac_power() -> bool {
         // Mains / USB / Wireless / BrickID are all "AC-like" supplies.
         let is_ac = matches!(
             typ.as_str(),
-            "Mains" | "USB" | "USB_ACA" | "USB_C" | "USB_PD" | "USB_PD_DRP" | "Wireless" | "BrickID"
+            "Mains"
+                | "USB"
+                | "USB_ACA"
+                | "USB_C"
+                | "USB_PD"
+                | "USB_PD_DRP"
+                | "Wireless"
+                | "BrickID"
         );
         if !is_ac {
             continue;
@@ -203,7 +215,9 @@ fn main() -> ExitCode {
 
     match battery_is_discharging_and_low() {
         Err(e) => {
-            eprintln!("Failed to check battery status, assuming not charged yet, powering off: {e}");
+            eprintln!(
+                "Failed to check battery status, assuming not charged yet, powering off: {e}"
+            );
             ExitCode::from(1)
         }
         Ok(true) => {

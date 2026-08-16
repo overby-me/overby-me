@@ -34,10 +34,7 @@ fn remove_delegate_children(path: &std::path::Path) {
 /// the delegated files to this UID; resolving `exec_config.user` would give root
 /// because the dynamic user is not recorded there.
 #[cfg_attr(not(feature = "cgroups"), allow(unused_variables))]
-pub fn pre_fork_os_specific(
-    srvc: &ServiceConfig,
-    dynamic_uid: Option<u32>,
-) -> Result<(), String> {
+pub fn pre_fork_os_specific(srvc: &ServiceConfig, dynamic_uid: Option<u32>) -> Result<(), String> {
     #[cfg(feature = "cgroups")]
     {
         std::fs::create_dir_all(&srvc.platform_specific.cgroup_path).map_err(|e| {
@@ -122,10 +119,7 @@ pub fn pre_fork_os_specific(
                     Some(g) if srvc.exec_config.group.is_none() => g,
                     _ => super::start_service::resolve_gid(&srvc.exec_config.group).unwrap_or(uid),
                 };
-                let _ = std::fs::set_permissions(
-                    &pressure,
-                    std::fs::Permissions::from_mode(0o644),
-                );
+                let _ = std::fs::set_permissions(&pressure, std::fs::Permissions::from_mode(0o644));
                 let _ = nix::unistd::chown(
                     &pressure,
                     Some(nix::unistd::Uid::from_raw(uid)),
@@ -191,10 +185,8 @@ pub fn pre_fork_os_specific(
                 "memory.reclaim",
             ] {
                 let attr_path = srvc.platform_specific.cgroup_path.join(attr);
-                let _ = std::fs::set_permissions(
-                    &attr_path,
-                    std::fs::Permissions::from_mode(0o644),
-                );
+                let _ =
+                    std::fs::set_permissions(&attr_path, std::fs::Permissions::from_mode(0o644));
                 if let Err(e) = nix::unistd::chown(&attr_path, Some(uid), Some(gid)) {
                     trace!(
                         "Couldn't chown delegation file {:?} to uid={} gid={}: {} (continuing)",
@@ -213,8 +205,7 @@ pub fn pre_fork_os_specific(
                 if let Err(e) = std::fs::create_dir_all(&subpath) {
                     trace!("Could not create delegate subgroup {:?}: {}", subpath, e);
                 }
-                let _ =
-                    std::fs::set_permissions(&subpath, std::fs::Permissions::from_mode(0o755));
+                let _ = std::fs::set_permissions(&subpath, std::fs::Permissions::from_mode(0o755));
                 let _ = nix::unistd::chown(&subpath, Some(uid), Some(gid));
                 // Beyond the main-cgroup delegation files, a subgroup also gets
                 // cgroup.max.depth / cgroup.max.descendants delegated so the owner
@@ -227,8 +218,7 @@ pub fn pre_fork_os_specific(
                     "cgroup.max.descendants",
                 ] {
                     let ap = subpath.join(attr);
-                    let _ =
-                        std::fs::set_permissions(&ap, std::fs::Permissions::from_mode(0o644));
+                    let _ = std::fs::set_permissions(&ap, std::fs::Permissions::from_mode(0o644));
                     let _ = nix::unistd::chown(&ap, Some(uid), Some(gid));
                 }
             }

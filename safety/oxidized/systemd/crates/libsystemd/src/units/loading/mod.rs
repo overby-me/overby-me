@@ -9,11 +9,10 @@ use crate::units::{ParsingError, Specific, Unit, UnitId, get_file_list, parse_fi
 pub use directory_deps::collect_dir_deps_for_unit;
 use directory_deps::{
     DirectoryDependency, add_log_namespace_dependencies, apply_directory_dependencies,
-    apply_dropins, collect_dep_dir_entries,
-    collect_dropin_entries, create_implicit_slices_from_dropins, generate_fstab_mount_units,
-    generate_getty_units, insert_parsed_unit, instantiate_template_units, is_template_unit,
-    instance_of, is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_specifiers,
-    resolve_symlink_aliases,
+    apply_dropins, collect_dep_dir_entries, collect_dropin_entries,
+    create_implicit_slices_from_dropins, generate_fstab_mount_units, generate_getty_units,
+    insert_parsed_unit, instance_of, instantiate_template_units, is_template_unit, is_unit_file,
+    parse_dep_dir_name, parse_dropin_dir_name, resolve_specifiers, resolve_symlink_aliases,
 };
 
 use std::collections::HashMap;

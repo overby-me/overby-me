@@ -928,18 +928,20 @@ mod inner {
         fn job_type(&self) -> String {
             let ri = self.run_info.read_poisoned();
             let registry = ri.jobs.lock().unwrap();
-            registry
-                .get(self.id)
-                .map_or_else(|| self.kind.to_string(), |job| job.kind.as_str().to_string())
+            registry.get(self.id).map_or_else(
+                || self.kind.to_string(),
+                |job| job.kind.as_str().to_string(),
+            )
         }
 
         #[zbus(property)]
         fn state(&self) -> String {
             let ri = self.run_info.read_poisoned();
             let registry = ri.jobs.lock().unwrap();
-            registry
-                .get(self.id)
-                .map_or_else(|| "running".to_string(), |job| job.state.as_str().to_string())
+            registry.get(self.id).map_or_else(
+                || "running".to_string(),
+                |job| job.state.as_str().to_string(),
+            )
         }
     }
 
@@ -1045,7 +1047,9 @@ mod inner {
             if registry.get(id).is_some() {
                 Ok(job_object_path(id))
             } else {
-                Err(zbus::fdo::Error::Failed(format!("Job {id} does not exist.")))
+                Err(zbus::fdo::Error::Failed(format!(
+                    "Job {id} does not exist."
+                )))
             }
         }
 
@@ -1752,8 +1756,8 @@ mod inner {
         kind: crate::units::jobs::JobKind,
         cmd: crate::control::Command,
     ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-        let id = crate::control::find_or_load_unit(name, run_info)
-            .map_err(zbus::fdo::Error::Failed)?;
+        let id =
+            crate::control::find_or_load_unit(name, run_info).map_err(zbus::fdo::Error::Failed)?;
         let jmode = if mode == "fail" {
             crate::units::jobs::JobMode::Fail
         } else {
@@ -1763,12 +1767,7 @@ mod inner {
         let job_id = jobs
             .lock()
             .unwrap()
-            .create(
-                id,
-                kind,
-                crate::units::ActivationSource::Regular,
-                jmode,
-            )
+            .create(id, kind, crate::units::ActivationSource::Regular, jmode)
             .map_err(zbus::fdo::Error::Failed)?;
         let result = invoke_command(run_info, cmd);
         jobs.lock().unwrap().finish(

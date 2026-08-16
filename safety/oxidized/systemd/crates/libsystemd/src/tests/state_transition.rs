@@ -82,9 +82,7 @@ fn test_service_state_transitions_inner() {
         stderr_eventfd: crate::platform::make_event_fd().unwrap(),
         notification_eventfd: crate::platform::make_event_fd().unwrap(),
         socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-        jobs: std::sync::Arc::new(std::sync::Mutex::new(
-            crate::units::jobs::JobRegistry::new(),
-        )),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(crate::units::jobs::JobRegistry::new())),
         dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
         manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashMap::new(),

@@ -37,7 +37,11 @@ fn collect_symlinks(dest: &Path) -> BTreeSet<String> {
             let path = e.path();
             let ty = e.file_type().expect("file type");
             if ty.is_symlink() {
-                let rel = path.strip_prefix(dest).unwrap().to_string_lossy().into_owned();
+                let rel = path
+                    .strip_prefix(dest)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
                 if !rel.contains("fsck") {
                     out.insert(rel);
                 }

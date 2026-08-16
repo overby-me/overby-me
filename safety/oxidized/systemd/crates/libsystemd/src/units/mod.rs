@@ -83,10 +83,7 @@ mod exec_dir_entry_tests {
     #[test]
     fn empty_destination_is_none_and_access_mode_still_parses() {
         // `www::ro` means "no alias, read-only", not "alias named empty".
-        assert_eq!(
-            parse_exec_dir_entry("www::ro"),
-            ("www".into(), None, true)
-        );
+        assert_eq!(parse_exec_dir_entry("www::ro"), ("www".into(), None, true));
     }
 
     #[test]
@@ -117,10 +114,7 @@ mod exec_dir_entry_tests {
 
     #[test]
     fn escaped_backslash_is_literal() {
-        assert_eq!(
-            parse_exec_dir_entry(r"a\\b"),
-            (r"a\b".into(), None, false)
-        );
+        assert_eq!(parse_exec_dir_entry(r"a\\b"), (r"a\b".into(), None, false));
     }
 
     #[test]

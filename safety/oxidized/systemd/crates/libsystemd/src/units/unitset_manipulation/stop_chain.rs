@@ -140,8 +140,7 @@ pub(crate) fn service_stop_chain_step(
                     let timeout = st.srvc.get_stop_timeout(&svc.conf);
                     // Stop-side helpers see the service's filesystem view,
                     // like run_stop_cmd/run_poststop set up.
-                    st.srvc.helper_mount_ns =
-                        crate::services::helper_mount_ns_from_conf(&svc.conf);
+                    st.srvc.helper_mount_ns = crate::services::helper_mount_ns_from_conf(&svc.conf);
                     let res = st.srvc.spawn_helper_child(
                         &cmd,
                         chain.id.clone(),
@@ -168,9 +167,7 @@ pub(crate) fn service_stop_chain_step(
                         {
                             advance_stop_index(chain);
                         } else {
-                            chain
-                                .errors
-                                .push(format!("Failed to spawn {cmd}: {e}"));
+                            chain.errors.push(format!("Failed to spawn {cmd}: {e}"));
                             skip_current_stop_phase(chain);
                         }
                     }
@@ -219,10 +216,7 @@ pub(crate) fn service_stop_chain_step(
                         });
                         let alive = pid.is_some_and(|p| {
                             let pt = ri.pid_table.lock_poisoned();
-                            matches!(
-                                pt.get(&p),
-                                Some(crate::runtime_info::PidEntry::Service(..))
-                            )
+                            matches!(pt.get(&p), Some(crate::runtime_info::PidEntry::Service(..)))
                         });
                         if !alive {
                             (None, None, timeout)
@@ -254,10 +248,7 @@ pub(crate) fn service_stop_chain_step(
                                 chain.phase = StopPhase::Poststop(0);
                             }
                             Err(e) => {
-                                warn!(
-                                    "stop chain: SIGTERM to {} failed: {e}",
-                                    chain.id.name
-                                );
+                                warn!("stop chain: SIGTERM to {} failed: {e}", chain.id.name);
                                 chain.phase = StopPhase::Poststop(0);
                             }
                         }
@@ -292,16 +283,17 @@ pub(crate) fn service_stop_chain_helper_exited(
             && let Specific::Service(svc) = &unit.specific
         {
             let status = unit.common.status.read_poisoned().clone();
-            svc.state.write_poisoned().srvc.drain_helper_output_nonblocking(
-                &mut child,
-                &chain.id.name,
-                &status,
-            );
+            svc.state
+                .write_poisoned()
+                .srvc
+                .drain_helper_output_nonblocking(&mut child, &chain.id.name, &status);
         }
     }
     drop(child);
     let ok = termination.success()
-        || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus);
+        || cmd
+            .prefixes
+            .contains(&crate::units::CommandlinePrefix::Minus);
     if ok {
         advance_stop_index(chain);
     } else {
@@ -399,9 +391,7 @@ fn finalize_stop_chain(chain: &ServiceStopChain, run_info: &ArcMutRuntimeInfo) {
             let errors = chain
                 .errors
                 .iter()
-                .map(|e| {
-                    crate::units::UnitOperationErrorReason::GenericStartError(e.clone())
-                })
+                .map(|e| crate::units::UnitOperationErrorReason::GenericStartError(e.clone()))
                 .collect();
             *status = UnitStatus::Stopped(crate::units::StatusStopped::StoppedFinal, errors);
         }
@@ -445,9 +435,7 @@ fn finalize_stop_chain(chain: &ServiceStopChain, run_info: &ArcMutRuntimeInfo) {
             let cgroup_path = &conf.platform_specific.cgroup_path;
             if cgroup_path.exists() {
                 let mut removed = true;
-                if let Err(e) =
-                    crate::platform::cgroups::remove_cgroup_recursive(cgroup_path)
-                {
+                if let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path) {
                     removed = false;
                     if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
                         match crate::control::escalate_remove_cgroup(cgroup_path) {

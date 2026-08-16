@@ -89,8 +89,9 @@ fn main() -> ExitCode {
     // fstab (via x-initrd.mount) and must be mounted under /sysroot in the
     // initrd.  Without it, the main fstab is the initrd's OWN fstab and its
     // entries are initrd-local (never /sysroot-prefixed).
-    let root_is_fstab =
-        parse_cmdline_kv(&cmdline, "root=").map(|v| v == "fstab").unwrap_or(false);
+    let root_is_fstab = parse_cmdline_kv(&cmdline, "root=")
+        .map(|v| v == "fstab")
+        .unwrap_or(false);
 
     // In initrd, we may have TWO fstabs to process:
     //   * SYSTEMD_FSTAB — the initrd's own fstab (treated as regular entries)
@@ -1329,10 +1330,7 @@ mod tests {
                 !content.contains("systemd-fsck@UUID"),
                 "spec {spec}: fsck used the raw spec:\n{content}"
             );
-            let fsck = format!(
-                "systemd-fsck@{}.service",
-                unit_name_path_escape(node)
-            );
+            let fsck = format!("systemd-fsck@{}.service", unit_name_path_escape(node));
             assert!(
                 content.contains(&fsck),
                 "spec {spec}: missing {fsck} in:\n{content}"
@@ -1379,7 +1377,10 @@ mod tests {
         let unit = tmp.path().join("dev-disk-by\\x2duuid-swap\\x2d1.swap");
         let content = fs::read_to_string(&unit)
             .unwrap_or_else(|_| panic!("expected canonical swap unit at {}", unit.display()));
-        assert!(content.contains("What=/dev/disk/by-uuid/swap-1\n"), "{content}");
+        assert!(
+            content.contains("What=/dev/disk/by-uuid/swap-1\n"),
+            "{content}"
+        );
     }
 
     #[test]
@@ -1496,11 +1497,44 @@ mod tests {
     #[test]
     fn fuzz_fstab_parser_and_emit_never_panic() {
         const TOKENS: &[&str] = &[
-            "/dev/sda1", "UUID=x", "LABEL=y", "PARTUUID=z", "PARTLABEL=w", "tmpfs",
-            "none", "swap", "/", "/home", "/boot", "/usr", "ext4", "vfat", "auto",
-            "nfs", "defaults", "noauto,nofail", "sw", "x-systemd.makefs", "bg",
-            "ro", "rw", "0", "1", "2", "#c", "", " ", ":", ",", "=", "-", "/dev/",
-            "UUID=", "999999999999", "x-systemd.automount", "x-systemd.rw-only",
+            "/dev/sda1",
+            "UUID=x",
+            "LABEL=y",
+            "PARTUUID=z",
+            "PARTLABEL=w",
+            "tmpfs",
+            "none",
+            "swap",
+            "/",
+            "/home",
+            "/boot",
+            "/usr",
+            "ext4",
+            "vfat",
+            "auto",
+            "nfs",
+            "defaults",
+            "noauto,nofail",
+            "sw",
+            "x-systemd.makefs",
+            "bg",
+            "ro",
+            "rw",
+            "0",
+            "1",
+            "2",
+            "#c",
+            "",
+            " ",
+            ":",
+            ",",
+            "=",
+            "-",
+            "/dev/",
+            "UUID=",
+            "999999999999",
+            "x-systemd.automount",
+            "x-systemd.rw-only",
         ];
         let mut state: u64 = 0x0fed_cba9_8765_4321;
         let mut next = || {

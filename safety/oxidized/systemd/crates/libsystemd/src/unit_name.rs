@@ -729,13 +729,22 @@ mod tests {
         assert_eq!(unit_name_path_escape_checked("/foo/../bar"), None);
         assert_eq!(unit_name_path_escape_checked("foo/../bar"), None);
         // Relative normalized paths are accepted, matching C's `--path foo`.
-        assert_eq!(unit_name_path_escape_checked("foo"), Some("foo".to_string()));
+        assert_eq!(
+            unit_name_path_escape_checked("foo"),
+            Some("foo".to_string())
+        );
         assert_eq!(
             unit_name_path_escape_checked("foo/bar"),
             Some("foo-bar".to_string())
         );
-        assert_eq!(unit_name_path_escape_checked("./foo"), Some("foo".to_string()));
-        assert_eq!(unit_name_path_escape_checked("foo/"), Some("foo".to_string()));
+        assert_eq!(
+            unit_name_path_escape_checked("./foo"),
+            Some("foo".to_string())
+        );
+        assert_eq!(
+            unit_name_path_escape_checked("foo/"),
+            Some("foo".to_string())
+        );
         assert_eq!(
             unit_name_path_escape_checked("/dev/sda1"),
             Some("dev-sda1".to_string())
@@ -870,9 +879,35 @@ mod tests {
         // backslash, stray `@`/`-`/`.`, non-ASCII bytes, or an over-long input
         // must never panic any of the escape/unescape/mangle/template helpers.
         const TOKENS: &[&str] = &[
-            "\\", "\\x", "\\x2", "\\x2f", "\\xzz", "\\xGG", "-", "--", "@", "@.",
-            ".", "..", "/", "//", "foo", "a-b", "a@b", "@.service", "getty@.service",
-            ".mount", "foo.service", "\\x00", "%i", " ", "\t", "€", ":", "~", "0",
+            "\\",
+            "\\x",
+            "\\x2",
+            "\\x2f",
+            "\\xzz",
+            "\\xGG",
+            "-",
+            "--",
+            "@",
+            "@.",
+            ".",
+            "..",
+            "/",
+            "//",
+            "foo",
+            "a-b",
+            "a@b",
+            "@.service",
+            "getty@.service",
+            ".mount",
+            "foo.service",
+            "\\x00",
+            "%i",
+            " ",
+            "\t",
+            "€",
+            ":",
+            "~",
+            "0",
         ];
         let handle = std::thread::spawn(move || {
             let mut state: u64 = 0x1234_5678_9abc_def0;
@@ -892,8 +927,8 @@ mod tests {
                     }
                 }
                 let inst = TOKENS[(next() as usize) % TOKENS.len()];
-                let tmpl = ["getty@.service", "a@.mount", "@.service", "x", ""]
-                    [(next() as usize) % 5];
+                let tmpl =
+                    ["getty@.service", "a@.mount", "@.service", "x", ""][(next() as usize) % 5];
                 let input = s.clone();
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let _ = unit_name_escape(&s);

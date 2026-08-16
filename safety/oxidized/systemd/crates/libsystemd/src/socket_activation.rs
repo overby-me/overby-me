@@ -856,7 +856,9 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
                 let still_blocked = svc_id
                     .as_ref()
                     .and_then(|sid| unit_table_locked.get(sid))
-                    .map(|svc| conflict_blocks_activation(&svc.common.dependencies, unit_table_locked))
+                    .map(|svc| {
+                        conflict_blocks_activation(&svc.common.dependencies, unit_table_locked)
+                    })
                     .unwrap_or(false);
                 if !still_blocked {
                     {

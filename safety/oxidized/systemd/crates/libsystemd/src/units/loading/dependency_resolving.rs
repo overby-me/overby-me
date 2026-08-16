@@ -585,10 +585,25 @@ fn add_default_dependency_relations(units: &mut UnitTable) {
                     let fstype = m.conf.fs_type.as_deref().unwrap_or("");
                     let is_api = matches!(
                         fstype,
-                        "proc" | "sysfs" | "devtmpfs" | "devpts" | "cgroup" | "cgroup2"
-                            | "mqueue" | "hugetlbfs" | "debugfs" | "tracefs" | "securityfs"
-                            | "pstore" | "bpf" | "configfs" | "fusectl" | "efivarfs"
-                            | "binfmt_misc" | "autofs" | "ramfs"
+                        "proc"
+                            | "sysfs"
+                            | "devtmpfs"
+                            | "devpts"
+                            | "cgroup"
+                            | "cgroup2"
+                            | "mqueue"
+                            | "hugetlbfs"
+                            | "debugfs"
+                            | "tracefs"
+                            | "securityfs"
+                            | "pstore"
+                            | "bpf"
+                            | "configfs"
+                            | "fusectl"
+                            | "efivarfs"
+                            | "binfmt_misc"
+                            | "autofs"
+                            | "ramfs"
                     );
                     if m.conf.where_ == "/" || is_api {
                         None

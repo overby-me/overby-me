@@ -370,7 +370,10 @@ fn analyze_capability_matches_c() {
     };
     let c = pairs(&c_bin);
     let r = pairs(rust_bin);
-    assert!(!c.is_empty(), "C systemd-analyze capability produced no rows");
+    assert!(
+        !c.is_empty(),
+        "C systemd-analyze capability produced no rows"
+    );
 
     let only_c: Vec<_> = c.difference(&r).collect();
     let only_r: Vec<_> = r.difference(&c).collect();
@@ -483,20 +486,25 @@ fn analyze_capability_output_matches_c() {
         &["capability", "CAP_SYS_ADMIN"], // case-insensitive
         &["capability", "Cap_Sys_Admin"],
         &["capability", "cap_SYS_admin"],
-        &["capability", "cap_checkpoint_restore", "cap_chown", "cap_bpf"], // sort + width
+        &[
+            "capability",
+            "cap_checkpoint_restore",
+            "cap_chown",
+            "cap_bpf",
+        ], // sort + width
         &["capability", "sys_admin"], // bare name (no cap_ prefix) is rejected
         &["capability", "SYS_ADMIN"],
         &["capability", "cap_bogus_nonexistent"],
         &["capability", "999"], // numeric, beyond the capability model
         &["capability", "cap_chown", "cap_bogus"], // partial list -> no output, error
         // Mask mode: -m/--mask is a flag, the positional is a hex mask.
-        &["capability", "--mask", "0x3"], // bits 0,1
-        &["capability", "--mask", "3c00"], // bits 10-13, no 0x prefix
+        &["capability", "--mask", "0x3"],          // bits 0,1
+        &["capability", "--mask", "3c00"],         // bits 10-13, no 0x prefix
         &["capability", "-m", "0000000000003c00"], // leading zeros, short flag
-        &["capability", "--mask", "0"], // no bits set -> header only
-        &["capability", "--mask"], // missing positional
-        &["capability", "--mask", "0x3", "0x4"], // too many positionals
-        &["capability", "--mask", "zzz"], // unparseable mask
+        &["capability", "--mask", "0"],            // no bits set -> header only
+        &["capability", "--mask"],                 // missing positional
+        &["capability", "--mask", "0x3", "0x4"],   // too many positionals
+        &["capability", "--mask", "zzz"],          // unparseable mask
     ];
 
     let mut divergences = Vec::new();
@@ -579,9 +587,9 @@ fn analyze_timespan_output_matches_c() {
     let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
 
     let single = [
-        "1s", "2s", "1s 500ms", "1s 1us", "1.5s", "90s", "3661s", "1min", "61s",
-        "100ms", "500ms", "1us", "0", "infinity", "1y", "2w 3d", "1h 30min",
-        "999999", "1000000", "1000001", "59999999", "60000000", "1month",
+        "1s", "2s", "1s 500ms", "1s 1us", "1.5s", "90s", "3661s", "1min", "61s", "100ms", "500ms",
+        "1us", "0", "infinity", "1y", "2w 3d", "1h 30min", "999999", "1000000", "1000001",
+        "59999999", "60000000", "1month",
     ];
     let mut cases: Vec<Vec<&str>> = single.iter().map(|s| vec!["timespan", s]).collect();
     // Multiple inputs are separated by a blank line (none after the last).
@@ -592,9 +600,7 @@ fn analyze_timespan_output_matches_c() {
         let (ro, rok) = run(rust_bin, args);
         let (co, cok) = run(&c_bin, args);
         if ro != co || rok != cok {
-            div.push(format!(
-                "args={args:?}\n  C:\n{co}\n  R:\n{ro}"
-            ));
+            div.push(format!("args={args:?}\n  C:\n{co}\n  R:\n{ro}"));
         }
     }
     assert!(
@@ -765,7 +771,7 @@ fn analyze_syscall_filter_matches_c() {
     let rust_bin = env!("CARGO_BIN_EXE_systemd-analyze");
 
     let cases: &[&[&str]] = &[
-        &["syscall-filter"], // full listing incl. Ungrouped + Unlisted/notice
+        &["syscall-filter"],             // full listing incl. Ungrouped + Unlisted/notice
         &["syscall-filter", "@default"], // has a nested @sandbox ref
         &["syscall-filter", "@basic-io"],
         &["syscall-filter", "@known"], // has a nested @obsolete ref

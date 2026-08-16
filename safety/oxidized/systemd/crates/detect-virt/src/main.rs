@@ -568,7 +568,10 @@ mod tests {
         assert!(pos("kvm") < pos("amazon"));
         assert!(pos("amazon") < pos("qemu"));
         assert!(pos("qemu") < pos("bochs"));
-        assert!(pos("google") < pos("systemd-nspawn"), "VMs precede containers");
+        assert!(
+            pos("google") < pos("systemd-nspawn"),
+            "VMs precede containers"
+        );
         assert!(pos("systemd-nspawn") < pos("lxc-libvirt"));
         assert!(pos("lxc-libvirt") < pos("lxc"));
         assert!(pos("lxc") < pos("openvz"));

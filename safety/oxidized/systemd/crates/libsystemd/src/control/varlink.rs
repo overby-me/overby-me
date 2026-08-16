@@ -371,6 +371,9 @@ mod tests {
             props.contains(&"Markers=needs-reload needs-restart".to_owned()),
             "props did not contain the joined Markers assignment: {props:?}"
         );
-        assert!(props.contains(&"--runtime".to_owned()), "runtime flag missing: {props:?}");
+        assert!(
+            props.contains(&"--runtime".to_owned()),
+            "runtime flag missing: {props:?}"
+        );
     }
 }

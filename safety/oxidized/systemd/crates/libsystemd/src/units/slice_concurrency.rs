@@ -40,10 +40,7 @@ use crate::units::unit::{SliceConfig, Specific, Unit};
 /// (starting/started/restarting/stopping all count as "live"), matching
 /// `!UNIT_IS_INACTIVE_OR_FAILED(...)`.
 fn is_live(status: &UnitStatus) -> bool {
-    !matches!(
-        status,
-        UnitStatus::NeverStarted | UnitStatus::Stopped(..)
-    )
+    !matches!(status, UnitStatus::NeverStarted | UnitStatus::Stopped(..))
 }
 
 /// The slice a unit belongs to: a service's `Slice=` (mangled to a full unit
@@ -182,7 +179,10 @@ mod tests {
 
     #[test]
     fn test_slice_parent_name() {
-        assert_eq!(slice_parent_name("a-b-c.slice").as_deref(), Some("a-b.slice"));
+        assert_eq!(
+            slice_parent_name("a-b-c.slice").as_deref(),
+            Some("a-b.slice")
+        );
         assert_eq!(slice_parent_name("a-b.slice").as_deref(), Some("a.slice"));
         assert_eq!(slice_parent_name("a.slice"), None); // top-level
         assert_eq!(slice_parent_name("-.slice"), None); // root
