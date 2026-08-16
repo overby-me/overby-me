@@ -266,6 +266,9 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "allocated",
             "rank",
             "annotations",
+            "specification",
+            "enumKind",
+            "bitStride",
         ],
     ),
     (
@@ -282,6 +285,7 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "offset",
             "flags",
             "extraData",
+            "dwarfAddressSpace",
             "annotations",
             "ptrAuthKey",
             "ptrAuthIsAddressDiscriminated",
@@ -312,6 +316,7 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "type",
             "isLocal",
             "isDefinition",
+            "declaration",
             "templateParams",
             "align",
             "annotations",
@@ -321,7 +326,18 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
         "DIImportedEntity",
         &["tag", "name", "scope", "entity", "file", "line", "elements"],
     ),
-    ("DILabel", &["scope", "name", "file", "line", "column"]),
+    (
+        "DILabel",
+        &[
+            "scope",
+            "name",
+            "file",
+            "line",
+            "column",
+            "isArtificial",
+            "coroSuspendIdx",
+        ],
+    ),
     ("DILexicalBlock", &["scope", "file", "line", "column"]),
     ("DILexicalBlockFile", &["scope", "file", "discriminator"]),
     (
@@ -338,7 +354,18 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "annotations",
         ],
     ),
-    ("DILocation", &["line", "column", "scope", "isImplicitCode"]),
+    (
+        "DILocation",
+        &[
+            "line",
+            "column",
+            "scope",
+            "inlinedAt",
+            "isImplicitCode",
+            "atomGroup",
+            "atomRank",
+        ],
+    ),
     ("DIMacro", &["type", "line", "name", "value"]),
     ("DIMacroFile", &["line", "file", "nodes"]),
     (
@@ -400,9 +427,18 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
             "retainedNodes",
             "thrownTypes",
             "annotations",
+            "targetFuncName",
+            "keyInstructions",
         ],
     ),
-    ("DISubrange", &["count", "lowerBound", "stride"]),
+    // `upperBound` between the other two, which took a second probe: a
+    // subrange is described from one end or the other and never both, so the
+    // probe carrying `count` cannot carry `upperBound` and nothing said
+    // where it goes.
+    (
+        "DISubrange",
+        &["count", "lowerBound", "upperBound", "stride"],
+    ),
     ("DISubroutineType", &["flags", "cc", "types"]),
     ("DITemplateTypeParameter", &["name", "type", "defaulted"]),
     (

@@ -22,7 +22,7 @@ const PROBES = [
   ["DIFile" [[field, value]; [filename '"f"'] [directory '"d"'] [checksumkind 'CSK_MD5'] [checksum '"0123456789abcdef0123456789abcdef"'] [source '"x"']]]
   ["DIBasicType" [[field, value]; [tag 'DW_TAG_unspecified_type'] [name '"n"'] [size '8'] [align '8'] [encoding 'DW_ATE_signed'] [flags 'DIFlagPublic'] [num_extra_inhabitants '1']]]
   ["DIDerivedType" [[field, value]; [tag 'DW_TAG_member'] [name '"n"'] [scope '!14'] [file '!10'] [line '1'] [baseType '!11'] [size '8'] [align '8'] [offset '8'] [flags 'DIFlagPublic'] [extraData '!11'] [annotations '!18']]]
-  ["DICompositeType" [[field, value]; [tag 'DW_TAG_structure_type'] [name '"c"'] [scope '!14'] [file '!10'] [line '1'] [size '8'] [align '8'] [offset '8'] [num_extra_inhabitants '2'] [flags 'DIFlagPublic'] [elements '!18'] [templateParams '!18'] [vtableHolder '!11'] [annotations '!18'] [runtimeLang 'DW_LANG_ObjC'] [identifier '"id"']]]
+  ["DICompositeType" [[field, value]; [tag 'DW_TAG_structure_type'] [name '"c"'] [scope '!14'] [file '!10'] [line '1'] [size '8'] [align '8'] [offset '8'] [num_extra_inhabitants '2'] [flags 'DIFlagPublic'] [elements '!18'] [templateParams '!18'] [vtableHolder '!11'] [annotations '!18'] [runtimeLang 'DW_LANG_ObjC'] [identifier '"id"'] [specification '!11'] [enumKind 'DW_APPLE_ENUM_KIND_Closed']]]
   # An enumeration is the composite type that carries a `baseType` beside a
   # `scope`, a `file` and a `line`. Without it nothing said where `baseType`
   # goes: the structure probe above has no `baseType` and the array probe
@@ -31,22 +31,33 @@ const PROBES = [
   ["DICompositeType/enum" [[field, value]; [tag 'DW_TAG_enumeration_type'] [name '"e"'] [scope '!14'] [file '!10'] [line '1'] [baseType '!11'] [size '8'] [align '8'] [elements '!18'] [identifier '"eid"']]]
   ["DISubroutineType" [[field, value]; [flags 'DIFlagPublic'] [cc 'DW_CC_normal'] [types '!13']]]
   ["DISubrange" [[field, value]; [count '2'] [lowerBound '1'] [stride '2']]]
+  # A subrange is described from one end or the other and never both, so the
+  # probe above cannot carry `upperBound` and nothing said where it goes.
+  # Upstream writes it between `lowerBound` and `stride`, and the two probes
+  # merge on the fields they share.
+  ["DISubrange/upper" [[field, value]; [lowerBound '1'] [upperBound '3'] [stride '2']]]
   ["DIEnumerator" [[field, value]; [name '"e"'] [value '1'] [isUnsigned 'true']]]
   ["DITemplateTypeParameter" [[field, value]; [name '"T"'] [type '!11'] [defaulted 'true']]]
   ["DITemplateValueParameter" [[field, value]; [tag 'DW_TAG_GNU_template_template_param'] [name '"V"'] [type '!11'] [defaulted 'true'] [value 'i32 1']]]
   ["DINamespace" [[field, value]; [scope 'null'] [name '"n"'] [exportSymbols 'true']]]
+  # A DWARF address space says where a pointer points, so only the pointer
+  # probe can carry one.
+  ["DIDerivedType/pointer" [[field, value]; [tag 'DW_TAG_pointer_type'] [name '"p"'] [baseType '!11'] [size '8'] [align '8'] [offset '8'] [dwarfAddressSpace '3'] [flags 'DIFlagPublic'] [extraData '!11'] [annotations '!18']]]
   ["DIModule" [[field, value]; [scope 'null'] [name '"M"'] [configMacros '"-DM"'] [includePath '"/i"'] [apinotes '"a"'] [file '!10'] [line '1'] [isDecl 'true']]]
-  ["DISubprogram" [[field, value]; [name '"n"'] [linkageName '"l"'] [scope '!10'] [file '!10'] [line '1'] [type '!11'] [scopeLine '2'] [flags 'DIFlagPublic'] [spFlags 'DISPFlagDefinition'] [unit '!12'] [virtualIndex '3'] [thisAdjustment '4'] [containingType '!11'] [templateParams '!18'] [declaration '!23'] [retainedNodes '!18'] [thrownTypes '!18'] [annotations '!18']]]
+  ["DISubprogram" [[field, value]; [name '"n"'] [linkageName '"l"'] [scope '!10'] [file '!10'] [line '1'] [type '!11'] [scopeLine '2'] [flags 'DIFlagPublic'] [spFlags 'DISPFlagDefinition'] [unit '!12'] [virtualIndex '3'] [thisAdjustment '4'] [containingType '!11'] [templateParams '!18'] [declaration '!23'] [retainedNodes '!18'] [thrownTypes '!18'] [annotations '!18'] [targetFuncName '"t"'] [keyInstructions 'true']]]
   ["DILexicalBlock" [[field, value]; [scope '!9'] [file '!10'] [line '1'] [column '2']]]
   ["DILexicalBlockFile" [[field, value]; [scope '!9'] [file '!10'] [discriminator '3']]]
   ["DILocalVariable" [[field, value]; [name '"v"'] [arg '1'] [scope '!9'] [file '!10'] [line '1'] [type '!19'] [flags 'DIFlagPublic'] [align '8'] [annotations '!18']]]
-  ["DILabel" [[field, value]; [scope '!9'] [name '"l"'] [file '!10'] [line '1'] [column '2']]]
-  ["DILocation" [[field, value]; [line '1'] [column '2'] [scope '!9'] [isImplicitCode 'true']]]
+  ["DILabel" [[field, value]; [scope '!9'] [name '"l"'] [file '!10'] [line '1'] [column '2'] [isArtificial 'true'] [coroSuspendIdx '1']]]
+  ["DILocation" [[field, value]; [line '1'] [column '2'] [scope '!9'] [inlinedAt '!25'] [isImplicitCode 'true'] [atomGroup '1'] [atomRank '1']]]
   ["DIObjCProperty" [[field, value]; [name '"p"'] [file '!10'] [line '1'] [setter '"s"'] [getter '"g"'] [attributes '1'] [type '!11']]]
   ["DIImportedEntity" [[field, value]; [tag 'DW_TAG_imported_module'] [name '"i"'] [scope 'null'] [entity '!11'] [file '!10'] [line '1'] [elements '!18']]]
   ["DIMacro" [[field, value]; [type 'DW_MACINFO_define'] [line '1'] [name '"m"'] [value '"v"']]]
   ["DIMacroFile" [[field, value]; [line '1'] [file '!10'] [nodes '!16']]]
-  ["DIGlobalVariable" [[field, value]; [name '"g"'] [linkageName '"l"'] [scope 'null'] [file '!10'] [line '1'] [type '!11'] [isLocal 'true'] [isDefinition 'true'] [align '8'] [templateParams '!18'] [annotations '!18']]]
+  ["DIGlobalVariable" [[field, value]; [name '"g"'] [linkageName '"l"'] [scope 'null'] [file '!10'] [line '1'] [type '!11'] [isLocal 'true'] [isDefinition 'true'] [declaration '!22'] [align '8'] [templateParams '!18'] [annotations '!18']]]
+  # The three that only ever follow `annotations`, ordered against each other
+  # rather than each against the fields before them.
+  ["DICompositeType/tail" [[field, value]; [tag 'DW_TAG_array_type'] [baseType '!19'] [size '8'] [elements '!18'] [annotations '!18'] [specification '!11'] [enumKind 'DW_APPLE_ENUM_KIND_Closed'] [bitStride '!20']]]
   ["DICompositeType/array" [[field, value]; [tag 'DW_TAG_array_type'] [name '"a"'] [baseType '!19'] [size '8'] [elements '!18'] [dataLocation '!20'] [associated '!20'] [allocated '!20'] [rank '!20'] [identifier '"aid"'] [annotations '!18'] [templateParams '!18']]]
   # The pointer authentication fields, which only a `DW_TAG_LLVM_ptrauth_type`
   # writes back: they share the slot `align` uses and the tag is what decides
@@ -76,6 +87,7 @@ def probe-text [node: string, body: string]: nothing -> string {
     '!22 = !DIDerivedType(tag: DW_TAG_member, name: "d", scope: !14, baseType: !19, size: 8)'
     '!23 = !DISubprogram(name: "decl", scope: !10, file: !10, line: 1, type: !11, spFlags: DISPFlagOptimized)'
     '!24 = !DIGlobalVariable(name: "gdecl", scope: null, isLocal: false, isDefinition: false)'
+    '!25 = !DILocation(line: 9, column: 9, scope: !9)'
     $units
     '!llvm.module.flags = !{!15}'
     '!15 = !{i32 2, !"Debug Info Version", i32 3}'

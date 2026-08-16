@@ -2494,6 +2494,31 @@ the entry is a module upstream refuses for its colouring rather than for
 this.
 Verifier 326 to 327, and there is one module left in the two suites that we
 read and llvm-as refuses.
+The pass after it went back to `corpus/md-field-order.nu` with the question
+the last two passes kept running into: which fields no probe carries. It is
+answerable by comparing each kind's probe against the schema, and ten kinds
+had one.
+`DISubrange` was the one that showed: a subrange is described from one end or
+the other and never both, so the probe carrying `count` cannot carry
+`upperBound`, and upstream writes `upperBound` between `lowerBound` and
+`stride` where the table had nothing. Three DebugInfo files print identically
+now that it does.
+Nine more fields found their place with it. A DWARF address space goes
+between a derived type's `extraData` and its `annotations`, and only a
+pointer may carry one, so that is a probe of its own. A global variable's
+`declaration` goes before its `templateParams`, and wants a static data
+member rather than another global. A label's `isArtificial` and
+`coroSuspendIdx` follow its column, a location's `inlinedAt` precedes
+`isImplicitCode` and its `atomGroup` and `atomRank` follow, a subprogram's
+`targetFuncName` and `keyInstructions` come last, and a composite type's
+`specification`, `enumKind` and `bitStride` follow `annotations` in that
+order, which took a probe carrying all three because no other probe carries
+two.
+One of the ten was not a gap at all but a field we accept and upstream does
+not: `!DILocalVariable(tag: ...)` is "invalid field 'tag'" there and was in
+the schema here. Written out with a scope, so that neither refuses it for
+missing one, we read a module upstream refuses. That is the fourth time an
+order probe has found an acceptance bug rather than a printing one.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and

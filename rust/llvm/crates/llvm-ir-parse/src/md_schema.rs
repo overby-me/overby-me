@@ -391,7 +391,6 @@ static TABLE: &[(&str, Node)] = &[
                 field("flags"),
                 field("align"),
                 field("annotations"),
-                field("tag"),
             ],
             distinct: Distinct::Optional,
             positional: false,
