@@ -1,5 +1,5 @@
 {
-  description = "Personal Monorepo";
+  description = "Monorepo";
 
   nixConfig = {
     extra-substituters = ["https://overby-me.cachix.org"];
@@ -181,15 +181,6 @@
   outputs = inputs:
     import ./platform/nix/project/workspace.nix ./. {
       inherit inputs;
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
-      nixpkgs.config = {
-        allowUnfree = true;
-      };
-
       # Every directory under here is named after the output it feeds, and
       # platform/nix/project/outputs.nix reads them. flakelight's own nixDir
       # is switched off: one mechanism, and it is ours.
@@ -197,7 +188,7 @@
 
       # Every .nix file in it is a flakelight module. nixDir exports them
       # under the directory's own name; importing them is a separate act.
-      moduleDirs = [./platform/nix/flakelight-modules];
+      moduleDirs = [./platform/nix/flake-modules];
 
       # A tool's checks live inside that tool's library rather than in a
       # directory of modules, so these four stay named.

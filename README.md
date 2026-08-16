@@ -266,7 +266,7 @@
 
 | Module | Homepage | Description |
 |-|-|-|
-| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/flakelight-modules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
+| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/flake-modules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
 | [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/home-modules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
 | [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixos-modules) | [NixOS](https://nixos.org) | NixOS modules |
 | [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwin-modules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |

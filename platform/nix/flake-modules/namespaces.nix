@@ -70,7 +70,7 @@ in {
         packages named outside their project's namespace:
           ${builtins.concatStringsSep "\n  " violations}
         Rename them into the project's namespace, or add the name to `exports`
-        in platform/nix/flakelight-modules/namespaces.nix if it is published under
+        in platform/nix/flake-modules/namespaces.nix if it is published under
         an identity of its own.
       ''
     else "${pkgs.coreutils}/bin/true";

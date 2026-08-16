@@ -376,7 +376,7 @@
 
       systems = mkOption {
         type = types.listOf types.str;
-        default = ["x86_64-linux" "aarch64-linux"];
+        default = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
       };
 
       description = mkOption {
@@ -465,7 +465,9 @@
 
       nixpkgs.config = mkOption {
         type = types.attrsOf types.raw;
-        default = {};
+        # Stated here rather than in each flake that wants it. Every tree
+        # this builds allows unfree, and one that does not can say so.
+        default = {allowUnfree = true;};
       };
 
       lib = mkOption {
@@ -494,6 +496,15 @@
 
       templates = mkOption {
         type = types.lazyAttrsOf types.raw;
+        default = {};
+      };
+
+      # Modules written against this framework, exported so another flake can
+      # import one. The directory that feeds it is `flake-modules`, which is
+      # also what a workspace imports through `moduleDirs`: exporting a
+      # module and using it are different acts.
+      flakeModules = mkOption {
+        type = types.lazyAttrsOf projectTypes.module;
         default = {};
       };
 
@@ -636,6 +647,7 @@
         (optionalAttrs (config.nixosModules != {}) {inherit (config) nixosModules;})
         (optionalAttrs (config.homeModules != {}) {inherit (config) homeModules;})
         (optionalAttrs (config.templates != {}) {inherit (config) templates;})
+        (optionalAttrs (config.flakeModules != {}) {inherit (config) flakeModules;})
         (optionalAttrs (config.description != null) {inherit (config) description;})
       ];
   };

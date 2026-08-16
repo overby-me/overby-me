@@ -120,7 +120,6 @@ in {
   };
 
   config = {
-    systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
     pname = cfg.name;
     formatter = pkgs: pkgs.alejandra;
     description = lib.mkIf (cfg.description != "") cfg.description;

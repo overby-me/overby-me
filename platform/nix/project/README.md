@@ -47,7 +47,7 @@ so nixpkgs, flakelight and the hooks are the same in every published repo
 without any of them naming a revision, and each of their locks has one direct
 input.
 
-The module is also exported as `flakelightModules.default`, for a flake that
+The module is also exported as `flakeModules.default`, for a flake that
 needs to compose it with modules of its own.
 
 ## Workspaces
@@ -62,7 +62,7 @@ outputs = inputs:
     inherit inputs;
     systems = ["x86_64-linux"];
     nixDir = ./platform/nix;
-    imports = [./platform/nix/flakelight-modules/lib.nix];  # what is not a project
+    imports = [./platform/nix/flake-modules/lib.nix];  # what is not a project
     projects.exclude = ["platform/nix"];
   };
 ```

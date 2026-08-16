@@ -27,11 +27,10 @@
     module = import ./module.nix {gitHooks = inputs.git-hooks;};
   in
     mkFlake ./. {
-      systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin"];
       formatter = pkgs: pkgs.alejandra;
 
       outputs = {
-        projectModules.default = module;
+        flakeModules.default = module;
 
         # The other half: `project` builds one published unit, `workspace`
         # finds the tree of them. It closes over nothing (see workspace.nix),
