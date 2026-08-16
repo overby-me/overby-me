@@ -70,6 +70,51 @@ def github-token []: nothing -> string {
   $gh.stdout | str trim
 }
 
+# The filter a project publishes under, from what it is and where it has been.
+#
+# Not stored: a filter is derivable, and the stored ones drew blood twice -
+# one silently dropped a dependency, another silently mapped in an unrelated
+# project. What cannot be derived is the history, because josh reconstructs
+# it: a filter naming only today's path publishes a repo whose history starts
+# at the last move. So `formerPaths` records where a project has been, oldest
+# first, each with the siblings it depended on at the time (a dependency
+# moves house too, so the pairing is per era rather than global).
+#
+# `kind` is what the project is made of. A crate's .nix files are the
+# monorepo's build of it, which the published repo replaces with a generated
+# flake, so they are excluded and flake.nix is let back through. A nix
+# project's .nix files ARE the project, so nothing is excluded.
+def derive-filter [p: record]: nothing -> string {
+  let kind = ($p | get -o kind | default "crate")
+  let eras = (
+    ($p | get -o formerPaths | default [])
+    | append {path: $p.path, deps: ($p | get -o deps | default [])}
+  )
+  let terms = ($eras | each {|era|
+    let path = $era.path
+    let deps = ($era | get -o deps | default [])
+    let base = ($path | path basename)
+    if $kind == "nix" {
+      [$":/($path)"]
+    } else if ($deps | is-empty) {
+      [$":/($path):exclude[::*.nix]" $":/($path)::flake.nix"]
+    } else {
+      # Each directory keeps its own name at the root, so a Cargo.toml's
+      # `path = "../pcre2"` still resolves once they are side by side. The
+      # project's own generated files are lifted back to the repo root.
+      [$":/($path):exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=($base)"]
+      | append ($deps | each {|d| $":/($d):exclude[::*.nix]:prefix=($d | path basename)" })
+      | append [
+        $":/($path)::flake.nix"
+        $":/($path)::flake.lock"
+        $":/($path)::README.md"
+        $":/($path)::.tangled/"
+      ]
+    }
+  } | flatten)
+  $":[($terms | str join ',')]:unsign"
+}
+
 def check-josh []: nothing -> nothing {
   let found = (^josh-filter --version | complete)
   if $found.exit_code != 0 {
@@ -213,7 +258,7 @@ def main [
       # should be visible rather than hide a good Tangled publish.
       let gh_remote = $"https://x-access-token:($gh_token)@github.com/($github)/($p.name)"
       try {
-        let sha = (filter-project $mirror $p.name $p.filter $input)
+        let sha = (filter-project $mirror $p.name (derive-filter $p) $input)
         let published = (remote-head $mirror $remote $branch)
         let commits = (git-ok $mirror ["rev-list" "--count" $"refs/josh/($p.name)"])
         let short = ($sha | str substring 0..9)
