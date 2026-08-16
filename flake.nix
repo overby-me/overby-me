@@ -275,6 +275,7 @@
         ./platform/tangled/spindle-nix-engine
 
         ./apps/homepage
+        ./apps/randie
         ./apps/wiki
       ];
       nixDirAliases = {

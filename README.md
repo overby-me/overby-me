@@ -165,6 +165,7 @@
 | Project | Description |
 |-|-|
 | [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
+| [Randie 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/randie) | Indoor navigation drone firmware and its simulator |
 | [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
 
 </details>
