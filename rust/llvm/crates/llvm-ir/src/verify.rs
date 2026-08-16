@@ -1711,6 +1711,7 @@ impl Verifier<'_> {
         for block_id in &blocks {
             self.basic_block(function, *block_id);
         }
+        self.funclet_tokens(function);
         // Catching an exception needs a personality routine to decide what
         // was thrown, and a landing pad needs an edge that lands on it.
         let unwind_targets: HashSet<BlockId> = blocks
@@ -1890,6 +1891,91 @@ impl Verifier<'_> {
             ));
         }
         self.function = None;
+    }
+
+    /// A call inside a funclet says which funclet it is in, when the
+    /// intrinsic it calls is one upstream may lower into a real call.
+    ///
+    /// Windows exception handling runs a catch or a cleanup as a funclet of
+    /// its own, and the unwinder needs to know which one a call belongs to.
+    /// Most intrinsics need no bundle, an ordinary call needs none either,
+    /// and `crates/llvm-ir/src/intrinsic/funclet.rs` is the measured set of
+    /// the ones that do.
+    ///
+    /// Which blocks are inside a funclet is a colouring: every block reached
+    /// from one a pad opens, stopping where a `catchret` or a `cleanupret`
+    /// leaves it. A block reached both ways is a module upstream refuses for
+    /// its colouring rather than for this.
+    fn funclet_tokens(&mut self, function: &Function) {
+        let opens_a_funclet = |block: BlockId| {
+            function
+                .block(block)
+                .instructions
+                .iter()
+                .filter_map(|inst| function.try_instruction(*inst))
+                .any(|instruction| {
+                    matches!(
+                        instruction.kind,
+                        InstKind::CatchPad { .. } | InstKind::CleanupPad { .. }
+                    )
+                })
+        };
+        let mut inside: HashSet<BlockId> = HashSet::new();
+        let mut pending: Vec<BlockId> = function
+            .block_order
+            .iter()
+            .copied()
+            .filter(|block| opens_a_funclet(*block))
+            .collect();
+        while let Some(block) = pending.pop() {
+            if !inside.insert(block) {
+                continue;
+            }
+            let Some(terminator) = function.block(block).terminator() else {
+                continue;
+            };
+            let Some(instruction) = function.try_instruction(terminator) else {
+                continue;
+            };
+            // Both of these hand control back out of the funclet, so what
+            // they name is outside it.
+            if matches!(
+                instruction.kind,
+                InstKind::CatchRet { .. } | InstKind::CleanupRet { .. }
+            ) {
+                continue;
+            }
+            pending.extend(instruction.kind.successors());
+        }
+        for block in inside {
+            for inst in function.block(block).instructions.clone() {
+                let Some(instruction) = function.try_instruction(inst) else {
+                    continue;
+                };
+                let InstKind::Call(call) = &instruction.kind else {
+                    continue;
+                };
+                if call.bundles.iter().any(|bundle| bundle.tag == "funclet") {
+                    continue;
+                }
+                let Value::Constant(id) = call.callee else {
+                    continue;
+                };
+                let Some(GlobalRef::Function(callee)) = self.module.ctx.constant(id).as_global()
+                else {
+                    continue;
+                };
+                let Name::Named(name) = &self.module.function(callee).name else {
+                    continue;
+                };
+                if crate::intrinsic::funclet::needs_funclet_token(name) {
+                    self.report(format!(
+                        "a call to {name} in {} is missing its funclet token",
+                        describe_block(function, block)
+                    ));
+                }
+            }
+        }
     }
 
     fn basic_block(&mut self, function: &Function, id: BlockId) {

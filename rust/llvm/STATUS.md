@@ -64,6 +64,7 @@ and each row names the check that backs it.
 | A `DIDerivedType`'s pointer authentication packed into the slot `align` uses, spelled by the tag | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | The parameter shape a target extension type insists on | done for the 3 of 38 names upstream's tests spell that have one | `llvm-upstream-assembler` |
 | Positions of an intrinsic that share one lane count without sharing a type | done for the 103 LangRef documents more than once at more than one width | `llvm-upstream-verifier` |
+| A call inside a funclet carrying the token the intrinsic it calls needs | done for the 25 names that need one, out of 21,452 measured | `llvm-upstream-verifier` |
 
 ## The round trip
 
@@ -107,7 +108,7 @@ skipped, so the denominator is the whole suite.
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 483 | 483 | 0 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 326 | 328 | 0 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 327 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -169,8 +170,8 @@ The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse nothing llvm-as reads**. That count is the failure that
 matters and it is a ceiling that may only fall; it is at nought in both
 suites now, and the Assembler suite agrees on every one of its 483 files.
-We **read 2 modules llvm-as refuses**, both in Verifier, which is a missing
-verifier rule each, and agreement is a floor that may only rise. Everything
+We **read 1 module llvm-as refuses**, in Verifier, which is a missing
+verifier rule, and agreement is a floor that may only rise. Everything
 left in these two suites is on that side.
 
 **The eleven tree ratchets are at 100%**: every module `llvm-as` reads

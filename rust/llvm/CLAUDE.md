@@ -2473,6 +2473,27 @@ type classes, and the two tables sit beside each other rather than being
 merged, a call being able to get one right and the other wrong.
 Verifier 325 to 326, with the modules we read that llvm-as refuses down to
 two. Both of those are the prefix reduction task 18 records.
+The pass after it took the funclet token, which is a table of twenty-five
+and reads as a family until it is measured. Windows exception handling runs a
+catch or a cleanup as a funclet of its own, and a call upstream may lower
+into a real function call has to say which funclet it is in;
+`Verifier/operand-bundles-wineh.ll` is `llvm.objc.retain` called without one.
+Six probes said the objc intrinsics need a token and `llvm.memcpy`,
+`llvm.trap`, `llvm.stacksave`, `llvm.eh.typeid.for` and
+`llvm.launder.invariant.group` do not, which is a family and a guess.
+`corpus/intrinsic-funclet.nu` asks all of them: 33,681 declarations, each
+called from inside a funclet twice, once with a bundle and once without. A
+name refused both ways is refused for a reason that has nothing to do with
+the bundle, which most of them are, and only a name refused without it and
+read with it needs one. 21,452 answered, and the twenty-five that need a
+token are every `llvm.objc.*` there is and nothing else.
+Which blocks are inside a funclet is a colouring rather than a lookup: every
+block reached from one a pad opens, stopping where a `catchret` or a
+`cleanupret` hands control back out. A block reached both from a pad and from
+the entry is a module upstream refuses for its colouring rather than for
+this.
+Verifier 326 to 327, and there is one module left in the two suites that we
+read and llvm-as refuses.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and

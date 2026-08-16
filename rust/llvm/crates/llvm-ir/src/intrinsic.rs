@@ -27,6 +27,7 @@
 pub mod arity;
 pub mod attributes;
 pub mod declared;
+pub mod funclet;
 pub mod mangle;
 pub mod mangling;
 pub mod names;
