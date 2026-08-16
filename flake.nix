@@ -266,7 +266,7 @@
         ./safety/oxidized/systemd
         ./safety/oxidized/tar
         ./safety/oxidized/texinfo
-        ./safety/oxidized/wclip
+        ./dev/wclip
         ./safety/oxidized/xz
 
         ./slides

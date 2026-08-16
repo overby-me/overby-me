@@ -435,7 +435,7 @@ forbidden repo-wide as usual.
         ];
       };
 
-      index = ../../platform/nix/lib/cargo/index;
+      index = ../../../platform/nix/lib/cargo/index;
 
       rootAttrs.postInstall = ''
         # Upstream-compatible tool names, like safety/oxidized/gcc does for gcc/cc

@@ -46,7 +46,7 @@ limiting has been observed at this size.
 
 A filtered directory on its own is cargo-only. Every project's `default.nix`
 is a flakelight module, but the root flake imports it and all but one reach for
-`../../platform/nix/lib`, so the filter drops it. `gen-standalone.nu` gives every
+`../../../platform/nix/lib`, so the filter drops it. `gen-standalone.nu` gives every
 project the three things it needs to be a real repo, all of them inert in the
 monorepo:
 
@@ -238,7 +238,7 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 :/<path>            subdirectory becomes the repo root
 :exclude[::*.nix]   drop every top-level nix file: default.nix is a
                     flakelight module the root flake imports, reaching for
-                    ../../platform/nix/lib/cargo/index, and the testsuite helpers it
+                    ../../../platform/nix/lib/cargo/index, and the testsuite helpers it
                     calls are dead weight without it. A glob rather than a
                     list, because several projects carry more than two
                     (safety/oxidized/pipewire has six) and new ones appear.

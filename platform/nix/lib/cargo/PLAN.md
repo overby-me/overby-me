@@ -201,7 +201,7 @@ packages.my-tool = { lib, ... }:
   lib.buildCargoProject {
     pname = "my-tool";
     src = ./.;                       # contains Cargo.toml + Cargo.lock
-    index = ../../platform/nix/lib/cargo/index;   # snapshot or full index checkout
+    index = ../../../../platform/nix/lib/cargo/index;   # snapshot or full index checkout
     # features = [ "foo" ];          # root features, default: default set
     # noDefaultFeatures = true;
     # bins = [ "my-tool" ];          # default: all [[bin]] targets
@@ -221,7 +221,7 @@ packages.my-tool = { lib, ... }:
   `nix build .#checks.x86_64-linux.cargo-<mod>`; never `nix flake check`
   (repo rule: it OOMs).
 - Corpus ladder, in order:
-  1. `safety/oxidized/wclip`: one dep (`libc`), exercises fetch, index lookup, default
+  1. `dev/wclip`: one dep (`libc`), exercises fetch, index lookup, default
      features, `build.rs`.
   2. `safety/oxidized/xz`: 77 locked crates, edition 2024, `liblzma-sys` native linking
      via `crateOverrides`, dev-dep filtering (criterion must not be built for

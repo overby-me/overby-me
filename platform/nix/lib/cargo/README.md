@@ -63,7 +63,7 @@ In a flakelight package definition:
 packages.my-tool = {lib, ...}:
   lib.buildCargoProject {
     src = ./.;
-    index = ../../platform/nix/lib/cargo/index;
+    index = ../../../../platform/nix/lib/cargo/index;
   };
 ```
 

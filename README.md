@@ -119,7 +119,7 @@
 | [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
 | [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixos) | NixOS distribution with Rust user space |
 | [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
-| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/wclip) | Wayland clipboard tool with an xclip-style CLI |
+| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/wclip) | Wayland clipboard tool with an xclip-style CLI |
 
 #### Mojo
 
@@ -551,7 +551,7 @@
 | ✅ | Pager | [Tailspin 🦀](https://github.com/bensadeh/tailspin) | | 🆗 | [Less 💣](https://github.com/gwsw/less) |
 | ✅ | Performance Profiler | [Samply 🦀](https://github.com/mstange/samply) | | 🆗 | [Perf 💣](https://perf.wiki.kernel.org/) |
 | ✅ | TCP Tunnel | [Bore 🦀](https://github.com/ekzhang/bore) | | 🆗 | |
-| ✅ | Clipboard | [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/wclip) | | 🆗 | [wl-clipboard 💣🇷🇺](https://github.com/bugaevc/wl-clipboard), [wl-clipboard-rs 🦀🇷🇺](https://github.com/YaLTeR/wl-clipboard-rs) |
+| ✅ | Clipboard | [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/wclip) | | 🆗 | [wl-clipboard 💣🇷🇺](https://github.com/bugaevc/wl-clipboard), [wl-clipboard-rs 🦀🇷🇺](https://github.com/YaLTeR/wl-clipboard-rs) |
 | ✅ | Keymapper | [Kanata 🦀](https://github.com/jtroo/kanata) | | 🆗 | [Keyd 💣](https://github.com/rvaiya/keyd) |
 
 #### Version Control

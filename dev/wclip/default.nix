@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../platform/nix/lib/cargo/index;
 
         meta = {
           description = "An xclip-style Wayland clipboard tool written in Rust";
@@ -37,7 +37,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../platform/nix/lib/cargo/index;
         release = false;
 
         meta = {

@@ -38,7 +38,7 @@ A single test, locally:
 
 ```bash
 cd /tmp/make-work/make-4.4.1/tests
-perl run_make_tests.pl -make $PWD/../../../safety/oxidized/make/target/debug/make <category>/<name>
+perl run_make_tests.pl -make <monorepo>/safety/oxidized/make/target/debug/make <category>/<name>
 ```
 
 Full suite with failure listing:
