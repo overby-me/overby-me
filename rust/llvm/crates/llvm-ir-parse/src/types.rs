@@ -245,6 +245,21 @@ impl Parser {
             }
         }
         self.require(Token::RightParen)?;
+        // A registered name may insist on a shape, and upstream says so where
+        // it is written rather than leaving it to the verifier:
+        // `target("aarch64.svcount", i32)` is "should have no parameters".
+        // `corpus/target-extension-types.nu` measures which names have one,
+        // and it is three of the forty its tests spell; everything else takes
+        // whatever it is given.
+        if let Some((wanted_types, wanted_ints)) =
+            llvm_ir::target_extension::properties(&name).params
+            && (types.len() != usize::from(wanted_types) || ints.len() != usize::from(wanted_ints))
+        {
+            return self.error(format!(
+                "target extension type {name} should have {}",
+                describe_parameters(wanted_types, wanted_ints)
+            ));
+        }
         Ok(self
             .module
             .ctx
@@ -304,4 +319,24 @@ impl Parser {
             TypeKind::Integer(_) | TypeKind::Float(_) | TypeKind::Pointer { .. }
         )
     }
+}
+
+/// How upstream words the shape a target extension type insists on, which is
+/// three phrasings rather than a count: "no parameters", "no type parameters
+/// and one integer parameter", "one type parameter and one integer
+/// parameter".
+fn describe_parameters(types: u8, ints: u8) -> String {
+    let plural = |count: u8, what: &str| match count {
+        0 => format!("no {what}s"),
+        1 => format!("one {what}"),
+        many => format!("{many} {what}s"),
+    };
+    if types == 0 && ints == 0 {
+        return "no parameters".to_string();
+    }
+    format!(
+        "{} and {}",
+        plural(types, "type parameter"),
+        plural(ints, "integer parameter")
+    )
 }

@@ -62,6 +62,7 @@ and each row names the check that backs it.
 | Two spellings of one intrinsic merged into the function upstream keeps | done | `llvm-opt-differential` |
 | A call written before its intrinsic gained a parameter given the argument upstream gives it | done for the 92 declarations upstream's tests write at an older arity, and the 6 it drops outright | `llvm-verify-corpus`, `llvm-opt-differential` |
 | A `DIDerivedType`'s pointer authentication packed into the slot `align` uses, spelled by the tag | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| The parameter shape a target extension type insists on | done for the 3 of 38 names upstream's tests spell that have one | `llvm-upstream-assembler` |
 
 ## The round trip
 
@@ -104,7 +105,7 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 482 | 483 | 0 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 483 | 483 | 0 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 325 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
@@ -166,10 +167,10 @@ matches the list.
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse nothing llvm-as reads**. That count is the failure that
 matters and it is a ceiling that may only fall; it is at nought in both
-suites now. We **read 4 modules llvm-as refuses**, one in Assembler and
-three in Verifier, which is a missing verifier rule each, and agreement is a
-floor that may only rise. Everything left in these two suites is on that
-side.
+suites now, and the Assembler suite agrees on every one of its 483 files.
+We **read 3 modules llvm-as refuses**, all in Verifier, which is a missing
+verifier rule each, and agreement is a floor that may only rise. Everything
+left in these two suites is on that side.
 
 **The eleven tree ratchets are at 100%**: every module `llvm-as` reads
 across `Transforms`, `Analysis`, `CodeGen`, `DebugInfo`, `Instrumentation`,

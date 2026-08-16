@@ -43,6 +43,11 @@
 
 const PROPERTIES = ["sized" "global" "alloca" "zeroinit" "vector"]
 
+# The spellings a type parameter is tried as. A cell of the shape grid is
+# accepted when any of them assembles, so a name wanting a vector is not
+# recorded as wanting no parameters at all.
+const TYPE_SPELLINGS = ["i32" "<4 x float>" "{ float }" "<vscale x 4 x i32>"]
+
 # One shape per property, each assembling only when the type has it. `ty` is
 # a whole type spelling, parameters and all.
 def probe [ty: string, property: string] {
@@ -78,10 +83,49 @@ def assembles [llvm_as: string, text: string] {
   $code == 0
 }
 
-def measure [llvm_as: string, ty: string] {
-  $PROPERTIES | reduce --fold {} {|property, acc|
-    $acc | insert $property (assembles $llvm_as (probe $ty $property))
+# The parameter shape a name insists on, or null where it takes whatever it
+# is given.
+#
+# Upstream says so in as many words: "should have no parameters", "should
+# have one type parameter and one integer parameter", "should have no type
+# parameters and one integer parameter". Three of the forty names its own
+# tests spell have such a rule and the rest, an unregistered name included,
+# take anything, so the grid is swept and a name accepting every cell has no
+# rule to record.
+#
+# Counts rather than types, which is what upstream checks here. Whether the
+# type parameter of `riscv.vector.tuple` has to be a particular type is a
+# further question this does not ask.
+def shape [llvm_as: string, name: string] {
+  mut accepted = []
+  for types in 0..2 {
+    for ints in 0..3 {
+      let cell = ($TYPE_SPELLINGS | any {|spelling|
+        let params = (
+          (0..<$types | each {|_| $spelling}) ++ (0..<$ints | each {|_| "4"})
+        )
+        let written = if ($params | is-empty) { "" } else { ", " + ($params | str join ", ") }
+        assembles $llvm_as (spelled ('target("' + $name + '"' + $written + ')'))
+      })
+      if $cell {
+        $accepted = ($accepted | append {types: $types, ints: $ints})
+      }
+    }
   }
+  if ($accepted | length) == 12 {
+    return null
+  }
+  if ($accepted | length) == 1 {
+    return ($accepted | first)
+  }
+  error make {msg: $"($name) takes ($accepted | length) parameter shapes, which is neither one nor all"}
+}
+
+def measure [llvm_as: string, ty: string, name: string] {
+  let properties = ($PROPERTIES | reduce --fold {} {|property, acc|
+    $acc | insert $property (assembles $llvm_as (probe $ty $property))
+  })
+  $properties | insert shape (shape $llvm_as $name)
 }
 
 # The namespace a name belongs to, which is everything up to the first dot.
@@ -101,7 +145,12 @@ def row [name: string, properties: record] {
     | each {|p| $p + ": " + (rust-bool ($properties | get $p)) }
     | str join ", "
   )
-  '    ("' + $name + '", Properties { ' + $fields + " }),"
+  let shape = if $properties.shape == null {
+    "None"
+  } else {
+    $"Some\(\(($properties.shape.types), ($properties.shape.ints)))"
+  }
+  '    ("' + $name + '", Properties { ' + $fields + ", params: " + $shape + " }),"
 }
 
 def main [tree: path, out: path = "target_extension.rs"] {
@@ -145,9 +194,9 @@ def main [tree: path, out: path = "target_extension.rs"] {
   # override can be answering instead.
   let spaces = ($usable | columns | each {|n| namespace $n } | compact | uniq | sort)
   let defaults = ($spaces | reduce --fold {} {|space, acc|
-    $acc | insert $space (measure $llvm_as ('target("' + $space + '.zzunregisteredzz")'))
+    $acc | insert $space (measure $llvm_as ('target("' + $space + '.zzunregisteredzz")') ($space + ".zzunregisteredzz"))
   })
-  let nothing = ($PROPERTIES | reduce --fold {} {|p, acc| $acc | insert $p false })
+  let nothing = ($PROPERTIES | reduce --fold {} {|p, acc| $acc | insert $p false } | insert shape null)
   let interesting = ($spaces | where {|space| ($defaults | get $space) != $nothing })
   print $"($interesting | length) namespaces with defaults of their own"
 
@@ -161,7 +210,7 @@ def main [tree: path, out: path = "target_extension.rs"] {
     } else {
       $nothing
     }
-    let measured = (measure $llvm_as ($usable | get $name))
+    let measured = (measure $llvm_as ($usable | get $name) $name)
     if $measured != $inherited {
       $overrides = ($overrides | append {name: $name, properties: $measured})
     }
@@ -200,6 +249,11 @@ pub struct Properties {
     /// `<2 x target(\"spirv.Image\")>` an invalid vector element type where
     /// `<2 x target(\"llvm.test.vectorelement\")>` is a vector.
     pub vector: bool,
+    /// How many type parameters and how many integer ones the name insists
+    /// on, or `None` where it takes whatever it is given. Three of the names
+    /// upstream's own tests spell have such a rule and everything else,
+    /// an unregistered name included, takes any shape.
+    pub params: Option<(u8, u8)>,
 }
 "
 

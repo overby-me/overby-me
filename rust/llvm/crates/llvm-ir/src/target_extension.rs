@@ -30,6 +30,11 @@ pub struct Properties {
     /// `<2 x target("spirv.Image")>` an invalid vector element type where
     /// `<2 x target("llvm.test.vectorelement")>` is a vector.
     pub vector: bool,
+    /// How many type parameters and how many integer ones the name insists
+    /// on, or `None` where it takes whatever it is given. Three of the names
+    /// upstream's own tests spell have such a rule and everything else,
+    /// an unregistered name included, takes any shape.
+    pub params: Option<(u8, u8)>,
 }
 
 /// What a namespace gives every name in it that is not listed below.
@@ -42,6 +47,7 @@ static NAMESPACES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: false,
             vector: false,
+            params: None,
         },
     ),
     (
@@ -52,6 +58,7 @@ static NAMESPACES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: true,
             vector: false,
+            params: None,
         },
     ),
 ];
@@ -66,6 +73,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: true,
             vector: false,
+            params: Some((0, 0)),
         },
     ),
     (
@@ -76,6 +84,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: false,
             zeroinit: false,
             vector: false,
+            params: Some((0, 1)),
         },
     ),
     (
@@ -86,6 +95,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: false,
             vector: true,
+            params: None,
         },
     ),
     (
@@ -96,6 +106,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: true,
             vector: false,
+            params: Some((1, 1)),
         },
     ),
     (
@@ -106,6 +117,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: false,
             vector: false,
+            params: None,
         },
     ),
     (
@@ -116,6 +128,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: false,
             zeroinit: false,
             vector: false,
+            params: None,
         },
     ),
     (
@@ -126,6 +139,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: false,
             zeroinit: false,
             vector: false,
+            params: None,
         },
     ),
     (
@@ -136,6 +150,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: false,
             vector: false,
+            params: None,
         },
     ),
     (
@@ -146,6 +161,7 @@ static NAMES: &[(&str, Properties)] = &[
             alloca: true,
             zeroinit: false,
             vector: false,
+            params: None,
         },
     ),
 ];

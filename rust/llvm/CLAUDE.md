@@ -2438,6 +2438,25 @@ the shape that file's own comment already warns about: a kind whose fields
 cannot all be written at once needs a probe per shape, and a field no probe
 carries has no entry and no way to notice.
 Assembler differential 214 to 215, and `debug-info.ll` is byte-identical.
+The pass after it took the parameters a target extension type is allowed to
+have, which `Assembler/target-type-param-errors.ll` was the last file in that
+suite waiting on. `corpus/target-extension-types.nu` already asks the
+assembler five questions per name and this is a sixth: a grid of nought to
+two type parameters against nought to three integer ones, each cell a module
+that assembles or does not.
+The answer is smaller than the question. Three of the thirty-eight names
+upstream's own tests spell insist on a shape, and each insists on exactly one
+cell: `aarch64.svcount` takes no parameters, `amdgcn.named.barrier` takes one
+integer, `riscv.vector.tuple` takes one type and one integer. Everything
+else, an unregistered name included, takes whatever it is given, so a name
+with no row needs no check.
+A type parameter is written as each of four spellings and a cell counts as
+accepted when any of them assembles, so a name wanting a vector is not
+recorded as wanting no parameters at all. Whether `riscv.vector.tuple` also
+insists on *which* type is a further question this does not ask, upstream
+reporting only the counts here.
+Assembler 482 to 483 of 483, which is every file in that suite agreeing, with
+the ceiling still at nought.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and
