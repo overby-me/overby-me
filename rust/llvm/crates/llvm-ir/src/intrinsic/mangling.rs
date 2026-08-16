@@ -12,8 +12,9 @@
 //! goes into a name as readily as an argument: `llvm.masked.load` is
 //! `llvm.masked.load.v2f64.p0`, whose first component is what it returns.
 //!
-//! Only the intrinsics LangRef documents are here. A name with no row keeps
-//! whatever the module wrote, which is what we did before this table existed.
+//! The intrinsics LangRef documents are here, and the ones upstream's own
+//! tests declare. A name with no row keeps whatever the module wrote, which
+//! is what we did before this table existed.
 
 /// The positions one intrinsic's name is built from, at the arity they were
 /// measured at. `ARITY` counts the result, so it is one more than the number
@@ -21,21 +22,32 @@
 type Entry = (&'static str, usize, &'static [usize]);
 
 /// The name without its components, the arity they were measured at, and the
-/// positions whose types go into it. `None` when the intrinsic is not
-/// overloaded or LangRef does not document it.
+/// positions whose types go into it. `None` when nothing measured says what
+/// this name at this arity should be called.
 ///
 /// The reduction is `super::candidates`, the same one the other tables use:
 /// the whole name first, then trailing spelled types dropped one at a time.
 /// That is what lets a name that already carries some of its components be
 /// recognised, which matters because the ones written for typed pointers
 /// carry all but the ones the pointers used to imply.
-pub fn positions(name: &str) -> Option<(&'static str, usize, &'static [usize])> {
-    super::candidates(name).find_map(|candidate| {
-        let index = MANGLED
-            .binary_search_by_key(&candidate, |(name, _, _)| *name)
-            .ok()?;
-        Some(MANGLED[index])
-    })
+///
+/// The arity is asked for here rather than checked afterwards, because a
+/// base declared at two of them has a row for each and a lookup by name
+/// alone finds whichever the search lands on. `llvm.ptr.annotation` and
+/// `llvm.var.annotation` are the two.
+pub fn positions(name: &str, arity: usize) -> Option<(&'static str, usize, &'static [usize])> {
+    let (start, end) = super::candidates(name).find_map(|candidate| {
+        let start = MANGLED.partition_point(|(known, _, _)| *known < candidate);
+        let rows = MANGLED[start..]
+            .iter()
+            .take_while(|(known, _, _)| *known == candidate)
+            .count();
+        (rows > 0).then_some((start, start + rows))
+    })?;
+    MANGLED[start..end]
+        .iter()
+        .find(|(_, known, _)| *known == arity)
+        .copied()
 }
 
 /// Sorted, so the lookup can be a binary search.

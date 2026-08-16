@@ -1416,14 +1416,13 @@ impl Parser {
         // exists under it.
         let upgraded = self.upgraded_intrinsic_name(name);
         let written = upgraded.as_deref().unwrap_or(name);
-        let Some((base, arity, positions)) = llvm_ir::intrinsic::mangling::positions(written)
+        let Some((base, _, positions)) =
+            llvm_ir::intrinsic::mangling::positions(written, function.params.len() + 1)
         else {
-            // A rename with no mangling row still stands on its own.
+            // A rename with no mangling row still stands on its own, and so
+            // does one whose row was measured at another arity.
             return upgraded;
         };
-        if arity != function.params.len() + 1 {
-            return upgraded;
-        }
         // The same gate the attributes go through: a declaration whose types
         // do not fit the documented ones is not the intrinsic upstream would
         // recognise, and upstream leaves what it does not recognise alone.
@@ -1468,7 +1467,18 @@ impl Parser {
             return true;
         };
         if documented.len() != arity {
-            return false;
+            // LangRef and the assembler disagree about how many arguments
+            // three intrinsics take, and the assembler is what upstream is.
+            // `llvm.ptr.annotation` and `llvm.var.annotation` are documented
+            // with four arguments and upstream refuses that form outright,
+            // "Callsite was not defined with variable arguments!", while it
+            // renames the five-argument one to `llvm.ptr.annotation.p0.p0`
+            // and gives it its attributes. `llvm.donothing` is the other way
+            // round, documented with an argument and recognised with none.
+            // A signature of another arity than the measured one is stale,
+            // so it says nothing rather than refusing.
+            return llvm_ir::intrinsic::attributes::attributes(name)
+                .is_some_and(|measured| measured.params.len() == arity);
         }
         documented
             .iter()

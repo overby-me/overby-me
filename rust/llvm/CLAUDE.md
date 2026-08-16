@@ -2713,6 +2713,42 @@ inside the constant expressions a `#dbg_value` and a `#dbg_assign` record
 carry. Upstream's type finder walks those; ours walks instructions.
 Each of the four is a task rather than a paragraph here, and the ratchet
 holds 50 in the meantime.
+The pass after it closed the two mangling gaps the widened sweep left, and
+one of them was already closed by the reduction: `amdgcn-image-atomic-
+attributes.ll` prints identically now, because `llvm.amdgcn.image.atomic
+.swap.1d` was a name whose last component the loose rule ate rather than an
+ambiguity between two positions that always spell the same.
+The other was `llvm.ptr.annotation`, and it turned out to be LangRef being
+stale rather than anything about mangling. Three names are documented at one
+arity and recognised at another, and the whole set is small enough to name:
+`llvm.ptr.annotation` and `llvm.var.annotation` are documented with four
+arguments where upstream refuses that form outright, "Callsite was not
+defined with variable arguments!", and recognises the five-argument one it
+renames to `llvm.ptr.annotation.p0.p0`; `llvm.donothing` is the other way
+round, documented with an argument and recognised with none, upstream
+answering "Intrinsic has incorrect argument type!" to the documented form.
+Each was asked both ways, which is what says the measured arity is the
+recognised one rather than merely another one that works.
+So a documented signature of a different arity from the measured one says
+nothing now, where it used to refuse, and refusing was costing the
+attributes as well as the name: `apply_intrinsic_attributes` asks the same
+question with the measured arity in hand.
+The lookup had a second bug behind the first. A base declared at two arities
+gets a row for each, which is what the sweep was fixed to do, and
+`positions` searched by name alone and returned whichever row the search
+landed on. It takes the arity now and looks inside the run of rows that
+share the base, so the arity is asked rather than checked afterwards.
+No differential moved, `opaque-ptr-intrinsic-remangling.ll` still wanting
+the struct-returning expansion, and the six files left in the Assembler
+differential are six causes: that expansion; the attributes a variadic
+intrinsic declaration gets, which
+`amdgcn-unreachable.ll` wants; the nvvm upgrades that change the shape of an
+instruction rather than a name, in `auto_upgrade_nvvm_intrinsics.ll`; the
+alignment a target extension type implies, which `target-types.ll` writes
+out and we leave off; a debug record upstream drops in
+`drop-debug-info-nonzero-alloca.ll`, which belongs with the stripping above;
+and the order the predecessor comment lists blocks in, which `uselistorder
+.ll` permutes and we print in block order.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

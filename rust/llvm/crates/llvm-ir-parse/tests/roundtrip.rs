@@ -1018,6 +1018,38 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
+/// An intrinsic LangRef documents at one arity and upstream recognises at
+/// another is recognised at upstream's.
+///
+/// LangRef gives `llvm.ptr.annotation` four arguments and upstream refuses
+/// that form outright, "Callsite was not defined with variable arguments!",
+/// while the five-argument one comes back as `llvm.ptr.annotation.p0.p0`
+/// carrying the attributes upstream gives it. Both texts here are what
+/// `opt -S` printed. The stale signature has to say nothing rather than
+/// refuse, or the name keeps whatever the module wrote and the attributes
+/// are left off with it.
+#[test]
+fn a_stale_documented_arity_does_not_hide_the_measured_one() {
+    let text = concat!(
+        "declare ptr @llvm.ptr.annotation(ptr, ptr, ptr, i32, ptr)\n",
+        "define void @use(ptr %p) {\n",
+        "  %a = call ptr @llvm.ptr.annotation(ptr %p, ptr undef, ptr undef, i32 undef, ptr undef)\n",
+        "  ret void\n",
+        "}\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("declare ptr @llvm.ptr.annotation.p0.p0(ptr, ptr, ptr, i32, ptr)"),
+        "the five-argument form is the one upstream mangles\n--- printed ---\n{printed}"
+    );
+    assert!(
+        printed.contains("memory(inaccessiblemem: readwrite)"),
+        "and the one it gives its attributes to\n--- printed ---\n{printed}"
+    );
+}
+
 /// A module that writes both spellings of one intrinsic comes back with one
 /// function, both call sites naming it.
 ///
