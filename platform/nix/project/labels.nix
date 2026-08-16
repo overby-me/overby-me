@@ -187,27 +187,6 @@ in rec {
     # escape hatch for something a project keeps but did not name after
     # itself, and it is visible in the file rather than configured elsewhere.
     qualify = qualifyAny;
-
-    # The whole module at once: every output block a project declares gets
-    # its names qualified, and anything that is not a block of names is left
-    # alone.
-    #
-    #   project: project.make {
-    #     packages = { default = ...; dev = ...; };
-    #     checks   = { boot = ...; };
-    #   }
-    #
-    # One call rather than one per block, because a project is set up once.
-    # `qualify` stays for the single name, which is what you want inside a
-    # value rather than around one.
-    make = module:
-      builtins.mapAttrs (
-        _: value:
-          if isAttrs value
-          then qualifyAny value
-          else value
-      )
-      module;
   };
 
   # Renderings, with the ambiguous ones separated rather than merged. What a

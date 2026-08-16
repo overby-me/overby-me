@@ -96,21 +96,34 @@ applies it to its own identity, so the file states what it builds and never
 where the names come from:
 
 ```nix
-project:
-  project.make {
-    packages = {
-      default = ...;   # -> wclip
-      dev = ...;       # -> wclip-dev
-    };
-    checks = {
-      test-version = ...;   # -> wclip-test-version
-    };
-  }
+{
+  packages = {
+    default = ...;   # -> wclip
+    dev = ...;       # -> wclip-dev
+  };
+  checks = {
+    test-version = ...;   # -> wclip-test-version
+  };
+}
 ```
 
-One call sets the project up, because a project is set up once. Every block
-of names it declares is qualified; anything that is not a block of names is
-left alone.
+That is the whole file: an ordinary flakelight module, declaring what it
+builds in local names. There is nothing to wrap it in, because the workspace
+already holds both the file and the identity and applies one to the other.
+Every block of names is qualified; `imports`, `options` and `config` are
+structure rather than names and pass through.
+
+A module that needs to know where it is takes `project` among its arguments:
+
+```nix
+{lib, project, ...}: {
+  packages.default = { ... meta.homepage = ".../${project.path}"; ... };
+}
+```
+
+which works because the workspace applies the function itself. Handing it to
+the module system could not do this: `_module.args` is evaluation-wide, so
+every module would see the same project.
 
 `default` is the project itself, which is Bazel's `//foo/bar` meaning
 `//foo/bar:bar`; every other key hangs off it.
@@ -156,17 +169,16 @@ migrates one project at a time.
 `dev/wclip/project.nix`. Every name is local; the label supplies the rest.
 
 ```nix
-project: {lib, ...}:
-  project.make {
-    packages = {
-      default = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip"; ... };
-      dev     = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip-dev"; release = false; ... };
-    };
+{lib, ...}: {
+  packages = {
+    default = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip"; ... };
+    dev     = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip-dev"; release = false; ... };
+  };
 
-    checks = {
-      test-version = pkgs: import ./testsuite.nix { inherit pkgs; name = "version"; };
-    };
-  }
+  checks = {
+    test-version = pkgs: import ./testsuite.nix { inherit pkgs; name = "version"; };
+  };
+}
 ```
 
 ```text

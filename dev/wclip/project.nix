@@ -4,7 +4,11 @@
 # turns them into `wclip`, `wclip-dev`, `wclip-test-version`, from where this
 # directory sits, so nothing here can spell a name that lands in another
 # project's namespace and no prefix has to be remembered.
-project: {lib, ...}: let
+{
+  lib,
+  project,
+  ...
+}: let
   crate = {
     src = lib.fileset.toSource {
       root = ./.;
@@ -42,32 +46,31 @@ project: {lib, ...}: let
     "no-display"
     "selection-abbreviation"
   ];
-in
-  project.make {
-    packages = {
-      default = {lib, ...}:
-        lib.buildCargoProject (crate
-          // {
-            # The crate keeps its own name: pname is resolved against
-            # Cargo.lock, and this names a target rather than a crate.
-            pname = "rust-wclip";
-            meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust";};
-          });
+in {
+  packages = {
+    default = {lib, ...}:
+      lib.buildCargoProject (crate
+        // {
+          # The crate keeps its own name: pname is resolved against
+          # Cargo.lock, and this names a target rather than a crate.
+          pname = "rust-wclip";
+          meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust";};
+        });
 
-      dev = {lib, ...}:
-        lib.buildCargoProject (crate
-          // {
-            pname = "rust-wclip-dev";
-            release = false;
-            meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust (dev build, fast compile)";};
-          });
-    };
+    dev = {lib, ...}:
+      lib.buildCargoProject (crate
+        // {
+          pname = "rust-wclip-dev";
+          release = false;
+          meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust (dev build, fast compile)";};
+        });
+  };
 
-    checks = lib.listToAttrs (
-      map (name: {
-        name = "test-${name}";
-        value = pkgs: import ./testsuite.nix {inherit pkgs name;};
-      })
-      testNames
-    );
-  }
+  checks = lib.listToAttrs (
+    map (name: {
+      name = "test-${name}";
+      value = pkgs: import ./testsuite.nix {inherit pkgs name;};
+    })
+    testNames
+  );
+}

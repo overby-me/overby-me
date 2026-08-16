@@ -18,7 +18,7 @@
 #
 # Everything except `projects` is passed to flakelight untouched.
 root: cfg: let
-  inherit (builtins) attrNames concatMap filter pathExists readDir stringLength substring throw;
+  inherit (builtins) attrNames concatMap elem filter isAttrs isFunction mapAttrs pathExists readDir stringLength substring throw;
 
   labels = import ./labels.nix;
 
@@ -39,29 +39,44 @@ root: cfg: let
   # tell you what it just shadowed.
   named = labels.render found;
 
-  # A `project.nix` is a module applied to its own identity, which is what
-  # lets a file state what it builds without stating where the names come
-  # from:
+  # A `project.nix` is an ordinary flakelight module. What makes it a project
+  # module is that the workspace names its outputs, so the file declares what
+  # it builds using local names and never says where they land:
   #
-  #   project: project.make { packages = { default = ...; dev = ...; }; }
+  #   {lib, ...}: {
+  #     packages = { default = ...; dev = ...; };
+  #     checks   = { boot = ...; };
+  #   }
   #
-  # The argument is the project, not its label: a label is one of the things
-  # it carries, alongside the path, the renderings and the helpers. It is not
-  # the workspace either - that is the tree this project sits in, and the
-  # function the root flake calls.
+  # There is no call to wrap it in, because the workspace already has the
+  # file and the identity: it applies one to the other. A module that wants
+  # to know where it is takes `project` among its arguments, which works
+  # because the workspace applies the function itself rather than handing it
+  # to the module system - `_module.args` is evaluation-wide and could not
+  # give one module a different value from another.
   #
-  # The module system cannot hand one module a different argument from
-  # another - `_module.args` is evaluation-wide - so the label is applied at
-  # import rather than passed through it. That is only unambiguous because
-  # every file found this way is the same kind of thing, which is the
-  # dendritic part: one uniform rule, and the tree decides the names.
-  #
-  # A `default.nix` is imported as an ordinary flakelight module, so a
-  # project migrates when there is a reason to and not before.
-  moduleOf = l:
-    if pathExists (root + "/${l.path}/project.nix")
-    then import (root + "/${l.path}/project.nix") l
-    else root + "/${l.path}";
+  # `imports`, `options` and `config` are structure rather than names, so
+  # they pass through. Everything else that is a set of names is qualified,
+  # and a name beginning with `/` opts out.
+  structural = ["imports" "options" "config" "_module"];
+
+  qualifyOutputs = l:
+    mapAttrs (
+      name: value:
+        if elem name structural || !(isAttrs value)
+        then value
+        else l.qualify value
+    );
+
+  moduleOf = l: let
+    file = root + "/${l.path}/project.nix";
+    module = import file;
+  in
+    if !(pathExists file)
+    then root + "/${l.path}"
+    else if isFunction module
+    then (args: qualifyOutputs l (module (args // {project = l;})))
+    else qualifyOutputs l module;
 
   discovered =
     if named.report != null

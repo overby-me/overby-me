@@ -5,8 +5,7 @@
 # directory named after each output type. The file says which output it feeds
 # and the project says what the entry is called, so `oxidized-nixos` appears
 # nowhere below even though every name it produces starts with it.
-project:
-project.make {
+{
   devShells.default = pkgs: {
     packages = with pkgs; [
       just
