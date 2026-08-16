@@ -210,7 +210,7 @@
     name: "oxidized-grep"
     path: "safety/oxidized/grep"
     deps: ["safety/oxidized/pcre2"]
-    filter: ":[:/rust/grep:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=grep,:/rust/pcre2:exclude[::*.nix]:prefix=pcre2,:/rust/grep::flake.nix,:/rust/grep::flake.lock,:/rust/grep::README.md,:/rust/grep::.tangled/,:/safety/oxidized/grep:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=grep,:/rust/pcre2:exclude[::*.nix]:prefix=pcre2,:/safety/oxidized/grep::flake.nix,:/safety/oxidized/grep::flake.lock,:/safety/oxidized/grep::README.md,:/safety/oxidized/grep::.tangled/]:unsign"
+    filter: ":[:/rust/grep:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=grep,:/rust/pcre2:exclude[::*.nix]:prefix=pcre2,:/rust/grep::flake.nix,:/rust/grep::flake.lock,:/rust/grep::README.md,:/rust/grep::.tangled/,:/safety/oxidized/grep:exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=grep,:/safety/oxidized/pcre2:exclude[::*.nix]:prefix=pcre2,:/safety/oxidized/grep::flake.nix,:/safety/oxidized/grep::flake.lock,:/safety/oxidized/grep::README.md,:/safety/oxidized/grep::.tangled/]:unsign"
   }
   {
     name: "h26xtoav1"
