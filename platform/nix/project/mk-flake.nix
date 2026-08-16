@@ -127,6 +127,28 @@
     (types.coercedTo types.package (p: {overrideShell = p;})
       (types.submoduleWith {modules = [devShellModule];}));
 
+  # A check is a derivation, a shell script run over a copy of the source, or
+  # a function of pkgs returning either. The script form is what most modules
+  # here write, so it is resolved rather than left as a value nobody can
+  # build - which is what a name-only comparison will not tell you.
+  mkCheck = name: pkgs: cmd:
+    pkgs.runCommand "check-${name}" {allowSubstitutes = false;} ''
+      cp --no-preserve=mode -r ${src} src
+      cd src
+      ${cmd}
+      touch $out
+    '';
+
+  resolveCheck = name: pkgs: value: let
+    v =
+      if isFunction value
+      then value pkgs
+      else value;
+  in
+    if lib.isDerivation v
+    then v
+    else mkCheck name pkgs v;
+
   # Outputs merge by recursing into attribute sets, so two modules can each
   # contribute part of `outputs.checks.x86_64-linux` without either knowing
   # about the other. A conflict on a leaf is an error naming both files,
@@ -615,7 +637,15 @@
           checks = mapAttrs (_: mapAttrs' (n: nameValuePair "packages-${n}")) packagesOut;
           overlays.default = _final: prev: removeAttrs (packageOverlay prev prev) ["default"];
         })
-        (perSystem "checks" config.checks)
+        (optionalAttrs (config.checks != null) {
+          checks = genSystems (pkgs:
+            mapAttrs (name: resolveCheck name pkgs)
+            (
+              if isFunction config.checks
+              then config.checks pkgs
+              else config.checks
+            ));
+        })
         (optionalAttrs (config.devShells != {}) {
           devShells = genSystems (pkgs: mapAttrs (_: v: genDevShell pkgs (v pkgs)) config.devShells);
         })

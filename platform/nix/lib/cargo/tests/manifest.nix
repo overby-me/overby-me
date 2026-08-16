@@ -5,8 +5,8 @@ let
   wclip = manifest.loadWorkspace ../../../../../dev/wclip;
   xz = manifest.loadWorkspace ../../../../../safety/oxidized/xz;
 
-  wclipPkg = wclip.byName.wclip;
-  xzPkg = xz.byName.oxidized-xz;
+  wclipPkg = wclip.byName.rust-wclip;
+  xzPkg = xz.byName.rust-xz;
 
   wclipLibc = builtins.head wclipPkg.deps;
   xzDepsByName = builtins.listToAttrs (map (d: {
@@ -17,7 +17,7 @@ let
 
   checks = {
     wclipSingleMember = builtins.length wclip.members == 1;
-    wclipName = wclipPkg.name == "wclip";
+    wclipName = wclipPkg.name == "rust-wclip";
     wclipEdition = wclipPkg.edition == "2024";
     wclipNoLib = wclipPkg.lib == null;
     wclipBin =
@@ -40,7 +40,7 @@ let
       && !wclipLibc.optional;
 
     xzLib = xzPkg.lib.name == "rust_xz" && xzPkg.lib.path == "src/lib.rs" && !xzPkg.lib.procMacro;
-    # Explicit [[bin]] plus the auto-discovered src/bin/oxidized-xz-fuzz.rs.
+    # Explicit [[bin]] plus the auto-discovered src/bin/rust-xz-fuzz.rs.
     xzBin =
       xzPkg.bins
       == [
@@ -50,8 +50,8 @@ let
           requiredFeatures = [];
         }
         {
-          name = "oxidized-xz-fuzz";
-          path = "src/bin/oxidized-xz-fuzz.rs";
+          name = "rust-xz-fuzz";
+          path = "src/bin/rust-xz-fuzz.rs";
           requiredFeatures = [];
         }
       ];

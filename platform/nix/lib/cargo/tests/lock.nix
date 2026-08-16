@@ -6,7 +6,7 @@ let
   xz = lock.parseLock (builtins.readFile ../../../../../safety/oxidized/xz/Cargo.lock);
 
   libc = wclip.byId."libc-0.2.186";
-  member = wclip.byId."wclip-0.1.0";
+  member = wclip.byId."rust-wclip-0.1.0";
 
   gitSource = lock.parseSource "git+https://github.com/example/repo?rev=abc#deadbeef";
 
@@ -16,15 +16,15 @@ let
     libcIsRegistry = libc.sourceInfo.type == "registry" && libc.sourceInfo.cratesIo;
     libcChecksum = builtins.stringLength libc.checksum == 64;
     memberIsPath = member.sourceInfo.type == "path";
-    memberDeps = wclip.resolvedDeps."wclip-0.1.0" == ["libc-0.2.186"];
-    membersFound = map (p: p.name) wclip.workspaceMembers == ["wclip"];
+    memberDeps = wclip.resolvedDeps."rust-wclip-0.1.0" == ["libc-0.2.186"];
+    membersFound = map (p: p.name) wclip.workspaceMembers == ["rust-wclip"];
     findDepMatch = lock.findDep wclip ["libc-0.2.186"] "libc" "0.2" == "libc-0.2.186";
     findDepNoMatch = lock.findDep wclip ["libc-0.2.186"] "libc" "0.3" == null;
     findDepWrongName = lock.findDep wclip ["libc-0.2.186"] "serde" "1" == null;
 
     xzCount = builtins.length xz.packages == 77;
     xzRegistryCount = builtins.length xz.registryPackages == 76;
-    xzMemberDeps = builtins.length xz.resolvedDeps."oxidized-xz-0.1.0" == 3;
+    xzMemberDeps = builtins.length xz.resolvedDeps."rust-xz-0.1.0" == 3;
 
     gitType = gitSource.type == "git";
     gitUrl = gitSource.url == "https://github.com/example/repo";
