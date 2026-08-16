@@ -68,6 +68,7 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         module: Module::new(),
         symbols: HashMap::new(),
         implied_intrinsics: Vec::new(),
+        rebuilt_declarations: Vec::new(),
         implied_signatures: HashMap::new(),
         first_implied_id: FunctionId(0),
         extra_implied_ids: FunctionId(0),
@@ -135,6 +136,12 @@ pub(crate) struct Parser {
     /// The `llvm.*` names nothing declares, sorted by the name the module
     /// wrote, which is the order upstream appends their declarations in.
     pub(crate) implied_intrinsics: Vec<Name>,
+    /// The declarations upstream rebuilt rather than edited, which is what
+    /// moves one to the end of the module. A declaration is rebuilt once
+    /// however many things about it changed, so the pass that upgrades an
+    /// arity records what it moved and the one that renames leaves those
+    /// where they are.
+    pub(crate) rebuilt_declarations: Vec<llvm_ir::value::FunctionId>,
     /// What the first call to each of them says its signature is.
     pub(crate) implied_signatures: HashMap<Name, (TypeId, Vec<TypeId>)>,
     /// The id the first implied declaration took, the rest running on from

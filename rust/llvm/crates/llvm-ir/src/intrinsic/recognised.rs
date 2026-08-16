@@ -16,7 +16,13 @@
 
 /// Whether upstream would build a declaration for this name.
 pub fn is_recognised(name: &str) -> bool {
-    super::candidates(name).any(|candidate| RECOGNISED.binary_search(&candidate).is_ok())
+    super::candidates(name).any(names)
+}
+
+/// Whether this exact name is in the table, which is what the reduction asks
+/// while it is working out what to reduce to.
+pub fn names(name: &str) -> bool {
+    RECOGNISED.binary_search(&name).is_ok()
 }
 
 /// Sorted, so the lookup can be a binary search.

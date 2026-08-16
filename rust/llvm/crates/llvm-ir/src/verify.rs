@@ -585,6 +585,16 @@ impl Verifier<'_> {
             {
                 self.report(format!("{where_} steps through lanes narrower than an i8"));
             }
+            // The pattern is written into memory however many times it
+            // fits, so it has to be something with a size: `target("foo")`
+            // is unsized where `target("spirv.Event")` is not.
+            "llvm.experimental.memset.pattern"
+                if arguments
+                    .get(1)
+                    .is_some_and(|pattern| !self.is_sized(*pattern)) =>
+            {
+                self.report(format!("{where_} sets memory to an unsized pattern"));
+            }
             // It masks a pointer, so it takes one and returns one.
             "llvm.ptrmask" => {
                 let pointer = |verifier: &Self, ty: TypeId| {

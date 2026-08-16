@@ -68,21 +68,71 @@ fn mangled(part: &str) -> bool {
 }
 
 /// The names a lookup tries: the whole name, then the whole name with its
-/// trailing mangled types dropped one at a time, stopping at the first word.
+/// trailing mangled types dropped one at a time, stopping at the first word,
+/// and last of all the longest prefix that names an intrinsic at all.
 ///
-/// Stopping there keeps `llvm.vp.cttz.elts` from reaching `llvm.vp.cttz`,
-/// and trying the whole name first keeps `llvm.convert.to.fp16`, whose own
-/// last component is type-shaped.
+/// Stopping at the first word keeps `llvm.vp.cttz.elts` from reaching
+/// `llvm.vp.cttz`, and trying the whole name first keeps
+/// `llvm.convert.to.fp16`, whose own last component is type-shaped.
+///
+/// The prefix at the end is how upstream finds an intrinsic: the longest
+/// prefix of the name that it knows, with whatever follows ignored, which is
+/// what makes `llvm.objectsize.i32.unnamed` an `llvm.objectsize`. It goes
+/// last rather than first because the tables here are not the complete set
+/// upstream has, and falling back to a shorter name that happens to be in
+/// one would answer for the wrong intrinsic: `llvm.memcpy.element.unordered`
+/// is not an `llvm.memcpy`. Asked last, it only ever fires where the strict
+/// reading found nothing, and only when the prefix is a name something knows.
 pub fn candidates(name: &str) -> impl Iterator<Item = &str> {
     let mut next = Some(name);
+    let mut prefix = longest_known_prefix(name);
     std::iter::from_fn(move || {
-        let candidate = next?;
-        next = match candidate.rsplit_once('.') {
-            Some((rest, last)) if rest.contains('.') && mangled(last) => Some(rest),
-            _ => None,
-        };
-        Some(candidate)
+        if let Some(candidate) = next {
+            next = match candidate.rsplit_once('.') {
+                Some((rest, last)) if rest.contains('.') && mangled(last) => Some(rest),
+                _ => None,
+            };
+            if Some(candidate) == prefix {
+                prefix = None;
+            }
+            return Some(candidate);
+        }
+        prefix.take()
     })
+}
+
+/// The longest prefix of the name that something here knows as an intrinsic,
+/// or `None` when nothing does.
+///
+/// Prefixes only, on the dots, longest first: upstream reads a name by
+/// finding the longest one it has and ignoring the rest, which is why
+/// `llvm.objectsize.zzz` comes back `llvm.objectsize.i32.p0`.
+fn longest_known_prefix(name: &str) -> Option<&str> {
+    let mut candidate = name;
+    loop {
+        if names_an_intrinsic(candidate) {
+            return Some(candidate);
+        }
+        let (rest, _) = candidate.rsplit_once('.')?;
+        if !rest.contains('.') {
+            return None;
+        }
+        candidate = rest;
+    }
+}
+
+/// Whether this exact name is one LangRef documents, which is what a prefix
+/// is measured against.
+///
+/// The documented names only, where [`is_known`] asks three tables. The other
+/// two are stored reduced, so a name in them may be a reduction's own artefact
+/// rather than an intrinsic: `llvm.dbg.label` reduces to `llvm.dbg` because
+/// `label` is also a type spelling, and `llvm.dbg` is in the recognised table
+/// for no other reason. Reading a prefix out of that would make every
+/// `llvm.dbg.*` an `llvm.dbg`, which is two Linker files printed wrong. These
+/// names are exact and harvested from the documentation rather than reduced.
+fn names_an_intrinsic(name: &str) -> bool {
+    names::is_documented(name) || table::signature_exact(name).is_some()
 }
 
 /// The name with every mangled type dropped: `llvm.bswap.v4i32` is

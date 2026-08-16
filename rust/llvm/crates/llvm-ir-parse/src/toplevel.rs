@@ -13,7 +13,6 @@ use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
 use llvm_ir::types::TypeKind;
 use llvm_ir::value::{GlobalRef, MdId, Name, Value};
 use llvm_support::{ApInt, DataLayout, Triple};
-use std::collections::HashSet;
 
 /// What upstream says about a use list and the indexes written for it, or
 /// `None` when it says nothing.
@@ -846,33 +845,57 @@ impl Parser {
     /// is recorded as a print order rather than performed on the arena,
     /// because an id is what every constant naming the function holds.
     pub(crate) fn remangle_intrinsics(&mut self) {
-        let mut taken: HashSet<Name> = self
-            .module
-            .functions
-            .iter()
-            .map(|function| function.name.clone())
+        // Every canonical name first, because whether one is taken depends on
+        // what the others end up called rather than on what they are called
+        // now. `Assembler/remangle.ll` is two declarations whose canonical
+        // names are each other's, and upstream swaps them; a module writing
+        // two spellings of one intrinsic instead has one of them merged away.
+        // What tells those apart is whether the name is held by a declaration
+        // that keeps it.
+        let wanted: Vec<Option<Name>> = (0..self.module.functions.len())
+            .map(|index| {
+                let canonical = Name::Named(self.canonical_intrinsic_name(index)?);
+                (canonical != self.module.functions[index].name).then_some(canonical)
+            })
+            .collect();
+        let keeps: Vec<Name> = (0..self.module.functions.len())
+            .map(|index| {
+                wanted[index]
+                    .clone()
+                    .unwrap_or_else(|| self.module.functions[index].name.clone())
+            })
             .collect();
         let mut moved = Vec::new();
         let mut merged = Vec::new();
         for index in 0..self.module.functions.len() {
-            let Some(canonical) = self.canonical_intrinsic_name(index) else {
+            let Some(canonical) = wanted[index].clone() else {
                 continue;
             };
-            let canonical = Name::Named(canonical);
-            if canonical == self.module.functions[index].name {
-                continue;
-            }
-            // A module that writes both spellings has two declarations where
-            // upstream has one function, so the second is merged into the
-            // first rather than renamed onto it.
-            if taken.contains(&canonical) {
+            // A declaration that already has the name and is keeping it is
+            // the one upstream would have found, so this one is merged into
+            // it. Failing that, an earlier declaration wanting the same name
+            // gets it and the later ones merge into that.
+            let holder = (0..self.module.functions.len()).find(|other| {
+                *other != index
+                    && wanted[*other].is_none()
+                    && self.module.functions[*other].name == canonical
+            });
+            let claimant =
+                holder.or_else(|| (0..index).find(|earlier| keeps[*earlier] == canonical));
+            if claimant.is_some() {
                 merged.push((index, canonical));
                 continue;
             }
-            taken.remove(&self.module.functions[index].name);
-            taken.insert(canonical.clone());
             self.module.functions[index].name = canonical;
-            moved.push(llvm_ir::value::FunctionId(index as u32));
+            // One upstream rebuilt for its arity is where that pass put it:
+            // a declaration is built anew once, however many things about it
+            // the reader changed.
+            if !self
+                .rebuilt_declarations
+                .contains(&llvm_ir::value::FunctionId(index as u32))
+            {
+                moved.push(llvm_ir::value::FunctionId(index as u32));
+            }
         }
         for (index, canonical) in &merged {
             self.merge_intrinsic_declaration(*index, canonical);
@@ -952,6 +975,8 @@ impl Parser {
             }
             self.append_call_arguments(llvm_ir::value::FunctionId(index as u32), &arguments);
             moved.push(llvm_ir::value::FunctionId(index as u32));
+            self.rebuilt_declarations
+                .push(llvm_ir::value::FunctionId(index as u32));
         }
         for id in &dropped {
             self.drop_calls_to(*id);

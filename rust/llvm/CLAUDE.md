@@ -2519,6 +2519,39 @@ not: `!DILocalVariable(tag: ...)` is "invalid field 'tag'" there and was in
 the schema here. Written out with a scope, so that neither refuses it for
 missing one, we read a module upstream refuses. That is the fourth time an
 order probe has found an acceptance bug rather than a printing one.
+The pass after it took the reduction, which two files were waiting on and
+which turned out to be one rule rather than the two the task recorded.
+Upstream finds an intrinsic by the longest prefix of the name it knows and
+ignores whatever follows: `llvm.objectsize.i32.unnamed`, `llvm.objectsize.zzz`
+and `llvm.objectsize.i32.p0.zzz` all come back `llvm.objectsize.i32.p0`, and
+`llvm.ssa.copy.s_tys` is an `llvm.ssa.copy` whatever `s_tys` is. So the
+mangled-type grammar is not what decides where a name ends.
+The prefix goes last in the candidate sequence rather than first, and only
+LangRef's documented names count as one. Both halves are measured rather than
+chosen. Asked first, a prefix would answer for the wrong intrinsic wherever a
+table is missing the longer name, `llvm.memcpy.element.unordered` not being
+an `llvm.memcpy`. And asked of the recognised or declared tables, which store
+what a reduction gave them, it reads their artefacts back: `llvm.dbg.label`
+reduces to `llvm.dbg` because `label` is also a type spelling, so `llvm.dbg`
+is in the recognised table, and taking that as a prefix made every
+`llvm.dbg.*` an `llvm.dbg`. Two Linker files said so.
+Two more things came with it. A declaration is rebuilt once however many
+things about it changed, so one the arity upgrade already moved stays where
+that pass put it rather than moving again when it is renamed. And the rename
+is two-phase: whether a canonical name is taken depends on what the other
+declarations end up called, not on what they are called now.
+`Assembler/remangle.ll` is two declarations whose canonical names are each
+other's and upstream swaps them, where a module writing two spellings of one
+intrinsic has one merged away. What tells those apart is whether the name is
+held by a declaration that keeps it.
+The last of it is the shape the second bound exists for. Refusing
+`Verifier/memset-pattern-unsized.ll` for a name we did not recognise scored
+as agreement, and recognising the name exposed the rule that was standing in
+for: a memset pattern is written into memory however many times it fits, so
+it has to have a size, and `target("foo")` has none where
+`target("spirv.Event")` does.
+Assembler differential 215 to 217, Verifier holding at 327 with the rule that
+replaced the wrong one, and the Linker differential back where it was.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and
