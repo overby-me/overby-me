@@ -3040,6 +3040,40 @@ impl Verifier<'_> {
                             }
                         }
                     }
+                    // The same reading on lane counts rather than types: a
+                    // mask is `<4 x i1>` where the value it masks is
+                    // `<4 x double>`, so the two are one shape without being
+                    // one type, and a call giving them different lengths
+                    // names an instantiation there is not.
+                    if is_intrinsic
+                        && let Name::Named(intrinsic) = &callee.name
+                        && let Some((arity, classes)) =
+                            crate::intrinsic::overloads::tied_lanes(intrinsic)
+                        && arity == call.args.len() + 1
+                    {
+                        let positions: Vec<TypeId> = std::iter::once(ty)
+                            .chain(call.args.iter().map(|arg| arg.ty))
+                            .collect();
+                        for class in classes {
+                            let mut wanted = None;
+                            for position in *class {
+                                let lanes = TypeKind::as_vector(
+                                    self.module.ctx.type_kind(positions[*position]),
+                                )
+                                .map(|(_, count, scalable)| (count, scalable));
+                                match wanted {
+                                    None => wanted = Some(lanes),
+                                    Some(first) if first == lanes => {}
+                                    Some(_) => {
+                                        self.report(format!(
+                                            "{where_} calls an intrinsic with two lane counts where it takes one"
+                                        ));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // LangRef documents what each intrinsic takes, and the
                     // positions whose type is the same in every documented
                     // instantiation are the ones a call has to get right.

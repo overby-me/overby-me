@@ -35,6 +35,24 @@ pub fn tied(name: &str) -> Option<(usize, &'static [&'static [usize]])> {
     })
 }
 
+/// The classes tied by lane count rather than by type, read the same way.
+///
+/// A mask is `<4 x i1>` where the value it masks is `<4 x double>`, so the
+/// two are not one type and are one shape: `llvm.masked.load` is documented
+/// at sixteen lanes, at two and at eight, and its mask is as wide as its
+/// result in each. A call giving them different lengths names an
+/// instantiation there is not. A position that is not a vector in every
+/// documented instantiation has no lane count to tie, and one whose count
+/// never varies is fixed rather than tied.
+pub fn tied_lanes(name: &str) -> Option<(usize, &'static [&'static [usize]])> {
+    super::candidates(name).find_map(|candidate| {
+        let index = TIED_LANES
+            .binary_search_by_key(&candidate, |(name, _, _)| *name)
+            .ok()?;
+        Some((TIED_LANES[index].1, TIED_LANES[index].2))
+    })
+}
+
 /// Sorted, so the lookup can be a binary search.
 static TIED: &[Entry] = &[
     ("llvm.abs", 3, &[&[0, 1]]),
@@ -202,4 +220,115 @@ static TIED: &[Entry] = &[
     ("llvm.vp.umin", 5, &[&[0, 1, 2]]),
     ("llvm.vp.urem", 5, &[&[0, 1, 2]]),
     ("llvm.vp.xor", 5, &[&[0, 1, 2]]),
+];
+
+/// Sorted, so the lookup can be a binary search.
+static TIED_LANES: &[Entry] = &[
+    ("llvm.experimental.vector.compress", 4, &[&[0, 1, 2, 3]]),
+    (
+        "llvm.experimental.vector.extract.last.active",
+        4,
+        &[&[1, 2]],
+    ),
+    ("llvm.experimental.vector.histogram.add", 4, &[&[1, 3]]),
+    ("llvm.experimental.vector.partial.reduce.add", 3, &[&[0, 1]]),
+    ("llvm.experimental.vp.reverse", 4, &[&[0, 1, 2]]),
+    ("llvm.experimental.vp.splat", 4, &[&[0, 2]]),
+    ("llvm.experimental.vp.splice", 7, &[&[0, 1, 2, 4]]),
+    ("llvm.experimental.vp.strided.load", 5, &[&[0, 3]]),
+    ("llvm.experimental.vp.strided.store", 6, &[&[1, 4]]),
+    ("llvm.masked.compressstore", 4, &[&[1, 3]]),
+    ("llvm.masked.expandload", 4, &[&[0, 2, 3]]),
+    ("llvm.masked.gather", 5, &[&[0, 1, 3, 4]]),
+    ("llvm.masked.load", 5, &[&[0, 3, 4]]),
+    ("llvm.masked.scatter", 5, &[&[1, 2, 4]]),
+    ("llvm.masked.store", 5, &[&[1, 4]]),
+    ("llvm.vector.insert", 4, &[&[0, 1]]),
+    ("llvm.vector.interleave2", 3, &[&[1, 2]]),
+    ("llvm.vector.reverse", 2, &[&[0, 1]]),
+    ("llvm.vector.splice", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.abs", 5, &[&[0, 1, 3]]),
+    ("llvm.vp.add", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.and", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.ashr", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.bitreverse", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.bswap", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.ceil", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.copysign", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.ctlz", 5, &[&[0, 1, 3]]),
+    ("llvm.vp.ctpop", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.cttz", 5, &[&[0, 1, 3]]),
+    ("llvm.vp.cttz.elts", 5, &[&[1, 3]]),
+    ("llvm.vp.fabs", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.fadd", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.fcmp", 6, &[&[0, 1, 2, 4]]),
+    ("llvm.vp.fdiv", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.floor", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.fma", 6, &[&[0, 1, 2, 3, 4]]),
+    ("llvm.vp.fmul", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.fmuladd", 6, &[&[0, 1, 2, 3, 4]]),
+    ("llvm.vp.fneg", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.fpext", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.fptosi", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.fptoui", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.frem", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.fshl", 6, &[&[0, 1, 2, 3, 4]]),
+    ("llvm.vp.fshr", 6, &[&[0, 1, 2, 3, 4]]),
+    ("llvm.vp.fsub", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.gather", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.icmp", 6, &[&[0, 1, 2, 4]]),
+    ("llvm.vp.inttoptr", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.is.fpclass", 5, &[&[0, 1, 3]]),
+    ("llvm.vp.llrint", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.load", 4, &[&[0, 2]]),
+    ("llvm.vp.lrint", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.lshr", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.maximum", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.maxnum", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.merge", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.minimum", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.minnum", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.mul", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.nearbyint", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.or", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.ptrtoint", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.reduce.add", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.and", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.fadd", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.fmax", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.fmaximum", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.fmin", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.fminimum", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.fmul", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.mul", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.or", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.smax", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.smin", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.umax", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.umin", 5, &[&[2, 3]]),
+    ("llvm.vp.reduce.xor", 5, &[&[2, 3]]),
+    ("llvm.vp.rint", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.round", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.roundeven", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.roundtozero", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.scatter", 5, &[&[1, 2, 3]]),
+    ("llvm.vp.sdiv", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.select", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.sext", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.shl", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.sitofp", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.smax", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.smin", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.sqrt", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.srem", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.store", 5, &[&[1, 3]]),
+    ("llvm.vp.sub", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.trunc", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.udiv", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.uitofp", 4, &[&[0, 1, 2]]),
+    ("llvm.vp.umax", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.umin", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.urem", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.xor", 5, &[&[0, 1, 2, 3]]),
+    ("llvm.vp.zext", 4, &[&[0, 1, 2]]),
 ];

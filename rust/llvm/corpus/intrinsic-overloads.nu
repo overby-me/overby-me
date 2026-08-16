@@ -62,6 +62,22 @@ def bare-type [text: string]: nothing -> string {
   | str trim
 }
 
+# The lane count a type carries, or null where it is not a vector. A scalable
+# vector counts separately from a fixed one of the same length: `<vscale x 4 x
+# i1>` and `<4 x i1>` are not the same shape and upstream does not read one
+# where the other is wanted.
+def lanes-of [text: string]: nothing -> string {
+  let scalable = ($text | parse --regex '^<vscale x (?P<count>[0-9]+) x ')
+  if not ($scalable | is-empty) {
+    return $"nx($scalable | get count.0)"
+  }
+  let fixed = ($text | parse --regex '^<(?P<count>[0-9]+) x ')
+  if not ($fixed | is-empty) {
+    return ($fixed | get count.0)
+  }
+  ""
+}
+
 # The equality classes the tied pairs describe, as a union-find would give
 # them: `llvm.fshl` ties every pair among nought, one, two and three, which
 # is one class rather than six facts.
@@ -128,25 +144,53 @@ def main [tree: path, out: path] {
         }
       }
     }
-    if ($pairs | is-empty) { continue }
+    # The same reading again, on lane counts rather than types. A mask is
+    # `<4 x i1>` where the value it masks is `<4 x double>`, so the two are
+    # not one type and are one shape, and a call giving them different
+    # lengths names an instantiation there is not.
+    mut lane_pairs = []
+    for left in 0..<$arity {
+      let seen = ($group.rows | each {|r| lanes-of ($r.types | get $left)} | uniq)
+      # A position that is not a vector everywhere has no lane count to tie,
+      # and one whose count never varies is fixed rather than tied.
+      if ($seen | any {|l| $l == ""}) { continue }
+      if ($seen | length) < 2 { continue }
+      for right in ($left + 1)..<$arity {
+        let other = ($group.rows | each {|r| lanes-of ($r.types | get $right)} | uniq)
+        if ($other | any {|l| $l == ""}) { continue }
+        if ($group.rows | all {|r| (lanes-of ($r.types | get $left)) == (lanes-of ($r.types | get $right))}) {
+          $lane_pairs = ($lane_pairs | append [[$left, $right]])
+        }
+      }
+    }
+    if ($pairs | is-empty) and ($lane_pairs | is-empty) { continue }
     $entries = ($entries | append {
       name: $group.name
       classes: (classes $pairs $arity)
+      lanes: (classes $lane_pairs $arity)
       arity: $arity
     })
   }
 
   let sorted = ($entries | sort-by name)
+  let write_classes = {|entry, which|
+    let written = (
+      $entry | get $which
+      | each {|class| $"&[" + ($class | each {|p| $"($p)"} | str join ", ") + "]"}
+      | str join ", "
+    )
+    $"    \(\"($entry.name)\", ($entry.arity), &[($written)]\),"
+  }
   let body = (
     $sorted
-    | each {|entry|
-      let written = (
-        $entry.classes
-        | each {|class| $"&[" + ($class | each {|p| $"($p)"} | str join ", ") + "]"}
-        | str join ", "
-      )
-      $"    \(\"($entry.name)\", ($entry.arity), &[($written)]\),"
-    }
+    | where {|entry| ($entry.classes | is-not-empty)}
+    | each {|entry| do $write_classes $entry "classes"}
+    | str join "\n"
+  )
+  let lane_body = (
+    $sorted
+    | where {|entry| ($entry.lanes | is-not-empty)}
+    | each {|entry| do $write_classes $entry "lanes"}
     | str join "\n"
   )
 
@@ -187,9 +231,37 @@ pub fn tied(name: &str) -> Option<(usize, &'static [&'static [usize]])> {
     })
 }
 
+/// The classes tied by lane count rather than by type, read the same way.
+///
+/// A mask is `<4 x i1>` where the value it masks is `<4 x double>`, so the
+/// two are not one type and are one shape: `llvm.masked.load` is documented
+/// at sixteen lanes, at two and at eight, and its mask is as wide as its
+/// result in each. A call giving them different lengths names an
+/// instantiation there is not. A position that is not a vector in every
+/// documented instantiation has no lane count to tie, and one whose count
+/// never varies is fixed rather than tied.
+pub fn tied_lanes(name: &str) -> Option<(usize, &'static [&'static [usize]])> {
+    super::candidates(name).find_map(|candidate| {
+        let index = TIED_LANES
+            .binary_search_by_key(&candidate, |(name, _, _)| *name)
+            .ok()?;
+        Some((TIED_LANES[index].1, TIED_LANES[index].2))
+    })
+}
+
 /// Sorted, so the lookup can be a binary search.
 static TIED: &[Entry] = &["
 
-  [$header, $body, "];", ""] | str join "\n" | save --force $out
-  print $"($sorted | length) intrinsics with tied positions into ($out)"
+  [
+    $header
+    $body
+    "];"
+    ""
+    "/// Sorted, so the lookup can be a binary search."
+    "static TIED_LANES: &[Entry] = &["
+    $lane_body
+    "];"
+    ""
+  ] | str join "\n" | save --force $out
+  print $"($sorted | where {|e| $e.classes | is-not-empty} | length) with tied types, ($sorted | where {|e| $e.lanes | is-not-empty} | length) with tied lanes, into ($out)"
 }

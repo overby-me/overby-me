@@ -2457,6 +2457,22 @@ insists on *which* type is a further question this does not ask, upstream
 reporting only the counts here.
 Assembler 482 to 483 of 483, which is every file in that suite agreeing, with
 the ceiling still at nought.
+The pass after it read LangRef's `declare` lines an eighth way, and it is the
+half `corpus/intrinsic-overloads.nu` was throwing out. Two positions whose
+types vary together are one overloaded type, which that table already says;
+two whose *lane counts* vary together are one shape without being one type,
+which it did not. A mask is `<4 x i1>` where the value it masks is
+`<4 x double>`, so nothing about the types ties them and the lengths are tied
+all the same: `llvm.masked.load` is documented at sixteen lanes, at two and
+at eight, and its mask is as wide as its result in each.
+The reading is the same one with a different comparison, so the same two
+guards apply: a position that is not a vector in every documented
+instantiation has no lane count to tie, and one whose count never varies is
+fixed rather than tied. 103 intrinsics have lane classes against 161 with
+type classes, and the two tables sit beside each other rather than being
+merged, a call being able to get one right and the other wrong.
+Verifier 325 to 326, with the modules we read that llvm-as refuses down to
+two. Both of those are the prefix reduction task 18 records.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and
