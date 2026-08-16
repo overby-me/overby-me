@@ -19,11 +19,20 @@
 # Everything except `projects` is passed to flakelight untouched.
 root: cfg: let
   inherit (builtins) attrNames concatMap elem filter isAttrs isFunction mapAttrs pathExists readDir stringLength substring throw;
+  inherit (cfg.inputs.nixpkgs) lib;
 
   labels = import ./labels.nix;
   mkFlake = import ./mk-flake.nix {inherit (cfg.inputs) nixpkgs;};
 
   discovery = cfg.projects or {};
+
+  outputDirs = cfg.outputDirs or [];
+
+  # An output tree is not a project tree: `platform/nix` names outputs by
+  # directory, so nothing inside it is a project to discover. Derived rather
+  # than listed, because listing it twice is how the two come to disagree.
+  relativeTo = dir: lib.removePrefix "${toString root}/" (toString dir);
+  outputExcludes = map relativeTo outputDirs;
 
   # One walk, shared with the identity layer, so a project is the same thing
   # to both: the directory a `default.nix` makes addressable. Duplicating it
@@ -32,7 +41,8 @@ root: cfg: let
       inherit root;
       markers = ["project.nix" "default.nix"];
     }
-    // discovery);
+    // discovery
+    // {exclude = outputExcludes ++ (discovery.exclude or []);});
 
   # A label per project, so a collision is reported as the two labels that
   # produced it rather than as whichever definition the module system saw
@@ -101,14 +111,21 @@ root: cfg: let
         && isNixFile name)
       (attrNames (readDir dir)));
 
-  fromModuleDirs = concatMap modulesIn (cfg.moduleDirs or []);
+  # A `flake-modules` directory inside an output tree holds modules of this
+  # framework. They are exported as `flakeModules` because the directory is
+  # named after that output, and imported here because a tree that ships
+  # them means them: keeping the two apart would only mean saying the
+  # directory's name twice.
+  fromModuleDirs =
+    concatMap modulesIn
+    (filter pathExists (map (d: d + "/flake-modules") outputDirs));
 
   # A tree of outputs, replacing flakelight's nixDir with the same rule
   # projects follow: the path is the address. See ./outputs.nix.
   fromOutputDirs = map (d: import ./outputs.nix d) (cfg.outputDirs or []);
 in
   mkFlake root (
-    (removeAttrs cfg ["projects" "moduleDirs" "outputDirs"])
+    (removeAttrs cfg ["projects" "outputDirs"])
     // {
       # Explicit first, then whole directories, then projects. A workspace
       # can still name one module: the four lib checks are a file inside a

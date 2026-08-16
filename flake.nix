@@ -181,27 +181,9 @@
   outputs = inputs:
     import ./platform/nix/project/workspace.nix ./. {
       inherit inputs;
-      # Every directory under here is named after the output it feeds, and
-      # platform/nix/project/outputs.nix reads them. flakelight's own nixDir
-      # is switched off: one mechanism, and it is ours.
+      # Every directory under here is named after the output it feeds. Its
+      # flake-modules are imported, and nothing inside it is a project, both
+      # of which follow from saying this once.
       outputDirs = [./platform/nix];
-
-      # Every .nix file in it is a flakelight module. nixDir exports them
-      # under the directory's own name; importing them is a separate act.
-      moduleDirs = [./platform/nix/flake-modules];
-
-      # A tool's checks live inside that tool's library rather than in a
-      # directory of modules, so these four stay named.
-      imports = [
-        ./platform/nix/lib/cargo/checks.nix
-        ./platform/nix/lib/skylark/checks.nix
-        ./platform/nix/lib/buck2/checks.nix
-        ./platform/nix/lib/ninja/checks.nix
-      ];
-
-      # Every directory holding a default.nix is a project and is imported.
-      # platform/nix is not one: it is the nixDir above, and the modules in
-      # it are named explicitly.
-      projects.exclude = ["platform/nix"];
     };
 }

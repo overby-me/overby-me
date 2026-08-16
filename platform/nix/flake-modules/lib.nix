@@ -67,7 +67,27 @@
   # Separate perSystemLib attrs from pure lib attrs.
   mergedPerSystemLib = discovered.perSystemLib or {};
   mergedLib = removeAttrs discovered ["perSystemLib"];
+  # A tool's checks live inside that tool's library, next to what they test,
+  # rather than in the directory of flake modules. This walk already knows
+  # every library, so it imports them too instead of the root flake naming
+  # each one - which is how buck2's came to be listed after skylark's and
+  # nobody noticed the two had swapped.
+  #
+  # `imports` may not depend on `config`, and these depend only on paths.
+  checkModules = let
+    entries = lib.readDir libDir;
+  in
+    map (name: libDir + "/${name}/checks.nix")
+    (lib.filter (
+        name:
+          entries.${name}
+          == "directory"
+          && lib.pathExists (libDir + "/${name}/checks.nix")
+      )
+      (lib.attrNames entries));
 in {
+  imports = checkModules;
+
   lib = lib.mkForce mergedLib;
   perSystemLib = mergedPerSystemLib;
 }
