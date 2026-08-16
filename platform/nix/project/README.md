@@ -126,6 +126,86 @@ own namespace, which is otherwise something
 `default.nix` keeps working as an ordinary flakelight module, so a tree
 migrates one project at a time.
 
+## Worked examples
+
+### A crate, its dev build and its tests
+
+`dev/wclip/project.nix`. Every name is local; the label supplies the rest.
+
+```nix
+label: {lib, ...}: {
+  packages = label.names {
+    default = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip"; ... };
+    dev     = {lib, ...}: lib.buildCargoProject { pname = "rust-wclip-dev"; release = false; ... };
+  };
+
+  checks = label.names {
+    test-version = pkgs: import ./testsuite.nix { inherit pkgs; name = "version"; };
+  };
+}
+```
+
+```text
+packages.wclip          packages.wclip-dev          checks.wclip-test-version
+```
+
+`pname` stays the crate's own name. A label names a target; a crate is
+resolved against `Cargo.lock` and keeps its identity.
+
+### A project that contributes what nixDir contributes
+
+`safety/oxidized/nixos/project.nix` produces a devshell, two NixOS
+configurations and six checks - output types that would otherwise mean four
+directories named after them, in a tree far from the project:
+
+```nix
+label: {
+  devShells = label.names { default = pkgs: { packages = [pkgs.just]; }; };
+
+  nixosConfigurations = label.names {
+    default = _: { system = "x86_64-linux"; modules = [./base.nix ./systemd.nix]; };
+  } // {
+    # Named for what it is rather than for the project that keeps it.
+    nixos-nix = _: { system = "x86_64-linux"; modules = [./base.nix]; };
+  };
+
+  checks = label.names {
+    boot           = pkgs: import ./nixos-test.nix {inherit pkgs;};
+    rung1-tmpfiles = pkgs: import ./rung1-tmpfiles-test.nix {inherit pkgs;};
+  };
+}
+```
+
+```text
+devShells.oxidized-nixos              nixosConfigurations.oxidized-nixos
+checks.oxidized-nixos-boot            nixosConfigurations.nixos-nix
+checks.oxidized-nixos-rung1-tmpfiles
+```
+
+Before this the same file wrote `oxidized-nixos` into nine names by hand. It
+now appears nowhere in it.
+
+## How this relates to nixDir
+
+They are the same idea reached from opposite ends, and both are in use.
+
+**nixDir** puts the output type in the *directory* and the entry name in the
+*file*: `platform/nix/packages/datui.nix` is `packages.datui`, and
+`platform/nix/nixos-modules/services/openssh.nix` is a `nixosModules` entry.
+Nothing inside those files says what they are or what they are called. That is
+already path-derived naming, which is why converting them to self-declaring
+modules would be a step backwards, and why they stay.
+
+**A project module** puts the output type in the *file* and the name in the
+*path*: `safety/oxidized/nixos/project.nix` says `nixosConfigurations` and
+`checks`, and the label says `oxidized-nixos`.
+
+nixDir is the better fit when the thing belongs to no project - a package
+wrapping upstream software, a NixOS module about `services.flatpak`. The
+project module is the better fit when it does, because it keeps a project's
+outputs with the project and stops the name being repeated in each one. The
+rule is the same either way: **the path is the address.**
+
 ## Options
 
 | option | default | for |
