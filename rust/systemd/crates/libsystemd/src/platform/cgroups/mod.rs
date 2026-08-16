@@ -140,6 +140,23 @@ pub fn get_cgroup_root(base_path: &std::path::Path) -> Result<std::path::PathBuf
     }
 }
 
+/// The same lookup, without creating anything.
+///
+/// `get_cgroup_root` creates the directory it returns, via `get_own_freezer`.
+/// That is right when something is about to put a process in there, and wrong
+/// for a caller that only wants to know what the path will be: turning a
+/// parsed config into a Unit computes a service's cgroup path, and had no
+/// business making a directory under /sys/fs/cgroup to do it. The service's
+/// own cgroup is created at fork time regardless (see fork_os_specific), and
+/// create_dir_all makes the parents, so nothing is lost by not creating here.
+pub fn cgroup_root_path(base_path: &std::path::Path) -> Result<std::path::PathBuf, CgroupError> {
+    if let Some(v2_root) = detect_v2_root(base_path) {
+        Ok(v2_root)
+    } else {
+        own_freezer_path(base_path)
+    }
+}
+
 /// `base_path` should normally be /sys/fs/cgroup
 ///
 /// Tries to get the most sensible path to create our own cgroup under.
@@ -149,7 +166,18 @@ pub fn get_cgroup_root(base_path: &std::path::Path) -> Result<std::path::PathBuf
 ///
 /// The concrete path will be some sub-directory depending on the cgroup rust-systemd has been started in
 pub fn get_own_freezer(base_path: &std::path::Path) -> Result<std::path::PathBuf, CgroupError> {
-    let proc_content = std::fs::read_to_string("/proc/self/cgroup").unwrap();
+    let cgroup_path = own_freezer_path(base_path)?;
+
+    fs::create_dir_all(&cgroup_path)
+        .map_err(|e| CgroupError::IOErr(e, format!("{cgroup_path:?}")))?;
+
+    Ok(cgroup_path)
+}
+
+/// Where `get_own_freezer` would put us, without creating it.
+fn own_freezer_path(base_path: &std::path::Path) -> Result<std::path::PathBuf, CgroupError> {
+    let proc_content = std::fs::read_to_string("/proc/self/cgroup")
+        .map_err(|e| CgroupError::IOErr(e, "/proc/self/cgroup".to_string()))?;
     let proc_content_lines = proc_content.split('\n').collect::<Vec<_>>();
 
     let v1path = get_own_cgroup_v1(&proc_content_lines);
@@ -184,9 +212,6 @@ pub fn get_own_freezer(base_path: &std::path::Path) -> Result<std::path::PathBuf
     };
 
     trace!("Own cgroup: {cgroup_path:?}");
-
-    fs::create_dir_all(&cgroup_path)
-        .map_err(|e| CgroupError::IOErr(e, format!("{cgroup_path:?}")))?;
 
     Ok(cgroup_path)
 }

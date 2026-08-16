@@ -77,10 +77,21 @@
   {
     name: "rust-systemd"
     path: "rust/systemd"
-    # 223 of its tests read /sys/fs/cgroup, which no build sandbox grants, so
-    # they pass outside Nix and fail inside it. The monorepo's own builder
-    # does not run them either; the real suite is the VM integration tests.
-    doCheck: false
+    # The state-transition tests exec sleep, which a build sandbox has no
+    # other source of.
+    nativeBuildInputs: ["coreutils"]
+    # Four are skipped, all of them integration tests wearing a unit test's
+    # clothes: one needs a running D-Bus daemon, one starts a real service and
+    # so creates a real cgroup, and two need a real loopback interface.
+    # Everything else runs, after unit conversion stopped creating directories
+    # under /sys/fs/cgroup just to work out a path.
+    cargoTestFlags: [
+      "--"
+      "--skip" "dbus_wait::dbus_support::test_dbus_wait"
+      "--skip" "tests::state_transition::test_service_state_transitions"
+      "--skip" "netdev_create::tests::test_interface_exists_lo"
+      "--skip" "netdev_create::tests::test_resolve_ifindex_lo"
+    ]
     filter: ":[:/rust/systemd:exclude[::*.nix],:/rust/systemd::flake.nix]:unsign"
   }
   {

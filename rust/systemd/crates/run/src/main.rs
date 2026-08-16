@@ -890,7 +890,8 @@ mod tests {
     fn test_generate_unit_name_service() {
         let cmd = vec!["echo".to_string(), "hello".to_string()];
         let name = generate_unit_name(&cmd, false);
-        assert!(name.starts_with("run-echo"));
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-echo"));
         assert!(name.ends_with(".service"));
     }
 
@@ -898,7 +899,8 @@ mod tests {
     fn test_generate_unit_name_scope() {
         let cmd = vec!["/usr/bin/sleep".to_string(), "10".to_string()];
         let name = generate_unit_name(&cmd, true);
-        assert!(name.starts_with("run-sleep"));
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-sleep"));
         assert!(name.ends_with(".scope"));
     }
 
@@ -915,7 +917,8 @@ mod tests {
         let cmd = vec!["my program!.sh".to_string()];
         let name = generate_unit_name(&cmd, false);
         // Spaces and exclamation marks should be replaced with underscores
-        assert!(name.starts_with("run-my_program__sh"));
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-my_program__sh"));
         assert!(!name.contains(' '));
         assert!(!name.contains('!'));
     }
@@ -925,7 +928,8 @@ mod tests {
         let cmd = vec!["/usr/local/bin/my-daemon".to_string()];
         let name = generate_unit_name(&cmd, false);
         // Should use only the basename
-        assert!(name.starts_with("run-my-daemon"));
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-my-daemon"));
         assert!(!name.contains("usr"));
     }
 

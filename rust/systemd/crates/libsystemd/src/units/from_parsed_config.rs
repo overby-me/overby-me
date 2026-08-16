@@ -41,7 +41,10 @@ pub fn slice_cgroup_path(root: &std::path::Path, slice_name: &str) -> PathBuf {
 
 #[cfg(feature = "cgroups")]
 fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, String> {
-    let cgroup_root = crate::platform::cgroups::get_cgroup_root(&PathBuf::from("/sys/fs/cgroup"))
+    // The non-creating lookup: this only needs to know where the cgroup will
+    // be, and creating it here made turning a parsed config into a Unit fail
+    // anywhere /sys/fs/cgroup is not writable, a sandbox included.
+    let cgroup_root = crate::platform::cgroups::cgroup_root_path(&PathBuf::from("/sys/fs/cgroup"))
         .map_err(|e| format!("Couldnt get cgroup root: {}", e))?;
     let base = if let Some(slice_name) = slice {
         slice_cgroup_path(&cgroup_root, slice_name)

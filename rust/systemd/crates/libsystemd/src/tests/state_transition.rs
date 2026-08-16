@@ -3,6 +3,17 @@ use crate::units::Unit;
 use std::convert::TryInto;
 
 fn find_bin(cmd: &str) -> String {
+    // PATH first: it is the answer everywhere, and it is the only answer in a
+    // build sandbox, which has none of the directories below and no
+    // /usr/bin/env to fall back to.
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(cmd);
+            if candidate.exists() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
     // Search common binary directories for the command
     for dir in &[
         "/usr/bin",

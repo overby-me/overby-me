@@ -1376,10 +1376,15 @@ mod tests {
 
     #[test]
     fn test_handle_notifications_from_buffer_mainpid_and_watchdog() {
+        // MAINPID is only accepted for a live process, so the pid has to be
+        // one. This used to be a literal 42, which passes only where some
+        // unrelated process happens to hold that pid and fails in a build
+        // sandbox, where it never does.
+        let live_pid = std::process::id() as i32;
         let mut srvc = make_test_service();
-        srvc.notifications_buffer = "MAINPID=42\nWATCHDOG=1\n".to_owned();
+        srvc.notifications_buffer = format!("MAINPID={live_pid}\nWATCHDOG=1\n");
         handle_notifications_from_buffer(&mut srvc, "test.service");
-        assert_eq!(srvc.main_pid, Some(nix::unistd::Pid::from_raw(42)));
+        assert_eq!(srvc.main_pid, Some(nix::unistd::Pid::from_raw(live_pid)));
         assert!(srvc.watchdog_last_ping.is_some());
     }
 

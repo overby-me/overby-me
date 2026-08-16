@@ -60,7 +60,10 @@
 
       # flakelight turns this into packages.default, a check, and an overlay,
       # so `nix flake check` builds it and the CI workflow needs nothing else.
-      package = {rustPlatform}:
+      package = {
+        rustPlatform,
+        coreutils,
+      }:
         rustPlatform.buildRustPackage {
           pname = name;
           version = cargoPackage.version or "0.1.0";
@@ -69,8 +72,8 @@
             lockFile = ./Cargo.lock;
             allowBuiltinFetchGit = true;
           };
-          # Tests need network access or a running server.
-          doCheck = false;
+          nativeBuildInputs = [coreutils];
+          cargoTestFlags = ["--" "--skip" "dbus_wait::dbus_support::test_dbus_wait" "--skip" "tests::state_transition::test_service_state_transitions" "--skip" "netdev_create::tests::test_interface_exists_lo" "--skip" "netdev_create::tests::test_resolve_ifindex_lo"];
 
           meta = {
             description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
@@ -81,6 +84,7 @@
       devShell = {
         packages = pkgs:
           (with pkgs; [cargo rustc rust-analyzer clippy rustfmt])
+          ++ (with pkgs; [coreutils])
           ++ (hooksFor pkgs).enabledPackages;
         shellHook = pkgs: (hooksFor pkgs).shellHook;
       };
