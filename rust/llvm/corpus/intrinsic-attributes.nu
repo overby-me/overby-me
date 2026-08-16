@@ -514,7 +514,13 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
 
 /// Whether upstream recognised this name in a declaration.
 pub fn is_declared_intrinsic(name: &str) -> bool {
-    super::candidates(name).any(|candidate| DECLARED.binary_search(&candidate).is_ok())
+    super::candidates(name).any(names)
+}
+
+/// Whether this exact name is in the table, which is what the reduction asks
+/// while it is working out what to reduce to.
+pub fn names(name: &str) -> bool {
+    DECLARED.binary_search(&name).is_ok()
 }
 
 /// Sorted, so the lookup can be a binary search.
