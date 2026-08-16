@@ -18,42 +18,30 @@
 #
 # Everything except `projects` is passed to flakelight untouched.
 root: cfg: let
-  inherit (builtins) attrNames concatMap elem filter pathExists readDir stringLength substring;
+  inherit (builtins) attrNames concatMap filter readDir stringLength substring throw;
+
+  labels = import ./labels.nix;
 
   discovery = cfg.projects or {};
-  exclude = discovery.exclude or [];
-  # Deep enough for area/group/project (safety/oxidized/awk) with one to
-  # spare. Bounded rather than unbounded because the cost of an extra level
-  # is a readDir of everything at that level, on every evaluation.
-  depth = discovery.depth or 4;
 
-  # A project is a directory holding a default.nix. The walk stops there
-  # rather than descending, so a project's own subdirectories are its
-  # business: several of them carry a default.nix of their own that is
-  # imported by the project, not by the workspace.
-  walk = rel: remaining: let
-    dir =
-      if rel == ""
-      then root
-      else root + "/${rel}";
-    under = name:
-      if rel == ""
-      then name
-      else "${rel}/${name}";
-    children =
-      filter
-      (name: (readDir dir).${name} == "directory" && substring 0 1 name != ".")
-      (attrNames (readDir dir));
-  in
-    if elem rel exclude
-    then []
-    else if rel != "" && pathExists (dir + "/default.nix")
-    then [dir]
-    else if remaining == 0
-    then []
-    else concatMap (name: walk (under name) (remaining - 1)) children;
+  # One walk, shared with the identity layer, so a project is the same thing
+  # to both: the directory a `default.nix` makes addressable. Duplicating it
+  # here is how the two would come to disagree about what a project is.
+  found = labels.discover ({
+      inherit root;
+    }
+    // discovery);
 
-  discovered = walk "" depth;
+  # A label per project, so a collision is reported as the two labels that
+  # produced it rather than as whichever definition the module system saw
+  # last. This is the point of having labels at all: a flat namespace cannot
+  # tell you what it just shadowed.
+  named = labels.render found;
+
+  discovered =
+    if named.report != null
+    then throw "workspace: ${named.report}"
+    else map (l: root + "/${l.path}") found;
 
   # A module directory is imported file by file: every .nix in it is a
   # flakelight module. One level only, and no default.nix rule, because
