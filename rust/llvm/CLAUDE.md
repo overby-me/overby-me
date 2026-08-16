@@ -2849,6 +2849,29 @@ than what was in force where the number was used. `llvm-as` agrees with
 We kept the first, the lookup being a search for the number. The parser
 replaces the entry now, which is what upstream holds: one group per number.
 DebugInfo differential 55 to 56.
+The pass after it took the last DebugInfo file, and the question was where
+upstream's type finder walks rather than what it does when it gets there.
+`type-finder-w-dbg-records.ll` defines four named struct types mentioned
+nowhere but inside the constant expressions two debug records carry, and
+upstream prints all four where we printed none.
+One module answered five questions at once, each type mentioned in exactly
+one place and a control mentioned nowhere. Walked: a function's personality,
+a metadata node attached to an instruction, a debug record's operands, and a
+node an ordinary named list reaches. Not walked, from a second module of the
+same shape: a metadata attachment on a global, one on a function, a
+`DIArgList`'s operands inside a record, and a `DICompileUnit`'s
+`retainedTypes` chain. A third said the two absences are the same rule: a
+tuple two deep inside a named list is reached, so nesting is not the limit
+and entering a specialized node is what upstream does not do.
+The order came out of a fourth. A record sitting above the first of two
+instructions that carry attachments gives the first instruction's type, then
+the record's, then the second's, which no pass over the records of their own
+could give: a record is walked with the instruction it sits above and after
+that instruction's own metadata. The named lists come last, after every
+function.
+DebugInfo differential 56 to 57, which is every module at the top of that
+tree printed exactly as upstream prints it. Four of the five print suites
+are there now; Assembler is the one with anything left.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

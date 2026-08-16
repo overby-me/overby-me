@@ -1018,6 +1018,69 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
+/// A named type mentioned only inside metadata is printed all the same, and
+/// only from the places upstream's own walk reaches.
+///
+/// The type definitions come back in the order the walk meets them, so this
+/// pins the order as well as the set: a debug record is walked with the
+/// instruction it sits above rather than where it stands, and the named
+/// lists come after every function. An attachment on a global or on a
+/// function reaches nothing, and neither does a specialized node's field,
+/// which is why `%unreached` stays out.
+#[test]
+fn a_named_type_inside_metadata_is_found() {
+    let text = concat!(
+        "%viaAttachment = type { i32 }\n",
+        "%viaRecord = type { i32 }\n",
+        "%viaNamedList = type { i32 }\n",
+        "%unreached = type { i32 }\n",
+        "@a = global i32 0, !unwalked !30\n",
+        "@r = global i32 0\n",
+        "@n = global i32 0\n",
+        "@u = global i32 0\n",
+        "define void @f() !dbg !6 {\n",
+        "entry:\n",
+        "    #dbg_value(ptr getelementptr ([1 x %viaRecord], ptr @r, i32 0, i32 1), ",
+        "!12, !DIExpression(), !13)\n",
+        "  %x = add i32 0, 0, !attach !20\n",
+        "  ret void, !dbg !13\n",
+        "}\n",
+        "!llvm.dbg.cu = !{!0}\n",
+        "!llvm.module.flags = !{!90}\n",
+        "!keep = !{!21}\n",
+        "!90 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+        "!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, ",
+        "emissionKind: FullDebug, retainedTypes: !31)\n",
+        "!1 = !DIFile(filename: \"probe.c\", directory: \"/\")\n",
+        "!6 = distinct !DISubprogram(name: \"f\", scope: !1, file: !1, line: 1, type: !7, ",
+        "spFlags: DISPFlagDefinition, unit: !0)\n",
+        "!7 = !DISubroutineType(types: !8)\n",
+        "!8 = !{null}\n",
+        "!12 = !DILocalVariable(name: \"x\", scope: !6, file: !1, line: 1)\n",
+        "!13 = !DILocation(line: 1, column: 1, scope: !6)\n",
+        "!20 = !{ptr getelementptr ([1 x %viaAttachment], ptr @a, i32 0, i32 1)}\n",
+        "!21 = !{ptr getelementptr ([1 x %viaNamedList], ptr @n, i32 0, i32 1)}\n",
+        "!30 = !{ptr getelementptr ([1 x %unreached], ptr @u, i32 0, i32 1)}\n",
+        "!31 = !{!30}\n",
+    );
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    let types: Vec<&str> = printed
+        .lines()
+        .filter(|line| line.starts_with('%'))
+        .collect();
+    assert_eq!(
+        types,
+        [
+            "%viaAttachment = type { i32 }",
+            "%viaRecord = type { i32 }",
+            "%viaNamedList = type { i32 }",
+        ],
+        "--- printed ---\n{printed}"
+    );
+}
+
 /// An attribute group number defined twice keeps the last definition.
 ///
 /// Not the first, and not the two merged: two disjoint sets leave only the

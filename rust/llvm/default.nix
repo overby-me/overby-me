@@ -146,13 +146,12 @@ in {
     # performs. Measuring against `llvm-as | llvm-dis` instead counted the
     # bitcode reader's compatibility upgrades as print differences, which is
     # what thirteen of them were.
-    # Feature, Linker and Other print every module we both accept exactly as
-    # upstream does, so those three are held rather than raised from here.
-    # DebugInfo is the fifth, and the one the debug-info work keeps moving.
-    # Its one remaining file wants the named types reachable only from a
-    # debug record, which is a task of its own.
+    # Feature, Linker, Other and DebugInfo print every module we both accept
+    # exactly as upstream does, so those four are held rather than raised
+    # from here. Assembler is the one with anything left: six files and six
+    # causes, written down in CLAUDE.md.
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 220;
-    llvm-opt-differential-debuginfo = pkgs: differentialCheck pkgs "DebugInfo" 56;
+    llvm-opt-differential-debuginfo = pkgs: differentialCheck pkgs "DebugInfo" 57;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 71;
     llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 220;
     llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 144;

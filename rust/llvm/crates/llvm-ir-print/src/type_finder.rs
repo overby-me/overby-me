@@ -16,7 +16,8 @@ use std::collections::HashSet;
 use llvm_ir::attribute::{Attribute, AttributeSet};
 use llvm_ir::constant::{ConstId, Constant};
 use llvm_ir::instruction::InstKind;
-use llvm_ir::value::Value;
+use llvm_ir::metadata::{MdAttachment, MdOperand, MdRef, Metadata};
+use llvm_ir::value::{MdId, Value};
 use llvm_ir::{Module, StructId, TypeId, TypeKind};
 
 pub(crate) fn reachable_named_structs(module: &Module) -> Vec<StructId> {
@@ -24,6 +25,7 @@ pub(crate) fn reachable_named_structs(module: &Module) -> Vec<StructId> {
         module,
         seen_types: HashSet::new(),
         seen_constants: HashSet::new(),
+        seen_metadata: HashSet::new(),
         found: Vec::new(),
     };
 
@@ -59,11 +61,44 @@ pub(crate) fn reachable_named_structs(module: &Module) -> Vec<StructId> {
             walk.ty(param.ty);
             walk.attributes(&param.attrs);
         }
+        // The three constants a signature can carry, each of which is the
+        // only mention of a type in some module.
+        for (_, id) in [function.personality, function.prefix, function.prologue]
+            .into_iter()
+            .flatten()
+        {
+            walk.constant(id);
+        }
         for (id, _) in function.blocks() {
+            // A debug record is walked with the instruction it sits above
+            // rather than where it stands, and after that instruction's own
+            // metadata. Measured on a block whose record sits above the
+            // first of two instructions carrying attachments: upstream
+            // writes the first instruction's type, then the record's, then
+            // the second's, which no pass over the records of their own
+            // could give.
+            let mut pending = Vec::new();
             for (_, instruction) in function.block_instructions(id) {
+                if let InstKind::DebugRecord { operands, .. } = &instruction.kind {
+                    pending.push(operands);
+                    continue;
+                }
                 walk.ty(instruction.ty);
                 walk.instruction(&instruction.kind);
+                walk.attachments(&instruction.metadata);
+                for operands in pending.drain(..) {
+                    for operand in operands {
+                        walk.md_operand(operand);
+                    }
+                }
             }
+        }
+    }
+    // Last, and only the lists: an attachment on a global or on a function
+    // is not walked at all, which is measured beside these.
+    for named in &module.named_metadata {
+        for id in &named.operands {
+            walk.md(*id);
         }
     }
 
@@ -74,6 +109,7 @@ struct Walk<'m> {
     module: &'m Module,
     seen_types: HashSet<TypeId>,
     seen_constants: HashSet<ConstId>,
+    seen_metadata: HashSet<MdId>,
     found: Vec<StructId>,
 }
 
@@ -140,6 +176,52 @@ impl Walk<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The metadata attached to an instruction, which reaches a type when a
+    /// node holds a value: `!attach !{ptr getelementptr(%pair, ...)}`.
+    fn attachments(&mut self, attachments: &[MdAttachment]) {
+        for attachment in attachments {
+            match &attachment.node {
+                MdRef::Id(id) => self.md(*id),
+                MdRef::Inline(node) => self.md_node(node),
+            }
+        }
+    }
+
+    /// A metadata node by number.
+    fn md(&mut self, id: MdId) {
+        if !self.seen_metadata.insert(id) {
+            return;
+        }
+        if let Some(node) = self.module.metadata_node(id) {
+            self.md_node(&node.clone());
+        }
+    }
+
+    /// A tuple's operands, and nothing else. A specialized node is not
+    /// entered, which is what says a `DICompileUnit`'s `retainedTypes` and a
+    /// `DIArgList`'s operands reach no type where a tuple two deep does.
+    fn md_node(&mut self, node: &Metadata) {
+        if let Metadata::Tuple { operands, .. } = node {
+            for operand in operands {
+                self.md_operand(operand);
+            }
+        }
+    }
+
+    fn md_operand(&mut self, operand: &MdOperand) {
+        match operand {
+            MdOperand::Ref(id) => self.md(*id),
+            MdOperand::Value { ty, value } => {
+                self.ty(*ty);
+                if let Value::Constant(id) = value {
+                    self.constant(*id);
+                }
+            }
+            MdOperand::Inline(node) => self.md_node(node),
+            MdOperand::Null | MdOperand::String(_) => {}
         }
     }
 
