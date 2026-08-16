@@ -32,6 +32,16 @@ pkgs: let
   rustfmtEdition = pkgs.writeShellScript "rustfmt-edition" ''
     set -eu
     file="$1"
+
+    # The LLVM corpus is rustc's input, not our source. Each .rs there has a
+    # checked-in .ll beside it, produced by a real `rustc --emit=llvm-ir`, and
+    # debug.ll carries DILocation records naming source lines. Reformatting the
+    # input moves those lines and silently desynchronises the pair, which only
+    # shows up as a confusing conformance failure later.
+    case "$file" in
+      */llvm/corpus/*) exit 0 ;;
+    esac
+
     dir="$(${coreutils}/bin/dirname "$file")"
     edition=2024
     while :; do
