@@ -786,7 +786,18 @@ impl Parser {
             let Name::Named(name) = self.module.functions[index].name.clone() else {
                 continue;
             };
-            let Some(wanted) = llvm_ir::intrinsic::attributes::attributes(&name) else {
+            // The declaration's own shape is what is asked about, because
+            // upstream gives an intrinsic's attributes only to a declaration
+            // that fits it. `llvm.assume(i1)` gets them and
+            // `llvm.assume(i1, ...)` gets nothing, and
+            // `llvm.amdgcn.cs.chain` is written at three arities, all of
+            // them variadic, each with parameter attributes of its own.
+            let shape = &self.module.functions[index];
+            let Some(wanted) = llvm_ir::intrinsic::attributes::attributes(
+                &name,
+                shape.params.len(),
+                shape.is_var_arg,
+            ) else {
                 continue;
             };
             if !self.intrinsic_declaration_fits(index, wanted.params.len()) {
@@ -1468,9 +1479,15 @@ impl Parser {
     /// leave the declaration alone, and so does every position whose type
     /// LangRef states the same way in every instantiation. A position it
     /// leaves open is open here too.
+    ///
+    /// Whether the declaration ends in `...` is not asked here. The
+    /// attribute table is keyed on that as well as on the arity, so a
+    /// declaration that reaches this has already matched a measured shape,
+    /// and a variadic intrinsic like `llvm.amdgcn.cs.chain` is one upstream
+    /// gives its attributes to.
     fn intrinsic_declaration_fits(&self, index: usize, arity: usize) -> bool {
         let function = &self.module.functions[index];
-        if function.is_var_arg || function.params.len() != arity {
+        if function.params.len() != arity {
             return false;
         }
         let Name::Named(name) = &function.name else {
@@ -1493,8 +1510,8 @@ impl Parser {
             // round, documented with an argument and recognised with none.
             // A signature of another arity than the measured one is stale,
             // so it says nothing rather than refusing.
-            return llvm_ir::intrinsic::attributes::attributes(name)
-                .is_some_and(|measured| measured.params.len() == arity);
+            return llvm_ir::intrinsic::attributes::attributes(name, arity, function.is_var_arg)
+                .is_some();
         }
         documented
             .iter()

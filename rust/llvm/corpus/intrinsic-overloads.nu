@@ -40,8 +40,11 @@ def split-arguments [text: string]: nothing -> list<string> {
   mut depth = 0
   mut current = ""
   for char in ($text | split chars) {
-    if $char in ["<" "(" "["] { $depth = $depth + 1 }
-    if $char in [">" ")" "]"] { $depth = $depth - 1 }
+    # A literal struct is one argument however many commas it holds:
+    # `{ i32, ptr addrspace(5), i32, i32 }` was four before the brace was
+    # counted.
+    if $char in ["<" "(" "[" "{"] { $depth = $depth + 1 }
+    if $char in [">" ")" "]" "}"] { $depth = $depth - 1 }
     if $char == "," and $depth == 0 {
       $out = ($out | append ($current | str trim))
       $current = ""

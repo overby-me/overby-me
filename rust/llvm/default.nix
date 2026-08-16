@@ -148,9 +148,9 @@ in {
     # what thirteen of them were.
     # Feature, Linker, Other and DebugInfo print every module we both accept
     # exactly as upstream does, so those four are held rather than raised
-    # from here. Assembler is the one with anything left: six files and six
+    # from here. Assembler is the one with anything left: five files and five
     # causes, written down in CLAUDE.md.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 220;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 221;
     llvm-opt-differential-debuginfo = pkgs: differentialCheck pkgs "DebugInfo" 57;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 71;
     llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 220;

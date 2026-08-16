@@ -2872,6 +2872,37 @@ function.
 DebugInfo differential 56 to 57, which is every module at the top of that
 tree printed exactly as upstream prints it. Four of the five print suites
 are there now; Assembler is the one with anything left.
+The pass after it was meant to be about `...` and turned out to be about the
+key. `Assembler/amdgcn-unreachable.ll` declares
+`llvm.amdgcn.cs.chain.p0.i64.i32.i32(ptr, i64, i32, i32, i32 immarg, ...)`
+and upstream gives it `convergent noreturn nounwind` where we gave it
+nothing, and the reason was not the variadic gate in
+`intrinsic_declaration_fits`: that name has no row in the attribute table at
+all.
+Upstream's own tests declare it at three arities, five fixed parameters, six
+and eight, all variadic, all with the same function attributes and parameter
+attributes of their own. The sweep grouped every instantiation of a base
+name together, found the parameter lists disagreeing and dropped the name,
+which is the same mistake the mangling table had before it was keyed on the
+arity. The attribute table is keyed on the shape now, one row per base,
+arity and whether it ends in `...`, and the conflicts fall from ten to
+three: `llvm.scmp` and `llvm.ucmp`, whose `range` return attribute is a
+property of the instantiation, and `llvm.amdgcn.interp`, which really is
+written two ways at one arity.
+The `...` is part of that shape rather than a parameter, which two probes
+settle: `llvm.assume(i1)` gets its attributes and `llvm.assume(i1, ...)`
+gets none, and a `cs.chain` with the wrong number of fixed parameters gets
+none either. So the lookup asks for the declaration's own arity and its own
+variadic-ness, and the blanket refusal of a variadic declaration is gone.
+The sweep found a second thing on the way, which is why the row it wrote for
+that name carried `"}"` as a parameter attribute: the argument splitter
+counted `<`, `(` and `[` and not `{`, so a literal struct parameter split
+into as many arguments as it had fields. Six corpus scripts carried a copy
+of that splitter, the same way three carried a copy of the reduction, and
+all six count the brace now. The two tables built from LangRef alone,
+`table.rs` and `overloads.rs`, regenerate byte-identical, so nothing
+LangRef writes has a struct in an argument list.
+Assembler differential 220 to 221.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

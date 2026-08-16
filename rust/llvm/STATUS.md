@@ -42,7 +42,7 @@ and each row names the check that backs it.
 | Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 | Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
-| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 11,768 intrinsics upstream answers about, swept from LangRef and from its own tests | `llvm-opt-differential`, `llvm-upstream-verifier` |
+| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 11,785 shapes upstream answers about, one row per name, arity and whether it ends in `...`, swept from LangRef and from its own tests | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
 | Intrinsic names carrying the types they were instantiated at | done for the 2,127 measured, name and print position both, swept from LangRef and from upstream's own test declarations | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
@@ -209,7 +209,7 @@ where its type is the same in every documented instantiation.
 `corpus/intrinsic-attributes.nu` asks the assembler rather than LangRef,
 writing each `declare` line out and reading back the attributes upstream
 replaced them with. It reads LangRef's 1,803 lines and the 40,636 that
-upstream's own tests write, which is 11,768 intrinsics: LangRef documents
+upstream's own tests write, which is 11,785 shapes: LangRef documents
 370 of them and every target's are documented only in its backend. The same
 readback says which names upstream knew, `; Unknown intrinsic` being what it
 writes above one it does not, and that is the half
@@ -321,11 +321,11 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **220 of 226** are identical, with
+against upstream's own `opt -S`, and **221 of 226** are identical, with
 four more suites measured the same way: **71 of 71** in `Feature`, **220 of
 220** in `Linker`, **144 of 144** in `Other` and **57 of 57** in
 `DebugInfo`. Four of the five print every module both tools accept exactly
-as upstream prints it; the one that does not has its six remaining files
+as upstream prints it; the one that does not has its five remaining files
 sorted by cause in CLAUDE.md. Some of the
 remaining differences are ones where we already match
 `llvm-as | llvm-dis` and `opt -S` does something else. ODR type uniquing is most of them; the

@@ -61,8 +61,11 @@ def split-arguments [text: string]: nothing -> list<string> {
   mut depth = 0
   mut current = ""
   for char in ($text | split chars) {
-    if $char in ["<" "(" "["] { $depth = $depth + 1 }
-    if $char in [">" ")" "]"] { $depth = $depth - 1 }
+    # A literal struct is one argument however many commas it holds:
+    # `{ i32, ptr addrspace(5), i32, i32 }` was four before the brace was
+    # counted, and the closing one reached the table as an attribute.
+    if $char in ["<" "(" "[" "{"] { $depth = $depth + 1 }
+    if $char in [">" ")" "]" "}"] { $depth = $depth - 1 }
     if $char == "," and $depth == 0 {
       $out = ($out | append ($current | str trim))
       $current = ""
@@ -345,12 +348,21 @@ def read-declares [text: string]: nothing -> list {
       continue
     }
     let row = ($parsed | first)
+    # `...` is not a parameter and carries no attributes: it says the
+    # intrinsic takes more than it names. Upstream tells a declaration
+    # carrying one from a declaration of the same name without one, giving
+    # the attributes to whichever matches the intrinsic, so it is recorded
+    # beside the count rather than counted.
+    let written = (split-arguments $row.arguments)
+    let variadic = (($written | last 1 | str join "" | str trim) == "...")
+    let fixed = (if $variadic { $written | drop 1 } else { $written })
     $rows = ($rows | append {
       base: (strip-mangling $row.name)
       instantiation: $row.name
       known: (not $unknown)
+      variadic: $variadic
       ret: (return-attributes ($row.before | str trim))
-      params: (split-arguments $row.arguments | each {|a| argument-attributes $a})
+      params: ($fixed | each {|a| argument-attributes $a})
       function: (if ($row.group | is-empty) { "" } else { $groups | get --optional $row.group | default "" })
     })
     $unknown = false
@@ -465,9 +477,21 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
   # An intrinsic's attributes are the intrinsic's, so every instantiation of
   # one base name has to agree. Where they do not, the disagreement is
   # reported and the entry is left out rather than one of them being picked.
+  #
+  # Agreement is asked of the instantiations that share a shape, not of every
+  # one that shares a name. A base declared at two arities is two entries,
+  # the way the mangling table has been since the same mistake was found
+  # there: `llvm.amdgcn.cs.chain` is written with five fixed parameters, with
+  # six and with eight, and upstream gives all three the same function
+  # attributes and different parameter ones, so comparing them against each
+  # other reported a conflict and dropped a name upstream answers about.
   mut entries = []
   mut conflicts = []
-  for group in ($declares | group-by base | transpose base rows) {
+  let shaped = (
+    $declares
+    | each {|row| $row | insert shape $"($row.base)|($row.params | length)|($row.variadic)"}
+  )
+  for group in ($shaped | group-by shape | transpose shape rows) {
     # A declaration upstream did not recognise comes back exactly as it was
     # written, which says nothing rather than saying there are no
     # attributes. Comparing one of those against an instantiation that was
@@ -484,18 +508,19 @@ def main [tree: path, llvm_as: path, llvm_dis: path, out: path] {
     let functions = ($answered | each {|r| $r.function} | uniq)
     let rets = ($answered | each {|r| $r.ret} | uniq)
     let params = ($answered | each {|r| $r.params | str join "|"} | uniq)
+    let first = ($answered | first)
     if ($functions | length) != 1 or ($rets | length) != 1 or ($params | length) != 1 {
       $conflicts = ($conflicts | append {
-        name: $group.base
+        name: $first.base
         functions: $functions
         rets: $rets
         params: $params
       })
       continue
     }
-    let first = ($answered | first)
     $entries = ($entries | append {
-      name: $group.base
+      name: $first.base
+      variadic: $first.variadic
       function: $first.function
       ret: $first.ret
       params: $first.params
@@ -554,10 +579,10 @@ static DECLARED: &[&str] = &["
 
   let body = (
     $entries
-    | sort-by name
+    | sort-by name {|entry| $entry.params | length}
     | each {|entry|
       let params = ($entry.params | each {|p| $'"(escape-rust $p)"'} | str join ", ")
-      $"    \(\"(escape-rust $entry.name)\", Attributes { function: \"(escape-rust $entry.function)\", ret: \"(escape-rust $entry.ret)\", params: &[($params)] }\),"
+      $"    \(\"(escape-rust $entry.name)\", Attributes { function: \"(escape-rust $entry.function)\", ret: \"(escape-rust $entry.ret)\", params: &[($params)], variadic: ($entry.variadic) }\),"
     }
     | str join "\n"
   )
@@ -584,26 +609,40 @@ pub struct Attributes {
     /// What goes before the return type, empty when nothing does.
     pub ret: &'static str,
     /// One entry per parameter, in order, empty where that parameter
-    /// carries nothing.
+    /// carries nothing. A `...` is not one of them.
     pub params: &'static [&'static str],
+    /// Whether the declaration this was measured from ends in `...`.
+    pub variadic: bool,
 }
 
-/// What upstream gives the intrinsic this name instantiates, or `None` when
-/// it is not one whose attributes were measured.
+/// What upstream gives the intrinsic this name instantiates at this shape,
+/// or `None` when nothing measured says.
 ///
 /// The reduction is `super::candidates`, which tries the whole name first
 /// and then drops trailing mangled types, stopping at the first component
 /// that is a word. `llvm.vp.cttz.elts` is not `llvm.vp.cttz`.
-pub fn attributes(name: &str) -> Option<&'static Attributes> {
-    super::candidates(name).find_map(|candidate| {
-        let index = ATTRIBUTES
-            .binary_search_by_key(&candidate, |(name, _)| *name)
-            .ok()?;
-        Some(&ATTRIBUTES[index].1)
-    })
+///
+/// The shape is asked for because upstream gives an intrinsic's attributes
+/// only to a declaration that fits it: `llvm.assume(i1)` gets them and
+/// `llvm.assume(i1, ...)` gets nothing, and a base written at more than one
+/// arity has a row for each.
+pub fn attributes(name: &str, arity: usize, variadic: bool) -> Option<&'static Attributes> {
+    let (start, end) = super::candidates(name).find_map(|candidate| {
+        let start = ATTRIBUTES.partition_point(|(known, _)| *known < candidate);
+        let rows = ATTRIBUTES[start..]
+            .iter()
+            .take_while(|(known, _)| *known == candidate)
+            .count();
+        (rows > 0).then_some((start, start + rows))
+    })?;
+    ATTRIBUTES[start..end]
+        .iter()
+        .map(|(_, row)| row)
+        .find(|row| row.params.len() == arity && row.variadic == variadic)
 }
 
-/// Sorted, so the lookup can be a binary search.
+/// Sorted by name and then by how many parameters the declaration had, so
+/// the rows of one name sit together.
 static ATTRIBUTES: &[(&str, Attributes)] = &["
 
   [$header, $body, "];", ""] | str join "\n" | save --force $out

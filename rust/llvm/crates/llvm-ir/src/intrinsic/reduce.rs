@@ -211,7 +211,7 @@ mod tests {
         assert!(overloads::tied("llvm.vp.cttz").is_some());
         assert!(overloads::tied("llvm.vp.cttz.elts.i32.nxv16i1").is_none());
         assert!(table::signature("llvm.vp.cttz.elts.i32.nxv16i1").is_some());
-        assert!(attributes::attributes("llvm.vp.cttz.elts.i32.nxv16i1").is_some());
+        assert!(attributes::attributes("llvm.vp.cttz.elts.i32.nxv16i1", 4, false).is_some());
         assert!(table::signature("llvm.aarch64.made.up.p0").is_none());
         assert!(overloads::tied("llvm.aarch64.made.up.p0").is_none());
     }

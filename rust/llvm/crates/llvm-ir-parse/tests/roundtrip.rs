@@ -1018,6 +1018,40 @@ fn an_intrinsic_name_carries_the_types_it_was_instantiated_at() {
     }
 }
 
+/// An intrinsic gets its attributes when the declaration fits its shape, and
+/// a `...` is part of that shape.
+///
+/// `llvm.amdgcn.cs.chain` is variadic and written at three arities, so the
+/// table holds a row per shape. Upstream gives `llvm.assume(i1)` its
+/// attributes and gives `llvm.assume(i1, ...)` nothing, which is what says
+/// the `...` is not a parameter but part of what is being matched.
+#[test]
+fn a_variadic_intrinsic_declaration_gets_its_attributes() {
+    let cases = [
+        (
+            "declare void @llvm.amdgcn.cs.chain.p0.i64.i32.i32(ptr, i64, i32, i32, i32 immarg, ...)\n",
+            Some("convergent noreturn nounwind"),
+        ),
+        ("declare void @llvm.assume(i1)\n", Some("nocallback")),
+        ("declare void @llvm.assume(i1, ...)\n", None),
+    ];
+    for (text, wanted) in cases {
+        let module = llvm_ir_parse::parse_module(text)
+            .unwrap_or_else(|error| panic!("did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        match wanted {
+            Some(attribute) => assert!(
+                printed.contains(attribute),
+                "wanted {attribute} from {text}--- printed ---\n{printed}"
+            ),
+            None => assert!(
+                !printed.contains("attributes #"),
+                "wanted no attributes from {text}--- printed ---\n{printed}"
+            ),
+        }
+    }
+}
+
 /// A named type mentioned only inside metadata is printed all the same, and
 /// only from the places upstream's own walk reaches.
 ///
