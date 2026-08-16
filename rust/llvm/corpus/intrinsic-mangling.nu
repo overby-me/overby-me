@@ -109,10 +109,27 @@ def declare-lines [text: string]: nothing -> list<string> {
 # name. Same reading as `crates/llvm-ir/src/intrinsic/mod.rs`: a spelling
 # usually carries a width or a count, and the ones that do not are a closed
 # set.
+# Whether a component is a type upstream spells there, which is the same
+# grammar `crates/llvm-ir/src/intrinsic/reduce.rs` measures and has to stay
+# the same one: this decides what is stored and that decides what is looked
+# up. Stated loosely it is wrong both ways, `interleave4` in
+# `llvm.vector.interleave4` having a digit and not being a type.
+#
+# No `label`, `token` or `metadata`: the measured mangling spells a label and
+# a token `i0` and metadata `Metadata`, so none of the three is ever a
+# component.
 def spelled [part: string]: nothing -> bool {
-  ($part =~ '[0-9]') or ($part in [
-    "bfloat" "double" "float" "half" "isVoid" "metadata" "Metadata" "ptr" "token" "void"
-  ])
+  if $part in [
+    "Metadata" "bf16" "bfloat" "double" "f128" "f16" "f32" "f64" "f80" "float"
+    "fp128" "half" "isVoid" "ppcf128" "ptr" "void" "x86amx"
+  ] { return true }
+  if ($part | str starts-with "sl_") { return ($part | str ends-with "s") }
+  if ($part =~ '^[ip][0-9]+$') { return true }
+  let composite = ($part | parse --regex '^(?P<prefix>nxv|v|a)(?P<count>[0-9]+)(?P<element>.+)$')
+  if ($composite | is-not-empty) {
+    return (spelled ($composite | first | get element))
+  }
+  false
 }
 
 # The names a lookup tries, longest first: the whole name, then the whole

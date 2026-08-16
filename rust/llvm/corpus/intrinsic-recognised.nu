@@ -43,12 +43,16 @@
 # `interleave4` is not a type, and reducing through it stored `llvm.vector`;
 # `llvm.amdgcn.fdot2` stored `llvm.amdgcn`, which would answer for every name
 # that target has.
+# Whether a component is a type upstream spells there, which is the same
+# grammar `crates/llvm-ir/src/intrinsic/reduce.rs` measures and has to stay
+# the same one: this decides what is stored and that decides what is looked
+# up. Stated loosely it is wrong both ways, `interleave4` in
+# `llvm.vector.interleave4` having a digit and not being a type.
+#
+# No `label`, `token` or `metadata`: the measured mangling spells a label and
+# a token `i0` and metadata `Metadata`, so none of the three is ever a
+# component.
 def spelled [part: string]: nothing -> bool {
-  # No `label`, `token` or `metadata`: the measured mangling spells a label
-  # and a token `i0` and metadata `Metadata`, so none of the three is ever a
-  # component. Harvesting the words that follow a documented name cannot tell
-  # a type from the last word of a name, and the only name in the tree ending
-  # in `label` is `llvm.dbg.label`.
   if $part in [
     "Metadata" "bf16" "bfloat" "double" "f128" "f16" "f32" "f64" "f80" "float"
     "fp128" "half" "isVoid" "ppcf128" "ptr" "void" "x86amx"

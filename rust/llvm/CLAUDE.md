@@ -2658,6 +2658,35 @@ for over an hour, against a permanent indirection in the one artifact a
 reader consults to see what an intrinsic carries. Not worth it, and the
 numbers are here so it stays a decision rather than a thing nobody
 measured.
+The pass after it made the three sweeps spell one reduction. Each of them has
+to cut a written name down to the base its table is keyed on, and each had
+its own idea of what a component of a mangled type looks like:
+`intrinsic-recognised.nu` used the measured grammar, `intrinsic-attributes.nu`
+a regex that knew neither `ptr` nor the float spellings, and
+`intrinsic-mangling.nu` still the rule an earlier pass measured wrong, that a
+component with a digit in it is a type. That is the rule which reduces
+`llvm.vector.interleave4` to `llvm.vector`, and the pass before this one had
+widened that script's input by eleven thousand test declarations while it
+reduced with it.
+All three carry byte-identical copies of the grammar now: a closed set of
+spellings, `sl_` and a run of them for a literal struct, `i` or `p` and
+digits, and `nxv`, `v` or `a` with a count and an element that has itself to
+be a spelling. That last clause is the whole difference. `v2` is not a vector
+of anything, so `llvm.aarch64.sve.bfdot.lane.v2` is a name rather than
+`llvm.aarch64.sve.bfdot.lane` instantiated at one, and `bf8` is not a float,
+so `llvm.amdgcn.cvt.f16.bf8` keeps its last component too. 126 over-reduced
+names leave the recognised set and 53 whole ones join it, 11,865 to 11,792,
+and the attribute rows go 11,842 to 11,768.
+The mangling table gains 560 rows, 1,567 to 2,127, every one of them a name
+whose last component has a digit and is not a type: `llvm.aarch64.neon.tbl1`,
+`st1x2`, `vcadd.rot270`, `frint32x`. It loses 27, and those are worth naming
+because they were never intrinsics at all. Upstream's own tests write
+`llvm.aarch64.sve.bdep.x.nx16i8`, misspelling `nxv16i8`, and the loose rule
+read the misspelling as a type and made a base out of what was left.
+Rows dropped for disagreeing with the assembler go 32 to 5, which is what
+says the reduction was behind them rather than the mangling ambiguity they
+were blamed on: `llvm.amdgcn.image.atomic.swap.1d` has its row now.
+Assembler differential 219 to 220.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

@@ -24,10 +24,32 @@
 # the instantiations upstream recognises are the ones that were right.
 
 # The mangling suffix an instantiation adds: `llvm.smax.v4i32` is `llvm.smax`.
+# Whether a component is a type upstream spells there, which is the same
+# grammar `crates/llvm-ir/src/intrinsic/reduce.rs` measures and has to stay
+# the same one: this decides what is stored and that decides what is looked
+# up. Stated loosely it is wrong both ways, `interleave4` in
+# `llvm.vector.interleave4` having a digit and not being a type.
+#
+# No `label`, `token` or `metadata`: the measured mangling spells a label and
+# a token `i0` and metadata `Metadata`, so none of the three is ever a
+# component.
+def spelled [part: string]: nothing -> bool {
+  if $part in [
+    "Metadata" "bf16" "bfloat" "double" "f128" "f16" "f32" "f64" "f80" "float"
+    "fp128" "half" "isVoid" "ppcf128" "ptr" "void" "x86amx"
+  ] { return true }
+  if ($part | str starts-with "sl_") { return ($part | str ends-with "s") }
+  if ($part =~ '^[ip][0-9]+$') { return true }
+  let composite = ($part | parse --regex '^(?P<prefix>nxv|v|a)(?P<count>[0-9]+)(?P<element>.+)$')
+  if ($composite | is-not-empty) {
+    return (spelled ($composite | first | get element))
+  }
+  false
+}
+
 def strip-mangling [name: string]: nothing -> string {
   mut parts = ($name | split row ".")
-  while (($parts | length) > 2
-    and (($parts | last) =~ '^(v[0-9].*|nxv[0-9].*|p[0-9]+|i[0-9]+|f[0-9]+|bf[0-9]+|f80|f128|ppcf128|isVoid|a[0-9].*)$')) {
+  while (($parts | length) > 2 and (spelled ($parts | last))) {
     $parts = ($parts | drop 1)
   }
   $parts | str join "."

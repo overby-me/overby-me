@@ -4626,7 +4626,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.aarch64.sve.bfdot.lane",
+        "llvm.aarch64.sve.bfdot.lane.v2",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -4642,7 +4642,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.aarch64.sve.bfmlalb.lane",
+        "llvm.aarch64.sve.bfmlalb.lane.v2",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -4658,7 +4658,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.aarch64.sve.bfmlalt.lane",
+        "llvm.aarch64.sve.bfmlalt.lane.v2",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -5466,7 +5466,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.aarch64.sve.fcvt.bf16f32",
+        "llvm.aarch64.sve.fcvt.bf16f32.v2",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -5554,7 +5554,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.aarch64.sve.fcvtnt.bf16f32",
+        "llvm.aarch64.sve.fcvtnt.bf16f32.v2",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -11434,30 +11434,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.cs.chain",
-        Attributes {
-            function: "convergent noreturn nounwind",
-            ret: "",
-            params: &["", "", "", "", "immarg", ""],
-        },
-    ),
-    (
-        "llvm.amdgcn.cs.chain.p0.i32.v3i32.sl_i32p5i32i32s",
-        Attributes {
-            function: "convergent noreturn nounwind",
-            ret: "",
-            params: &["", "", "", "", "", "", "}", "immarg", ""],
-        },
-    ),
-    (
-        "llvm.amdgcn.cs.chain.p0.i32.v4i32.sl_p0v3i32s",
-        Attributes {
-            function: "convergent noreturn nounwind",
-            ret: "",
-            params: &["", "", "", "", "}", "immarg", ""],
-        },
-    ),
-    (
         "llvm.amdgcn.cubeid",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
@@ -11490,7 +11466,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.cvt",
+        "llvm.amdgcn.cvt.f16.bf8",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -11499,6 +11475,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
     ),
     (
         "llvm.amdgcn.cvt.f16.fp8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "immarg"],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.f32.bf8",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -11530,11 +11514,43 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.cvt.pk",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &["", ""],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.pk.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "immarg"],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.pk.f16.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &[""],
+        },
+    ),
+    (
         "llvm.amdgcn.cvt.pk.f16.fp8",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
             params: &[""],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.pk.f32.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "immarg"],
         },
     ),
     (
@@ -11594,7 +11610,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.cvt.scalef32.2xpk16",
+        "llvm.amdgcn.cvt.scalef32.2xpk16.bf6",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -11610,6 +11626,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.cvt.scalef32.f16.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "immarg", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.cvt.scalef32.f16.fp8",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
@@ -11618,9 +11642,25 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.cvt.scalef32.f32.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.cvt.scalef32.f32.fp8",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "immarg"],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.scalef32.pk.bf16.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
             params: &["", "", "immarg"],
         },
@@ -11635,6 +11675,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
     ),
     (
         "llvm.amdgcn.cvt.scalef32.pk.bf16.fp8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &["", "", "immarg"],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.scalef32.pk.f16.bf8",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -11658,6 +11706,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.cvt.scalef32.pk.f32.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &["", "", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.cvt.scalef32.pk.f32.fp4",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
@@ -11674,7 +11730,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.cvt.scalef32.pk32",
+        "llvm.amdgcn.cvt.scalef32.pk32.bf16.bf6",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -11690,7 +11746,31 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.cvt.scalef32.pk32.bf6",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &["", ""],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.scalef32.pk32.f16.bf6",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &["", ""],
+        },
+    ),
+    (
         "llvm.amdgcn.cvt.scalef32.pk32.f16.fp6",
+        Attributes {
+            function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
+            ret: "",
+            params: &["", ""],
+        },
+    ),
+    (
+        "llvm.amdgcn.cvt.scalef32.pk32.f32.bf6",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -11714,7 +11794,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.cvt.scalef32.sr",
+        "llvm.amdgcn.cvt.scalef32.sr.bf8",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -11738,7 +11818,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.cvt.scalef32.sr.pk32",
+        "llvm.amdgcn.cvt.scalef32.sr.pk32.bf6",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -11762,6 +11842,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.cvt.sr.bf8",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.cvt.sr.fp8",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
@@ -11778,18 +11866,18 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.dispatch.id",
+        "llvm.amdgcn.dispatch",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
-            ret: "noundef",
+            ret: "noundef nonnull align 4",
             params: &[],
         },
     ),
     (
-        "llvm.amdgcn.dispatch.ptr",
+        "llvm.amdgcn.dispatch.id",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
-            ret: "noundef nonnull align 4",
+            ret: "noundef",
             params: &[],
         },
     ),
@@ -11818,7 +11906,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.dot4",
+        "llvm.amdgcn.dot4.f32.bf8.bf8",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -11834,7 +11922,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.dot4.f32.fp8",
+        "llvm.amdgcn.dot4.f32.fp8.bf8",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "",
@@ -12650,14 +12738,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.gather4.2d.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.gather4.2darray",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
@@ -13006,79 +13086,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.load.1d.sl_f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_v2f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_v3f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_v3f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_v4f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1d.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.load.1darray",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.1darray.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13094,79 +13102,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.load.2d.sl_f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_v2f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_v3f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_v3f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_v4f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2d.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.load.2darray",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2darray.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13182,23 +13118,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.load.2darraymsaa.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.load.2dmsaa",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.2dmsaa.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13214,22 +13134,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.load.3d.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.3d.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.load.cube",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
@@ -13238,23 +13142,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.load.cube.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.load.mip.1d",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.mip.1d.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13271,30 +13159,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
     ),
     (
         "llvm.amdgcn.image.load.mip.2d",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.mip.2d.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.mip.2d.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.load.mip.2d.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13334,39 +13198,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.msaa.load.2darraymsaa.sl_v4f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.msaa.load.2darraymsaa.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.msaa.load.2dmsaa",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.msaa.load.2dmsaa.sl_v4f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.msaa.load.2dmsaa.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13382,31 +13214,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.msaa.load.x.2darraymsaa.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.image.msaa.load.x.2dmsaa",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.msaa.load.x.2dmsaa.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.msaa.load.x.2dmsaa.sl_v4f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -13425,14 +13233,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         "llvm.amdgcn.image.sample.1d.nortn",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn",
-            ret: "",
-            params: &["immarg", "", "", "", "immarg", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.1d.sl_v4f32i32s",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
             params: &["immarg", "", "", "", "immarg", "immarg", "immarg"],
         },
@@ -13465,22 +13265,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         "llvm.amdgcn.image.sample.2d.nortn",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.2d.sl_f16i32s",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "immarg", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.2d.sl_v2f16i32s",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
             params: &["immarg", "", "", "", "", "immarg", "immarg", "immarg"],
         },
@@ -13545,22 +13329,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         "llvm.amdgcn.image.sample.b.2d.nortn",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn",
-            ret: "",
-            params: &["immarg", "", "", "", "", "", "immarg", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.b.2d.sl_v3f16i32s",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["immarg", "", "", "", "", "", "immarg", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.b.2d.sl_v4f16i32s",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
             params: &["immarg", "", "", "", "", "", "immarg", "immarg", "immarg"],
         },
@@ -13870,16 +13638,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.image.sample.c.d.1d.sl_v2f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &[
-                "immarg", "", "", "", "", "", "", "immarg", "immarg", "immarg",
-            ],
-        },
-    ),
-    (
         "llvm.amdgcn.image.sample.c.d.2d",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
@@ -13984,26 +13742,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
     ),
     (
         "llvm.amdgcn.image.sample.c.d.o.2darray",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &[
-                "immarg", "", "", "", "", "", "", "", "", "", "", "", "immarg", "immarg", "immarg",
-            ],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.c.d.o.2darray.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &[
-                "immarg", "", "", "", "", "", "", "", "", "", "", "", "immarg", "immarg", "immarg",
-            ],
-        },
-    ),
-    (
-        "llvm.amdgcn.image.sample.c.d.o.2darray.sl_v2f32i32s",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -14585,7 +14323,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.implicit.buffer.ptr",
+        "llvm.amdgcn.implicit.buffer",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "noundef align 4",
@@ -14593,7 +14331,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.implicitarg.ptr",
+        "llvm.amdgcn.implicitarg",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "noundef align 4",
@@ -14665,7 +14403,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.kernarg.segment.ptr",
+        "llvm.amdgcn.kernarg.segment",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "noundef align 4",
@@ -14823,6 +14561,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8",
+        Attributes {
+            function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "immarg", "immarg", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
@@ -14831,7 +14577,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.mfma.f32.16x16x32.fp8",
+        "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -14895,6 +14641,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8",
+        Attributes {
+            function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "immarg", "immarg", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.mfma.f32.32x32x16.bf8.fp8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
@@ -14903,7 +14657,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.mfma.f32.32x32x16.fp8",
+        "llvm.amdgcn.mfma.f32.32x32x16.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -15287,7 +15041,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.queue.ptr",
+        "llvm.amdgcn.queue",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "noundef nonnull align 4",
@@ -15460,86 +15214,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
             function: "nocallback nofree nounwind willreturn",
             ret: "",
             params: &["", "captures(none)", "immarg", "", "", "immarg", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_i16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_i8i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_v2i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_v3f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_v3i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.raw.buffer.load.sl_v4i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "immarg"],
         },
     ),
     (
@@ -16303,7 +15977,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.smfmac.f32.16x16x128",
+        "llvm.amdgcn.smfmac.f32.16x16x128.bf8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -16319,7 +15993,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.smfmac.f32.16x16x128.fp8",
+        "llvm.amdgcn.smfmac.f32.16x16x128.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -16351,6 +16025,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.smfmac.f32.16x16x64.bf8.bf8",
+        Attributes {
+            function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "", "immarg", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.smfmac.f32.16x16x64.bf8.fp8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
@@ -16359,7 +16041,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.smfmac.f32.16x16x64.fp8",
+        "llvm.amdgcn.smfmac.f32.16x16x64.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -16391,6 +16073,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.smfmac.f32.32x32x32.bf8.bf8",
+        Attributes {
+            function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", "", "immarg", "immarg"],
+        },
+    ),
+    (
         "llvm.amdgcn.smfmac.f32.32x32x32.bf8.fp8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
@@ -16399,7 +16089,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.smfmac.f32.32x32x32.fp8",
+        "llvm.amdgcn.smfmac.f32.32x32x32.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -16415,7 +16105,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.smfmac.f32.32x32x64",
+        "llvm.amdgcn.smfmac.f32.32x32x64.bf8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -16431,7 +16121,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.smfmac.f32.32x32x64.fp8",
+        "llvm.amdgcn.smfmac.f32.32x32x64.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -16663,70 +16353,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.struct.buffer.load.format.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_v2i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_v3f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_v3i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.format.sl_v4i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.struct.buffer.load.lds",
         Attributes {
             function: "nocallback nofree nounwind willreturn",
@@ -16741,86 +16367,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
                 "immarg",
                 "immarg",
             ],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_f16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_i16i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_i8i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_v2i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_v3f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_v3i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.buffer.load.sl_v4i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(read)",
-            ret: "",
-            params: &["", "", "", "", "immarg"],
         },
     ),
     (
@@ -16984,70 +16530,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_v2f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_v2i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_v3f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_v3i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_v4f32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
-        "llvm.amdgcn.struct.ptr.buffer.load.format.sl_v4i32i32s",
-        Attributes {
-            function: "nocallback nofree nosync nounwind willreturn memory(argmem: read)",
-            ret: "",
-            params: &["readonly captures(none)", "", "", "", "immarg"],
-        },
-    ),
-    (
         "llvm.amdgcn.struct.ptr.buffer.load.lds",
         Attributes {
             function: "nocallback nofree nounwind willreturn memory(argmem: readwrite)",
@@ -17161,6 +16643,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.swmmac.f32.16x16x32.bf8.bf8",
+        Attributes {
+            function: "convergent nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", "", ""],
+        },
+    ),
+    (
         "llvm.amdgcn.swmmac.f32.16x16x32.bf8.fp8",
         Attributes {
             function: "convergent nounwind willreturn memory(none)",
@@ -17169,7 +16659,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.swmmac.f32.16x16x32.fp8",
+        "llvm.amdgcn.swmmac.f32.16x16x32.fp8.bf8",
         Attributes {
             function: "convergent nounwind willreturn memory(none)",
             ret: "",
@@ -17385,6 +16875,14 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
+        "llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8",
+        Attributes {
+            function: "convergent nocallback nofree nounwind willreturn memory(none)",
+            ret: "",
+            params: &["", "", ""],
+        },
+    ),
+    (
         "llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8",
         Attributes {
             function: "convergent nocallback nofree nounwind willreturn memory(none)",
@@ -17393,7 +16891,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.amdgcn.wmma.f32.16x16x16.fp8",
+        "llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8",
         Attributes {
             function: "convergent nocallback nofree nounwind willreturn memory(none)",
             ret: "",
@@ -18417,7 +17915,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.arm.mve.pred",
+        "llvm.arm.mve.pred.i2v",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -18425,7 +17923,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.arm.mve.pred.i2v",
+        "llvm.arm.mve.pred.v2i",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(none)",
             ret: "",
@@ -21490,7 +20988,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.bpf.load.byte",
+        "llvm.bpf.load",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -21498,7 +20996,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.bpf.load.half",
+        "llvm.bpf.load.byte",
         Attributes {
             function: "nocallback nofree nosync nounwind willreturn memory(read)",
             ret: "",
@@ -21583,30 +21081,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
             function: "nocallback nofree nosync nounwind willreturn",
             ret: "",
             params: &[""],
-        },
-    ),
-    (
-        "llvm.callbr.landingpad",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &[""],
-        },
-    ),
-    (
-        "llvm.callbr.landingpad.sl_i32i32s",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &["", "}"],
-        },
-    ),
-    (
-        "llvm.callbr.landingpad.sl_i8i32s",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &["", "}"],
         },
     ),
     (
@@ -21890,39 +21364,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.coro.suspend.async.sl_p0i32s",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &["", "", "", ""],
-        },
-    ),
-    (
-        "llvm.coro.suspend.async.sl_p0p0p0p0s",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &["", "", "", ""],
-        },
-    ),
-    (
-        "llvm.coro.suspend.async.sl_p0p0p0s",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &["", "", "", ""],
-        },
-    ),
-    (
-        "llvm.coro.suspend.async.sl_p0p0s",
-        Attributes {
-            function: "nomerge nounwind",
-            ret: "",
-            params: &["", "", "", ""],
-        },
-    ),
-    (
-        "llvm.coro.suspend.async.sl_p0s",
+        "llvm.coro.suspend.async",
         Attributes {
             function: "nomerge nounwind",
             ret: "",
@@ -21931,22 +21373,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
     ),
     (
         "llvm.coro.suspend.retcon",
-        Attributes {
-            function: "nounwind",
-            ret: "",
-            params: &[""],
-        },
-    ),
-    (
-        "llvm.coro.suspend.retcon.sl_i1p0s",
-        Attributes {
-            function: "nounwind",
-            ret: "",
-            params: &[""],
-        },
-    ),
-    (
-        "llvm.coro.suspend.retcon.sl_i32i1s",
         Attributes {
             function: "nounwind",
             ret: "",
@@ -22947,14 +22373,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
     ),
     (
         "llvm.experimental.patchpoint",
-        Attributes {
-            function: "",
-            ret: "",
-            params: &["immarg", "immarg", "", "immarg", ""],
-        },
-    ),
-    (
-        "llvm.experimental.patchpoint.void",
         Attributes {
             function: "",
             ret: "",
@@ -34631,22 +34049,6 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
             function: "nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)",
             ret: "",
             params: &["immarg", "captures(none)"],
-        },
-    ),
-    (
-        "llvm.is.constant",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
-            ret: "",
-            params: &[""],
-        },
-    ),
-    (
-        "llvm.is.constant.sl_i32i32s",
-        Attributes {
-            function: "convergent nocallback nofree nosync nounwind willreturn memory(none)",
-            ret: "",
-            params: &["", "}"],
         },
     ),
     (
@@ -61464,7 +60866,7 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
         },
     ),
     (
-        "llvm.r600.implicitarg.ptr",
+        "llvm.r600.implicitarg",
         Attributes {
             function: "nocallback nofree nosync nounwind speculatable willreturn memory(none)",
             ret: "noundef",
