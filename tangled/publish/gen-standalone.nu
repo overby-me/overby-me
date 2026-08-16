@@ -19,6 +19,9 @@
 # repo root. A project with a sibling path dependency is published as several
 # directories instead, so that `path = "../pcre2"` still resolves, and then
 # the crate to build is one level down.
+# Everything shared between published repos lives in the standalone
+# flakelight module, so this writes only what differs: the description, the
+# name, and whichever build settings the project declares in projects.nuon.
 def flake-text [
     name: string
     description: string
@@ -27,72 +30,46 @@ def flake-text [
     native: list<string> = []
     build: list<string> = []
     check: bool = true
-    test_flags: list<string> = []
     toolchain: bool = false
-    extra_args: list<string> = []
     build_env: record = {}
+    test_flags: list<string> = []
 ]: nothing -> string {
-    # A project that is a compiler plugin links against rustc's own internals,
-    # so it needs the exact nightly it was written for rather than whatever
-    # rustc nixpkgs ships. Its rust-toolchain.toml is published with it and
-    # stays the single source of truth for the pin, as it is in the monorepo.
-    let toolchain_input = if not $toolchain { "" } else {
+    let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
+
+    mut opts = []
+    if not ($subdir | is-empty) { $opts = ($opts | append $"        subdir = \"($subdir)\";") }
+    if not ($native | is-empty) {
+        $opts = ($opts | append $"        nativeBuildInputs = [(do $quoted $native)];")
+    }
+    if not ($build | is-empty) {
+        $opts = ($opts | append $"        buildInputs = [(do $quoted $build)];")
+    }
+    if not $check { $opts = ($opts | append "        doCheck = false;") }
+    if not ($test_flags | is-empty) {
+        $opts = ($opts | append $"        cargoTestFlags = [(do $quoted $test_flags)];")
+    }
+    if $toolchain { $opts = ($opts | append "        toolchain = true;") }
+    if not ($build_env | is-empty) {
+        let pairs = ($build_env | items {|k, v| $"          ($k) = \"($v)\";" } | str join "\n")
+        $opts = ($opts | append $"        env = pkgs: {\n($pairs)\n        };")
+    }
+    let extra = if ($opts | is-empty) { "" } else { "\n" + ($opts | str join "\n") }
+
+    # A pinned toolchain needs the overlay that provides rust-bin, and only
+    # the project that asks for one pays for the extra input.
+    let overlay_input = if not $toolchain { "" } else {
         "\n\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay = {\n      url = \"github:oxalica/rust-overlay\";\n      inputs.nixpkgs.follows = \"nixpkgs\";\n    };"
     }
-    let toolchain_overlay = if not $toolchain { "" } else {
+    let overlay_line = if not $toolchain { "" } else {
         "\n      withOverlays = [inputs.rust-overlay.overlays.default];\n"
     }
-    let platform = if $toolchain { "platform" } else { "rustPlatform" }
-    let toolchain_let = if not $toolchain { "" } else {
-        "let\n          toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;\n          platform = makeRustPlatform {\n            cargo = toolchain;\n            rustc = toolchain;\n          };\n        in\n          "
-    }
-    # Most projects are pure Rust and need none of this. The few that link
-    # against a C library declare it in projects.nuon, because parsing it out
-    # of default.nix would mean telling the main package apart from the test
-    # fixtures beside it, which are the majority of what is declared there.
-    #
-    # flakelight callPackages the package function, so a dependency is named
-    # once, as an argument, and used from there.
-    let base_args = if $toolchain { ["makeRustPlatform" "rust-bin"] } else { ["rustPlatform"] }
-    let pkg_args = ($base_args | append $native | append $build | append $extra_args | uniq)
-    let env_lines = if ($build_env | is-empty) { "" } else {
-        $build_env | items {|k, v| $"\n          ($k) = \"($v)\";" } | str join ""
-    }
-    let native_line = if ($native | is-empty) { "" } else {
-        $"\n          nativeBuildInputs = [($native | str join ' ')];"
-    }
-    let build_line = if ($build | is-empty) { "" } else {
-        $"\n          buildInputs = [($build | str join ' ')];"
-    }
-    let check_line = if $check { "" } else {
-        "\n          # Tests need network access or a running server.\n          doCheck = false;"
-    }
-    let test_flags_line = if ($test_flags | is-empty) { "" } else {
-        let quoted = ($test_flags | each {|f| $"\"($f)\"" } | str join " ")
-        $"\n          cargoTestFlags = [($quoted)];"
-    }
-    let extra_shell = if (($native | append $build) | is-empty) { "" } else {
-        $"\n          ++ \(with pkgs; [(($native | append $build) | str join ' ')]\)"
-    }
-    let shell_rust = if $toolchain {
-        "[\(pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml\) pkgs.rust-analyzer]"
-    } else {
-        "\(with pkgs; [cargo rustc rust-analyzer clippy rustfmt]\)"
-    }
-    let at = if ($subdir | is-empty) { "." } else { $"./($subdir)" }
-    let in_subdir = if ($subdir | is-empty) { "" } else {
-        # Both are needed and they do different jobs: cargoRoot tells the
-        # setup hook where Cargo.lock and the vendor config belong,
-        # buildAndTestSubdir tells the build hook where to run cargo. They
-        # happen to be the same directory here.
-        $"\n          # The repo root holds several directories so the crate's sibling path\n          # dependencies resolve; the crate itself is one level down.\n          cargoRoot = \"($subdir)\";\n          buildAndTestSubdir = \"($subdir)\";"
-    }
+
     $"# Standalone build for the published repo. Generated by
 # tangled/publish/gen-standalone.nu; edit that template, not this file.
 #
-# Deliberately not the monorepo's default.nix. That one is a flakelight module
-# too, but the root flake imports it and it reaches for ../../nix/lib, so it
-# means nothing in a clone. This is the same shape, standing on its own.
+# The build, the devshell and its hooks, and the formatter are shared with
+# every other repo published from the monorepo, and live in the standalone
+# module. Only what is particular to this project is stated here.
 {
   description = \"($description)\";
 
@@ -102,78 +79,29 @@ def flake-text [
     # Change it by re-running the generator, never here.
     nixpkgs.url = \"github:NixOS/nixpkgs/($nixpkgs_rev)\";
 
-    # The monorepo is a flakelight tree, so its published pieces are too.
     flakelight = {
       url = \"github:accelbread/flakelight\";
       inputs.nixpkgs.follows = \"nixpkgs\";
     };
 
-    git-hooks = {
-      url = \"github:cachix/git-hooks.nix\";
+    standalone = {
+      url = \"github:overby-me/nix-standalone\";
       inputs.nixpkgs.follows = \"nixpkgs\";
-    };($toolchain_input)
+      inputs.flakelight.follows = \"flakelight\";
+    };($overlay_input)
   };
 
-  outputs = inputs: let
-    # Read the crate's own manifest rather than restating it here. A workspace
-    # root has no [package], and baseNameOf ./. would give the store path, so
-    # the repo name is baked in as the fallback.
-    cargoToml = builtins.fromTOML \(builtins.readFile ($at)/Cargo.toml\);
-    cargoPackage = cargoToml.package or {};
-    name = cargoPackage.name or \"($name)\";
-
-    # The same gates in every published repo, so a contributor who has only
-    # this one is held to what the monorepo holds it to. Generated from a
-    # shared template rather than pulled from a common repo of ours: an input
-    # would make entering this shell depend on a second repo of ours, and the
-    # point is that this one stands alone. Entering the shell installs them.
-    hooksFor = pkgs:
-      inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
-        src = ./.;
-        package = pkgs.prek;
-        hooks = {
-          rustfmt.enable = true;
-          clippy.enable = true;
-          typos.enable = true;
-          ripsecrets.enable = true;
-          alejandra.enable = true;
-          deadnix.enable = true;
-          statix.enable = true;
-        };
-      };
-  in
+  outputs = inputs:
     inputs.flakelight ./. {
       inherit inputs;
-      systems = [\"x86_64-linux\" \"aarch64-linux\" \"aarch64-darwin\"];
-      pname = name;
-($toolchain_overlay)
+      imports = [inputs.standalone.flakelightModules.default];
+($overlay_line)
+      description = \"($description)\";
 
-      # flakelight turns this into packages.default, a check, and an overlay,
-      # so `nix flake check` builds it and the CI workflow needs nothing else.
-      package = {($pkg_args | str join ', ')}:
-        ($toolchain_let)($platform).buildRustPackage {
-          pname = name;
-          version = cargoPackage.version or \"0.1.0\";
-          src = ./.;
-          cargoLock = {
-            lockFile = ($at)/Cargo.lock;
-            allowBuiltinFetchGit = true;
-          };($native_line)($build_line)($env_lines)($check_line)($test_flags_line)($in_subdir)
-
-          meta = {
-            description = \"($description)\";
-            mainProgram = name;
-          };
-        };
-
-      devShell = {
-        packages = pkgs:
-          ($shell_rust)($extra_shell)
-          ++ \(hooksFor pkgs\).enabledPackages;
-        shellHook = pkgs: \(hooksFor pkgs\).shellHook;
+      standalone = {
+        name = \"($name)\";
+        root = ./.;($extra)
       };
-
-      formatter = pkgs: pkgs.alejandra;
     };
 }
 "
@@ -293,25 +221,31 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         let subdir = if (($p | get -o deps | default []) | is-empty) { "" } else {
             $p.path | path basename
         }
-        let want_flake = (
+        # The generated flake builds a Rust crate, so a project without a
+        # Cargo.toml gets none. nix-standalone is the module the others
+        # import, and writes its own.
+        let is_crate = ($dir | path join "Cargo.toml" | path exists)
+
+        let want_flake = if not $is_crate { "" } else { (
             flake-text $p.name $description $nixpkgs_rev $subdir
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
                 ($p | get -o doCheck | default true)
-                ($p | get -o cargoTestFlags | default [])
                 ($p | get -o toolchain | default false)
-                ($p | get -o extraArgs | default [])
                 ($p | get -o env | default {})
-        )
+                ($p | get -o cargoTestFlags | default [])
+        ) }
         if $check {
             if not ($flake | path exists) { $missing = ($missing | append $p.name) }
             continue
         }
-        $want_flake | save -f $flake
-        # flakelight gives every repo a checks.formatting that runs alejandra
-        # over the tree, so a flake this generator wrote by hand would fail the
-        # CI of the repo it was written for.
-        ^alejandra --quiet $flake | ignore
+        if $is_crate {
+            $want_flake | save -f $flake
+            # flakelight gives every repo a checks.formatting that runs
+            # alejandra over the tree, so a flake this generator wrote by hand
+            # would fail the CI of the repo it was written for.
+            ^alejandra --quiet $flake | ignore
+        }
         mkdir ($dir | path join ".tangled" "workflows")
         $CI_TEXT | save -f $ci
 
@@ -321,7 +255,8 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
             let want = (with-banner $now (banner-text $p.name $p.path $github))
             if $want != $now { $want | save -f $readme; " + README banner" } else { "" }
         } else { "" }
-        print $"  ($p.name): flake.nix + .tangled/workflows/ci.yml($banner)"
+        let what = if $is_crate { "flake.nix + " } else { "" }
+        print $"  ($p.name): ($what).tangled/workflows/ci.yml($banner)"
     }
 
     if $check and not ($missing | is-empty) {

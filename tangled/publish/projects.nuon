@@ -96,8 +96,7 @@
     path: "rust/perl"
     # Its FFI wrapper includes two headers that ship only in Perl's source
     # distribution, so build.rs is handed an unpacked tree to include from.
-    extraArgs: ["srcOnly" "perl"]
-    env: {PERL_SRC: "${srcOnly perl}"}
+    env: {PERL_SRC: "${pkgs.srcOnly pkgs.perl}"}
     filter: ":[:/rust/perl:exclude[::*.nix],:/rust/perl::flake.nix]:unsign"
   }
   {
@@ -184,6 +183,15 @@
     # leave the doc examples until that debt is dealt with on its own.
     cargoTestFlags: ["--lib" "--bins"]
     filter: ":[:/rust/gcc:exclude[::*.nix],:/rust/gcc::flake.nix]:unsign"
+  }
+  # Not a rust/ rewrite: the flakelight module every other published repo
+  # imports. It has to be published for them to resolve it, and it is
+  # deliberately first in this list so a run that adds a project pushes the
+  # module before anything that depends on it.
+  {
+    name: "nix-standalone"
+    path: "nix/standalone"
+    filter: ":/nix/standalone:unsign"
   }
   # Not a rust/ rewrite: the client this publisher itself uses to create and
   # authorise the repos it publishes to. Its path dependencies all point
