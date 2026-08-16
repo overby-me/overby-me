@@ -1,7 +1,7 @@
 # wiki
 
 A Rust + [Dioxus](https://dioxuslabs.com) 0.7 frontend compiled to WebAssembly:
-the port that replaced the former React RadikalWiki app in this directory. It
+the port that replaced the former React wiki app in this directory. It
 talks to the same NHost / Hasura backend (auth over REST, data over GraphQL via
 [cynic](https://cynic-rs.dev)). The crate and Dioxus app are still named
 `wiki-dioxus` internally.

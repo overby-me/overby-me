@@ -1,16 +1,16 @@
-# OpenSlides: Inspiration & Ideas for RadikalWiki
+# OpenSlides: Inspiration & Ideas for wiki
 
 ## What OpenSlides is, and why learn from it
 
 [OpenSlides](https://openslides.com) is a mature, open-source (MIT) assembly-management system used to run parliamentary meetings, party conferences, and delegate assemblies. It handles the full lifecycle of a meeting: motions with amendments and diffs, electronic and paper ballots, elections, a live list of speakers, a projector/beamer surface for the room, participant/permission management, and a follow-along "Autopilot" for delegates on their phones. Its backend is a service-oriented, event-sourced architecture (an append-only datastore plus a permission-filtering push service).
 
-It is the right thing to learn from for RadikalWiki because the two tools solve the same problem, running a legitimate deliberative assembly (a *landsmøde*), and because OpenSlides has already made and documented the hard modeling decisions RadikalWiki is now approaching: motion workflows, entitled-voter snapshots, named-vs-anonymous ballots, and, crucially, an append-only record store with a server-side restrictor that maps almost one-to-one onto the wiki's planned atproto/lexicon backend.
+It is the right thing to learn from for wiki because the two tools solve the same problem, running a legitimate deliberative assembly (a *landsmøde*), and because OpenSlides has already made and documented the hard modeling decisions wiki is now approaching: motion workflows, entitled-voter snapshots, named-vs-anonymous ballots, and, crucially, an append-only record store with a server-side restrictor that maps almost one-to-one onto the wiki's planned atproto/lexicon backend.
 
 This document integrates a verified idea catalog. It has been filtered against three checks: OpenSlides accuracy (a few claims corrected below), novelty against the current wiki source (already-shipped items demoted or dropped, duplicates merged), and completeness (genuinely missing OpenSlides features added). Where the catalog overstated what OpenSlides does or what the wiki lacks, the text here is the corrected version.
 
 ## How the two models line up
 
-| OpenSlides | RadikalWiki (nodes / mime / permissions) |
+| OpenSlides | wiki (nodes / mime / permissions) |
 |---|---|
 | Organization | `wiki/home` (root node) / the whole deployment |
 | Committee | `wiki/group` (self-owned context holding a permission template) |
@@ -66,7 +66,7 @@ This document integrates a verified idea catalog. It has been filtered against t
 
 ## What we already do well
 
-RadikalWiki has real parity with OpenSlides on a large surface. These are already shipped, so treat them as a baseline, not a to-do list:
+wiki has real parity with OpenSlides on a large surface. These are already shipped, so treat them as a baseline, not a to-do list:
 
 - Amendments as first-class nodes that form a tree, including amendments-of-amendments (`vote/change` parents `vote/change`), matching OpenSlides' `lead_motion_id` nesting.
 - Ordinal A/B/C labeling of amendments via the computed `get_index`, analogous to OpenSlides' amendment prefixes. (Note: this is a render-time position, not a durable citable number, see MOT-10.)
@@ -746,7 +746,7 @@ The near-term roadmap: High-priority ideas that are Small or Medium feasibility,
 
 ## Caveats & fit
 
-Not everything in OpenSlides belongs in RadikalWiki. Being honest about the misfits:
+Not everything in OpenSlides belongs in wiki. Being honest about the misfits:
 
 - **Scale features add cost without payoff.** Multiple projectors (PRJ-05), vote weight (PAR-03), structure-level speaking-time pools (PAR-05), and proxy voting (PAR-04) exist for large delegate parliaments. A youth-org landsmøde rarely needs them; ship them opt-in, behind a context toggle, or not at all until asked.
 - **The privacy pivot cuts against several designs.** atproto records are public by default. That means: the has-voted marker and the pseudoanonymize clear step (VOT-05) must live only in the trusted service, never a public lexicon; personal notes and favorites (PAR-08) must not become public records; per-level and weighted result breakdowns (PAR-03, PAR-05) can deanonymize small factions on secret ballots; and public change history (PLT-05) could expose who authored/edited what. The restrictor (PLT-01) is load-bearing precisely because it is the only thing standing between role-gated content and a public record store. Do NOT adopt OpenSlides' cryptographic vote-decrypt path: its own README flags timing attacks and it was never used in production.

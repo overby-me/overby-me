@@ -1,4 +1,4 @@
-# RadikalWiki Dioxus — remaining work
+# wiki Dioxus — remaining work
 
 `apps/wiki` is a Rust/Dioxus/WASM port of the former React app (which it has now
 replaced), against the same NHost/Hasura backend (production
@@ -242,7 +242,7 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 
 ---
 
-## Open backlog (RadikalWiki GitHub issues still relevant)
+## Open backlog (wiki GitHub issues still relevant)
 
 - `[ ]` `#138` Replace "questions" with a comment model (see §3 Questions).
 - `[ ]` `#25` Content metadata attributes (e.g. a "keep longer" flag).

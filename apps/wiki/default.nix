@@ -136,6 +136,6 @@
       # web bundle, and the test fixtures aren't in this package's source set.
       doCheck = false;
 
-      meta.description = "RadikalWiki frontend built with Dioxus + Rust/WASM";
+      meta.description = "wiki frontend built with Dioxus + Rust/WASM";
     };
 }

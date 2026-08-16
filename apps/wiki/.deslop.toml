@@ -1,4 +1,4 @@
-# deslop configuration for apps/wiki (the RadikalWiki Dioxus/WASM SPA).
+# deslop configuration for apps/wiki (the wiki Dioxus/WASM SPA).
 #
 # deslop's Rust rules are tuned for backend services. This crate is a browser
 # single-page app: it talks to an NHost/Hasura GraphQL API over async reqwest,

@@ -56,7 +56,7 @@
       doCheck = false;
 
       meta = {
-        description = "RadikalWiki atproto AppView (stateful axum + Turso + firehose)";
+        description = "wiki atproto AppView (stateful axum + Turso + firehose)";
         mainProgram = "appview";
       };
     };

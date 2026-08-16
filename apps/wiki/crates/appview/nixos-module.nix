@@ -43,7 +43,7 @@
   '';
 in {
   options.services.wiki-appview = {
-    enable = lib.mkEnableOption "the RadikalWiki atproto AppView";
+    enable = lib.mkEnableOption "the wiki atproto AppView";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -97,7 +97,7 @@ in {
 
   config = lib.mkIf cfg.enable {
     systemd.services.wiki-appview = {
-      description = "RadikalWiki atproto AppView (stateful)";
+      description = "wiki atproto AppView (stateful)";
       wantedBy = ["multi-user.target"];
       after = ["network-online.target"];
       wants = ["network-online.target"];
@@ -143,7 +143,7 @@ in {
     # forward to the local AppView. A host may set `reverseProxy = false` to use
     # its own edge.
     systemd.services.wiki-appview-proxy = lib.mkIf cfg.reverseProxy {
-      description = "Ferron reverse proxy for the RadikalWiki AppView";
+      description = "Ferron reverse proxy for the wiki AppView";
       wantedBy = ["multi-user.target"];
       after = ["network-online.target" "wiki-appview.service"];
       wants = ["network-online.target"];

@@ -1,4 +1,4 @@
-//! Client for the RadikalWiki backend API: the endpoints that SURVIVE the atproto
+//! Client for the wiki backend API: the endpoints that SURVIVE the atproto
 //! rewrite (the axum backend already serves these exact paths and evolves into the
 //! AppView). Split out of `nhost.rs` so the cutover deletion boundary is exact:
 //! `nhost.rs` (NHost auth + storage glue) is deleted wholesale, this module is kept
@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 
-/// The RadikalWiki backend (a Rust axum service on Scaleway Serverless Containers,
+/// The wiki backend (a Rust axum service on Scaleway Serverless Containers,
 /// fr-par). Hosts the atproto OAuth flow for linking a Bluesky account:
 /// `GET /atproto/start?handle=&token=` begins linking and redirects back with
 /// `?linked=success|error`.
