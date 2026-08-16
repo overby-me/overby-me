@@ -42,7 +42,7 @@
         };
       };
 
-    tramp-agent = {
+    nushell-plugin-tramp-agent = {
       lib,
       rustPlatform,
     }:
@@ -76,7 +76,7 @@
         };
       };
 
-    tramp-agent-cache = pkgs: let
+    nushell-plugin-tramp-agent-cache = pkgs: let
       cross = import ./cross.nix {
         nixpkgs = pkgs.path;
         inherit (pkgs) lib;

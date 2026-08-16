@@ -31,7 +31,7 @@ pkgs.runCommand "oxidized-tar-test-${name}" {
     pkgs.bzip2
     pkgs.xz
   ];
-  harness = pkgs.gnutar-test-harness;
+  harness = pkgs.oxidized-tar-gnutar-test-harness;
 } ''
   # Prepare a writable copy of the prebuilt harness so the testsuite can
   # write to its tests/ and tmp-* dirs.

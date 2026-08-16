@@ -55,7 +55,7 @@
     # (`genfile`, `checkseekhole`, `ckmtime`). Used by `testsuite.nix` as
     # the base tree for every per-test derivation so we only run the
     # autoconf + build chain once.
-    gnutar-test-harness = {
+    oxidized-tar-gnutar-test-harness = {
       stdenv,
       gnutar,
       autoconf,
