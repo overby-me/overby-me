@@ -371,13 +371,20 @@ async fn secret_add(args: SpindleSecretAddArgs) -> Result<()> {
         .unwrap_or_else(|| "https://spindle.tangled.sh".to_string());
     let api = crate::util::make_client(&spindle_base);
 
-    // Handle special value patterns: @file or - (stdin)
+    // Handle special value patterns: @file or - (stdin).
+    //
+    // Both convenience forms trim trailing whitespace, because both all but
+    // guarantee a trailing newline: an editor adds one to a file, and a shell
+    // adds one when piping. A secret is usually a token, and a token with a
+    // newline glued to it fails wherever it is used, with an error that says
+    // nothing about the newline. The literal --value form is left verbatim,
+    // since there the caller wrote exactly what they meant.
     let value = if args.value == "-" {
         // Read from stdin
         use std::io::Read;
         let mut buffer = String::new();
         std::io::stdin().read_to_string(&mut buffer)?;
-        buffer
+        buffer.trim_end().to_string()
     } else if let Some(path) = args.value.strip_prefix('@') {
         // Read from file, expand ~ if needed
         let expanded_path = if path.starts_with("~/") {
@@ -391,6 +398,8 @@ async fn secret_add(args: SpindleSecretAddArgs) -> Result<()> {
         };
         std::fs::read_to_string(&expanded_path)
             .map_err(|e| anyhow!("Failed to read file '{}': {}", expanded_path, e))?
+            .trim_end()
+            .to_string()
     } else {
         // Use value as-is
         args.value
