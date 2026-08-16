@@ -5,7 +5,7 @@
 # every other repo published from the monorepo, and live in the standalone
 # module. Only what is particular to this project is stated here.
 {
-  description = "A pure Rust implementation of PCRE2 (Perl Compatible Regular Expressions)";
+  description = "A PCRE2-compatible regular expression library written in Rust";
 
   inputs = {
     # Pinned to the same revision the monorepo resolves, so every published
@@ -30,7 +30,7 @@
       inherit inputs;
       imports = [inputs.standalone.flakelightModules.default];
 
-      description = "A pure Rust implementation of PCRE2 (Perl Compatible Regular Expressions)";
+      description = "A PCRE2-compatible regular expression library written in Rust";
 
       standalone = {
         name = "oxidized-pcre2";

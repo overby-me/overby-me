@@ -5,7 +5,7 @@
 # every other repo published from the monorepo, and live in the standalone
 # module. Only what is particular to this project is stated here.
 {
-  description = "A Meson build system compatible implementation in Rust";
+  description = "A Meson-compatible build system written in Rust";
 
   inputs = {
     # Pinned to the same revision the monorepo resolves, so every published
@@ -30,7 +30,7 @@
       inherit inputs;
       imports = [inputs.standalone.flakelightModules.default];
 
-      description = "A Meson build system compatible implementation in Rust";
+      description = "A Meson-compatible build system written in Rust";
 
       standalone = {
         name = "oxidized-meson";

@@ -5,7 +5,7 @@
 # every other repo published from the monorepo, and live in the standalone
 # module. Only what is particular to this project is stated here.
 {
-  description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
+  description = "A systemd-compatible service manager written in Rust";
 
   inputs = {
     # Pinned to the same revision the monorepo resolves, so every published
@@ -30,7 +30,7 @@
       inherit inputs;
       imports = [inputs.standalone.flakelightModules.default];
 
-      description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
+      description = "A systemd-compatible service manager written in Rust";
 
       standalone = {
         name = "oxidized-systemd";

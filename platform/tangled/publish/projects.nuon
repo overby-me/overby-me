@@ -76,6 +76,7 @@
   }
   {
     name: "oxidized-systemd"
+    description: "A systemd-compatible service manager written in Rust"
     path: "safety/oxidized/systemd"
     # Tests are built but not run here, and this is a disk limit rather than
     # anything wrong with them: the Spindle microvm runs out of space while
@@ -116,16 +117,19 @@
   }
   {
     name: "oxidized-binutils"
+    description: "A GNU binutils-compatible suite of binary utilities written in Rust"
     path: "safety/oxidized/binutils"
     filter: ":[:/rust/binutils:exclude[::*.nix],:/rust/binutils::flake.nix,:/safety/oxidized/binutils:exclude[::*.nix],:/safety/oxidized/binutils::flake.nix]:unsign"
   }
   {
     name: "oxidized-pipewire"
+    description: "A PipeWire-compatible multimedia graph daemon written in Rust"
     path: "safety/oxidized/pipewire"
     filter: ":[:/rust/pipewire:exclude[::*.nix],:/rust/pipewire::flake.nix,:/safety/oxidized/pipewire:exclude[::*.nix],:/safety/oxidized/pipewire::flake.nix]:unsign"
   }
   {
     name: "fe-c"
+    description: "Gradual memory-safety hardening for unsafe Rust and mixed-language programs"
     path: "safety/fe-c"
     # A rustc compiler plugin: it links against rustc_middle, so it needs the
     # exact nightly named in its own rust-toolchain.toml, not nixpkgs' rustc.
@@ -144,6 +148,7 @@
   }
   {
     name: "oxidized-meson"
+    description: "A Meson-compatible build system written in Rust"
     path: "safety/oxidized/meson"
     filter: ":[:/rust/meson:exclude[::*.nix],:/rust/meson::flake.nix,:/safety/oxidized/meson:exclude[::*.nix],:/safety/oxidized/meson::flake.nix]:unsign"
   }
@@ -154,6 +159,7 @@
   }
   {
     name: "oxidized-pcre2"
+    description: "A PCRE2-compatible regular expression library written in Rust"
     path: "safety/oxidized/pcre2"
     filter: ":[:/rust/pcre2:exclude[::*.nix],:/rust/pcre2::flake.nix,:/safety/oxidized/pcre2:exclude[::*.nix],:/safety/oxidized/pcre2::flake.nix]:unsign"
   }

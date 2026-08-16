@@ -208,6 +208,11 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
 
         # The description is the one thing worth taking from the monorepo's
         # own module, so the two do not drift apart.
+        # A repo's description is a fact about the project, and for a
+        # workspace no single package's meta states it: fe-c's first entry
+        # describes its runtime crate. State it in projects.nuon where it
+        # differs, and scrape default.nix otherwise.
+        let stated = ($p | get -o description)
         let default_nix = ($dir | path join "default.nix")
         let description = if ($default_nix | path exists) {
             let hits = (open $default_nix | lines | where {|l| $l =~ 'description = "' })
@@ -221,6 +226,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 | str replace -a '"' '\"'
             }
         } else { "A Rust rewrite, published from a monorepo" }
+        let description = ($stated | default $description)
 
         # A project with sibling path dependencies publishes as several
         # directories, so its crate lands one level down under its own name.

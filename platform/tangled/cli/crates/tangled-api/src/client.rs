@@ -707,6 +707,10 @@ impl TangledClient {
             private: bool,
             #[serde(rename = "createdAt")]
             created_at: String,
+            // See update_repo_knot: putRecord replaces the record, so anything
+            // not named here is dropped, repoDid included.
+            #[serde(flatten)]
+            rest: serde_json::Map<String, serde_json::Value>,
         }
         #[derive(Deserialize)]
         struct GetRes {

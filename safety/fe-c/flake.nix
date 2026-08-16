@@ -5,7 +5,7 @@
 # every other repo published from the monorepo, and live in the standalone
 # module. Only what is particular to this project is stated here.
 {
-  description = "Fe-C runtime: allocation table, capability checks, quarantining allocator";
+  description = "Gradual memory-safety hardening for unsafe Rust and mixed-language programs";
 
   inputs = {
     # Pinned to the same revision the monorepo resolves, so every published
@@ -38,7 +38,7 @@
 
       withOverlays = [inputs.rust-overlay.overlays.default];
 
-      description = "Fe-C runtime: allocation table, capability checks, quarantining allocator";
+      description = "Gradual memory-safety hardening for unsafe Rust and mixed-language programs";
 
       standalone = {
         name = "fe-c";
