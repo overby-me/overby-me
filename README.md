@@ -251,9 +251,9 @@
 
 | Configuration | Homepage | Description |
 |-|-|-|
-| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/homeConfigurations) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager configurations |
-| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixosConfigurations) | [NixOS](https://nixos.org) | NixOS configurations |
-| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwinConfigurations) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin configurations |
+| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/home-configurations) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager configurations |
+| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixos-configurations) | [NixOS](https://nixos.org) | NixOS configurations |
+| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwin-configurations) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin configurations |
 | [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/devshell/lib/mkDevShell.nix) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Default devshell |
 
 </details>
@@ -266,10 +266,10 @@
 
 | Module | Homepage | Description |
 |-|-|-|
-| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/flakelightModules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
-| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/homeModules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
-| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixosModules) | [NixOS](https://nixos.org) | NixOS modules |
-| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwinModules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |
+| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/flakelight-modules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
+| [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/home-modules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
+| [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixos-modules) | [NixOS](https://nixos.org) | NixOS modules |
+| [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwin-modules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |
 | [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/devshell/modules) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Devshell modules |
 
 </details>

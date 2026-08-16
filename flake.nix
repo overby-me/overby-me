@@ -195,13 +195,14 @@
       };
 
       # flakelight autoloads from nixDir, and every directory under it is
-      # named after the output it feeds, so the mapping is the identity
-      # function and there is no alias table to keep.
+      # named after the output it feeds, in this tree's own kebab-case.
+      # nixDirKebab.nix computes the mapping from flakelight's option names,
+      # so there is no alias table to keep.
       nixDir = ./platform/nix;
 
       # Every .nix file in it is a flakelight module. nixDir exports them
       # under the directory's own name; importing them is a separate act.
-      moduleDirs = [./platform/nix/flakelightModules];
+      moduleDirs = [./platform/nix/flakelight-modules];
 
       # A tool's checks live inside that tool's library rather than in a
       # directory of modules, so these four stay named.

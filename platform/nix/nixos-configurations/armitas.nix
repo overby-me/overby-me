@@ -85,21 +85,21 @@
     # aarch64 binfmt, core/hardware.nix wants amdgpu and a Nitrokey, and
     # core/virtualisation.nix pulls in docker, libvirtd and waydroid.  The
     # bootloader settings core/boot.nix carried are restated below.
-    ../nixosModules/core/audio.nix
-    ../nixosModules/core/console.nix
-    ../nixosModules/core/environment.nix
-    ../nixosModules/core/fonts.nix
-    ../nixosModules/core/locale.nix
-    ../nixosModules/core/networking.nix
-    ../nixosModules/core/nix.nix
-    ../nixosModules/core/secrets.nix
-    ../nixosModules/core/system.nix
-    ../nixosModules/core/uinput.nix
-    ../nixosModules/core/users.nix
-    ../nixosModules/core/zram.nix
-    ../nixosModules/services/netbird.nix
-    ../nixosModules/services/openssh.nix
-    ../nixosModules/services/resolved.nix
+    ../nixos-modules/core/audio.nix
+    ../nixos-modules/core/console.nix
+    ../nixos-modules/core/environment.nix
+    ../nixos-modules/core/fonts.nix
+    ../nixos-modules/core/locale.nix
+    ../nixos-modules/core/networking.nix
+    ../nixos-modules/core/nix.nix
+    ../nixos-modules/core/secrets.nix
+    ../nixos-modules/core/system.nix
+    ../nixos-modules/core/uinput.nix
+    ../nixos-modules/core/users.nix
+    ../nixos-modules/core/zram.nix
+    ../nixos-modules/services/netbird.nix
+    ../nixos-modules/services/openssh.nix
+    ../nixos-modules/services/resolved.nix
 
     # ── Machine configuration ─────────────────────────────────────────
     (_: {

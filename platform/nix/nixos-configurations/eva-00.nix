@@ -61,10 +61,10 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
     {nixpkgs.overlays = [inputs.self.overlays.default];}
 
     # ── zswap ──────────────────────────────────────────────────────────
-    ../nixosModules/core/zswap.nix
+    ../nixos-modules/core/zswap.nix
 
     # ── IronClaw service module ─────────────────────────────────────────
-    ../nixosModules/services/ironclaw.nix
+    ../nixos-modules/services/ironclaw.nix
 
     # ── Machine configuration ───────────────────────────────────────────
     ({
@@ -221,7 +221,7 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
       # ── Nix settings ────────────────────────────────────────────────
       nix = {
         settings = {
-          # As in platform/nix/nixosModules/core/nix.nix, which this host does not
+          # As in platform/nix/nixos-modules/core/nix.nix, which this host does not
           # import: a .drv is a GC root for the whole build-time closure of what
           # it built, and a card has the least room to spare for one.
           keep-derivations = false;
