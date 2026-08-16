@@ -40,6 +40,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
+          "standalone",
           "nixpkgs"
         ]
       },
@@ -76,9 +77,9 @@
     "root": {
       "inputs": {
         "flakelight": "flakelight",
-        "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay"
+        "rust-overlay": "rust-overlay",
+        "standalone": "standalone"
       }
     },
     "rust-overlay": {
@@ -88,16 +89,40 @@
         ]
       },
       "locked": {
-        "lastModified": 1786762605,
-        "narHash": "sha256-iQpYIhInh8gRx+cSnPtX+Yp2Gg9kr2h+MehETCqRgDo=",
+        "lastModified": 1786849542,
+        "narHash": "sha256-MS8cOa/ii1+QA8R3JWVzqEIoXimu9n50GwQDiBVTFOM=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "ad8ebb59d84bcf3780c46f107e1d99eb4ca2fe7f",
+        "rev": "b211eadeba8b180da9453ec3413a8a3535c85b3f",
         "type": "github"
       },
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "standalone": {
+      "inputs": {
+        "flakelight": [
+          "flakelight"
+        ],
+        "git-hooks": "git-hooks",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786867641,
+        "narHash": "sha256-8wagkd+qYjRjcF700W2Ee3BxN7QNR5+xuejwB77+3EI=",
+        "owner": "overby-me",
+        "repo": "nix-standalone",
+        "rev": "94df90be51417a4fea9f572ddf0c43ffcb1525e6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "overby-me",
+        "repo": "nix-standalone",
         "type": "github"
       }
     }

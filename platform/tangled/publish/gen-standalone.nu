@@ -179,7 +179,13 @@ def with-banner [readme: string, banner: string]: nothing -> string {
 
 def main [--check, --github: string = "overby-me"]: nothing -> nothing {
     let here = ($env.FILE_PWD | default ".")
-    let root = ($here | path dirname | path dirname)
+    # Walk up to the monorepo root rather than counting directories, which
+    # went wrong the moment this script moved an area deeper.
+    let root = (
+        1..6 | reduce --fold $here {|_, acc|
+            if ($acc | path join "flake.lock" | path exists) { $acc } else { $acc | path dirname }
+        }
+    )
     let projects = (open ($here | path join "projects.nuon"))
 
     # One source of truth for nixpkgs: whatever the monorepo already resolved.
