@@ -68,6 +68,26 @@ let
     inherit (body) pos;
   };
 
+  # Drive a parser step until it reports `done`, in CHUNKS. Nix has no tail-call
+  # elimination, so a `go acc (i + 1)` loop costs one C-stack frame per element and
+  # overflows on a big literal -- a generated SDK header map is thousands of entries
+  # in a single dict. foldl' over chunk indices is iterative, and each chunk recurses
+  # only chunkSize deep. Overshooting the step bound is harmless: a state that is
+  # already done is returned unchanged.
+  iterateSteps = {
+    step,
+    init,
+    maxSteps,
+  }: let
+    chunkSize = 200;
+    stepN = n: st:
+      if n == 0 || st.done
+      then st
+      else stepN (n - 1) (step st);
+  in
+    builtins.foldl' (st: _: stepN chunkSize st) init
+    (builtins.genList (i: i) (1 + maxSteps / chunkSize));
+
   # Left-associative binary operator level.
   leftAssoc = sub: opTypes: toks: i: let
     first = sub toks i;
@@ -512,41 +532,58 @@ let
         val.pos;
 
   parseDictRest = toks: entries: i: let
-    go = acc: j:
-      if at toks j "}"
-      then {
-        node = {
-          k = "dict";
-          entries = acc;
-        };
-        pos = j + 1;
-      }
+    step = st:
+      if at toks st.pos "}"
+      then
+        st
+        // {
+          done = true;
+          pos = st.pos + 1;
+        }
       else let
-        j2 = expect toks j ",";
+        j2 = expect toks st.pos ",";
       in
         if at toks j2 "}"
-        then {
-          node = {
-            k = "dict";
-            entries = acc;
-          };
-          pos = j2 + 1;
-        }
+        then
+          st
+          // {
+            done = true;
+            pos = j2 + 1;
+          }
         else let
           key = parseTest toks j2;
           colon = expect toks key.pos ":";
           val = parseTest toks colon;
         in
-          go (acc
-            ++ [
-              {
-                key = key.node;
-                value = val.node;
-              }
-            ])
-          val.pos;
-  in
-    go entries i;
+          st
+          // {
+            acc =
+              st.acc
+              ++ [
+                {
+                  key = key.node;
+                  value = val.node;
+                }
+              ];
+            inherit (val) pos;
+          };
+    r = iterateSteps {
+      inherit step;
+      init = {
+        acc = entries;
+        pos = i;
+        done = false;
+      };
+      # Each entry consumes at least three tokens (key, colon, value).
+      maxSteps = length toks + 2;
+    };
+  in {
+    node = {
+      k = "dict";
+      entries = r.acc;
+    };
+    inherit (r) pos;
+  };
 
   # `for <targets> in <expr>` and `if <expr>` clauses, ending at `closer`.
   parseComprehensionClauses = toks: i: closer: let
@@ -988,34 +1025,61 @@ let
     };
 
   parseStmtsUntilDedent = toks: i: let
-    go = acc: j:
-      if at toks j "DEDENT" || at toks j "EOF"
-      then {
-        nodes = acc;
-        pos = j;
-      }
-      else if at toks j "NEWLINE"
-      then go acc (j + 1)
+    step = st:
+      if at toks st.pos "DEDENT" || at toks st.pos "EOF"
+      then st // {done = true;}
+      else if at toks st.pos "NEWLINE"
+      then st // {pos = st.pos + 1;}
       else let
-        s = parseStatement toks j;
+        s = parseStatement toks st.pos;
       in
-        go (acc ++ [s.node]) s.pos;
-  in
-    go [] i;
+        st
+        // {
+          acc = st.acc ++ [s.node];
+          inherit (s) pos;
+        };
+    r = iterateSteps {
+      inherit step;
+      init = {
+        acc = [];
+        pos = i;
+        done = false;
+      };
+      maxSteps = length toks + 2;
+    };
+  in {
+    nodes = r.acc;
+    inherit (r) pos;
+  };
 
+  # A module body is the other unbounded list: a generated BUCK file is tens of
+  # thousands of statements, so this iterates for the same reason parseDictRest does.
   parseModule = toks: let
-    go = acc: j:
-      if at toks j "EOF"
-      then acc
-      else if at toks j "NEWLINE" || at toks j "INDENT" || at toks j "DEDENT"
-      then go acc (j + 1)
+    step = st:
+      if at toks st.pos "EOF"
+      then st // {done = true;}
+      else if at toks st.pos "NEWLINE" || at toks st.pos "INDENT" || at toks st.pos "DEDENT"
+      then st // {pos = st.pos + 1;}
       else let
-        s = parseStatement toks j;
+        s = parseStatement toks st.pos;
       in
-        go (acc ++ [s.node]) s.pos;
+        st
+        // {
+          acc = st.acc ++ [s.node];
+          inherit (s) pos;
+        };
+    r = iterateSteps {
+      inherit step;
+      init = {
+        acc = [];
+        pos = 0;
+        done = false;
+      };
+      maxSteps = length toks + 2;
+    };
   in {
     k = "module";
-    body = go [] 0;
+    body = r.acc;
   };
 
   parse = src: parseModule (tokenize src);

@@ -29,6 +29,20 @@ let
   mkDict = entries: {
     __sk = "dict";
     inherit entries;
+    # A LAZY index of the string keys, built on first lookup and then memoised, so
+    # repeated lookups into a big dict are O(1) and involve no recursion. A generated
+    # Buck2 header map is thousands of entries, and a linear scan there costs one
+    # evaluator frame per entry -- which overflows the stack before it is slow.
+    strIdx = builtins.listToAttrs (builtins.filter (x: x != null)
+      (builtins.genList (i: let
+        e = elemAt entries i;
+      in
+        if builtins.isString e.key
+        then {
+          name = e.key;
+          value = i;
+        }
+        else null) (length entries)));
   };
   mkFn = f:
     {
@@ -124,16 +138,20 @@ let
     ka == kb && builtins.all (k: eq a.${k} b.${k}) ka;
 
   # ---- dict operations (ordered entries, linear lookup) -----------------
-  dictFindIndex = d: key: let
-    n = length d.entries;
-    go = i:
-      if i >= n
-      then -1
-      else if eq (elemAt d.entries i).key key
-      then i
-      else go (i + 1);
-  in
-    go 0;
+  dictFindIndex = d: key:
+    if builtins.isString key && d ? strIdx
+    then d.strIdx.${key} or (-1)
+    else let
+      n = length d.entries;
+      # Non-string keys (and dicts built without the index) still scan, but
+      # iteratively: foldl' keeps the stack flat however long the dict is.
+    in
+      builtins.foldl' (acc: i:
+        if acc >= 0
+        then acc
+        else if eq (elemAt d.entries i).key key
+        then i
+        else -1) (-1) (builtins.genList (i: i) n);
   dictHas = d: key: dictFindIndex d key >= 0;
   dictGet = d: key: let
     i = dictFindIndex d key;

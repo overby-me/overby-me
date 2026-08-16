@@ -9,6 +9,8 @@
   V,
   currentFile,
   system,
+  # Parsed .buckconfig sections, for read_root_config / read_config.
+  sections ? {},
 }: let
   inherit (V) mkList mkDict truthy;
   inherit (builtins) elemAt length substring stringLength filter isString;
@@ -306,6 +308,29 @@
   });
 
   # ---- glob --------------------------------------------------------------
+  # read_root_config(section, key, default = None): a value from the project's
+  # .buckconfig, with .buckconfig.local layered on top. Buck2 uses it for values that
+  # are machine-local rather than checked in -- a toolchain's compiler or linker path --
+  # so a rule can name one without hardcoding it. read_config is the same lookup for the
+  # root cell, which is all this interpreter models.
+  readRootConfigGlobal = builtin ({
+    pos,
+    world,
+    ...
+  }: let
+    # Strings are plain Nix strings in this interpreter, and None is null.
+    section = argAt pos 0 "";
+    key = argAt pos 1 "";
+    fallback = argAt pos 2 V.none;
+    have = sections ? ${section} && sections.${section} ? ${key};
+  in {
+    value =
+      if have
+      then sections.${section}.${key}
+      else fallback;
+    inherit world;
+  });
+
   globGlobal = builtin ({
     pos,
     named,
@@ -426,6 +451,8 @@ in {
   rule = ruleGlobal;
   attrs = attrsObj;
   struct = structGlobal;
+  read_root_config = readRootConfigGlobal;
+  read_config = readRootConfigGlobal;
   host_info = hostInfoGlobal;
   oncall = oncallGlobal;
   glob = globGlobal;

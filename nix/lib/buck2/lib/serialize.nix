@@ -104,6 +104,17 @@ let
       sha256 = a.sha256 or null;
       sha1 = a.sha1 or null;
     }
+    else if a.kind == "symlinked_dir"
+    then {
+      inherit (a) kind id;
+      output = plainArtifact a.output;
+      entries =
+        map (e: {
+          inherit (e) path;
+          src = plainVal e.src;
+        })
+        a.entries;
+    }
     else if a.kind == "copy"
     then {
       inherit (a) kind id;
