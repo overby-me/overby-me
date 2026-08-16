@@ -122,7 +122,10 @@ in rec {
     shortName = concatStringsSep "-" (projectSegs ++ suffix);
   in {
     inherit area path;
-    project = concatStringsSep "/" projectSegs;
+    # The package part of the label, in Bazel's sense: the path within the
+    # area. Not called `project`, because the value this belongs to *is* the
+    # project and `project.project` says nothing.
+    pkg = concatStringsSep "/" projectSegs;
     target = name;
 
     # The form to print in an error: the only one that is always
@@ -168,7 +171,7 @@ in rec {
     # The same over a whole attribute set, so a file states what it builds
     # and not where the names come from:
     #
-    #   packages = label.names { default = ...; dev = ...; };
+    #   packages = project.names { default = ...; dev = ...; };
     #   -> { oxidized-awk = ...; oxidized-awk-dev = ...; }
     names = set:
       listToAttrs (map (target: {

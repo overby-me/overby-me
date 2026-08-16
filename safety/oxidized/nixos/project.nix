@@ -1,12 +1,12 @@
-# A project module, applied to its own label by the workspace.
+# A project module, applied to its own identity by the workspace.
 #
 # This one contributes what nixDir contributes - a devshell, NixOS
 # configurations, checks - from the project's own directory rather than from a
 # directory named after each output type. The file says which output it feeds
-# and the label says what the entry is called, so `oxidized-nixos` appears
+# and the project says what the entry is called, so `oxidized-nixos` appears
 # nowhere below even though every name it produces starts with it.
-label: {
-  devShells = label.names {
+project: {
+  devShells = project.names {
     default = pkgs: {
       packages = with pkgs; [
         just
@@ -16,7 +16,7 @@ label: {
   };
 
   nixosConfigurations =
-    label.names {
+    project.names {
       default = _: {
         system = "x86_64-linux";
         modules = [
@@ -40,7 +40,7 @@ label: {
       };
     };
 
-  checks = label.names {
+  checks = project.names {
     boot = pkgs: import ./nixos-test.nix {inherit pkgs;};
 
     # Rung 1 (docs/ROADMAP.md "Ship one increment"): one rust component under

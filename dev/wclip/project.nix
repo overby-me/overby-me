@@ -1,10 +1,10 @@
-# A project module, applied to its own label by the workspace.
+# A project module, applied to its own identity by the workspace.
 #
-# Every name below is local: `default`, `dev`, `test-version`. The label turns
-# them into `wclip`, `wclip-dev`, `wclip-test-version`, from where this
+# Every name below is local: `default`, `dev`, `test-version`. The project
+# turns them into `wclip`, `wclip-dev`, `wclip-test-version`, from where this
 # directory sits, so nothing here can spell a name that lands in another
 # project's namespace and no prefix has to be remembered.
-label: {lib, ...}: let
+project: {lib, ...}: let
   crate = {
     src = lib.fileset.toSource {
       root = ./.;
@@ -18,7 +18,7 @@ label: {lib, ...}: let
     index = ../../platform/nix/lib/cargo/index;
 
     meta = {
-      homepage = "https://tangled.org/overby.me/overby.me/tree/main/${label.path}";
+      homepage = "https://tangled.org/overby.me/overby.me/tree/main/${project.path}";
       license = lib.licenses.mit;
       mainProgram = "wclip";
       platforms = lib.platforms.linux;
@@ -43,12 +43,12 @@ label: {lib, ...}: let
     "selection-abbreviation"
   ];
 in {
-  packages = label.names {
+  packages = project.names {
     default = {lib, ...}:
       lib.buildCargoProject (crate
         // {
           # The crate keeps its own name: pname is resolved against
-          # Cargo.lock, and a label names a target rather than a crate.
+          # Cargo.lock, and this names a target rather than a crate.
           pname = "rust-wclip";
           meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust";};
         });
@@ -63,7 +63,7 @@ in {
   };
 
   checks =
-    label.names
+    project.names
     (lib.listToAttrs (
       map (name: {
         name = "test-${name}";

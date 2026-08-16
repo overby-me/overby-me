@@ -39,10 +39,16 @@ root: cfg: let
   # tell you what it just shadowed.
   named = labels.render found;
 
-  # A `project.nix` is a module applied to its own label, which is what lets
-  # a file state what it builds without stating where the names come from:
+  # A `project.nix` is a module applied to its own identity, which is what
+  # lets a file state what it builds without stating where the names come
+  # from:
   #
-  #   label: {...}: { packages = label.names { default = ...; dev = ...; }; }
+  #   project: {...}: { packages = project.names { default = ...; }; }
+  #
+  # The argument is the project, not its label: a label is one of the things
+  # it carries, alongside the path, the renderings and the helpers. It is not
+  # the workspace either - that is the tree this project sits in, and the
+  # function the root flake calls.
   #
   # The module system cannot hand one module a different argument from
   # another - `_module.args` is evaluation-wide - so the label is applied at
