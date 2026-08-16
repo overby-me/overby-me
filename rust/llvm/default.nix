@@ -146,11 +146,11 @@ in {
     # performs. Measuring against `llvm-as | llvm-dis` instead counted the
     # bitcode reader's compatibility upgrades as print differences, which is
     # what thirteen of them were.
-    # Feature and Other print every module we both accept exactly as upstream
-    # does, so those two are held rather than raised from here.
+    # Feature, Linker and Other print every module we both accept exactly as
+    # upstream does, so those three are held rather than raised from here.
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 218;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 71;
-    llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 219;
+    llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 220;
     llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 144;
 
     # Ten thousand pass tests, none of them written with a parser in mind,

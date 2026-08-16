@@ -1600,6 +1600,7 @@ impl Parser {
         let flags: Vec<MdId> = self.module_flags();
         let mut has_version = false;
         let mut has_properties = false;
+        let mut swift = Vec::new();
         for id in &flags {
             let Some(name) = self.flag_name(*id) else {
                 continue;
@@ -1607,9 +1608,13 @@ impl Parser {
             match name.as_str() {
                 "Objective-C Image Info Version" => has_version = true,
                 "Objective-C Class Properties" => has_properties = true,
-                "Objective-C Garbage Collection" => self.narrow_flag_value(*id, 8),
+                "Objective-C Garbage Collection" => swift = self.upgrade_objc_collection(*id),
                 _ => {}
             }
+        }
+        for (name, bits, value) in swift {
+            let node = self.module_flag(1, name, bits, value);
+            self.add_module_flag(node);
         }
         if !has_version || has_properties {
             return;
@@ -1637,6 +1642,118 @@ impl Parser {
                 return;
             }
         }
+    }
+
+    /// The Objective-C collector flag, which is eight bits wide and was once
+    /// where a Swift compiler wrote its own version too.
+    ///
+    /// Measured by sweeping the value. The low byte is the collector's own
+    /// configuration and stays; bits 8 to 15 are the Swift ABI version, 16 to
+    /// 23 the minor and 24 to 31 the major, and upstream writes those out as
+    /// three flags of their own when there is anything above the low byte.
+    /// `0x05010700` comes back as an `i8 0` collector beside ABI 7, major 5
+    /// and minor 1, and `0x00000001` comes back as an `i8 1` collector and
+    /// nothing else.
+    ///
+    /// The upgrade fires on a value wider than eight bits, whatever the
+    /// behaviour says, and the behaviour it leaves is always `Error`: a flag
+    /// written `i8` is left alone entirely, keeping the behaviour it had.
+    fn upgrade_objc_collection(&mut self, id: MdId) -> Vec<(&'static str, u32, u64)> {
+        let Some(Metadata::Tuple { operands, .. }) = self.module.metadata_node(id) else {
+            return Vec::new();
+        };
+        let [
+            _,
+            _,
+            MdOperand::Value {
+                ty,
+                value: Value::Constant(written),
+            },
+        ] = operands.as_slice()
+        else {
+            return Vec::new();
+        };
+        let TypeKind::Integer(bits) = *self.module.ctx.type_kind(*ty) else {
+            return Vec::new();
+        };
+        if bits <= 8 {
+            return Vec::new();
+        }
+        let Some(value) = self
+            .module
+            .ctx
+            .constant(*written)
+            .as_integer()
+            .and_then(ApInt::to_u64)
+        else {
+            return Vec::new();
+        };
+        self.narrow_flag_value(id, 8);
+        self.set_flag_behaviour(id, 1);
+        if value >> 8 == 0 {
+            return Vec::new();
+        }
+        vec![
+            ("Swift ABI Version", 32, (value >> 8) & 0xff),
+            ("Swift Major Version", 8, (value >> 24) & 0xff),
+            ("Swift Minor Version", 8, (value >> 16) & 0xff),
+        ]
+    }
+
+    /// One module flag, built rather than read.
+    fn module_flag(&mut self, behaviour: u64, name: &'static str, bits: u32, value: u64) -> MdId {
+        let i32_type = self.module.ctx.int_type(32);
+        let behaviour = self
+            .module
+            .ctx
+            .const_int(i32_type, ApInt::from_u64(32, behaviour));
+        let ty = self.module.ctx.int_type(bits);
+        let value = self.module.ctx.const_int(ty, ApInt::from_u64(bits, value));
+        self.module.add_metadata(Metadata::Tuple {
+            distinct: false,
+            operands: vec![
+                MdOperand::Value {
+                    ty: i32_type,
+                    value: Value::Constant(behaviour),
+                },
+                MdOperand::String(name.into()),
+                MdOperand::Value {
+                    ty,
+                    value: Value::Constant(value),
+                },
+            ],
+        })
+    }
+
+    /// Adds a flag to `llvm.module.flags`, which is where upstream puts one
+    /// it worked out: at the end, after everything the module wrote.
+    fn add_module_flag(&mut self, node: MdId) {
+        for named in &mut self.module.named_metadata {
+            if named.name == "llvm.module.flags" {
+                named.operands.push(node);
+                return;
+            }
+        }
+    }
+
+    /// Rewrites the behaviour a flag was written with.
+    fn set_flag_behaviour(&mut self, id: MdId, behaviour: u64) {
+        let Some(Metadata::Tuple { distinct, operands }) = self.module.metadata_node(id).cloned()
+        else {
+            return;
+        };
+        let i32_type = self.module.ctx.int_type(32);
+        let written = self
+            .module
+            .ctx
+            .const_int(i32_type, ApInt::from_u64(32, behaviour));
+        let mut operands = operands;
+        operands[0] = MdOperand::Value {
+            ty: i32_type,
+            value: Value::Constant(written),
+        };
+        self.module
+            .set_metadata(id, Metadata::Tuple { distinct, operands });
     }
 
     /// The nodes `llvm.module.flags` names.

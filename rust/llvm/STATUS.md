@@ -68,6 +68,7 @@ and each row names the check that backs it.
 | The order a specialized node writes its fields in | done for every field its kind can be written with, ten of which no probe carried until now | `llvm-opt-differential`, `llvm-roundtrip` |
 | An intrinsic found by the longest documented prefix of its name | done, which is what makes `llvm.objectsize.i32.unnamed` an `llvm.objectsize` | `llvm-opt-differential` |
 | The members of an ODR type uniqued under it, keyed on the tag and name or on the linkage name | done | `llvm-opt-differential`, `llvm-opt-differential-linker` |
+| The Swift version read out of the Objective-C collector flag it was packed into | done | `llvm-opt-differential-linker` |
 
 ## The round trip
 

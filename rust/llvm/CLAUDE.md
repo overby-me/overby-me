@@ -2598,6 +2598,26 @@ the declaration. The merged members are held out of the structural pass as
 well, since two that merged here differ structurally by the file they were
 written in if nothing else.
 Assembler differential 217 to 218.
+The pass after it took the last Linker file, which is one flag standing in
+for four. A Swift compiler once wrote its own version into the Objective-C
+collector flag, so `!{i32 4, !"Objective-C Garbage Collection", i32
+83953408}` is not a collector configuration at all: the low byte is, and
+upstream splits the rest out into `Swift ABI Version`, `Swift Major Version`
+and `Swift Minor Version` beside it.
+Which bits are which was swept rather than read off the one file: bits 8 to
+15 are the ABI, 16 to 23 the minor and 24 to 31 the major, which
+`0x05010700` coming back as ABI 7, major 5 and minor 1 pins against
+`0x06010600` coming back as ABI 6, major 6, minor 1. The `Swift Version`
+flag the same file carries has nothing to do with it and survives untouched,
+which one probe without it settled.
+Two more things the sweep said and the file did not. The upgrade fires on a
+value wider than eight bits whatever the behaviour says, and the behaviour it
+leaves is always `Error`, where the module wrote `Override`. And a flag
+written `i8` already is left alone entirely, keeping the behaviour it had, so
+narrowing is not what triggers it.
+Linker 219 to 220 of 220, which is every module we both accept printed
+exactly as upstream prints it. Three of the four print suites are there now,
+Feature and Other being the others.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and
