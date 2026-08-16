@@ -262,6 +262,25 @@ def main [tree: path, as: path, dis: path, out: path] {
   }
   let work = (mktemp -d)
 
+  # Upstream's own tests declare thousands of intrinsics LangRef never
+  # mentions, every target's among them, and a name with no row here prints
+  # as the module wrote it where upstream fills in its types. The same lines
+  # are what the rows are held against further down, so they are read once.
+  let harvest = (
+    ^grep -rhoE '^declare[^{]*@llvm\.[A-Za-z0-9_.]*\([^)]*\)' --include='*.ll' ([$tree "llvm" "test"] | path join)
+    | lines
+    | uniq
+    | parse --regex '^declare\s+(?P<result>.+?)\s+@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\s*\((?P<arguments>.*?)\)$'
+    | each {|row|
+      {
+        name: $row.name
+        types: ([(bare-type $row.result)] ++ (split-arguments $row.arguments | each {|a| bare-type $a}))
+      }
+    }
+    | where not ($it.types | any {|t| ($t == "") or ($t | str contains "...")})
+  )
+  print $"($harvest | length) intrinsic declarations in llvm/test"
+
   let declares = (
     declare-lines (open --raw $langref)
     | parse --regex '^declare\s+(?P<result>.+?)\s+@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\s*\((?P<arguments>.*?)\)\s*(#[0-9]+)?$'
@@ -277,6 +296,26 @@ def main [tree: path, as: path, dis: path, out: path] {
     | uniq
   )
   print $"($declares | length) usable declare lines in LangRef"
+
+  # A test's declaration is a signature like any other once its name is
+  # reduced to the base: writing that base with those types and reading back
+  # what upstream calls it is the same question LangRef's lines are asked.
+  let declares = (
+    $declares
+    ++ (
+      $harvest
+      | each {|row|
+        {
+          base: (strip-mangling $row.name)
+          types: $row.types
+          arguments: ($row.types | skip 1)
+          result: ($row.types | first)
+        }
+      }
+    )
+    | uniq
+  )
+  print $"($declares | length) signatures once the tests are in"
 
   # One module per instantiation depth, so that a base declared twice never
   # collides with itself. Names inside a module are distinct, and an output
@@ -317,33 +356,65 @@ def main [tree: path, as: path, dis: path, out: path] {
   let spelling = $spellings
   print $"($spelling | columns | length) distinct types spelled"
 
+  # One entry per base and arity, which is what a row is keyed on. A base
+  # declared at two lengths is two intrinsics as far as the name goes, and
+  # accumulating one assignment across both gives positions that index past
+  # the shorter one. The rounds stay per base, because the probe writes the
+  # bare name and two arities of one base cannot share a module.
   mut entries = []
-  for group in $grouped {
-    mut fits = []
+  for pair in ($grouped | each {|g| $g.rows | each {|r| $r.types | length} | uniq | each {|a| {group: $g, arity: $a}}} | flatten) {
+    let group = $pair.group
+    mut tally = {}
     mut started = false
-    mut usable = true
     for round in 0..<($group.rows | length) {
       let row = ($group.rows | get $round)
+      if ($row.types | length) != $pair.arity { continue }
+      # A round that came back with nothing says nothing: the batch it was in
+      # may have been refused for another line in it, and a base read from
+      # upstream's tests has as many rounds as the tests have signatures for
+      # it, where one from LangRef has one or two. Discarding the base for a
+      # single silent round threw away every target intrinsic declared more
+      # than a few times, `llvm.amdgcn.image.atomic.swap.1d` among them.
       let name = ($canonical | get -o $"($round)|($group.base)")
-      if $name == null { $usable = false; break }
+      if $name == null { continue }
       let components = (
         if $name == $group.base { [] } else { $name | str substring (($group.base | str length) + 1).. | split row "." }
       )
       if ($components | is-empty) {
-        # Not overloaded: upstream left the name alone, and so do we. That is
-        # the same answer as having no row at all.
-        $usable = false
-        break
+        # Upstream left this one alone, which is what it does with a
+        # signature that is not the intrinsic's. Another round may still be.
+        continue
       }
       let spelled_types = ($row.types | each {|t| $spelling | get $t})
-      if ($spelled_types | any {|s| $s == ""}) { $usable = false; break }
+      if ($spelled_types | any {|s| $s == ""}) { continue }
       let candidates = (assignments $components $spelled_types)
-      if ($candidates | is-empty) { $usable = false; break }
-      $fits = (if $started { $fits | where {|f| $f in $candidates} } else { $candidates })
+      if ($candidates | is-empty) { continue }
+      # Counted rather than intersected. With LangRef alone a base had one or
+      # two signatures and every one of them was right, so the assignments
+      # they agreed on were the answer. Upstream's tests bring dozens per
+      # base and some of them are inventions their own module never compiles,
+      # so one odd signature would empty the intersection and take the base
+      # with it, `llvm.memcpy` among them. The assignment the most signatures
+      # support is the answer instead, and the mutation probes below still
+      # cut down whatever ties.
+      for candidate in $candidates {
+        let key = ($candidate | each {|p| $"($p)"} | str join ",")
+        $tally = ($tally | upsert $key (($tally | get -o $key | default 0) + 1))
+      }
       $started = true
-      if ($fits | is-empty) { $usable = false; break }
     }
-    if (not $usable) or (not $started) {
+    if (not $started) {
+      continue
+    }
+    let best = ($tally | values | math max)
+    mut fits = (
+      $tally
+      | transpose key count
+      | where count == $best
+      | get key
+      | each {|k| $k | split row "," | each {|p| $p | into int}}
+    )
+    if ($fits | is-empty) {
       continue
     }
 
@@ -354,7 +425,7 @@ def main [tree: path, as: path, dis: path, out: path] {
     # answer at `ptr addrspace(1)` says which of the two its name carries.
     # A mutation the intrinsic has no instantiation for is not remangled at
     # all, which says nothing and is skipped.
-    let first_row = ($group.rows | first)
+    let first_row = ($group.rows | where {|r| ($r.types | length) == $pair.arity} | first)
     if ($fits | length) > 1 {
       for position in 0..<($first_row.types | length) {
         if ($fits | length) <= 1 { break }
@@ -398,20 +469,6 @@ def main [tree: path, as: path, dis: path, out: path] {
   # written an older spelling, which is the whole reason for this table, so
   # the disagreement is put to the assembler rather than counted. A row the
   # assembler contradicts is dropped.
-  let harvest = (
-    ^grep -rhoE '^declare[^{]*@llvm\.[A-Za-z0-9_.]*\([^)]*\)' --include='*.ll' ([$tree "llvm" "test"] | path join)
-    | lines
-    | uniq
-    | parse --regex '^declare\s+(?P<result>.+?)\s+@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\s*\((?P<arguments>.*?)\)$'
-    | each {|row|
-      {
-        name: $row.name
-        types: ([(bare-type $row.result)] ++ (split-arguments $row.arguments | each {|a| bare-type $a}))
-      }
-    }
-    | where not ($it.types | any {|t| ($t == "") or ($t | str contains "...")})
-  )
-  print $"($harvest | length) intrinsic declarations in llvm/test to hold the rows against"
 
   let by_name = ($entries | reduce --fold {} {|entry, all| $all | upsert $entry.name $entry})
   mut wider = $spelling

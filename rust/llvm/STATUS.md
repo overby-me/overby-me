@@ -45,7 +45,7 @@ and each row names the check that backs it.
 | Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 11,842 intrinsics upstream answers about, swept from LangRef and from its own tests | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 | Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
-| Intrinsic names carrying the types they were instantiated at | done for the 239 LangRef documents, name and print position both | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
+| Intrinsic names carrying the types they were instantiated at | done for the 1,567 measured, name and print position both, swept from LangRef and from upstream's own test declarations | `llvm-opt-differential-other`, `llvm-opt-differential-feature`, `llvm-roundtrip` |
 | Building a declaration for an undeclared call to an intrinsic upstream knows | done for the 1,790 names used undeclared, plus the 11,865 upstream recognises in a declaration | the eleven tree checks, `llvm-upstream-assembler` |
 | A `DICompositeType` with an identifier made `distinct` and uniqued under that identifier | done | `llvm-opt-differential`, `llvm-opt-differential-linker`, `llvm-roundtrip` |
 | The data layout a triple implies, filled in when a module writes none | done for the 679 triples upstream's tests name that imply one | `llvm-opt-differential-linker`, `llvm-opt-differential` |

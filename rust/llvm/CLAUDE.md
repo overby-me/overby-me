@@ -2618,6 +2618,33 @@ narrowing is not what triggers it.
 Linker 219 to 220 of 220, which is every module we both accept printed
 exactly as upstream prints it. Three of the four print suites are there now,
 Feature and Other being the others.
+The pass after it widened the mangling table the way the attribute table was
+widened. `corpus/intrinsic-mangling.nu` measured which positions feed a name
+by writing out a signature LangRef documents, so it knew 239 names where
+upstream recognises 11,865 in a declaration, and a name with no row prints as
+the module wrote it where upstream fills in its types. The tests are the
+other source and the script already read them, to hold its rows against, so
+the same lines now go in as signatures too: a test's declaration is a
+signature like any other once its name is reduced to the base. 239 rows to
+1,567.
+Three probe designs had to be fixed before that was sound, and each was
+invisible while LangRef was the only source. A round that comes back silent
+says nothing, where before it discarded the base: with dozens of signatures
+per base, one batch refused for an unrelated line threw away every heavily
+declared target intrinsic. A base declared at two arities is two entries, not
+one, because a row is keyed on the arity and accumulating one assignment
+across both gives positions that index past the shorter signature.
+And the assignments are counted rather than intersected. That is the one that
+matters: with one or two signatures per base every one of them was right, so
+intersecting was sound, and upstream's tests bring signatures their own
+module never compiles, so a single odd one emptied the intersection and took
+the base with it. `llvm.memcpy` lost its row that way, which the unit test
+caught and the Assembler ceiling caught again at 0 to 1. The assignment the
+most signatures support is the answer, and the mutation probes still cut down
+whatever ties.
+Assembler differential 218 to 219, `remangle.ll` being a module whose two
+`llvm.ssa.copy` declarations upstream swaps and which now prints exactly as
+it does.
 Measured and not done: interning the attribute table.
 `crates/llvm-ir/src/intrinsic/attributes.rs` is 2.5 MB and 95,000 lines,
 one row per intrinsic with its attribute strings written out in full, and
