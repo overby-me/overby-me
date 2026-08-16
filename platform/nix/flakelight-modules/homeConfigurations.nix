@@ -40,7 +40,6 @@
   pkgsFor,
   outputs,
   moduleArgs,
-  modulesPath,
   ...
 }: let
   inherit (builtins) head mapAttrs match;
@@ -88,10 +87,6 @@
       else mkHome name cfg)
     config.homeConfigurations;
 in {
-  # The stock builtin builds home configs with a bare, un-overlaid pkgs and no
-  # `pkgs` specialArg; disable it and take over the option/outputs below.
-  disabledModules = [(modulesPath + "/homeConfigurations.nix")];
-
   options.homeConfigurations = mkOption {
     type = optCallWith moduleArgs (lazyAttrsOf (optCallWith moduleArgs attrs));
     default = {};

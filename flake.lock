@@ -211,26 +211,6 @@
         "type": "github"
       }
     },
-    "flakelight": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786367861,
-        "narHash": "sha256-6SuLCSsEx1lpL5/TXdU/HPK0f4QeELLqmOlmUPHmW4s=",
-        "owner": "accelbread",
-        "repo": "flakelight",
-        "rev": "aa55b43cc4fda05655083ff846b99b5abf69252a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "accelbread",
-        "repo": "flakelight",
-        "type": "github"
-      }
-    },
     "git-hooks": {
       "inputs": {
         "flake-compat": [
@@ -632,7 +612,6 @@
         "flake-compat": "flake-compat",
         "flake-parts": "flake-parts",
         "flake-utils": "flake-utils",
-        "flakelight": "flakelight",
         "git-hooks": "git-hooks",
         "gitignore": "gitignore",
         "hercules-ci-effects": "hercules-ci-effects",

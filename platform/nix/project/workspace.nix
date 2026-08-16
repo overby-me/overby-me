@@ -21,6 +21,7 @@ root: cfg: let
   inherit (builtins) attrNames concatMap elem filter isAttrs isFunction mapAttrs pathExists readDir stringLength substring throw;
 
   labels = import ./labels.nix;
+  mkFlake = import ./mk-flake.nix {inherit (cfg.inputs) nixpkgs;};
 
   discovery = cfg.projects or {};
 
@@ -106,7 +107,7 @@ root: cfg: let
   # projects follow: the path is the address. See ./outputs.nix.
   fromOutputDirs = map (d: import ./outputs.nix d) (cfg.outputDirs or []);
 in
-  cfg.inputs.flakelight root (
+  mkFlake root (
     (removeAttrs cfg ["projects" "moduleDirs" "outputDirs"])
     // {
       # Explicit first, then whole directories, then projects. A workspace

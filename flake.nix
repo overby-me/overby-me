@@ -28,10 +28,6 @@
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Config support
-    flakelight = {
-      url = "github:accelbread/flakelight";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     nixos-hardware = {
       url = "github:NixOS/nixos-hardware/master";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -198,7 +194,6 @@
       # platform/nix/project/outputs.nix reads them. flakelight's own nixDir
       # is switched off: one mechanism, and it is ours.
       outputDirs = [./platform/nix];
-      nixDir = null;
 
       # Every .nix file in it is a flakelight module. nixDir exports them
       # under the directory's own name; importing them is a separate act.

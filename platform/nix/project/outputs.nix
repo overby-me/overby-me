@@ -87,5 +87,13 @@ dir: {
     subtractLists ["_module" "nixDir" "nixDirAliases" "nixDirPathAttrs"]
     (attrNames options);
 in {
+  # Which options want the path to an entry rather than the imported value.
+  # Declared here because this is what reads it: a directory of NixOS modules
+  # is imported by the configuration that uses it, not by us.
+  options.nixDirPathAttrs = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [];
+  };
+
   config = genAttrs outputNames (name: mkMerge (valueFor name));
 }
