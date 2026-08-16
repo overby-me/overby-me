@@ -148,7 +148,13 @@ in {
     # what thirteen of them were.
     # Feature, Linker and Other print every module we both accept exactly as
     # upstream does, so those three are held rather than raised from here.
+    # DebugInfo is the fifth, and the one the debug-info work keeps moving.
+    # Its seven remaining files are four causes, each a task of its own:
+    # broken debug info upstream strips rather than refuses, the order
+    # attributes taking an argument print in, which of two attribute groups
+    # sharing an id wins, and named types reachable only from a debug record.
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 220;
+    llvm-opt-differential-debuginfo = pkgs: differentialCheck pkgs "DebugInfo" 50;
     llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 71;
     llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 220;
     llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 144;

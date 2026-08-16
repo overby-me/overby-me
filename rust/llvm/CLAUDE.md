@@ -2687,6 +2687,32 @@ Rows dropped for disagreeing with the assembler go 32 to 5, which is what
 says the reduction was behind them rather than the mangling ambiguity they
 were blamed on: `llvm.amdgcn.image.atomic.swap.1d` has its row now.
 Assembler differential 219 to 220.
+The pass after it gave `llvm/test/DebugInfo` a print differential of its own,
+which is the tree the debug-info work keeps moving and the one where three
+files started printing identically without any number recording it. 50 of
+the 57 modules at the top of that tree print exactly as upstream prints
+them, and the seven left are four causes rather than seven:
+Four of them are one rule we do not have. Upstream's verifier has a
+debug-info half whose failures do not refuse a module, they strip every bit
+of debug info out of it and warn: "ignoring debug info with an invalid
+version (0)" in `strip-DIGlobalVariable.ll`, "missing global variable type"
+in `pr34186.ll`, "invalid type ref" in `pr34672.ll`, and "definition
+subprograms cannot be nested within DICompositeType when enabling ODR" in
+`cross-cu-scope.ll`. We read all four and print the debug info back.
+`sroa-handle-dbg-value.ll` is one parameter, written `noalias nocapture
+sret(%T)`, which upstream prints as `noalias sret(%T) captures(none)` and we
+print as `noalias captures(none) sret(%T)`. The printer sorts the attributes
+that take an argument by a six-name list and everything outside it ties, so
+what comes out is the order the module wrote them in.
+`unrolled-loop-remainder.ll` defines `attributes #0` twice, once with
+`readnone` and once without, and upstream's answer carries `memory(none)`
+where ours does not. Whether that is the later definition winning or the two
+merging is a question one probe settles, and neither is what we do now.
+`type-finder-w-dbg-records.ll` is four named struct types used nowhere but
+inside the constant expressions a `#dbg_value` and a `#dbg_assign` record
+carry. Upstream's type finder walks those; ours walks instructions.
+Each of the four is a task rather than a paragraph here, and the ratchet
+holds 50 in the meantime.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

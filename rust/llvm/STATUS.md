@@ -317,12 +317,14 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **191 of 223** are identical, with
-three more suites measured the same way: **67 of 71** in `Feature`, **207 of
-220** in `Linker` and **140 of 144** in `Other`. Fourteen of the
+against upstream's own `opt -S`, and **220 of 226** are identical, with
+four more suites measured the same way: **71 of 71** in `Feature`, **220 of
+220** in `Linker`, **144 of 144** in `Other` and **50 of 57** in
+`DebugInfo`. Three of the five print every module both tools accept exactly
+as upstream prints it; the two that do not have their remaining files
+sorted by cause in CLAUDE.md, six in one and seven in the other. Some of the
 remaining differences are ones where we already match
-`llvm-as | llvm-dis` and `opt -S` does something else, so the attainable
-maximum is 641 rather than 655. ODR type uniquing is most of them; the
+`llvm-as | llvm-dis` and `opt -S` does something else. ODR type uniquing is most of them; the
 clearest is `!DIObjCProperty`, where `opt -S` prints the setter and the
 getter swapped and `llvm-dis` does not. The corpus is `llvm-dis` output
 and is the headline property, so where the two upstream tools disagree
