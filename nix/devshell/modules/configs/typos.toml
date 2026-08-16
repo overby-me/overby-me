@@ -181,6 +181,25 @@ guage = "guage"
 Guage = "Guage"
 GUAGE = "GUAGE"
 
+# LLVM spells the runtime-preemption keyword `dso_preemptable`, and LangRef
+# is the spelling a compatibility project has to use. `olt` is one of its
+# floating-point comparison predicates (ordered less than), not `old`.
+preemptable = "preemptable"
+Preemptable = "Preemptable"
+olt = "olt"
+
+# SEH = Structured Exception Handling, which names a family of LLVM
+# intrinsics (`llvm.seh.scope.begin` and friends), not a misspelt "she".
+seh = "seh"
+SEH = "SEH"
+
+# SME = Scalable Matrix Extension, which names AArch64 calling conventions
+# (`aarch64_sme_preservemost_from_x0` and friends), not a misspelt "some".
+sme = "sme"
+SME = "SME"
+Sme = "Sme"
+Olt = "Olt"
+
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.
 extrac01 = "extrac01"
@@ -244,5 +263,17 @@ extend-exclude = [
   # And endgame's games, whose moves are algebraic chess notation rather than
   # words: Ba6 is a bishop, Rhe1 a rook, Nf3 a knight.
   "web/homepage/xscreensaver/src/hacks3d/endgame_games.rs",
+  # The LLVM IR conformance corpus. Its comparison predicates are LangRef
+  # keywords rather than English: olt, oge, une, uno and friends.
+  "rust/llvm/corpus/",
+  # The generated intrinsic tables. Every string in them is a name upstream
+  # chose, measured from its own tests, so a spelling here is a fact rather
+  # than a choice: `llvm.aarch64.sve.ld1.pn.x2` names SVE's predicate-as-
+  # counter register and cannot be corrected to `on`.
+  "rust/llvm/crates/llvm-ir/src/intrinsic/",
+  # And the target triples, which are names too: cros is ChromeOS, sie is Sony
+  # Interactive Entertainment, and i386-unknow-linux and x86_64-unknown-unkown
+  # are malformed on purpose, being the inputs that prove a bad triple parses.
+  "rust/llvm/crates/llvm-ir/src/target_layout.rs",
 ]
 ignore-hidden = false

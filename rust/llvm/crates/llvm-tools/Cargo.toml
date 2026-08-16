@@ -1,0 +1,19 @@
+[package]
+name = "llvm-tools"
+version.workspace = true
+edition.workspace = true
+description = "Command-line tools with upstream-compatible interfaces"
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opt"
+path = "src/opt.rs"
+
+[dependencies]
+llvm-ir.workspace = true
+llvm-ir-parse.workspace = true
+llvm-ir-print.workspace = true
+
+[lints]
+workspace = true

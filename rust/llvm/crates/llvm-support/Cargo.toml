@@ -1,0 +1,10 @@
+[package]
+name = "llvm-support"
+version.workspace = true
+edition.workspace = true
+description = "Value and target primitives for LLVM-rs: APInt, APFloat, DataLayout, Triple"
+repository.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
