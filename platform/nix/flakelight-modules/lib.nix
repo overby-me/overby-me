@@ -1,4 +1,4 @@
-# Auto-discovers lib functions from nixDir/lib/ directory.
+# Auto-discovers lib functions from platform/nix/lib/.
 # Each .nix file can be an attrset or a function taking lib, returning an attrset.
 # Results are merged flat into the lib flake output.
 # Uses mkForce to override nixDir's raw auto-discovery with resolved values.
@@ -12,13 +12,12 @@
 # Modules that define `perSystemLib` attrs are automatically routed to
 # the perSystemLib option (system-dependent functions taking pkgs).
 # All other attrs are merged into the flake's lib output (system-independent).
-{
-  config,
-  lib,
-  ...
-}: let
-  libDir = config.nixDir + "/lib";
-  hasLibDir = config.nixDir != null && lib.pathExists libDir;
+{lib, ...}: let
+  # Named directly rather than through nixDir: this is a second rule over the
+  # same directory - resolve each file and merge the results flat - and it
+  # runs whether or not anything else is scanning the tree.
+  libDir = ../lib;
+  hasLibDir = lib.pathExists libDir;
 
   resolve = v:
     if lib.isFunction v

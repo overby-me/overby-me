@@ -86,7 +86,6 @@ in {
     })
 
     {
-      nixDirAliases.systemConfigs = ["system-manager/config"];
       nixDirPathAttrs = ["systemModules"];
     }
   ];

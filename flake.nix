@@ -194,11 +194,11 @@
         allowUnfree = true;
       };
 
-      # flakelight autoloads from nixDir, and every directory under it is
-      # named after the output it feeds, in this tree's own kebab-case.
-      # nixDirKebab.nix computes the mapping from flakelight's option names,
-      # so there is no alias table to keep.
-      nixDir = ./platform/nix;
+      # Every directory under here is named after the output it feeds, and
+      # platform/nix/project/outputs.nix reads them. flakelight's own nixDir
+      # is switched off: one mechanism, and it is ours.
+      outputDirs = [./platform/nix];
+      nixDir = null;
 
       # Every .nix file in it is a flakelight module. nixDir exports them
       # under the directory's own name; importing them is a separate act.

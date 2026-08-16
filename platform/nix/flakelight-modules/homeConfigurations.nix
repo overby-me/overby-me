@@ -108,6 +108,5 @@ in {
         configs
       );
     };
-    nixDirAliases.homeConfigurations = ["home"];
   };
 }

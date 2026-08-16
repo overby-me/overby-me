@@ -221,12 +221,46 @@ checks.oxidized-nixos-rung1-tmpfiles
 Before this the same file wrote `oxidized-nixos` into nine names by hand. It
 now appears nowhere in it.
 
-## How this relates to nixDir
+## Output directories
+
+`outputDirs` is the other half of the tree, for everything that belongs to no
+project: a directory names the output it feeds, a file names the entry.
+
+```nix
+outputDirs = [./platform/nix];
+nixDir = null;              # flakelight's own scanner, switched off
+```
+
+```text
+platform/nix/packages/datui.nix       -> packages.datui
+platform/nix/nixos-modules/core/      -> nixosModules.core
+platform/nix/with-overlays/rust.nix   -> an entry of withOverlays
+```
+
+Directory names are this tree's kebab-case, and the option they feed is
+derived from them. A `<output>.nix` file, or a `<output>/default.nix`, feeds
+the whole option at once; otherwise each entry is imported and keyed by its
+filename, with a leading `_` stripped so a file can order itself in a listing
+without that reaching the flake. Whether the entries arrive as a set or a
+list is decided by the option's own type, which is what lets a list-valued
+output like `withOverlays` work the same way.
+
+This replaces flakelight's `nixDir` rather than configuring it. The two
+behaved identically - all fourteen outputs evaluate to the same names with it
+switched off - and doing it here means the whole convention lives in one
+place instead of half of it being an alias table.
+
+A module that wants a directory for its own reasons should name it directly
+rather than reach for the scanner: `secrets.nix` scans `../secrets` for
+`.age` files, and `lib.nix` resolves `../lib`, because neither is importing
+modules keyed by filename.
+
+## Which of the two to use
 
 They are the same idea reached from opposite ends, and both are in use.
 
-**nixDir** puts the output type in the *directory* and the entry name in the
-*file*: `platform/nix/packages/datui.nix` is `packages.datui`, and
+**An output directory** puts the output type in the *directory* and the entry
+name in the *file*: `platform/nix/packages/datui.nix` is `packages.datui`, and
 `platform/nix/nixos-modules/services/openssh.nix` is a `nixosModules` entry.
 Nothing inside those files says what they are or what they are called. That is
 already path-derived naming, which is why converting them to self-declaring
@@ -236,7 +270,7 @@ modules would be a step backwards, and why they stay.
 *path*: `safety/oxidized/nixos/project.nix` says `nixosConfigurations` and
 `checks`, and the label says `oxidized-nixos`.
 
-nixDir is the better fit when the thing belongs to no project - a package
+An output directory is the better fit when the thing belongs to no project - a package
 wrapping upstream software, a NixOS module about `services.flatpak`. The
 project module is the better fit when it does, because it keeps a project's
 outputs with the project and stops the name being repeated in each one. The

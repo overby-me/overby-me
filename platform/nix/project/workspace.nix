@@ -101,13 +101,17 @@ root: cfg: let
       (attrNames (readDir dir)));
 
   fromModuleDirs = concatMap modulesIn (cfg.moduleDirs or []);
+
+  # A tree of outputs, replacing flakelight's nixDir with the same rule
+  # projects follow: the path is the address. See ./outputs.nix.
+  fromOutputDirs = map (d: import ./outputs.nix d) (cfg.outputDirs or []);
 in
   cfg.inputs.flakelight root (
-    (removeAttrs cfg ["projects" "moduleDirs"])
+    (removeAttrs cfg ["projects" "moduleDirs" "outputDirs"])
     // {
       # Explicit first, then whole directories, then projects. A workspace
       # can still name one module: the four lib checks are a file inside a
       # library rather than a directory of modules.
-      imports = (cfg.imports or []) ++ fromModuleDirs ++ discovered;
+      imports = (cfg.imports or []) ++ fromOutputDirs ++ fromModuleDirs ++ discovered;
     }
   )
