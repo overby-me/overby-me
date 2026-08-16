@@ -43,7 +43,7 @@ root: cfg: let
   # lets a file state what it builds without stating where the names come
   # from:
   #
-  #   project: {...}: { packages = project.names { default = ...; }; }
+  #   project: {...}: { packages = project.qualify { default = ...; }; }
   #
   # The argument is the project, not its label: a label is one of the things
   # it carries, alongside the path, the renderings and the helpers. It is not

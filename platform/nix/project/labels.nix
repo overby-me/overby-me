@@ -43,7 +43,7 @@
 #   nix     packages.<system>.safety-oxidized-sed, plus the short alias
 #   josh    :/safety/oxidized/sed
 let
-  inherit (builtins) attrNames concatMap concatStringsSep elem elemAt filter head isString length listToAttrs pathExists readDir substring tail;
+  inherit (builtins) attrNames concatMap concatStringsSep elem elemAt filter head isAttrs isString length listToAttrs pathExists readDir substring tail;
 
   segsOf = p: filter (x: x != "" && x != ".") (filter isString (builtins.split "/" p));
 
@@ -157,31 +157,33 @@ in rec {
     # only; see `filterOf` for why that is not the whole filter.
     josh = ":/${path}";
 
-    # Qualify a target name written inside this project. `default` is the
-    # project itself, which is Bazel's `//foo/bar` meaning `//foo/bar:bar`;
-    # anything else hangs off it. A project therefore writes the names it
-    # uses locally and cannot spell one that lands outside its namespace,
-    # which is the property `checks.namespace-ownership` otherwise has to go
-    # looking for after the fact.
-    qualify = target:
-      if target == "default" || target == ""
-      then shortName
-      else "${shortName}-${target}";
-
-    # The same over a whole attribute set, so a file states what it builds
-    # and not where the names come from:
+    # Qualify what this project calls a target, into what the flake calls it.
+    # `default` is the project itself, which is Bazel's `//foo/bar` meaning
+    # `//foo/bar:bar`; anything else hangs off it.
     #
-    #   packages = project.names { default = ...; dev = ...; };
-    #   -> { oxidized-awk = ...; oxidized-awk-dev = ...; }
-    names = set:
-      listToAttrs (map (target: {
-          name =
-            if target == "default"
-            then shortName
-            else "${shortName}-${target}";
-          value = set.${target};
-        })
-        (attrNames set));
+    #   qualify "dev"                     -> "oxidized-awk-dev"
+    #   qualify { default = a; dev = b; } -> { oxidized-awk = a;
+    #                                          oxidized-awk-dev = b; }
+    #
+    # One name for both, because it is one idea: a file writes the target
+    # names it uses locally, and cannot write one that lands in another
+    # project's namespace. Taking the set as well as the string is what makes
+    # that convenient enough to actually do - a whole `packages` or `checks`
+    # block goes through it at once.
+    qualify = arg: let
+      one = target:
+        if target == "default" || target == ""
+        then shortName
+        else "${shortName}-${target}";
+    in
+      if isAttrs arg
+      then
+        listToAttrs (map (target: {
+            name = one target;
+            value = arg.${target};
+          })
+          (attrNames arg))
+      else one arg;
   };
 
   # Renderings, with the ambiguous ones separated rather than merged. What a

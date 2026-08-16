@@ -43,7 +43,7 @@ project: {lib, ...}: let
     "selection-abbreviation"
   ];
 in {
-  packages = project.names {
+  packages = project.qualify {
     default = {lib, ...}:
       lib.buildCargoProject (crate
         // {
@@ -63,7 +63,7 @@ in {
   };
 
   checks =
-    project.names
+    project.qualify
     (lib.listToAttrs (
       map (name: {
         name = "test-${name}";

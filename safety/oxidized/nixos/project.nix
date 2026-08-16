@@ -6,7 +6,7 @@
 # and the project says what the entry is called, so `oxidized-nixos` appears
 # nowhere below even though every name it produces starts with it.
 project: {
-  devShells = project.names {
+  devShells = project.qualify {
     default = pkgs: {
       packages = with pkgs; [
         just
@@ -16,7 +16,7 @@ project: {
   };
 
   nixosConfigurations =
-    project.names {
+    project.qualify {
       default = _: {
         system = "x86_64-linux";
         modules = [
@@ -40,7 +40,7 @@ project: {
       };
     };
 
-  checks = project.names {
+  checks = project.qualify {
     boot = pkgs: import ./nixos-test.nix {inherit pkgs;};
 
     # Rung 1 (docs/ROADMAP.md "Ship one increment"): one rust component under
