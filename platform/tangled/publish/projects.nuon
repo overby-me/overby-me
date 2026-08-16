@@ -262,6 +262,18 @@
     description: "A GNU makeinfo-compatible Texinfo processor written in Rust"
     filter: ":[:/rust/texinfo:exclude[::*.nix],:/rust/texinfo::flake.nix,:/safety/oxidized/texinfo:exclude[::*.nix],:/safety/oxidized/texinfo::flake.nix]:unsign"
   }
+  {
+    name: "wiki"
+    path: "apps/wiki"
+    description: "A political conference and discussion platform, in Rust and Dioxus"
+    filter: ":[:/web/wiki:exclude[::*.nix],:/web/wiki::flake.nix,:/apps/wiki:exclude[::*.nix],:/apps/wiki::flake.nix]:unsign"
+  }
+  {
+    name: "homepage"
+    path: "apps/homepage"
+    description: "The overby.me website, in Rust and Dioxus with WebGL screensavers"
+    filter: ":[:/web/homepage:exclude[::*.nix],:/web/homepage::flake.nix,:/apps/homepage:exclude[::*.nix],:/apps/homepage::flake.nix]:unsign"
+  }
   # Not a rust/ rewrite: the flakelight module every other published repo
   # imports. It has to be published for them to resolve it, and it is
   # deliberately first in this list so a run that adds a project pushes the
