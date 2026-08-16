@@ -143,7 +143,7 @@
 
 | Project | Description |
 |-|-|
-| [Nix Standalone ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/standalone) | Shared flakelight module for the published repos |
+| [Nix Project ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/project) | Shared flakelight module for the published repos |
 | [Tangled CLI 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
 | [Tangled Spindle Nix Engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
 
@@ -151,14 +151,14 @@
 
 | Project | Description |
 |-|-|
-| [ironclaw-bluesky 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/bluesky) | Bluesky/AT Protocol channel for IronClaw AI assistant |
-| [ironclaw-calendar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/calendar) | Calendar channel for IronClaw AI assistant via CalDAV |
-| [ironclaw-contacts 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/contacts) | Contacts channel for IronClaw AI assistant via CardDAV |
-| [ironclaw-mail 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/mail) | Email channel for IronClaw AI assistant via JMAP |
-| [ironclaw-matrix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/matrix) | Matrix channel for IronClaw AI assistant |
-| [ironclaw-pixtral 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/pixtral) | Pixtral AI image generation tool for IronClaw AI assistant |
-| [ironclaw-searxng 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/searxng) | SearXNG web search tool for IronClaw AI assistant |
-| [ironclaw-signal 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/signal) | Signal channel for IronClaw AI assistant |
+| [IronClaw Bluesky 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/bluesky) | Bluesky/AT Protocol channel for IronClaw AI assistant |
+| [IronClaw Calendar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/calendar) | Calendar channel for IronClaw AI assistant via CalDAV |
+| [IronClaw Contacts 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/contacts) | Contacts channel for IronClaw AI assistant via CardDAV |
+| [IronClaw Mail 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/mail) | Email channel for IronClaw AI assistant via JMAP |
+| [IronClaw Matrix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/matrix) | Matrix channel for IronClaw AI assistant |
+| [IronClaw Pixtral 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/pixtral) | Pixtral AI image generation tool for IronClaw AI assistant |
+| [IronClaw SearXNG 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/searxng) | SearXNG web search tool for IronClaw AI assistant |
+| [IronClaw Signal 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/signal) | Signal channel for IronClaw AI assistant |
 
 #### apps
 

@@ -6,8 +6,8 @@
 # flakelight module so each repo states only what is different about it,
 # rather than carrying its own copy of one hook list.
 #
-# It is itself published, at tangled.org/overby.me/nix-standalone and
-# github.com/overby-me/nix-standalone, and the monorepo is the source of
+# It is itself published, at tangled.org/overby.me/nix-project and
+# github.com/overby-me/nix-project, and the monorepo is the source of
 # truth for it as for everything else here.
 {
   description = "The shared flakelight module for projects published from the overby.me monorepo";
