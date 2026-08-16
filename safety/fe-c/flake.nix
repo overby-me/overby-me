@@ -9,7 +9,7 @@
   description = "Gradual memory-safety hardening for unsafe Rust and mixed-language programs";
 
   inputs = {
-    project.url = "github:overby-me/nix-project";
+    project.url = "git+https://tangled.org/overby.me/nix-project";
 
     # This project pins rustc through its own rust-toolchain.toml.
     rust-overlay.url = "github:oxalica/rust-overlay";

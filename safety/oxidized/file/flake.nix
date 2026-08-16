@@ -8,7 +8,7 @@
 {
   description = "A GNU file-compatible file type detection tool written in Rust";
 
-  inputs.project.url = "github:overby-me/nix-project";
+  inputs.project.url = "git+https://tangled.org/overby.me/nix-project";
 
   outputs = inputs:
     inputs.project ./. {

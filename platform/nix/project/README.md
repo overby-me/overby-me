@@ -32,7 +32,7 @@ flake is the call and whatever is different about that project:
 {
   description = "A GNU sed-compatible stream editor written in Rust";
 
-  inputs.project.url = "github:overby-me/nix-project";
+  inputs.project.url = "git+https://tangled.org/overby.me/nix-project";
 
   outputs = inputs:
     inputs.project ./. {
@@ -305,7 +305,7 @@ consuming flake supplies the `rust-overlay` overlay for it, through
 
 ```nix
 inputs = {
-  project.url = "github:overby-me/nix-project";
+  project.url = "git+https://tangled.org/overby.me/nix-project";
   rust-overlay.url = "github:oxalica/rust-overlay";
 };
 

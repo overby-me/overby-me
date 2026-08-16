@@ -8,7 +8,7 @@
 {
   description = "Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol";
 
-  inputs.project.url = "github:overby-me/nix-project";
+  inputs.project.url = "git+https://tangled.org/overby.me/nix-project";
 
   outputs = inputs:
     inputs.project ./. {

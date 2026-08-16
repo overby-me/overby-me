@@ -82,17 +82,17 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786901992,
-        "narHash": "sha256-GP5x5RDrpNtXGCg1EVUlWy1LtrLtLpMnuVJrErNe0G4=",
-        "owner": "overby-me",
-        "repo": "nix-project",
-        "rev": "c9c59a5f8519448c10407f67417f8b9dbd26b31e",
-        "type": "github"
+        "lastModified": 1786913075,
+        "narHash": "sha256-IaEAQS05RPWYzZi5iDs1LRmXxMJuBpxaucOZ/YKQw64=",
+        "ref": "refs/heads/main",
+        "rev": "a9665eda58d1603bbda2f0bafc61ca02dcd09ad3",
+        "revCount": 21,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-project"
       },
       "original": {
-        "owner": "overby-me",
-        "repo": "nix-project",
-        "type": "github"
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-project"
       }
     },
     "root": {

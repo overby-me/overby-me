@@ -8,7 +8,7 @@
 {
   description = "An indoor navigation drone's firmware and its simulator, in Rust and Dioxus";
 
-  inputs.project.url = "github:overby-me/nix-project";
+  inputs.project.url = "git+https://tangled.org/overby.me/nix-project";
 
   outputs = inputs:
     inputs.project ./. {

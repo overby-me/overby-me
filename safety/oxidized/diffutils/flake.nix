@@ -8,7 +8,7 @@
 {
   description = "A GNU diffutils-compatible suite of file comparison tools written in Rust";
 
-  inputs.project.url = "github:overby-me/nix-project";
+  inputs.project.url = "git+https://tangled.org/overby.me/nix-project";
 
   outputs = inputs:
     inputs.project ./. {
