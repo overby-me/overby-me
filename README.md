@@ -117,7 +117,7 @@
 
 | Project | Description |
 |-|-|
-| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
+| [fe-c 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 
 #### media
 
@@ -131,12 +131,12 @@
 
 | Project | Description |
 |-|-|
-| [Mojo-wasm 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasm) | WebAssembly interop layer for Mojo |
-| [Mojo-wasmtime 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasmtime) | Wasmtime WebAssembly runtime bindings for Mojo |
-| [Mojo-zed 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/zed) | Mojo language extension for Zed |
-| [Nickel-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | Nickel-powered workspace manager for Nix flakes |
-| [Nickel-zed ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/zed) | Nickel language extension for Zed |
-| [Nushell-plugin-tramp 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/nushell/plugin-tramp) | TRAMP-inspired remote filesystem plugin for Nushell |
+| [mojo-wasm 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasm) | WebAssembly interop layer for Mojo |
+| [mojo-wasmtime 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasmtime) | Wasmtime WebAssembly runtime bindings for Mojo |
+| [mojo-zed 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/zed) | Mojo language extension for Zed |
+| [nickel-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | Nickel-powered workspace manager for Nix flakes |
+| [nickel-zed ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/zed) | Nickel language extension for Zed |
+| [nushell-plugin-tramp 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/nushell/plugin-tramp) | TRAMP-inspired remote filesystem plugin for Nushell |
 | [wclip 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/wclip) | Wayland clipboard tool with an xclip-style CLI |
 
 #### platform
@@ -144,28 +144,28 @@
 | Project | Description |
 |-|-|
 | [nix-standalone ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/standalone) | Shared flakelight module for the published repos |
-| [Tangled-cli 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
-| [Spindle-nix-engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
+| [tangled-cli 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
+| [tangled-spindle-nix-engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
 
 #### ai
 
 | Project | Description |
 |-|-|
-| [IronClaw Bluesky Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/bluesky) | Bluesky/AT Protocol channel for IronClaw AI assistant |
-| [IronClaw Calendar Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/calendar) | Calendar channel for IronClaw AI assistant via CalDAV |
-| [IronClaw Contacts Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/contacts) | Contacts channel for IronClaw AI assistant via CardDAV |
-| [IronClaw Mail Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/mail) | Email channel for IronClaw AI assistant via JMAP |
-| [IronClaw Matrix Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/matrix) | Matrix channel for IronClaw AI assistant |
-| [IronClaw Pixtral Tool 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/pixtral) | Pixtral AI image generation tool for IronClaw AI assistant |
-| [IronClaw SearXNG Tool 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/searxng) | SearXNG web search tool for IronClaw AI assistant |
-| [IronClaw Signal Channel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/signal) | Signal channel for IronClaw AI assistant |
+| [ironclaw-bluesky 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/bluesky) | Bluesky/AT Protocol channel for IronClaw AI assistant |
+| [ironclaw-calendar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/calendar) | Calendar channel for IronClaw AI assistant via CalDAV |
+| [ironclaw-contacts 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/contacts) | Contacts channel for IronClaw AI assistant via CardDAV |
+| [ironclaw-mail 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/mail) | Email channel for IronClaw AI assistant via JMAP |
+| [ironclaw-matrix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/matrix) | Matrix channel for IronClaw AI assistant |
+| [ironclaw-pixtral 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/pixtral) | Pixtral AI image generation tool for IronClaw AI assistant |
+| [ironclaw-searxng 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/searxng) | SearXNG web search tool for IronClaw AI assistant |
+| [ironclaw-signal 🦀](https://tangled.org/@overby.me/overby.me/tree/main/ai/ironclaw/signal) | Signal channel for IronClaw AI assistant |
 
 #### apps
 
 | Project | Description |
 |-|-|
-| [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
-| [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
+| [homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
+| [wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
 
 </details>
 
@@ -587,7 +587,7 @@
 | 🚧 | Developer Secrets | | [SecretSpec 🦀](https://github.com/cachix/secretspec) | 🆗 | |
 | ✅ | Deployment | [Colmena 🦀️❄️](https://github.com/zhaofengli/colmena) | [Navi 🦀❄️](https://github.com/cafkafk/navi) | 🆗 | |
 | ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | [Devenv 🦀️❄️](https://github.com/cachix/devenv) |
-| 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [Nix-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
+| 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [nickel-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
 | ✅ | File Locator | [Nix-index 🦀](https://github.com/nix-community/nix-index), [Comma 🦀](https://github.com/nix-community/comma) | | 🆗 | |
 | ✅ | Rust Integration | [Crate2nix 🦀❄️](https://github.com/nix-community/crate2nix) | | 🆗 | [Crane ❄️](https://github.com/ipetkov/crane) |
 | ✅ | Python Integration | [Uv2nix ❄️](https://github.com/pyproject-nix/uv2nix) | | 🆗 | |
