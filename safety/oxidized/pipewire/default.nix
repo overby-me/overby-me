@@ -1,4 +1,59 @@
-{
+let
+  # The multicall binary's own name, which comes from Cargo.toml's [[bin]]
+  # and not from pname. Both matter: the dev variant sets pname to
+  # rust-pipewire-dev while cargo still builds rust-pipewire, and the
+  # attribute is oxidized-pipewire while neither is. Linking to the
+  # attribute name is what left all 34 of these dangling, which
+  # noBrokenSymlinks turned into a build failure.
+  multicall = "rust-pipewire";
+
+  # Every PipeWire tool and daemon name is a symlink to that one binary;
+  # argv[0] selects the dispatcher. Written once because the two packages
+  # differ only in optimisation, and a list this long kept in two places is
+  # how they come to disagree.
+  tools = [
+    "pipewire"
+    "pipewire-pulse"
+    "pipewire-aes67"
+    "pipewire-avb"
+    "pipewire-vulkan"
+    "pw-cli"
+    "pw-mon"
+    "pw-dump"
+    "pw-link"
+    "pw-metadata"
+    "pw-loopback"
+    "pw-config"
+    "pw-cat"
+    "pw-play"
+    "pw-record"
+    "pw-dot"
+    "pw-top"
+    "pw-profiler"
+    "pw-reserve"
+    "pw-container"
+    "pw-mididump"
+    "pw-midiplay"
+    "pw-midirecord"
+    "pw-midi2play"
+    "pw-midi2record"
+    "pw-sysex"
+    "pw-dsdplay"
+    "pw-encplay"
+    "pw-v4l2"
+    "spa-json-dump"
+    "spa-inspect"
+    "spa-monitor"
+    "spa-acp-tool"
+    "spa-resample"
+  ];
+
+  multicallLinks = ''
+    for tool in ${builtins.concatStringsSep " " tools}; do
+      ln -s $out/bin/${multicall} $out/bin/$tool
+    done
+  '';
+in {
   packages = {
     oxidized-pipewire = {lib, ...}:
       lib.buildCargoProject {
@@ -15,19 +70,7 @@
 
         index = ../../../platform/nix/lib/cargo/index;
 
-        rootAttrs.postInstall = ''
-          # Multicall binary: every PipeWire tool/daemon name is a symlink
-          # to oxidized-pipewire. argv[0] selects the dispatcher.
-          for tool in \
-            pipewire pipewire-pulse pipewire-aes67 pipewire-avb pipewire-vulkan \
-            pw-cli pw-mon pw-dump pw-link pw-metadata pw-loopback pw-config \
-            pw-cat pw-play pw-record pw-dot pw-top pw-profiler pw-reserve \
-            pw-container pw-mididump pw-midiplay pw-midirecord pw-midi2play \
-            pw-midi2record pw-sysex pw-dsdplay pw-encplay pw-v4l2 \
-            spa-json-dump spa-inspect spa-monitor spa-acp-tool spa-resample; do
-            ln -s $out/bin/oxidized-pipewire $out/bin/$tool
-          done
-        '';
+        rootAttrs.postInstall = multicallLinks;
 
         meta = {
           description = "PipeWire-compatible multimedia graph daemon and tools written in Rust";
@@ -54,17 +97,7 @@
 
         release = false;
 
-        rootAttrs.postInstall = ''
-          for tool in \
-            pipewire pipewire-pulse pipewire-aes67 pipewire-avb pipewire-vulkan \
-            pw-cli pw-mon pw-dump pw-link pw-metadata pw-loopback pw-config \
-            pw-cat pw-play pw-record pw-dot pw-top pw-profiler pw-reserve \
-            pw-container pw-mididump pw-midiplay pw-midirecord pw-midi2play \
-            pw-midi2record pw-sysex pw-dsdplay pw-encplay pw-v4l2 \
-            spa-json-dump spa-inspect spa-monitor spa-acp-tool spa-resample; do
-            ln -s $out/bin/oxidized-pipewire $out/bin/$tool
-          done
-        '';
+        rootAttrs.postInstall = multicallLinks;
 
         meta = {
           description = "PipeWire-compatible multimedia graph daemon and tools written in Rust (dev build, fast compile)";

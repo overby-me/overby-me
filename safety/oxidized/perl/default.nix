@@ -23,8 +23,13 @@
         # build.rs includes perl_siphash.h and sbox32_hash.h, which ship only
         # in Perl's source distribution. Without this it fell back to a
         # hand-unpacked directory under /tmp, so this package did not build.
+        #
+        # Keyed by the crate's name in Cargo.toml, not by this attribute's
+        # name and not by pname: an override naming a crate the lock does not
+        # have is silently no-op, which is how this said oxidized-perl and
+        # went back to failing on /tmp without anyone noticing.
         crateOverrides = {
-          oxidized-perl.PERL_SRC = "${srcOnly perl}";
+          rust-perl.PERL_SRC = "${srcOnly perl}";
         };
 
         meta = {
@@ -59,8 +64,13 @@
         # build.rs includes perl_siphash.h and sbox32_hash.h, which ship only
         # in Perl's source distribution. Without this it fell back to a
         # hand-unpacked directory under /tmp, so this package did not build.
+        #
+        # Keyed by the crate's name in Cargo.toml, not by this attribute's
+        # name and not by pname: an override naming a crate the lock does not
+        # have is silently no-op, which is how this said oxidized-perl and
+        # went back to failing on /tmp without anyone noticing.
         crateOverrides = {
-          oxidized-perl.PERL_SRC = "${srcOnly perl}";
+          rust-perl.PERL_SRC = "${srcOnly perl}";
         };
 
         release = false;

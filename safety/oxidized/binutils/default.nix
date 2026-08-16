@@ -1,4 +1,35 @@
-{lib, ...}: {
+{lib, ...}: let
+  # The multicall binary's own name, from Cargo.toml's [[bin]] and not from
+  # this attribute or from pname. Linking to the attribute name is what left
+  # all thirteen of these dangling, which noBrokenSymlinks turned into a
+  # build failure; oxidized-pipewire had the same bug, from the same rename.
+  multicall = "rust-binutils";
+
+  tools = [
+    "ar"
+    "ranlib"
+    "nm"
+    "objdump"
+    "readelf"
+    "objcopy"
+    "strings"
+    "size"
+    "addr2line"
+    "c++filt"
+    "strip"
+    "as"
+    "ld"
+    "elfedit"
+  ];
+
+  # Written once because the two packages differ only in optimisation, and a
+  # list kept in two places is how they come to disagree.
+  multicallLinks = ''
+    for tool in ${builtins.concatStringsSep " " tools}; do
+      ln -s $out/bin/${multicall} $out/bin/$tool
+    done
+  '';
+in {
   packages = {
     oxidized-binutils = {lib, ...}:
       lib.buildCargoProject {
@@ -15,12 +46,7 @@
 
         index = ../../../platform/nix/lib/cargo/index;
 
-        rootAttrs.postInstall = ''
-          # Create symlinks for all binutils tools (multicall binary)
-          for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
-            ln -s $out/bin/oxidized-binutils $out/bin/$tool
-          done
-        '';
+        rootAttrs.postInstall = multicallLinks;
 
         meta = {
           description = "GNU binutils-compatible binary utilities written in Rust";
@@ -47,12 +73,7 @@
 
         release = false;
 
-        rootAttrs.postInstall = ''
-          # Create symlinks for all binutils tools (multicall binary)
-          for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
-            ln -s $out/bin/oxidized-binutils $out/bin/$tool
-          done
-        '';
+        rootAttrs.postInstall = multicallLinks;
 
         meta = {
           description = "GNU binutils-compatible binary utilities written in Rust (dev build, fast compile)";
