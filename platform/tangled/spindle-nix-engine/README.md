@@ -1,4 +1,4 @@
-# tangled-spindle-nix-engine
+# Tangled Spindle Nix Engine
 
 A Rust reimplementation of the [Tangled Spindle](https://docs.tangled.org/spindles.html) CI runner that replaces Docker-based isolation with **native Nix** for dependency management and **systemd service-level sandboxing** for isolation.
 

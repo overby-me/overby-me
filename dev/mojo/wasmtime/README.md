@@ -1,4 +1,4 @@
-# mojo-wasmtime
+# Mojo Wasmtime
 
 Mojo FFI bindings for the [Wasmtime](https://wasmtime.dev/) WebAssembly runtime.
 

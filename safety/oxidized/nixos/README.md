@@ -1,4 +1,4 @@
-# oxidized-nixos
+# Oxidized NixOS
 
 NixOS with a Rust user space.
 

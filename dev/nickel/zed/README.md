@@ -1,4 +1,4 @@
-# nickel-zed
+# Nickel Zed
 
 A [Zed](https://zed.dev/) extension providing [Nickel](https://nickel-lang.org/)
 language support: syntax highlighting from

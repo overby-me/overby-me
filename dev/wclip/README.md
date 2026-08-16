@@ -1,4 +1,4 @@
-# wclip
+# Wclip
 
 `wclip` is an [`xclip`](https://github.com/astrand/xclip)-style clipboard
 tool for **Wayland**, written in pure Rust. It reads data into a selection or

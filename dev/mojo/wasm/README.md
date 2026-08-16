@@ -1,4 +1,4 @@
-# mojo-wasm
+# Mojo WASM
 
 A reactive UI framework for the browser, written in [Mojo](https://www.modular.com/mojo) and compiled to WebAssembly.
 

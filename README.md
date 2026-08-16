@@ -78,74 +78,74 @@
 
 | Project | Description |
 |-|-|
-| [oxidized-awk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/awk) | GNU awk-compatible pattern processing tool |
-| [oxidized-bash 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bash) | Bash-compatible shell written in Rust |
-| [oxidized-binutils 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/binutils) | GNU binutils-compatible binary utilities |
-| [oxidized-bison 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bison) | POSIX yacc/bison-compatible parser generator |
-| [oxidized-bubblewrap 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bubblewrap) | Bubblewrap-compatible unprivileged sandboxing tool |
-| [oxidized-bzip2 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bzip2) | bzip2-compatible compression tool |
-| [oxidized-cachix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/cachix) | Cachix CLI reimplementation |
-| [oxidized-curl 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/curl) | curl-compatible HTTP client using Rustls |
-| [oxidized-diffutils 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/diffutils) | GNU diffutils-compatible file comparison tools |
-| [oxidized-direnv 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/direnv) | Direnv reimplementation |
-| [oxidized-file 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/file) | GNU file-compatible file type detection tool |
-| [oxidized-flatpak 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
-| [oxidized-gcc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gcc) | GCC-compatible C compiler written in Rust |
-| [oxidized-grep 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/grep) | GNU grep-compatible pattern matching tool |
-| [oxidized-gzip 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gzip) | gzip-compatible compression tool |
-| [oxidized-help2man 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/help2man) | GNU help2man-compatible man page generator |
-| [oxidized-libc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
-| [oxidized-llvm 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/llvm) | LLVM-compatible compiler infrastructure |
-| [oxidized-make 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/make) | GNU Make-compatible build system driver |
-| [oxidized-meson 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/meson) | Meson build system compatible implementation |
-| [oxidized-ninja 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/ninja) | Ninja-compatible build system |
-| [oxidized-nixos 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixos) | NixOS distribution with Rust user space |
-| [oxidized-nixpkgs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
-| [oxidized-patch 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/patch) | GNU patch-compatible patch application tool |
-| [oxidized-patchelf 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/patchelf) | patchelf-compatible ELF binary patching tool |
-| [oxidized-pcre2 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pcre2) | PCRE2-compatible regular expression library |
-| [oxidized-perl 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/perl) | Perl interpreter written in Rust |
-| [oxidized-pipewire 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pipewire) | PipeWire-compatible multimedia tools and protocol client |
-| [oxidized-pkg-config 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pkg-config) | pkg-config reimplementation |
-| [oxidized-sed 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/sed) | GNU sed-compatible stream editor |
-| [oxidized-systemd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/systemd) | Systemd replacement |
-| [oxidized-tar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/tar) | GNU tar-compatible tape archive tool |
-| [oxidized-texinfo 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/texinfo) | GNU makeinfo-compatible Texinfo processor |
-| [oxidized-xz 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/xz) | xz-compatible compression tool |
+| [Oxidized Awk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/awk) | GNU awk-compatible pattern processing tool |
+| [Oxidized Bash 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bash) | Bash-compatible shell written in Rust |
+| [Oxidized Binutils 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/binutils) | GNU binutils-compatible binary utilities |
+| [Oxidized Bison 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bison) | POSIX yacc/bison-compatible parser generator |
+| [Oxidized Bubblewrap 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bubblewrap) | Bubblewrap-compatible unprivileged sandboxing tool |
+| [Oxidized Bzip2 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bzip2) | bzip2-compatible compression tool |
+| [Oxidized Cachix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/cachix) | Cachix CLI reimplementation |
+| [Oxidized Curl 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/curl) | curl-compatible HTTP client using Rustls |
+| [Oxidized Diffutils 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/diffutils) | GNU diffutils-compatible file comparison tools |
+| [Oxidized Direnv 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/direnv) | Direnv reimplementation |
+| [Oxidized File 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/file) | GNU file-compatible file type detection tool |
+| [Oxidized Flatpak 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
+| [Oxidized GCC 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gcc) | GCC-compatible C compiler written in Rust |
+| [Oxidized Grep 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/grep) | GNU grep-compatible pattern matching tool |
+| [Oxidized Gzip 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gzip) | gzip-compatible compression tool |
+| [Oxidized Help2man 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/help2man) | GNU help2man-compatible man page generator |
+| [Oxidized Libc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
+| [Oxidized LLVM 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/llvm) | LLVM-compatible compiler infrastructure |
+| [Oxidized Make 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/make) | GNU Make-compatible build system driver |
+| [Oxidized Meson 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/meson) | Meson build system compatible implementation |
+| [Oxidized Ninja 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/ninja) | Ninja-compatible build system |
+| [Oxidized NixOS 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixos) | NixOS distribution with Rust user space |
+| [Oxidized Nixpkgs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
+| [Oxidized Patch 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/patch) | GNU patch-compatible patch application tool |
+| [Oxidized Patchelf 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/patchelf) | patchelf-compatible ELF binary patching tool |
+| [Oxidized PCRE2 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pcre2) | PCRE2-compatible regular expression library |
+| [Oxidized Perl 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/perl) | Perl interpreter written in Rust |
+| [Oxidized PipeWire 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pipewire) | PipeWire-compatible multimedia tools and protocol client |
+| [Oxidized pkg-config 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/pkg-config) | pkg-config reimplementation |
+| [Oxidized Sed 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/sed) | GNU sed-compatible stream editor |
+| [Oxidized Systemd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/systemd) | Systemd replacement |
+| [Oxidized Tar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/tar) | GNU tar-compatible tape archive tool |
+| [Oxidized Texinfo 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/texinfo) | GNU makeinfo-compatible Texinfo processor |
+| [Oxidized XZ 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/xz) | xz-compatible compression tool |
 
 #### safety
 
 | Project | Description |
 |-|-|
-| [fe-c 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
+| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 
 #### media
 
 | Project | Description |
 |-|-|
-| [h264-decoder 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h264-decoder) | Pure Rust H.264 decoder library and CLI |
-| [h265-decoder 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h265-decoder) | Pure Rust H.265/HEVC decoder library |
+| [H264 Decoder 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h264-decoder) | Pure Rust H.264 decoder library and CLI |
+| [H265 Decoder 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h265-decoder) | Pure Rust H.265/HEVC decoder library |
 | [h26xtoav1 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
 
 #### dev
 
 | Project | Description |
 |-|-|
-| [mojo-wasm 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasm) | WebAssembly interop layer for Mojo |
-| [mojo-wasmtime 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasmtime) | Wasmtime WebAssembly runtime bindings for Mojo |
-| [mojo-zed 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/zed) | Mojo language extension for Zed |
-| [nickel-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | Nickel-powered workspace manager for Nix flakes |
-| [nickel-zed ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/zed) | Nickel language extension for Zed |
-| [nushell-plugin-tramp 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/nushell/plugin-tramp) | TRAMP-inspired remote filesystem plugin for Nushell |
-| [wclip 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/wclip) | Wayland clipboard tool with an xclip-style CLI |
+| [Mojo WASM 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasm) | WebAssembly interop layer for Mojo |
+| [Mojo Wasmtime 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/wasmtime) | Wasmtime WebAssembly runtime bindings for Mojo |
+| [Mojo Zed 🔥](https://tangled.org/@overby.me/overby.me/tree/main/dev/mojo/zed) | Mojo language extension for Zed |
+| [Nickel Workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | Nickel-powered workspace manager for Nix flakes |
+| [Nickel Zed ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/zed) | Nickel language extension for Zed |
+| [Nushell Plugin Tramp 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/nushell/plugin-tramp) | TRAMP-inspired remote filesystem plugin for Nushell |
+| [Wclip 🦀](https://tangled.org/@overby.me/overby.me/tree/main/dev/wclip) | Wayland clipboard tool with an xclip-style CLI |
 
 #### platform
 
 | Project | Description |
 |-|-|
-| [nix-standalone ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/standalone) | Shared flakelight module for the published repos |
-| [tangled-cli 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
-| [tangled-spindle-nix-engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
+| [Nix Standalone ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/standalone) | Shared flakelight module for the published repos |
+| [Tangled CLI 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
+| [Tangled Spindle Nix Engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
 
 #### ai
 
@@ -164,8 +164,8 @@
 
 | Project | Description |
 |-|-|
-| [homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
-| [wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
+| [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
+| [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
 
 </details>
 

@@ -1,4 +1,4 @@
-# wiki
+# Wiki
 
 A Rust + [Dioxus](https://dioxuslabs.com) 0.7 frontend compiled to WebAssembly:
 the port that replaced the former React wiki app in this directory. It

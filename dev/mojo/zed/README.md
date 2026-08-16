@@ -1,4 +1,4 @@
-# mojo-zed
+# Mojo Zed
 
 A [Zed](https://zed.dev/) extension providing [Mojo](https://www.modular.com/mojo) language support with syntax highlighting and LSP integration.
 

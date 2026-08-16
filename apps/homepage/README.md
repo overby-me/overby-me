@@ -1,4 +1,4 @@
-# homepage
+# Homepage
 
 Personal homepage for [overby.me](https://overby.me) — an interactive 3D graph visualization that maps out online presence, interests, and connections.
 

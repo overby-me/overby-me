@@ -1,4 +1,4 @@
-# h264-decoder
+# H264 Decoder
 
 A pure Rust H.264 (AVC) decoder library and CLI tool.
 

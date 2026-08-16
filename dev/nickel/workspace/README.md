@@ -1,4 +1,4 @@
-# nickel-workspace
+# Nickel Workspace
 
 A Nickel-powered workspace manager for Nix flakes.
 

@@ -1,4 +1,4 @@
-# h265-decoder
+# H265 Decoder
 
 A pure Rust H.265/HEVC decoder library.
 

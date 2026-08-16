@@ -261,16 +261,31 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         mkdir ($dir | path join ".tangled" "workflows")
         $CI_TEXT | save -f $ci
 
-        # A published repo's README should be titled the way it publishes,
-        # not the way its directory used to be called. Nineteen still said
-        # rust-awk after the rename, which is the first thing a visitor read.
+        # A published repo's README should be titled after the project, not
+        # after the directory it used to live in: nineteen still said
+        # rust-awk after the rename, which is the first line a visitor reads.
+        # The heading is prose (Oxidized Systemd), the repo name is the
+        # identifier (oxidized-systemd); both are derived from the same name
+        # so they cannot disagree.
         let readme = ($dir | path join "README.md")
         if ($readme | path exists) {
+            let words = ($p.name | split row "-")
+            let special = {
+                cli: "CLI", llvm: "LLVM", gcc: "GCC", pcre2: "PCRE2",
+                nixos: "NixOS", pipewire: "PipeWire", xz: "XZ", wasm: "WASM"
+            }
+            let want = if ($p.name in ["fe-c" "h26xtoav1"]) {
+                if $p.name == "fe-c" { "Fe-C" } else { "h26xtoav1" }
+            } else if ($p.name | str ends-with "pkg-config") {
+                "Oxidized pkg-config"
+            } else {
+                $words | each {|w| ($special | get -o $w | default ($w | str capitalize)) } | str join " "
+            }
             let txt = (open --raw $readme)
             let h1 = ($txt | lines | where {|l| $l | str starts-with "# " } | get -o 0)
-            if $h1 != null and $h1 != $"# ($p.name)" {
-                $txt | str replace $h1 $"# ($p.name)" | save -f $readme
-                print $"  ($p.name): retitled from ($h1 | str substring 2..)"
+            if $h1 != null and $h1 != $"# ($want)" {
+                $txt | str replace $h1 $"# ($want)" | save -f $readme
+                print $"  ($p.name): retitled to ($want)"
             }
         }
         let banner = if ($readme | path exists) {

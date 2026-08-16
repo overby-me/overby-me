@@ -1,4 +1,4 @@
-# oxidized-nixpkgs
+# Oxidized Nixpkgs
 
 Rust replacements for the C toolchain that builds Nix packages.
 

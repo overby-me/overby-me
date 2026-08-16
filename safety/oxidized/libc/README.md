@@ -1,4 +1,4 @@
-# oxidized-libc
+# Oxidized Libc
 
 All-Rust libc substrate for Linux — the vendored [Eyra](https://github.com/sunfishcode/eyra)
 lineage, adopted into the monorepo.

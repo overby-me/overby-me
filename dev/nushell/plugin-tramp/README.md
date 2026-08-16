@@ -1,4 +1,4 @@
-# nushell-plugin-tramp
+# Nushell Plugin Tramp
 
 > A TRAMP-inspired remote filesystem plugin for [Nushell](https://www.nushell.sh/), written in Rust.
 
