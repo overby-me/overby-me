@@ -143,7 +143,8 @@
 
 | Project | Description |
 |-|-|
-| [Nix Workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/workspace) | Flake framework for a tree published as one or many repos |
+| [Nix Config ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config) | This tree's NixOS, nix-darwin and home-manager configuration, as a workspace |
+| [Nix Packages ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages) | Packages built from source, without the configuration around them |
 | [Tangled CLI 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
 | [Tangled Spindle Nix Engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
 
