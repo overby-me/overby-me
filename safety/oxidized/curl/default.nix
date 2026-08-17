@@ -141,7 +141,15 @@
             -n \
             -a \
             1200 to 1500 \
-            2>&1 | ${coreutils}/bin/tee "$TMPDIR/results.txt" || true
+            > "$TMPDIR/results.txt" 2>&1 || true
+
+          # Written to the file and shown afterwards rather than teed through
+          # a pipe. The suite leaves its servers running, and they inherit the
+          # pipe: killing runtests.pl on the timeout still left `tee` waiting
+          # for an end-of-file that an orphaned sws would never send, so the
+          # timeout fired and the build hung anyway. A file has nothing to
+          # wait on.
+          ${coreutils}/bin/cat "$TMPDIR/results.txt" || true
 
           ${coreutils}/bin/mkdir -p $out
           ${coreutils}/bin/cp "$TMPDIR/results.txt" $out/results.txt
