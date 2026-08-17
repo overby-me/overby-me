@@ -1248,11 +1248,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786973236,
-        "narHash": "sha256-yuc4nmEvMlp95un3KdtScTAuRfx4J9Mkr4ODaWu9th4=",
+        "lastModified": 1786978842,
+        "narHash": "sha256-/dI/RAmRy01N5YhORQFmjqPU0C93up41hVmPztd/B74=",
         "ref": "refs/heads/main",
-        "rev": "09dcd8c66f519a5d096ff32bcbe60f0a1de607f1",
-        "revCount": 33,
+        "rev": "5b65b887a83d583b0b3af079d83d9349b9036818",
+        "revCount": 36,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
