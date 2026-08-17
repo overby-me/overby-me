@@ -9,25 +9,6 @@
   inputs = {
     # Nix
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
-
-    # Development
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # Transitive flake dependencies
-    git-hooks = {
-      url = "github:cachix/git-hooks.nix";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-compat.follows = "flake-compat";
-      };
-    };
-    flake-compat = {
-      url = "github:edolstra/flake-compat";
-    };
   };
 
   # nix-workspace and the modules taken out of it are declared one level
@@ -36,10 +17,7 @@
   # the workspace still finds every module while the root stops listing them.
   inputs.nix = {
     url = "path:./platform/nix";
-    inputs = {
-      nixpkgs.follows = "nixpkgs";
-      git-hooks.follows = "git-hooks";
-    };
+    inputs.nixpkgs.follows = "nixpkgs";
   };
 
   # The projects this tree publishes are declared one level down, in
