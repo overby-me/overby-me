@@ -35,6 +35,19 @@
     };
   };
 
+  # The packages built from source, which are a workspace rather than a
+  # directory of the configuration: what they need is a pkg-config, and what
+  # the configuration needs is eight hosts' worth of modules. Splitting them
+  # is what lets either be taken without the other.
+  inputs.nix-packages = {
+    url = "path:./platform/nix/packages";
+    inputs = {
+      nixpkgs.follows = "nixpkgs";
+      workspace.follows = "workspace";
+      oxidized-pkg-config.url = "path:./safety/oxidized/pkg-config";
+    };
+  };
+
   # The projects this tree publishes are declared one level down, in
   # platform/tangled/publish/checks, and reach this flake as one input. They
   # are inputs because a check builds each project's own flake and holds it

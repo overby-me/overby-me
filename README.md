@@ -178,68 +178,68 @@
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Deslop 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/deslop.nix) | [GitHub](https://github.com/chinmay-sawant/deslop) | Lightning-fast best practice analyzer for AI-generated code |
-| [IronClaw 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/ironclaw.nix) | [IronClaw](https://www.ironclaw.com) | OpenClaw-inspired secure personal AI assistant |
-| [Pi Agent 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/pi-agent-rust.nix) | [pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | High-performance AI coding agent CLI written in Rust |
+| [Deslop 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/deslop.nix) | [GitHub](https://github.com/chinmay-sawant/deslop) | Lightning-fast best practice analyzer for AI-generated code |
+| [IronClaw 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/ironclaw.nix) | [IronClaw](https://www.ironclaw.com) | OpenClaw-inspired secure personal AI assistant |
+| [Pi Agent 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/pi-agent-rust.nix) | [pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | High-performance AI coding agent CLI written in Rust |
 
 #### Development
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
-| [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
-| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
-| [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
+| [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
+| [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
+| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
+| [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
 
 #### Desktop
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
-| [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
-| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
-| [Non-spatial-input 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/non-spatial-input.nix) | [GitHub](https://github.com/StardustXR/non-spatial-input) | Non-spatial input drivers (eclipse/manifold) for Stardust XR |
-| [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
-| [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
+| [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
+| [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
+| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
+| [Non-spatial-input 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/non-spatial-input.nix) | [GitHub](https://github.com/StardustXR/non-spatial-input) | Non-spatial input drivers (eclipse/manifold) for Stardust XR |
+| [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
+| [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
 
 #### Jupyter
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
-| [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
-| [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
-| [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
-| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
+| [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
+| [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
+| [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
+| [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
+| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
 
 #### Media
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
-| [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
-| [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
+| [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
+| [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
+| [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
 
 #### Security
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
-| [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
+| [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
+| [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
 
 #### Social
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
-| [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
+| [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
+| [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
 
 #### System
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
-| [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/packages/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
+| [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
+| [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/packages/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
 
 </details>
 

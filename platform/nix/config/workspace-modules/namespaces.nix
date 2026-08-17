@@ -46,7 +46,7 @@
 
   # Which project a definition came from, by the file the module system
   # recorded for it. A definition from outside any project - the workspace's
-  # own autoloading, which names platform/nix/config/packages by filename -
+  # own autoloading, which names platform/nix/packages/packages by filename -
   # is not a project's to answer for.
   projectOf = file: let
     hits = builtins.filter (l: lib.hasSuffix "/${l.path}" file || lib.hasInfix "/${l.path}/" file) projects;

@@ -114,12 +114,26 @@ def derive-filter [p: record, --current]: nothing -> string {
   # still has these files in its directory, and letting them through would
   # publish two of each, the stale one winning wherever it is prefixed.
   let generated = ":exclude[::flake.lock]:exclude[::.tangled/]"
+  # Files of the project's directory that are about the monorepo rather than
+  # about the project, and so do not belong in a clone of it. A nix project
+  # ships its directory as it stands, which is the only kind that can hold
+  # one: a crate's .nix files are dropped wholesale already.
+  let dropped = ($p | get -o exclude | default [] | each {|e| $":exclude[::($e)]"} | str join "")
   let terms = ($eras | each {|era|
     let path = $era.path
     let deps = ($era | get -o deps | default [])
     let base = ($path | path basename)
+    # An era can be told to drop a directory as well, for the one move
+    # `formerPaths` does not otherwise survive: a project that moved *into* a
+    # subdirectory of where it was. Every other former path stopped existing
+    # at the move, so its term yields nothing at the tip and history is all it
+    # contributes. This one still exists and now holds the new location, so
+    # without dropping it the era republishes today's tree one level down -
+    # and it wins, because a union takes both and this one has the whole
+    # project inside a directory named after where it went.
+    let era_dropped = ($era | get -o exclude | default [] | each {|e| $":exclude[::($e)]"} | str join "")
     if $kind == "nix" {
-      [$":/($path):exclude[::.tangled/]"]
+      [$":/($path):exclude[::.tangled/]($dropped)($era_dropped)"]
     } else if ($deps | is-empty) {
       # `exclude[::*.nix]` drops the monorepo's build of the project, then
       # flake.nix is let back through: it is the published repo's own build,

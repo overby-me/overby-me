@@ -403,4 +403,55 @@
     deps: ["media/h264-decoder" "media/h265-decoder"]
     formerPaths: [{path: "h264toav1-rs" deps: []} {path: "rust/h264toav1" deps: ["rust/h264-decoder" "rust/h265-decoder"]} {path: "rust/h26xtoav1" deps: ["rust/h264-decoder" "rust/h265-decoder"]}]
   }
+  # This tree's nix configuration. The only `nix` kind: its .nix files are
+  # the project rather than the monorepo's build of one, so nothing is
+  # generated for it - it ships the flake and the lock it already has, and
+  # only the workflow is mapped in.
+  #
+  # Two of its workspace modules are about the monorepo rather than about the
+  # configuration, and a clone has neither the tree they read nor a reason to
+  # care: namespaces discovers every project under the repo root to check
+  # that none names a package outside its own label, and project-flakes holds
+  # each published repo's build against this tree's build of the same source.
+  # The directory is imported by reading itself, so dropping the files is the
+  # whole of dropping the modules.
+  {
+    name: "nix-config"
+    kind: "nix"
+    path: "platform/nix/config"
+    # `packages/` is excluded from every era, not just from today's where it
+    # is already gone: it is nix-packages' history now, and letting the older
+    # eras keep it would publish the same files from two repos.
+    # The packages are excluded from every era, not just from today's where
+    # they are already gone: they are nix-packages' history now, and letting
+    # the older eras keep them would publish the same files from two repos.
+    # Under both names, because they were `pkgs` for most of that history.
+    exclude: ["workspace-modules/namespaces.nix" "workspace-modules/project-flakes.nix" "packages/" "pkgs/"]
+    # The `platform/nix` era drops `config/`, because that is where this went:
+    # the directory it used to be is still there and now contains it, so
+    # without this the era publishes today's tree nested one level down.
+    formerPaths: [{path: "nix" deps: []} {path: "platform/nix" deps: [] exclude: ["config/"]}]
+  }
+  # The packages, split out of the configuration so a tree can take them
+  # without eight hosts and a secrets directory. Their history is inside the
+  # configuration's, one directory deeper again, so the eras name where that
+  # directory was rather than where the workspace around it is now.
+  {
+    name: "nix-packages"
+    kind: "nix"
+    path: "platform/nix/packages"
+    # Six homes, oldest first. They were `pkgs` before they were `packages`,
+    # which is why `pkgs/euro-office/patches/*` sat dead in the typos config
+    # for as long as it did. Only one of the six still exists: the second
+    # `platform/nix/packages` is where they are now, and its era has to drop
+    # what is there today or it republishes the whole workspace at the root.
+    formerPaths: [
+      {path: "pkgs" deps: []}
+      {path: "nix/pkgs" deps: []}
+      {path: "platform/nix/pkgs" deps: []}
+      {path: "nix/packages" deps: []}
+      {path: "platform/nix/packages" deps: [] exclude: ["packages/" "with-overlays/" "flake.nix" "flake.lock"]}
+      {path: "platform/nix/config/packages" deps: []}
+    ]
+  }
 ]

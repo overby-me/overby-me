@@ -5,7 +5,6 @@
         "darwin": "darwin",
         "home-manager": "home-manager_2",
         "nixpkgs": [
-          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "nixpkgs"
@@ -60,7 +59,6 @@
     "darwin": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "agenix",
@@ -85,7 +83,6 @@
     "disko": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-disko",
           "nixpkgs"
         ]
@@ -109,7 +106,6 @@
         "flake-parts": "flake-parts",
         "haumea": "haumea",
         "nixpkgs": [
-          "nix-config",
           "workspace-drowse",
           "nixpkgs"
         ]
@@ -191,26 +187,9 @@
         "type": "github"
       }
     },
-    "flake-compat_5": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1767039857,
-        "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
-        "owner": "NixOS",
-        "repo": "flake-compat",
-        "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "repo": "flake-compat",
-        "type": "github"
-      }
-    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
-          "nix-config",
           "workspace-drowse",
           "drowse",
           "nixpkgs"
@@ -233,7 +212,6 @@
     "flake-parts_2": {
       "inputs": {
         "nixpkgs-lib": [
-          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -294,29 +272,6 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "nix-config",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1784288435,
-        "narHash": "sha256-ReRHaLgr/uVqdD8afFSn+myXIfpHeOhP0yYe0TJqAA8=",
-        "owner": "cachix",
-        "repo": "git-hooks.nix",
-        "rev": "43b3c1ab9d40fb1dbb008f451988a91e375825e9",
-        "type": "github"
-      },
-      "original": {
-        "owner": "cachix",
-        "repo": "git-hooks.nix",
-        "type": "github"
-      }
-    },
-    "git-hooks_2": {
-      "inputs": {
-        "flake-compat": "flake-compat_5",
-        "nixpkgs": [
-          "workspace",
           "nixpkgs"
         ]
       },
@@ -337,7 +292,6 @@
     "gitignore": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-nix-wallpaper",
           "nix-wallpaper",
           "pre-commit-hooks",
@@ -361,7 +315,6 @@
     "gitignore_2": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -386,7 +339,6 @@
     "haumea": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-drowse",
           "drowse",
           "nixpkgs"
@@ -410,7 +362,6 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-home-manager",
           "nixpkgs"
         ]
@@ -433,7 +384,6 @@
     "home-manager_2": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "agenix",
@@ -457,7 +407,6 @@
     "home-manager_3": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-zen-browser",
           "zen-browser",
           "nixpkgs"
@@ -493,46 +442,9 @@
         "type": "github"
       }
     },
-    "nix-config": {
-      "inputs": {
-        "git-hooks": "git-hooks",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "nixpkgs-unstable": "nixpkgs-unstable",
-        "oxidized-ninja": "oxidized-ninja",
-        "oxidized-xz": "oxidized-xz",
-        "rust-overlay": "rust-overlay",
-        "wclip": "wclip",
-        "workspace": [
-          "workspace"
-        ],
-        "workspace-darwin": "workspace-darwin",
-        "workspace-disko": "workspace-disko",
-        "workspace-drowse": "workspace-drowse",
-        "workspace-home-manager": "workspace-home-manager",
-        "workspace-modular-skills": "workspace-modular-skills",
-        "workspace-nix-wallpaper": "workspace-nix-wallpaper",
-        "workspace-nixos-hardware": "workspace-nixos-hardware",
-        "workspace-nixos-raspberrypi": "workspace-nixos-raspberrypi",
-        "workspace-ragenix": "workspace-ragenix",
-        "workspace-system-manager": "workspace-system-manager",
-        "workspace-zen-browser": "workspace-zen-browser"
-      },
-      "locked": {
-        "path": "./platform/nix/config",
-        "type": "path"
-      },
-      "original": {
-        "path": "./platform/nix/config",
-        "type": "path"
-      },
-      "parent": []
-    },
     "nix-darwin": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-darwin",
           "nixpkgs"
         ]
@@ -552,31 +464,10 @@
         "type": "github"
       }
     },
-    "nix-packages": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "oxidized-pkg-config": "oxidized-pkg-config",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "./platform/nix/packages",
-        "type": "path"
-      },
-      "original": {
-        "path": "./platform/nix/packages",
-        "type": "path"
-      },
-      "parent": []
-    },
     "nix-wallpaper": {
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": [
-          "nix-config",
           "workspace-nix-wallpaper",
           "nixpkgs"
         ],
@@ -599,7 +490,6 @@
     "nixos-hardware": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-nixos-hardware",
           "nixpkgs"
         ]
@@ -622,13 +512,11 @@
     "nixos-images": {
       "inputs": {
         "nixos-stable": [
-          "nix-config",
           "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
         ],
         "nixos-unstable": [
-          "nix-config",
           "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
@@ -655,7 +543,6 @@
         "flake-compat": "flake-compat_3",
         "nixos-images": "nixos-images",
         "nixpkgs": [
-          "nix-config",
           "workspace-nixos-raspberrypi",
           "nixpkgs"
         ]
@@ -677,17 +564,17 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1784356753,
-        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
+        "lastModified": 1786943417,
+        "narHash": "sha256-b4qgjdFtlz5TAZ1Hi7DFJeqX3sjaDUnrwr9OO+O1rM0=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
+        "rev": "0dd31db7e6dbf9ce05697c4545f6fe01accec994",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
+        "ref": "nixos-26.05",
         "repo": "nixpkgs",
-        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       }
     },
@@ -709,476 +596,65 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1786313170,
-        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
+        "lastModified": 1784356753,
+        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
+        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-26.05",
         "repo": "nixpkgs",
+        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       }
-    },
-    "oxidized-awk": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/awk",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/awk",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-bash": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/bash",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/bash",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-binutils": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/binutils",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/binutils",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-bison": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/bison",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/bison",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-bubblewrap": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/bubblewrap",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/bubblewrap",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-bzip2": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/bzip2",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/bzip2",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-diffutils": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/diffutils",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/diffutils",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-file": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/file",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/file",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-gcc": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/gcc",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/gcc",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-gzip": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/gzip",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/gzip",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-help2man": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/help2man",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/help2man",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-llvm": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/llvm",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/llvm",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-make": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/make",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/make",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
     },
     "oxidized-ninja": {
       "inputs": {
         "workspace": [
-          "nix-config",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/ninja",
-        "type": "path"
+        "lastModified": 1786990098,
+        "narHash": "sha256-84raFhxHJbMOfldWExajXueMiV6n2RwirZDArHcIVEQ=",
+        "ref": "refs/heads/main",
+        "rev": "35c37233f642caa127636f93203bfb6f9f28ae2b",
+        "revCount": 36,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-ninja"
       },
       "original": {
-        "path": "./safety/oxidized/ninja",
-        "type": "path"
-      },
-      "parent": []
-    },
-    "oxidized-ninja_2": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/ninja",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/ninja",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-patch": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/patch",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/patch",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-patchelf": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/patchelf",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/patchelf",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-pcre2": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/pcre2",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/pcre2",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-perl": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/perl",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/perl",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-pipewire": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/pipewire",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/pipewire",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-pkg-config": {
-      "inputs": {
-        "workspace": [
-          "nix-packages",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "./safety/oxidized/pkg-config",
-        "type": "path"
-      },
-      "original": {
-        "path": "./safety/oxidized/pkg-config",
-        "type": "path"
-      },
-      "parent": []
-    },
-    "oxidized-sed": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/sed",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/sed",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
-    },
-    "oxidized-texinfo": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../safety/oxidized/texinfo",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../safety/oxidized/texinfo",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-ninja"
+      }
     },
     "oxidized-xz": {
       "inputs": {
         "workspace": [
-          "nix-config",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/xz",
-        "type": "path"
+        "lastModified": 1786972456,
+        "narHash": "sha256-H4k6DdSnUDRfeDA+WimHpwpxouzCWisA05h+HRk6eNQ=",
+        "ref": "refs/heads/main",
+        "rev": "8835dd3e76b669e2effcdd14e0da3273958fcfc5",
+        "revCount": 43,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-xz"
       },
       "original": {
-        "path": "./safety/oxidized/xz",
-        "type": "path"
-      },
-      "parent": []
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-xz"
+      }
     },
     "pre-commit-hooks": {
       "inputs": {
         "flake-compat": "flake-compat_2",
         "gitignore": "gitignore",
         "nixpkgs": [
-          "nix-config",
           "workspace-nix-wallpaper",
           "nix-wallpaper",
           "nixpkgs"
@@ -1201,7 +677,6 @@
     "pre-commit-hooks-nix": {
       "inputs": {
         "flake-compat": [
-          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -1209,7 +684,6 @@
         ],
         "gitignore": "gitignore_2",
         "nixpkgs": [
-          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -1230,51 +704,12 @@
         "type": "github"
       }
     },
-    "publish-checks": {
-      "inputs": {
-        "oxidized-awk": "oxidized-awk",
-        "oxidized-bash": "oxidized-bash",
-        "oxidized-binutils": "oxidized-binutils",
-        "oxidized-bison": "oxidized-bison",
-        "oxidized-bubblewrap": "oxidized-bubblewrap",
-        "oxidized-bzip2": "oxidized-bzip2",
-        "oxidized-diffutils": "oxidized-diffutils",
-        "oxidized-file": "oxidized-file",
-        "oxidized-gcc": "oxidized-gcc",
-        "oxidized-gzip": "oxidized-gzip",
-        "oxidized-help2man": "oxidized-help2man",
-        "oxidized-llvm": "oxidized-llvm",
-        "oxidized-make": "oxidized-make",
-        "oxidized-ninja": "oxidized-ninja_2",
-        "oxidized-patch": "oxidized-patch",
-        "oxidized-patchelf": "oxidized-patchelf",
-        "oxidized-pcre2": "oxidized-pcre2",
-        "oxidized-perl": "oxidized-perl",
-        "oxidized-pipewire": "oxidized-pipewire",
-        "oxidized-sed": "oxidized-sed",
-        "oxidized-texinfo": "oxidized-texinfo",
-        "wclip": "wclip_2",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "./platform/tangled/publish/checks",
-        "type": "path"
-      },
-      "original": {
-        "path": "./platform/tangled/publish/checks",
-        "type": "path"
-      },
-      "parent": []
-    },
     "ragenix": {
       "inputs": {
         "agenix": "agenix",
         "crane": "crane",
         "flake-utils": "flake-utils_2",
         "nixpkgs": [
-          "nix-config",
           "workspace-ragenix",
           "nixpkgs"
         ],
@@ -1296,17 +731,30 @@
     },
     "root": {
       "inputs": {
-        "nix-config": "nix-config",
-        "nix-packages": "nix-packages",
-        "nixpkgs": "nixpkgs_2",
-        "publish-checks": "publish-checks",
-        "workspace": "workspace"
+        "git-hooks": "git-hooks",
+        "nixpkgs": "nixpkgs",
+        "nixpkgs-unstable": "nixpkgs-unstable",
+        "oxidized-ninja": "oxidized-ninja",
+        "oxidized-xz": "oxidized-xz",
+        "rust-overlay": "rust-overlay",
+        "wclip": "wclip",
+        "workspace": "workspace",
+        "workspace-darwin": "workspace-darwin",
+        "workspace-disko": "workspace-disko",
+        "workspace-drowse": "workspace-drowse",
+        "workspace-home-manager": "workspace-home-manager",
+        "workspace-modular-skills": "workspace-modular-skills",
+        "workspace-nix-wallpaper": "workspace-nix-wallpaper",
+        "workspace-nixos-hardware": "workspace-nixos-hardware",
+        "workspace-nixos-raspberrypi": "workspace-nixos-raspberrypi",
+        "workspace-ragenix": "workspace-ragenix",
+        "workspace-system-manager": "workspace-system-manager",
+        "workspace-zen-browser": "workspace-zen-browser"
       }
     },
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1327,7 +775,6 @@
     "rust-overlay_2": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "nixpkgs"
@@ -1350,7 +797,7 @@
     "system-manager": {
       "inputs": {
         "flake-compat": "flake-compat_4",
-        "nixpkgs": "nixpkgs",
+        "nixpkgs": "nixpkgs_2",
         "userborn": "userborn"
       },
       "locked": {
@@ -1430,14 +877,12 @@
     "userborn": {
       "inputs": {
         "flake-compat": [
-          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "flake-compat"
         ],
         "flake-parts": "flake-parts_2",
         "nixpkgs": [
-          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "nixpkgs"
@@ -1463,42 +908,28 @@
     "wclip": {
       "inputs": {
         "workspace": [
-          "nix-config",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./dev/wclip",
-        "type": "path"
+        "lastModified": 1786972456,
+        "narHash": "sha256-Cop5/K/i0v6snqzddo6KV+WiGUDrlpxU2qPsxZhzmBc=",
+        "ref": "refs/heads/main",
+        "rev": "c510ef9feb3dda50b7f94881e0b7a51fa99d9427",
+        "revCount": 14,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/wclip"
       },
       "original": {
-        "path": "./dev/wclip",
-        "type": "path"
-      },
-      "parent": []
-    },
-    "wclip_2": {
-      "inputs": {
-        "workspace": [
-          "publish-checks",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "../../../../dev/wclip",
-        "type": "path"
-      },
-      "original": {
-        "path": "../../../../dev/wclip",
-        "type": "path"
-      },
-      "parent": [
-        "publish-checks"
-      ]
+        "type": "git",
+        "url": "https://tangled.org/overby.me/wclip"
+      }
     },
     "workspace": {
       "inputs": {
-        "git-hooks": "git-hooks_2",
+        "git-hooks": [
+          "git-hooks"
+        ],
         "nixpkgs": [
           "nixpkgs"
         ]
@@ -1521,7 +952,6 @@
       "inputs": {
         "nix-darwin": "nix-darwin",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1545,7 +975,6 @@
       "inputs": {
         "disko": "disko",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1569,7 +998,6 @@
       "inputs": {
         "drowse": "drowse",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1593,7 +1021,6 @@
       "inputs": {
         "home-manager": "home-manager",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1617,7 +1044,6 @@
       "inputs": {
         "modular-skills": "modular-skills",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1641,7 +1067,6 @@
       "inputs": {
         "nix-wallpaper": "nix-wallpaper",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1665,7 +1090,6 @@
       "inputs": {
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1689,7 +1113,6 @@
       "inputs": {
         "nixos-raspberrypi": "nixos-raspberrypi",
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1712,7 +1135,6 @@
     "workspace-ragenix": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ],
         "ragenix": "ragenix"
@@ -1736,7 +1158,6 @@
     "workspace-system-manager": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ],
         "system-manager": "system-manager"
@@ -1760,7 +1181,6 @@
     "workspace-zen-browser": {
       "inputs": {
         "nixpkgs": [
-          "nix-config",
           "nixpkgs"
         ],
         "zen-browser": "zen-browser"
@@ -1785,7 +1205,6 @@
       "inputs": {
         "home-manager": "home-manager_3",
         "nixpkgs": [
-          "nix-config",
           "workspace-zen-browser",
           "nixpkgs"
         ]
