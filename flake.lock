@@ -5,6 +5,7 @@
         "darwin": "darwin",
         "home-manager": "home-manager_2",
         "nixpkgs": [
+          "nix",
           "workspace-ragenix",
           "ragenix",
           "nixpkgs"
@@ -59,6 +60,7 @@
     "darwin": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-ragenix",
           "ragenix",
           "agenix",
@@ -83,6 +85,7 @@
     "disko": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-disko",
           "nixpkgs"
         ]
@@ -106,6 +109,7 @@
         "flake-parts": "flake-parts",
         "haumea": "haumea",
         "nixpkgs": [
+          "nix",
           "workspace-drowse",
           "nixpkgs"
         ]
@@ -189,6 +193,7 @@
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
+          "nix",
           "workspace-drowse",
           "drowse",
           "nixpkgs"
@@ -211,6 +216,7 @@
     "flake-parts_2": {
       "inputs": {
         "nixpkgs-lib": [
+          "nix",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -293,6 +299,7 @@
     "gitignore": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-nix-wallpaper",
           "nix-wallpaper",
           "pre-commit-hooks",
@@ -316,6 +323,7 @@
     "gitignore_2": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -340,6 +348,7 @@
     "haumea": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-drowse",
           "drowse",
           "nixpkgs"
@@ -363,6 +372,7 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-home-manager",
           "nixpkgs"
         ]
@@ -385,6 +395,7 @@
     "home-manager_2": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-ragenix",
           "ragenix",
           "agenix",
@@ -408,6 +419,7 @@
     "home-manager_3": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-zen-browser",
           "zen-browser",
           "nixpkgs"
@@ -443,9 +455,41 @@
         "type": "github"
       }
     },
+    "nix": {
+      "inputs": {
+        "git-hooks": [
+          "git-hooks"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "workspace": "workspace",
+        "workspace-darwin": "workspace-darwin",
+        "workspace-disko": "workspace-disko",
+        "workspace-drowse": "workspace-drowse",
+        "workspace-home-manager": "workspace-home-manager",
+        "workspace-modular-skills": "workspace-modular-skills",
+        "workspace-nix-wallpaper": "workspace-nix-wallpaper",
+        "workspace-nixos-hardware": "workspace-nixos-hardware",
+        "workspace-nixos-raspberrypi": "workspace-nixos-raspberrypi",
+        "workspace-ragenix": "workspace-ragenix",
+        "workspace-system-manager": "workspace-system-manager",
+        "workspace-zen-browser": "workspace-zen-browser"
+      },
+      "locked": {
+        "path": "./platform/nix",
+        "type": "path"
+      },
+      "original": {
+        "path": "./platform/nix",
+        "type": "path"
+      },
+      "parent": []
+    },
     "nix-darwin": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-darwin",
           "nixpkgs"
         ]
@@ -469,6 +513,7 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": [
+          "nix",
           "workspace-nix-wallpaper",
           "nixpkgs"
         ],
@@ -491,6 +536,7 @@
     "nixos-hardware": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "workspace-nixos-hardware",
           "nixpkgs"
         ]
@@ -513,11 +559,13 @@
     "nixos-images": {
       "inputs": {
         "nixos-stable": [
+          "nix",
           "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
         ],
         "nixos-unstable": [
+          "nix",
           "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
@@ -544,6 +592,7 @@
         "flake-compat": "flake-compat_3",
         "nixos-images": "nixos-images",
         "nixpkgs": [
+          "nix",
           "workspace-nixos-raspberrypi",
           "nixpkgs"
         ]
@@ -565,17 +614,17 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1786313170,
-        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
+        "lastModified": 1784356753,
+        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
+        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-26.05",
         "repo": "nixpkgs",
+        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       }
     },
@@ -597,17 +646,17 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1784356753,
-        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
+        "lastModified": 1786313170,
+        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
+        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
+        "ref": "nixos-26.05",
         "repo": "nixpkgs",
-        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       }
     },
@@ -1015,6 +1064,7 @@
         "flake-compat": "flake-compat_2",
         "gitignore": "gitignore",
         "nixpkgs": [
+          "nix",
           "workspace-nix-wallpaper",
           "nix-wallpaper",
           "nixpkgs"
@@ -1037,6 +1087,7 @@
     "pre-commit-hooks-nix": {
       "inputs": {
         "flake-compat": [
+          "nix",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -1044,6 +1095,7 @@
         ],
         "gitignore": "gitignore_2",
         "nixpkgs": [
+          "nix",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -1089,6 +1141,7 @@
         "oxidized-texinfo": "oxidized-texinfo",
         "wclip": "wclip",
         "workspace": [
+          "nix",
           "workspace"
         ]
       },
@@ -1108,10 +1161,11 @@
         "crane": "crane",
         "flake-utils": "flake-utils_2",
         "nixpkgs": [
+          "nix",
           "workspace-ragenix",
           "nixpkgs"
         ],
-        "rust-overlay": "rust-overlay_2"
+        "rust-overlay": "rust-overlay"
       },
       "locked": {
         "lastModified": 1761832913,
@@ -1131,47 +1185,17 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "git-hooks": "git-hooks",
-        "nixpkgs": "nixpkgs",
+        "nix": "nix",
+        "nixpkgs": "nixpkgs_2",
         "nixpkgs-unstable": "nixpkgs-unstable",
         "publish-checks": "publish-checks",
-        "rust-overlay": "rust-overlay",
-        "workspace": "workspace",
-        "workspace-darwin": "workspace-darwin",
-        "workspace-disko": "workspace-disko",
-        "workspace-drowse": "workspace-drowse",
-        "workspace-home-manager": "workspace-home-manager",
-        "workspace-modular-skills": "workspace-modular-skills",
-        "workspace-nix-wallpaper": "workspace-nix-wallpaper",
-        "workspace-nixos-hardware": "workspace-nixos-hardware",
-        "workspace-nixos-raspberrypi": "workspace-nixos-raspberrypi",
-        "workspace-ragenix": "workspace-ragenix",
-        "workspace-system-manager": "workspace-system-manager",
-        "workspace-zen-browser": "workspace-zen-browser"
+        "rust-overlay": "rust-overlay_2"
       }
     },
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786849542,
-        "narHash": "sha256-MS8cOa/ii1+QA8R3JWVzqEIoXimu9n50GwQDiBVTFOM=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "b211eadeba8b180da9453ec3413a8a3535c85b3f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "rust-overlay_2": {
-      "inputs": {
-        "nixpkgs": [
+          "nix",
           "workspace-ragenix",
           "ragenix",
           "nixpkgs"
@@ -1191,10 +1215,30 @@
         "type": "github"
       }
     },
+    "rust-overlay_2": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786849542,
+        "narHash": "sha256-MS8cOa/ii1+QA8R3JWVzqEIoXimu9n50GwQDiBVTFOM=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "b211eadeba8b180da9453ec3413a8a3535c85b3f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
     "system-manager": {
       "inputs": {
         "flake-compat": "flake-compat_4",
-        "nixpkgs": "nixpkgs_2",
+        "nixpkgs": "nixpkgs",
         "userborn": "userborn"
       },
       "locked": {
@@ -1274,12 +1318,14 @@
     "userborn": {
       "inputs": {
         "flake-compat": [
+          "nix",
           "workspace-system-manager",
           "system-manager",
           "flake-compat"
         ],
         "flake-parts": "flake-parts_2",
         "nixpkgs": [
+          "nix",
           "workspace-system-manager",
           "system-manager",
           "nixpkgs"
@@ -1324,9 +1370,11 @@
     "workspace": {
       "inputs": {
         "git-hooks": [
+          "nix",
           "git-hooks"
         ],
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1348,6 +1396,7 @@
       "inputs": {
         "nix-darwin": "nix-darwin",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1371,6 +1420,7 @@
       "inputs": {
         "disko": "disko",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1394,6 +1444,7 @@
       "inputs": {
         "drowse": "drowse",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1417,6 +1468,7 @@
       "inputs": {
         "home-manager": "home-manager",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1440,6 +1492,7 @@
       "inputs": {
         "modular-skills": "modular-skills",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1463,6 +1516,7 @@
       "inputs": {
         "nix-wallpaper": "nix-wallpaper",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1486,6 +1540,7 @@
       "inputs": {
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1509,6 +1564,7 @@
       "inputs": {
         "nixos-raspberrypi": "nixos-raspberrypi",
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ]
       },
@@ -1531,6 +1587,7 @@
     "workspace-ragenix": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ],
         "ragenix": "ragenix"
@@ -1554,6 +1611,7 @@
     "workspace-system-manager": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ],
         "system-manager": "system-manager"
@@ -1577,6 +1635,7 @@
     "workspace-zen-browser": {
       "inputs": {
         "nixpkgs": [
+          "nix",
           "nixpkgs"
         ],
         "zen-browser": "zen-browser"
@@ -1601,6 +1660,7 @@
       "inputs": {
         "home-manager": "home-manager_3",
         "nixpkgs": [
+          "nix",
           "workspace-zen-browser",
           "nixpkgs"
         ]
