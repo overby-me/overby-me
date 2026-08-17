@@ -71,7 +71,12 @@
     }:
       stdenv.mkDerivation {
         pname = "gnutar-test-harness";
-        inherit (gnutar) src;
+        # From gnutar, like the source: mkDerivation builds `name` out of
+        # pname and version, so a pname on its own is not a derivation at
+        # all - it fails with `attribute 'name' missing`, from inside
+        # derivationStrict where nothing names the package that caused it.
+        # Nothing had ever built this, so it went unnoticed.
+        inherit (gnutar) src version;
 
         nativeBuildInputs = [
           autoconf
