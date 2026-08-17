@@ -12,7 +12,7 @@
         ];
       };
 
-      index = ../../../platform/nix/config/lib/cargo/index;
+      index = ../../../platform/nix/lib/lib/cargo/index;
 
       meta = {
         description = "A bubblewrap-compatible unprivileged sandboxing tool written in Rust";

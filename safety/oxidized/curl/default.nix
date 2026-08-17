@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         meta = {
           description = "A curl-compatible HTTP client written in Rust";
@@ -37,7 +37,7 @@
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

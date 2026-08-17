@@ -14,7 +14,7 @@ backed by a check that passes or is marked unmeasured.
 | IR dialect | LLVM 21 | The major that `nixpkgs.llvm` (21.1.8) and the repo's rustc both speak. Older dialects are refused, not half-supported. |
 | Oracle LLVM | `pkgs.llvm` 21.1.8 | Test-only, inside check derivations. Never a build or runtime dependency of any package output. |
 | Rust toolchain | stable, whatever the devshell ships (1.95 today) | No `rust-toolchain.toml` yet on purpose: nothing here needs nightly. The pin arrives with `crates/rustc-codegen-llvmrs` (task B5), which needs `rustc_private`. |
-| Third-party crates | none | The whole workspace has zero dependencies, so there is nothing to add to `platform/nix/config/lib/cargo/index` yet. |
+| Third-party crates | none | The whole workspace has zero dependencies, so there is nothing to add to `platform/nix/lib/lib/cargo/index` yet. |
 
 ## What works
 

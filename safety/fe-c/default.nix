@@ -19,7 +19,7 @@
 
   # Offline vendor directory for cargo-driven checks (clippy, unit, miri).
   # Sources and checksums come straight from the lockfiles, mirroring
-  # platform/nix/config/lib/cargo's fetch scheme, so the checks stay pure. Two locks feed
+  # platform/nix/lib/lib/cargo's fetch scheme, so the checks stay pure. Two locks feed
   # it: the workspace's own, and a committed copy of the pinned
   # toolchain's library/Cargo.lock so `cargo miri setup` can build its
   # sysroot offline (refresh platform/nix/config/miri-std.Cargo.lock on toolchain bumps).
@@ -137,7 +137,7 @@
       inherit pname;
 
       src = fecSrc;
-      index = ../../platform/nix/config/lib/cargo/index;
+      index = ../../platform/nix/lib/lib/cargo/index;
       roots = [root];
 
       toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;

@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         rootAttrs.postInstall = ''
           ln -s $out/bin/awk $out/bin/gawk
@@ -41,7 +41,7 @@
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

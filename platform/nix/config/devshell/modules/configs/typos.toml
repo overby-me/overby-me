@@ -249,8 +249,8 @@ extend-exclude = [
   "safety/oxidized/bash/src/builtins/help_data.rs",
   # Registry index snapshot data (JSON lines fetched from index.crates.io);
   # contains target names like target_os = "nto" that look like typos
-  "platform/nix/config/lib/cargo/index/",
-  "platform/nix/config/lib/cargo/tests/fixtures/index/",
+  "platform/nix/lib/lib/cargo/index/",
+  "platform/nix/lib/lib/cargo/tests/fixtures/index/",
   # The Shadertoy programs, vendored verbatim from XScreenSaver. They are
   # shader source, and their local names are short and mathematical (ba, pa,
   # fre, lod, aas), so nearly every one reads as a misspelling.

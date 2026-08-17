@@ -498,10 +498,7 @@
       "inputs": {
         "git-hooks": "git-hooks",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "oxidized-ninja": "oxidized-ninja",
-        "oxidized-xz": "oxidized-xz",
         "rust-overlay": "rust-overlay",
-        "wclip": "wclip",
         "workspace": [
           "workspace"
         ],
@@ -549,6 +546,25 @@
         "repo": "nix-darwin",
         "type": "github"
       }
+    },
+    "nix-lib": {
+      "inputs": {
+        "oxidized-ninja": "oxidized-ninja",
+        "oxidized-xz": "oxidized-xz",
+        "wclip": "wclip",
+        "workspace": [
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./platform/nix/lib",
+        "type": "path"
+      },
+      "original": {
+        "path": "./platform/nix/lib",
+        "type": "path"
+      },
+      "parent": []
     },
     "nix-packages": {
       "inputs": {
@@ -967,7 +983,7 @@
     "oxidized-ninja": {
       "inputs": {
         "workspace": [
-          "nix-config",
+          "nix-lib",
           "workspace"
         ]
       },
@@ -1136,7 +1152,7 @@
     "oxidized-xz": {
       "inputs": {
         "workspace": [
-          "nix-config",
+          "nix-lib",
           "workspace"
         ]
       },
@@ -1274,6 +1290,7 @@
     "root": {
       "inputs": {
         "nix-config": "nix-config",
+        "nix-lib": "nix-lib",
         "nix-packages": "nix-packages",
         "nixpkgs": "nixpkgs_2",
         "publish-checks": "publish-checks",
@@ -1441,7 +1458,7 @@
     "wclip": {
       "inputs": {
         "workspace": [
-          "nix-config",
+          "nix-lib",
           "workspace"
         ]
       },

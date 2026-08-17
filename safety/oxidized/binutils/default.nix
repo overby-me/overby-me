@@ -44,7 +44,7 @@ in {
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         rootAttrs.postInstall = multicallLinks;
 
@@ -69,7 +69,7 @@ in {
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

@@ -283,13 +283,13 @@
 
 | Library | Homepage | Description |
 |-|-|-|
-| [Buck2 ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/buck2) | [Buck2](https://buck2.build) | Pure-eval Buck2 builds, each action lowered to its own derivation |
-| [Cargo ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/cargo) | [Cargo](https://doc.rust-lang.org/cargo/) | Pure-eval Rust builds, resolved from `Cargo.lock` without import-from-derivation |
-| [Deno ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/deno) | [Deno](https://deno.com) | Nix builder for Deno projects with npm dependencies |
-| [Mobile ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/mobile) | [nixos-fairphone-fp5](https://github.com/gian-reto/nixos-fairphone-fp5) | Boot and ext4 rootfs images for flashing NixOS to an Android-bootloader device |
-| [Ninja ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/ninja) | [Ninja](https://ninja-build.org) | Pure-eval Ninja builds, each edge lowered to its own derivation |
-| [Skylark ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/skylark) | [Starlark](https://github.com/bazelbuild/starlark) | Starlark interpreter written in pure Nix, used by the Buck2 builder |
-| [YAML ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/config/lib/yaml) | [YAML](https://yaml.org) | YAML reader and writer in pure Nix |
+| [Buck2 ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/buck2) | [Buck2](https://buck2.build) | Pure-eval Buck2 builds, each action lowered to its own derivation |
+| [Cargo ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/cargo) | [Cargo](https://doc.rust-lang.org/cargo/) | Pure-eval Rust builds, resolved from `Cargo.lock` without import-from-derivation |
+| [Deno ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/deno) | [Deno](https://deno.com) | Nix builder for Deno projects with npm dependencies |
+| [Mobile ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/mobile) | [nixos-fairphone-fp5](https://github.com/gian-reto/nixos-fairphone-fp5) | Boot and ext4 rootfs images for flashing NixOS to an Android-bootloader device |
+| [Ninja ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/ninja) | [Ninja](https://ninja-build.org) | Pure-eval Ninja builds, each edge lowered to its own derivation |
+| [Skylark ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/skylark) | [Starlark](https://github.com/bazelbuild/starlark) | Starlark interpreter written in pure Nix, used by the Buck2 builder |
+| [YAML ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/lib/lib/yaml) | [YAML](https://yaml.org) | YAML reader and writer in pure Nix |
 
 </details>
 

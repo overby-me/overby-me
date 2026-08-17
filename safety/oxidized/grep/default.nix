@@ -18,7 +18,7 @@
 
         manifestDir = "grep";
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         rootAttrs.postInstall = ''
           ln -s $out/bin/grep $out/bin/egrep

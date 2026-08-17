@@ -12,7 +12,7 @@
         ];
       };
 
-      index = ../../../platform/nix/config/lib/cargo/index;
+      index = ../../../platform/nix/lib/lib/cargo/index;
 
       meta = {
         description = "A GNU help2man-compatible man page generator written in Rust";

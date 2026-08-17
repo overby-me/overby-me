@@ -334,7 +334,7 @@ to the escape (only escaped regions stay findable-as-dead).
 - **Interposed frees don't quarantine.** `interpose::free` clears liveness
   (I7) then frees immediately; routing C frees through the shared quarantine
   needs a per-origin release dispatch on the node (System vs libc `free`).
-- **`platform/nix/config/lib/cargo` per-crate wrapper / hash-extension** (docs/nix-integration
+- **`platform/nix/lib/lib/cargo` per-crate wrapper / hash-extension** (docs/nix-integration
   §6 Q1/Q2) — needed for the per-crate `harden` dial and for whole-tree
   instrumentation via a proper wrapper rather than `RUSTC=`.
 - **`-Zbuild-std` sysroot (D1)** would make cementite a sysroot crate,

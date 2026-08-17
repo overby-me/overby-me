@@ -63,7 +63,7 @@ limiting has been observed at this size.
 
 A filtered directory on its own is cargo-only. Every project's `default.nix`
 is a nix-workspace module, but the root flake imports it and all but one reach for
-`../../../platform/nix/config/lib`, so the filter drops it. `gen-project.nu` gives every
+`../../../platform/nix/lib/lib`, so the filter drops it. `gen-project.nu` gives every
 project the three things it needs to be a real repo. None of them is stored in
 the project's own directory: they live together under
 [`generated/`](./generated) and josh maps them into place when it publishes
@@ -415,7 +415,7 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 :/<path>            subdirectory becomes the repo root
 :exclude[::*.nix]   drop every top-level nix file: default.nix is a
                     nix-workspace module the root flake imports, reaching for
-                    ../../../platform/nix/config/lib/cargo/index, and the testsuite helpers it
+                    ../../../platform/nix/lib/lib/cargo/index, and the testsuite helpers it
                     calls are dead weight without it. A glob rather than a
                     list, because several projects carry more than two
                     (safety/oxidized/pipewire has six) and new ones appear.

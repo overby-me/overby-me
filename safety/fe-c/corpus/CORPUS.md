@@ -122,7 +122,7 @@ reproducers of shapes already covered. See `docs/evaluation-2026-07.md` §3.5.
    *missed* is worth as much as a row that is caught, and more than a row that
    is silently dropped.
 2. For rows worth pursuing: pin the version, add a minimal reproducer, vendor
-   sources through `platform/nix/config/lib/cargo` so the check stays pure and offline, and
+   sources through `platform/nix/lib/lib/cargo` so the check stays pure and offline, and
    assert the Fe-C report (site + FailKind), not just a nonzero exit.
 3. Give each entry a real patched-version control. Today only `smallvec-0003`
    has one (`CLAUDE.md` §5).

@@ -432,11 +432,28 @@
     # they are already gone: they are nix-packages' history now, and letting
     # the older eras keep them would publish the same files from two repos.
     # Under both names, because they were `pkgs` for most of that history.
-    exclude: ["workspace-modules/namespaces.nix" "workspace-modules/project-flakes.nix" "packages/" "pkgs/"]
+    exclude: ["workspace-modules/namespaces.nix" "workspace-modules/project-flakes.nix" "packages/" "pkgs/" "lib/" "workspace-modules/lib.nix" "workspace-modules/perSystemLib.nix"]
     # The `platform/nix` era drops `config/`, because that is where this went:
     # the directory it used to be is still there and now contains it, so
     # without this the era publishes today's tree nested one level down.
     formerPaths: [{path: "nix" deps: []} {path: "platform/nix" deps: [] exclude: ["config/"]}]
+  }
+  # The build systems, split out of the configuration because none of the
+  # thirty-eight things that build with them is a machine configuration - and
+  # because they were most of it: 1482 of its 1687 files, 1361 of those the
+  # committed registry index.
+  {
+    name: "nix-lib"
+    kind: "nix"
+    path: "platform/nix/lib"
+    # Four homes. The third is where they are now, so its era drops what is
+    # there today or it republishes the whole workspace at the root.
+    formerPaths: [
+      {path: "lib" deps: []}
+      {path: "nix/lib" deps: []}
+      {path: "platform/nix/lib" deps: [] exclude: ["lib/" "workspace-modules/" "flake.nix" "flake.lock"]}
+      {path: "platform/nix/config/lib" deps: []}
+    ]
   }
   # The packages, split out of the configuration so a tree can take them
   # without eight hosts and a secrets directory. Their history is inside the

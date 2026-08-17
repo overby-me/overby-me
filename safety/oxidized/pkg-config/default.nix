@@ -19,7 +19,7 @@
         ];
       };
 
-      index = ../../../platform/nix/config/lib/cargo/index;
+      index = ../../../platform/nix/lib/lib/cargo/index;
 
       # This workspace has two root crates (libpkgconf + pkgconf), so
       # buildCargoProject wraps them in a symlinkJoin, which runs no stdenv

@@ -87,34 +87,6 @@
       url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/zen-browser";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
     };
-
-    # Real Cargo workspaces, which the cargo library is tested against and the
-    # ninja library builds its graph extractor from. They were sibling
-    # directories reached by `../../../..`, which is a thing this flake cannot
-    # see: a flake's source is its own directory, so those paths worked only
-    # because the monorepo happened to be what surrounded it, and they broke
-    # the moment it moved. As inputs they are the same source either way, and
-    # the tree above overrides them onto its own copies so a change to a port
-    # is still what gets tested.
-    #
-    # Fixtures rather than vendored copies on purpose: what these catch is the
-    # cargo library meeting a manifest feature it does not handle, which a
-    # snapshot stops doing the day after it is taken.
-    #
-    # Each follows onto the framework above rather than fetching its own, so
-    # a tree that takes this has one nix-workspace rather than four.
-    wclip = {
-      url = "git+https://tangled.org/overby.me/wclip";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-xz = {
-      url = "git+https://tangled.org/overby.me/oxidized-xz";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-ninja = {
-      url = "git+https://tangled.org/overby.me/oxidized-ninja";
-      inputs.workspace.follows = "workspace";
-    };
   };
 
   # A module, so this directory is a workspace rather than a bag of inputs:

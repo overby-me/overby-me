@@ -20,14 +20,22 @@
   # says neither what is in there nor what it needs.
   inputs.nix-config = {
     url = "path:./platform/nix/config";
+    inputs.workspace.follows = "workspace";
+  };
+
+  # The build systems, as a workspace: every port in this tree builds with a
+  # `lib` from in there, and none of them is a machine configuration. Reaching
+  # it through the flake that also carries eight NixOS hosts had that
+  # backwards, and it was most of that flake.
+  #
+  # The three ports are its fixtures - two Cargo workspaces the resolver is
+  # tested against, and the ninja rewrite whose `graph-json` its build graph
+  # extraction runs - pointed at this tree's own copies so a change to one is
+  # what the check builds.
+  inputs.nix-lib = {
+    url = "path:./platform/nix/lib";
     inputs = {
       workspace.follows = "workspace";
-
-      # The ports its libraries build and test against, onto this tree's own
-      # copies. Named by URL over there, because that directory is published
-      # and a clone has to fetch them; here they are three directories away,
-      # and a change to one should be what the check builds rather than
-      # whatever was last pushed.
       wclip.url = "path:./dev/wclip";
       oxidized-xz.url = "path:./safety/oxidized/xz";
       oxidized-ninja.url = "path:./safety/oxidized/ninja";

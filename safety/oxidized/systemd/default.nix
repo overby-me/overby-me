@@ -50,7 +50,7 @@ in {
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         features = ["dbus_support"];
 
@@ -111,7 +111,7 @@ in {
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         features = ["dbus_support"];
         release = false;

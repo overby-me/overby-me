@@ -611,46 +611,6 @@
         "type": "github"
       }
     },
-    "oxidized-ninja": {
-      "inputs": {
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786990098,
-        "narHash": "sha256-84raFhxHJbMOfldWExajXueMiV6n2RwirZDArHcIVEQ=",
-        "ref": "refs/heads/main",
-        "rev": "35c37233f642caa127636f93203bfb6f9f28ae2b",
-        "revCount": 36,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-ninja"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-ninja"
-      }
-    },
-    "oxidized-xz": {
-      "inputs": {
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786972456,
-        "narHash": "sha256-H4k6DdSnUDRfeDA+WimHpwpxouzCWisA05h+HRk6eNQ=",
-        "ref": "refs/heads/main",
-        "rev": "8835dd3e76b669e2effcdd14e0da3273958fcfc5",
-        "revCount": 43,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-xz"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-xz"
-      }
-    },
     "pre-commit-hooks": {
       "inputs": {
         "flake-compat": "flake-compat_2",
@@ -734,10 +694,7 @@
       "inputs": {
         "git-hooks": "git-hooks",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "oxidized-ninja": "oxidized-ninja",
-        "oxidized-xz": "oxidized-xz",
         "rust-overlay": "rust-overlay",
-        "wclip": "wclip",
         "workspace": "workspace",
         "workspace-darwin": "workspace-darwin",
         "workspace-disko": "workspace-disko",
@@ -904,26 +861,6 @@
         "ref": "system-manager",
         "repo": "userborn",
         "type": "github"
-      }
-    },
-    "wclip": {
-      "inputs": {
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786972456,
-        "narHash": "sha256-Cop5/K/i0v6snqzddo6KV+WiGUDrlpxU2qPsxZhzmBc=",
-        "ref": "refs/heads/main",
-        "rev": "c510ef9feb3dda50b7f94881e0b7a51fa99d9427",
-        "revCount": 14,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/wclip"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/wclip"
       }
     },
     "workspace": {

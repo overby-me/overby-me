@@ -18,7 +18,7 @@
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         # build.rs includes perl_siphash.h and sbox32_hash.h, which ship only
         # in Perl's source distribution. Without this it fell back to a
@@ -59,7 +59,7 @@
           ];
         };
 
-        index = ../../../platform/nix/config/lib/cargo/index;
+        index = ../../../platform/nix/lib/lib/cargo/index;
 
         # build.rs includes perl_siphash.h and sbox32_hash.h, which ship only
         # in Perl's source distribution. Without this it fell back to a

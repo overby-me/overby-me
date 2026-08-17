@@ -12,7 +12,7 @@
         ];
       };
 
-      index = ../../../platform/nix/config/lib/cargo/index;
+      index = ../../../platform/nix/lib/lib/cargo/index;
 
       # Provide texi2any as an alias (some build systems use it)
       rootAttrs.postInstall = ''
