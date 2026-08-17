@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
 
         meta = {
           description = "A Ninja-compatible build system written in Rust";
@@ -37,7 +37,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
 
         release = false;
 

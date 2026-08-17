@@ -26,7 +26,7 @@
 
       manifestDir = "h26xtoav1";
 
-      index = ../../platform/nix/lib/cargo/index;
+      index = ../../platform/nix/config/lib/cargo/index;
 
       meta = {
         description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode, h265-decode, and rav1e";

@@ -113,7 +113,7 @@ detection feature; see `docs/evaluation-2026-07.md` §5 for why.
 
 **A1. [done] Workspace + toolchain + nix skeleton.** *(2026-07-21)*
 Three crates, `rust-toolchain.toml` pinned nightly (shared with `../libc`),
-flakelight module wiring through `platform/nix/lib/cargo`.
+flakelight module wiring through `platform/nix/config/lib/cargo`.
 *Before writing any nix*, answer the six API questions in
 `docs/nix-integration.md` §6 — especially #2 (is the per-crate derivation key
 user-extensible? `harden` must enter the hash or mode flips silently reuse
@@ -365,7 +365,7 @@ CVE aliases; publish caught / missed / not-attempted; keep misses as rows.
 ✅ `corpus/CORPUS.md` carries a scoreboard with a denominator.
 
 **E7. [todo, human decision] The per-crate dial.**
-Either build it (per-crate rustc flags in `platform/nix/lib/cargo`, `harden` in the
+Either build it (per-crate rustc flags in `platform/nix/config/lib/cargo`, `harden` in the
 artifact key per `docs/nix-integration.md` §6 Q2, and a real `cargo-fe-c`), or
 demote it from the README headline until it exists. Do not leave the project's
 central promise implemented as an env var. Like C1, this one is the human's.
@@ -467,7 +467,7 @@ rewrite published history, never force-push. Push the feature branch only.
 
 **Hard stops — write `STATUS.md` and halt. Do not guess, do not work around.**
 
-- The `platform/nix/lib/cargo` questions in `docs/nix-integration.md` §6 can't be
+- The `platform/nix/config/lib/cargo` questions in `docs/nix-integration.md` §6 can't be
   answered by reading the code — especially #2. Guessing the derivation key is
   a correctness bug that hides for weeks.
 - A §3 settled decision looks wrong.

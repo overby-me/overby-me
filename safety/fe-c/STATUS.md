@@ -334,13 +334,13 @@ to the escape (only escaped regions stay findable-as-dead).
 - **Interposed frees don't quarantine.** `interpose::free` clears liveness
   (I7) then frees immediately; routing C frees through the shared quarantine
   needs a per-origin release dispatch on the node (System vs libc `free`).
-- **`platform/nix/lib/cargo` per-crate wrapper / hash-extension** (docs/nix-integration
+- **`platform/nix/config/lib/cargo` per-crate wrapper / hash-extension** (docs/nix-integration
   §6 Q1/Q2) — needed for the per-crate `harden` dial and for whole-tree
   instrumentation via a proper wrapper rather than `RUSTC=`.
 - **`-Zbuild-std` sysroot (D1)** would make cementite a sysroot crate,
   removing the `FEC_INSTRUMENT_ONLY` scoping limitation and enabling
   whole-process coverage (D2 + `../libc`).
-- **Toolchain pin** `nightly-2026-06-29`; `platform/nix/miri-std.Cargo.lock` is a
+- **Toolchain pin** `nightly-2026-06-29`; `platform/nix/config/miri-std.Cargo.lock` is a
   committed copy of the toolchain's `library/Cargo.lock` — refresh on bumps.
 - **`FEC_DEBUG=1`** makes the driver print which bodies it instruments and
   how many checks — useful when validating a new corpus entry.

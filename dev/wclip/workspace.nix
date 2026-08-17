@@ -19,7 +19,7 @@
       ];
     };
 
-    index = ../../platform/nix/lib/cargo/index;
+    index = ../../platform/nix/config/lib/cargo/index;
 
     meta = {
       homepage = "https://tangled.org/overby.me/overby.me/tree/main/${workspace.path}";
@@ -31,7 +31,7 @@
 
   # Command-line behaviour exercised in the sandbox (no compositor needed).
   # Note: the per-crate cargo builder does not run `cargo test` targets yet
-  # (see platform/nix/lib/cargo/PLAN.md), so the in-crate wire-protocol unit
+  # (see platform/nix/config/lib/cargo/PLAN.md), so the in-crate wire-protocol unit
   # tests rely on these checks for coverage until test targets land.
   testNames = [
     "version"

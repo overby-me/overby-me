@@ -49,7 +49,7 @@ Fe-C, and (c) feeds the NixOS-rs Rust-userspace trajectory.
     pinned nightly; the artifact other `rust/` projects (and Fe-C's
     instrumented sysroots) consume
   - `checks.libc-{hello,static-dns,examples,fec-case}` (last one phase-gated)
-- `platform/nix/lib/cargo` (the in-house per-crate/gradual build lib) for the
+- `platform/nix/config/lib/cargo` (the in-house per-crate/gradual build lib) for the
   workspace; corpus/example sources vendored so checks stay pure and offline;
   harmonia caches the sysroot derivations.
 - Single `rust-toolchain.toml` shared with `../fe-c` — one nightly to bump,

@@ -17,7 +17,7 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/cargo/index;
+      index = ../../../platform/nix/config/lib/cargo/index;
 
       crateOverrides.lzma-sys = {
         nativeBuildInputs = [pkg-config];

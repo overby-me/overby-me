@@ -63,7 +63,7 @@ limiting has been observed at this size.
 
 A filtered directory on its own is cargo-only. Every project's `default.nix`
 is a nix-workspace module, but the root flake imports it and all but one reach for
-`../../../platform/nix/lib`, so the filter drops it. `gen-project.nu` gives every
+`../../../platform/nix/config/lib`, so the filter drops it. `gen-project.nu` gives every
 project the three things it needs to be a real repo. None of them is stored in
 the project's own directory: they live together under
 [`generated/`](./generated) and josh maps them into place when it publishes
@@ -155,7 +155,7 @@ published one. Nineteen of those are taken as root inputs and built. Each
 differs from its published counterpart in a single line:
 
 ```nix
-inputs.project.url = "path:../../../platform/nix/workspace";             # in-tree
+inputs.project.url = "path:../../../platform/nix/config/workspace";             # in-tree
 inputs.project.url = "git+https://tangled.org/overby.me/nix-workspace";  # published
 ```
 
@@ -169,7 +169,7 @@ Two things about this are non-obvious, and both were measured:
 
 - **A relative path input only resolves when the flake is reached through the
   repo root.** `nix eval 'path:./safety/oxidized/sed#…'` fails with *access to
-  absolute path '/platform/nix/workspace' is forbidden*, because `../../../` is
+  absolute path '/platform/nix/config/workspace' is forbidden*, because `../../../` is
   resolved against the filesystem root. Reached as an input of the root flake,
   or as `nix eval '.?dir=safety/oxidized/sed#…'`, it resolves inside the tree
   and evaluates to `rust-sed-0.1.0`. So the flake is checkable where it sits,
@@ -415,7 +415,7 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 :/<path>            subdirectory becomes the repo root
 :exclude[::*.nix]   drop every top-level nix file: default.nix is a
                     nix-workspace module the root flake imports, reaching for
-                    ../../../platform/nix/lib/cargo/index, and the testsuite helpers it
+                    ../../../platform/nix/config/lib/cargo/index, and the testsuite helpers it
                     calls are dead weight without it. A glob rather than a
                     list, because several projects carry more than two
                     (safety/oxidized/pipewire has six) and new ones appear.

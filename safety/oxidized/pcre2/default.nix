@@ -12,7 +12,7 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/cargo/index;
+      index = ../../../platform/nix/config/lib/cargo/index;
 
       meta = {
         description = "A pure Rust implementation of PCRE2 (Perl Compatible Regular Expressions)";

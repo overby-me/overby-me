@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
 
         rootAttrs.postInstall = ''
           ln -s $out/bin/bash $out/bin/sh
@@ -41,7 +41,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
 
         release = false;
 

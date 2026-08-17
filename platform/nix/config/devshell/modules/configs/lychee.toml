@@ -1,0 +1,93 @@
+# Run `touch .envrc && direnv export json` to apply changes to the repository.
+accept = [200, 201, 202, 203, 204, 206, 207, 429, 403]
+exclude_path = [
+  "platform/nix/config/devshell/modules/configs/lychee.toml",
+  # Registry index snapshot data, not documents
+  "platform/nix/config/lib/cargo/index",
+  "platform/nix/config/lib/cargo/tests/fixtures/index",
+]
+exclude = [
+  '\$\{',
+  "x-access-token",
+  "%7B",
+  # Raw `{...}` template placeholders in source (e.g. `.../profile/{handle}`)
+  # are not real links; skip them like the `%7B`/`${` encoded forms above.
+  '\{',
+  # Nushell string interpolation `($var)` in URLs (e.g. snapshot-index.nu)
+  '\(\$',
+  "localhost",
+  '127\.0\.0\.1',
+  'host\.docker\.internal',
+  "https://github.com/example/",
+  "https://fuchsia.googlesource.com/",
+  "https://xcancel.com/",
+  "https://smokesignal.events/",
+  "https://wiki.multimedia.cx/",
+  "https://spindle.tangled.sh/",
+  "https://cloudflare-dns.com/",
+  # Self-hosted services that only answer on the home network, so they are
+  # unreachable from CI and from any machine that is not on it.
+  "https://mail.overby.me/",
+  "https://search.overby.me/",
+  "https://api.mistral.ai/",
+  "https://api.tokenfactory.nebius.com/",
+  "https://console.mistral.ai/",
+  "https://startpage.com/",
+  # Dead links inside vendored upstream XScreenSaver copyright headers, which
+  # are kept verbatim: the pages moved or went away years after the code cited
+  # them.
+  'soulwire\.co\.uk',
+  "https://x.com/",
+  'box2d\.org/files/',
+  # Zvi Har'El's home page, named in the kaleido copyright notice that
+  # apps/homepage/xscreensaver/src/runtime/kaleido.rs keeps verbatim. The site
+  # serves a certificate this machine's root store does not trust.
+  'math\.technion\.ac\.il/~rl',
+  # Placeholder URLs in safety/oxidized/curl comments and test fixtures: the literal
+  # hosts "host"/"proxy.example", the literal port ":port", and ellipsis
+  # paths are examples, not real links.
+  "^https?://(user1@)?host(/|$)",
+  'proxy\.example',
+  ":port",
+  "%E2%80%A6",
+  # Scaleway Serverless Functions/Containers API endpoints (e.g. the wiki backend):
+  # these serve specific routes and 404 on `/`, so they are not link-checkable.
+  'functions\.fnc\.[a-z0-9-]+\.scw\.cloud',
+  # WebPush service endpoints are opaque per-subscriber URLs, not documentation
+  # links; they appear in the wiki's push code + SSRF-allowlist tests (push.rs).
+  'fcm\.googleapis\.com',
+  'push\.services\.mozilla\.com',
+  'web\.push\.apple\.com',
+  'notify\.windows\.com',
+  # Private / link-local addresses used as SSRF-rejection test targets (e.g. the
+  # cloud metadata service 169.254.169.254) and fake test endpoints — never real
+  # links.
+  '//(10|192\.168|169\.254)\.\d',
+  "//ep/",
+  # Go toolchain download endpoint in the buck2 no_prelude test fixture: the
+  # real URL is built at analysis time (base + version + platform + ext), so
+  # the bare base 404s and is not link-checkable.
+  'go\.dev/dl',
+  # Author home pages cited in XScreenSaver copyright headers, transcribed
+  # verbatim into the Rust ports in apps/homepage/xscreensaver. Some are from
+  # the nineties and no longer resolve; the headers stay as upstream wrote
+  # them either way.
+  'www\.organic\.com/staff/',
+  'home\.sol\.no/',
+  'cs\.cmu\.edu/~spot/',
+  'astronomy\.swin\.edu\.au/~pbourke/',
+  'kaleidocycles\.de/pdf/',
+  'complexification\.net/gallery/machines/interMomentary/',
+  'complexification\.net/gallery/machines/substrate/',
+  # A citation in life.asm, one of the m6502 demo programs vendored verbatim
+  # from upstream. Its author wrote the path with a stray slash in it, so it
+  # has never resolved; the listing stays as it was written.
+  "rosettacode\\.org/wiki/Conway/",
+  # The Shadertoy programs cite where their maths came from, and half of those
+  # citations are Inigo Quilez articles under the /www/ path he has since
+  # dropped. The programs are vendored verbatim, comments and all.
+  'iquilezles\.org/www/',
+  # Another of those citations: a graph plotted by putting the formula in the
+  # URL, which the site no longer answers to.
+  'thetamath\.com/',
+]

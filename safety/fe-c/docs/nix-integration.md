@@ -1,12 +1,12 @@
 # Nix integration sketch
 
 Written on a phone without the repo open, so **every reference to
-`platform/nix/lib/cargo` is an assumption**. §6 lists what to verify first; the shapes
+`platform/nix/config/lib/cargo` is an assumption**. §6 lists what to verify first; the shapes
 below are the requirements, not the final API.
 
-## 1. Why this project fits `platform/nix/lib/cargo` specifically
+## 1. Why this project fits `platform/nix/config/lib/cargo` specifically
 
-`platform/nix/lib/cargo` builds per-crate derivations with gradual rebuilds. Fe-C's
+`platform/nix/config/lib/cargo` builds per-crate derivations with gradual rebuilds. Fe-C's
 hardening dial is *also* per-crate. They compose exactly:
 
 ```text
@@ -91,7 +91,7 @@ that shell out to nix so there is one execution path, not two.
 
 ## 6. API questions — answered at the computer (Task A1, 2026-07-21)
 
-Verified against `platform/nix/lib/cargo` as of the `fe-c/v0` branch point.
+Verified against `platform/nix/config/lib/cargo` as of the `fe-c/v0` branch point.
 
 1. **Per-crate env / wrapper settings: no, workspace-wide only.**
    `buildCargoProject` accepts `rustcFlags` and `toolchain` for the whole
@@ -116,7 +116,7 @@ Verified against `platform/nix/lib/cargo` as of the `fe-c/v0` branch point.
 4. **Vendoring: solved and reusable for the corpus.** `Cargo.lock` is
    parsed in pure nix (`lib/lock.nix`), each crate fetched with `fetchurl`
    from `static.crates.io` by lockfile checksum, and registry metadata
-   comes from a committed mini-index snapshot (`platform/nix/lib/cargo/index`,
+   comes from a committed mini-index snapshot (`platform/nix/config/lib/cargo/index`,
    maintained by `tools/snapshot-index.nu`). Corpus fixtures pin
    vulnerable versions in their own lockfiles and extend the snapshot
    index; checks stay pure/offline.

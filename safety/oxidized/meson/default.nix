@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
 
         meta = {
           description = "A Meson build system compatible implementation in Rust";

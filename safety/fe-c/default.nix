@@ -19,14 +19,14 @@
 
   # Offline vendor directory for cargo-driven checks (clippy, unit, miri).
   # Sources and checksums come straight from the lockfiles, mirroring
-  # platform/nix/lib/cargo's fetch scheme, so the checks stay pure. Two locks feed
+  # platform/nix/config/lib/cargo's fetch scheme, so the checks stay pure. Two locks feed
   # it: the workspace's own, and a committed copy of the pinned
   # toolchain's library/Cargo.lock so `cargo miri setup` can build its
-  # sysroot offline (refresh platform/nix/miri-std.Cargo.lock on toolchain bumps).
+  # sysroot offline (refresh platform/nix/config/miri-std.Cargo.lock on toolchain bumps).
   vendorFor = pkgs: let
     locks = [
       ./Cargo.lock
-      ./platform/nix/miri-std.Cargo.lock
+      ./platform/nix/config/miri-std.Cargo.lock
       # The B2 instrumentation harness is its own workspace with its own
       # lock (a cementite path dep; cementite is dependency-free, I11).
       ./crates/fe-c-driver/tests/fixtures/harness/Cargo.lock
@@ -137,7 +137,7 @@
       inherit pname;
 
       src = fecSrc;
-      index = ../../platform/nix/lib/cargo/index;
+      index = ../../platform/nix/config/lib/cargo/index;
       roots = [root];
 
       toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;

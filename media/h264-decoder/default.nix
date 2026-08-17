@@ -18,7 +18,7 @@
         ];
       };
 
-      index = ../../platform/nix/lib/cargo/index;
+      index = ../../platform/nix/config/lib/cargo/index;
 
       meta = {
         description = "A pure Rust H.264 decoder library";

@@ -4,7 +4,7 @@
 #
 # A published repo is a filtered copy of one directory, so it cannot use the
 # monorepo's default.nix: that is a flakelight module the root flake imports,
-# and it reaches for ../../../platform/nix/lib. Without something of its own, a clone is
+# and it reaches for ../../../platform/nix/config/lib. Without something of its own, a clone is
 # cargo-only and has no CI.
 #
 # One template covers every project because the flake reads Cargo.toml itself

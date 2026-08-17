@@ -3,7 +3,7 @@
 //! Unlike `-t compdb-targets` (which filters to edges reaching named targets
 //! and emits only directory/command/file/output), this dumps EVERY edge with
 //! its fully-expanded command plus all the metadata a per-edge Nix lowering
-//! (`platform/nix/lib/ninja`) needs: explicit/implicit/order-only inputs and outputs,
+//! (`platform/nix/config/lib/ninja`) needs: explicit/implicit/order-only inputs and outputs,
 //! the expanded depfile and rspfile paths + content, the deps mode, and the
 //! restat/generator flags and pool. Phony edges are included (with
 //! `"phony": true`) so alias/`default` resolution is possible downstream.

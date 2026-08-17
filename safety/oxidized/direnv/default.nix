@@ -12,7 +12,7 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/cargo/index;
+      index = ../../../platform/nix/config/lib/cargo/index;
 
       meta = {
         description = "A Rust rewrite of direnv - unclutter your .profile";

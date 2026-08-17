@@ -202,7 +202,7 @@ safety/oxidized/llvm/
 ├── README.md  PLAN.md  STATUS.md  CLAUDE.md  .deslop.toml
 ├── docs/                 # surface-inventory, design records, evaluations
 ├── corpus/               # .ll conformance corpus + vendored LLVM tests
-├── platform/nix/                  # project-local nix helpers (oracle pins, check harness)
+├── platform/nix/config/                  # project-local nix helpers (oracle pins, check harness)
 └── crates/
     ├── llvm-support      # APInt/APFloat, DataLayout, Triple (target-lexicon)
     ├── llvm-ir           # Context/Module/Value/Type/Instr, attrs, metadata, verifier
@@ -263,7 +263,7 @@ pattern lands with an Alive2-checked `.ll` pair in `corpus/`.
 ## 5. Dependency policy
 
 Rule: never rewrite what the Rust ecosystem already does well; everything must be
-pure Rust and vendorable into `platform/nix/lib/cargo/index`.
+pure Rust and vendorable into `platform/nix/config/lib/cargo/index`.
 
 | Use | Crate | Notes |
 | --- | --- | --- |
@@ -435,7 +435,7 @@ forbidden repo-wide as usual.
         ];
       };
 
-      index = ../../../platform/nix/lib/cargo/index;
+      index = ../../../platform/nix/config/lib/cargo/index;
 
       rootAttrs.postInstall = ''
         # Upstream-compatible tool names, like safety/oxidized/gcc does for gcc/cc
@@ -465,7 +465,7 @@ forbidden repo-wide as usual.
   `./safety/oxidized/help2man` and `./safety/oxidized/make` (note: `safety/oxidized/libc` exists in-tree but is
   deliberately not in the imports list today — don't cargo-cult that; llvm
   ships packages and checks, so it belongs in the list).
-- `platform/nix/lib/cargo/index`: add `regalloc2`, `object`, `gimli`, `target-lexicon`,
+- `platform/nix/config/lib/cargo/index`: add `regalloc2`, `object`, `gimli`, `target-lexicon`,
   `cranelift-isle`, `iced-x86`, `filecheck`, Mollusc crates, `hashbrown`,
   `smallvec`, `indexmap`, `rayon` (+ transitive closure). Do this as its own
   commit — the index is the known landmine field.

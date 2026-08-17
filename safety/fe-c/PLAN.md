@@ -193,10 +193,10 @@ optimizer entanglement.
 ## 9. Nix integration ❄️
 
 Detail in `docs/nix-integration.md` (including API questions to verify against
-`platform/nix/lib/cargo` before wiring anything).
+`platform/nix/config/lib/cargo` before wiring anything).
 
 - Flake wiring via the repo's flakelight modules; workspace built with the
-  in-house `platform/nix/lib/cargo` (per-crate derivations, gradual builds). That model
+  in-house `platform/nix/config/lib/cargo` (per-crate derivations, gradual builds). That model
   fits Fe-C unusually well: `harden` becomes a per-crate derivation attribute,
   so flipping one crate's mode rebuilds only that crate and its dependents,
   and the instrumented sysroots are just more nodes in the same graph.
@@ -211,7 +211,7 @@ Detail in `docs/nix-integration.md` (including API questions to verify against
   - `fmt` / `statix` / `deadnix` / `clippy`
   - `unit`, `ui` (trybuild-style driver diagnostics)
   - `corpus-rustsec`: pinned vulnerable crate versions, vendored through
-    `platform/nix/lib/cargo`'s lockfile handling so the check is pure/offline, asserted
+    `platform/nix/config/lib/cargo`'s lockfile handling so the check is pure/offline, asserted
     to abort with an Fe-C report
   - `false-positive`: clean crates' own test suites under `case`
   - `selfhost`: `cementite` and `fe-c-driver` built under `case` mode
@@ -274,7 +274,7 @@ guarantee. Full evidence and file references:
 | §3 runtime: interceptor tiers b/c/d, guard-page and canary sampling | Only tier (a), the malloc family |
 | §3 runtime: unknown-provenance policy knob with counters | Hard-coded tolerate-unknown; the dead-stack-is-fatal half of `strict-stack` is implemented, the counters are not |
 | §7 v0 gate: overhead measured and published | No benchmark exists; the only number is A2's microbench of the table alone, and it is 2 to 10 times the design's own assumed floor, on a path the design assumed would be cold |
-| §9: `harden` as a per-crate derivation attribute | Corpus checks drive `RUSTC=` with env vars; `platform/nix/lib/cargo`'s artifact key is untouched (nix-integration §6 Q2 is still the open correctness hazard it was flagged as) |
+| §9: `harden` as a per-crate derivation attribute | Corpus checks drive `RUSTC=` with env vars; `platform/nix/config/lib/cargo`'s artifact key is untouched (nix-integration §6 Q2 is still the open correctness hazard it was flagged as) |
 | §9: `-Zbuild-std` sysroots | Attempted, blocked on `compiler_builtins` upstream monomorphization errors |
 | I11: `#![no_std]` where possible | Zero external dependencies (the load-bearing half), but std-linked |
 

@@ -529,7 +529,7 @@ inputs.flake-parts.lib.mkFlake { inherit inputs; } {
 inputs.flake-parts.lib.mkFlake { inherit inputs; } {
   flake = {
     overlays.default = final: prev: {
-      my-tool = final.callPackage ./platform/nix/my-tool.nix {};
+      my-tool = final.callPackage ./platform/nix/config/my-tool.nix {};
     };
   };
 };
@@ -540,7 +540,7 @@ inputs.flake-parts.lib.mkFlake { inherit inputs; } {
 ```nix
 # overlays/default.nix
 final: prev: {
-  my-tool = final.callPackage ./platform/nix/my-tool.nix {};
+  my-tool = final.callPackage ./platform/nix/config/my-tool.nix {};
 }
 ```
 

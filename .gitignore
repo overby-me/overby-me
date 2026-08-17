@@ -21,10 +21,10 @@ build
 !**/src/build/**
 !**/lib/cargo/build
 !**/lib/cargo/build/**
-!platform/nix/lib/buck2/build
-!platform/nix/lib/buck2/build/**
-!platform/nix/lib/ninja/build
-!platform/nix/lib/ninja/build/**
+!**/lib/buck2/build
+!**/lib/buck2/build/**
+!**/lib/ninja/build
+!**/lib/ninja/build/**
 dist
 target/
 deployment.zip

@@ -1,0 +1,57 @@
+# deslop configuration for the nix-ninja lowering library
+#
+# build/lower_group.py is a build-time helper, not library code: nix eval hands
+# it one group's edge list and it does the per-edge work that used to run in
+# eval and cost 15-40 minutes on the whole-Darling graph. It is invoked once
+# per group by a derivation builder, has no importers, and its "public API" is
+# an argv parser. The rules below fire on that shape rather than on a defect.
+#
+# It first became visible to deslop when a gitignore anchor was repaired, not
+# when it was written, so nothing here is a new exemption for new code: the
+# rules that would catch a defect introduced in it are left on.
+
+disabled_rules = [
+  # ── Script shape ──────────────────────────────────────────────────────
+  # Every module-level function is internal to a single file that nothing
+  # imports, so "public API" means "not nested". Annotating them documents
+  # nothing a reader of a 500-line script does not already have in view.
+  "public_api_missing_type_hints",
+
+  # `topo` is a topological sort and `main` is an argv parser followed by the
+  # stage sequence the module docstring lists. Splitting either would spread
+  # one linear procedure across call sites without removing a branch.
+  "god_function",
+  "mixed_concerns_function",
+
+  # ── Graph work that is inherently per-iteration ───────────────────────
+  # The ninja graph is a DAG of edges: visiting one means copying its input
+  # set, and the sets are per-edge, so there is nothing invariant to hoist.
+  "set_created_per_iteration_same_elements",
+  "temporary_collection_in_loop",
+  "nested_list_search_map_candidate",
+  "builtin_reduction_candidate",
+
+  # Producer lookup recurses over the same DAG. Its depth is the graph's
+  # dependency depth, which ninja itself bounds well below Python's limit.
+  "recursive_traversal_risk",
+
+  # ── One-shot build-time I/O ───────────────────────────────────────────
+  # This runs once inside a derivation and then the process exits. Buffering
+  # policy, context managers around handles that live until exit, and
+  # repeated opens while probing then rewriting a shebang all cost less than
+  # the compile the script is about to run.
+  "write_without_buffering_in_loop",
+  "missing_context_manager",
+  "repeated_open_same_file_in_function",
+
+  # Staging resolves each path because each one differs; the invariant part
+  # is the root, which is already hoisted.
+  "path_resolve_or_expanduser_in_loop",
+
+  # ── Low signal here ───────────────────────────────────────────────────
+  # The comments narrate a lowering pipeline whose steps are otherwise only
+  # legible by reading ninja's own semantics, and `root_for` returning None
+  # explicitly is what makes its two exits read alike.
+  "obvious_commentary",
+  "redundant_return_none",
+]

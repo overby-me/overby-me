@@ -517,11 +517,11 @@
         "workspace-zen-browser": "workspace-zen-browser"
       },
       "locked": {
-        "path": "./platform/nix",
+        "path": "./platform/nix/config",
         "type": "path"
       },
       "original": {
-        "path": "./platform/nix",
+        "path": "./platform/nix/config",
         "type": "path"
       },
       "parent": []

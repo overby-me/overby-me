@@ -13,7 +13,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
         rootAttrs.postInstall = ''
           ln -s $out/bin/gzip $out/bin/gunzip
           ln -s $out/bin/gzip $out/bin/zcat
@@ -41,7 +41,7 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/cargo/index;
+        index = ../../../platform/nix/config/lib/cargo/index;
         release = false;
 
         rootAttrs.postInstall = ''
