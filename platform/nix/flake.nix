@@ -33,6 +33,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # For `outputsIn`, which turns this directory into a module. The consuming
+    # flake follows its own copy onto this, so there is one framework.
+    workspace = {
+      url = "git+https://tangled.org/overby.me/nix-workspace";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        git-hooks.follows = "git-hooks";
+      };
+    };
+
     workspace-darwin = {
       url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/darwin";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -79,9 +89,49 @@
     };
   };
 
-  # Nothing but the inputs: the root flake merges these into its own so the
-  # workspace finds every module, and calls the framework from here.
-  outputs = inputs: {
-    modules = removeAttrs inputs ["self"];
+  # A module, so this directory is a workspace rather than a bag of inputs:
+  # it carries the outputs under it and the modules it takes, and a tree that
+  # has this input gets both by having it.
+  #
+  # A module rather than outputs of its own, because outputs would be a second
+  # evaluation, and the thirty-four projects elsewhere in the tree build with
+  # a `lib` defined in here - a lib in another flake's evaluation is not one
+  # they can reach.
+  #
+  # A plain attribute set, not `{lib, ...}: {...}`. `imports` is read before
+  # module arguments exist, so building it out of one is the loop the module
+  # system warns about as referencing `config` in `imports`: it surfaces as
+  # infinite recursion inside whichever module happens to want `pkgs` first.
+  # Everything here comes from this flake's own closure instead.
+  outputs = inputs: let
+    inherit (inputs.nixpkgs) lib;
+    modules = lib.filterAttrs (n: _: lib.hasPrefix "workspace-" n) inputs;
+
+    # The modules of this tree, which used to be found by the consuming flake
+    # because it named this directory. It carries them itself now, so having
+    # this input is the whole of having them.
+    own =
+      map (n: ./workspace-modules + "/${n}")
+      (builtins.attrNames (builtins.readDir ./workspace-modules));
+  in {
+    workspaceModule = {
+      imports =
+        [(inputs.workspace.outputsIn ./.)]
+        ++ own
+        ++ (lib.mapAttrsToList (_: i: i.workspaceModule) modules);
+
+      # What this directory pins, handed to the consuming tree the way the
+      # modules beside it hand over theirs: the overlays in with-overlays/
+      # reach rust-overlay and nixpkgs-unstable through `pkgs.inputs`, which
+      # is this set.
+      # mkDefault, like the modules beside it: the consuming tree names some of
+      # these too - nixpkgs at least - and `inputs` takes one definition per
+      # name, so handing them over plainly is a collision rather than a merge.
+      inputs = lib.mapAttrs (_: lib.mkDefault) (removeAttrs inputs ["self"]);
+
+      # Where this directory is, for anything deriving a path from it - the
+      # secrets module takes <outputDir>/secrets from here.
+      outputDirs = [./.];
+    };
   };
 }

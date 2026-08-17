@@ -5,7 +5,7 @@
         "darwin": "darwin",
         "home-manager": "home-manager_2",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "nixpkgs"
@@ -60,7 +60,7 @@
     "darwin": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "agenix",
@@ -85,7 +85,7 @@
     "disko": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-disko",
           "nixpkgs"
         ]
@@ -109,7 +109,7 @@
         "flake-parts": "flake-parts",
         "haumea": "haumea",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-drowse",
           "nixpkgs"
         ]
@@ -210,7 +210,7 @@
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
-          "nix",
+          "nix-config",
           "workspace-drowse",
           "drowse",
           "nixpkgs"
@@ -233,7 +233,7 @@
     "flake-parts_2": {
       "inputs": {
         "nixpkgs-lib": [
-          "nix",
+          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -294,7 +294,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
@@ -337,7 +337,7 @@
     "gitignore": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-nix-wallpaper",
           "nix-wallpaper",
           "pre-commit-hooks",
@@ -361,7 +361,7 @@
     "gitignore_2": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -386,7 +386,7 @@
     "haumea": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-drowse",
           "drowse",
           "nixpkgs"
@@ -410,7 +410,7 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-home-manager",
           "nixpkgs"
         ]
@@ -433,7 +433,7 @@
     "home-manager_2": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "agenix",
@@ -457,7 +457,7 @@
     "home-manager_3": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-zen-browser",
           "zen-browser",
           "nixpkgs"
@@ -493,7 +493,7 @@
         "type": "github"
       }
     },
-    "nix": {
+    "nix-config": {
       "inputs": {
         "git-hooks": "git-hooks",
         "nixpkgs": [
@@ -501,6 +501,9 @@
         ],
         "nixpkgs-unstable": "nixpkgs-unstable",
         "rust-overlay": "rust-overlay",
+        "workspace": [
+          "workspace"
+        ],
         "workspace-darwin": "workspace-darwin",
         "workspace-disko": "workspace-disko",
         "workspace-drowse": "workspace-drowse",
@@ -526,7 +529,7 @@
     "nix-darwin": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-darwin",
           "nixpkgs"
         ]
@@ -550,7 +553,7 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-nix-wallpaper",
           "nixpkgs"
         ],
@@ -573,7 +576,7 @@
     "nixos-hardware": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-nixos-hardware",
           "nixpkgs"
         ]
@@ -596,13 +599,13 @@
     "nixos-images": {
       "inputs": {
         "nixos-stable": [
-          "nix",
+          "nix-config",
           "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
         ],
         "nixos-unstable": [
-          "nix",
+          "nix-config",
           "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
@@ -629,7 +632,7 @@
         "flake-compat": "flake-compat_3",
         "nixos-images": "nixos-images",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-nixos-raspberrypi",
           "nixpkgs"
         ]
@@ -1101,7 +1104,7 @@
         "flake-compat": "flake-compat_2",
         "gitignore": "gitignore",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-nix-wallpaper",
           "nix-wallpaper",
           "nixpkgs"
@@ -1124,7 +1127,7 @@
     "pre-commit-hooks-nix": {
       "inputs": {
         "flake-compat": [
-          "nix",
+          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -1132,7 +1135,7 @@
         ],
         "gitignore": "gitignore_2",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "userborn",
@@ -1197,7 +1200,7 @@
         "crane": "crane",
         "flake-utils": "flake-utils_2",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-ragenix",
           "nixpkgs"
         ],
@@ -1219,7 +1222,7 @@
     },
     "root": {
       "inputs": {
-        "nix": "nix",
+        "nix-config": "nix-config",
         "nixpkgs": "nixpkgs_2",
         "publish-checks": "publish-checks",
         "workspace": "workspace"
@@ -1228,7 +1231,7 @@
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
@@ -1249,7 +1252,7 @@
     "rust-overlay_2": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-ragenix",
           "ragenix",
           "nixpkgs"
@@ -1352,14 +1355,14 @@
     "userborn": {
       "inputs": {
         "flake-compat": [
-          "nix",
+          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "flake-compat"
         ],
         "flake-parts": "flake-parts_2",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-system-manager",
           "system-manager",
           "nixpkgs"
@@ -1409,11 +1412,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1426,17 +1429,17 @@
       "inputs": {
         "nix-darwin": "nix-darwin",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/darwin",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1450,17 +1453,17 @@
       "inputs": {
         "disko": "disko",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/disko",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1474,17 +1477,17 @@
       "inputs": {
         "drowse": "drowse",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/drowse",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1498,17 +1501,17 @@
       "inputs": {
         "home-manager": "home-manager",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/home-manager",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1522,17 +1525,17 @@
       "inputs": {
         "modular-skills": "modular-skills",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/modular-skills",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1546,17 +1549,17 @@
       "inputs": {
         "nix-wallpaper": "nix-wallpaper",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/nix-wallpaper",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1570,17 +1573,17 @@
       "inputs": {
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/nixos-hardware",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1594,17 +1597,17 @@
       "inputs": {
         "nixos-raspberrypi": "nixos-raspberrypi",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ]
       },
       "locked": {
         "dir": "modules/nixos-raspberrypi",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1617,18 +1620,18 @@
     "workspace-ragenix": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ],
         "ragenix": "ragenix"
       },
       "locked": {
         "dir": "modules/ragenix",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1641,18 +1644,18 @@
     "workspace-system-manager": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ],
         "system-manager": "system-manager"
       },
       "locked": {
         "dir": "modules/system-manager",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1665,18 +1668,18 @@
     "workspace-zen-browser": {
       "inputs": {
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "nixpkgs"
         ],
         "zen-browser": "zen-browser"
       },
       "locked": {
         "dir": "modules/zen-browser",
-        "lastModified": 1786986483,
-        "narHash": "sha256-9Mqz8LlWtJ+Q/qvX6RC3+xgvQGXHlnW/M52fKgzRLaE=",
+        "lastModified": 1786988493,
+        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
         "ref": "refs/heads/main",
-        "rev": "726d892acbc0a713e31e44a7464f5eb11b944cea",
-        "revCount": 39,
+        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
+        "revCount": 40,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1690,7 +1693,7 @@
       "inputs": {
         "home-manager": "home-manager_3",
         "nixpkgs": [
-          "nix",
+          "nix-config",
           "workspace-zen-browser",
           "nixpkgs"
         ]

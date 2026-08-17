@@ -13,13 +13,17 @@
     };
   };
 
-  # The modules taken out of nix-workspace are declared one level down, in
-  # platform/nix, which is the directory that talks to them. This takes that
-  # as one input and merges what it carries into its own below, so the
-  # workspace still finds every module while this file stops listing them.
-  inputs.nix = {
+  # This tree's nix configuration, as a workspace of its own: it carries the
+  # outputs under platform/nix and the modules that directory talks to, and
+  # exports them as one module. Taking it is the whole of using it, because
+  # the workspace imports every input that exports a module - so this file
+  # says neither what is in there nor what it needs.
+  inputs.nix-config = {
     url = "path:./platform/nix";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs = {
+      nixpkgs.follows = "nixpkgs";
+      workspace.follows = "workspace";
+    };
   };
 
   # The projects this tree publishes are declared one level down, in
@@ -35,14 +39,14 @@
 
   outputs = inputs:
     inputs.workspace ./. {
-      # What platform/nix talks to, merged in so the workspace finds every
-      # module: it scans the inputs it is handed, and those arrive one level
-      # down. Merged rather than replaced, so this flake's own inputs still
-      # reach the modules that read them.
-      inputs = inputs // inputs.nix.modules;
-      # Every directory under here is named after the output it feeds. Its
-      # workspace-modules are imported, and nothing inside it is a project, both
-      # of which follow from saying this once.
-      outputDirs = [./platform/nix];
+      inherit inputs;
+
+      # Nothing in there is a project. It used to follow from `outputDirs`,
+      # which excluded what it scanned; now that the scanning belongs to that
+      # directory, the exclusion has to be said. Without it discovery walks
+      # platform/nix, finds every default.nix under it, and imports as a
+      # project module one that builds its own `imports` from `pkgs` - which
+      # is a loop, and surfaces as infinite recursion nowhere near here.
+      workspaces.exclude = ["platform/nix"];
     };
 }
