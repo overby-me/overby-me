@@ -7,6 +7,15 @@
     package = pkgs.pkgsUnstable.nixVersions.latest;
     settings = {
       max-jobs = "auto";
+
+      # How many cores one derivation may use, which `auto` leaves at all of
+      # them. That multiplies: on a 22-core machine `max-jobs = "auto"` is 22
+      # builders, each entitled to 22 compilers, and building the whole
+      # package set at once put the machine far enough into swap that it had
+      # to be power-cycled. A build is rarely 22-way parallel for long, so
+      # the ceiling costs little and the product is what matters.
+      cores = 4;
+
       keep-going = true;
       # A .drv is a GC root for the whole build-time closure of what it built,
       # so keeping them holds on to the sources and compilers behind everything
@@ -58,7 +67,24 @@
     IOSchedulingClass = lib.mkForce "idle";
     IPEgressPriority = 7;
     IPIngressPriority = 7;
-    MemoryMax = "90%";
-    MemorySwapMax = "64G";
+
+    # Throttle before the ceiling rather than only at it. Above MemoryHigh the
+    # kernel puts the cgroup under reclaim pressure and slows its allocations,
+    # which is what turns "too many builders" into a slow build instead of a
+    # dead machine. There was only MemoryMax here, so there was nothing
+    # between fine and killed.
+    MemoryHigh = "60%";
+
+    # 90% left about three gigabytes for the session on a thirty gigabyte
+    # machine, which is not enough to stay usable while the daemon is at its
+    # limit - and the limit is what a hard cap is for. This leaves a quarter
+    # of the machine outside the builds.
+    MemoryMax = "75%";
+
+    # Swap here is zram: compressed, and living in the same RAM the limit is
+    # counting. Letting the daemon push 64 GiB into it does not buy memory,
+    # it spends memory to store memory, and vm.swappiness = 180 makes that
+    # the first thing the kernel reaches for. Bounded so it stays a cushion.
+    MemorySwapMax = "8G";
   };
 }
