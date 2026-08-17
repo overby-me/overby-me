@@ -66,9 +66,5 @@
       # workspace-modules are imported, and nothing inside it is a project, both
       # of which follow from saying this once.
       outputDirs = [./platform/nix];
-
-      # The .age files belong to this tree; the module that reads them does
-      # not know where they are until it is told.
-      secretsDir = ./platform/nix/secrets;
     };
 }
