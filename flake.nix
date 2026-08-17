@@ -40,10 +40,7 @@
   # is what lets either be taken without the other.
   inputs.nix-packages = {
     url = "path:./platform/nix/packages";
-    inputs = {
-      workspace.follows = "workspace";
-      oxidized-pkg-config.url = "path:./safety/oxidized/pkg-config";
-    };
+    inputs.workspace.follows = "workspace";
   };
 
   # The projects this tree publishes are declared one level down, in

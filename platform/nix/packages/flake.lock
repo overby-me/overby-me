@@ -54,29 +54,8 @@
         "type": "github"
       }
     },
-    "oxidized-pkg-config": {
-      "inputs": {
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1786993635,
-        "narHash": "sha256-L38IPouLbojAjt62j9NaxC90sPUQdJu/TSjVpmKH/tU=",
-        "ref": "refs/heads/main",
-        "rev": "8bfe93efe2ffb7fc2d348ba4747bddab24189645",
-        "revCount": 51,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-pkg-config"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-pkg-config"
-      }
-    },
     "root": {
       "inputs": {
-        "oxidized-pkg-config": "oxidized-pkg-config",
         "workspace": "workspace"
       }
     },

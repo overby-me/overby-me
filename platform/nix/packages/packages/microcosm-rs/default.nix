@@ -2,7 +2,7 @@
   lib,
   rustPlatform,
   fetchFromGitHub,
-  oxidized-pkg-config,
+  pkg-config,
   openssl,
   perl,
   zstd,
@@ -70,7 +70,7 @@ rustPlatform.buildRustPackage rec {
   ];
 
   nativeBuildInputs = [
-    oxidized-pkg-config
+    pkg-config
     perl
   ];
 
@@ -91,7 +91,10 @@ rustPlatform.buildRustPackage rec {
     homepage = "https://github.com/at-microcosm/microcosm-rs";
     license = with lib.licenses; [agpl3Only];
     maintainers = with lib.maintainers; [overby-me];
-    # Builds against the project's Linux-only oxidized-pkg-config toolchain.
+    # Kept from when this built against a Linux-only pkg-config rewrite. That
+    # reason is gone with the rewrite; whether the crates themselves are
+    # Linux-only was never tested, so the restriction stays until someone
+    # builds it somewhere else.
     platforms = lib.platforms.linux;
   };
 }

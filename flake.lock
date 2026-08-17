@@ -552,7 +552,6 @@
     },
     "nix-packages": {
       "inputs": {
-        "oxidized-pkg-config": "oxidized-pkg-config",
         "workspace": [
           "workspace"
         ]
@@ -1095,23 +1094,6 @@
       "parent": [
         "publish-checks"
       ]
-    },
-    "oxidized-pkg-config": {
-      "inputs": {
-        "workspace": [
-          "nix-packages",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "path": "./safety/oxidized/pkg-config",
-        "type": "path"
-      },
-      "original": {
-        "path": "./safety/oxidized/pkg-config",
-        "type": "path"
-      },
-      "parent": []
     },
     "oxidized-sed": {
       "inputs": {

@@ -2,7 +2,7 @@
   lib,
   rustPlatform,
   fetchFromGitHub,
-  oxidized-pkg-config,
+  pkg-config,
   openssl,
   stdenv,
   darwin,
@@ -22,7 +22,7 @@ rustPlatform.buildRustPackage rec {
   cargoHash = "sha256-hh328dPgbRJuy/YDZ/TBI807qmJ6qdiwnUn0Ols0BFo=";
 
   nativeBuildInputs = [
-    oxidized-pkg-config
+    pkg-config
     rustPlatform.bindgenHook
     python3
   ];

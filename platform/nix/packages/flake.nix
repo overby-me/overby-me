@@ -9,6 +9,12 @@
 # rule everywhere - the path is the address. That is why the directory inside
 # is named again: this flake is the workspace, and `packages/` is the output
 # it feeds.
+#
+# One input, and it is the framework. Six of these link native libraries and
+# briefly took the tree's own pkg-config rewrite, which made a package set
+# depend on a port of a build tool: nixpkgs' pkg-config is what a package set
+# should ask for, and the rewrite is something the tree that wrote it can
+# substitute if it wants to.
 {
   description = "Packages built from source, for a tree that wants them without the configuration around them";
 
@@ -22,16 +28,6 @@
     # of the tree did not have. One input is one thing to follow, and there is
     # no arrangement of it that leaves the two disagreeing.
     workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
-
-    # The one port these reach for. Six of them build Rust that links native
-    # libraries, and take it as the pkg-config on the build side rather than
-    # nixpkgs' - which is the point of having rewritten it. It arrived as an
-    # ambient package while these lived beside the tree that builds it; a
-    # workspace has to name what it uses.
-    oxidized-pkg-config = {
-      url = "git+https://tangled.org/overby.me/oxidized-pkg-config";
-      inputs.workspace.follows = "workspace";
-    };
   };
 
   # A module, like the configuration beside it: a tree that has this input has
