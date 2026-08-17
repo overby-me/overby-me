@@ -17,5 +17,6 @@
       aliases = {
         "pkg-config" = "pkgconf";
       };
+      setupHook = "setup-hook.sh";
     };
 }

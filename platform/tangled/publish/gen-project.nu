@@ -47,6 +47,7 @@ def flake-text [
     build_env: record = {}
     test_flags: list<string> = []
     aliases: record = {}
+    setup_hook: string = ""
 ]: nothing -> string {
     let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
 
@@ -69,6 +70,11 @@ def flake-text [
     if not ($aliases | is-empty) {
         let pairs = ($aliases | items {|k, v| $"        \"($k)\" = \"($v)\";" } | str join "\n")
         $opts = ($opts | append $"      aliases = {\n($pairs)\n      };")
+    }
+    # A tool that replaces part of stdenv needs its hook installed, or a
+    # build that lists it gets a binary that finds nothing.
+    if not ($setup_hook | is-empty) {
+        $opts = ($opts | append $"      setupHook = \"($setup_hook)\";")
     }
     if not ($build_env | is-empty) {
         let pairs = ($build_env | items {|k, v| $"        ($k) = \"($v)\";" } | str join "\n")
@@ -280,6 +286,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o env | default {})
                 ($p | get -o cargoTestFlags | default [])
                 ($p | get -o aliases | default {})
+                ($p | get -o setupHook | default "")
         ) }
         let flake = ($dir | path join "flake.nix")
         # Only a crate has a generated flake. Checking every project for one

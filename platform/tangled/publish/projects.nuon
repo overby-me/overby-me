@@ -337,6 +337,12 @@
   {
     name: "oxidized-pkg-config"
     aliases: {pkg-config: "pkgconf"}
+    # Without this the published repo ships a pkg-config no build can use:
+    # stdenv learns about one from its hook, which is what reads buildInputs
+    # and exports PKG_CONFIG_PATH. The monorepo's own build installed it and
+    # the generated flake did not, so the first package to depend on it from
+    # a clone could not find openssl.
+    setupHook: "setup-hook.sh"
     path: "safety/oxidized/pkg-config"
     description: "A pkg-config-compatible build metadata tool written in Rust"
     formerPaths: [{path: "pkg-config-rs" deps: []} {path: "rust/pkg-config" deps: []}]
