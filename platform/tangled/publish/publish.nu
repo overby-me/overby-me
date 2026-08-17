@@ -82,37 +82,85 @@ def github-token []: nothing -> string {
 #
 # `kind` is what the project is made of. A crate's .nix files are the
 # monorepo's build of it, which the published repo replaces with a generated
-# flake, so they are excluded and flake.nix is let back through. A nix
-# project's .nix files ARE the project, so nothing is excluded.
-def derive-filter [p: record]: nothing -> string {
+# flake, so they are excluded. A nix project's .nix files ARE the project, so
+# only its workflow is replaced.
+#
+# The generated files - the flake, its lock, the CI workflow - are not kept
+# in the project's directory. They live together under generated/ and josh
+# maps them into position, because `::destination=source` places a file
+# somewhere other than where it was found. Three things follow from that.
+# They stop being 115 inert files scattered through the tree that look
+# editable and are not; the workflow stops being 39 byte-identical copies and
+# becomes one file mapped 39 times; and a generated file can no longer drift
+# from the filter that ships it, because the same expression names both.
+#
+# `--current` drops the former eras and keeps only today's paths. Publishing
+# wants every era, because that is what reconstructs the history. Reversing
+# wants none of them: josh attributes a reversed tree to the *first* matching
+# subtree term, which is the oldest era, so ingesting a contribution to
+# oxidized-sed through the full filter writes it to rust/sed - a directory
+# that moved house two renames ago. A contribution is against today's tree, so
+# it should be filtered by today's paths. The two filters produce the same
+# tree at the tip, because an era's directory no longer exists there; that is
+# checked below rather than assumed.
+def derive-filter [p: record, --current]: nothing -> string {
   let kind = ($p | get -o kind | default "crate")
-  let eras = (
-    ($p | get -o formerPaths | default [])
-    | append {path: $p.path, deps: ($p | get -o deps | default [])}
-  )
+  let gen = "platform/tangled/publish/generated"
+  let today = {path: $p.path, deps: ($p | get -o deps | default [])}
+  let eras = if $current { [$today] } else {
+    ($p | get -o formerPaths | default []) | append $today
+  }
+  # Excluded from every era, not just today's: an era predating the move
+  # still has these files in its directory, and letting them through would
+  # publish two of each, the stale one winning wherever it is prefixed.
+  let generated = ":exclude[::flake.lock]:exclude[::.tangled/]"
   let terms = ($eras | each {|era|
     let path = $era.path
     let deps = ($era | get -o deps | default [])
     let base = ($path | path basename)
     if $kind == "nix" {
-      [$":/($path)"]
+      [$":/($path):exclude[::.tangled/]"]
     } else if ($deps | is-empty) {
-      [$":/($path):exclude[::*.nix]" $":/($path)::flake.nix"]
+      [$":/($path):exclude[::*.nix]($generated)"]
     } else {
       # Each directory keeps its own name at the root, so a Cargo.toml's
       # `path = "../pcre2"` still resolves once they are side by side. The
-      # project's own generated files are lifted back to the repo root.
-      [$":/($path):exclude[::*.nix]:exclude[::flake.lock]:exclude[::.tangled/]:exclude[::README.md]:prefix=($base)"]
+      # project's own README is lifted back to the repo root.
+      [$":/($path):exclude[::*.nix]($generated):exclude[::README.md]:prefix=($base)"]
       | append ($deps | each {|d| $":/($d):exclude[::*.nix]:prefix=($d | path basename)" })
-      | append [
-        $":/($path)::flake.nix"
-        $":/($path)::flake.lock"
-        $":/($path)::README.md"
-        $":/($path)::.tangled/"
-      ]
+      | append [$":/($path)::README.md"]
     }
   } | flatten)
-  $":[($terms | str join ',')]:unsign"
+  # One workflow for every project; a flake and a lock for those that have a
+  # generated one. A nix project's flake is its own source, not an artifact.
+  #
+  # Each is mapped from every home it has had: the project's own directory
+  # once per era, and generated/ LAST. Naming them all is what keeps the
+  # history whole - mapping only from generated/ published a repo whose every
+  # historical commit had no flake at all, the same failure `formerPaths`
+  # exists to prevent, a repo you can clone but cannot build at any commit
+  # before today.
+  #
+  # The order is load-bearing and was measured, not assumed: where two terms
+  # write the same destination, the LAST one wins. For most of history only
+  # one source exists and order cannot matter, but a project whose own
+  # directory holds a real flake - one that path-inputs nix-workspace so the
+  # monorepo can evaluate it - has both at once, and the published repo must
+  # get the generated one. That path does not exist in a clone.
+  let artifacts = (
+    [{dest: ".tangled/workflows/ci.yml", now: $"($gen)/ci.yml", then: ".tangled/workflows/ci.yml"}]
+    | append (if $kind == "nix" { [] } else {
+      [
+        {dest: "flake.nix", now: $"($gen)/($p.name)/flake.nix", then: "flake.nix"}
+        {dest: "flake.lock", now: $"($gen)/($p.name)/flake.lock", then: "flake.lock"}
+      ]
+    })
+  )
+  let mapped = ($artifacts | each {|a|
+    ($eras | each {|era| $"::($a.dest)=($era.path)/($a.then)" })
+    | append [$"::($a.dest)=($a.now)"]
+  } | flatten)
+  $":[(($terms | append $mapped) | str join ',')]:unsign"
 }
 
 def check-josh []: nothing -> nothing {
@@ -300,6 +348,30 @@ def main [
   }
 }
 
+# Print the filter each project publishes under.
+#
+# A filter is derived rather than stored, which makes it correct by
+# construction but invisible: the only way to see one was to read
+# derive-filter and run it in your head. Changing that derivation changes
+# every published repo, so being able to diff the filters before and after is
+# what makes such a change reviewable.
+# Printed as plain `name<tab>filter` lines rather than returned as a table:
+# a filter is far wider than a terminal, and a rendered table truncates it,
+# which would make a diff of the output silently agree.
+def "main filters" [
+  --only: string              # only this project
+  --current                   # today's paths only, as `main ingest` reverses through
+]: nothing -> nothing {
+  let here = ($env.FILE_PWD | default ".")
+  open ($here | path join "projects.nuon")
+  | where {|p| $only == null or $p.name == $only }
+  | each {|p|
+    let f = if $current { derive-filter $p --current } else { derive-filter $p }
+    print $"($p.name)\t($f)"
+  }
+  | ignore
+}
+
 # Create the GitHub mirrors that do not exist yet. Kept out of `main` on
 # purpose: publishing should push to repos, not bring them into being, and a
 # typo in a project name would otherwise quietly create a repo rather than
@@ -417,10 +489,16 @@ def "main ingest" [
 
   # Reverse updates the *input* ref, so point it at a review branch rather
   # than at the monorepo branch itself. Nothing lands on ($branch) here.
+  #
+  # Derived, and derived `--current`. This read `$entry.filter` until the
+  # stored filters were removed from projects.nuon, since when every ingest
+  # failed on a missing column; deriving it is what the publish side already
+  # does. `--current` is what decides where the contribution lands.
   git-ok $mirror ["update-ref" $"refs/heads/($review)" $base] | ignore
+  let filter = (derive-filter $entry --current)
   let out = (do {
     cd $mirror
-    ^josh-filter $entry.filter $"refs/heads/($review)" --update $"refs/josh/($project)" --reverse | complete
+    ^josh-filter $filter $"refs/heads/($review)" --update $"refs/josh/($project)" --reverse | complete
   })
   if $out.exit_code != 0 {
     error make {msg: $"reverse filter failed: ($out.stderr | str trim)"}

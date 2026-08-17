@@ -60,18 +60,14 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786914078,
-        "narHash": "sha256-0LgysXfzihGFyifwUrQy4YPc1oXe3VEqUELt/r9LSgU=",
-        "ref": "refs/heads/main",
-        "rev": "8074575ff47056415467ffdf1059a5edf6c500eb",
-        "revCount": 23,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-project"
+        "path": "../../../platform/nix/project",
+        "type": "path"
       },
       "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-project"
-      }
+        "path": "../../../platform/nix/project",
+        "type": "path"
+      },
+      "parent": []
     },
     "root": {
       "inputs": {

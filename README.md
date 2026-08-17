@@ -143,7 +143,7 @@
 
 | Project | Description |
 |-|-|
-| [Nix Project ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/project) | Shared flakelight module for the published repos |
+| [Nix Workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/workspace) | Flake framework for a tree published as one or many repos |
 | [Tangled CLI 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/cli) | Tangled git collaboration CLI |
 | [Tangled Spindle Nix Engine 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) | Tangled Spindle CI runner with native Nix engine |
 
@@ -266,7 +266,7 @@
 
 | Module | Homepage | Description |
 |-|-|-|
-| [Flakelight ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/flake-modules) | [GitHub](https://github.com/accelbread/flakelight) | Flakelight modules |
+| [Nix Workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/workspace-modules) | [Tangled](https://tangled.org/@overby.me/nix-workspace) | This tree’s own workspace modules |
 | [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/home-modules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
 | [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/nixos-modules) | [NixOS](https://nixos.org) | NixOS modules |
 | [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/darwin-modules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |

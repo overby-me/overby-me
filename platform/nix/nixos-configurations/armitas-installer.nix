@@ -21,7 +21,7 @@
 #
 # Note: this is built with nixpkgs.lib.nixosSystem rather than handed to
 # flakelight as a { system, modules } attrset, and that is load-bearing.
-# platform/nix/flake-modules/colmena.nix registers every nixosConfiguration that is
+# platform/nix/workspace-modules/colmena.nix registers every nixosConfiguration that is
 # *not* already a built system as a deploy target, so an installer image
 # would otherwise show up as a node at armitas-installer.overby.me.
 # Flakelight's own handler detects built systems via

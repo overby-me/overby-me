@@ -84,11 +84,13 @@
 [
   {
     name: "oxidized-awk"
+    aliases: {gawk: "awk"}
     path: "safety/oxidized/awk"
     formerPaths: [{path: "rust/awk" deps: []}]
   }
   {
     name: "oxidized-bash"
+    aliases: {sh: "bash"}
     path: "safety/oxidized/bash"
     formerPaths: [{path: "rust/bash" deps: []}]
   }
@@ -120,6 +122,7 @@
   }
   {
     name: "oxidized-make"
+    aliases: {gmake: "make"}
     path: "safety/oxidized/make"
     formerPaths: [{path: "rust/make" deps: []}]
   }
@@ -135,12 +138,64 @@
   }
   {
     name: "oxidized-binutils"
+    aliases: {
+      ar: "rust-binutils"
+      ranlib: "rust-binutils"
+      nm: "rust-binutils"
+      objdump: "rust-binutils"
+      readelf: "rust-binutils"
+      objcopy: "rust-binutils"
+      strings: "rust-binutils"
+      size: "rust-binutils"
+      addr2line: "rust-binutils"
+      c++filt: "rust-binutils"
+      strip: "rust-binutils"
+      as: "rust-binutils"
+      ld: "rust-binutils"
+      elfedit: "rust-binutils"
+    }
     description: "A GNU binutils-compatible suite of binary utilities written in Rust"
     path: "safety/oxidized/binutils"
     formerPaths: [{path: "rust/binutils" deps: []}]
   }
   {
     name: "oxidized-pipewire"
+    aliases: {
+      pipewire: "rust-pipewire"
+      pipewire-pulse: "rust-pipewire"
+      pipewire-aes67: "rust-pipewire"
+      pipewire-avb: "rust-pipewire"
+      pipewire-vulkan: "rust-pipewire"
+      pw-cli: "rust-pipewire"
+      pw-mon: "rust-pipewire"
+      pw-dump: "rust-pipewire"
+      pw-link: "rust-pipewire"
+      pw-metadata: "rust-pipewire"
+      pw-loopback: "rust-pipewire"
+      pw-config: "rust-pipewire"
+      pw-cat: "rust-pipewire"
+      pw-play: "rust-pipewire"
+      pw-record: "rust-pipewire"
+      pw-dot: "rust-pipewire"
+      pw-top: "rust-pipewire"
+      pw-profiler: "rust-pipewire"
+      pw-reserve: "rust-pipewire"
+      pw-container: "rust-pipewire"
+      pw-mididump: "rust-pipewire"
+      pw-midiplay: "rust-pipewire"
+      pw-midirecord: "rust-pipewire"
+      pw-midi2play: "rust-pipewire"
+      pw-midi2record: "rust-pipewire"
+      pw-sysex: "rust-pipewire"
+      pw-dsdplay: "rust-pipewire"
+      pw-encplay: "rust-pipewire"
+      pw-v4l2: "rust-pipewire"
+      spa-json-dump: "rust-pipewire"
+      spa-inspect: "rust-pipewire"
+      spa-monitor: "rust-pipewire"
+      spa-acp-tool: "rust-pipewire"
+      spa-resample: "rust-pipewire"
+    }
     description: "A PipeWire-compatible multimedia graph daemon written in Rust"
     path: "safety/oxidized/pipewire"
     formerPaths: [{path: "rust/pipewire" deps: []}]
@@ -172,6 +227,7 @@
   }
   {
     name: "oxidized-gzip"
+    aliases: {gunzip: "gzip", zcat: "gzip"}
     path: "safety/oxidized/gzip"
     formerPaths: [{path: "rust/gzip" deps: []}]
   }
@@ -188,6 +244,13 @@
   }
   {
     name: "oxidized-xz"
+    aliases: {
+      unxz: "xz"
+      xzcat: "xz"
+      lzma: "xz"
+      unlzma: "xz"
+      lzcat: "xz"
+    }
     path: "safety/oxidized/xz"
     formerPaths: [{path: "rust/xz" deps: []}]
   }
@@ -222,6 +285,7 @@
   }
   {
     name: "oxidized-bzip2"
+    aliases: {bunzip2: "bzip2", bzcat: "bzip2"}
     path: "safety/oxidized/bzip2"
     description: "A bzip2-compatible compression tool written in Rust"
     formerPaths: [{path: "rust/bzip2" deps: []}]
@@ -240,6 +304,7 @@
   }
   {
     name: "oxidized-diffutils"
+    aliases: {cmp: "diff", sdiff: "diff", diff3: "diff"}
     path: "safety/oxidized/diffutils"
     description: "A GNU diffutils-compatible suite of file comparison tools written in Rust"
     formerPaths: [{path: "rust/diffutils" deps: []}]
@@ -264,18 +329,21 @@
   }
   {
     name: "oxidized-llvm"
+    aliases: {opt-rs: "opt"}
     path: "safety/oxidized/llvm"
     description: "An LLVM-compatible compiler infrastructure written in Rust"
     formerPaths: [{path: "rust/llvm" deps: []}]
   }
   {
     name: "oxidized-pkg-config"
+    aliases: {pkg-config: "pkgconf"}
     path: "safety/oxidized/pkg-config"
     description: "A pkg-config-compatible build metadata tool written in Rust"
     formerPaths: [{path: "pkg-config-rs" deps: []} {path: "rust/pkg-config" deps: []}]
   }
   {
     name: "oxidized-texinfo"
+    aliases: {texi2any: "makeinfo"}
     path: "safety/oxidized/texinfo"
     description: "A GNU makeinfo-compatible Texinfo processor written in Rust"
     formerPaths: [{path: "rust/texinfo" deps: []}]
@@ -309,10 +377,17 @@
   # deliberately first in this list so a run that adds a project pushes the
   # module before anything that depends on it.
   {
-    name: "nix-project"
-    path: "platform/nix/project"
-    description: "The shared flakelight module for projects published from the overby.me monorepo"
-    formerPaths: [{path: "nix/standalone" deps: []} {path: "platform/nix/standalone" deps: []}]
+    name: "nix-workspace"
+    path: "platform/nix/workspace"
+    description: "A flake framework for a tree published as one or many repos"
+    # Four homes so far. The last of them is this rename: without the entry
+    # the published repo's history would begin at the move, which is the
+    # failure this list exists to prevent.
+    formerPaths: [
+      {path: "nix/standalone" deps: []}
+      {path: "platform/nix/standalone" deps: []}
+      {path: "platform/nix/project" deps: []}
+    ]
     kind: "nix"
   }
   # Not a rust/ rewrite: the client this publisher itself uses to create and
@@ -330,6 +405,7 @@
   # the root, because that is what the depending Cargo.toml already says.
   {
     name: "oxidized-grep"
+    aliases: {egrep: "grep", fgrep: "grep"}
     path: "safety/oxidized/grep"
     deps: ["safety/oxidized/pcre2"]
     formerPaths: [{path: "rust/grep" deps: ["rust/pcre2"]}]

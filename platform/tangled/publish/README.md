@@ -62,19 +62,21 @@ limiting has been observed at this size.
 ## Standing alone
 
 A filtered directory on its own is cargo-only. Every project's `default.nix`
-is a flakelight module, but the root flake imports it and all but one reach for
+is a nix-workspace module, but the root flake imports it and all but one reach for
 `../../../platform/nix/lib`, so the filter drops it. `gen-project.nu` gives every
-project the three things it needs to be a real repo, all of them inert in the
-monorepo:
+project the three things it needs to be a real repo. None of them is stored in
+the project's own directory: they live together under
+[`generated/`](./generated) and josh maps them into place when it publishes
+(see [Generated, not stored](#generated-not-stored)).
 
-- `flake.nix`, one call into [`nix-project`](../../nix/project), which is a
+- `flake.nix`, one call into [`nix-workspace`](../../nix/workspace), which is a
   flakelight flake made callable through flakelight's `functor` option:
 
   ```nix
   {
     description = "A GNU sed-compatible stream editor written in Rust";
 
-    inputs.project.url = "github:overby-me/nix-project";
+    inputs.project.url = "github:overby-me/nix-workspace";
 
     outputs = inputs:
       inputs.project ./. {
@@ -91,16 +93,117 @@ monorepo:
   further declared. A project states only what differs: `subdir`,
   `nativeBuildInputs`, `buildInputs`, `doCheck`, `cargoTestFlags`, `env`,
   `toolchain`.
-- `.tangled/workflows/ci.yml`, which runs `nix flake check`. Tangled reads
-  workflows from a repo root, so under `safety/oxidized/<name>/` it does nothing
-  here.
-- the README banner pointing back here.
+- `.tangled/workflows/ci.yml`, which runs `nix flake check`. One file, mapped
+  into all 39: Tangled reads workflows from a repo root, so a copy under
+  `safety/oxidized/<name>/` did nothing here but wait to be edited by mistake.
+- the README banner pointing back here. This one *is* written in place, because
+  the README is a real file that the generator only edits.
 
-The generator runs `alejandra` over what it writes, because flakelight gives
+The generator runs `alejandra` over what it writes, because nix-workspace gives
 every repo a formatting check and an unformatted generated flake fails the CI
 of the repo it was generated for.
 
-nixpkgs comes from `nix-project`'s own lock, because the functor closes over
+### Generated, not stored
+
+These files used to sit in the directory they were generated for: 115 of them,
+inert, since nothing in the monorepo reads a published repo's flake and Tangled
+reads no workflow from a subdirectory. All they did there was look editable.
+(117 files matched the three names; two of them were `nix-workspace`'s own flake
+and lock, which are source rather than artifact and stayed where they are.)
+
+They now live under `generated/` and reach the published repo through josh's
+`::<destination>=<source>` filter, which publishes a file at a path other than
+the one it is stored at:
+
+```text
+::flake.nix=platform/tangled/publish/generated/oxidized-sed/flake.nix
+::.tangled/workflows/ci.yml=platform/tangled/publish/generated/ci.yml
+```
+
+Three things follow. The tree stops carrying files that look editable and are
+not. The workflow collapses from 39 byte-identical copies to one. And a
+generated file can no longer drift from the filter that ships it, because one
+expression names both.
+
+Each artifact is mapped from every home it has had - the project's own
+directory once per era in `formerPaths`, and `generated/` **last**. Naming them
+all is what keeps the history whole: mapping only from `generated/` published
+repos whose every historical commit had no flake at all, which is the failure
+`formerPaths` exists to prevent. With the era terms in place, 37 of the 39
+published repos filter to a byte-identical tip commit - the same SHA, so the
+same entire history, and nothing to push.
+
+The order is load-bearing, and measured rather than assumed: **where two terms
+write the same destination, the last one wins.** For most of history only one
+source exists, so order cannot matter. It matters for a project whose own
+directory holds a real flake (see below), because then both exist in the same
+commit and the published repo must get the generated one.
+
+The two that change are worth stating. `nix-workspace` differs only in the
+committer timestamp of the working-copy commit, an artifact of filtering
+uncommitted work rather than of the move. `oxidized-grep` gains one commit,
+which deletes `pcre2/flake.lock` and `pcre2/.tangled/workflows/ci.yml`: grep
+vendors pcre2 as a sibling directory, and pcre2's own generated files were
+being published inside grep's repo, where they meant nothing. Moving the
+artifacts out of the tree removed them by construction.
+
+### A real flake in the project directory
+
+Every project without sibling dependencies - 36 of the 38 - has a real
+`flake.nix` in its own directory, written by `gen-project.nu` alongside the
+published one. Nineteen of those are taken as root inputs and built. Each
+differs from its published counterpart in a single line:
+
+```nix
+inputs.project.url = "path:../../../platform/nix/workspace";             # in-tree
+inputs.project.url = "git+https://tangled.org/overby.me/nix-workspace";  # published
+```
+
+The path is what avoids the circularity: nix-workspace is published *from* here,
+so a URL would mean publishing before the monorepo could evaluate its own
+change to it. josh maps the published variant over the in-tree one, which makes
+substituting that line the filter's job rather than the generator's, and is why
+the mapping order above has to put `generated/` last.
+
+Two things about this are non-obvious, and both were measured:
+
+- **A relative path input only resolves when the flake is reached through the
+  repo root.** `nix eval 'path:./safety/oxidized/sed#…'` fails with *access to
+  absolute path '/platform/nix/workspace' is forbidden*, because `../../../` is
+  resolved against the filesystem root. Reached as an input of the root flake,
+  or as `nix eval '.?dir=safety/oxidized/sed#…'`, it resolves inside the tree
+  and evaluates to `rust-sed-0.1.0`. So the flake is checkable where it sits,
+  without the monorepo taking a path input per project.
+- **The lock stays live.** A path input is recorded with no `narHash`, and the
+  sub-flake gets no lock of its own in-tree, so nothing here is pinned that
+  could drift from the published lock. That holds only because a project flake
+  has exactly one input; nixpkgs and the hooks arrive through the functor.
+
+This does not replace `default.nix`, and is not meant to. The monorepo builds
+the crate with `lib.buildCargoProject` - per-crate derivations against the
+committed 7.3 MB index shared by all 39 projects - while the flake builds it
+with `rustPlatform.buildRustPackage`, one derivation and nothing bespoke.
+Converging them would mean slicing that index into every published repo, or
+making each one do IFD against the sparse index on every `nix flake check`:
+paying, in repos an outsider clones, for a property only the monorepo benefits
+from.
+
+So the second build is kept and made to earn its place. `checks.project-flake-*`
+builds both and holds them against each other: everything the published repo
+ships must exist in the tree's build and produce identical `--version` and
+`--help` output. Containment rather than equality, because the tree's
+`default.nix` adds the aliases these tools are drop-in replacements for -
+`gawk` beside `awk`, `sh` beside `bash`, `gmake` beside `make`, `texi2any`
+beside `makeinfo`, and eleven names for `oxidized-gcc`'s five. That is
+packaging, not a divergence in the build. A binary the published build ships
+and the tree does not would be the real thing, and fails.
+
+All nineteen agree today. Two projects are held back because their build in
+this tree is broken independently of any of this: `oxidized-pipewire` fails
+with 34 dangling symlinks, and `oxidized-perl` fails separately. Both build
+fine as published flakes, which is how the difference showed up.
+
+nixpkgs comes from `nix-workspace`'s own lock, because the functor closes over
 that flake's inputs. Every published repo therefore builds against identical
 nixpkgs by construction, and each lock has one direct input. This replaced
 writing the monorepo's resolved revision into all thirty-eight files, which
@@ -113,7 +216,7 @@ everywhere: `rustfmt`, `clippy`, `typos`, `ripsecrets`, `alejandra`, `deadnix`
 and `statix`. A contributor who has only that repo is then held to what the
 monorepo holds it to.
 
-They come from `nix-project` rather than from each repo's own flake, so
+They come from `nix-workspace` rather than from each repo's own flake, so
 changing the hook list is one commit there rather than thirty-eight
 regenerated files. That does make a published repo depend on a second repo of
 ours, which the earlier per-repo template avoided; the trade was taken once
@@ -123,7 +226,7 @@ An overlay is the exception, and stays the consuming flake's own input:
 
 ```nix
 inputs = {
-  project.url = "github:overby-me/nix-project";
+  project.url = "github:overby-me/nix-workspace";
   rust-overlay.url = "github:oxalica/rust-overlay";
 };
 
@@ -135,7 +238,7 @@ outputs = inputs:
   };
 ```
 
-Carrying `rust-overlay` in `nix-project` would make all thirty-eight repos
+Carrying `rust-overlay` in `nix-workspace` would make all thirty-eight repos
 fetch it for the one that pins a toolchain.
 
 ### Projects that are not pure Rust
@@ -208,7 +311,26 @@ secret should not stop the forge that is these repos' actual home.
 Published repos are read-only mirrors, so a contribution arrives as a branch
 on one of them (typically a pull request's source branch). `ingest`
 reverse-filters that branch back through the project's filter and lands it on
-a local review branch, re-prefixed into the project's directory:
+a local review branch, re-prefixed into the project's directory.
+
+It reverses through `derive-filter --current`, which is today's paths only,
+not the full filter that publishing uses. Two reasons, both found by testing
+the reverse direction rather than reasoning about it:
+
+- josh attributes a reversed tree to the **first** matching subtree term, and
+  the eras are ordered oldest first. Reversed through the full filter, a
+  contribution to `oxidized-sed` landed in `rust/sed/` - recreating 4,000
+  lines at a directory that moved two renames ago, while today's directory
+  went untouched. A contribution is made against today's tree, so today's
+  paths are what it should reverse through.
+- The filter was read from a stored `filter` field on each project. That
+  field was removed when filters became derived, so every `ingest` run failed
+  on a missing column; it is derived now, like the publish side.
+
+Both are checked: `--current` and the full filter produce an identical tip
+tree for all 39 projects, so nothing about what gets published depends on
+this, and a contribution touching source and a generated flake now lands in
+`safety/oxidized/sed/src/` and `generated/oxidized-sed/` respectively.
 
 ```sh
 nu publish.nu ingest oxidized-awk --from-ref some-contribution
@@ -292,21 +414,44 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 ```text
 :/<path>            subdirectory becomes the repo root
 :exclude[::*.nix]   drop every top-level nix file: default.nix is a
-                    flakelight module the root flake imports, reaching for
+                    nix-workspace module the root flake imports, reaching for
                     ../../../platform/nix/lib/cargo/index, and the testsuite helpers it
                     calls are dead weight without it. A glob rather than a
                     list, because several projects carry more than two
                     (safety/oxidized/pipewire has six) and new ones appear.
+::<dest>=<source>   publish a file at a path other than the one it is
+                    stored at. Names a source that need not exist: a term
+                    whose source is absent from a commit contributes
+                    nothing to it rather than failing.
 :unsign             strip signatures; these are publish-only mirrors
 ```
 
 Switching the pilots from two explicit excludes to the glob produced byte
 identical output, so it rewrote no published history.
 
-**Keep the shared surface empty.** Every path mapped into a published repo
-makes it pick up commits touching that path. Map `flake.lock` into N projects
-and one `nix flake update` becomes N commits across N repos, forever. No
-current filter maps anything from outside its own directory.
+Verified against josh r26.05.08. Note that josh's other file-creating filter,
+insertion (`:$path="content"`), is refused unless
+`JOSH_EXPERIMENTAL_FEATURES=1` is set, and is documented as generative with
+`:empty` for an inverse - so a file it fabricated could not be reverse
+filtered back to a source. Mapping has neither problem, which is why the
+generated files are stored and mapped rather than synthesised.
+
+**Keep the shared surface small, and generated.** Every path mapped into a
+published repo makes it pick up commits touching that path. Map `flake.lock`
+into N projects and one `nix flake update` becomes N commits across N repos,
+forever.
+
+One path is now shared: `generated/ci.yml`, mapped into all 39. That is the
+same coupling those repos already had - the workflow was 39 byte-identical
+copies that were only ever regenerated together, so a change to it was
+already one commit landing in all 39 - but it is now visible as one file
+instead of hidden as 39. The rule that survives is the reason behind it:
+share a path only when every commit touching it is *meant* for all of its
+readers. A generated artifact qualifies; a source file does not. Each
+project's `flake.nix` and `flake.lock` therefore stay per project under
+`generated/<name>/`, even though 36 of the 38 locks are byte-identical: they
+are identical by construction today, and sharing the path would mean relocking
+one project silently relocked thirty-six.
 
 ## Known wart: empty commits
 
