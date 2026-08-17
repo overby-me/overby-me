@@ -20,7 +20,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "project",
+          "workspace",
           "nixpkgs"
         ]
       },
@@ -40,22 +40,6 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1786313170,
-        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
-        "type": "github"
-      }
-    },
-    "nixpkgs_2": {
-      "locked": {
         "lastModified": 1744536153,
         "narHash": "sha256-awS2zRgF4uTwrOKwwiJcByDzDOdo3Q1rPZbiHQg/N38=",
         "owner": "NixOS",
@@ -70,47 +54,63 @@
         "type": "github"
       }
     },
-    "project": {
-      "inputs": {
-        "git-hooks": "git-hooks",
-        "nixpkgs": "nixpkgs"
-      },
+    "nixpkgs_2": {
       "locked": {
-        "lastModified": 1786914078,
-        "narHash": "sha256-0LgysXfzihGFyifwUrQy4YPc1oXe3VEqUELt/r9LSgU=",
-        "ref": "refs/heads/main",
-        "rev": "8074575ff47056415467ffdf1059a5edf6c500eb",
-        "revCount": 23,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-project"
+        "lastModified": 1786313170,
+        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-project"
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
+        "type": "github"
       }
     },
     "root": {
       "inputs": {
-        "project": "project",
-        "rust-overlay": "rust-overlay"
+        "rust-overlay": "rust-overlay",
+        "workspace": "workspace"
       }
     },
     "rust-overlay": {
       "inputs": {
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786849542,
-        "narHash": "sha256-MS8cOa/ii1+QA8R3JWVzqEIoXimu9n50GwQDiBVTFOM=",
+        "lastModified": 1786935912,
+        "narHash": "sha256-26qGGBO364d5JbTMrFchrxp7xY8CJp3D5cjkND99t7E=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "b211eadeba8b180da9453ec3413a8a3535c85b3f",
+        "rev": "b479967b8ed7aca40ba52cf12f460484c53928a9",
         "type": "github"
       },
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
         "type": "github"
+      }
+    },
+    "workspace": {
+      "inputs": {
+        "git-hooks": "git-hooks",
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1786969942,
+        "narHash": "sha256-NkupovRJNpaVnbKVm+OJkzO+cOHg8Ga9W0V90entEZM=",
+        "ref": "refs/heads/main",
+        "rev": "54d06ccb4c76c4124752a6f4139d0955f643cafa",
+        "revCount": 28,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
       }
     }
   },

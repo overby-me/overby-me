@@ -284,7 +284,12 @@ def main [
 
   if $ssh_key != null {
     let user = ($ssh_user | default $owner)
-    $env.GIT_SSH_COMMAND = $"ssh -i ($ssh_key) -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    # ControlPath=none because a multiplexed connection is already
+    # authenticated: with ControlMaster on, ssh reuses the existing socket and
+    # never consults -i or IdentitiesOnly, so the knot sees whichever key
+    # opened it first and answers "this ssh key doesn't match any key
+    # published by the accounts that may push here" no matter what is passed.
+    $env.GIT_SSH_COMMAND = $"ssh -i ($ssh_key) -o IdentitiesOnly=yes -o ControlMaster=no -o ControlPath=none -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
     print $"pushing as ($user)@tangled.org with ($ssh_key)"
   }
 
@@ -461,7 +466,12 @@ def "main ingest" [
   let review = if $into != null { $into } else { $"ingest/($project)" }
 
   if $ssh_key != null {
-    $env.GIT_SSH_COMMAND = $"ssh -i ($ssh_key) -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    # ControlPath=none because a multiplexed connection is already
+    # authenticated: with ControlMaster on, ssh reuses the existing socket and
+    # never consults -i or IdentitiesOnly, so the knot sees whichever key
+    # opened it first and answers "this ssh key doesn't match any key
+    # published by the accounts that may push here" no matter what is passed.
+    $env.GIT_SSH_COMMAND = $"ssh -i ($ssh_key) -o IdentitiesOnly=yes -o ControlMaster=no -o ControlPath=none -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
   }
   let ssh_login = ($ssh_user | default $owner)
   let remote = $"($ssh_login)@tangled.org:($owner)/($entry.name)"
