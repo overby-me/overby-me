@@ -61,11 +61,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786972456,
-        "narHash": "sha256-4jFMM6JJ1PcxVhOwIJKb5pDAKLeB795cq5PBc8vqY/U=",
+        "lastModified": 1786993635,
+        "narHash": "sha256-L38IPouLbojAjt62j9NaxC90sPUQdJu/TSjVpmKH/tU=",
         "ref": "refs/heads/main",
-        "rev": "1866eb1fc9b094e55a5bb259cf43044ea6a67c69",
-        "revCount": 50,
+        "rev": "8bfe93efe2ffb7fc2d348ba4747bddab24189645",
+        "revCount": 51,
         "type": "git",
         "url": "https://tangled.org/overby.me/oxidized-pkg-config"
       },
@@ -89,11 +89,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786988493,
-        "narHash": "sha256-0lQzOo0uhosY5x+ExtEmbh4RxZ8X/+7KaealgyFP/LE=",
+        "lastModified": 1786993604,
+        "narHash": "sha256-04xzLq7sQZwU5O07rfYwF+1BJKvcKQLF4S+8moSSpAU=",
         "ref": "refs/heads/main",
-        "rev": "84567655d50f43bb208353b35be49dbdcbc27fab",
-        "revCount": 40,
+        "rev": "c66e855ba10449f71e54ed4f5aaf7633b83b434e",
+        "revCount": 41,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
