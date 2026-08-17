@@ -2,8 +2,8 @@
 let
   manifest = import ../lib/manifest.nix;
 
-  wclip = manifest.loadWorkspace ../../../../../dev/wclip;
-  xz = manifest.loadWorkspace ../../../../../safety/oxidized/xz;
+  wclip = manifest.loadWorkspace ../../../../../../dev/wclip;
+  xz = manifest.loadWorkspace ../../../../../../safety/oxidized/xz;
 
   wclipPkg = wclip.byName.rust-wclip;
   xzPkg = xz.byName.rust-xz;

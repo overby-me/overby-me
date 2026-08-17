@@ -18,9 +18,9 @@ let
       workspace = manifestLib.loadWorkspace src;
     }).nodes;
 
-  wclip = resolveProject ../../../../../dev/wclip ["rust-wclip"] false;
-  xz = resolveProject ../../../../../safety/oxidized/xz ["rust-xz"] false;
-  xzDev = resolveProject ../../../../../safety/oxidized/xz ["rust-xz"] true;
+  wclip = resolveProject ../../../../../../dev/wclip ["rust-wclip"] false;
+  xz = resolveProject ../../../../../../safety/oxidized/xz ["rust-xz"] false;
+  xzDev = resolveProject ../../../../../../safety/oxidized/xz ["rust-xz"] true;
 
   xzNames = builtins.attrNames xz;
   has = nodes: name:

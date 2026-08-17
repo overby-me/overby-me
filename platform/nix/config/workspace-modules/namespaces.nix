@@ -18,10 +18,16 @@
 # upstream name.
 {
   options,
+  config,
   lib,
   ...
 }: let
-  labels = import ../project/labels.nix;
+  # From the framework rather than from a sibling directory: labels left this
+  # tree with nix-workspace, and the path this used to name has been dead
+  # since. Taken through `inputs` because the module system has it, and
+  # only ever forced inside the check below, so it cannot be the `imports`
+  # loop the flake warns about.
+  labels = import (config.inputs.workspace + "/labels.nix");
 
   exports = {
     # fe-c's runtime and cargo subcommand are published crates in their own
@@ -29,15 +35,19 @@
     "safety/fe-c" = ["cargo-fe-c" "cementite"];
   };
 
+  # Four levels, because this file sits four below the root. An existence
+  # check cannot catch a mistake here: one level short is `platform`, which
+  # exists, so discovery quietly finds nothing and the check passes by
+  # having nothing to say.
   projects = labels.discover {
-    root = ../../..;
+    root = ../../../..;
     exclude = ["platform/nix"];
   };
 
   # Which project a definition came from, by the file the module system
-  # recorded for it. A definition from outside any project - flakelight's own
-  # nixDir autoloading, which names platform/nix/config/packages by filename - is not a
-  # project's to answer for.
+  # recorded for it. A definition from outside any project - the workspace's
+  # own autoloading, which names platform/nix/config/packages by filename -
+  # is not a project's to answer for.
   projectOf = file: let
     hits = builtins.filter (l: lib.hasSuffix "/${l.path}" file || lib.hasInfix "/${l.path}/" file) projects;
   in

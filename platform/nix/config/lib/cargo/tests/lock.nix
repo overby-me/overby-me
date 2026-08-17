@@ -2,8 +2,8 @@
 let
   lock = import ../lib/lock.nix;
 
-  wclip = lock.parseLock (builtins.readFile ../../../../../dev/wclip/Cargo.lock);
-  xz = lock.parseLock (builtins.readFile ../../../../../safety/oxidized/xz/Cargo.lock);
+  wclip = lock.parseLock (builtins.readFile ../../../../../../dev/wclip/Cargo.lock);
+  xz = lock.parseLock (builtins.readFile ../../../../../../safety/oxidized/xz/Cargo.lock);
 
   libc = wclip.byId."libc-0.2.186";
   member = wclip.byId."rust-wclip-0.1.0";

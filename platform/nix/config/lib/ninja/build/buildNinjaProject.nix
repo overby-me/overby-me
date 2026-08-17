@@ -54,11 +54,11 @@
     pkgs.lib.buildCargoProject {
       pname = "rust-ninja";
       src = pkgs.lib.fileset.toSource {
-        root = ../../../../../safety/oxidized/ninja;
+        root = ../../../../../../safety/oxidized/ninja;
         fileset = pkgs.lib.fileset.unions [
-          ../../../../../safety/oxidized/ninja/Cargo.toml
-          ../../../../../safety/oxidized/ninja/Cargo.lock
-          ../../../../../safety/oxidized/ninja/src
+          ../../../../../../safety/oxidized/ninja/Cargo.toml
+          ../../../../../../safety/oxidized/ninja/Cargo.lock
+          ../../../../../../safety/oxidized/ninja/src
         ];
       };
       index = ../../cargo/index;
