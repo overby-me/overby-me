@@ -86,53 +86,8 @@
   # has this input gets both by having it.
   #
   # A module rather than outputs of its own, because outputs would be a second
-  # evaluation, and the thirty-four projects elsewhere in the tree build with
-  # a `lib` defined in here - a lib in another flake's evaluation is not one
-  # they can reach.
-  #
-  # A plain attribute set, not `{lib, ...}: {...}`. `imports` is read before
-  # module arguments exist, so building it out of one is the loop the module
-  # system warns about as referencing `config` in `imports`: it surfaces as
-  # infinite recursion inside whichever module happens to want `pkgs` first.
-  # Everything here comes from this flake's own closure instead.
-  outputs = inputs: let
-    inherit (inputs.workspace.inputs) nixpkgs;
-    inherit (nixpkgs) lib;
-    modules = lib.filterAttrs (n: _: lib.hasPrefix "workspace-" n) inputs;
-
-    # The modules of this tree, which used to be found by the consuming flake
-    # because it named this directory. It carries them itself now, so having
-    # this input is the whole of having them.
-    own =
-      map (n: ./workspace-modules + "/${n}")
-      (builtins.attrNames (builtins.readDir ./workspace-modules));
-  in {
-    workspaceModule = {
-      imports =
-        [(inputs.workspace.outputsIn ./.)]
-        ++ own
-        ++ (lib.mapAttrsToList (_: i: i.workspaceModule) modules);
-
-      # What this directory pins, handed to the consuming tree the way the
-      # modules beside it hand over theirs: the overlays in with-overlays/
-      # reach rust-overlay and nixpkgs-unstable through `pkgs.inputs`, which
-      # is this set.
-      #
-      # nixpkgs is put back into it by name. It is not an input of this flake
-      # any more, and colmena reads it as `inputs.nixpkgs` - so leaving it out
-      # would make that resolve to whatever the consuming tree calls nixpkgs,
-      # which is the disagreement not declaring it was meant to rule out.
-      #
-      # mkDefault, like the modules beside it: the consuming tree names some of
-      # these too - nixpkgs at least - and `inputs` takes one definition per
-      # name, so handing them over plainly is a collision rather than a merge.
-      inputs =
-        lib.mapAttrs (_: lib.mkDefault)
-        ((removeAttrs inputs ["self"]) // {inherit nixpkgs;});
-
-      # Where this directory is, for anything deriving a path from it - the
-      # secrets module takes <outputDir>/secrets from here.
-      outputDirs = [./.];
-    };
-  };
+  # evaluation, and the projects elsewhere in the tree build with a `lib`
+  # defined in another workspace - a lib in another flake's evaluation is not
+  # one they can reach.
+  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn ./. inputs;};
 }

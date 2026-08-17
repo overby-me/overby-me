@@ -32,27 +32,5 @@
 
   # A module, like the configuration beside it: a tree that has this input has
   # the packages, and does not have to name the directory they are in.
-  outputs = inputs: let
-    inherit (inputs.workspace.inputs) nixpkgs;
-    inherit (nixpkgs) lib;
-  in {
-    workspaceModule = {
-      imports = [(inputs.workspace.outputsIn ./.)];
-
-      # nixpkgs is put back in by name. It is not an input of this flake any
-      # more, and the modules read it as `inputs.nixpkgs` - so leaving it out
-      # would make that resolve to whatever the consuming tree happens to
-      # call nixpkgs, which is the disagreement not declaring it was meant to
-      # rule out.
-      #
-      # mkDefault, because the consuming tree names nixpkgs too and `inputs`
-      # takes one definition per name: handing them over plainly is a
-      # collision rather than a merge.
-      inputs =
-        lib.mapAttrs (_: lib.mkDefault)
-        ((removeAttrs inputs ["self"]) // {inherit nixpkgs;});
-
-      outputDirs = [./.];
-    };
-  };
+  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn ./. inputs;};
 }

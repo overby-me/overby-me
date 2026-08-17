@@ -56,25 +56,5 @@
   # A module, like the workspaces beside it: a tree that has this input has
   # the builders, as `pkgs.lib.<name>` for the ones that need a pkgs and as
   # the flake's own `lib` output for the ones that do not.
-  outputs = inputs: let
-    inherit (inputs.workspace.inputs) nixpkgs;
-    inherit (nixpkgs) lib;
-
-    own =
-      map (n: ./workspace-modules + "/${n}")
-      (builtins.attrNames (builtins.readDir ./workspace-modules));
-  in {
-    workspaceModule = {
-      imports = [(inputs.workspace.outputsIn ./.)] ++ own;
-
-      # nixpkgs is put back in by name: it is not an input of this flake any
-      # more, and a module that reads `inputs.nixpkgs` would otherwise get
-      # whatever the consuming tree happens to call nixpkgs.
-      inputs =
-        lib.mapAttrs (_: lib.mkDefault)
-        ((removeAttrs inputs ["self"]) // {inherit nixpkgs;});
-
-      outputDirs = [./.];
-    };
-  };
+  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn ./. inputs;};
 }
