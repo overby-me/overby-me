@@ -125,7 +125,18 @@
           cd "$TMPDIR/tests"
           export LD_LIBRARY_PATH="${curl-test-infra}/lib"
 
-          ${perl}/bin/perl ./runtests.pl \
+          # Bounded, because a curl test that blocks blocks forever: the suite
+          # starts its own servers (sws and friends) and waits on them, and in
+          # the sandbox one of them sat at zero CPU for an hour with nothing to
+          # time it out. `-a` already keeps the run going past a failure, so
+          # what was missing was only an end. Killed hard after the grace
+          # period, since the thing to kill is a server that is not listening.
+          #
+          # The results file is written either way: a partial results.txt is
+          # what a discovery run is for, and an empty one says the suite never
+          # got started.
+          ${coreutils}/bin/timeout --kill-after=60s 45m \
+            ${perl}/bin/perl ./runtests.pl \
             -c "${oxidized-curl-dev}/bin/curl" \
             -n \
             -a \
