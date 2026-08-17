@@ -1,9 +1,12 @@
 # What this tree's nix configuration talks to.
 #
-# nix-workspace and the modules taken out of it, declared here rather than in
-# the root flake. Each module is a flake owning one upstream and the module
-# that uses it, so a tree takes only what it talks to and the name says what
-# taking it costs - and this is the directory doing the talking.
+# The modules taken out of nix-workspace, declared here rather than in the
+# root flake. The framework itself is not among them: the root calls it, and
+# nothing in this directory talks to it.
+#
+# Each module is a flake owning one upstream and the module that uses it, so a
+# tree takes only what it talks to and the name says what taking it costs -
+# and this is the directory doing the talking.
 #
 # It only carries inputs. A flake's own source is its directory, so this one
 # cannot see safety/ or apps/, and discovery over the whole tree stays with
@@ -28,14 +31,6 @@
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    workspace = {
-      url = "git+https://tangled.org/overby.me/nix-workspace";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
     };
 
     workspace-darwin = {
