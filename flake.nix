@@ -107,16 +107,16 @@
   #
   # Each is a path to the project's own flake, which names nix-workspace by
   # the same URL a clone does - the framework is its own repo, so there is no
-  # longer an in-tree spelling and a published spelling to keep in step. The
-  # follows point its nixpkgs and git-hooks at this tree's, so a project
-  # builds here against what everything else here builds against; a clone has
-  # no such override and gets what nix-workspace pins.
+  # longer an in-tree spelling and a published spelling to keep in step.
   #
-  # Both `follows` are what keep this free. Without them nix locks a separate
-  # node per occurrence even when every one resolves to the same revision:
-  # adding these twenty-one put 25 flake-compat nodes and 22 git-hooks nodes
-  # in the lock, all at one rev. With them the twenty-one add no fetchable
-  # node at all.
+  # Each follows this tree's copy of the framework rather than resolving its
+  # own, so all twenty-two build against the one nix-workspace declared above,
+  # already pointed at this tree's nixpkgs and git-hooks. Overriding those two
+  # per project instead would say the same thing twenty-two times and leave a
+  # separate node per occurrence: nix locks one even when every one resolves
+  # to the same revision, which is how an earlier arrangement put 25
+  # flake-compat and 22 git-hooks nodes in this lock at a single rev. A clone
+  # has no such override and gets what nix-workspace pins.
   #
   # Not every project: the list is the cheap end, and grows deliberately
   # because each one costs a second build of the crate. The two projects with
@@ -126,157 +126,91 @@
   inputs = {
     oxidized-awk = {
       url = "path:./safety/oxidized/awk";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-bash = {
       url = "path:./safety/oxidized/bash";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-binutils = {
       url = "path:./safety/oxidized/binutils";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-bison = {
       url = "path:./safety/oxidized/bison";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-bubblewrap = {
       url = "path:./safety/oxidized/bubblewrap";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-bzip2 = {
       url = "path:./safety/oxidized/bzip2";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-diffutils = {
       url = "path:./safety/oxidized/diffutils";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-file = {
       url = "path:./safety/oxidized/file";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-gcc = {
       url = "path:./safety/oxidized/gcc";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-gzip = {
       url = "path:./safety/oxidized/gzip";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-help2man = {
       url = "path:./safety/oxidized/help2man";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-llvm = {
       url = "path:./safety/oxidized/llvm";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-make = {
       url = "path:./safety/oxidized/make";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-ninja = {
       url = "path:./safety/oxidized/ninja";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-perl = {
       url = "path:./safety/oxidized/perl";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-pipewire = {
       url = "path:./safety/oxidized/pipewire";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-patch = {
       url = "path:./safety/oxidized/patch";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-patchelf = {
       url = "path:./safety/oxidized/patchelf";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-pcre2 = {
       url = "path:./safety/oxidized/pcre2";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-sed = {
       url = "path:./safety/oxidized/sed";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     oxidized-texinfo = {
       url = "path:./safety/oxidized/texinfo";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
     wclip = {
       url = "path:./dev/wclip";
-      inputs.workspace.inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-      };
+      inputs.workspace.follows = "workspace";
     };
   };
 
