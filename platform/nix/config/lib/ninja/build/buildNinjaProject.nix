@@ -50,15 +50,19 @@
   toolchain ? [pkgs.stdenv.cc pkgs.coreutils],
   # The oxidized-ninja binary used for graph extraction. Built here by default so
   # the library is self-contained; override to reuse a cached package.
-  rustNinja ?
+  rustNinja ? let
+    # A path, because fileset takes paths: the input is an attribute set, and
+    # `input + "/src"` on one is a string, which unions rejects.
+    ninja = /. + (builtins.unsafeDiscardStringContext pkgs.inputs.oxidized-ninja.outPath);
+  in
     pkgs.lib.buildCargoProject {
       pname = "rust-ninja";
       src = pkgs.lib.fileset.toSource {
-        root = ../../../../../../safety/oxidized/ninja;
+        root = ninja;
         fileset = pkgs.lib.fileset.unions [
-          ../../../../../../safety/oxidized/ninja/Cargo.toml
-          ../../../../../../safety/oxidized/ninja/Cargo.lock
-          ../../../../../../safety/oxidized/ninja/src
+          (ninja + "/Cargo.toml")
+          (ninja + "/Cargo.lock")
+          (ninja + "/src")
         ];
       };
       index = ../../cargo/index;

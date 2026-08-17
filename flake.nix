@@ -23,6 +23,15 @@
     inputs = {
       nixpkgs.follows = "nixpkgs";
       workspace.follows = "workspace";
+
+      # The ports its libraries build and test against, onto this tree's own
+      # copies. Named by URL over there, because that directory is published
+      # and a clone has to fetch them; here they are three directories away,
+      # and a change to one should be what the check builds rather than
+      # whatever was last pushed.
+      wclip.url = "path:./dev/wclip";
+      oxidized-xz.url = "path:./safety/oxidized/xz";
+      oxidized-ninja.url = "path:./safety/oxidized/ninja";
     };
   };
 

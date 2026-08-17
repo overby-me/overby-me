@@ -500,7 +500,10 @@
           "nixpkgs"
         ],
         "nixpkgs-unstable": "nixpkgs-unstable",
+        "oxidized-ninja": "oxidized-ninja",
+        "oxidized-xz": "oxidized-xz",
         "rust-overlay": "rust-overlay",
+        "wclip": "wclip",
         "workspace": [
           "workspace"
         ],
@@ -950,6 +953,23 @@
     "oxidized-ninja": {
       "inputs": {
         "workspace": [
+          "nix-config",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./safety/oxidized/ninja",
+        "type": "path"
+      },
+      "original": {
+        "path": "./safety/oxidized/ninja",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "oxidized-ninja_2": {
+      "inputs": {
+        "workspace": [
           "publish-checks",
           "workspace"
         ]
@@ -1099,6 +1119,23 @@
         "publish-checks"
       ]
     },
+    "oxidized-xz": {
+      "inputs": {
+        "workspace": [
+          "nix-config",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./safety/oxidized/xz",
+        "type": "path"
+      },
+      "original": {
+        "path": "./safety/oxidized/xz",
+        "type": "path"
+      },
+      "parent": []
+    },
     "pre-commit-hooks": {
       "inputs": {
         "flake-compat": "flake-compat_2",
@@ -1171,7 +1208,7 @@
         "oxidized-help2man": "oxidized-help2man",
         "oxidized-llvm": "oxidized-llvm",
         "oxidized-make": "oxidized-make",
-        "oxidized-ninja": "oxidized-ninja",
+        "oxidized-ninja": "oxidized-ninja_2",
         "oxidized-patch": "oxidized-patch",
         "oxidized-patchelf": "oxidized-patchelf",
         "oxidized-pcre2": "oxidized-pcre2",
@@ -1179,7 +1216,7 @@
         "oxidized-pipewire": "oxidized-pipewire",
         "oxidized-sed": "oxidized-sed",
         "oxidized-texinfo": "oxidized-texinfo",
-        "wclip": "wclip",
+        "wclip": "wclip_2",
         "workspace": [
           "workspace"
         ]
@@ -1386,6 +1423,23 @@
       }
     },
     "wclip": {
+      "inputs": {
+        "workspace": [
+          "nix-config",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./dev/wclip",
+        "type": "path"
+      },
+      "original": {
+        "path": "./dev/wclip",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "wclip_2": {
       "inputs": {
         "workspace": [
           "publish-checks",

@@ -1,9 +1,21 @@
-# Run: nix eval -f platform/nix/config/cargo/tests/lock.nix
-let
+# Run: nix eval -f platform/nix/config/lib/cargo/tests/lock.nix --apply 'f: f {}'
+#
+# The `--apply` is because of the arguments below: without it nix prints the
+# function rather than running the test, which reads like a pass.
+#
+# The two real workspaces are arguments, so this file does not have to know
+# where they live. The defaults are where they sit in the monorepo, which is
+# what keeps the line above working from a checkout of it; the cargo-lib
+# check passes flake inputs instead, which is what makes this run in a clone
+# of this directory alone.
+{
+  wclipSrc ? ../../../../../../dev/wclip,
+  xzSrc ? ../../../../../../safety/oxidized/xz,
+}: let
   lock = import ../lib/lock.nix;
 
-  wclip = lock.parseLock (builtins.readFile ../../../../../../dev/wclip/Cargo.lock);
-  xz = lock.parseLock (builtins.readFile ../../../../../../safety/oxidized/xz/Cargo.lock);
+  wclip = lock.parseLock (builtins.readFile (wclipSrc + "/Cargo.lock"));
+  xz = lock.parseLock (builtins.readFile (xzSrc + "/Cargo.lock"));
 
   libc = wclip.byId."libc-0.2.186";
   member = wclip.byId."rust-wclip-0.1.0";

@@ -1,9 +1,21 @@
-# Run: nix eval -f platform/nix/config/cargo/tests/manifest.nix
-let
+# Run: nix eval -f platform/nix/config/lib/cargo/tests/manifest.nix --apply 'f: f {}'
+#
+# The `--apply` is because of the arguments below: without it nix prints the
+# function rather than running the test, which reads like a pass.
+#
+# The two real workspaces are arguments, so this file does not have to know
+# where they live. The defaults are where they sit in the monorepo, which is
+# what keeps the line above working from a checkout of it; the cargo-lib
+# check passes flake inputs instead, which is what makes this run in a clone
+# of this directory alone.
+{
+  wclipSrc ? ../../../../../../dev/wclip,
+  xzSrc ? ../../../../../../safety/oxidized/xz,
+}: let
   manifest = import ../lib/manifest.nix;
 
-  wclip = manifest.loadWorkspace ../../../../../../dev/wclip;
-  xz = manifest.loadWorkspace ../../../../../../safety/oxidized/xz;
+  wclip = manifest.loadWorkspace wclipSrc;
+  xz = manifest.loadWorkspace xzSrc;
 
   wclipPkg = wclip.byName.rust-wclip;
   xzPkg = xz.byName.rust-xz;

@@ -1,8 +1,20 @@
-# Run: nix eval -f platform/nix/config/lib/cargo/tests/resolve-real.nix
+# Run: nix eval -f platform/nix/config/lib/cargo/tests/resolve-real.nix --apply 'f: f {}'
+#
+# The `--apply` is because of the arguments below: without it nix prints the
+# function rather than running the test, which reads like a pass.
 #
 # Resolves the real wclip and xz lockfiles against the committed snapshot
 # index. Resolution itself verifies every crate checksum (lock vs index).
-let
+#
+# The two real workspaces are arguments, so this file does not have to know
+# where they live. The defaults are where they sit in the monorepo, which is
+# what keeps the line above working from a checkout of it; the cargo-lib
+# check passes flake inputs instead, which is what makes this run in a clone
+# of this directory alone.
+{
+  wclipSrc ? ../../../../../../dev/wclip,
+  xzSrc ? ../../../../../../safety/oxidized/xz,
+}: let
   lockLib = import ../lib/lock.nix;
   cfgLib = import ../lib/cfg.nix;
   manifestLib = import ../lib/manifest.nix;
@@ -18,9 +30,9 @@ let
       workspace = manifestLib.loadWorkspace src;
     }).nodes;
 
-  wclip = resolveProject ../../../../../../dev/wclip ["rust-wclip"] false;
-  xz = resolveProject ../../../../../../safety/oxidized/xz ["rust-xz"] false;
-  xzDev = resolveProject ../../../../../../safety/oxidized/xz ["rust-xz"] true;
+  wclip = resolveProject wclipSrc ["rust-wclip"] false;
+  xz = resolveProject xzSrc ["rust-xz"] false;
+  xzDev = resolveProject xzSrc ["rust-xz"] true;
 
   xzNames = builtins.attrNames xz;
   has = nodes: name:
