@@ -6,7 +6,7 @@
 # project's namespace and no prefix has to be remembered.
 {
   lib,
-  project,
+  workspace,
   ...
 }: let
   crate = {
@@ -22,7 +22,7 @@
     index = ../../platform/nix/lib/cargo/index;
 
     meta = {
-      homepage = "https://tangled.org/overby.me/overby.me/tree/main/${project.path}";
+      homepage = "https://tangled.org/overby.me/overby.me/tree/main/${workspace.path}";
       license = lib.licenses.mit;
       mainProgram = "wclip";
       platforms = lib.platforms.linux;
