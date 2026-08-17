@@ -614,338 +614,401 @@
     "oxidized-awk": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/awk",
+        "path": "../../../../safety/oxidized/awk",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/awk",
+        "path": "../../../../safety/oxidized/awk",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-bash": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/bash",
+        "path": "../../../../safety/oxidized/bash",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/bash",
+        "path": "../../../../safety/oxidized/bash",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-binutils": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/binutils",
+        "path": "../../../../safety/oxidized/binutils",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/binutils",
+        "path": "../../../../safety/oxidized/binutils",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-bison": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/bison",
+        "path": "../../../../safety/oxidized/bison",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/bison",
+        "path": "../../../../safety/oxidized/bison",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-bubblewrap": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/bubblewrap",
+        "path": "../../../../safety/oxidized/bubblewrap",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/bubblewrap",
+        "path": "../../../../safety/oxidized/bubblewrap",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-bzip2": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/bzip2",
+        "path": "../../../../safety/oxidized/bzip2",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/bzip2",
+        "path": "../../../../safety/oxidized/bzip2",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-diffutils": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/diffutils",
+        "path": "../../../../safety/oxidized/diffutils",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/diffutils",
+        "path": "../../../../safety/oxidized/diffutils",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-file": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/file",
+        "path": "../../../../safety/oxidized/file",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/file",
+        "path": "../../../../safety/oxidized/file",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-gcc": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/gcc",
+        "path": "../../../../safety/oxidized/gcc",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/gcc",
+        "path": "../../../../safety/oxidized/gcc",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-gzip": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/gzip",
+        "path": "../../../../safety/oxidized/gzip",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/gzip",
+        "path": "../../../../safety/oxidized/gzip",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-help2man": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/help2man",
+        "path": "../../../../safety/oxidized/help2man",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/help2man",
+        "path": "../../../../safety/oxidized/help2man",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-llvm": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/llvm",
+        "path": "../../../../safety/oxidized/llvm",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/llvm",
+        "path": "../../../../safety/oxidized/llvm",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-make": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/make",
+        "path": "../../../../safety/oxidized/make",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/make",
+        "path": "../../../../safety/oxidized/make",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-ninja": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/ninja",
+        "path": "../../../../safety/oxidized/ninja",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/ninja",
+        "path": "../../../../safety/oxidized/ninja",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-patch": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/patch",
+        "path": "../../../../safety/oxidized/patch",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/patch",
+        "path": "../../../../safety/oxidized/patch",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-patchelf": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/patchelf",
+        "path": "../../../../safety/oxidized/patchelf",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/patchelf",
+        "path": "../../../../safety/oxidized/patchelf",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-pcre2": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/pcre2",
+        "path": "../../../../safety/oxidized/pcre2",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/pcre2",
+        "path": "../../../../safety/oxidized/pcre2",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-perl": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/perl",
+        "path": "../../../../safety/oxidized/perl",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/perl",
+        "path": "../../../../safety/oxidized/perl",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-pipewire": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/pipewire",
+        "path": "../../../../safety/oxidized/pipewire",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/pipewire",
+        "path": "../../../../safety/oxidized/pipewire",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-sed": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/sed",
+        "path": "../../../../safety/oxidized/sed",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/sed",
+        "path": "../../../../safety/oxidized/sed",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "oxidized-texinfo": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./safety/oxidized/texinfo",
+        "path": "../../../../safety/oxidized/texinfo",
         "type": "path"
       },
       "original": {
-        "path": "./safety/oxidized/texinfo",
+        "path": "../../../../safety/oxidized/texinfo",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "pre-commit-hooks": {
       "inputs": {
@@ -1001,6 +1064,44 @@
         "type": "github"
       }
     },
+    "publish-checks": {
+      "inputs": {
+        "oxidized-awk": "oxidized-awk",
+        "oxidized-bash": "oxidized-bash",
+        "oxidized-binutils": "oxidized-binutils",
+        "oxidized-bison": "oxidized-bison",
+        "oxidized-bubblewrap": "oxidized-bubblewrap",
+        "oxidized-bzip2": "oxidized-bzip2",
+        "oxidized-diffutils": "oxidized-diffutils",
+        "oxidized-file": "oxidized-file",
+        "oxidized-gcc": "oxidized-gcc",
+        "oxidized-gzip": "oxidized-gzip",
+        "oxidized-help2man": "oxidized-help2man",
+        "oxidized-llvm": "oxidized-llvm",
+        "oxidized-make": "oxidized-make",
+        "oxidized-ninja": "oxidized-ninja",
+        "oxidized-patch": "oxidized-patch",
+        "oxidized-patchelf": "oxidized-patchelf",
+        "oxidized-pcre2": "oxidized-pcre2",
+        "oxidized-perl": "oxidized-perl",
+        "oxidized-pipewire": "oxidized-pipewire",
+        "oxidized-sed": "oxidized-sed",
+        "oxidized-texinfo": "oxidized-texinfo",
+        "wclip": "wclip",
+        "workspace": [
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./platform/tangled/publish/checks",
+        "type": "path"
+      },
+      "original": {
+        "path": "./platform/tangled/publish/checks",
+        "type": "path"
+      },
+      "parent": []
+    },
     "ragenix": {
       "inputs": {
         "agenix": "agenix",
@@ -1032,29 +1133,8 @@
         "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "oxidized-awk": "oxidized-awk",
-        "oxidized-bash": "oxidized-bash",
-        "oxidized-binutils": "oxidized-binutils",
-        "oxidized-bison": "oxidized-bison",
-        "oxidized-bubblewrap": "oxidized-bubblewrap",
-        "oxidized-bzip2": "oxidized-bzip2",
-        "oxidized-diffutils": "oxidized-diffutils",
-        "oxidized-file": "oxidized-file",
-        "oxidized-gcc": "oxidized-gcc",
-        "oxidized-gzip": "oxidized-gzip",
-        "oxidized-help2man": "oxidized-help2man",
-        "oxidized-llvm": "oxidized-llvm",
-        "oxidized-make": "oxidized-make",
-        "oxidized-ninja": "oxidized-ninja",
-        "oxidized-patch": "oxidized-patch",
-        "oxidized-patchelf": "oxidized-patchelf",
-        "oxidized-pcre2": "oxidized-pcre2",
-        "oxidized-perl": "oxidized-perl",
-        "oxidized-pipewire": "oxidized-pipewire",
-        "oxidized-sed": "oxidized-sed",
-        "oxidized-texinfo": "oxidized-texinfo",
+        "publish-checks": "publish-checks",
         "rust-overlay": "rust-overlay",
-        "wclip": "wclip",
         "workspace": "workspace",
         "workspace-darwin": "workspace-darwin",
         "workspace-disko": "workspace-disko",
@@ -1225,18 +1305,21 @@
     "wclip": {
       "inputs": {
         "workspace": [
+          "publish-checks",
           "workspace"
         ]
       },
       "locked": {
-        "path": "./dev/wclip",
+        "path": "../../../../dev/wclip",
         "type": "path"
       },
       "original": {
-        "path": "./dev/wclip",
+        "path": "../../../../dev/wclip",
         "type": "path"
       },
-      "parent": []
+      "parent": [
+        "publish-checks"
+      ]
     },
     "workspace": {
       "inputs": {

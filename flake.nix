@@ -99,119 +99,15 @@
     };
   };
 
-  # The projects this tree publishes, taken as inputs so it builds the flakes
-  # it ships and holds them against its own build of the same source. A flake
-  # nothing evaluates is the problem these had in the first place, and `?dir=`
-  # makes one checkable by hand but nothing runs it. See project-flakes.nix
-  # and platform/tangled/publish/README.md.
-  #
-  # Each is a path to the project's own flake, which names nix-workspace by
-  # the same URL a clone does - the framework is its own repo, so there is no
-  # longer an in-tree spelling and a published spelling to keep in step.
-  #
-  # Each follows this tree's copy of the framework rather than resolving its
-  # own, so all twenty-two build against the one nix-workspace declared above,
-  # already pointed at this tree's nixpkgs and git-hooks. Overriding those two
-  # per project instead would say the same thing twenty-two times and leave a
-  # separate node per occurrence: nix locks one even when every one resolves
-  # to the same revision, which is how an earlier arrangement put 25
-  # flake-compat and 22 git-hooks nodes in this lock at a single rev. A clone
-  # has no such override and gets what nix-workspace pins.
-  #
-  # Not every project: the list is the cheap end, and grows deliberately
-  # because each one costs a second build of the crate. The two projects with
-  # sibling dependencies are absent for a different reason - they publish as
-  # several directories with the crate one level down, a shape their own
-  # directory does not have.
-  inputs = {
-    oxidized-awk = {
-      url = "path:./safety/oxidized/awk";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-bash = {
-      url = "path:./safety/oxidized/bash";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-binutils = {
-      url = "path:./safety/oxidized/binutils";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-bison = {
-      url = "path:./safety/oxidized/bison";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-bubblewrap = {
-      url = "path:./safety/oxidized/bubblewrap";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-bzip2 = {
-      url = "path:./safety/oxidized/bzip2";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-diffutils = {
-      url = "path:./safety/oxidized/diffutils";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-file = {
-      url = "path:./safety/oxidized/file";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-gcc = {
-      url = "path:./safety/oxidized/gcc";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-gzip = {
-      url = "path:./safety/oxidized/gzip";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-help2man = {
-      url = "path:./safety/oxidized/help2man";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-llvm = {
-      url = "path:./safety/oxidized/llvm";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-make = {
-      url = "path:./safety/oxidized/make";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-ninja = {
-      url = "path:./safety/oxidized/ninja";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-perl = {
-      url = "path:./safety/oxidized/perl";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-pipewire = {
-      url = "path:./safety/oxidized/pipewire";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-patch = {
-      url = "path:./safety/oxidized/patch";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-patchelf = {
-      url = "path:./safety/oxidized/patchelf";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-pcre2 = {
-      url = "path:./safety/oxidized/pcre2";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-sed = {
-      url = "path:./safety/oxidized/sed";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-texinfo = {
-      url = "path:./safety/oxidized/texinfo";
-      inputs.workspace.follows = "workspace";
-    };
-    wclip = {
-      url = "path:./dev/wclip";
-      inputs.workspace.follows = "workspace";
-    };
+  # The projects this tree publishes are declared one level down, in
+  # platform/tangled/publish/checks, and reach this flake as one input. They
+  # are inputs because a check builds each project's own flake and holds it
+  # against this tree's build of the same source; that is a fact about that
+  # check rather than about this tree, and twenty-two lines of it here said so
+  # in the wrong place.
+  inputs.publish-checks = {
+    url = "path:./platform/tangled/publish/checks";
+    inputs.workspace.follows = "workspace";
   };
 
   outputs = inputs:

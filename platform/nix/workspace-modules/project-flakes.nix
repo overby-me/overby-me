@@ -26,50 +26,16 @@
   lib,
   ...
 }: let
-  # Named here rather than discovered, because an input cannot be discovered:
-  # nix resolves `inputs` from flake.nix before any of this is evaluated, so
-  # this and the list in flake.nix are kept in step by hand. Getting that
-  # wrong fails either way - input-usage catches an input nothing reads, and
-  # this fails on an input that is not there.
+  # What publish/checks declares, which is the list itself: that flake takes
+  # one input per published project and exports them minus itself and the
+  # framework, so adding a project is one entry there and nothing here.
   #
-  # Each is named literally rather than looped over, because input-usage
-  # proves an input has a consumer by grepping for `inputs.<name>`, and a
-  # reference built from a variable is invisible to it. Writing them out is
-  # what makes the use findable, by that check and by anyone else grepping
-  # the tree, so the repetition is the point rather than a cost.
-  #
-  # The attribute name is the project's name in projects.nuon, which is also
-  # the tree's package name, so one string addresses both sides.
-  #
-  # Not all 38. This is the cheap end by crate count, and grows deliberately
-  # because each entry costs a second build of the crate. The two projects
-  # with sibling dependencies are absent for a different reason: they publish
-  # as several directories with the crate one level down, which their own
-  # directory is not, so there is no in-tree flake to compare.
-  published = {
-    oxidized-awk = config.inputs.oxidized-awk;
-    oxidized-bash = config.inputs.oxidized-bash;
-    oxidized-binutils = config.inputs.oxidized-binutils;
-    oxidized-bison = config.inputs.oxidized-bison;
-    oxidized-bubblewrap = config.inputs.oxidized-bubblewrap;
-    oxidized-bzip2 = config.inputs.oxidized-bzip2;
-    oxidized-diffutils = config.inputs.oxidized-diffutils;
-    oxidized-file = config.inputs.oxidized-file;
-    oxidized-gcc = config.inputs.oxidized-gcc;
-    oxidized-gzip = config.inputs.oxidized-gzip;
-    oxidized-help2man = config.inputs.oxidized-help2man;
-    oxidized-llvm = config.inputs.oxidized-llvm;
-    oxidized-make = config.inputs.oxidized-make;
-    oxidized-ninja = config.inputs.oxidized-ninja;
-    oxidized-patch = config.inputs.oxidized-patch;
-    oxidized-perl = config.inputs.oxidized-perl;
-    oxidized-pipewire = config.inputs.oxidized-pipewire;
-    oxidized-patchelf = config.inputs.oxidized-patchelf;
-    oxidized-pcre2 = config.inputs.oxidized-pcre2;
-    oxidized-sed = config.inputs.oxidized-sed;
-    oxidized-texinfo = config.inputs.oxidized-texinfo;
-    wclip = config.inputs.wclip;
-  };
+  # Discovered rather than named, unlike everything else that reads an input.
+  # `input-usage` proves a root input has a consumer by grepping for
+  # `inputs.<name>`, and there is one root input here to find - the twenty-two
+  # behind it are not this flake's to justify.
+  published = config.inputs.publish-checks.published;
+
   check = name: input: pkgs: let
     tree = pkgs.${name};
     flake = input.packages.${pkgs.stdenv.hostPlatform.system}.default;
