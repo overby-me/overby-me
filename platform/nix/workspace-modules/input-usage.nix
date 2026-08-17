@@ -30,12 +30,22 @@
   ...
 }: {
   checks.input-usage = pkgs: let
+    # What flake.nix declares, read from the lock, which records exactly that
+    # under root. Not `config.inputs`: a module hands its own pin to the
+    # consumer by setting one, so that set holds entries nobody declared here
+    # and which nothing here reads - `system-manager` arrives from the module
+    # that pins it, and the file reading it lives in nix-workspace now. Those
+    # are not this tree's to justify.
+    declared =
+      builtins.attrNames
+      (builtins.fromJSON (builtins.readFile "${src}/flake.lock")).nodes.root.inputs;
+
     integrations =
       builtins.attrNames
       (lib.filterAttrs
         (_: i: builtins.isAttrs i && (i ? workspaceModule || i ? workspaceModules.default))
         config.inputs);
-    names = lib.subtractLists integrations (builtins.attrNames config.inputs);
+    names = lib.subtractLists integrations declared;
   in
     pkgs.runCommand "check-input-usage" {} ''
       cd ${src}

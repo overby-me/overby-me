@@ -60,4 +60,5 @@ kgen.trace.json.*
 /deno.jsonc
 /lychee.toml
 /rumdl.toml
+/statix.toml
 /typos.toml

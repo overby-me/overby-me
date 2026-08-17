@@ -30,61 +30,71 @@
     };
   };
 
-  # The workspace half of nix-workspace: it finds the projects, so this file
-  # does not list them. Imported by path rather than taken as an input,
-  # because nix-workspace is published *from* here: an input would mean
-  # publishing before the monorepo could evaluate its own change to it.
-  # Integrations: each is a flake owning one upstream and the module that
-  # uses it, so a tree takes only what it talks to and its name says what
-  # taking it costs. Declaring one is the whole of taking it - the workspace
-  # finds every input that exports workspaceModules.
+  # nix-workspace finds the projects in this tree, so this file does not list
+  # them. It used to live here and be published from here, which is why it was
+  # imported by path: taking it as an input would have meant publishing a
+  # change to it before this tree could evaluate that change. It is developed
+  # in its own repo now, so it is an ordinary input, and this tree consumes it
+  # exactly the way anyone else does - which is the point, because the two
+  # bugs it shipped were both ones only an input-consumer could hit.
   #
-  # Each follows this tree's nixpkgs. Without that an integration builds its
+  # Its modules are selected one at a time out of the same repo. Each is a
+  # flake owning one upstream and the module that uses it, so a tree takes
+  # only what it talks to and its name says what taking it costs.
+  #
+  # Each follows this tree's nixpkgs. Without that a module builds its
   # upstream against a nixpkgs of its own, which is how zen-browser came to
   # want an ffmpeg the rest of the tree does not have.
   inputs = {
+    workspace = {
+      url = "git+https://tangled.org/overby.me/nix-workspace";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        git-hooks.follows = "git-hooks";
+      };
+    };
     workspace-darwin = {
-      url = "path:./platform/nix/workspace/modules/darwin";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/darwin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-disko = {
-      url = "path:./platform/nix/workspace/modules/disko";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/disko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-drowse = {
-      url = "path:./platform/nix/workspace/modules/drowse";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/drowse";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-home-manager = {
-      url = "path:./platform/nix/workspace/modules/home-manager";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-modular-skills = {
-      url = "path:./platform/nix/workspace/modules/modular-skills";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/modular-skills";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-nixos-hardware = {
-      url = "path:./platform/nix/workspace/modules/nixos-hardware";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-hardware";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-nixos-raspberrypi = {
-      url = "path:./platform/nix/workspace/modules/nixos-raspberrypi";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-raspberrypi";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-nix-wallpaper = {
-      url = "path:./platform/nix/workspace/modules/nix-wallpaper";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nix-wallpaper";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-ragenix = {
-      url = "path:./platform/nix/workspace/modules/ragenix";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/ragenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-system-manager = {
-      url = "path:./platform/nix/workspace/modules/system-manager";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/system-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     workspace-zen-browser = {
-      url = "path:./platform/nix/workspace/modules/zen-browser";
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/zen-browser";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -95,11 +105,12 @@
   # makes one checkable by hand but nothing runs it. See project-flakes.nix
   # and platform/tangled/publish/README.md.
   #
-  # Each `project` input is a path, and each follows this tree's nixpkgs and
-  # git-hooks rather than the ones nix-workspace pins: in-tree they should build
-  # against what everything else here builds against. A published repo still
-  # gets nix-workspace's pins, because that resolution happens in its own lock,
-  # not this one.
+  # Each is a path to the project's own flake, which names nix-workspace by
+  # the same URL a clone does - the framework is its own repo, so there is no
+  # longer an in-tree spelling and a published spelling to keep in step. The
+  # follows point its nixpkgs and git-hooks at this tree's, so a project
+  # builds here against what everything else here builds against; a clone has
+  # no such override and gets what nix-workspace pins.
   #
   # Both `follows` are what keep this free. Without them nix locks a separate
   # node per occurrence even when every one resolves to the same revision:
@@ -115,154 +126,154 @@
   inputs = {
     oxidized-awk = {
       url = "path:./safety/oxidized/awk";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-bash = {
       url = "path:./safety/oxidized/bash";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-binutils = {
       url = "path:./safety/oxidized/binutils";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-bison = {
       url = "path:./safety/oxidized/bison";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-bubblewrap = {
       url = "path:./safety/oxidized/bubblewrap";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-bzip2 = {
       url = "path:./safety/oxidized/bzip2";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-diffutils = {
       url = "path:./safety/oxidized/diffutils";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-file = {
       url = "path:./safety/oxidized/file";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-gcc = {
       url = "path:./safety/oxidized/gcc";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-gzip = {
       url = "path:./safety/oxidized/gzip";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-help2man = {
       url = "path:./safety/oxidized/help2man";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-llvm = {
       url = "path:./safety/oxidized/llvm";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-make = {
       url = "path:./safety/oxidized/make";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-ninja = {
       url = "path:./safety/oxidized/ninja";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-perl = {
       url = "path:./safety/oxidized/perl";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-pipewire = {
       url = "path:./safety/oxidized/pipewire";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-patch = {
       url = "path:./safety/oxidized/patch";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-patchelf = {
       url = "path:./safety/oxidized/patchelf";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-pcre2 = {
       url = "path:./safety/oxidized/pcre2";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-sed = {
       url = "path:./safety/oxidized/sed";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     oxidized-texinfo = {
       url = "path:./safety/oxidized/texinfo";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
     };
     wclip = {
       url = "path:./dev/wclip";
-      inputs.project.inputs = {
+      inputs.workspace.inputs = {
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
       };
@@ -270,15 +281,15 @@
   };
 
   outputs = inputs:
-    import ./platform/nix/workspace/workspace.nix ./. {
+    inputs.workspace ./. {
       inherit inputs;
       # Every directory under here is named after the output it feeds. Its
       # workspace-modules are imported, and nothing inside it is a project, both
       # of which follow from saying this once.
       outputDirs = [./platform/nix];
 
-      # The .age files belong to this tree; the integration that reads them
-      # does not know where they are until it is told.
+      # The .age files belong to this tree; the module that reads them does
+      # not know where they are until it is told.
       secretsDir = ./platform/nix/secrets;
     };
 }

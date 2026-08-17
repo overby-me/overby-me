@@ -20,7 +20,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "project",
+          "workspace",
           "nixpkgs"
         ]
       },
@@ -54,24 +54,28 @@
         "type": "github"
       }
     },
-    "project": {
+    "root": {
+      "inputs": {
+        "workspace": "workspace"
+      }
+    },
+    "workspace": {
       "inputs": {
         "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "path": "../../../platform/nix/project",
-        "type": "path"
+        "lastModified": 1786969942,
+        "narHash": "sha256-NkupovRJNpaVnbKVm+OJkzO+cOHg8Ga9W0V90entEZM=",
+        "ref": "refs/heads/main",
+        "rev": "54d06ccb4c76c4124752a6f4139d0955f643cafa",
+        "revCount": 28,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
       },
       "original": {
-        "path": "../../../platform/nix/project",
-        "type": "path"
-      },
-      "parent": []
-    },
-    "root": {
-      "inputs": {
-        "project": "project"
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
       }
     }
   },

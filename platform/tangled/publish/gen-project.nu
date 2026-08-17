@@ -229,7 +229,6 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
     mut missing = []
     for p in $projects {
         let dir = ($root | path join $p.path)
-        let flake = ($gen | path join $p.name "flake.nix")
 
         # The description is the one thing worth taking from the monorepo's
         # own module, so the two do not drift apart.
@@ -263,11 +262,17 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # import, and writes its own.
         let is_crate = ($dir | path join "Cargo.toml" | path exists)
 
+        # One flake per project, written into the project's own directory and
+        # published from there. It names nix-workspace by URL, which is the
+        # same thing in tree and in a clone now that the framework is its own
+        # repo: while it lived here the two had to differ in that one line,
+        # and josh mapped a second copy over the first.
+        #
         # Parenthesised: without it nushell ends the command at the first
-        # newline and the closure returns the last argument rather than the
+        # newline and the call returns its last argument rather than the
         # flake, which writes an empty file to every project at once.
-        let flakeFor = {|url| (
-            flake-text $p.name $description $url $subdir
+        let want_flake = if not $is_crate { "" } else { (
+            flake-text $p.name $description "git+https://tangled.org/overby.me/nix-workspace" $subdir
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
                 ($p | get -o doCheck | default true)
@@ -276,22 +281,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o cargoTestFlags | default [])
                 ($p | get -o aliases | default {})
         ) }
-        let want_flake = if not $is_crate { "" } else {
-            do $flakeFor "git+https://tangled.org/overby.me/nix-workspace"
-        }
-
-        # The in-tree copy, which the monorepo can take as an input and check.
-        # Not written for a project with sibling dependencies: those publish
-        # as several directories with the crate one level down, a shape the
-        # project's own directory does not have, so `subdir` would be wrong
-        # here even though it is right there.
-        let has_deps = not ((($p | get -o deps | default []) | is-empty))
-        let in_tree = ($dir | path join "flake.nix")
-        let want_in_tree = if (not $is_crate) or $has_deps { "" } else {
-            # One `..` per path segment, then down to nix-workspace.
-            let up = (1..($p.path | path split | length) | each {|_| ".." } | str join "/")
-            do $flakeFor $"path:($up)/platform/nix/workspace"
-        }
+        let flake = ($dir | path join "flake.nix")
         # Only a crate has a generated flake. Checking every project for one
         # passed by accident while these lived in the project's directory: a
         # nix project's own flake sat exactly where the generated one would
@@ -303,16 +293,11 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
             continue
         }
         if $is_crate {
-            mkdir ($gen | path join $p.name)
             $want_flake | save -f $flake
             # nix-workspace gives every repo a checks.formatting that runs
             # alejandra over the tree, so a flake this generator wrote by hand
             # would fail the CI of the repo it was written for.
             ^alejandra --quiet $flake | ignore
-        }
-        if not ($want_in_tree | is-empty) {
-            $want_in_tree | save -f $in_tree
-            ^alejandra --quiet $in_tree | ignore
         }
 
         # A published repo's README should be titled after the project, not

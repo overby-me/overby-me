@@ -376,20 +376,7 @@
   # imports. It has to be published for them to resolve it, and it is
   # deliberately first in this list so a run that adds a project pushes the
   # module before anything that depends on it.
-  {
-    name: "nix-workspace"
-    path: "platform/nix/workspace"
-    description: "A flake framework for a tree published as one or many repos"
-    # Four homes so far. The last of them is this rename: without the entry
-    # the published repo's history would begin at the move, which is the
-    # failure this list exists to prevent.
-    formerPaths: [
-      {path: "nix/standalone" deps: []}
-      {path: "platform/nix/standalone" deps: []}
-      {path: "platform/nix/project" deps: []}
-    ]
-    kind: "nix"
-  }
+
   # Not a rust/ rewrite: the client this publisher itself uses to create and
   # authorise the repos it publishes to. Its path dependencies all point
   # inside crates/, so it needs no `deps`.

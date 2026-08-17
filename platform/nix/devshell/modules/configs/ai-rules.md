@@ -112,6 +112,7 @@
   | `deno.jsonc` | `devshell/modules/configs/deno.jsonc` | copy |
   | `lychee.toml` | `devshell/modules/configs/lychee.toml` | copy |
   | `rumdl.toml` | `devshell/modules/configs/rumdl.toml` | copy |
+  | `statix.toml` | `devshell/modules/configs/statix.toml` | copy |
   | `typos.toml` | `devshell/modules/configs/typos.toml` | copy |
   | `.secretsignore` | `devshell/modules/configs/secretsignore` | copy |
   | `.commitlintrc.yml` | `devshell/modules/configs/commitlintrc.nix` | generated (Nix derivation) — scope list is auto-derived from top-level directory names; copied into place |

@@ -121,14 +121,18 @@ def derive-filter [p: record, --current]: nothing -> string {
     if $kind == "nix" {
       [$":/($path):exclude[::.tangled/]"]
     } else if ($deps | is-empty) {
-      [$":/($path):exclude[::*.nix]($generated)"]
+      # `exclude[::*.nix]` drops the monorepo's build of the project, then
+      # flake.nix is let back through: it is the published repo's own build,
+      # and since the framework left this tree it is the same file here and
+      # there rather than one mapped over the other.
+      [$":/($path):exclude[::*.nix]($generated)" $":/($path)::flake.nix"]
     } else {
       # Each directory keeps its own name at the root, so a Cargo.toml's
       # `path = "../pcre2"` still resolves once they are side by side. The
-      # project's own README is lifted back to the repo root.
+      # project's own flake and README are lifted back to the repo root.
       [$":/($path):exclude[::*.nix]($generated):exclude[::README.md]:prefix=($base)"]
       | append ($deps | each {|d| $":/($d):exclude[::*.nix]:prefix=($d | path basename)" })
-      | append [$":/($path)::README.md"]
+      | append [$":/($path)::flake.nix" $":/($path)::README.md"]
     }
   } | flatten)
   # One workflow for every project; a flake and a lock for those that have a
@@ -147,13 +151,15 @@ def derive-filter [p: record, --current]: nothing -> string {
   # directory holds a real flake - one that path-inputs nix-workspace so the
   # monorepo can evaluate it - has both at once, and the published repo must
   # get the generated one. That path does not exist in a clone.
+  # flake.nix is not among these any more. It names nix-workspace by the URL a
+  # clone uses, which is now the only spelling there is: the framework left
+  # this tree, so the in-tree file and the published one are the same file and
+  # there is nothing to map over. It ships from the project's own directory,
+  # let back through the `exclude[::*.nix]` that drops the monorepo's build.
   let artifacts = (
     [{dest: ".tangled/workflows/ci.yml", now: $"($gen)/ci.yml", then: ".tangled/workflows/ci.yml"}]
     | append (if $kind == "nix" { [] } else {
-      [
-        {dest: "flake.nix", now: $"($gen)/($p.name)/flake.nix", then: "flake.nix"}
-        {dest: "flake.lock", now: $"($gen)/($p.name)/flake.lock", then: "flake.lock"}
-      ]
+      [{dest: "flake.lock", now: $"($gen)/($p.name)/flake.lock", then: "flake.lock"}]
     })
   )
   let mapped = ($artifacts | each {|a|
