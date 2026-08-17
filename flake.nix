@@ -21,7 +21,6 @@
   inputs.nix-config = {
     url = "path:./platform/nix/config";
     inputs = {
-      nixpkgs.follows = "nixpkgs";
       workspace.follows = "workspace";
 
       # The ports its libraries build and test against, onto this tree's own
@@ -42,7 +41,6 @@
   inputs.nix-packages = {
     url = "path:./platform/nix/packages";
     inputs = {
-      nixpkgs.follows = "nixpkgs";
       workspace.follows = "workspace";
       oxidized-pkg-config.url = "path:./safety/oxidized/pkg-config";
     };
