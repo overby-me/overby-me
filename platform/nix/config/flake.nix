@@ -51,16 +51,8 @@
       url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/disko";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
     };
-    workspace-drowse = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/drowse";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
     workspace-home-manager = {
       url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/home-manager";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-modular-skills = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/modular-skills";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
     };
     workspace-nixos-hardware = {

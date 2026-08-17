@@ -65,13 +65,5 @@
   outputs = inputs:
     inputs.workspace ./. {
       inherit inputs;
-
-      # Nothing in there is a project. It used to follow from `outputDirs`,
-      # which excluded what it scanned; now that the scanning belongs to that
-      # directory, the exclusion has to be said. Without it discovery walks
-      # platform/nix/config, finds every default.nix under it, and imports
-      # as a project one that builds its own `imports` from `pkgs` - which
-      # is a loop, and surfaces as infinite recursion nowhere near here.
-      workspaces.exclude = ["platform/nix"];
     };
 }
