@@ -228,11 +228,9 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
           trusted-users = ["root" "overby.me"];
           experimental-features = "nix-command flakes";
           substituters = [
-            "https://overby-me.cachix.org"
             "https://nixos-raspberrypi.cachix.org"
           ];
           trusted-public-keys = [
-            "overby-me.cachix.org-1:dU7qOj5u97QZz98nqnh+Nwait6c+2d2Eq0KTOAXTyp4="
             "nixos-raspberrypi.cachix.org-1:4iMO9LXa8BqhU+Rpg6LQKiGa2lsNh/j2oiYLNOQ5sPI="
           ];
         };

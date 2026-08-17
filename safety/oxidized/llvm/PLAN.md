@@ -474,7 +474,7 @@ forbidden repo-wide as usual.
   pipeline cadence fe-c uses.
 - Oracle pins: real LLVM + alive2 come from nixpkgs *inside check derivations
   only*; record the oracle LLVM version in `STATUS.md`.
-- CI: checks run on Spindle (`.tangled/`), cache to `overby-me.cachix.org`;
+- CI: checks run on Spindle (`.tangled/`);
   tier-gating checks (`llvm-t0-hello`, `llvm-ui-ratchet`, …) are the pipeline.
 - Root `README.md`, two edits:
   - Projects → Rust table row:
