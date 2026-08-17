@@ -1,11 +1,6 @@
 {
   description = "Monorepo";
 
-  nixConfig = {
-    extra-substituters = ["https://overby-me.cachix.org"];
-    extra-trusted-public-keys = ["overby-me.cachix.org-1:dU7qOj5u97QZz98nqnh+Nwait6c+2d2Eq0KTOAXTyp4="];
-  };
-
   inputs = {
     # Nix
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
