@@ -891,9 +891,9 @@ impl OpenXrBackend {
     fn acquire_swapchain_image(&mut self, panel_id: u32) -> Option<&wgpu::TextureView> {
         let sc = self.panel_swapchains.get_mut(&panel_id)?;
 
-        if sc.acquired_index.is_some() {
+        if let Some(index) = sc.acquired_index {
             // Already acquired — return the current view.
-            return sc.views.get(sc.acquired_index.unwrap());
+            return sc.views.get(index);
         }
 
         let index = sc.swapchain.acquire_image().ok()? as usize;

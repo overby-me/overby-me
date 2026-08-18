@@ -392,15 +392,13 @@ impl Panel {
 
         let mut doc = BaseDocument::new(config);
 
-        // Build a minimal DOM structure: Document → <html> → <body>
-        // The document root (node 0) is created by BaseDocument::new().
+        // Document → <html> → <body>. BaseDocument::new() makes the root.
         let html_name = QualName::new(None::<Prefix>, ns!(html), local_name!("html"));
         let html_id = doc.create_node(NodeData::Element(ElementData::new(html_name, vec![])));
 
         let body_name = QualName::new(None::<Prefix>, ns!(html), local_name!("body"));
         let body_id = doc.create_node(NodeData::Element(ElementData::new(body_name, vec![])));
 
-        // Attach <html> to document root, <body> to <html>
         {
             let mut mutator = doc.mutate();
             mutator.append_children(0, &[html_id]);
@@ -495,9 +493,7 @@ impl Panel {
 
     /// Remove and drop a node.
     fn remove_node(&mut self, node_id: usize) {
-        // Clean up ID mappings
         self.id_map.remove_blitz(node_id);
-        // Remove event listeners for this node
         self.listeners.retain(|l| l.node_id != node_id);
 
         let mut mutator = self.doc.mutate();
@@ -603,15 +599,12 @@ impl Panel {
             return String::new();
         };
         match &node.data {
-            NodeData::Text(text_data) => {
-                // Use raw text format (matching Phase 5.1 serialization style)
-                text_data.content.to_string()
-            }
+            NodeData::Text(text_data) => text_data.content.to_string(),
             NodeData::Comment => "<!---->".to_string(),
             NodeData::Element(el) | NodeData::AnonymousBlock(el) => {
                 let tag = el.name.local.to_string();
                 let mut attrs = String::new();
-                // Sort attributes for deterministic output
+                // Sorted, so the output is deterministic.
                 let mut attr_list: Vec<_> = el.attrs().iter().collect();
                 attr_list.sort_by_key(|a| a.name.local.to_string());
                 for attr in &attr_list {
@@ -653,10 +646,13 @@ impl Panel {
         });
     }
 
-    /// Find the handler for an event on a node (walk up the tree for bubbling).
+    /// Find the handler for an event on a node.
     ///
-    /// Traverses the Blitz DOM tree from the target node upward through parents,
-    /// checking for a matching event listener at each level.
+    /// Shaped as a bubbling walk, but it does NOT bubble: Blitz `Node` exposes
+    /// no public parent, so the step upward returns `None` and the loop runs
+    /// once, over the target node alone. A listener registered on an ancestor
+    /// is therefore never found. Give the step a real parent lookup once Blitz
+    /// offers one, and the loop bubbles as written.
     fn find_handler(&self, node_id: usize, event_type: u8) -> Option<u32> {
         let mut current = Some(node_id);
         while let Some(nid) = current {
@@ -665,24 +661,7 @@ impl Panel {
                     return Some(listener.handler_id);
                 }
             }
-            // Walk up to parent via Blitz DOM tree.
-            // The document root's parent is not accessible, so we stop there.
             current = self.doc.get_node(nid).and_then(|node| {
-                // Check each potential parent by scanning upward.
-                // Blitz Node doesn't expose a public `.parent` field directly,
-                // so we use the parent tracking we get from our tree structure.
-                // For a simpler approach, we check if any node has this as a child.
-                // However, this is O(n) per level. For the XR shim's use case
-                // (small DOM trees, few listeners), this is acceptable.
-                //
-                // Optimization: When Blitz exposes parent access, use it directly.
-                // For now, we search our listener list which is typically small.
-                //
-                // Actually, we can traverse more efficiently: find parent by
-                // checking all nodes. But that's expensive. Instead, since
-                // find_handler is only called during event dispatch (infrequent),
-                // we just check all listeners for any node that matches the event.
-                // This effectively implements bubbling by checking all ancestors.
                 let _ = node;
                 None::<usize>
             });
@@ -846,8 +825,8 @@ impl OffscreenRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            // Vello's render_to_texture requires STORAGE_BINDING.
-            // COPY_SRC allows readback to CPU for debugging / snapshot tests.
+            // STORAGE_BINDING is Vello's requirement; COPY_SRC is for CPU
+            // readback in debugging and snapshot tests.
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
@@ -938,7 +917,6 @@ impl OffscreenRenderer {
         );
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        // Map the buffer synchronously.
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
@@ -956,7 +934,6 @@ impl OffscreenRenderer {
             return 0;
         }
 
-        // Copy row-by-row, stripping padding.
         for row in 0..pt.height as usize {
             let src_start = row * bytes_per_row_padded as usize;
             let src_end = src_start + bytes_per_row_unpadded as usize;
@@ -1074,7 +1051,6 @@ impl XrSessionContext {
         self.panels.insert(panel_id, panel);
         self.panel_order.push(panel_id);
 
-        // Auto-focus the first panel
         if self.focused_panel_id == 0 {
             self.focused_panel_id = panel_id;
         }
@@ -1210,7 +1186,10 @@ unsafe fn read_str(ptr: *const c_char, len: u32) -> &'static str {
         return "";
     }
     let slice = std::slice::from_raw_parts(ptr as *const u8, len as usize);
-    std::str::from_utf8_unchecked(slice)
+    // Checked, because the bytes come from Mojo across the C ABI and nothing
+    // on this side can promise they are UTF-8. `from_utf8_unchecked` here was
+    // undefined behaviour for any caller that ever passed something else.
+    std::str::from_utf8(slice).unwrap_or("")
 }
 
 /// Write a string into a C buffer. Returns the number of bytes written
@@ -1308,7 +1287,6 @@ pub unsafe extern "C" fn mxr_destroy_panel(session: *mut XrSessionContext, panel
     if session.is_null() {
         return;
     }
-    // Destroy the panel's swapchain if one exists.
     if let Some(ref mut backend) = (*session).xr_backend {
         backend.destroy_panel_swapchain(panel_id);
     }
@@ -1861,7 +1839,6 @@ pub unsafe extern "C" fn mxr_wait_frame(session: *mut XrSessionContext) -> i64 {
     }
     let ctx = &mut *session;
 
-    // Poll OpenXR session events and update state.
     if let Some(ref mut backend) = ctx.xr_backend {
         let new_state = backend.poll_session_events();
         if new_state >= 0 {
@@ -1921,7 +1898,6 @@ pub unsafe extern "C" fn mxr_render_dirty_panels(session: *mut XrSessionContext)
 
     // If we have an OpenXR backend, render dirty panels to swapchain images.
     if ctx.xr_backend.is_some() {
-        // Sync input actions once per frame.
         if let Some(ref backend) = ctx.xr_backend {
             backend.sync_actions();
         }
@@ -1960,7 +1936,6 @@ pub unsafe extern "C" fn mxr_render_dirty_panels(session: *mut XrSessionContext)
         }
     }
 
-    // Put the renderer back.
     ctx.renderer = renderer;
     count
 }

@@ -2,10 +2,9 @@
   devShells.mojo-gui = pkgs: let
     inherit (pkgs) lib stdenv;
 
-    # Rust toolchain with Windows cross-compilation target (from rust-overlay).
-    # This is NOT added to PATH (to avoid shadowing the devenv-provided Rust).
-    # Instead, its sysroot is exposed via the `rust-sysroot-windows` helper script
-    # so that cross-compilation recipes can pass --sysroot to rustc.
+    # A rust-overlay toolchain carrying the Windows target. Kept off PATH so it
+    # cannot shadow the devenv Rust; the `rust-sysroot-windows` helper below
+    # exposes its sysroot instead, for a cross recipe to pass to rustc.
     rustWithWindows = pkgs.rust-bin.stable.latest.default.override {
       extensions = ["rust-src"];
       targets = ["x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu"];
@@ -53,9 +52,9 @@
         vulkan-headers
         libGL
 
-        # Windows cross-compilation (MinGW-w64 linker for x86_64-pc-windows-gnu)
-        # Strip nix-support/ to avoid setup hooks that set CC/AR/etc. to cross names,
-        # which would break native builds. We only need the binaries on PATH.
+        # The MinGW-w64 linker for x86_64-pc-windows-gnu. nix-support/ is
+        # stripped: its setup hooks point CC/AR at the cross names and break
+        # native builds, and only the binaries are wanted on PATH.
         (symlinkJoin {
           name = "mingw-w64-cc-noenv";
           paths = [pkgsCross.mingwW64.stdenv.cc];
@@ -87,10 +86,8 @@
 
   # ── CI Check Derivations ──────────────────────────────────────────────
   #
-  # These checks run via `nix flake check` in the Tangled CI pipeline.
-  # Each check is a derivation that succeeds (exit 0) when the check passes.
-  #
-  # Implemented checks (S-1 from PLAN.md):
+  # Run by `nix flake check` in the Tangled CI pipeline; each succeeds by
+  # exiting 0.
   #   - mojo-gui-test-desktop  — 75 Rust integration tests for Blitz shim (headless)
   #   - mojo-gui-test-xr       — 37 Rust integration tests for XR shim (headless)
   #   - mojo-gui-test          — 52 Mojo test suites via wasmtime

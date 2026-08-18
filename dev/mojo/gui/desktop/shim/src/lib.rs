@@ -106,7 +106,6 @@ impl blitz_dom::EventHandler for MojoEventHandler<'_> {
         _mutr: &mut blitz_dom::DocumentMutator<'_>,
         _event_state: &mut EventState,
     ) {
-        // Map DomEventData to the event name string used by mojo-gui
         let event_name = match &event.data {
             DomEventData::Click(_) => "click",
             DomEventData::Input(_) => "input",
@@ -136,7 +135,6 @@ impl blitz_dom::EventHandler for MojoEventHandler<'_> {
             if let Some(handlers) = self.event_handlers.get(&node_id) {
                 for handler in handlers {
                     if handler.event_name == event_name {
-                        // Extract string value for input events
                         let value = match &event.data {
                             DomEventData::Input(data) => data.value.to_string(),
                             _ => String::new(),
@@ -254,23 +252,19 @@ impl BlitzContext {
 
         let mut doc = BaseDocument::new(config);
 
-        // Build a minimal DOM structure: Document → <html> → <body>
-        // The document root (node 0) is created by BaseDocument::new().
-        // We need to create <html> and <body> elements.
+        // Document → <html> → <body>. BaseDocument::new() makes the root.
         let html_name = QualName::new(None::<Prefix>, ns!(html), local_name!("html"));
         let html_id = doc.create_node(NodeData::Element(ElementData::new(html_name, vec![])));
 
         let body_name = QualName::new(None::<Prefix>, ns!(html), local_name!("body"));
         let body_id = doc.create_node(NodeData::Element(ElementData::new(body_name, vec![])));
 
-        // Attach <html> to document root, <body> to <html>
         {
             let mut mutator = doc.mutate();
             mutator.append_children(0, &[html_id]);
             mutator.append_children(html_id, &[body_id]);
         }
 
-        // Set window title via a <title> element
         if !title.is_empty() {
             let head_name = QualName::new(None::<Prefix>, ns!(html), local_name!("head"));
             let head_id = doc.create_node(NodeData::Element(ElementData::new(head_name, vec![])));
@@ -292,7 +286,6 @@ impl BlitzContext {
         id_to_node.insert(0, body_id);
         node_to_id.insert(body_id, 0);
 
-        // Create the Winit event loop
         let event_loop = EventLoop::<()>::builder().build().unwrap();
         event_loop.set_control_flow(ControlFlow::Wait);
 
@@ -311,7 +304,6 @@ impl BlitzContext {
             debug,
             in_mutation_batch: false,
 
-            // Windowing state
             event_loop: Some(event_loop),
             window: None,
             renderer: Some(VelloWindowRenderer::new()),
@@ -321,7 +313,6 @@ impl BlitzContext {
             window_initialized: false,
             needs_redraw: false,
 
-            // Input state
             mouse_buttons: MouseEventButtons::None,
             mouse_pos: (0.0, 0.0),
         }
@@ -476,7 +467,6 @@ impl BlitzContext {
 
     /// Remove and drop a node.
     pub fn remove_node(&mut self, node_id: usize) {
-        // Clean up ID mappings
         if let Some(mojo_id) = self.node_to_id.remove(&node_id) {
             self.id_to_node.remove(&mojo_id);
         }
@@ -768,7 +758,6 @@ impl BlitzContext {
                 }
             }
 
-            // Ignore other events for now
             _ => {}
         }
     }
@@ -1011,12 +1000,10 @@ pub unsafe extern "C" fn mblitz_step(ctx: *mut BlitzContext, blocking: i32) -> i
 
     let status = event_loop.pump_app_events(timeout, &mut *ctx);
 
-    // Check if the event loop requested exit
     if matches!(status, PumpStatus::Exit(_)) {
         ctx.alive = false;
     }
 
-    // Put the event loop back
     ctx.event_loop = Some(event_loop);
 
     if ctx.alive { 1 } else { 0 }
@@ -1252,7 +1239,6 @@ pub unsafe extern "C" fn mblitz_replace_with(
         .map(|&id| ctx.resolve_id(id).unwrap_or(id as usize))
         .collect();
 
-    // Clean up ID mapping for old node
     if let Some(mojo_id) = ctx.node_to_id.remove(&old_blitz) {
         ctx.id_to_node.remove(&mojo_id);
     }
@@ -1626,7 +1612,6 @@ pub unsafe extern "C" fn mblitz_stack_pop_replace(ctx: *mut BlitzContext, old_id
     let old_blitz = ctx.resolve_id(old_id).unwrap_or(old_id as usize);
     let replacements = ctx.stack_pop_n(count as usize);
 
-    // Clean up ID mapping for old node
     if let Some(mojo_id) = ctx.node_to_id.remove(&old_blitz) {
         ctx.id_to_node.remove(&mojo_id);
     }
