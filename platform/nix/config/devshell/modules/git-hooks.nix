@@ -436,6 +436,15 @@
         files = "\\.(rs|go|py)$";
         pass_filenames = true;
       };
+      cargo-profiles = {
+        enable = true;
+        name = "cargo-profiles";
+        # Release-profile policy, which lives in the manifest rather than the
+        # code: clippy lints Rust, and TOML is not an ast-grep language.
+        entry = "${pkgs.nushell}/bin/nu ${src}/dev/scripts/check-cargo-profiles.nu";
+        files = "Cargo\\.toml$";
+        pass_filenames = false;
+      };
       rumdl = {
         enable = true;
         entry = "${pkgs.rumdl}/bin/rumdl fmt";
