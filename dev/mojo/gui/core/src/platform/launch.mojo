@@ -56,7 +56,7 @@
 #     session, wraps the app in a single floating panel, mounts the DOM,
 #     and enters the XR frame loop (blocking until the session ends).
 #
-#   - The compile-time dispatch uses @parameter if with is_wasm_target()
+#   - The compile-time dispatch uses comptime if with is_wasm_target()
 #     so that only the relevant renderer code is compiled for each target.
 #     This avoids pulling in desktop dependencies for WASM builds and
 #     vice versa.
@@ -76,7 +76,7 @@
 #       targets for API compatibility. Callers should use the config
 #       passed directly to them rather than relying on global state.
 #
-# Step 3.9.3: launch() uses @parameter if is_wasm_target() for
+# Step 3.9.3: launch() uses comptime if is_wasm_target() for
 # compile-time target dispatch. On WASM, it returns immediately
 # (JS drives the loop). On XR native, it calls xr_launch[AppType]().
 # On desktop native, it calls desktop_launch[AppType]() with the

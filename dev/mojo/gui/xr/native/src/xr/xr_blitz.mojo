@@ -331,40 +331,19 @@ fn _find_library() -> String:
     # 2. NIX_LDFLAGS — parse -L/nix/store/... paths
     var nix_flags = getenv("NIX_LDFLAGS")
     if len(nix_flags) > 0:
-        var i = 0
-        var flag_start = 0
-        while i <= len(nix_flags):
-            var at_end = i == len(nix_flags)
-            var is_space = False
-            if not at_end:
-                is_space = nix_flags[byte=i] == " "
-            if at_end or is_space:
-                if i > flag_start:
-                    var token = nix_flags[flag_start:i]
-                    if len(token) > 2:
-                        if token[byte=0] == "-" and token[byte=1] == "L":
-                            var dir_path = token[2:]
-                            var candidate = String(dir_path) + sep + name
-                            return candidate
-                flag_start = i + 1
-            i += 1
+        # Split on spaces and take the first -L. This was a hand-rolled
+        # index walk, which 26.2.0 no longer allows: String has no range
+        # __getitem__, only the byte= form used for single characters.
+        for token in nix_flags.split(" "):
+            if len(token) > 2 and token.startswith("-L"):
+                return token.removeprefix("-L") + sep + name
 
     # 3. LD_LIBRARY_PATH
     var ld_path = getenv("LD_LIBRARY_PATH")
     if len(ld_path) > 0:
-        var i = 0
-        var path_start = 0
-        while i <= len(ld_path):
-            var at_end = i == len(ld_path)
-            var is_colon = False
-            if not at_end:
-                is_colon = ld_path[byte=i] == ":"
-            if at_end or is_colon:
-                if i > path_start:
-                    var dir_path = ld_path[path_start:i]
-                    return String(dir_path) + sep + name
-                path_start = i + 1
-            i += 1
+        for dir_path in ld_path.split(":"):
+            if len(dir_path) > 0:
+                return dir_path + sep + name
 
     # 4. Fall back to bare library name (let the linker search)
     return name
@@ -829,7 +808,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         parent_id: UInt32,
-        child_ids: UnsafePointer[UInt32],
+        child_ids: UnsafePointer[UInt32, _],
         child_count: UInt32,
     ):
         """Append children to a parent element in a panel.
@@ -848,7 +827,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32],
+        new_ids: UnsafePointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes before an anchor node in a panel.
@@ -867,7 +846,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32],
+        new_ids: UnsafePointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes after an anchor node in a panel.
@@ -886,7 +865,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         old_id: UInt32,
-        new_ids: UnsafePointer[UInt32],
+        new_ids: UnsafePointer[UInt32, _],
         new_count: UInt32,
     ):
         """Replace a node with new nodes in a panel.
@@ -985,7 +964,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         root_id: UInt32,
-        path: UnsafePointer[UInt32],
+        path: UnsafePointer[UInt32, _],
         path_len: UInt32,
     ) -> UInt32:
         """Navigate to a child at the given path from a starting node.
@@ -1399,7 +1378,7 @@ struct XRBlitz(Movable):
     fn read_pixels(
         self,
         panel_id: UInt32,
-        buf: UnsafePointer[UInt8],
+        buf: UnsafePointer[UInt8, _],
         buf_len: UInt32,
     ) -> UInt32:
         """Copy a panel's most-recently-rendered texture to a CPU buffer.

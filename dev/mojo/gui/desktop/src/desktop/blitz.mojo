@@ -173,45 +173,21 @@ fn _find_library() -> String:
     # 2. NIX_LDFLAGS — parse -L/nix/store/... paths
     var nix_flags = getenv("NIX_LDFLAGS")
     if len(nix_flags) > 0:
-        # Simple parsing: split on spaces, look for -L flags
-        var i = 0
-        var flag_start = 0
-        while i <= len(nix_flags):
-            var at_end = i == len(nix_flags)
-            var is_space = False
-            if not at_end:
-                is_space = nix_flags[byte=i] == " "
-            if at_end or is_space:
-                if i > flag_start:
-                    var token = nix_flags[flag_start:i]
-                    if len(token) > 2:
-                        if token[byte=0] == "-" and token[byte=1] == "L":
-                            var dir_path = token[2:]
-                            # Check if the library exists in this directory
-                            # We can't do filesystem checks easily, so just
-                            # try the path. The dynamic linker will reject
-                            # it if it doesn't exist.
-                            var candidate = String(dir_path) + sep + name
-                            return candidate
-                flag_start = i + 1
-            i += 1
+        # Split on spaces and take the first -L. This was a hand-rolled
+        # index walk, which 26.2.0 no longer allows: String has no range
+        # __getitem__, only the byte= form used for single characters.
+        for token in nix_flags.split(" "):
+            if len(token) > 2 and token.startswith("-L"):
+                # No filesystem check here: the dynamic linker rejects the
+                # path if the library is not actually in it.
+                return token.removeprefix("-L") + sep + name
 
     # 3. LD_LIBRARY_PATH
     var ld_path = getenv("LD_LIBRARY_PATH")
     if len(ld_path) > 0:
-        var i = 0
-        var path_start = 0
-        while i <= len(ld_path):
-            var at_end = i == len(ld_path)
-            var is_colon = False
-            if not at_end:
-                is_colon = ld_path[byte=i] == ":"
-            if at_end or is_colon:
-                if i > path_start:
-                    var dir_path = ld_path[path_start:i]
-                    return String(dir_path) + sep + name
-                path_start = i + 1
-            i += 1
+        for dir_path in ld_path.split(":"):
+            if len(dir_path) > 0:
+                return dir_path + sep + name
 
     # 4. Fall back to bare library name (let the linker search)
     return name
@@ -424,7 +400,7 @@ struct Blitz(Movable):
     fn append_children(
         self,
         parent_id: UInt32,
-        child_ids: UnsafePointer[UInt32],
+        child_ids: UnsafePointer[UInt32, _],
         child_count: UInt32,
     ):
         """Append children to a parent element.
@@ -441,7 +417,7 @@ struct Blitz(Movable):
     fn insert_before(
         self,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32],
+        new_ids: UnsafePointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes before an anchor node.
@@ -458,7 +434,7 @@ struct Blitz(Movable):
     fn insert_after(
         self,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32],
+        new_ids: UnsafePointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes after an anchor node.
@@ -475,7 +451,7 @@ struct Blitz(Movable):
     fn replace_with(
         self,
         old_id: UInt32,
-        new_ids: UnsafePointer[UInt32],
+        new_ids: UnsafePointer[UInt32, _],
         new_count: UInt32,
     ):
         """Replace a node with new nodes.
@@ -552,7 +528,7 @@ struct Blitz(Movable):
     fn node_at_path(
         self,
         start_id: UInt32,
-        path: UnsafePointer[UInt8],
+        path: UnsafePointer[UInt8, _],
         path_len: UInt32,
     ) -> UInt32:
         """Navigate to a child at the given path from a starting node.
@@ -646,7 +622,7 @@ struct Blitz(Movable):
         """
         # Allocate output slots for each event field.
         # For the value pointer we use alloc[Int] (pointer-sized) because
-        # alloc[UnsafePointer[UInt8]] fails to infer the origin parameter
+        # alloc[UnsafePointer[UInt8, _]] fails to infer the origin parameter
         # in Mojo 26.1. This follows the pattern from launcher.mojo.
         var out_handler_id = alloc[UInt32](1)
         var out_event_type = alloc[UInt8](1)

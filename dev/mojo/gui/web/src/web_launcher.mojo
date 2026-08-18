@@ -182,7 +182,9 @@ struct WebApp(PlatformApp):
 
         self._initialized = True
 
-    fn flush_mutations(mut self, buf: UnsafePointer[UInt8], length: Int) raises:
+    fn flush_mutations(
+        mut self, buf: UnsafePointer[UInt8, _], length: Int
+    ) raises:
         """No-op on WASM — the JS runtime reads the mutation buffer directly.
 
         On the web target, the mutation buffer lives in WASM linear memory.

@@ -3,7 +3,7 @@
 NOTE on FFI output parameters:
     Wasmtime C API functions write results through pointers (e.g. the
     instance handle from wasmtime_linker_instantiate).  For Mojo types
-    marked @register_passable("trivial"), the compiler may keep local
+    that are TrivialRegisterPassable, the compiler may keep local
     variables in registers.  If we take the address of such a local with
     UnsafePointer(to=var) and pass it to FFI, the write goes to a stack
     spill slot — but the compiler may never reload the register from that

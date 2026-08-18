@@ -33,7 +33,7 @@
 # Usage by renderer implementors:
 #
 #     struct MyRenderer(PlatformApp):
-#         fn flush_mutations(mut self, buf: UnsafePointer[UInt8], length: Int):
+#         fn flush_mutations(mut self, buf: UnsafePointer[UInt8, _], length: Int):
 #             # Send the mutation buffer to the rendering backend
 #             ...
 #
@@ -103,7 +103,9 @@ trait PlatformApp(Movable):
         """
         ...
 
-    fn flush_mutations(mut self, buf: UnsafePointer[UInt8], length: Int) raises:
+    fn flush_mutations(
+        mut self, buf: UnsafePointer[UInt8, _], length: Int
+    ) raises:
         """Deliver a completed mutation buffer to the renderer.
 
         Args:
