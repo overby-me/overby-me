@@ -730,7 +730,7 @@ impl EventRing {
             panel_id: event.panel_id,
             handler_id: event.handler_id,
             event_type: event.event_type,
-            value_ptr: self.last_polled_value.as_ptr() as *const c_char,
+            value_ptr: self.last_polled_value.as_ptr().cast::<c_char>(),
             value_len: self.last_polled_value.len() as u32,
             hit_u: event.hit_u,
             hit_v: event.hit_v,
@@ -847,7 +847,11 @@ impl OffscreenRenderer {
     fn render_panel(&mut self, panel: &mut Panel) {
         self.ensure_texture(panel);
 
-        let pt = panel.gpu_texture.as_ref().expect("texture just ensured");
+        let Some(pt) = panel.gpu_texture.as_ref() else {
+            // ensure_texture only fails without a GPU; skip the frame rather
+            // than aborting the process from inside the render path.
+            return;
+        };
 
         let mut scene = VelloScene::new();
         {
@@ -1185,7 +1189,7 @@ unsafe fn read_str(ptr: *const c_char, len: u32) -> &'static str {
     if ptr.is_null() || len == 0 {
         return "";
     }
-    let slice = std::slice::from_raw_parts(ptr as *const u8, len as usize);
+    let slice = std::slice::from_raw_parts(ptr.cast::<u8>(), len as usize);
     // Checked, because the bytes come from Mojo across the C ABI and nothing
     // on this side can promise they are UTF-8. `from_utf8_unchecked` here was
     // undefined behaviour for any caller that ever passed something else.
@@ -1200,7 +1204,7 @@ unsafe fn write_to_buf(s: &str, buf: *mut c_char, buf_len: u32) -> u32 {
         return needed;
     }
     let copy_len = std::cmp::min(needed, buf_len) as usize;
-    std::ptr::copy_nonoverlapping(s.as_ptr(), buf as *mut u8, copy_len);
+    std::ptr::copy_nonoverlapping(s.as_ptr(), buf.cast::<u8>(), copy_len);
     copy_len as u32
 }
 
@@ -2437,6 +2441,10 @@ pub unsafe extern "C" fn mxr_get_squeeze_state(session: *mut XrSessionContext) -
 ///
 /// The `out_value_ptr` / `out_value_len` pair points into an internal buffer
 /// that stays alive until the next `mxr_poll_event_into()` call.
+#[expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "batched writes through caller-provided out-pointers; one validity argument (the caller passed pointers it owns) covers every write in the block"
+)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mxr_poll_event_into(
     session: *mut XrSessionContext,
@@ -2484,6 +2492,10 @@ pub unsafe extern "C" fn mxr_poll_event_into(
 ///
 /// Returns 1 if a panel was hit, 0 if the ray missed all panels.
 /// When returning 0, output pointers are zeroed.
+#[expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "batched writes through caller-provided out-pointers; one validity argument (the caller passed pointers it owns) covers every write in the block"
+)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mxr_raycast_panels_into(
     session: *mut XrSessionContext,
@@ -2522,6 +2534,10 @@ pub unsafe extern "C" fn mxr_raycast_panels_into(
 ///
 /// Returns 1 if the pose is valid (tracking active), 0 otherwise.
 /// In headless mode, always returns 0 and zeroes the output.
+#[expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "batched writes through caller-provided out-pointers; one validity argument (the caller passed pointers it owns) covers every write in the block"
+)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mxr_get_pose_into(
     session: *mut XrSessionContext,

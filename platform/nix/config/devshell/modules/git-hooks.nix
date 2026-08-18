@@ -382,11 +382,7 @@
         # apps/homepage/xscreensaver transcribes upstream hacks verbatim, and
         # the hardened lint set reads that fabric as errors (2,753 on first
         # contact, dominated by cast_precision_loss on graphics maths).
-        # The XR shim is excluded pending its own cleanup: first contact with
-        # the hardened set found 16 errors (unwraps at the extern-C surface
-        # among them - real hazards that deserve unhurried fixes in FFI code
-        # that compiles here but only runs against a headset).
-        excludes = ["^safety/fe-c/" "^apps/wiki/" "^apps/homepage/xscreensaver/" "^dev/mojo/gui/xr/native/shim/"];
+        excludes = ["^safety/fe-c/" "^apps/wiki/" "^apps/homepage/xscreensaver/"];
         entry = "${pkgs.writeShellScript "clippy-multi-project" ''
           # Determine which Cargo projects contain changed .rs files.
           # Arguments are the changed .rs file paths passed by pre-commit.

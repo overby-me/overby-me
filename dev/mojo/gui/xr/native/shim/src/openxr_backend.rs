@@ -156,6 +156,10 @@ impl OpenXrBackend {
     /// 6. Create reference spaces
     /// 7. Set up input actions
     /// 8. Wrap Vulkan device in wgpu for Vello rendering
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear OpenXR bring-up sequence (the eight numbered steps above); splitting it adds parameter plumbing without adding structure"
+    )]
     pub fn try_new(app_name: &str) -> Option<Self> {
         // ── 1. Load OpenXR ──────────────────────────────────────────
 
@@ -185,8 +189,7 @@ impl OpenXrBackend {
             enabled_exts.fb_passthrough = true;
         }
 
-        let app_name_c =
-            CString::new(app_name).unwrap_or_else(|_| CString::new("mojo-gui").unwrap());
+        let app_name_c = CString::new(app_name).unwrap_or_else(|_| CString::from(c"mojo-gui"));
         let app_name_bytes = app_name_c.as_bytes();
         let mut name_buf = [0u8; 128];
         let copy_len = app_name_bytes.len().min(127);
@@ -531,8 +534,8 @@ impl OpenXrBackend {
         let wgpu_adapter = unsafe { wgpu_instance.create_adapter_from_hal(hal_exposed_adapter) };
 
         // Create a HAL open device wrapping our raw Vulkan device.
+        let adapter_guard = unsafe { wgpu_adapter.as_hal::<VulkanApi>() }?;
         let hal_open_device = unsafe {
-            let adapter_guard = wgpu_adapter.as_hal::<VulkanApi>()?;
             adapter_guard
                 .device_from_raw(
                     vk_device.clone(),
@@ -813,11 +816,14 @@ impl OpenXrBackend {
         let mut views = Vec::with_capacity(images.len());
 
         for vk_image in &images {
+            let Some(device_guard) =
+                (unsafe { self.wgpu_device.as_hal::<wgpu::hal::api::Vulkan>() })
+            else {
+                // Constructed via the Vulkan path, so this cannot miss; if it
+                // ever does, failing the swapchain beats aborting the app.
+                return false;
+            };
             let hal_texture = unsafe {
-                let device_guard = self
-                    .wgpu_device
-                    .as_hal::<wgpu::hal::api::Vulkan>()
-                    .expect("XR backend must use Vulkan wgpu device");
                 device_guard.texture_from_raw(
                     ash::vk::Image::from_raw(*vk_image),
                     &wgpu::hal::TextureDescriptor {
@@ -933,7 +939,9 @@ impl OpenXrBackend {
 
         // Acquire swapchain image.
         // We need to work around borrow checker: acquire first, then render.
-        let sc = self.panel_swapchains.get_mut(&panel_id).unwrap();
+        let Some(sc) = self.panel_swapchains.get_mut(&panel_id) else {
+            return false;
+        };
         if sc.acquired_index.is_none() {
             let index = match sc.swapchain.acquire_image() {
                 Ok(i) => i as usize,
@@ -948,7 +956,9 @@ impl OpenXrBackend {
             }
             sc.acquired_index = Some(index);
         }
-        let image_index = sc.acquired_index.unwrap();
+        let Some(image_index) = sc.acquired_index else {
+            return false;
+        };
         let view = &sc.views[image_index];
 
         // Paint the panel's Blitz DOM to a Vello scene.
@@ -984,7 +994,9 @@ impl OpenXrBackend {
         );
 
         // Release the swapchain image.
-        let sc = self.panel_swapchains.get_mut(&panel_id).unwrap();
+        let Some(sc) = self.panel_swapchains.get_mut(&panel_id) else {
+            return false;
+        };
         let _ = sc.swapchain.release_image();
         sc.acquired_index = None;
 
