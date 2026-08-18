@@ -69,7 +69,7 @@
     then let
       imported = import resolvedPath;
     in
-      if builtins.isFunction imported
+      if lib.isFunction imported
       then imported {inherit pkgs workspaceRoot lib;}
       else if lib.isDerivation imported
       then imported
@@ -137,7 +137,7 @@
         _name: cfg: let
           targetSystems = cfg.systems or workspaceSystems;
         in
-          builtins.elem system targetSystems
+          lib.elem system targetSystems
       )
       effectiveConfigs;
   in

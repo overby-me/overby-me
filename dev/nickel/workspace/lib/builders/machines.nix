@@ -92,10 +92,10 @@
                 addr: let
                   parts = lib.splitString "/" addr;
                 in {
-                  address = builtins.head parts;
+                  address = lib.head parts;
                   prefixLength =
-                    if builtins.length parts > 1
-                    then lib.toInt (builtins.elemAt parts 1)
+                    if lib.length parts > 1
+                    then lib.toInt (lib.elemAt parts 1)
                     else 24;
                 }
               ) (ifCfg.ip-addresses or []);
@@ -142,7 +142,7 @@
     #   - A relative path to a .nix file (e.g. "./modules/custom.nix")
     #   - An absolute path to a .nix file
     resolveModuleRef = ref:
-      if builtins.hasAttr ref workspaceModules
+      if lib.hasAttr ref workspaceModules
       then workspaceModules.${ref}
       else if lib.hasPrefix "./" ref || lib.hasPrefix "../" ref
       then workspaceRoot + "/${ref}"
@@ -151,7 +151,7 @@
       else
         throw ''
           nix-workspace: machine '${name}' references module '${ref}' which was not found.
-          Available workspace modules: ${builtins.concatStringsSep ", " (builtins.attrNames workspaceModules)}
+          Available workspace modules: ${lib.concatStringsSep ", " (lib.attrNames workspaceModules)}
           Hint: module references can be a workspace module name, a relative path (./path), or an absolute path.
         '';
 
@@ -180,7 +180,7 @@
       if hasHomeManager
       then let
         resolveHomeModuleRef = ref:
-          if builtins.hasAttr ref homeModules
+          if lib.hasAttr ref homeModules
           then homeModules.${ref}
           else if lib.hasPrefix "./" ref || lib.hasPrefix "../" ref
           then workspaceRoot + "/${ref}"
@@ -189,7 +189,7 @@
           else
             throw ''
               nix-workspace: home-manager module '${ref}' not found.
-              Available home modules: ${builtins.concatStringsSep ", " (builtins.attrNames homeModules)}
+              Available home modules: ${lib.concatStringsSep ", " (lib.attrNames homeModules)}
             '';
       in {
         home-manager = {

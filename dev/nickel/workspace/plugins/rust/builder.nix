@@ -33,7 +33,7 @@
       (cfg.cargo-build-flags or [])
       ++ (lib.optionals (features != []) [
         "--features"
-        (builtins.concatStringsSep "," features)
+        (lib.concatStringsSep "," features)
       ])
       ++ (lib.optionals (!defaultFeatures) [
         "--no-default-features"
@@ -43,7 +43,7 @@
       (cfg.cargo-test-flags or [])
       ++ (lib.optionals (features != []) [
         "--features"
-        (builtins.concatStringsSep "," features)
+        (lib.concatStringsSep "," features)
       ])
       ++ (lib.optionals (!defaultFeatures) [
         "--no-default-features"

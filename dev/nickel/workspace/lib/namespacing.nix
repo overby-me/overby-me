@@ -62,7 +62,7 @@
       rootOutputs;
 
     registryWithAll =
-      builtins.foldl' (
+      lib.foldl' (
         registry: sub: let
           subName = sub.name;
           subOutputs = sub.outputs or {};
@@ -94,13 +94,13 @@
           lib.concatLists (
             lib.mapAttrsToList (
               name: sources:
-                if builtins.length sources > 1
+                if lib.length sources > 1
                 then [
                   {
                     code = "NW200";
                     severity = "error";
                     inherit convention name sources;
-                    message = "Namespace conflict: '${name}' in '${convention}' is produced by multiple sources: ${builtins.concatStringsSep ", " sources}";
+                    message = "Namespace conflict: '${name}' in '${convention}' is produced by multiple sources: ${lib.concatStringsSep ", " sources}";
                     hint = "Rename one of the conflicting outputs, or use a different subworkspace directory name.";
                   }
                 ]
@@ -118,7 +118,7 @@
 
   # A valid Nix derivation name is [a-zA-Z_][a-zA-Z0-9_-]*.
   isValidOutputName = name:
-    builtins.match "[a-zA-Z_][a-zA-Z0-9_-]*" name != null;
+    lib.match "[a-zA-Z_][a-zA-Z0-9_-]*" name != null;
 
   # Diagnostics for every namespaced name that is not one.
   validateOutputNames = subworkspaceName: outputs:
@@ -182,10 +182,10 @@
       );
 
     diagnosticMessages =
-      builtins.concatStringsSep "\n\n" (map formatDiagnostic allDiagnostics);
+      lib.concatStringsSep "\n\n" (map formatDiagnostic allDiagnostics);
 
     merged =
-      builtins.foldl' (
+      lib.foldl' (
         acc: sub:
           lib.mapAttrs (
             convention: rootNames: let
@@ -215,7 +215,7 @@
     lib.concatLists (
       lib.mapAttrsToList (
         alias: target:
-          if builtins.elem target knownSubworkspaces
+          if lib.elem target knownSubworkspaces
           then []
           else [
             {
@@ -226,14 +226,14 @@
               message = "Subworkspace '${subworkspaceName}' declares dependency '${alias}' → '${target}', but no subworkspace named '${target}' exists.";
               hint = let
                 suggestions =
-                  builtins.filter (
-                    name: lib.hasPrefix (builtins.substring 0 3 target) name
+                  lib.filter (
+                    name: lib.hasPrefix (lib.substring 0 3 target) name
                   )
                   knownSubworkspaces;
               in
                 if suggestions != []
-                then "Did you mean one of: ${builtins.concatStringsSep ", " suggestions}?"
-                else "Available subworkspaces: ${builtins.concatStringsSep ", " knownSubworkspaces}";
+                then "Did you mean one of: ${lib.concatStringsSep ", " suggestions}?"
+                else "Available subworkspaces: ${lib.concatStringsSep ", " knownSubworkspaces}";
             }
           ]
       )
@@ -242,22 +242,22 @@
 
   # DFS, which is enough: a workspace dependency graph is tiny.
   detectCycles = dependencyGraph: let
-    allNames = builtins.attrNames dependencyGraph;
+    allNames = lib.attrNames dependencyGraph;
 
     # Whether `target` is reachable from `start`.
     isReachable = start: target: visited: let
       neighbors = dependencyGraph.${start} or [];
-      unvisited = builtins.filter (n: !builtins.elem n visited) neighbors;
+      unvisited = lib.filter (n: !lib.elem n visited) neighbors;
     in
-      builtins.elem target neighbors
-      || builtins.any (
+      lib.elem target neighbors
+      || lib.any (
         neighbor:
           isReachable neighbor target (visited ++ [start])
       )
       unvisited;
 
     nodesInCycles =
-      builtins.filter (
+      lib.filter (
         name: isReachable name name []
       )
       allNames;
@@ -268,7 +268,7 @@
       {
         code = "NW301";
         severity = "error";
-        message = "Circular dependency detected among subworkspaces: ${builtins.concatStringsSep ", " nodesInCycles}";
+        message = "Circular dependency detected among subworkspaces: ${lib.concatStringsSep ", " nodesInCycles}";
         hint = "Break the cycle by removing one of the dependency declarations.";
         nodes = nodesInCycles;
       }
@@ -278,13 +278,13 @@
   buildDependencyGraph = subworkspaceConfigs:
     lib.mapAttrs (
       _name: config:
-        builtins.attrValues (config.dependencies or {})
+        lib.attrValues (config.dependencies or {})
     )
     subworkspaceConfigs;
 
   # Every reference resolves, and no cycles.
   validateAllDependencies = subworkspaceConfigs: let
-    knownNames = builtins.attrNames subworkspaceConfigs;
+    knownNames = lib.attrNames subworkspaceConfigs;
 
     refErrors = lib.concatLists (
       lib.mapAttrsToList (

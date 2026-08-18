@@ -56,14 +56,14 @@
     tags = cfg.tags or [];
     tagsFlag =
       if tags != []
-      then ["-tags" (builtins.concatStringsSep "," tags)]
+      then ["-tags" (lib.concatStringsSep "," tags)]
       else [];
 
     # Linker flags
     ldflags = cfg.ldflags or [];
     ldflagsStr =
       if ldflags != []
-      then builtins.concatStringsSep " " ldflags
+      then lib.concatStringsSep " " ldflags
       else null;
 
     # CGO
@@ -142,7 +142,7 @@
         _name: cfg: let
           targetSystems = cfg.systems or workspaceSystems;
         in
-          builtins.elem system targetSystems
+          lib.elem system targetSystems
       )
       packageConfigs;
   in

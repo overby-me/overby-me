@@ -126,7 +126,7 @@
         _name: cfg: let
           targetSystems = cfg.systems or workspaceSystems;
         in
-          builtins.elem system targetSystems
+          lib.elem system targetSystems
       )
       packageConfigs;
   in

@@ -26,7 +26,7 @@
     allModulePaths ? {},
   }: let
     resolveImportRef = ref:
-      if builtins.hasAttr ref allModulePaths
+      if lib.hasAttr ref allModulePaths
       then allModulePaths.${ref}
       else if lib.hasPrefix "./" ref || lib.hasPrefix "../" ref
       then workspaceRoot + "/${ref}"
@@ -35,7 +35,7 @@
       else
         throw ''
           nix-workspace: NixOS module '${name}' imports '${ref}' which was not found.
-          Available workspace modules: ${builtins.concatStringsSep ", " (builtins.attrNames allModulePaths)}
+          Available workspace modules: ${lib.concatStringsSep ", " (lib.attrNames allModulePaths)}
           Hint: import references can be a workspace module name, a relative path (./path), or an absolute path.
         '';
 
@@ -55,7 +55,7 @@
         else if lib.hasPrefix "/" moduleConfig.path
         then /. + moduleConfig.path
         else workspaceRoot + "/${moduleConfig.path}"
-      else if builtins.hasAttr name allModulePaths
+      else if lib.hasAttr name allModulePaths
       then allModulePaths.${name}
       else null;
   in
@@ -83,7 +83,7 @@
     allHomePaths ? {},
   }: let
     resolveImportRef = ref:
-      if builtins.hasAttr ref allHomePaths
+      if lib.hasAttr ref allHomePaths
       then allHomePaths.${ref}
       else if lib.hasPrefix "./" ref || lib.hasPrefix "../" ref
       then workspaceRoot + "/${ref}"
@@ -92,7 +92,7 @@
       else
         throw ''
           nix-workspace: home-manager module '${name}' imports '${ref}' which was not found.
-          Available home modules: ${builtins.concatStringsSep ", " (builtins.attrNames allHomePaths)}
+          Available home modules: ${lib.concatStringsSep ", " (lib.attrNames allHomePaths)}
           Hint: import references can be a home module name, a relative path (./path), or an absolute path.
         '';
 
@@ -111,7 +111,7 @@
         else if lib.hasPrefix "/" homeConfig.path
         then /. + homeConfig.path
         else workspaceRoot + "/${homeConfig.path}"
-      else if builtins.hasAttr name allHomePaths
+      else if lib.hasAttr name allHomePaths
       then allHomePaths.${name}
       else null;
   in
@@ -165,9 +165,9 @@
   discoverNixFiles = workspaceRoot: relativeDir: let
     dirPath = workspaceRoot + "/${relativeDir}";
   in
-    if builtins.pathExists dirPath
+    if lib.pathExists dirPath
     then let
-      entries = builtins.readDir dirPath;
+      entries = lib.readDir dirPath;
       nixEntries =
         lib.filterAttrs (
           name: type:

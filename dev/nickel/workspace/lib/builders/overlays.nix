@@ -28,7 +28,7 @@
     then let
       imported = import resolvedPath;
     in
-      if builtins.isFunction imported
+      if lib.isFunction imported
       then imported
       else
         throw ''
@@ -57,7 +57,7 @@
     resolvedConfigs =
       lib.mapAttrs (
         _name: cfg:
-          if cfg ? path && builtins.isPath cfg.path
+          if cfg ? path && lib.isPath cfg.path
           then cfg // {path = toString cfg.path;}
           else cfg
       )
@@ -81,7 +81,7 @@
       })
       overlayConfigs;
   in
-    builtins.sort (
+    lib.sort (
       a: b:
         if a.priority != b.priority
         then a.priority < b.priority

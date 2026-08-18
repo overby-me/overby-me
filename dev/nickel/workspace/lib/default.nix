@@ -57,7 +57,7 @@
       || (discoveredOverlays != {})
       || (discoveredChecks != {})
       || (discoveredTemplates != {})
-      || builtins.pathExists (workspaceRoot + "/workspace.ncl");
+      || lib.pathExists (workspaceRoot + "/workspace.ncl");
 
     # ── Phase 1c: Plugin resolution ─────────────────────────────
     #
@@ -91,7 +91,7 @@
             then "\n  hint: ${d.hint}"
             else ""
           );
-        msg = builtins.concatStringsSep "\n\n" (map formatDiag pluginValidation);
+        msg = lib.concatStringsSep "\n\n" (map formatDiag pluginValidation);
       in
         throw "nix-workspace: plugin errors:\n\n${msg}"
       else true;
@@ -142,7 +142,7 @@
       then
         evalNickel.evalAllPlugins {
           inherit bootstrapPkgs contractsDir;
-          pluginNclPaths = builtins.listToAttrs (
+          pluginNclPaths = lib.listToAttrs (
             map (name: {
               inherit name;
               value = pluginsLib.resolvePluginNcl pluginsDir name;
@@ -238,7 +238,7 @@
               then "\n  hint: ${d.hint}"
               else ""
             );
-          msg = builtins.concatStringsSep "\n\n" (map formatDiag diagnostics);
+          msg = lib.concatStringsSep "\n\n" (map formatDiag diagnostics);
         in
           throw "nix-workspace: dependency errors:\n\n${msg}"
         else true
@@ -255,7 +255,7 @@
         pluginConventions;
 
       allPluginPkgs =
-        builtins.foldl' (
+        lib.foldl' (
           acc: convName: let
             items = pluginDiscovered.${convName} or {};
           in
@@ -267,7 +267,7 @@
               )
               items)
         ) {}
-        (builtins.attrNames pkgConventions);
+        (lib.attrNames pkgConventions);
     in
       allPluginPkgs;
 
@@ -329,7 +329,7 @@
           (
             lib.filterAttrs (
               _: cfg:
-                builtins.elem system (cfg.systems or systems)
+                lib.elem system (cfg.systems or systems)
             )
             packageConfigs
           );
@@ -344,7 +344,7 @@
           (
             lib.filterAttrs (
               _: cfg:
-                builtins.elem system (cfg.systems or systems)
+                lib.elem system (cfg.systems or systems)
             )
             shellConfigs
           );
@@ -352,11 +352,11 @@
         # If there's exactly one package and no explicit default shell,
         # create a default shell with that package's build inputs.
         hasDefaultShell = builtShells ? default;
-        packageNames = builtins.attrNames builtPackages;
+        packageNames = lib.attrNames builtPackages;
         autoDefaultShell =
-          if !hasDefaultShell && builtins.length packageNames == 1
+          if !hasDefaultShell && lib.length packageNames == 1
           then let
-            singlePkgName = builtins.head packageNames;
+            singlePkgName = lib.head packageNames;
           in {
             default = pkgs.mkShell {
               name = "nix-workspace-default";
@@ -411,7 +411,7 @@
         subworkspaceConfigs
       );
     in
-      builtins.listToAttrs subEntries;
+      lib.listToAttrs subEntries;
 
     resolvePackageRoot = pkgName:
       subworkspaceOutputRoots.${pkgName} or workspaceRoot;
@@ -476,7 +476,7 @@
         subworkspaceMap
       );
     in
-      builtins.listToAttrs allSubModulePaths;
+      lib.listToAttrs allSubModulePaths;
 
     subworkspaceHomePaths = let
       allSubHomePaths = lib.concatLists (
@@ -498,7 +498,7 @@
         subworkspaceMap
       );
     in
-      builtins.listToAttrs allSubHomePaths;
+      lib.listToAttrs allSubHomePaths;
 
     allModulePaths = resolvedModulePaths // subworkspaceModulePaths;
     allHomePaths = resolvedHomePaths // subworkspaceHomePaths;
@@ -581,7 +581,7 @@
           _name: cfg: {
             name = cfg.name or "unknown";
             description = cfg.description or "";
-            conventions = builtins.attrNames (cfg.conventions or {});
+            conventions = lib.attrNames (cfg.conventions or {});
           }
         )
         evaluatedPluginConfigs;

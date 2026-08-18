@@ -103,9 +103,9 @@
   discoverTemplateDirs = workspaceRoot: let
     templatesDir = workspaceRoot + "/templates";
   in
-    if builtins.pathExists templatesDir
+    if lib.pathExists templatesDir
     then let
-      entries = builtins.readDir templatesDir;
+      entries = lib.readDir templatesDir;
       dirs =
         lib.filterAttrs (
           _name: type:

@@ -13,7 +13,7 @@
 
     pluginDir = pluginsDir + "/${shortName}";
   in
-    if builtins.pathExists pluginDir
+    if lib.pathExists pluginDir
     then pluginDir
     else
       throw ''
@@ -27,7 +27,7 @@
     dir = resolvePluginDir pluginsDir pluginName;
     nclPath = dir + "/plugin.ncl";
   in
-    if builtins.pathExists nclPath
+    if lib.pathExists nclPath
     then nclPath
     else
       throw ''
@@ -40,7 +40,7 @@
     dir = resolvePluginDir pluginsDir pluginName;
     builderPath = dir + "/builder.nix";
   in
-    if builtins.pathExists builderPath
+    if lib.pathExists builderPath
     then builderPath
     else null;
 
@@ -75,7 +75,7 @@
     #   plugins/rust/builder.nix: { buildRustPackage, meta.buildSystem = "rust" }
     #   plugins/go/builder.nix:   { buildGo, meta.buildSystem = "go" }
     allBuilders =
-      builtins.foldl' (
+      lib.foldl' (
         acc: plugin:
           if plugin.hasBuilder
           then let
@@ -93,7 +93,7 @@
     # called while building a dev shell to add the plugin's own packages, a Rust
     # toolchain's components say.
     allShellExtras =
-      builtins.foldl' (
+      lib.foldl' (
         acc: plugin:
           if plugin.hasBuilder && (plugin.builderModule ? shellExtras)
           then acc // {${plugin.name} = plugin.builderModule.shellExtras;}
@@ -113,7 +113,7 @@
   #   { conventionName = { dir, output, autoDiscover }; ... }
   # ready to merge into discover.defaultConventions.
   extractConventions = evaluatedPluginConfigs:
-    builtins.foldl' (
+    lib.foldl' (
       acc: pluginConfig: let
         conventions = pluginConfig.conventions or {};
       in
@@ -129,7 +129,7 @@
           )
           conventions)
     ) {}
-    (builtins.attrValues evaluatedPluginConfigs);
+    (lib.attrValues evaluatedPluginConfigs);
 
   # ── Builder routing ───────────────────────────────────────────
   routeBuilder = pluginBuilders: coreBuilders: pkgs: workspaceRoot: name: cfg: let
@@ -137,7 +137,7 @@
 
     # Plugins first, so one can override core behaviour.
     builderFn =
-      if builtins.hasAttr buildSystem pluginBuilders
+      if lib.hasAttr buildSystem pluginBuilders
       then let
         pluginModule = pluginBuilders.${buildSystem};
         # The main build function is named build<BuildSystem>: buildRustPackage,
@@ -145,11 +145,11 @@
         fnName =
           if buildSystem == "rust"
           then "buildRustPackage"
-          else "build${lib.toUpper (builtins.substring 0 1 buildSystem)}${builtins.substring 1 (builtins.stringLength buildSystem - 1) buildSystem}";
+          else "build${lib.toUpper (lib.substring 0 1 buildSystem)}${lib.substring 1 (lib.stringLength buildSystem - 1) buildSystem}";
       in
         pluginModule.${fnName}
         or (throw "nix-workspace: plugin builder for '${buildSystem}' does not export '${fnName}'")
-      else if builtins.hasAttr buildSystem coreBuilders
+      else if lib.hasAttr buildSystem coreBuilders
       then coreBuilders.${buildSystem}
       else throw "nix-workspace: unknown build-system '${buildSystem}' for package '${name}'. No plugin or core builder registered for this build system.";
   in
@@ -188,13 +188,13 @@
   # ── Plugin validation ─────────────────────────────────────────
   validatePlugins = pluginNames: let
     uniqueNames = lib.unique pluginNames;
-    hasDuplicates = builtins.length uniqueNames != builtins.length pluginNames;
+    hasDuplicates = lib.length uniqueNames != lib.length pluginNames;
 
     duplicateDiagnostics =
       if hasDuplicates
       then let
         counts =
-          builtins.foldl' (
+          lib.foldl' (
             acc: name:
               acc // {${name} = (acc.${name} or 0) + 1;}
           ) {}

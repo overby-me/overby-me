@@ -19,7 +19,7 @@
     eachSystem = f: let
       systemsList = import systems;
     in
-      builtins.foldl'
+      lib.foldl'
       (acc: system: nixpkgs.lib.recursiveUpdate acc (f system))
       {}
       systemsList;

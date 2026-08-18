@@ -10,7 +10,7 @@
   # `f` takes a system string and returns system-keyed outputs, e.g.
   # `{ packages.${system}.hello = drv; }`. The results merge recursively.
   eachSystem = systems: f:
-    builtins.foldl'
+    lib.foldl'
     (acc: system: lib.recursiveUpdate acc (f system))
     {}
     systems;
@@ -25,7 +25,7 @@
           _name: cfg: let
             targetSystems = cfg.systems or workspaceSystems;
           in
-            builtins.elem system targetSystems
+            lib.elem system targetSystems
         )
         configs;
 
@@ -37,7 +37,7 @@
         relevantConfigs;
     in {${outputKey}.${system} = built;};
   in
-    builtins.foldl'
+    lib.foldl'
     (acc: system: lib.recursiveUpdate acc (buildForSystem system))
     {}
     workspaceSystems;
@@ -48,7 +48,7 @@
 
   # Validate that all systems in a list are known.
   validSystems = knownSystems: systems:
-    builtins.all (s: builtins.elem s knownSystems) systems;
+    lib.all (s: lib.elem s knownSystems) systems;
 
   # An upper bound to validate against; a workspace picks a subset.
   allSystems = [

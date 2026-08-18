@@ -57,7 +57,7 @@
   applyConventionOverrides = conventions: overrides:
     lib.mapAttrs (
       name: conv:
-        if builtins.hasAttr name overrides
+        if lib.hasAttr name overrides
         then let
           ovr = overrides.${name};
         in
@@ -74,9 +74,9 @@
   discoverNclFiles = workspaceRoot: relativeDir: let
     dirPath = workspaceRoot + "/${relativeDir}";
   in
-    if builtins.pathExists dirPath
+    if lib.pathExists dirPath
     then let
-      entries = builtins.readDir dirPath;
+      entries = lib.readDir dirPath;
       nclEntries =
         lib.filterAttrs (
           name: type:
@@ -94,7 +94,7 @@
     else {};
 
   dirExists = workspaceRoot: relativeDir:
-    builtins.pathExists (workspaceRoot + "/${relativeDir}");
+    lib.pathExists (workspaceRoot + "/${relativeDir}");
 
   # Every convention directory, as
   #   { packages = { hello = /path/...; }; shells = { default = /path/...; }; }
@@ -119,8 +119,8 @@
   # (node_modules, .git, result) are skipped.
   discoverSubworkspaces = workspaceRoot: let
     entries =
-      if builtins.pathExists workspaceRoot
-      then builtins.readDir workspaceRoot
+      if lib.pathExists workspaceRoot
+      then lib.readDir workspaceRoot
       else {};
 
     skipDirs = [".git" ".github" ".gitlab" "node_modules" "result" ".direnv" ".devenv"];
@@ -129,15 +129,15 @@
       lib.filterAttrs (
         name: type:
           (type == "directory" || type == "symlink")
-          && !(lib.hasPrefix "." name && builtins.elem name skipDirs)
+          && !(lib.hasPrefix "." name && lib.elem name skipDirs)
           # A convention directory is not a subworkspace.
-          && !(builtins.elem name (map (c: c.dir) (builtins.attrValues defaultConventions)))
+          && !(lib.elem name (map (c: c.dir) (lib.attrValues defaultConventions)))
       )
       entries;
   in
     lib.filterAttrs (
       name: _:
-        builtins.pathExists (workspaceRoot + "/${name}/workspace.ncl")
+        lib.pathExists (workspaceRoot + "/${name}/workspace.ncl")
     ) (
       lib.mapAttrs (
         name: _: workspaceRoot + "/${name}"
@@ -204,7 +204,7 @@
   # One tree from root and subworkspaces:
   #   { merged; subworkspaceNames; subworkspaceInfo }
   mergeDiscovered = rootDiscovered: subworkspaceMap: let
-    subNames = builtins.attrNames subworkspaceMap;
+    subNames = lib.attrNames subworkspaceMap;
 
     namespacedSubs =
       lib.mapAttrs (
@@ -217,7 +217,7 @@
       subworkspaceMap;
 
     merged =
-      builtins.foldl' (
+      lib.foldl' (
         acc: subName: let
           sub = namespacedSubs.${subName};
           subOutputs = sub.namespaced;
@@ -240,7 +240,7 @@
 
   # Conflicts between root and subworkspaces, and between subworkspaces.
   checkDiscoveryConflicts = rootDiscovered: subworkspaceMap: let
-    subNames = builtins.attrNames subworkspaceMap;
+    subNames = lib.attrNames subworkspaceMap;
 
     # { convention.outputName = [source, ...] }
     rootRegistry =
@@ -251,7 +251,7 @@
       rootDiscovered;
 
     registryWithSubs =
-      builtins.foldl' (
+      lib.foldl' (
         registry: subName: let
           subInfo = subworkspaceMap.${subName};
           namespacedOutputs = namespaceSubworkspaceDiscovered subName subInfo.discovered;
@@ -280,13 +280,13 @@
           lib.concatLists (
             lib.mapAttrsToList (
               name: sources:
-                if builtins.length sources > 1
+                if lib.length sources > 1
                 then [
                   {
                     code = "NW200";
                     severity = "error";
                     inherit convention name sources;
-                    message = "Namespace conflict: output '${name}' in '${convention}' is produced by ${builtins.toString (builtins.length sources)} sources: ${builtins.concatStringsSep ", " sources}";
+                    message = "Namespace conflict: output '${name}' in '${convention}' is produced by ${lib.toString (lib.length sources)} sources: ${lib.concatStringsSep ", " sources}";
                     hint = "Rename one of the conflicting outputs or use a different subworkspace directory name.";
                   }
                 ]

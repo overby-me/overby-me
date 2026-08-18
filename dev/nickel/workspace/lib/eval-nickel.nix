@@ -239,7 +239,7 @@
     discoveredTemplates ? {},
     pluginNclPaths ? [],
   }: let
-    hasWorkspaceNcl = builtins.pathExists (workspaceRoot + "/workspace.ncl");
+    hasWorkspaceNcl = lib.pathExists (workspaceRoot + "/workspace.ncl");
 
     wrapperSource = generateWrapperSource {
       inherit
@@ -265,7 +265,7 @@
       text = wrapperSource;
     };
 
-    pluginDirRefs = map (p: builtins.dirOf p) pluginNclPaths;
+    pluginDirRefs = map (p: lib.dirOf p) pluginNclPaths;
 
     evalDrv =
       bootstrapPkgs.runCommand "nix-workspace-eval" (
@@ -283,7 +283,7 @@
         nickel export ${wrapperFile} > $out
       '';
   in
-    builtins.fromJSON (builtins.readFile evalDrv);
+    lib.fromJSON (lib.readFile evalDrv);
 
   # evalWorkspace for one subworkspace, producing an independent validated
   # config tree that the caller then namespaces.
@@ -302,7 +302,7 @@
     discoveredTemplates ? {},
     pluginNclPaths ? [],
   }: let
-    hasWorkspaceNcl = builtins.pathExists (subworkspaceRoot + "/workspace.ncl");
+    hasWorkspaceNcl = lib.pathExists (subworkspaceRoot + "/workspace.ncl");
 
     wrapperSource = generateSubworkspaceWrapperSource {
       inherit
@@ -327,7 +327,7 @@
       text = wrapperSource;
     };
 
-    pluginDirRefs = map (p: builtins.dirOf p) pluginNclPaths;
+    pluginDirRefs = map (p: lib.dirOf p) pluginNclPaths;
 
     evalDrv =
       bootstrapPkgs.runCommand "nix-workspace-eval-${subworkspaceName}" (
@@ -342,7 +342,7 @@
         nickel export ${wrapperFile} > $out
       '';
   in
-    builtins.fromJSON (builtins.readFile evalDrv);
+    lib.fromJSON (lib.readFile evalDrv);
 
   # `subworkspaceMap` is discover.discoverAllSubworkspaces' output.
   evalAllSubworkspaces = {
@@ -395,12 +395,12 @@
       bootstrapPkgs.runCommand "nix-workspace-plugin-eval-${pluginName}" {
         nativeBuildInputs = [bootstrapPkgs.nickel];
         inherit contractsDir;
-        pluginDir = builtins.dirOf pluginNclPath;
+        pluginDir = lib.dirOf pluginNclPath;
       } ''
         nickel export ${wrapperFile} > $out
       '';
   in
-    builtins.fromJSON (builtins.readFile evalDrv);
+    lib.fromJSON (lib.readFile evalDrv);
 
   evalAllPlugins = {
     bootstrapPkgs,
