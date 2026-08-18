@@ -6,6 +6,7 @@
   ...
 }: let
   commitlintrc = import ./commitlintrc.nix {inherit pkgs lib src;};
+  sgconfig = import ./sgconfig.nix {inherit pkgs lib;};
 in {
   # Wrapped in an `if` (rather than an early `return`) because devshell module
   # shellHooks are concatenated: an early return would abort later hooks too.
@@ -18,6 +19,7 @@ in {
       install -m 644 ${./deno.jsonc} deno.jsonc
       install -m 644 ${./lychee.toml} lychee.toml
       install -m 644 ${./rumdl.toml} rumdl.toml
+      install -m 644 ${sgconfig} sgconfig.yml
       install -m 644 ${./statix.toml} statix.toml
       install -m 644 ${./clippy.toml} clippy.toml
       install -m 644 ${./typos.toml} typos.toml

@@ -1,5 +1,20 @@
 # Rules considered and rejected
 
+## mojo-bare-except
+
+Flags `except:` with no exception type, which swallows everything. Measured
+before writing: 11 sites in this tree, and all 11 are correct.
+
+Seven are `except: pass` inside `__del__`. A Mojo destructor cannot propagate,
+so swallowing there is the only option the language leaves. Three more are a
+try-next-candidate loop in `_lib.mojo`, which tries each `-L` path in
+`NIX_LDFLAGS` and raises a real error after the loop if none held. The last
+returns a sentinel from a WASM host function whose C caller reads the return
+value rather than an exception.
+
+A rule that is wrong 11 times out of 11 is the deslop failure mode this layer
+exists to avoid, so it was not written.
+
 ## rust-test-without-assertion
 
 Flags a `#[test]` whose body contains no assertion. Written, measured, and

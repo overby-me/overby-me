@@ -1,7 +1,0 @@
-# ast-grep project config. Nix, Rust and the rest are built-in languages, so
-# there is no customLanguages block here and there should not be: registering a
-# name that already exists built-in makes every rule for it silently match
-# nothing, because rules resolve the name through the built-in table and files
-# resolve it through the custom extension map, and the two compare unequal.
-ruleDirs:
-  - dev/ast-grep/rules

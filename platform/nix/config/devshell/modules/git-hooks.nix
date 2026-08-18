@@ -53,7 +53,10 @@
         # because a rule's ignore globs are how its exceptions are recorded and
         # those are path-based.
         entry = "${pkgs.ast-grep}/bin/ast-grep scan";
-        files = "\\.(nix|rs)$";
+        # .mojo is here because ast-grep has no Mojo built in and this tree
+        # builds a grammar for it; the 260 .mojo files are otherwise reachable
+        # by no linter, since clippy is Rust-only and statix is Nix-only.
+        files = "\\.(nix|rs|mojo)$";
         pass_filenames = true;
       };
       tombi-format = {
