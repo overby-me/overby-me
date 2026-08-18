@@ -188,9 +188,11 @@ fold into the TLS family as ratchet or drop).
 - Archive-entry name joined into extraction path (zip/tar-slip): ratchet;
   the tar port builds paths differently, no current shape. Valuable the day a
   service accepts uploaded archives.
-- Decompression without a size cap: LIVE partial-coverage hits -
-  pptx-parser reads zip entries to string with no visible cap (~2296, ~2324)
-  in the wiki's user-upload path; most other ooxml reads are take-capped.
+- Decompression without a size cap: CORRECTED on verification - the
+  pptx-parser reads at ~2296/~2324 that the mining flagged as live sit
+  inside #[cfg(test)] mod tests and read local sample files; every
+  production read routes through the size-checked, take-capped
+  read_zip_str/ooxml-common helpers. No live gap.
   Coverage is partial by construction (reader bound to a variable first is
   invisible) - must be labeled audit, not gate.
 - Permissive file modes: skip tree-wide (ports mirror upstream umask idioms
