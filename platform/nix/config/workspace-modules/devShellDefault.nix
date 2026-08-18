@@ -9,7 +9,7 @@
   inputs,
   ...
 }: let
-  inherit (lib) mapAttrs mapAttrsToList removeAttrs;
+  inherit (lib) filter mapAttrs mapAttrsToList removeAttrs tryEval;
 
   mkDevShell = import ../devshell/lib/mkDevShell.nix {inherit lib inputs;};
 
@@ -32,12 +32,24 @@
           inherit (cfg') inputsFrom packages shellHook;
           inherit (cfg) hardeningDisable;
         });
+
+  # Folding in the union of every shell means the default shell is only as
+  # portable as the least portable one: devShells.mojo-{gui,wasm} name pkgs.mojo,
+  # which has no aarch64-linux build, so on armitas plain `nix develop` was a
+  # checkMeta throw rather than a shell. Drop what this system cannot build and
+  # keep the rest.
+  #
+  # tryEval takes any evaluation failure, not just an unsupported platform, so a
+  # shell broken by a mistake leaves the union quietly. Asking for it by name -
+  # `nix develop .#mojo-gui` - still fails, with the error this discards.
+  buildable = shell: (tryEval shell.drvPath).success;
 in {
   config.devShells.default = pkgs: let
     otherShells =
-      mapAttrsToList
-      (_: shellFn: resolveDevShell pkgs shellFn)
-      (removeAttrs config.devShells ["default"]);
+      filter buildable
+      (mapAttrsToList
+        (_: shellFn: resolveDevShell pkgs shellFn)
+        (removeAttrs config.devShells ["default"]));
   in
     mkDevShell pkgs [
       ../devshell/modules/common.nix

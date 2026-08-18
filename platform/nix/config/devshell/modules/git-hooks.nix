@@ -101,10 +101,22 @@
         files = "\\.ncl$";
         pass_filenames = true;
       };
-      mojo-format = {
-        enable = true;
+      # mojo is packaged from the conda linux-64 and osx-arm64 artifacts, so it
+      # has no aarch64-linux build. Naming it unconditionally made `${pkgs.mojo}`
+      # a checkMeta throw there, which took down the whole devshell rather than
+      # this one hook. The guard is meta.available rather than a system test so
+      # that a mojo gone broken, or unfree under a stricter config, drops the
+      # hook the same way.
+      #
+      # Where it is unavailable, *.mojo files go unformatted: `nix fmt` skips
+      # them too (platform/nix/config/formatters.nix), so no formatter reaches
+      # them there. The ast-grep hook above still lints them.
+      mojo-format = let
+        available = pkgs.mojo.meta.available;
+      in {
+        enable = available;
         name = "mojo-format";
-        entry = "${pkgs.mojo}/bin/mojo format";
+        entry = lib.optionalString available "${pkgs.mojo}/bin/mojo format";
         files = "\\.mojo$";
         pass_filenames = true;
       };
