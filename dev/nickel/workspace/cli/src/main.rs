@@ -23,6 +23,11 @@
 //! - 1 — Validation errors or build failure
 //! - 2 — Infrastructure error (missing tool, bad arguments, etc.)
 
+// A CLI reports failure by exit code, so the commands call process::exit
+// directly rather than unwinding a Result up through main to say the same
+// thing. The lint is aimed at libraries, which cannot take the process down.
+#![allow(clippy::exit)]
+
 mod commands;
 mod diagnostics;
 mod flake_gen;
