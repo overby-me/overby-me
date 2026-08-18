@@ -1,3 +1,7 @@
+// A UI crate's f64 casts are chart geometry, list counts and epoch millis -
+// all far below 2^52, so usize/i64 -> f64 is exact here. The lint stays on
+// for the decoders and wire formats where truncation is real.
+#![allow(clippy::cast_precision_loss)]
 mod backend_api;
 mod build_info;
 mod components;
@@ -152,8 +156,8 @@ fn install_history_query_shim() {
         let this = history.clone();
         let wrapper = Closure::wrap(
             Box::new(move |state: JsValue, title: JsValue, url: JsValue| {
-                let url = match url.as_string() {
-                    Some(s) if s.ends_with('?') => JsValue::from_str(s.strip_suffix('?').unwrap()),
+                let url = match url.as_string().as_deref().and_then(|s| s.strip_suffix('?')) {
+                    Some(stripped) => JsValue::from_str(stripped),
                     _ => url,
                 };
                 let args = js_sys::Array::of3(&state, &title, &url);

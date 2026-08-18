@@ -227,10 +227,10 @@ impl SshBackend {
             Self::check_result(&result, path, &self.host)?;
         } else {
             // Fallback: plain printf.  Only works for text content.
-            let text = String::from_utf8(data.to_vec()).map_err(|_| {
-                TrampError::RemoteError(
-                    "remote host lacks base64(1) and file contains binary data".to_string(),
-                )
+            let text = String::from_utf8(data.to_vec()).map_err(|e| {
+                TrampError::RemoteError(format!(
+                    "remote host lacks base64(1) and file contains binary data: {e}"
+                ))
             })?;
             let escaped_content = text.replace('\\', "\\\\").replace('\'', "'\\''");
             let script = format!("printf '%s' '{escaped_content}' > {escaped}");

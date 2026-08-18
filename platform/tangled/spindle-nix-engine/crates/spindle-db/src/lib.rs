@@ -126,7 +126,7 @@ impl Database {
     ///
     /// Returns a `MutexGuard<Connection>` that auto-releases on drop.
     fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, DbError> {
-        self.conn.lock().map_err(|_| DbError::LockPoisoned)
+        self.conn.lock().map_err(|_poisoned| DbError::LockPoisoned)
     }
 
     // -----------------------------------------------------------------------

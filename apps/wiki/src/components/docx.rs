@@ -1092,7 +1092,11 @@ pub fn DocxBody(
                         for (j, item) in items.into_iter().enumerate() {
                             match split_at(i, j) {
                                 Some(mark) if j > 0 => runs.push((Some(mark), vec![item])),
-                                _ => runs.last_mut().expect("seeded above").1.push(item),
+                                _ => {
+                                    if let Some(run) = runs.last_mut() {
+                                        run.1.push(item);
+                                    }
+                                }
                             }
                         }
                         // A page beginning at the list's FIRST item belongs

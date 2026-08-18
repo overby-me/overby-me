@@ -38,7 +38,7 @@ pub async fn admin_gql(
     let v: Value = resp
         .json()
         .await
-        .map_err(|_| AppError::Upstream("backend query failed".into()))?;
+        .map_err(|_net_err| AppError::Upstream("backend query failed".into()))?;
     if let Some(errors) = v.get("errors") {
         // Log the Hasura detail server-side, but return a generic error so query
         // internals (schema, constraint names) never reach the client.

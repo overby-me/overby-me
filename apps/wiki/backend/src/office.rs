@@ -148,9 +148,9 @@ async fn file_inner(
         .map_err(|e| AppError::Upstream(e.to_string()))?;
     mac.update(format!("{file_id}.{expires}").as_bytes());
     let expected = crate::util::b64url_decode(&sig)
-        .map_err(|_| AppError::Forbidden("bad signature".into()))?;
+        .map_err(|_mac_err| AppError::Forbidden("bad signature".into()))?;
     mac.verify_slice(&expected)
-        .map_err(|_| AppError::Forbidden("bad signature".into()))?;
+        .map_err(|_mac_err| AppError::Forbidden("bad signature".into()))?;
 
     // Entitlement was settled when the link was minted; read the bytes with the
     // service credential, which is the only identity this request has.

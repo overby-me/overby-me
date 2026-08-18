@@ -53,12 +53,15 @@ casbin = "2"
 notify = "7"
 
 # Crypto / encoding
-aes-gcm = "0.10"
+# zeroize: the cipher's expanded key schedule is wiped on drop instead of
+# lingering in freed memory of a long-running server.
+aes-gcm = { version = "0.10", features = ["zeroize"] }
 base64 = "0.22"
 bs58 = "0.5"
 k256 = { version = "0.13", features = ["ecdsa"] }
 p256 = { version = "0.13", features = ["ecdsa"] }
 ring = "0.17"
+zeroize = "1"
 
 # Utilities
 async-trait = "0.1"

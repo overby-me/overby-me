@@ -90,6 +90,10 @@ fn inside_own_scroller(target: Option<web_sys::EventTarget>) -> bool {
 /// at 60-120Hz and often write the same value (a repeated 0.0 reset, or the
 /// MAX_PULL clamp), each write re-rendering the indicator's subscribers.
 fn set_pull(dist: f64) {
+    #[expect(
+        clippy::float_cmp,
+        reason = "guards re-render on the exact same value; both sides are the same untransformed f64, so bit equality is the intended test"
+    )]
     if *PULL_DISTANCE.peek() != dist {
         *PULL_DISTANCE.write() = dist;
     }

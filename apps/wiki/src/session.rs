@@ -250,14 +250,16 @@ pub async fn establish_from_refresh_token(refresh_token: &str) -> bool {
 
 fn web_sys_storage() -> Result<Option<String>, ()> {
     let window = web_sys::window().ok_or(())?;
-    let storage = window.local_storage().map_err(|_| ())?.ok_or(())?;
-    storage.get_item("wiki_session").map_err(|_| ())
+    let storage = window.local_storage().map_err(|_js_err| ())?.ok_or(())?;
+    storage.get_item("wiki_session").map_err(|_js_err| ())
 }
 
 fn set_web_sys_storage(value: &str) -> Result<(), ()> {
     let window = web_sys::window().ok_or(())?;
-    let storage = window.local_storage().map_err(|_| ())?.ok_or(())?;
-    storage.set_item("wiki_session", value).map_err(|_| ())
+    let storage = window.local_storage().map_err(|_js_err| ())?.ok_or(())?;
+    storage
+        .set_item("wiki_session", value)
+        .map_err(|_js_err| ())
 }
 
 /// Read and parse the persisted session straight from localStorage (the value

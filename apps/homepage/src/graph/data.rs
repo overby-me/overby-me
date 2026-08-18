@@ -44,6 +44,10 @@ impl GraphData {
     }
 
     /// The hand-curated graph shown on the homepage root (`/`).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the personal graph is one literal dataset; length is the data, not logic"
+    )]
     pub fn personal() -> Self {
         // Small builders keep the node/link tables readable.
         fn node(

@@ -455,9 +455,9 @@ fn parse_bool_env(key: &str, default: bool) -> Result<bool, ConfigError> {
 /// Parse a `usize` environment variable.
 fn parse_usize_env(key: &str, default: usize) -> Result<usize, ConfigError> {
     match env::var(key) {
-        Ok(val) if !val.is_empty() => val.parse::<usize>().map_err(|_| ConfigError::InvalidValue {
+        Ok(val) if !val.is_empty() => val.parse::<usize>().map_err(|e| ConfigError::InvalidValue {
             key: key.into(),
-            message: format!("expected positive integer, got {val:?}"),
+            message: format!("expected positive integer, got {val:?}: {e}"),
         }),
         _ => Ok(default),
     }
@@ -478,22 +478,22 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
     if let Some(num) = s.strip_suffix('h') {
         let n: u64 = num
             .parse()
-            .map_err(|_| format!("invalid hours value: {num:?}"))?;
+            .map_err(|e| format!("invalid hours value: {num:?}: {e}"))?;
         Ok(Duration::from_secs(n * 3600))
     } else if let Some(num) = s.strip_suffix('m') {
         let n: u64 = num
             .parse()
-            .map_err(|_| format!("invalid minutes value: {num:?}"))?;
+            .map_err(|e| format!("invalid minutes value: {num:?}: {e}"))?;
         Ok(Duration::from_secs(n * 60))
     } else if let Some(num) = s.strip_suffix('s') {
         let n: u64 = num
             .parse()
-            .map_err(|_| format!("invalid seconds value: {num:?}"))?;
+            .map_err(|e| format!("invalid seconds value: {num:?}: {e}"))?;
         Ok(Duration::from_secs(n))
     } else {
         // Bare number → seconds
-        let n: u64 = s.parse().map_err(|_| {
-            format!("invalid duration: {s:?} (expected e.g. \"5m\", \"300s\", \"1h\")")
+        let n: u64 = s.parse().map_err(|e| {
+            format!("invalid duration: {s:?} (expected e.g. \"5m\", \"300s\", \"1h\"): {e}")
         })?;
         Ok(Duration::from_secs(n))
     }

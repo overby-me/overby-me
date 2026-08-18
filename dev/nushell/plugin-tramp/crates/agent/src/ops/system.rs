@@ -241,6 +241,8 @@ fn get_home_dir() -> Option<String> {
     }
 
     // Fall back to getpwuid.
+    // SAFETY: getpwuid returns a pointer into static libc storage, valid until
+    // the next getpw* call; it is read immediately and copied out.
     unsafe {
         let uid = libc::getuid();
         let pw = libc::getpwuid(uid);
@@ -267,8 +269,11 @@ fn get_uptime() -> Option<u64> {
     // Try clock_gettime with CLOCK_BOOTTIME (Linux) or CLOCK_MONOTONIC.
     #[cfg(target_os = "linux")]
     {
+        // SAFETY: timespec is plain data, so zeroed is a valid value; the
+        // call writes through a live &mut.
         let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
         // CLOCK_BOOTTIME (7) includes time spent in suspend.
+        // SAFETY: writes through the live &mut ts initialised above.
         if unsafe { libc::clock_gettime(7, &mut ts) } == 0 {
             return Some(ts.tv_sec as u64);
         }
@@ -276,7 +281,9 @@ fn get_uptime() -> Option<u64> {
 
     // Fallback: CLOCK_MONOTONIC (not exactly uptime but close enough).
     {
+        // SAFETY: as above - plain-data zeroed init and a live out-pointer.
         let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+        // SAFETY: writes through the live &mut ts initialised above.
         if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) } == 0 {
             return Some(ts.tv_sec as u64);
         }

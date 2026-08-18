@@ -208,19 +208,19 @@ pub(crate) async fn fetch_json<T: for<'de> Deserialize<'de>>(url: &str) -> Resul
     let window = web_sys::window().ok_or("no window")?;
     let resp_value = JsFuture::from(window.fetch_with_str(url))
         .await
-        .map_err(|_| format!("network error fetching {url}"))?;
+        .map_err(|e| format!("network error fetching {url}: {e:?}"))?;
     let resp: Response = resp_value
         .dyn_into()
-        .map_err(|_| "unexpected fetch result".to_string())?;
+        .map_err(|e| format!("unexpected fetch result: {e:?}"))?;
     if !resp.ok() {
         return Err(format!("HTTP {} from {url}", resp.status()));
     }
     let promise = resp
         .json()
-        .map_err(|_| "response was not JSON".to_string())?;
+        .map_err(|e| format!("response was not JSON: {e:?}"))?;
     let json = JsFuture::from(promise)
         .await
-        .map_err(|_| "malformed JSON response".to_string())?;
+        .map_err(|e| format!("malformed JSON response: {e:?}"))?;
     serde_wasm_bindgen::from_value(json).map_err(|e| format!("unexpected JSON shape: {e}"))
 }
 

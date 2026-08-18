@@ -85,7 +85,9 @@ struct OpenBaoManagerInner {
     /// KV v2 mount path (e.g. `spindle`).
     mount: String,
     /// OpenBao token for authentication.
-    token: String,
+    /// Wiped on drop: this is the server credential of a long-lived
+    /// process, and freed memory is what a core dump or reused page shows.
+    token: zeroize::Zeroizing<String>,
     /// Sender half of the stop signal for token renewal.
     /// When dropped or sent `true`, the renewal task exits.
     stop_tx: watch::Sender<bool>,
@@ -113,7 +115,7 @@ impl OpenBaoManager {
                 client: Client::new(),
                 addr: addr.into().trim_end_matches('/').to_owned(),
                 mount: mount.into(),
-                token: token.into(),
+                token: zeroize::Zeroizing::new(token.into()),
                 stop_tx,
             }),
         }

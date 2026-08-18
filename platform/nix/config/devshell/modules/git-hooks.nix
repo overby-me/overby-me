@@ -282,7 +282,6 @@
           "panic_in_result_fn"
           "get_unwrap"
           "try_err"
-          "wildcard_imports"
           "float_cmp"
           "lossy_float_literal"
           "fn_params_excessive_bools"
@@ -331,10 +330,20 @@
           "unwrap_in_result"
           "unnecessary_safety_comment"
           "create_dir"
+          # Enabled after their backlogs were cleared tree-wide: every
+          # remaining |_| map_err either gained its source or became a named
+          # discard, and every unsafe block outside the two C-ABI shims (which
+          # carry crate-level contracts) has a SAFETY comment.
+          "map_err_ignore"
+          "undocumented_unsafe_blocks"
         ];
         # same_name_method was dropped after apps/wiki first ran it: 154 hits
         # across 74 files, every one the `builder` that dioxus's Props derive
         # generates, and no first-party method among them.
+        # wildcard_imports was dropped when apps/wiki first ran it: 27 hits,
+        # all `use super::*` / sibling-module globs - internal organization,
+        # not the accidental external-crate globs the lint is for; zero of
+        # those exist anywhere in the tree.
         # Four were tried and dropped. unused_async fired eleven times, every
         # one on a function that has to be async to exist: an axum handler
         # satisfying the Handler trait, or an arm of a dispatch table whose

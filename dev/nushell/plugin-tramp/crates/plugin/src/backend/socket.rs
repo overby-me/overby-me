@@ -132,7 +132,7 @@ pub async fn connect_tcp_with_timeout(
     // Establish the TCP connection with a timeout.
     let stream = tokio::time::timeout(connect_timeout, TcpStream::connect(addr))
         .await
-        .map_err(|_| TrampError::ConnectionFailed {
+        .map_err(|_elapsed| TrampError::ConnectionFailed {
             host: format!("tcp:{addr}"),
             reason: format!("connection timed out after {connect_timeout:?}"),
         })?
@@ -153,7 +153,7 @@ pub async fn connect_tcp_with_timeout(
     // Verify the agent is alive.
     tokio::time::timeout(ping_timeout, client.ping())
         .await
-        .map_err(|_| TrampError::ConnectionFailed {
+        .map_err(|_elapsed| TrampError::ConnectionFailed {
             host: format!("tcp:{addr}"),
             reason: format!("agent ping timed out after {ping_timeout:?}"),
         })?
@@ -192,7 +192,7 @@ pub async fn connect_unix_with_timeout(
     // Establish the Unix socket connection with a timeout.
     let stream = tokio::time::timeout(connect_timeout, UnixStream::connect(&socket_path))
         .await
-        .map_err(|_| TrampError::ConnectionFailed {
+        .map_err(|_elapsed| TrampError::ConnectionFailed {
             host: format!("unix:{socket_path}"),
             reason: format!("connection timed out after {connect_timeout:?}"),
         })?
@@ -210,7 +210,7 @@ pub async fn connect_unix_with_timeout(
     // Verify the agent is alive.
     tokio::time::timeout(ping_timeout, client.ping())
         .await
-        .map_err(|_| TrampError::ConnectionFailed {
+        .map_err(|_elapsed| TrampError::ConnectionFailed {
             host: format!("unix:{socket_path}"),
             reason: format!("agent ping timed out after {ping_timeout:?}"),
         })?

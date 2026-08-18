@@ -105,10 +105,13 @@ fn daemonize() -> io::Result<()> {
     }
     if pid > 0 {
         // Parent: leave the child running and return success immediately.
+        // SAFETY: _exit is async-signal-safe and takes no pointers.
         unsafe { libc::_exit(0) };
     }
 
     // Child: detach from the controlling terminal and silence std streams.
+    // SAFETY: child-side post-fork: only async-signal-safe calls
+    // (setsid/open/dup2/close) with a NUL-terminated literal path.
     unsafe {
         libc::setsid();
         let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);

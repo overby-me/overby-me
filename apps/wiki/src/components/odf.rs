@@ -40,7 +40,7 @@ pub fn content_xml(bytes: &[u8]) -> Result<String, String> {
     let mut zip = zip::ZipArchive::new(reader).map_err(|e| format!("not a zip: {e}"))?;
     let mut file = zip
         .by_name("content.xml")
-        .map_err(|_| "no content.xml: not an OpenDocument file".to_string())?;
+        .map_err(|e| format!("no content.xml: not an OpenDocument file: {e}"))?;
     let mut out = String::new();
     file.read_to_string(&mut out)
         .map_err(|e| format!("content.xml unreadable: {e}"))?;

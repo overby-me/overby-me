@@ -16,6 +16,10 @@ use crate::snackbar::show_snackbar;
 /// Panic on demand. A named `()`-returning fn (rather than an inline closure
 /// body) so the diverging `panic!` does not trip edition-2024 never-type
 /// fallback in the event-handler closure.
+#[expect(
+    clippy::panic,
+    reason = "this page EXISTS to test the panic hook; the panic is the feature"
+)]
 fn trigger_panic() {
     panic!("Triggered test panic from /error");
 }

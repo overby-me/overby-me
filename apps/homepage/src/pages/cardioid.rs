@@ -748,13 +748,12 @@ fn draw_line(ctx: &CanvasRenderingContext2d, x1: f64, y1: f64, x2: f64, y2: f64)
     ctx.stroke();
 }
 
-fn context_2d(canvas: &HtmlCanvasElement) -> CanvasRenderingContext2d {
+fn context_2d(canvas: &HtmlCanvasElement) -> Option<CanvasRenderingContext2d> {
     canvas
         .get_context("2d")
-        .unwrap()
-        .unwrap()
-        .dyn_into::<CanvasRenderingContext2d>()
-        .unwrap()
+        .ok()
+        .flatten()
+        .and_then(|c| c.dyn_into::<CanvasRenderingContext2d>().ok())
 }
 
 /// Trigger a PNG download of the current canvas.
@@ -794,15 +793,18 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
                 false
             }
         };
-        if connected && let Some(window) = web_sys::window() {
-            let _ = window
-                .request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+        if connected
+            && let Some(window) = web_sys::window()
+            && let Some(cb) = f.borrow().as_ref()
+        {
+            let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
         }
     }) as Box<dyn FnMut()>));
 
-    if let Some(window) = web_sys::window() {
-        let _ =
-            window.request_animation_frame(g.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+    if let Some(window) = web_sys::window()
+        && let Some(cb) = g.borrow().as_ref()
+    {
+        let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
     }
 }
 
@@ -847,8 +849,15 @@ pub fn CardioidInner() -> Element {
         let mut state = state;
         move |evt: MountedEvent| {
             spawn(async move {
-                let elem: web_sys::Element = evt.data().try_as_web_event().unwrap();
-                let canvas: HtmlCanvasElement = elem.dyn_into().unwrap();
+                // A mount event that is not a web element, or an element that
+                // is not a canvas, means the DOM is not what this page built:
+                // skip setup rather than panic the whole wasm app.
+                let Some(elem) = evt.data().try_as_web_event() else {
+                    return;
+                };
+                let Ok(canvas) = elem.dyn_into::<HtmlCanvasElement>() else {
+                    return;
+                };
 
                 let dpr = web_sys::window()
                     .map(|w| w.device_pixel_ratio())
@@ -871,8 +880,12 @@ pub fn CardioidInner() -> Element {
                 trace_canvas.set_width((css_w * dpr) as u32);
                 trace_canvas.set_height((css_h * dpr) as u32);
 
-                let ctx = context_2d(&canvas);
-                let trace = context_2d(&trace_canvas);
+                // No 2d context = an environment that cannot draw; skip
+                // setup rather than panic the page.
+                let (Some(ctx), Some(trace)) = (context_2d(&canvas), context_2d(&trace_canvas))
+                else {
+                    return;
+                };
                 let _ = ctx.scale(dpr, dpr);
                 let _ = trace.scale(dpr, dpr);
                 ctx.set_line_cap("round");

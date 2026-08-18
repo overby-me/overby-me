@@ -151,6 +151,8 @@ impl Connection {
         {
             // SAFETY: the parent handed us ownership of this fd.
             let stream = unsafe { UnixStream::from_raw_fd(fd) };
+            // SAFETY: single-threaded startup; nothing else reads the
+            // environment concurrently.
             unsafe { env::remove_var("WAYLAND_SOCKET") };
             return Ok(Connection::new(stream));
         }
@@ -278,6 +280,7 @@ impl Connection {
         mhdr.msg_control = cmsg.as_mut_ptr().cast::<libc::c_void>();
         mhdr.msg_controllen = cmsg.len() as _;
 
+        // SAFETY: mhdr points at live iov and control buffers set up above.
         let n =
             unsafe { libc::recvmsg(self.stream.as_raw_fd(), &mut mhdr, libc::MSG_CMSG_CLOEXEC) };
         if n < 0 {
@@ -295,6 +298,8 @@ impl Connection {
         }
 
         // Harvest any file descriptors from SCM_RIGHTS control messages.
+        // SAFETY: the CMSG_* walk only touches the control buffer recvmsg
+        // just filled, bounded by msg_controllen.
         unsafe {
             let mut hdr = libc::CMSG_FIRSTHDR(&mhdr);
             while !hdr.is_null() {
@@ -325,6 +330,7 @@ impl Connection {
         let cmsg_space = if fds.is_empty() {
             0
         } else {
+            // SAFETY: CMSG_SPACE is pure arithmetic on the length.
             unsafe { libc::CMSG_SPACE((fds.len() * FD_SIZE) as u32) as usize }
         };
         let mut cmsg = vec![0u8; cmsg_space];
@@ -344,6 +350,8 @@ impl Connection {
             if sent == 0 && !fds.is_empty() {
                 mhdr.msg_control = cmsg.as_mut_ptr().cast::<libc::c_void>();
                 mhdr.msg_controllen = cmsg.len() as _;
+                // SAFETY: writes stay inside cmsg, sized by CMSG_SPACE for
+                // exactly these descriptors.
                 unsafe {
                     let hdr = libc::CMSG_FIRSTHDR(&mhdr);
                     (*hdr).cmsg_level = libc::SOL_SOCKET;
@@ -360,6 +368,8 @@ impl Connection {
                 }
             }
 
+            // SAFETY: mhdr points at live iov and control buffers for the
+            // duration of the call.
             let n = unsafe { libc::sendmsg(self.stream.as_raw_fd(), &mhdr, libc::MSG_NOSIGNAL) };
             if n < 0 {
                 let err = io::Error::last_os_error();
@@ -377,6 +387,7 @@ impl Connection {
 /// Create a pipe, returning `(read_end, write_end)`, both close-on-exec.
 pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     let mut fds = [0 as RawFd; 2];
+    // SAFETY: fds is a live two-element array the call writes into.
     let r = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
     if r < 0 {
         return Err(io::Error::last_os_error());

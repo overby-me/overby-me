@@ -120,16 +120,16 @@ pub fn effective_accent() -> String {
 
 /// Set the primary seed, re-skin, and persist. Choosing the brand default clears
 /// the override, so selecting the first swatch restores the exact baked theme.
-pub fn set_primary_seed(hex: String) {
-    *SEED_PRIMARY.write() = brand_or_seed(&hex, BRAND_PRIMARY);
+pub fn set_primary_seed(hex: &str) {
+    *SEED_PRIMARY.write() = brand_or_seed(hex, BRAND_PRIMARY);
     apply_seeds();
     save_seeds();
 }
 
 /// Set the accent seed, re-skin, and persist. Choosing the brand default clears
 /// the override.
-pub fn set_accent_seed(hex: String) {
-    *SEED_ACCENT.write() = brand_or_seed(&hex, BRAND_ACCENT);
+pub fn set_accent_seed(hex: &str) {
+    *SEED_ACCENT.write() = brand_or_seed(hex, BRAND_ACCENT);
     apply_seeds();
     save_seeds();
 }

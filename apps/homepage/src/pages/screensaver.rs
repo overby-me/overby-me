@@ -469,15 +469,18 @@ fn start_animation_loop(host: Rc<RefCell<Host>>, mut delivered: Signal<u32>) {
                 }
             });
         }
-        if connected && let Some(window) = web_sys::window() {
-            let _ = window
-                .request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+        if connected
+            && let Some(window) = web_sys::window()
+            && let Some(cb) = f.borrow().as_ref()
+        {
+            let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
         }
     }) as Box<dyn FnMut()>));
 
-    if let Some(window) = web_sys::window() {
-        let _ =
-            window.request_animation_frame(g.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+    if let Some(window) = web_sys::window()
+        && let Some(cb) = g.borrow().as_ref()
+    {
+        let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
     }
 }
 
@@ -677,8 +680,15 @@ fn SaverStage(slug: String) -> Element {
         let mut host = host;
         move |evt: MountedEvent| {
             spawn(async move {
-                let element: web_sys::Element = evt.data().try_as_web_event().unwrap();
-                let canvas: HtmlCanvasElement = element.dyn_into().unwrap();
+                // A mount event that is not a web element, or an element that
+                // is not a canvas, means the DOM is not what this page built:
+                // skip setup rather than panic the whole wasm app.
+                let Some(element) = evt.data().try_as_web_event() else {
+                    return;
+                };
+                let Ok(canvas) = element.dyn_into::<HtmlCanvasElement>() else {
+                    return;
+                };
 
                 let css_w = canvas.client_width().max(1);
                 let css_h = canvas.client_height().max(1);

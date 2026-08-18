@@ -144,29 +144,29 @@ async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, Aut
         });
     }
 
-    let header_bytes = URL_SAFE_NO_PAD.decode(parts[0]).map_err(|_| AuthError {
+    let header_bytes = URL_SAFE_NO_PAD.decode(parts[0]).map_err(|e| AuthError {
         status: StatusCode::UNAUTHORIZED,
-        message: "invalid JWT header encoding".into(),
+        message: format!("invalid JWT header encoding: {e}"),
     })?;
 
-    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|_| AuthError {
+    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|e| AuthError {
         status: StatusCode::UNAUTHORIZED,
-        message: "invalid JWT payload encoding".into(),
+        message: format!("invalid JWT payload encoding: {e}"),
     })?;
 
-    let signature_bytes = URL_SAFE_NO_PAD.decode(parts[2]).map_err(|_| AuthError {
+    let signature_bytes = URL_SAFE_NO_PAD.decode(parts[2]).map_err(|e| AuthError {
         status: StatusCode::UNAUTHORIZED,
-        message: "invalid JWT signature encoding".into(),
+        message: format!("invalid JWT signature encoding: {e}"),
     })?;
 
-    let header: JwtHeader = serde_json::from_slice(&header_bytes).map_err(|_| AuthError {
+    let header: JwtHeader = serde_json::from_slice(&header_bytes).map_err(|e| AuthError {
         status: StatusCode::UNAUTHORIZED,
-        message: "invalid JWT header".into(),
+        message: format!("invalid JWT header: {e}"),
     })?;
 
-    let payload: JwtPayload = serde_json::from_slice(&payload_bytes).map_err(|_| AuthError {
+    let payload: JwtPayload = serde_json::from_slice(&payload_bytes).map_err(|e| AuthError {
         status: StatusCode::UNAUTHORIZED,
-        message: "invalid JWT payload".into(),
+        message: format!("invalid JWT payload: {e}"),
     })?;
 
     if payload.aud != state.did_web {
@@ -247,9 +247,9 @@ async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, Aut
 
     let key_bytes = bs58::decode(&multibase_key[1..])
         .into_vec()
-        .map_err(|_| AuthError {
+        .map_err(|e| AuthError {
             status: StatusCode::UNAUTHORIZED,
-            message: "invalid base58btc key encoding".into(),
+            message: format!("invalid base58btc key encoding: {e}"),
         })?;
 
     if key_bytes.len() < 3 {
@@ -268,39 +268,39 @@ async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, Aut
 
     match (prefix, header.alg.as_str()) {
         (MULTICODEC_SECP256K1, "ES256K") => {
-            let vk = k256::ecdsa::VerifyingKey::from_sec1_bytes(pubkey_bytes).map_err(|_| {
+            let vk = k256::ecdsa::VerifyingKey::from_sec1_bytes(pubkey_bytes).map_err(|e| {
                 AuthError {
                     status: StatusCode::UNAUTHORIZED,
-                    message: "invalid secp256k1 public key".into(),
+                    message: format!("invalid secp256k1 public key: {e}"),
                 }
             })?;
             let sig =
-                k256::ecdsa::Signature::from_slice(&signature_bytes).map_err(|_| AuthError {
+                k256::ecdsa::Signature::from_slice(&signature_bytes).map_err(|e| AuthError {
                     status: StatusCode::UNAUTHORIZED,
-                    message: "invalid ES256K signature".into(),
+                    message: format!("invalid ES256K signature: {e}"),
                 })?;
             vk.verify(signing_input.as_bytes(), &sig)
-                .map_err(|_| AuthError {
+                .map_err(|e| AuthError {
                     status: StatusCode::UNAUTHORIZED,
-                    message: "ES256K signature verification failed".into(),
+                    message: format!("ES256K signature verification failed: {e}"),
                 })?;
         }
         (MULTICODEC_P256, "ES256") => {
-            let vk = p256::ecdsa::VerifyingKey::from_sec1_bytes(pubkey_bytes).map_err(|_| {
+            let vk = p256::ecdsa::VerifyingKey::from_sec1_bytes(pubkey_bytes).map_err(|e| {
                 AuthError {
                     status: StatusCode::UNAUTHORIZED,
-                    message: "invalid P-256 public key".into(),
+                    message: format!("invalid P-256 public key: {e}"),
                 }
             })?;
             let sig =
-                p256::ecdsa::Signature::from_slice(&signature_bytes).map_err(|_| AuthError {
+                p256::ecdsa::Signature::from_slice(&signature_bytes).map_err(|e| AuthError {
                     status: StatusCode::UNAUTHORIZED,
-                    message: "invalid ES256 signature".into(),
+                    message: format!("invalid ES256 signature: {e}"),
                 })?;
             vk.verify(signing_input.as_bytes(), &sig)
-                .map_err(|_| AuthError {
+                .map_err(|e| AuthError {
                     status: StatusCode::UNAUTHORIZED,
-                    message: "ES256 signature verification failed".into(),
+                    message: format!("ES256 signature verification failed: {e}"),
                 })?;
         }
         _ => {

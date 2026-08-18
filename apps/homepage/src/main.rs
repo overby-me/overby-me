@@ -1,3 +1,7 @@
+// Graph simulation, canvas geometry and random picks cast counts to f64;
+// everything is far below 2^52, so the casts are exact. The lint stays on
+// where truncation is real (decoders, wire formats).
+#![allow(clippy::cast_precision_loss)]
 mod atproto;
 mod atproto_web;
 mod glyphs;

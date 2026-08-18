@@ -144,6 +144,10 @@ const VAPID_PUBLIC_BYTES: [u8; 65] = [
     128, 137,
 ];
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "by-value signature is what lets every call site stay the point-free map_err(js_err)"
+)]
 fn js_err(e: wasm_bindgen::JsValue) -> String {
     e.as_string().unwrap_or_else(|| "js error".to_string())
 }
@@ -171,7 +175,7 @@ fn subscription_json(sub: &web_sys::PushSubscription) -> Result<wasm_bindgen::Js
     let func = js_sys::Reflect::get(obj, &"toJSON".into())
         .map_err(js_err)?
         .dyn_into::<js_sys::Function>()
-        .map_err(|_| "toJSON not callable".to_string())?;
+        .map_err(|e| format!("toJSON not callable: {e:?}"))?;
     func.call0(obj).map_err(js_err)
 }
 
@@ -187,7 +191,7 @@ async fn registration() -> Result<web_sys::ServiceWorkerRegistration, String> {
         .await
         .map_err(js_err)?
         .dyn_into::<web_sys::ServiceWorkerRegistration>()
-        .map_err(|_| "no service worker registration".to_string())
+        .map_err(|e| format!("no service worker registration: {e:?}"))
 }
 
 /// Whether this browser currently holds a push subscription. Used to render the
@@ -238,7 +242,7 @@ pub async fn subscribe_push(token: &str) -> Result<(), String> {
         .await
         .map_err(js_err)?
         .dyn_into::<web_sys::PushSubscription>()
-        .map_err(|_| "no subscription".to_string())?;
+        .map_err(|e| format!("no subscription: {e:?}"))?;
 
     // `toJSON()` gives the endpoint + base64url keys the backend expects.
     let json = subscription_json(&sub)?;

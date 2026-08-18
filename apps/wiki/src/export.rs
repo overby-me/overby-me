@@ -197,6 +197,10 @@ fn base_style(base: &Base) -> String {
 /// Render a paragraph-like block (`inner` already XML-escaped) with its base
 /// style and, if present, its alignment. Headings emit `<text:h>` with the
 /// outline level; everything else emits `<text:p>`.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Base is a small Copy-like enum passed by value for call-site brevity across dozens of uses"
+)]
 fn styled_block(base: Base, align: Option<&str>, inner: &str) -> String {
     // With an alignment, use the generated `Al_<base>_<value>` automatic style
     // (which inherits from the base style); otherwise the base style itself.

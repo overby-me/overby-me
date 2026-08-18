@@ -58,8 +58,15 @@ pub async fn run_server(
 
     let secrets: Arc<dyn spindle_secrets::Manager + Send + Sync> = match cfg.secrets.provider {
         SecretsProvider::Sqlite => {
-            let key_material = ring::digest::digest(&ring::digest::SHA256, cfg.token.as_bytes());
-            let master_key = key_material.as_ref();
+            // Zeroizing: the derived AES key is wiped when this scope ends;
+            // the cipher inside SqliteManager wipes its own expanded schedule
+            // on drop via aes-gcm's zeroize feature.
+            let key_material = zeroize::Zeroizing::new(
+                ring::digest::digest(&ring::digest::SHA256, cfg.token.as_bytes())
+                    .as_ref()
+                    .to_vec(),
+            );
+            let master_key = key_material.as_slice();
             let db_path = cfg.db_path.with_extension("secrets.db");
             match spindle_secrets::SqliteManager::new(&db_path, master_key) {
                 Ok(mgr) => Arc::new(mgr),

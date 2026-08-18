@@ -528,6 +528,10 @@ pub(super) fn place_name(
 /// the place (see [`context_home`]); then the feed, and for authed users
 /// speak/vote/canvas/member and the rest. Shared by the desktop rail and the
 /// mobile app bar, mirroring React's `useApps`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one flat table of app entries per context; splitting it would scatter a single decision across helpers"
+)]
 pub(super) fn context_apps(
     route: &Route,
     is_auth: bool,

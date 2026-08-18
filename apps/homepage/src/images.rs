@@ -603,24 +603,26 @@ async fn decode(url: &str, max_w: i32, max_h: i32) -> Result<XImage, String> {
     let window = web_sys::window().ok_or("no window")?;
     let response: Response = JsFuture::from(window.fetch_with_str(url))
         .await
-        .map_err(|_| format!("network error fetching {url}"))?
+        .map_err(|e| format!("network error fetching {url}: {e:?}"))?
         .dyn_into()
-        .map_err(|_| "unexpected fetch result".to_string())?;
+        .map_err(|e| format!("unexpected fetch result: {e:?}"))?;
     if !response.ok() {
         return Err(format!("HTTP {} from {url}", response.status()));
     }
-    let blob = JsFuture::from(response.blob().map_err(|_| "no blob")?)
+    let blob = JsFuture::from(response.blob().map_err(|e| format!("no blob: {e:?}"))?)
         .await
-        .map_err(|_| "could not read the blob".to_string())?;
+        .map_err(|e| format!("could not read the blob: {e:?}"))?;
     let bitmap: ImageBitmap = JsFuture::from(
         window
-            .create_image_bitmap_with_blob(&blob.dyn_into().map_err(|_| "not a blob")?)
-            .map_err(|_| "could not decode the image".to_string())?,
+            .create_image_bitmap_with_blob(
+                &blob.dyn_into().map_err(|e| format!("not a blob: {e:?}"))?,
+            )
+            .map_err(|e| format!("could not decode the image: {e:?}"))?,
     )
     .await
-    .map_err(|_| "could not decode the image".to_string())?
+    .map_err(|e| format!("could not decode the image: {e:?}"))?
     .dyn_into()
-    .map_err(|_| "decoded to something that is not an image".to_string())?;
+    .map_err(|e| format!("decoded to something that is not an image: {e:?}"))?;
 
     let (bw, bh) = (bitmap.width() as f64, bitmap.height() as f64);
     if bw < 1.0 || bh < 1.0 {
@@ -632,24 +634,24 @@ async fn decode(url: &str, max_w: i32, max_h: i32) -> Result<XImage, String> {
     let document = window.document().ok_or("no document")?;
     let canvas: HtmlCanvasElement = document
         .create_element("canvas")
-        .map_err(|_| "could not make a canvas")?
+        .map_err(|e| format!("could not make a canvas: {e:?}"))?
         .dyn_into()
-        .map_err(|_| "not a canvas".to_string())?;
+        .map_err(|e| format!("not a canvas: {e:?}"))?;
     canvas.set_width(w);
     canvas.set_height(h);
     let ctx: CanvasRenderingContext2d = canvas
         .get_context("2d")
-        .map_err(|_| "no 2d context")?
+        .map_err(|e| format!("no 2d context: {e:?}"))?
         .ok_or("no 2d context")?
         .dyn_into()
-        .map_err(|_| "not a 2d context".to_string())?;
+        .map_err(|e| format!("not a 2d context: {e:?}"))?;
     ctx.draw_image_with_image_bitmap_and_dw_and_dh(&bitmap, 0.0, 0.0, w as f64, h as f64)
-        .map_err(|_| "could not draw the image".to_string())?;
+        .map_err(|e| format!("could not draw the image: {e:?}"))?;
     bitmap.close();
 
     let data = ctx
         .get_image_data(0.0, 0.0, w as f64, h as f64)
-        .map_err(|_| "could not read the canvas back (tainted?)".to_string())?
+        .map_err(|e| format!("could not read the canvas back (tainted?): {e:?}"))?
         .data();
 
     let mut image = XImage::new(w as i32, h as i32);

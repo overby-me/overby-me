@@ -159,6 +159,10 @@ pub struct Wire {
     pub variables: serde_json::Value,
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "consuming the operation matches how every caller hands it off; a reference would force callers to keep a dead value alive"
+)]
 fn wire<Q, V: serde::Serialize>(op: cynic::StreamingOperation<Q, V>) -> Wire {
     // A StreamingOperation keeps its parts private and serialises to exactly the
     // wire shape, `{query, variables}`, which is what the hub sends.

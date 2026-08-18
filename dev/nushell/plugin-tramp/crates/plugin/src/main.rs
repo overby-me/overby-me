@@ -2432,6 +2432,7 @@ mod tty_raw {
     /// Query the terminal dimensions of the given fd.
     /// Returns `(cols, rows)`.  Falls back to 80×24 on failure.
     pub fn terminal_size(fd: i32) -> (u16, u16) {
+        // SAFETY: winsize is plain data; ioctl writes through a live &mut.
         unsafe {
             let mut ws: libc::winsize = std::mem::zeroed();
             if libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0 {
@@ -2445,6 +2446,8 @@ mod tty_raw {
     /// Save the current termios settings and switch to raw mode.
     /// Returns the original termios so it can be restored later.
     pub fn enable_raw_mode(fd: i32) -> io::Result<libc::termios> {
+        // SAFETY: termios is plain data; tcgetattr/cfmakeraw write through
+        // live &muts on this fd.
         unsafe {
             let mut orig: libc::termios = std::mem::zeroed();
             if libc::tcgetattr(fd, &mut orig) != 0 {
@@ -2464,6 +2467,7 @@ mod tty_raw {
 
     /// Restore previously saved termios settings.
     pub fn restore_mode(fd: i32, orig: &libc::termios) {
+        // SAFETY: orig is a live reference for the duration of the call.
         unsafe {
             libc::tcsetattr(fd, libc::TCSANOW, orig);
         }
@@ -2473,6 +2477,8 @@ mod tty_raw {
     /// Returns `Some(n)` with the number of bytes read, or `None` on
     /// timeout / error / EOF.
     pub fn read_with_timeout(fd: i32, buf: &mut [u8], timeout_ms: i32) -> Option<usize> {
+        // SAFETY: pfd and buf are live locals; read writes at most
+        // buf.len() bytes.
         unsafe {
             let mut pfd = libc::pollfd {
                 fd,
@@ -2491,6 +2497,8 @@ mod tty_raw {
 
     /// Write all bytes to an fd.
     pub fn write_all(fd: i32, data: &[u8]) {
+        // SAFETY: data stays borrowed for the whole loop; each write reads at
+        // most the remaining length from it.
         unsafe {
             let mut off = 0;
             while off < data.len() {

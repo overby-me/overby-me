@@ -21,7 +21,12 @@
 //!     during pump_app_events() to avoid borrow conflicts with the document.
 
 #![allow(private_interfaces)] // FFI functions intentionally expose opaque pointers to private types
-#![allow(clippy::missing_safety_doc)] // All extern "C" functions share the same safety contract: ctx must be a valid pointer from mblitz_create()
+#![allow(clippy::missing_safety_doc)]
+// All extern "C" functions share the same safety contract: ctx must be a valid pointer from mblitz_create()
+// Same contract, block form: every unsafe block here dereferences that ctx or
+// reads caller-provided ptr+len pairs, and one argument covers them all. A
+// per-block SAFETY comment would restate it 76 times.
+#![allow(clippy::undocumented_unsafe_blocks)]
 
 use std::collections::HashMap;
 use std::slice;
@@ -286,6 +291,10 @@ impl BlitzContext {
         id_to_node.insert(0, body_id);
         node_to_id.insert(body_id, 0);
 
+        #[expect(
+            clippy::unwrap_used,
+            reason = "no event loop means no display environment; the shim has nothing to fall back to and Mojo gets the abort either way"
+        )]
         let event_loop = EventLoop::<()>::builder().build().unwrap();
         event_loop.set_control_flow(ControlFlow::Wait);
 
@@ -483,6 +492,15 @@ impl BlitzContext {
 
     /// Navigate to a child at path from a starting node.
     /// Uses the public `get_node` API to traverse children.
+    ///
+    /// # Panics
+    /// Panics if `start_id` or any step of `path` names a node that does not
+    /// exist; the path comes from this shim's own template tables, so a miss
+    /// is a template/DOM desync worth failing loudly on.
+    #[expect(
+        clippy::expect_used,
+        reason = "a template path miss is a shim-internal desync; see Panics above"
+    )]
     pub fn node_at_path(&self, start_id: usize, path: &[u8]) -> usize {
         let mut current = start_id;
         for &idx in path {
@@ -665,6 +683,10 @@ impl BlitzContext {
 
     /// Process a single Winit window event, converting to Blitz UI events
     /// and routing DOM events to the mojo handler queue.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "mirrors winit's own event-loop callback signature; taking a reference would force a clone at the single call site"
+    )]
     fn handle_winit_event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
@@ -771,8 +793,9 @@ impl BlitzContext {
         //
         // To satisfy the borrow checker, we use a raw pointer trick:
         // take references to disjoint fields before creating the driver.
-        let event_handlers_ptr = &self.event_handlers as *const HashMap<usize, Vec<MojoHandler>>;
-        let event_queue_ptr = &mut self.event_queue as *mut Vec<BufferedEvent>;
+        let event_handlers_ptr =
+            std::ptr::from_ref::<HashMap<usize, Vec<MojoHandler>>>(&self.event_handlers);
+        let event_queue_ptr = std::ptr::from_mut::<Vec<BufferedEvent>>(&mut self.event_queue);
 
         let handler = MojoEventHandler {
             event_handlers: unsafe { &*event_handlers_ptr },
@@ -838,6 +861,10 @@ impl ApplicationHandler for BlitzContext {
                     self.initial_width,
                     self.initial_height,
                 ));
+            #[expect(
+                clippy::unwrap_used,
+                reason = "window creation fails only without a display; the shim cannot run headless and Mojo gets the abort either way"
+            )]
             let winit_window = Arc::new(event_loop.create_window(attrs).unwrap());
             winit_window.set_ime_allowed(true);
 
@@ -1462,11 +1489,21 @@ pub unsafe extern "C" fn mblitz_poll_event_into(
     let ctx = unsafe { &mut *ctx };
     match ctx.poll_event() {
         Some(event) => {
+            // The caller passed pointers it owns (module contract); one
+            // validity argument covers each batched write block below.
+            #[expect(
+                clippy::multiple_unsafe_ops_per_block,
+                reason = "batched writes through caller-provided out-pointers under one validity argument"
+            )]
             unsafe {
                 *out_handler_id = event.handler_id;
                 *out_event_type = event.event_type;
             }
             ctx.last_polled_value = event.value;
+            #[expect(
+                clippy::multiple_unsafe_ops_per_block,
+                reason = "batched writes through caller-provided out-pointers under one validity argument"
+            )]
             unsafe {
                 if ctx.last_polled_value.is_empty() {
                     *out_value_ptr = std::ptr::null();

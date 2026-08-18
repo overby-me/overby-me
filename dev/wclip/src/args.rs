@@ -89,7 +89,9 @@ impl Args {
                 "t" | "tar" | "target" => args.target = Some(value()?),
                 "l" | "loops" => {
                     let v = value()?;
-                    args.loops = v.parse().map_err(|_| format!("invalid loop count '{v}'"))?;
+                    args.loops = v
+                        .parse()
+                        .map_err(|e| format!("invalid loop count '{v}': {e}"))?;
                 }
                 "r" | "rmlastnl" => args.rmlastnl = true,
                 "f" | "filter" => args.filter = true,

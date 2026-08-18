@@ -1183,6 +1183,10 @@ fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Option<String> {
         .ok()
         .and_then(|o| number(o).ok())
         .unwrap_or(8.0);
+    #[expect(
+        clippy::float_cmp,
+        reason = "BitsPerComponent is a PDF integer carried as f64; only the exact value 8 is supported"
+    )]
     if bpc != 8.0 {
         return None;
     }
@@ -2615,6 +2619,10 @@ struct Mark {
     src: String,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear pass over a page; the length is the sequence of layout cases, not mixed concerns"
+)]
 fn page_runs(
     doc: &Document,
     page_id: lopdf::ObjectId,
@@ -3998,6 +4006,10 @@ fn space_before(lines: &[Line], at: usize, body: f64, usual: f64) -> Option<f64>
     (extra > body * 0.6).then(|| (extra / body).min(8.0))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "as page_runs: a single linear grouping pass whose cases read top to bottom"
+)]
 fn blocks_from(
     lines: Vec<Line>,
     running: &Running,

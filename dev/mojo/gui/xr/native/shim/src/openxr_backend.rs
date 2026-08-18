@@ -37,6 +37,10 @@
 //! This ensures a single Vulkan device is shared between OpenXR compositing
 //! and Vello rendering — no GPU→CPU→GPU copies needed.
 
+// Unlike the C-ABI surface in lib.rs, the unsafe here is Vulkan/OpenXR
+// bring-up where each call has its own precondition - so the crate-level
+// waiver is reversed and every block documents its claim.
+#![warn(clippy::undocumented_unsafe_blocks)]
 use std::collections::HashMap;
 use std::ffi::{CString, c_void};
 
@@ -163,6 +167,8 @@ impl OpenXrBackend {
     pub fn try_new(app_name: &str) -> Option<Self> {
         // ── 1. Load OpenXR ──────────────────────────────────────────
 
+        // SAFETY: dlopens the OpenXR loader; sound as long as the loader
+        // library itself is well-formed, which is the runtime's contract.
         let entry = unsafe { xr::Entry::load().ok()? };
 
         // ── 2. Create instance ──────────────────────────────────────
@@ -231,6 +237,7 @@ impl OpenXrBackend {
             vk_instance_ext_names.iter().map(|s| s.as_ptr()).collect();
 
         // Create Vulkan entry and instance.
+        // SAFETY: dlopens libvulkan; same library-well-formedness contract.
         let vk_entry = unsafe { ash::Entry::load().ok()? };
 
         let vk_app_info =
@@ -240,9 +247,13 @@ impl OpenXrBackend {
             .application_info(&vk_app_info)
             .enabled_extension_names(&vk_instance_ext_ptrs);
 
+        // SAFETY: create-info and its extension strings outlive the call;
+        // no allocator callbacks are passed.
         let vk_instance = unsafe { vk_entry.create_instance(&vk_instance_ci, None).ok()? };
 
         // Get the physical device OpenXR wants us to use.
+        // SAFETY: the runtime returns a valid VkPhysicalDevice handle for
+        // the instance we just created and passed in.
         let vk_physical_device = ash::vk::PhysicalDevice::from_raw(unsafe {
             instance
                 .vulkan_graphics_device(system, vk_instance.handle().as_raw() as *const c_void)
@@ -262,6 +273,8 @@ impl OpenXrBackend {
             vk_device_ext_names.iter().map(|s| s.as_ptr()).collect();
 
         // Find a graphics queue family.
+        // SAFETY: queries properties of the live physical device; the
+        // returned Vec owns its memory.
         let queue_family_index = unsafe {
             let families =
                 vk_instance.get_physical_device_queue_family_properties(vk_physical_device);
@@ -281,16 +294,22 @@ impl OpenXrBackend {
             .queue_create_infos(std::slice::from_ref(&queue_ci))
             .enabled_extension_names(&vk_device_ext_ptrs);
 
+        // SAFETY: xrCreateVulkanDevice-style creation over live instance and
+        // physical-device handles; create-info outlives the call.
         let vk_device = unsafe {
             vk_instance
                 .create_device(vk_physical_device, &device_ci, None)
                 .ok()?
         };
 
+        // SAFETY: the queue family index came from this device's own
+        // properties; queue 0 exists because we requested one.
         let _vk_queue = unsafe { vk_device.get_device_queue(queue_family_index, 0) };
 
         // ── 5. Create OpenXR session ───────────────────────────────
 
+        // SAFETY: all raw handles handed to create_session are live and
+        // stay owned by us for the session's lifetime.
         let (session, frame_waiter, frame_stream) = unsafe {
             instance
                 .create_session::<xr::Vulkan>(
@@ -508,6 +527,9 @@ impl OpenXrBackend {
         .ok()?;
 
         // Create the HAL instance wrapping our raw Vulkan instance.
+        // SAFETY: wraps the raw VkInstance we created; wgpu-hal takes
+        // shared ownership and the drop-guard is disabled, so OpenXR keeps
+        // destruction order.
         let hal_instance = unsafe {
             <VulkanApi as wgpu::hal::Api>::Instance::from_raw(
                 vk_entry.clone(),
@@ -528,13 +550,19 @@ impl OpenXrBackend {
         let hal_exposed_adapter = hal_instance.expose_adapter(vk_physical_device)?;
 
         // Create the wgpu instance from the HAL instance.
+        // SAFETY: hal_instance was built from a live VkInstance above.
         let wgpu_instance = unsafe { wgpu::Instance::from_hal::<VulkanApi>(hal_instance) };
 
         // Create the wgpu adapter from the HAL exposed adapter.
+        // SAFETY: the exposed adapter came from this same hal instance.
         let wgpu_adapter = unsafe { wgpu_instance.create_adapter_from_hal(hal_exposed_adapter) };
 
         // Create a HAL open device wrapping our raw Vulkan device.
+        // SAFETY: the adapter was created via the Vulkan HAL two lines up,
+        // so the API type matches.
         let adapter_guard = unsafe { wgpu_adapter.as_hal::<VulkanApi>() }?;
+        // SAFETY: device_from_raw wraps the live VkDevice; extensions and
+        // features passed match what the device was created with (none).
         let hal_open_device = unsafe {
             adapter_guard
                 .device_from_raw(
@@ -550,6 +578,8 @@ impl OpenXrBackend {
         };
 
         // Create the wgpu device + queue from the HAL device.
+        // SAFETY: consumes the hal device we just wrapped; descriptor
+        // requests no features the device lacks.
         let (wgpu_device, wgpu_queue) = unsafe {
             wgpu_adapter
                 .create_device_from_hal(
@@ -817,12 +847,16 @@ impl OpenXrBackend {
 
         for vk_image in &images {
             let Some(device_guard) =
-                (unsafe { self.wgpu_device.as_hal::<wgpu::hal::api::Vulkan>() })
+                            // SAFETY: this backend only ever constructs its device via the
+            // Vulkan HAL path above.
+            (unsafe { self.wgpu_device.as_hal::<wgpu::hal::api::Vulkan>() })
             else {
                 // Constructed via the Vulkan path, so this cannot miss; if it
                 // ever does, failing the swapchain beats aborting the app.
                 return false;
             };
+            // SAFETY: wraps a swapchain VkImage the OpenXR runtime owns; the
+            // no-drop-guard descriptor keeps ownership with the runtime.
             let hal_texture = unsafe {
                 device_guard.texture_from_raw(
                     ash::vk::Image::from_raw(*vk_image),
@@ -845,6 +879,8 @@ impl OpenXrBackend {
                 )
             };
 
+            // SAFETY: the hal texture was created for this same device with
+            // a matching descriptor.
             let texture = unsafe {
                 self.wgpu_device
                     .create_texture_from_hal::<wgpu::hal::api::Vulkan>(

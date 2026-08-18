@@ -58,51 +58,53 @@ async fn decode(url: &str) -> Result<XImage, String> {
     let window = web_sys::window().ok_or("no window")?;
     let response: Response = JsFuture::from(window.fetch_with_str(url))
         .await
-        .map_err(|_| format!("network error fetching {url}"))?
+        .map_err(|e| format!("network error fetching {url}: {e:?}"))?
         .dyn_into()
-        .map_err(|_| "unexpected fetch result".to_string())?;
+        .map_err(|e| format!("unexpected fetch result: {e:?}"))?;
     if !response.ok() {
         return Err(format!("HTTP {} from {url}", response.status()));
     }
-    let blob = JsFuture::from(response.blob().map_err(|_| "no body")?)
+    let blob = JsFuture::from(response.blob().map_err(|e| format!("no body: {e:?}"))?)
         .await
-        .map_err(|_| "could not read the body".to_string())?;
+        .map_err(|e| format!("could not read the body: {e:?}"))?;
 
     // Decoding from a blob we already fetched keeps this same-origin as far as
     // the canvas is concerned, so `getImageData` works even though the bytes
     // came from another host.
     let bitmap: ImageBitmap = JsFuture::from(
         window
-            .create_image_bitmap_with_blob(&blob.dyn_into().map_err(|_| "not a blob")?)
-            .map_err(|_| "could not decode the tile".to_string())?,
+            .create_image_bitmap_with_blob(
+                &blob.dyn_into().map_err(|e| format!("not a blob: {e:?}"))?,
+            )
+            .map_err(|e| format!("could not decode the tile: {e:?}"))?,
     )
     .await
-    .map_err(|_| "could not decode the tile".to_string())?
+    .map_err(|e| format!("could not decode the tile: {e:?}"))?
     .dyn_into()
-    .map_err(|_| "not an image".to_string())?;
+    .map_err(|e| format!("not an image: {e:?}"))?;
 
     let (w, h) = (bitmap.width() as i32, bitmap.height() as i32);
     let document = window.document().ok_or("no document")?;
     let canvas: HtmlCanvasElement = document
         .create_element("canvas")
-        .map_err(|_| "no canvas")?
+        .map_err(|e| format!("no canvas: {e:?}"))?
         .dyn_into()
-        .map_err(|_| "not a canvas")?;
+        .map_err(|e| format!("not a canvas: {e:?}"))?;
     canvas.set_width(w as u32);
     canvas.set_height(h as u32);
     let ctx: CanvasRenderingContext2d = canvas
         .get_context("2d")
-        .map_err(|_| "no 2d context")?
+        .map_err(|e| format!("no 2d context: {e:?}"))?
         .ok_or("no 2d context")?
         .dyn_into()
-        .map_err(|_| "not a 2d context")?;
+        .map_err(|e| format!("not a 2d context: {e:?}"))?;
     ctx.draw_image_with_image_bitmap(&bitmap, 0.0, 0.0)
-        .map_err(|_| "could not draw the tile".to_string())?;
+        .map_err(|e| format!("could not draw the tile: {e:?}"))?;
     bitmap.close();
 
     let data = ctx
         .get_image_data(0.0, 0.0, f64::from(w), f64::from(h))
-        .map_err(|_| "the canvas was tainted, so the tile cannot be read".to_string())?
+        .map_err(|e| format!("the canvas was tainted, so the tile cannot be read: {e:?}"))?
         .data();
 
     let mut img = XImage::new(w, h);

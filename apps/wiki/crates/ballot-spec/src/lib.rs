@@ -350,7 +350,7 @@ impl Board {
         entry: BoardEntry,
     ) -> Result<usize, CastError> {
         pk.verify(&entry.signature, entry.msg_randomizer, &entry.token)
-            .map_err(|_| CastError::BadSignature)?;
+            .map_err(|_sig_err| CastError::BadSignature)?;
         if self.entries.iter().any(|e| e.token == entry.token) {
             return Err(CastError::DoubleSpend);
         }

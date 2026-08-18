@@ -26,7 +26,7 @@ pub fn verify_access_token(token: &str, secret: &str) -> Result<String, String> 
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
     mac.update(signing_input.as_bytes());
     mac.verify_slice(&sig)
-        .map_err(|_| "bad jwt signature".to_string())?;
+        .map_err(|_sig_err| "bad jwt signature".to_string())?;
 
     let claims: Value =
         serde_json::from_slice(&util::b64url_decode(parts[1])?).map_err(|e| e.to_string())?;

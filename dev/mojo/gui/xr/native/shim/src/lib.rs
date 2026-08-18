@@ -1,3 +1,9 @@
+// The C ABI surface Mojo drives. Every unsafe block in THIS file either
+// dereferences a session pointer the caller minted via mxr_create or reads a
+// caller-provided ptr+len pair; that single contract is the safety argument,
+// as in the desktop shim. openxr_backend.rs opts back in below: its unsafe is
+// Vulkan/OpenXR initialisation where every call carries its own claim.
+#![allow(clippy::undocumented_unsafe_blocks)]
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(dead_code)]
 #![allow(clippy::missing_safety_doc)]

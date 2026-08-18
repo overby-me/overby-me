@@ -228,6 +228,10 @@ pub fn use_focus_refresh(mut refresh: Signal<u32>) {
 ///
 /// The hub connects on the first subscription and closes after the last one
 /// goes, so a signed-out reader with no live views holds no socket at all.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the wire moves into the subscription task spawned inside; the capture is through hook macros the lint cannot see"
+)]
 pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<serde_json::Value>> {
     // Subscribing to the session hook keeps this component in the reactive
     // graph; the fresh token itself is re-read at each (re)connect below.

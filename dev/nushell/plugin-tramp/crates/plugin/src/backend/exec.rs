@@ -222,10 +222,10 @@ impl Backend for ExecBackend {
             Self::check_result(&result, path)?;
         } else {
             // Fallback: printf.  Only works for text content (no NUL bytes).
-            let text = String::from_utf8(data.to_vec()).map_err(|_| {
-                TrampError::RemoteError(
-                    "target lacks base64(1) and file contains binary data".into(),
-                )
+            let text = String::from_utf8(data.to_vec()).map_err(|e| {
+                TrampError::RemoteError(format!(
+                    "target lacks base64(1) and file contains binary data: {e}"
+                ))
             })?;
             let escaped_content = text.replace('\\', "\\\\").replace('\'', "'\\''");
             let script = format!("printf '%s' '{escaped_content}' > {escaped}");

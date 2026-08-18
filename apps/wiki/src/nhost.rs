@@ -205,10 +205,10 @@ pub async fn sign_in(email: &str, password: &str) -> Result<AuthSession, NhostEr
     }
 
     let session = body.get("session").cloned().unwrap_or_default();
-    serde_json::from_value::<AuthSession>(session).map_err(|_| NhostError {
+    serde_json::from_value::<AuthSession>(session).map_err(|e| NhostError {
         status: None,
         error: Some("no_session".to_string()),
-        message: Some("No session returned".to_string()),
+        message: Some(format!("No session returned: {e}")),
     })
 }
 

@@ -56,6 +56,8 @@ mod unix {
         let mut master_raw: RawFd = -1;
         let mut slave_raw: RawFd = -1;
 
+        // SAFETY: out-pointers are live locals; null name/termios/winsize are
+        // documented as "use defaults".
         let ret = unsafe {
             libc::openpty(
                 &mut master_raw,
@@ -70,8 +72,10 @@ mod unix {
             return Err(io::Error::last_os_error());
         }
 
-        // Safety: openpty returned valid fds on success.
+        // SAFETY: openpty returned 0, so both fds are valid and owned by us;
+        // wrapping each exactly once transfers that ownership.
         let master = unsafe { OwnedFd::from_raw_fd(master_raw) };
+        // SAFETY: as above - the slave half of the same successful openpty.
         let slave = unsafe { OwnedFd::from_raw_fd(slave_raw) };
 
         Ok((master, slave))
@@ -86,6 +90,8 @@ mod unix {
             ws_ypixel: 0,
         };
 
+        // SAFETY: fd is a live PTY master; &ws is a valid winsize for the
+        // duration of the call.
         let ret = unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &ws) };
         if ret != 0 {
             return Err(io::Error::last_os_error());
@@ -95,10 +101,12 @@ mod unix {
 
     /// Set a file descriptor to non-blocking mode.
     fn set_nonblocking(fd: RawFd) -> io::Result<()> {
+        // SAFETY: F_GETFL reads flags of a live fd; no pointers involved.
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
         if flags < 0 {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: same live fd; F_SETFL takes a plain int argument.
         let ret = unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
         if ret < 0 {
             return Err(io::Error::last_os_error());
@@ -143,6 +151,8 @@ mod unix {
                 Ok(Ok(mut guard)) => {
                     match guard.try_io(|inner| {
                         let fd = inner.get_ref().as_raw_fd();
+                        // SAFETY: buf is a live &mut [u8]; read writes at most
+                        // buf.len() bytes into it.
                         let n = unsafe {
                             libc::read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len())
                         };
@@ -181,6 +191,8 @@ mod unix {
                 match guard.try_io(|inner| {
                     let fd = inner.get_ref().as_raw_fd();
                     let remaining = &data[offset..];
+                    // SAFETY: remaining borrows data for the whole call; write
+                    // reads at most remaining.len() bytes.
                     let n = unsafe {
                         libc::write(
                             fd,
@@ -291,7 +303,7 @@ mod unix {
 
     fn get_u16_param(params: &Value, key: &str) -> Result<u16, Response> {
         let val = get_u64_param(params, key)?;
-        u16::try_from(val).map_err(|_| {
+        u16::try_from(val).map_err(|_out_of_range| {
             Response::err(
                 0,
                 error_code::INVALID_PARAMS,
@@ -339,6 +351,8 @@ mod unix {
     /// Returns `Some(exit_code)` if the child has exited, `None` otherwise.
     fn try_wait_pid(pid: u32) -> Option<i32> {
         let mut status: libc::c_int = 0;
+        // SAFETY: &mut status is a live out-pointer; WNOHANG makes this a
+        // non-blocking status poll.
         let ret = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
         if ret > 0 {
             if libc::WIFEXITED(status) {
@@ -410,6 +424,8 @@ mod unix {
         let c_cwd: Option<std::ffi::CString> = cwd.and_then(|d| std::ffi::CString::new(d).ok());
 
         // 4. Fork.
+        // SAFETY: fork itself has no memory preconditions; the child below
+        // calls only async-signal-safe libc before exec.
         let pid = unsafe { libc::fork() };
 
         if pid < 0 {
@@ -418,6 +434,8 @@ mod unix {
 
         if pid == 0 {
             // ---- Child process ----
+            // SAFETY: child-side post-fork: only async-signal-safe calls
+            // (setsid/ioctl/dup2/close/exec family) on fds the parent opened.
             unsafe {
                 libc::setsid();
                 libc::ioctl(slave_raw, libc::TIOCSCTTY, 0);
@@ -515,6 +533,7 @@ mod unix {
             Ok(m) => m,
             Err(e) => {
                 // Kill the child since we can't communicate with it.
+                // SAFETY: kill takes a pid by value; no pointers involved.
                 unsafe { libc::kill(child_pid as libc::pid_t, libc::SIGKILL) };
                 return Response::err(
                     id,
@@ -603,6 +622,8 @@ mod unix {
 
         // Send SIGWINCH to the child process group so it picks up the
         // new window size.
+        // SAFETY: kill takes a pid by value; the negative pid targets the
+        // child's process group.
         unsafe {
             libc::kill(-(managed.pid as libc::pid_t), libc::SIGWINCH);
         }
@@ -753,6 +774,7 @@ mod unix {
             );
         };
 
+        // SAFETY: kill takes a pid by value; no pointers involved.
         let ret = unsafe { libc::kill(managed.pid as libc::pid_t, libc::SIGKILL) };
         if ret != 0 {
             let err = io::Error::last_os_error();
@@ -767,6 +789,7 @@ mod unix {
         }
 
         // Reap the child to avoid zombies.
+        // SAFETY: &mut status is a live local for the duration of the call.
         unsafe {
             let mut status: libc::c_int = 0;
             libc::waitpid(managed.pid as libc::pid_t, &mut status, 0);

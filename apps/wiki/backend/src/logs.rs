@@ -38,11 +38,11 @@ async fn ingest_inner(
     }
     let bytes = axum::body::to_bytes(req.into_body(), MAX_BODY)
         .await
-        .map_err(|_| AppError::BadRequest("log body too large".into()))?;
+        .map_err(|e| AppError::BadRequest(format!("log body too large: {e}")))?;
     // Validate it parses as JSON before forwarding, so this proxy can't be used
     // to relay arbitrary bytes to the ingest host.
     let mut batch: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|_| AppError::BadRequest("log body not JSON".into()))?;
+        .map_err(|e| AppError::BadRequest(format!("log body not JSON: {e}")))?;
 
     // Resolve the wasm frames while the entry is passing through: a stack of
     // `wasm-function[4231]:0x1d4c0` is unreadable in Better Stack, and the sink

@@ -599,7 +599,7 @@ async fn process_ws_message(
         payload: msg.event,
     };
 
-    event_tx.send(pipeline_event).await.map_err(|_| {
+    event_tx.send(pipeline_event).await.map_err(|_send_err| {
         KnotError::Connection(format!("pipeline event channel closed for knot {knot}"))
     })?;
 

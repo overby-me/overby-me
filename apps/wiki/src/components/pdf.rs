@@ -401,9 +401,9 @@ pub fn PdfDocument(doc: Extracted) -> Element {
             .last()
             .and_then(|g| g.iter().rev().find(|b| !matches!(b, Block::Anchor(_))))
             .is_some_and(|prev| runs_on(prev, block));
-        match extend {
-            true => groups.last_mut().expect("checked").push(block.clone()),
-            false => groups.push(vec![block.clone()]),
+        match groups.last_mut() {
+            Some(group) if extend => group.push(block.clone()),
+            _ => groups.push(vec![block.clone()]),
         }
     }
 

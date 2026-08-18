@@ -287,6 +287,8 @@ impl Renderer {
 
         // Upload line data
         gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.line_buffer));
+        // SAFETY: the view borrows line_data, and no allocation happens
+        // between creating it and the buffer_data upload that consumes it.
         unsafe {
             let array = js_sys::Float32Array::view(&line_data);
             gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::DYNAMIC_DRAW);
@@ -540,12 +542,16 @@ fn create_buffer<T: bytemuck_compatible::Pod>(
 ) -> Result<WebGlBuffer, String> {
     let buffer = gl.create_buffer().ok_or("failed to create buffer")?;
     gl.bind_buffer(target, Some(&buffer));
-    unsafe {
-        let byte_slice =
-            std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data));
-        let array = js_sys::Uint8Array::view(byte_slice);
-        gl.buffer_data_with_array_buffer_view(target, &array, GL::STATIC_DRAW);
-    }
+    // SAFETY: T: Pod (plain data, no padding), so its bytes are a valid
+    // [u8]; the js view borrows that slice and is consumed before any
+    // allocation can move the backing memory.
+    let byte_slice = unsafe {
+        std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data))
+    };
+    // SAFETY: the view borrows byte_slice and is consumed by the upload on
+    // the next line, before any allocation can move the backing memory.
+    let array = unsafe { js_sys::Uint8Array::view(byte_slice) };
+    gl.buffer_data_with_array_buffer_view(target, &array, GL::STATIC_DRAW);
     Ok(buffer)
 }
 
@@ -624,6 +630,8 @@ mod bytemuck_compatible {
     /// # Safety
     /// Implementors must be plain-old-data types (no padding, no pointers).
     pub unsafe trait Pod: Copy + 'static {}
+    // SAFETY: both are primitive numeric types - no padding, no pointers.
     unsafe impl Pod for f32 {}
+    // SAFETY: as above.
     unsafe impl Pod for u16 {}
 }

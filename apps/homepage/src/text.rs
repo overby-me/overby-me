@@ -210,15 +210,15 @@ async fn fetch_text(url: &str) -> Result<String, String> {
     let window = web_sys::window().ok_or("no window")?;
     let response: Response = JsFuture::from(window.fetch_with_str(url))
         .await
-        .map_err(|_| {
+        .map_err(|e| {
             format!(
                 "could not read {url}. A browser will only let this page read \
                  a response whose server sends access-control-allow-origin, \
-                 and that is the server's to give, not ours."
+                 and that is the server's to give, not ours. ({e:?})"
             )
         })?
         .dyn_into()
-        .map_err(|_| "unexpected fetch result".to_string())?;
+        .map_err(|e| format!("unexpected fetch result: {e:?}"))?;
     if !response.ok() {
         return Err(format!("HTTP {} from {url}", response.status()));
     }
@@ -229,9 +229,9 @@ async fn fetch_text(url: &str) -> Result<String, String> {
         .flatten()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let body = JsFuture::from(response.text().map_err(|_| "no body")?)
+    let body = JsFuture::from(response.text().map_err(|e| format!("no body: {e:?}"))?)
         .await
-        .map_err(|_| "could not read the body".to_string())?
+        .map_err(|e| format!("could not read the body: {e:?}"))?
         .as_string()
         .ok_or("body was not text")?;
 

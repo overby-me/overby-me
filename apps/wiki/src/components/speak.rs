@@ -1006,9 +1006,12 @@ fn time_string(total: i64) -> String {
 
 /// A millisecond timestamp for generating unique node keys.
 fn now_ms() -> String {
-    let window = web_sys::window().unwrap();
-    let performance = window.performance().unwrap();
-    format!("{:.0}", performance.now())
+    // A missing window/performance is a broken environment; zero still makes
+    // a usable (if non-unique) key rather than a panic mid-render.
+    let now = web_sys::window()
+        .and_then(|w| w.performance())
+        .map_or(0.0, |p| p.now());
+    format!("{now:.0}")
 }
 
 /// Seconds left on the current speaker's turn: the `time` limit minus the elapsed

@@ -183,10 +183,10 @@ impl TangledClient {
         match url.scheme() {
             "https" => url
                 .set_scheme("wss")
-                .map_err(|_| anyhow!("cannot use wss for this host"))?,
+                .map_err(|()| anyhow!("cannot use wss for this host"))?,
             "http" => url
                 .set_scheme("ws")
-                .map_err(|_| anyhow!("cannot use ws for this host"))?,
+                .map_err(|()| anyhow!("cannot use ws for this host"))?,
             other => return Err(anyhow!("spindle host must be http(s), got {other}")),
         }
         url.set_path(&format!("/xrpc/{SUBSCRIBE_PIPELINE_LOGS}"));

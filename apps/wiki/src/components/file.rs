@@ -1491,6 +1491,10 @@ pub enum HeifPreview {
 /// The bytes are fetched WHATEVER the mime says, when the mime is one that could
 /// plausibly be a HEIC -- see `is_heif_mime` for why the mime cannot be trusted
 /// on its own -- and the sniff decides. An ordinary JPEG never reaches here.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "file_id moves into use_reactive!/spawn captures the lint cannot see through"
+)]
 pub fn use_heif_preview(file_id: String, mime: String) -> HeifPreview {
     let mut state = use_signal(|| HeifPreview::NotHeif);
     let maybe = is_heif_mime(&mime) || mime == "application/octet-stream" || mime.is_empty();

@@ -168,7 +168,7 @@ fn parse_hop(segment: &str) -> TrampResult<Hop> {
         let port_str = &remainder[hash_idx + 1..];
         let port = port_str
             .parse::<u16>()
-            .map_err(|_| TrampError::InvalidPort(port_str.to_string()))?;
+            .map_err(|_parse_err| TrampError::InvalidPort(port_str.to_string()))?;
         (host.to_string(), Some(port))
     } else {
         (remainder.to_string(), None)

@@ -440,6 +440,10 @@ impl Gl3dEngine {
         self.runner.event(*event)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear GL frame: bind, upload, draw per pass; splitting would hide the pipeline order"
+    )]
     pub fn draw(&mut self, now: f64) {
         self.runner.tick(now);
         let gl = self.gl.clone();

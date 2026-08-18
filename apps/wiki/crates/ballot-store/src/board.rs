@@ -127,7 +127,7 @@ impl PersistentBoard {
         entry: BoardEntry,
     ) -> Result<u64, BoardError> {
         pk.verify(&entry.signature, entry.msg_randomizer, &entry.token)
-            .map_err(|_| BoardError::Cast(CastError::BadSignature))?;
+            .map_err(|_sig_err| BoardError::Cast(CastError::BadSignature))?;
         rules
             .validate(&entry.choices)
             .map_err(|e| BoardError::Cast(CastError::Invalid(e)))?;

@@ -62,8 +62,14 @@ pub fn Graph(data: GraphData) -> Element {
     let onmounted = move |evt: MountedEvent| {
         let data = data.clone();
         spawn(async move {
-            let elem: web_sys::Element = evt.data().try_as_web_event().unwrap();
-            let canvas: web_sys::HtmlCanvasElement = elem.dyn_into().unwrap();
+            // A mount event that is not a web element, or not a canvas, means
+            // the DOM is not what this page built: skip setup, do not panic.
+            let Some(elem) = evt.data().try_as_web_event() else {
+                return;
+            };
+            let Ok(canvas) = elem.dyn_into::<web_sys::HtmlCanvasElement>() else {
+                return;
+            };
 
             let dpr = web_sys::window()
                 .map(|w| w.device_pixel_ratio())
@@ -78,12 +84,14 @@ pub fn Graph(data: GraphData) -> Element {
             canvas.set_width(display_width as u32);
             canvas.set_height(display_height as u32);
 
-            let gl: GL = canvas
-                .get_context("webgl")
-                .unwrap()
-                .unwrap()
-                .dyn_into()
-                .unwrap();
+            // No WebGL context = an environment that cannot show the graph;
+            // leave the canvas blank instead of panicking the app.
+            let Ok(Some(ctx)) = canvas.get_context("webgl") else {
+                return;
+            };
+            let Ok(gl) = ctx.dyn_into::<GL>() else {
+                return;
+            };
 
             let renderer = match Renderer::new(gl.clone()) {
                 Ok(r) => r,
@@ -605,16 +613,18 @@ fn start_animation_loop(state: Rc<RefCell<GraphState>>) {
         }
 
         // Request next frame
-        if let Some(window) = web_sys::window() {
-            let _ = window
-                .request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+        if let Some(window) = web_sys::window()
+            && let Some(cb) = f.borrow().as_ref()
+        {
+            let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
         }
     }) as Box<dyn FnMut()>));
 
     // Kick off the first frame
-    if let Some(window) = web_sys::window() {
-        let _ =
-            window.request_animation_frame(g.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+    if let Some(window) = web_sys::window()
+        && let Some(cb) = g.borrow().as_ref()
+    {
+        let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
     }
 }
 

@@ -47,10 +47,10 @@ async fn build_url(args: &BrowseArgs) -> Result<String> {
 
 fn detect_repo_from_git() -> Result<String> {
     let repo = git2::Repository::discover(".")
-        .map_err(|_| anyhow!("not in a git repository; provide a target (e.g. owner/repo)"))?;
+        .map_err(|e| anyhow!("not in a git repository; provide a target (e.g. owner/repo): {e}"))?;
     let remote = repo
         .find_remote("origin")
-        .map_err(|_| anyhow!("no 'origin' remote found; provide a target"))?;
+        .map_err(|e| anyhow!("no 'origin' remote found; provide a target: {e}"))?;
     let url = remote
         .url()
         .ok_or_else(|| anyhow!("origin remote has no URL"))?;

@@ -721,7 +721,10 @@ pub(super) fn abbrev_context_name(name: &str) -> String {
         .split(' ')
         .filter(|w| !w.is_empty())
         .filter(|w| {
-            let first = w.chars().next().unwrap();
+            // The is_empty filter above guarantees a first char.
+            let Some(first) = w.chars().next() else {
+                return false;
+            };
             let has_digit = w.chars().any(|c| c.is_ascii_digit());
             (first.is_uppercase() && !(has_digit && w.chars().count() > 1)) || upper_count(w) > 1
         })
@@ -731,7 +734,7 @@ pub(super) fn abbrev_context_name(name: &str) -> String {
             // An acronym (e.g. "EU-"): keep only its uppercase letters, so
             // trailing punctuation like a hyphen cannot break onto a new line.
             _ if upper_count(w) > 1 => w.chars().filter(|c| c.is_uppercase()).collect(),
-            _ => w.chars().next().unwrap().to_string(),
+            _ => w.chars().next().map(String::from).unwrap_or_default(),
         })
         .collect();
 

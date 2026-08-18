@@ -149,7 +149,7 @@ pub(super) fn UserMenu() -> Element {
                                 "#00796B".to_string(),
                                 "#C62828".to_string(),
                             ],
-                            on_change: move |hex: String| crate::theme::set_primary_seed(hex),
+                            on_change: move |hex: String| crate::theme::set_primary_seed(&hex),
                         }
                         crate::components::widgets::ColorPicker {
                             label: t("layout.accentColor"),
@@ -162,7 +162,7 @@ pub(super) fn UserMenu() -> Element {
                                 "#F9A825".to_string(),
                                 "#2E7D32".to_string(),
                             ],
-                            on_change: move |hex: String| crate::theme::set_accent_seed(hex),
+                            on_change: move |hex: String| crate::theme::set_accent_seed(&hex),
                         }
                     }
                     // Language toggle
