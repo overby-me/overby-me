@@ -19,6 +19,7 @@ in {
       install -m 644 ${./lychee.toml} lychee.toml
       install -m 644 ${./rumdl.toml} rumdl.toml
       install -m 644 ${./statix.toml} statix.toml
+      install -m 644 ${./clippy.toml} clippy.toml
       install -m 644 ${./typos.toml} typos.toml
       install -m 644 ${./secretsignore} .secretsignore
       install -m 644 ${commitlintrc} .commitlintrc.yml

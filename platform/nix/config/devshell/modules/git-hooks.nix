@@ -199,7 +199,81 @@
         ''}";
         pass_filenames = true;
       };
-      clippy = {
+      clippy = let
+        # Lints beyond clippy's default set, enabled centrally so every
+        # workspace gets them without a [lints] block of its own. Chosen from a
+        # measurement over the ten native workspaces (2556 findings across 57
+        # candidates, lib and bin targets only, which is what this hook checks).
+        #
+        # The first group never fired anywhere, so it costs nothing today and
+        # keeps the pattern from arriving. Seven of them are rules the
+        # .deslop.toml files suppress by hand in up to nine projects.
+        unusedToday = [
+          "dbg_macro"
+          "todo"
+          "unimplemented"
+          "unreachable"
+          "panic"
+          "panic_in_result_fn"
+          "get_unwrap"
+          "try_err"
+          "wildcard_imports"
+          "float_cmp"
+          "lossy_float_literal"
+          "fn_params_excessive_bools"
+          "mutex_atomic"
+          "rc_mutex"
+          "rc_buffer"
+          "large_futures"
+          "large_stack_frames"
+          "cast_ptr_alignment"
+          "ref_as_ptr"
+          "transmute_undefined_repr"
+        ];
+        # The second group fires under twenty times each, so the whole set is
+        # about 150 findings to answer across the repo. `unwrap_used` is
+        # seventeen of them: deslop's headline rule, which its own
+        # implementation misses entirely.
+        worthFixing = [
+          "unwrap_used"
+          "expect_used"
+          "unwrap_in_result"
+          "multiple_unsafe_ops_per_block"
+          "ptr_as_ptr"
+          "mem_forget"
+          "cast_precision_loss"
+          "needless_pass_by_value"
+          "exit"
+          "same_name_method"
+          "verbose_file_reads"
+          "missing_panics_doc"
+          "implicit_hasher"
+          "too_many_lines"
+        ];
+        # Four were tried and dropped. unused_async fired eleven times, every
+        # one on a function that has to be async to exist: an axum handler
+        # satisfying the Handler trait, or an arm of a dispatch table whose
+        # other arms await. mod_module_files prefers foo.rs over foo/mod.rs,
+        # and this tree has chosen mod.rs.
+        # struct_excessive_bools reads a run of
+        # booleans as a state machine wanting an enum, which is wrong for a
+        # wire format: H.265's Pps carries 21 one-bit flags because the
+        # specification says so. missing_asserts_for_indexing fired four times,
+        # every one where the bound was already checked - by `windows(2)`, or by
+        # an early return on `len()` - in a form the lint cannot see.
+        #
+        # Deliberately left off. arithmetic_side_effects (552) and
+        # indexing_slicing (373) want panic-free code, which is not what a tree
+        # of parsers and video decoders is; str_to_string (345) is a style
+        # preference; print_stdout and print_stderr (339) fire on the CLIs whose
+        # job is printing; missing_errors_doc (228) is documentation debt, not a
+        # defect. Also staged out for now: the cast and FFI family
+        # (cast_possible_truncation 90, cast_sign_loss 37, cast_possible_wrap
+        # 36, borrow_as_ptr 22, undocumented_unsafe_blocks 33) and
+        # allow_attributes_without_reason (47), which are worth having but are
+        # 265 findings concentrated in the FFI shims.
+        lintFlags = lib.concatMapStringsSep " " (l: "-W clippy::${l}") (unusedToday ++ worthFixing);
+      in {
         enable = true;
         # safety/fe-c pins a nightly toolchain and its fe-c-driver crate uses
         # `#![feature(rustc_private)]`, which the stable `pkgs.cargo` here
@@ -275,7 +349,7 @@
           for ws_dir in "''${!workspace_roots[@]}"; do
             manifest="$ws_dir/Cargo.toml"
             echo "Running cargo clippy --workspace for $manifest"
-            ${pkgs.cargo}/bin/cargo clippy --manifest-path "$manifest" --workspace -- -D warnings &
+            ${pkgs.cargo}/bin/cargo clippy --manifest-path "$manifest" --workspace -- ${lintFlags} -D warnings &
             pids+=($!)
           done
 
@@ -286,7 +360,7 @@
               continue
             fi
             echo "Running cargo clippy for $manifest"
-            ${pkgs.cargo}/bin/cargo clippy --manifest-path "$manifest" -- -D warnings &
+            ${pkgs.cargo}/bin/cargo clippy --manifest-path "$manifest" -- ${lintFlags} -D warnings &
             pids+=($!)
           done
 
