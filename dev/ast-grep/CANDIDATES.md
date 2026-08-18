@@ -437,3 +437,86 @@ cannot see the dependency tree.
 
 Clones for the triage pass: scratchpad/{codeql,advisory-db} + rudra/geiger
 readmes, /tmp/deslop-src, /tmp/semgrep-rules, sweep artifacts in /tmp.
+
+## Triage verdicts (measured against this tree, every hit inspected)
+
+Method: prototype rules run via a scratch sgconfig over the real tree,
+first-party (fp) counted separately from vendor/oxidized; every fp hit read
+before judging. Full location lists in the session triage artifacts.
+
+### Implement as ast-grep rules (#39)
+
+Ratchets at 0 first-party findings, each requiring a firing fixture:
+unsafe Send/Sync impls GENERIC-ONLY (the 3 non-generic fe-c impls carry
+SAFETY comments and are the shape done right - generic-with-missing-bounds
+is the bug class); repr(packed) without C; mem::uninitialized + chained
+uninit().assume_init(); set_len-then-read_exact handoff; size_hint inside
+unsafe-bearing fns; TLS danger_accept_* (the bare |_,_| true closure form
+DROPPED: 11/11 hits were Dioxus UI predicates - keep only the reqwest/rustls
+API forms); weak-hash constructors (2 protocol-mandated oxidized uses live
+outside the hook); thread-sleep-in-async (197 sleep sites, ZERO intersect
+async fns); TOCTOU exists-then-open same-$P (three sources converged; tree
+clean); await-after-sync-lock-guard; Err(_)=>{} swallow; Condvar wait outside
+loop; static mut; thread::spawn in loop; walker filters disabled; Runtime
+built outside main; sh -c scoped to apps/platform/ai; alloc arithmetic
+NARROWED to from_raw_parts/Layout (the general with_capacity form hit 45
+benign graphics-grid sites); http:// URL literals with tests excluded;
+Path::join("/...") with the [^"] regex (the naive form was 5/5 slice-join
+separators - `.` matched the closing quote); secret-named identifiers in LOG
+macros only (format! included pulled in 4 legitimate auth-header builds);
+Mojo double-free ($P.free() follows $P.free()); Mojo external_call naming
+banned C string functions; Nix builtins.getEnv (zero uses today!);
+Nix fetchTarball/fetchurl without a hash attr; Nix currentSystem (1 hit,
+guarded by `or` fallback - suppress or not-inside-or refinement).
+
+Live findings to act on in #39:
+
+- extern "C" fn with unwrap and no catch_unwind: 1 real hit,
+  dev/mojo/gui/xr/native/shim lib.rs ~1881 (panic across the C ABI aborts).
+- reqwest::Client::new() with no possible timeout: glob out apps/wiki (dual
+  wasm/native target where the browser owns timeouts); tangled-api (7),
+  nhost excluded with wiki, spindle router (1), oauth (2) are native and
+  real - fix or justify in-line.
+- SQL built by format!: the corrected pattern (trailing args allowed) found
+  17, all in wiki's migration-loader and appview store DDL assembly where
+  identifiers cannot be bound params - files-ignore those two crates, rule
+  ships as a ratchet for runtime SQL.
+
+### Route to clippy config (git-hooks.nix lines, not rules)
+
+Zero-finding frees: path_buf_push_overwrite, suspicious_xor_used_as_pow,
+mutex_integer, rc_clone_in_vec_init, tests_outside_test_module,
+disallowed_script_idents, string_to_string, unwrap_in_result (0 fp),
+unnecessary_safety_comment (0 fp). Near-free (inspect while enabling):
+create_dir 1, empty_drop 1, mixed_read_write_in_expression 3,
+self_named_module_files 5, missing_assert_message 2 fp, iter_over_hash_type
+11 fp. Deferred as backlogs with real counts: map_err_ignore 77 fp,
+undocumented_unsafe_blocks 134 fp - each its own clearing task, same shape
+as the wiki-clippy backlog task.
+
+### Route to a pre-commit grep (not ast-grep)
+
+Trojan-source bidi codepoints over rs/nix/mojo/nu (tree clean; one line).
+
+### Rejected, with the measured reason
+
+Fixed /tmp literals: 63 fp, dominated by sandbox-internal paths (spindle
+nix builds, plugin-tramp remote agent) - the flatpak-FP class predicted by
+the miner; the real hits live in oxidized outside the hook. Vec::remove(0)
+in loop: 7/7 are bounded LRU eviction on tiny queues. flush-in-loop: 6/6
+are decoder DPB.flush() - a domain method, not IO; matching by method name
+repeats deslop's core mistake. equality-or chains: pattern inexpressible
+(no regex backreferences in Rust's regex crate) AND zero grep surface.
+Bare always-true closures: 11/11 Dioxus predicates. General allocation
+arithmetic: 45 benign graphics sites. Commented-out code: 70 hits but the
+deepcomment editorial pass owns this space. Credentials-in-URL grep: 6
+hits, all port test fixtures plus one deliberate publish.nu design.
+Unbounded read_to_end in server crates: 9/9 read trusted local artifacts.
+Detached tokio::spawn: JoinHandle is #[must_use], statement position
+already warns via rustc, and `let _ =` is the deliberate-suppression idiom
+
+- redundant. CString-temporary as_ptr: rustc's
+dangling_pointers_from_temporaries covers it (verified by compiling the
+shape); the Mojo C-ABI analogue has no such guard and stays on the Mojo
+list. Cookie-without-Secure: no first-party cookie issuance (Hasura/PDS own
+sessions). #[ctor]/#[dtor]: zero uses.
