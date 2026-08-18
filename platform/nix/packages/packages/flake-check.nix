@@ -47,8 +47,13 @@ writeShellApplication {
     # pass flake options such as --override-input.
     eval_args=("$@")
 
-    # Evaluate a fragment into $out/<label>.jsonl. Returns non-zero if any
-    # attribute failed to evaluate.
+    # Set by `evaluate` when an attribute fails to evaluate, and read once at
+    # the end so the run reports everything before it fails.
+    eval_failed=0
+
+    # Evaluate a fragment into $out/<label>.jsonl. Attributes that fail to
+    # evaluate are reported and set `eval_failed`; the return value is
+    # nix-eval-jobs' own, so the run carries on to what did evaluate.
     evaluate() {
       local fragment="$1" label="$2" rc=0
       echo ">> evaluating .#$fragment (workers=$workers, max-memory=''${max_memory_mb}MiB)"
@@ -64,7 +69,13 @@ writeShellApplication {
         echo ">> evaluation errors in $fragment:" >&2
         jq -r 'select(.error != null) | "  \(.attr): \(.error | rtrimstr("\n") | split("\n") | last)"' \
           "$out/$label.jsonl" >&2
-        return 1
+        # Recorded, not fatal. One attribute that cannot be evaluated used to
+        # end the run before a single check was built, so the answer to "does
+        # this tree build" was withheld by whichever check was most broken -
+        # `_ninja-darling-launcher` names a store path and can only be
+        # evaluated with --impure, and on its own it hid the state of 5481
+        # others. The run still fails at the end.
+        eval_failed=1
       fi
       return "$rc"
     }
@@ -84,7 +95,7 @@ writeShellApplication {
 
     if [ "''${#drvs[@]}" -eq 0 ]; then
       echo ">> all checks already cached"
-      exit 0
+      exit "$eval_failed"
     fi
 
     # One build job at a time: several checks are NixOS VM tests, which are
@@ -116,6 +127,10 @@ writeShellApplication {
         attr="$(jq -r --arg d "$drv" 'select(.drvPath == $d) | .attr' "$out/checks.jsonl" | head -1)"
         echo "  ''${attr:-?} ($drv)" >&2
       done < "$failures"
+      exit 1
+    fi
+    if [ "$eval_failed" -ne 0 ]; then
+      echo ">> checks built, but some attributes did not evaluate" >&2
       exit 1
     fi
     echo ">> all checks passed"
