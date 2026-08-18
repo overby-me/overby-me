@@ -1,0 +1,26 @@
+# A std::sync::Mutex guard held across .await keeps the lock while the task
+# is parked; another task on the same thread that wants the lock deadlocks.
+# clippy's await_holding_lock is MIR-based and better - warn-by-default and
+# active here - but it misses guards bound through unwrap() chains in some
+# shapes; this is the cheap syntactic backstop. .lock().await receivers are
+# async-aware mutexes and correct, so only the .unwrap()/.expect() spellings
+# match.
+id: rust-await-holding-sync-lock
+language: rust
+severity: warning
+message: >-
+  An await after taking a sync Mutex guard in this block parks the task with
+  the lock held. Drop the guard first, or use tokio::sync::Mutex.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  kind: expression_statement
+  has: {pattern: $X.await, stopBy: end}
+  follows:
+    stopBy: end
+    any:
+      - pattern: let $G = $M.lock().unwrap();
+      - pattern: let $G = $M.lock().expect($E);

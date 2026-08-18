@@ -510,6 +510,8 @@ mod tests {
         // SAFETY: This test is not run in parallel with other tests that
         // read NIX_WORKSPACE_CONTRACTS.
         unsafe {
+            // Set before the Nickel subprocess spawns; single-threaded at this point.
+            // ast-grep-ignore: rust-env-set-var
             std::env::set_var("NIX_WORKSPACE_CONTRACTS", contracts.to_str().unwrap());
         }
         let result = find_contracts_dir();

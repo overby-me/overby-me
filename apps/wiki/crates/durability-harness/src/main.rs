@@ -63,6 +63,8 @@ fn run_sqlite(path: &str) {
 }
 
 fn run_turso(path: &str) {
+    // A kill-9 stress harness: each run_* builds its own runtime and dies with it.
+    // ast-grep-ignore: rust-runtime-built-in-fn
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

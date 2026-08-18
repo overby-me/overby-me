@@ -342,6 +342,8 @@ impl Fb {
         // SAFETY: `Pixel` is `u32`, which has no padding and no invalid bit
         // patterns, so any `[u32]` is a valid `[u8]` four times as long. The
         // borrow keeps the source alive for the lifetime of the slice.
+        // len is the length of a live [u32], so len*4 <= isize::MAX by construction.
+        // ast-grep-ignore: rust-unsafe-len-arithmetic
         unsafe { std::slice::from_raw_parts(self.px.as_ptr().cast::<u8>(), self.px.len() * 4) }
     }
 

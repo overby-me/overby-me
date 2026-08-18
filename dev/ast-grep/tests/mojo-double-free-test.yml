@@ -1,0 +1,5 @@
+id: mojo-double-free
+valid:
+  - "fn ok() raises:\n    var a = alloc[Int](1)\n    var b = alloc[Int](1)\n    a.free()\n    b.free()\n"
+invalid:
+  - "fn bad() raises:\n    var a = alloc[Int](1)\n    a.free()\n    a.free()\n"

@@ -1,0 +1,20 @@
+# reqwest::Client::new() can never carry a timeout - the plain constructor
+# has no builder step - so every call through it can hang forever on a stuck
+# peer. apps/wiki is globbed out: the frontend compiles to wasm, where the
+# browser owns timeouts and the builder has no timeout() at all. The
+# remaining native sites (tangled-api, spindle) are real and were live
+# findings at introduction.
+id: rust-client-without-timeout
+language: rust
+severity: warning
+message: >-
+  A client built this way has no timeout; a hung peer pins the caller
+  forever. Use Client::builder().timeout(...) - and reuse the client rather
+  than constructing one per call.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/**"
+  - "safety/oxidized/**"
+rule:
+  pattern: reqwest::Client::new()

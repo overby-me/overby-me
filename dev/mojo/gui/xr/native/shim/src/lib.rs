@@ -1897,14 +1897,11 @@ pub unsafe extern "C" fn mxr_render_dirty_panels(session: *mut XrSessionContext)
     }
 
     // If we have an OpenXR backend, render dirty panels to swapchain images.
-    if ctx.xr_backend.is_some() {
-        if let Some(ref backend) = ctx.xr_backend {
-            backend.sync_actions();
-        }
-
-        // Take the backend out temporarily to satisfy the borrow checker
-        // (we need mut access to both the backend and individual panels).
-        let mut backend = ctx.xr_backend.take().unwrap();
+    // Taken out with if-let rather than is_some + unwrap: this is an
+    // extern "C" entry point, and a panic here aborts the whole process with
+    // no Mojo frame in the trace.
+    if let Some(mut backend) = ctx.xr_backend.take() {
+        backend.sync_actions();
 
         for &panel_id in &panel_ids {
             if let Some(panel) = ctx.panels.get_mut(&panel_id) {

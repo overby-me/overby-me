@@ -1,0 +1,22 @@
+# Command::new("sh") is the injection door the moment any argument is
+# assembled. The coreutils-style ports run shell strings BY SPEC, so this is
+# scoped to service code, where there are zero uses today - a ratchet.
+id: rust-shell-c-command
+language: rust
+severity: warning
+message: >-
+  This spawns a shell. Run the target binary directly with args, or justify
+  why shell interpretation is required here.
+files:
+  - "apps/**/*.rs"
+  - "platform/**/*.rs"
+  - "ai/**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+rule:
+  pattern: Command::new($SH)
+  has:
+    field: arguments
+    has:
+      kind: string_literal
+      regex: '^"(sh|bash|/bin/sh|/bin/bash|zsh|nu)"$'

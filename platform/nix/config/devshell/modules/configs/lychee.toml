@@ -7,6 +7,8 @@ exclude_path = [
   "platform/nix/lib/lib/cargo/tests/fixtures/index",
 ]
 exclude = [
+  # RFC 2606 reserved TLDs: fixture URLs in lint tests are made up on purpose.
+  "\\.invalid",
   '\$\{',
   "x-access-token",
   "%7B",

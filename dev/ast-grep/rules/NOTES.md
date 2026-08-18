@@ -35,3 +35,15 @@ test that could not fail — `test_clamp_does_not_overflow` asserted `r <= 255`
 on a `u8` — and clippy found it, but only sideways, through
 `absurd_extreme_comparisons` complaining about the comparison rather than
 about the test. Neither tool has a rule for the thing itself.
+
+## Rejections from the 2026-08 mining pass
+
+Recorded with their measurements in ../CANDIDATES.md ("Triage verdicts"):
+fixed-/tmp literals (63 sandbox-internal fps), Vec::remove(0)-in-loop (7/7
+bounded LRU), flush-in-loop (6/6 decoder DPB.flush - a domain method, the
+name-matching mistake deslop made), equality-or chains (no regex
+backreferences + zero surface), bare always-true closures (11/11 Dioxus
+predicates), general allocation arithmetic (45 benign graphics sites),
+commented-out code (the deepcomment pass owns it), detached tokio::spawn
+(rustc must_use covers it), CString-temporary as_ptr (rustc
+dangling_pointers_from_temporaries covers it - verified by compiling).

@@ -1,0 +1,7 @@
+id: rust-repr-packed-without-c
+valid:
+  - "#[repr(C, packed)]\nstruct Wire { a: u8, b: u32 }"
+  - "#[repr(C)]\nstruct Plain { a: u8 }"
+invalid:
+  - "#[repr(packed)]\nstruct Wire { a: u8, b: u32 }"
+  - "#[repr(packed(2))]\nstruct Wire { a: u8 }"

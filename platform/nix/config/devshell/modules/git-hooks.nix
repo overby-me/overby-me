@@ -39,6 +39,32 @@
       alejandra.enable = true;
       deadnix.enable = true;
       ripsecrets.enable = true;
+      trojan-source = {
+        enable = true;
+        name = "trojan-source";
+        # Bidirectional-override codepoints make source read differently than
+        # it compiles (the Trojan Source class). One grep over the invisible
+        # control ranges covers every language at once, which no per-grammar
+        # rule can.
+        entry = "${pkgs.writeShellScript "trojan-source" ''
+          if ${pkgs.gnugrep}/bin/grep -rlP '[\x{202A}-\x{202E}\x{2066}-\x{2069}]' "$@" 2>/dev/null; then
+            echo "bidirectional override codepoints found (Trojan Source)"
+            exit 1
+          fi
+          exit 0
+        ''}";
+        types = ["text"];
+      };
+      ast-grep-test = {
+        enable = true;
+        name = "ast-grep-test";
+        # A rule with zero findings and a broken rule are indistinguishable
+        # from scan output alone; the fixture tests are what tell them apart,
+        # so they run whenever a rule changes.
+        entry = "${pkgs.ast-grep}/bin/ast-grep test -t dev/ast-grep/tests --skip-snapshot-tests";
+        files = "^dev/ast-grep/";
+        pass_filenames = false;
+      };
       statix.enable = true;
       ast-grep = {
         enable = true;
@@ -287,6 +313,23 @@
           "missing_panics_doc"
           "implicit_hasher"
           "too_many_lines"
+          # The zero-cost tier from sweeping all 321 not-yet-enabled
+          # allow-by-default lints across 54 cargo roots: each of these had
+          # zero first-party findings, so enabling is a free ratchet. Four
+          # near-free ones (iter_over_hash_type 11, empty_drop 1,
+          # missing_assert_message 2, mixed_read_write_in_expression 3) wait
+          # on their sites; map_err_ignore (77) and
+          # undocumented_unsafe_blocks (134) have their own clearing task.
+          "path_buf_push_overwrite"
+          "suspicious_xor_used_as_pow"
+          "mutex_integer"
+          "rc_clone_in_vec_init"
+          "tests_outside_test_module"
+          "disallowed_script_idents"
+          "string_to_string"
+          "unwrap_in_result"
+          "unnecessary_safety_comment"
+          "create_dir"
         ];
         # same_name_method was dropped after apps/wiki first ran it: 154 hits
         # across 74 files, every one the `builder` that dioxus's Props derive
@@ -335,7 +378,14 @@
         # errors in wiki-dioxus alone, none of them related to the change. The
         # hook lints whole crates, so leaving it on blocks every wiki commit
         # behind an unrelated backlog. Remove this once that backlog is clear.
-        excludes = ["^safety/fe-c/" "^apps/wiki/"];
+        # apps/homepage/xscreensaver transcribes upstream hacks verbatim, and
+        # the hardened lint set reads that fabric as errors (2,753 on first
+        # contact, dominated by cast_precision_loss on graphics maths).
+        # The XR shim is excluded pending its own cleanup: first contact with
+        # the hardened set found 16 errors (unwraps at the extern-C surface
+        # among them - real hazards that deserve unhurried fixes in FFI code
+        # that compiles here but only runs against a headset).
+        excludes = ["^safety/fe-c/" "^apps/wiki/" "^apps/homepage/xscreensaver/" "^dev/mojo/gui/xr/native/shim/"];
         entry = "${pkgs.writeShellScript "clippy-multi-project" ''
           # Determine which Cargo projects contain changed .rs files.
           # Arguments are the changed .rs file paths passed by pre-commit.

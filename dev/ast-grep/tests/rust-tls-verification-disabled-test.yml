@@ -1,0 +1,7 @@
+id: rust-tls-verification-disabled
+valid:
+  - "let c = reqwest::Client::builder().timeout(t).build()?;"
+  - "let b = builder.danger_accept_invalid_certs(false);"
+invalid:
+  - "let c = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;"
+  - "cfg.dangerous().set_certificate_verifier(v);"

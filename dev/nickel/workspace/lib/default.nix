@@ -112,6 +112,8 @@
     #
     # A bootstrap pkgs, only to get the `nickel` binary the IFD needs.
     # builtins.currentSystem where it is available, x86_64-linux otherwise.
+    # Bootstrap fallback for impure callers; flake outputs pass the system explicitly.
+    # ast-grep-ignore: nix-currentsystem
     bootstrapSystem = builtins.currentSystem or "x86_64-linux";
     bootstrapPkgs = import userNixpkgs {system = bootstrapSystem;};
 
