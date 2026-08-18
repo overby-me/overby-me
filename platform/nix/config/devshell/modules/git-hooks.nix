@@ -40,6 +40,17 @@
       deadnix.enable = true;
       ripsecrets.enable = true;
       statix.enable = true;
+      ast-grep = {
+        enable = true;
+        name = "ast-grep";
+        # Structural rules that statix and clippy do not cover, in
+        # dev/ast-grep/rules. Scans whole files rather than the changed hunk,
+        # because a rule's ignore globs are how its exceptions are recorded and
+        # those are path-based.
+        entry = "${pkgs.ast-grep}/bin/ast-grep scan";
+        files = "\\.(nix|rs)$";
+        pass_filenames = true;
+      };
       tombi-format = {
         enable = true;
         name = "tombi-format";
