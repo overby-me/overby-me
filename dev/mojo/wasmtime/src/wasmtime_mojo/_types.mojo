@@ -21,8 +21,8 @@ the 8-byte-aligned addresses cause SIGSEGV on SIMD-aligned loads/stores.
 Using UInt64 fields gives correct 8-byte alignment matching C.
 """
 
-from memory import UnsafePointer, memset_zero, memcpy
-from sys.info import sizeof
+from std.memory import UnsafePointer, memset_zero, memcpy
+from std.sys.info import sizeof
 
 # ---------------------------------------------------------------------------
 # Wasmtime val kind constants (wasmtime_valkind_t)

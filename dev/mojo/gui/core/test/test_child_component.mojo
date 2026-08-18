@@ -19,9 +19,9 @@ Validates ChildComponent via the child-counter app (cc_*) WASM exports:
   - destroy with dirty (unflushed) state does not crash
 """
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
-from testing import assert_equal, assert_true, assert_false
+from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
     WasmInstance,
     get_instance,

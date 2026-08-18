@@ -194,7 +194,7 @@
 #                 # select / remove
 #             return False
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from std.ffi import external_call
 from bridge import MutationWriter
 from mutations import CreateEngine
@@ -237,9 +237,9 @@ struct BenchRow(Copyable):
         self.id = id
         self.label = label
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.label = other.label
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.label = copy.label
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id
@@ -267,11 +267,10 @@ fn performance_now() -> Float64:
     On native: uses the system monotonic clock via `perf_counter_ns()`.
     """
 
-    @parameter
-    if is_wasm_target():
+    comptime if is_wasm_target():
         return external_call["performance_now", Float64]()
     else:
-        from time import perf_counter_ns
+        from std.time import perf_counter_ns
 
         return Float64(perf_counter_ns()) / 1_000_000.0
 
@@ -668,9 +667,9 @@ struct BenchmarkApp(GuiApp):
 
     fn _generate_label(mut self) -> String:
         """Generate a random "adjective colour noun" label."""
-        var a = Int(self._next_random() % _ADJ_COUNT)
-        var c = Int(self._next_random() % _COL_COUNT)
-        var n = Int(self._next_random() % _NOUN_COUNT)
+        var a = Int(self._next_random() % UInt32(_ADJ_COUNT))
+        var c = Int(self._next_random() % UInt32(_COL_COUNT))
+        var n = Int(self._next_random() % UInt32(_NOUN_COUNT))
         return _adjective(a) + " " + _colour(c) + " " + _noun(n)
 
     fn _bump_version(mut self):

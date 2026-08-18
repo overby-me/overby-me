@@ -29,7 +29,7 @@
 #   - `dispatch_event` executes the action, which writes to a signal,
 #     which in turn marks subscribing scopes dirty.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 
 # ── Event type tags ──────────────────────────────────────────────────────────
@@ -116,12 +116,12 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         self.operand = operand
         self.event_name = event_name
 
-    fn __copyinit__(out self, other: Self):
-        self.scope_id = other.scope_id
-        self.action = other.action
-        self.signal_key = other.signal_key
-        self.operand = other.operand
-        self.event_name = other.event_name
+    fn __copyinit__(out self, copy: Self):
+        self.scope_id = copy.scope_id
+        self.action = copy.action
+        self.signal_key = copy.signal_key
+        self.operand = copy.operand
+        self.event_name = copy.event_name
 
     fn __moveinit__(out self, deinit take: Self):
         self.scope_id = take.scope_id

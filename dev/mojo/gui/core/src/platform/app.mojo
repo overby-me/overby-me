@@ -53,7 +53,7 @@
 #             # Return True if the application should exit
 #             ...
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -193,7 +193,7 @@ fn is_wasm_target() -> Bool:
 
     Used by launch() to select the appropriate renderer at compile time.
     """
-    from sys.param_env import is_defined
+    from std.sys.param_env import is_defined
 
     return is_defined["MOJO_TARGET_WASM"]()
 
@@ -223,6 +223,6 @@ fn is_xr_target() -> Bool:
 
     Used by launch() to select the XR renderer at compile time.
     """
-    from sys.param_env import is_defined
+    from std.sys.param_env import is_defined
 
     return is_defined["MOJO_TARGET_XR"]()

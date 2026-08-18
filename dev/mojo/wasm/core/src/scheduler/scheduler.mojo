@@ -17,7 +17,7 @@
 # The scheduler does NOT own the Runtime — it borrows a pointer to it
 # for querying scope heights and draining the dirty queue.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from signals import Runtime
 
 
@@ -28,9 +28,9 @@ struct SchedulerEntry(Copyable, Equatable, Writable):
     var scope_id: UInt32
     var height: UInt32
 
-    fn __copyinit__(out self, other: Self):
-        self.scope_id = other.scope_id
-        self.height = other.height
+    fn __copyinit__(out self, copy: Self):
+        self.scope_id = copy.scope_id
+        self.height = copy.height
 
     fn __moveinit__(out self, deinit take: Self):
         self.scope_id = take.scope_id

@@ -58,7 +58,7 @@
 # The Phase 16 methods (create_scope, item_builder, push_child) remain
 # available for apps that prefer the manual pattern.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 from events import HandlerEntry
 from .lifecycle import FragmentSlot
@@ -88,10 +88,10 @@ struct _HandlerMapping(Copyable, Equatable, Writable):
     var tag: UInt8
     var data: Int32
 
-    fn __copyinit__(out self, other: Self):
-        self.handler_id = other.handler_id
-        self.tag = other.tag
-        self.data = other.data
+    fn __copyinit__(out self, copy: Self):
+        self.handler_id = copy.handler_id
+        self.tag = copy.tag
+        self.data = copy.data
 
     fn __moveinit__(out self, deinit take: Self):
         self.handler_id = take.handler_id
@@ -136,10 +136,10 @@ struct HandlerAction(Copyable, Equatable, Writable):
         self.data = data
         self.found = True
 
-    fn __copyinit__(out self, other: Self):
-        self.tag = other.tag
-        self.data = other.data
-        self.found = other.found
+    fn __copyinit__(out self, copy: Self):
+        self.tag = copy.tag
+        self.data = copy.data
+        self.found = copy.found
 
     fn __moveinit__(out self, deinit take: Self):
         self.tag = take.tag

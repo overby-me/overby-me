@@ -43,7 +43,7 @@
 #
 # Thread safety: WASM is single-threaded, so no synchronisation needed.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from .runtime import Runtime
 
 
@@ -52,7 +52,7 @@ from .runtime import Runtime
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-struct SignalI32(Copyable, Stringable):
+struct SignalI32(Copyable, Writable):
     """Ergonomic handle wrapping a raw signal key + runtime pointer.
 
     Provides operator overloading for concise reactive state management:
@@ -86,9 +86,9 @@ struct SignalI32(Copyable, Stringable):
         self.key = key
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.key = other.key
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.key = copy.key
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.key = take.key
@@ -178,7 +178,15 @@ struct SignalI32(Copyable, Stringable):
         """
         return self.runtime[0].signals.version(self.key)
 
-    # ── Stringable ───────────────────────────────────────────────────
+    # ── Writable ─────────────────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         """Return the signal value as a String for display/interpolation.
@@ -194,7 +202,7 @@ struct SignalI32(Copyable, Stringable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-struct MemoI32(Copyable, Stringable):
+struct MemoI32(Copyable, Writable):
     """Ergonomic handle wrapping a raw memo ID + runtime pointer.
 
     Memos are derived values that cache their result and recompute only
@@ -234,9 +242,9 @@ struct MemoI32(Copyable, Stringable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id
@@ -318,7 +326,15 @@ struct MemoI32(Copyable, Stringable):
         self.begin_compute()
         self.end_compute(value)
 
-    # ── Stringable ───────────────────────────────────────────────────
+    # ── Writable ─────────────────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         """Return the memo's cached value as a String.
@@ -371,9 +387,9 @@ struct EffectHandle(Copyable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id
@@ -415,7 +431,7 @@ struct EffectHandle(Copyable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-struct SignalBool(Copyable, Stringable):
+struct SignalBool(Copyable, Writable):
     """Ergonomic handle wrapping a Bool signal stored as Int32 (0/1).
 
     Provides a proper boolean API on top of the Int32 signal store,
@@ -452,9 +468,9 @@ struct SignalBool(Copyable, Stringable):
         self.key = key
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.key = other.key
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.key = copy.key
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.key = take.key
@@ -530,7 +546,15 @@ struct SignalBool(Copyable, Stringable):
         """
         return self.runtime[0].signals.version(self.key)
 
-    # ── Stringable ───────────────────────────────────────────────────
+    # ── Writable ─────────────────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         """Return "true" or "false" for display/interpolation.
@@ -548,7 +572,7 @@ struct SignalBool(Copyable, Stringable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-struct SignalString(Copyable, Stringable):
+struct SignalString(Copyable, Writable):
     """Ergonomic handle wrapping a reactive String signal.
 
     Unlike SignalI32/SignalBool which store values in the type-erased
@@ -589,10 +613,10 @@ struct SignalString(Copyable, Stringable):
         self.version_key = version_key
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.string_key = other.string_key
-        self.version_key = other.version_key
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.string_key = copy.string_key
+        self.version_key = copy.version_key
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.string_key = take.string_key
@@ -670,7 +694,15 @@ struct SignalString(Copyable, Stringable):
         """
         return len(self.get()) == 0
 
-    # ── Stringable ───────────────────────────────────────────────────
+    # ── Writable ─────────────────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         """Return the string value for display/interpolation.
@@ -686,7 +718,7 @@ struct SignalString(Copyable, Stringable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-struct MemoBool(Copyable, Stringable):
+struct MemoBool(Copyable, Writable):
     """Ergonomic handle wrapping a Bool memo ID + runtime pointer.
 
     Memos are derived values that cache their result and recompute only
@@ -725,9 +757,9 @@ struct MemoBool(Copyable, Stringable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id
@@ -809,7 +841,15 @@ struct MemoBool(Copyable, Stringable):
         self.begin_compute()
         self.end_compute(value)
 
-    # ── Stringable ───────────────────────────────────────────────────
+    # ── Writable ─────────────────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         """Return the memo's cached value as a String.
@@ -827,7 +867,7 @@ struct MemoBool(Copyable, Stringable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-struct MemoString(Copyable, Stringable):
+struct MemoString(Copyable, Writable):
     """Ergonomic handle wrapping a String memo ID + runtime pointer.
 
     MemoString stores its cached value in the StringStore (same pattern
@@ -869,9 +909,9 @@ struct MemoString(Copyable, Stringable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.runtime = copy.runtime
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id
@@ -969,7 +1009,15 @@ struct MemoString(Copyable, Stringable):
         """
         return len(self.peek()) == 0
 
-    # ── Stringable ───────────────────────────────────────────────────
+    # ── Writable ─────────────────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         """Return the memo's cached value as a String.

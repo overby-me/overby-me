@@ -9,8 +9,8 @@
 # Run with:
 #   mojo test test/test_mutations.mojo
 
-from memory import UnsafePointer
-from testing import assert_equal, assert_true, assert_false
+from std.memory import UnsafePointer
+from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
     WasmInstance,
@@ -116,16 +116,16 @@ struct MutationInfo(Copyable):
         self.path_len = 0
         self.handler_id = 0
 
-    fn __copyinit__(out self, other: Self):
-        self.op = other.op
-        self.id = other.id
-        self.id2 = other.id2
-        self.id3 = other.id3
-        self.text_len = other.text_len
-        self.name_len = other.name_len
-        self.ns = other.ns
-        self.path_len = other.path_len
-        self.handler_id = other.handler_id
+    fn __copyinit__(out self, copy: Self):
+        self.op = copy.op
+        self.id = copy.id
+        self.id2 = copy.id2
+        self.id3 = copy.id3
+        self.text_len = copy.text_len
+        self.name_len = copy.name_len
+        self.ns = copy.ns
+        self.path_len = copy.path_len
+        self.handler_id = copy.handler_id
 
     fn __moveinit__(out self, deinit take: Self):
         self.op = take.op

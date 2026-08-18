@@ -54,9 +54,9 @@ struct RouteEntry(Copyable, Movable):
         self.path = path
         self.branch = branch
 
-    fn __copyinit__(out self, other: Self):
-        self.path = other.path
-        self.branch = other.branch
+    fn __copyinit__(out self, copy: Self):
+        self.path = copy.path
+        self.branch = copy.branch
 
     fn __moveinit__(out self, deinit take: Self):
         self.path = take.path^

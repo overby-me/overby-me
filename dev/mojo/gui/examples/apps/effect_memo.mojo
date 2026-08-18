@@ -25,7 +25,7 @@
 #   3. Increment: input += 1 → scope dirty + memo dirty
 #   4. Flush: consume_dirty → recompute memo → run effect → render → diff
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import (

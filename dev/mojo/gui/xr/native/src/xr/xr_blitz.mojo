@@ -56,8 +56,8 @@
 #           # dispatch event to panel's GuiApp.handle_event()
 #   xr.destroy()
 
-from memory import UnsafePointer, alloc
-from os import getenv
+from std.memory import UnsafePointer, alloc
+from std.os import getenv
 from std.ffi import _DLHandle
 
 
@@ -166,15 +166,15 @@ struct XREvent(Copyable, Movable):
         self.hit_v = hit_v
         self.hand = hand
 
-    fn __copyinit__(out self, other: Self):
-        self.valid = other.valid
-        self.panel_id = other.panel_id
-        self.handler_id = other.handler_id
-        self.event_type = other.event_type
-        self.value = other.value
-        self.hit_u = other.hit_u
-        self.hit_v = other.hit_v
-        self.hand = other.hand
+    fn __copyinit__(out self, copy: Self):
+        self.valid = copy.valid
+        self.panel_id = copy.panel_id
+        self.handler_id = copy.handler_id
+        self.event_type = copy.event_type
+        self.value = copy.value
+        self.hit_u = copy.hit_u
+        self.hit_v = copy.hit_v
+        self.hand = copy.hand
 
     fn __moveinit__(out self, deinit take: Self):
         self.valid = take.valid
@@ -223,15 +223,15 @@ struct XRPose(Copyable, Movable):
         self.qz = 0.0
         self.qw = 1.0
 
-    fn __copyinit__(out self, other: Self):
-        self.valid = other.valid
-        self.px = other.px
-        self.py = other.py
-        self.pz = other.pz
-        self.qx = other.qx
-        self.qy = other.qy
-        self.qz = other.qz
-        self.qw = other.qw
+    fn __copyinit__(out self, copy: Self):
+        self.valid = copy.valid
+        self.px = copy.px
+        self.py = copy.py
+        self.pz = copy.pz
+        self.qx = copy.qx
+        self.qy = copy.qy
+        self.qz = copy.qz
+        self.qw = copy.qw
 
     fn __moveinit__(out self, deinit take: Self):
         self.valid = take.valid
@@ -273,12 +273,12 @@ struct XRRaycastHit(Copyable, Movable):
         self.v = 0.0
         self.distance = 0.0
 
-    fn __copyinit__(out self, other: Self):
-        self.hit = other.hit
-        self.panel_id = other.panel_id
-        self.u = other.u
-        self.v = other.v
-        self.distance = other.distance
+    fn __copyinit__(out self, copy: Self):
+        self.hit = copy.hit
+        self.panel_id = copy.panel_id
+        self.u = copy.u
+        self.v = copy.v
+        self.distance = copy.distance
 
     fn __moveinit__(out self, deinit take: Self):
         self.hit = take.hit

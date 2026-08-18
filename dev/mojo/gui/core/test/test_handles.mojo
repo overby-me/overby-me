@@ -14,8 +14,8 @@
 #     on_input_set, vnode_builder, render_builder, mount, dispatch_event, flush,
 #     has_dirty, consume_dirty, diff, finalize, destroy
 
-from memory import UnsafePointer, alloc
-from testing import assert_equal, assert_true, assert_false
+from std.memory import UnsafePointer, alloc
+from std.testing import assert_equal, assert_true, assert_false
 from signals import (
     Runtime,
     StringStore,

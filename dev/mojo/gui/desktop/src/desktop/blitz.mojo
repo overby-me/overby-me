@@ -49,8 +49,8 @@
 #           _ = blitz.step(blocking=True)
 #   blitz.destroy()
 
-from memory import UnsafePointer, alloc
-from os import getenv
+from std.memory import UnsafePointer, alloc
+from std.os import getenv
 from std.ffi import _DLHandle
 
 
@@ -94,11 +94,11 @@ struct BlitzEvent(Copyable, Movable):
         self.event_type = event_type
         self.value = value
 
-    fn __copyinit__(out self, other: Self):
-        self.valid = other.valid
-        self.handler_id = other.handler_id
-        self.event_type = other.event_type
-        self.value = other.value
+    fn __copyinit__(out self, copy: Self):
+        self.valid = copy.valid
+        self.handler_id = copy.handler_id
+        self.event_type = copy.event_type
+        self.value = copy.value
 
     fn __moveinit__(out self, deinit take: Self):
         self.valid = take.valid
@@ -122,7 +122,7 @@ fn _is_windows_target() -> Bool:
     Uses the MOJO_TARGET_WINDOWS compile-time define, which must be passed
     via `-D MOJO_TARGET_WINDOWS` when cross-compiling for Windows.
     """
-    from sys.param_env import is_defined
+    from std.sys.param_env import is_defined
 
     return is_defined["MOJO_TARGET_WINDOWS"]()
 
@@ -130,8 +130,7 @@ fn _is_windows_target() -> Bool:
 fn _lib_name() -> String:
     """Return the platform-appropriate shared library filename."""
 
-    @parameter
-    if _is_windows_target():
+    comptime if _is_windows_target():
         return _LIB_NAME_DLL
     else:
         return _LIB_NAME
@@ -140,8 +139,7 @@ fn _lib_name() -> String:
 fn _path_sep() -> String:
     """Return the platform-appropriate path separator."""
 
-    @parameter
-    if _is_windows_target():
+    comptime if _is_windows_target():
         return "\\"
     else:
         return "/"

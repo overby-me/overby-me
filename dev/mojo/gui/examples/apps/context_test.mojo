@@ -4,7 +4,7 @@
 # consume_context(), and the typed signal-sharing helpers.  Has a root
 # scope + one child scope so that parent-chain walk-up can be verified.
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32
 

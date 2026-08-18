@@ -57,7 +57,7 @@
 #     panel.set_position(0.0, 1.4, -1.0)
 #     panel.set_rotation_euler(0.0, 0.0, 0.0)
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -80,10 +80,10 @@ struct Vec3(Copyable, Movable):
         self.y = y
         self.z = z
 
-    fn __copyinit__(out self, other: Self):
-        self.x = other.x
-        self.y = other.y
-        self.z = other.z
+    fn __copyinit__(out self, copy: Self):
+        self.x = copy.x
+        self.y = copy.y
+        self.z = copy.z
 
     fn __moveinit__(out self, deinit take: Self):
         self.x = take.x
@@ -143,11 +143,11 @@ struct Quaternion(Copyable, Movable):
         self.z = z
         self.w = w
 
-    fn __copyinit__(out self, other: Self):
-        self.x = other.x
-        self.y = other.y
-        self.z = other.z
-        self.w = other.w
+    fn __copyinit__(out self, copy: Self):
+        self.x = copy.x
+        self.y = copy.y
+        self.z = copy.z
+        self.w = copy.w
 
     fn __moveinit__(out self, deinit take: Self):
         self.x = take.x
@@ -186,7 +186,7 @@ struct Quaternion(Copyable, Movable):
         var half_roll = roll_deg * DEG_TO_RAD * 0.5
 
         # Use SIMD for sin/cos computation
-        from math import sin, cos
+        from std.math import sin, cos
 
         var sp = sin(half_pitch)
         var cp = cos(half_pitch)
@@ -276,15 +276,15 @@ struct PanelConfig(Copyable, Movable):
         self.curvature_radius = curvature_radius
         self.interact = interact
 
-    fn __copyinit__(out self, other: Self):
-        self.width_m = other.width_m
-        self.height_m = other.height_m
-        self.pixels_per_meter = other.pixels_per_meter
-        self.position = other.position
-        self.rotation = other.rotation
-        self.curved = other.curved
-        self.curvature_radius = other.curvature_radius
-        self.interact = other.interact
+    fn __copyinit__(out self, copy: Self):
+        self.width_m = copy.width_m
+        self.height_m = copy.height_m
+        self.pixels_per_meter = copy.pixels_per_meter
+        self.position = copy.position
+        self.rotation = copy.rotation
+        self.curved = copy.curved
+        self.curvature_radius = copy.curvature_radius
+        self.interact = copy.interact
 
     fn __moveinit__(out self, deinit take: Self):
         self.width_m = take.width_m

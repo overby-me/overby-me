@@ -50,7 +50,7 @@
 # and FragmentSlot (manages keyed lists), but for reusable sub-components
 # with their own template and scope.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime
@@ -104,11 +104,11 @@ struct _ChildEventInfo(Copyable, Movable):
         self.signal_key = signal_key
         self.operand = operand
 
-    fn __copyinit__(out self, other: Self):
-        self.event_name = other.event_name
-        self.action = other.action
-        self.signal_key = other.signal_key
-        self.operand = other.operand
+    fn __copyinit__(out self, copy: Self):
+        self.event_name = copy.event_name
+        self.action = copy.action
+        self.signal_key = copy.signal_key
+        self.operand = copy.operand
 
     fn __moveinit__(out self, deinit take: Self):
         self.event_name = take.event_name^
@@ -136,9 +136,9 @@ struct ChildEventBinding(Copyable, Movable):
         self.event_name = event_name
         self.handler_id = handler_id
 
-    fn __copyinit__(out self, other: Self):
-        self.event_name = other.event_name
-        self.handler_id = other.handler_id
+    fn __copyinit__(out self, copy: Self):
+        self.event_name = copy.event_name
+        self.handler_id = copy.handler_id
 
     fn __moveinit__(out self, deinit take: Self):
         self.event_name = take.event_name^
@@ -211,13 +211,13 @@ struct ChildAutoBinding(Copyable, Movable):
         self.string_key = string_key
         self.version_key = version_key
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.event_name = other.event_name
-        self.handler_id = other.handler_id
-        self.attr_name = other.attr_name
-        self.string_key = other.string_key
-        self.version_key = other.version_key
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.event_name = copy.event_name
+        self.handler_id = copy.handler_id
+        self.attr_name = copy.attr_name
+        self.string_key = copy.string_key
+        self.version_key = copy.version_key
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind
@@ -434,13 +434,13 @@ struct ChildComponent(Copyable, Movable):
         self._event_bindings = event_bindings^
         self._auto_bindings = auto_bindings^
 
-    fn __copyinit__(out self, other: Self):
-        self.scope_id = other.scope_id
-        self.template_id = other.template_id
-        self.current_vnode = other.current_vnode
-        self.slot = other.slot.copy()
-        self._event_bindings = other._event_bindings.copy()
-        self._auto_bindings = other._auto_bindings.copy()
+    fn __copyinit__(out self, copy: Self):
+        self.scope_id = copy.scope_id
+        self.template_id = copy.template_id
+        self.current_vnode = copy.current_vnode
+        self.slot = copy.slot.copy()
+        self._event_bindings = copy._event_bindings.copy()
+        self._auto_bindings = copy._auto_bindings.copy()
 
     fn __moveinit__(out self, deinit take: Self):
         self.scope_id = take.scope_id

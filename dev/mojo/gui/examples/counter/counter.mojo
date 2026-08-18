@@ -83,7 +83,7 @@
 #     p > dynamic_text[0]   ← "Count is even" / "Count is odd"
 #     p > dynamic_text[1]   ← "Doubled: N"
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 from component import ComponentContext, ConditionalSlot
 from signals import SignalI32, SignalBool

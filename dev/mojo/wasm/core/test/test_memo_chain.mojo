@@ -25,9 +25,9 @@ a mixed-type memo chain: SignalI32 → MemoI32 → MemoBool → MemoString.
   - threshold boundary exact (input=5 is the boundary)
 """
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
-from testing import assert_equal, assert_true, assert_false
+from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
     WasmInstance,
     get_instance,

@@ -27,9 +27,9 @@ nested suspense boundaries with independent load/resolve lifecycles:
   - scope IDs all distinct
 """
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
-from testing import assert_equal, assert_true, assert_false
+from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
     WasmInstance,
     get_instance,

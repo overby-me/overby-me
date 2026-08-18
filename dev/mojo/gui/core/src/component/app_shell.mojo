@@ -24,7 +24,7 @@
 #             self.my_signal = self.shell.create_signal_i32(42)
 #             ...
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime, create_runtime, destroy_runtime

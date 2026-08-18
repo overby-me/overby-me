@@ -121,11 +121,11 @@ struct AppConfig(Copyable, Movable):
         self.height = height
         self.debug = debug
 
-    fn __copyinit__(out self, other: Self):
-        self.title = other.title
-        self.width = other.width
-        self.height = other.height
-        self.debug = other.debug
+    fn __copyinit__(out self, copy: Self):
+        self.title = copy.title
+        self.width = copy.width
+        self.height = copy.height
+        self.debug = copy.debug
 
     fn __moveinit__(out self, deinit take: Self):
         self.title = take.title^
@@ -229,8 +229,7 @@ fn launch[AppType: GuiApp](config: AppConfig = AppConfig()) raises:
     uniformly regardless of platform.
     """
 
-    @parameter
-    if is_wasm_target():
+    comptime if is_wasm_target():
         # Web path: JS runtime drives the event loop.
         # The @export wrappers in main.mojo use gui_app_exports helpers
         # (gui_app_init[AppType], gui_app_mount[AppType], etc.) to call

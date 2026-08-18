@@ -8,8 +8,8 @@
 # Run with:
 #   mojo test test/test_boundaries.mojo
 
-from memory import UnsafePointer
-from testing import assert_equal, assert_true
+from std.memory import UnsafePointer
+from std.testing import assert_equal, assert_true
 
 from wasm_harness import (
     WasmInstance,

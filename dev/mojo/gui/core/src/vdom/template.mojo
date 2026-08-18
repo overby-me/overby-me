@@ -22,7 +22,7 @@
 #   - Static:  A name/value pair known at template definition time.
 #   - Dynamic: A placeholder (index into VNode's dynamic_attrs array).
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 # TAG_UNKNOWN sentinel — defined locally to avoid circular import with html.tags
 # (tags.mojo was moved from vdom/ to html/ during the mojo-gui separation).
@@ -96,11 +96,11 @@ struct TemplateAttribute(Copyable):
         self.value = value
         self.dynamic_index = dynamic_index
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.name = other.name
-        self.value = other.value
-        self.dynamic_index = other.dynamic_index
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.name = copy.name
+        self.value = copy.value
+        self.dynamic_index = copy.dynamic_index
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind
@@ -224,14 +224,14 @@ struct TemplateNode(Copyable):
         self.text = text
         self.dynamic_index = dynamic_index
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.html_tag = other.html_tag
-        self.children = other.children.copy()
-        self.first_attr = other.first_attr
-        self.num_attrs = other.num_attrs
-        self.text = other.text
-        self.dynamic_index = other.dynamic_index
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.html_tag = copy.html_tag
+        self.children = copy.children.copy()
+        self.first_attr = copy.first_attr
+        self.num_attrs = copy.num_attrs
+        self.text = copy.text
+        self.dynamic_index = copy.dynamic_index
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind
@@ -335,12 +335,12 @@ struct Template(Copyable):
         self.attrs = attrs^
         self.root_indices = root_indices^
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.name = other.name
-        self.nodes = other.nodes.copy()
-        self.attrs = other.attrs.copy()
-        self.root_indices = other.root_indices.copy()
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.name = copy.name
+        self.nodes = copy.nodes.copy()
+        self.attrs = copy.attrs.copy()
+        self.root_indices = copy.root_indices.copy()
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id

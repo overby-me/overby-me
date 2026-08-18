@@ -19,7 +19,7 @@
 #   - Input 10→11: clamped 10→10 (stable!), label "high"→"high" (stable!)
 #   - Input 11→12: clamped 10→10 (stable!), label "high"→"high" (stable!)
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, MemoI32, MemoString

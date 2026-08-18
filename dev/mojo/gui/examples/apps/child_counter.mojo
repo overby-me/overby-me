@@ -16,7 +16,7 @@
 # Child template ("child-display"):
 #   p > dynamic_text[0]          ← "Count: N"
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponent
 from mutations import CreateEngine as _CreateEngine

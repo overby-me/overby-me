@@ -56,7 +56,7 @@
 #       blitz.end_mutations()
 #       blitz.request_redraw()
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from .blitz import Blitz
 from html.tags import tag_name
 

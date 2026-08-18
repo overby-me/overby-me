@@ -32,7 +32,7 @@
 #     destroying the AppShell.  The child scope, its signals, and its
 #     handlers are destroyed via destroy().
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from signals import Runtime
 from signals.handle import (
     SignalI32,

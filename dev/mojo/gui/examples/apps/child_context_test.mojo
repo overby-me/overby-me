@@ -5,7 +5,7 @@
 # The parent provides a count signal via context; the child consumes it
 # and also owns a local bool signal (show_hex toggle).
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

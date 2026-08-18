@@ -119,7 +119,7 @@
 #                 return True
 #             return False
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from mutations import CreateEngine
 from events import HandlerEntry
@@ -166,10 +166,10 @@ struct TodoItem(Copyable):
         self.text = text
         self.completed = completed
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.text = other.text
-        self.completed = other.completed
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.text = copy.text
+        self.completed = copy.completed
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id

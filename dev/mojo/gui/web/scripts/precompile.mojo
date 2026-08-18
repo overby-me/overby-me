@@ -9,7 +9,7 @@ Usage:
     mojo run -I ../mojo-wasmtime/src build/precompile.mojo
 """
 
-from pathlib import Path
+from std.pathlib import Path
 
 from wasmtime_mojo import Engine, Module
 

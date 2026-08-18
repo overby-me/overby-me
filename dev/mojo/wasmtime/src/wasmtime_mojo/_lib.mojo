@@ -6,9 +6,9 @@ wrappers around the C API functions needed by mojo-wasmtime.
 The OwnedDLHandle is loaded lazily on first use via `get_lib()`.
 """
 
-from os import getenv
+from std.os import getenv
 from std.ffi import OwnedDLHandle
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 
 from ._types import (
     EnginePtr,

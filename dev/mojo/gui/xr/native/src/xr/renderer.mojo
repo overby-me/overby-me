@@ -59,7 +59,7 @@
 #       interpreter.apply(buf_ptr, Int(mount_len))
 #       xr_blitz.panel_end_mutations(panel_id)
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from .xr_blitz import XRBlitz, _event_type_from_name
 from html.tags import tag_name
 

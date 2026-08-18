@@ -26,7 +26,7 @@
 #   SNInnerSkeletonChild:    p > dyn_text("Inner loading...")
 #   SNOuterSkeletonChild:    p > dyn_text("Outer loading...")
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

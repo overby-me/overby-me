@@ -52,7 +52,7 @@
 #         Todo {},
 #     }
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import (
     ComponentContext,

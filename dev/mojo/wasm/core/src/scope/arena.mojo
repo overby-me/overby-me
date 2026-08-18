@@ -9,7 +9,7 @@
 # The arena does not impose any hierarchy — parent/child relationships
 # are tracked by ScopeState.parent_id and ScopeState.height.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from .scope import ScopeState
 
 

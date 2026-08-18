@@ -231,7 +231,7 @@ from apps.suspense_nest import (
     _sn_inner_resolve,
     _sn_flush,
 )
-from memory import UnsafePointer, memset_zero, alloc
+from std.memory import UnsafePointer, memset_zero, alloc
 
 
 # ██████████████████████████████████████████████████████████████████████████████

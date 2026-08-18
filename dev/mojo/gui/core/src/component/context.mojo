@@ -51,7 +51,7 @@
 # destroying it.  The reactive handles (SignalI32, MemoI32, EffectHandle)
 # hold non-owning pointers back to the Runtime inside the shell.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from signals import Runtime
 from signals.handle import (
     SignalI32,
@@ -116,9 +116,9 @@ struct EventBinding(Copyable, Equatable, Writable):
         self.event_name = event_name
         self.handler_id = handler_id
 
-    fn __copyinit__(out self, other: Self):
-        self.event_name = other.event_name
-        self.handler_id = other.handler_id
+    fn __copyinit__(out self, copy: Self):
+        self.event_name = copy.event_name
+        self.handler_id = copy.handler_id
 
     fn __moveinit__(out self, deinit take: Self):
         self.event_name = take.event_name^
@@ -201,13 +201,13 @@ struct AutoBinding(Copyable):
         self.string_key = string_key
         self.version_key = version_key
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.event_name = other.event_name
-        self.handler_id = other.handler_id
-        self.attr_name = other.attr_name
-        self.string_key = other.string_key
-        self.version_key = other.version_key
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.event_name = copy.event_name
+        self.handler_id = copy.handler_id
+        self.attr_name = copy.attr_name
+        self.string_key = copy.string_key
+        self.version_key = copy.version_key
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind
@@ -2095,7 +2095,7 @@ struct ComponentContext(Movable):
 
         Useful for testing and introspection.
         """
-        return self.shell.runtime[0].handler_count()
+        return UInt32(self.shell.runtime[0].handler_count())
 
     fn view_events(self) -> List[EventBinding]:
         """Return a copy of the registered view event bindings.
@@ -2140,12 +2140,12 @@ struct _EventInfo(Copyable, Equatable, Writable):
         self.operand = operand
         self.attr_idx = attr_idx
 
-    fn __copyinit__(out self, other: Self):
-        self.event_name = other.event_name
-        self.action = other.action
-        self.signal_key = other.signal_key
-        self.operand = other.operand
-        self.attr_idx = other.attr_idx
+    fn __copyinit__(out self, copy: Self):
+        self.event_name = copy.event_name
+        self.action = copy.action
+        self.signal_key = copy.signal_key
+        self.operand = copy.operand
+        self.attr_idx = copy.attr_idx
 
     fn __moveinit__(out self, deinit take: Self):
         self.event_name = take.event_name^
@@ -2175,11 +2175,11 @@ struct _ValueBindingInfo(Copyable, Equatable, Writable):
         self.version_key = version_key
         self.attr_idx = attr_idx
 
-    fn __copyinit__(out self, other: Self):
-        self.attr_name = other.attr_name
-        self.string_key = other.string_key
-        self.version_key = other.version_key
-        self.attr_idx = other.attr_idx
+    fn __copyinit__(out self, copy: Self):
+        self.attr_name = copy.attr_name
+        self.string_key = copy.string_key
+        self.version_key = copy.version_key
+        self.attr_idx = copy.attr_idx
 
     fn __moveinit__(out self, deinit take: Self):
         self.attr_name = take.attr_name^

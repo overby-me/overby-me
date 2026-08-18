@@ -25,7 +25,7 @@
 #   InnerFallbackChild:   p > dyn_text("Inner error: ...") + button("Inner Retry")
 #   OuterFallbackChild:   p > dyn_text("Outer error: ...") + button("Outer Retry")
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

@@ -16,7 +16,7 @@ Usage:
     var glob = instance_get_global(store.context(), inst, "__heap_base")
 """
 
-from memory import UnsafePointer, alloc, memcpy, free
+from std.memory import UnsafePointer, alloc, memcpy, free
 
 from ._types import (
     ContextPtr,

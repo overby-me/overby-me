@@ -12,7 +12,7 @@
 #   CounterChild: div > p(dyn_text) + button("Reset")
 #   SummaryChild: p(dyn_text, dyn_attr[0])
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

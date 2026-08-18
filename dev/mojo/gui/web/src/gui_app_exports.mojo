@@ -54,7 +54,7 @@
 #   - The WASM ABI uses Int64 for pointers (wasm64) and Int32 for return
 #     values. Bool is returned as Int32 (1 or 0) via _b2i().
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from platform import GuiApp
 

@@ -26,7 +26,7 @@
 #      shows content with loaded data
 #   4. Re-load: repeat cycle with new data
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

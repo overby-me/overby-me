@@ -28,9 +28,9 @@ Import signatures are derived from `wasm-objdump -j Import -x build/out.wasm`:
    - func[14] sig=11 (i32, i64) -> i32       clock_gettime
 """
 
-from collections import Dict
-from memory import UnsafePointer, memcpy, memset_zero, alloc
-from pathlib import Path
+from std.collections import Dict
+from std.memory import UnsafePointer, memcpy, memset_zero, alloc
+from std.pathlib import Path
 from std.ffi import OwnedDLHandle
 
 from wasmtime_mojo import (

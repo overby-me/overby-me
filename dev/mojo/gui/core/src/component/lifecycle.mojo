@@ -65,7 +65,7 @@
 #     # Flush — hide (back to placeholder):
 #     self.cond = flush_conditional_empty(writer, eid, rt, store, self.cond)
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime
@@ -115,10 +115,10 @@ struct FragmentSlot(Copyable, Equatable, Writable):
         self.current_frag = initial_frag
         self.mounted = False
 
-    fn __copyinit__(out self, other: Self):
-        self.anchor_id = other.anchor_id
-        self.current_frag = other.current_frag
-        self.mounted = other.mounted
+    fn __copyinit__(out self, copy: Self):
+        self.anchor_id = copy.anchor_id
+        self.current_frag = copy.current_frag
+        self.mounted = copy.mounted
 
     fn __moveinit__(out self, deinit take: Self):
         self.anchor_id = take.anchor_id
@@ -183,10 +183,10 @@ struct ConditionalSlot(Copyable, Equatable, Writable):
         self.current_vnode = -1
         self.mounted = False
 
-    fn __copyinit__(out self, other: Self):
-        self.anchor_id = other.anchor_id
-        self.current_vnode = other.current_vnode
-        self.mounted = other.mounted
+    fn __copyinit__(out self, copy: Self):
+        self.anchor_id = copy.anchor_id
+        self.current_vnode = copy.current_vnode
+        self.mounted = copy.mounted
 
     fn __moveinit__(out self, deinit take: Self):
         self.anchor_id = take.anchor_id

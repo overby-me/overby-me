@@ -8,7 +8,7 @@
 # This is the Tier 1 (runtime) registry.  In Tier 2, compile-time
 # templates will be pre-registered as constants.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from .template import Template
 
 

@@ -52,7 +52,7 @@
 # loop). On native, launch() calls desktop_launch() which blocks until
 # the window is closed.
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from platform.gui_app import GuiApp
 from platform.launch import AppConfig

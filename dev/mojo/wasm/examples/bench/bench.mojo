@@ -188,7 +188,7 @@
 #                 # select / remove
 #             return False
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from std.ffi import external_call
 from bridge import MutationWriter
 from mutations import CreateEngine
@@ -232,9 +232,9 @@ struct BenchRow(Copyable):
         self.id = id
         self.label = label
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.label = other.label
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.label = copy.label
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id

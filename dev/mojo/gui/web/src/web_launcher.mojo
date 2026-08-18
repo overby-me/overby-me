@@ -82,7 +82,7 @@
 #   platform abstraction matures, main.mojo can be simplified to delegate
 #   to WebApp methods.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from platform import (
     PlatformApp,
     AppConfig,

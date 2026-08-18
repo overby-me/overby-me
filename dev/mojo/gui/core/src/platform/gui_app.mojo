@@ -117,7 +117,7 @@
 # (native). The GuiApp trait ensures the renderer can drive the app
 # uniformly regardless of platform.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 
 
@@ -126,7 +126,7 @@ from bridge import MutationWriter
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-trait GuiApp(Movable):
+trait GuiApp(ImplicitlyDestructible, Movable):
     """Lifecycle trait that every mojo-gui application implements.
 
     This is the app-side counterpart to `PlatformApp` (renderer-side).

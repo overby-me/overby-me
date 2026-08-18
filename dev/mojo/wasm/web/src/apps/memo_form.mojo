@@ -19,7 +19,7 @@
 #      Flush → is_valid=True, status="✓ Valid: hi" → render → diff → SetText.
 #   4. Clear input: input="" → is_valid=False, status="✗ Empty".
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalString, MemoBool, MemoString

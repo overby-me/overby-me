@@ -23,9 +23,9 @@ MemoBool + MemoString in a form-validation scenario:
   - scope count is 1
 """
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
-from testing import assert_equal, assert_true, assert_false
+from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
     WasmInstance,
     get_instance,

@@ -37,7 +37,7 @@
 #   When the pending scope resolves, the boundary re-renders with the
 #   actual content.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 
 # ── Hook type tags ───────────────────────────────────────────────────────────
@@ -113,22 +113,22 @@ struct ScopeState(Copyable):
         self.is_suspense_boundary = False
         self.is_pending = False
 
-    fn __copyinit__(out self, other: Self):
-        self.id = other.id
-        self.height = other.height
-        self.parent_id = other.parent_id
-        self.dirty = other.dirty
-        self.render_count = other.render_count
-        self.hook_cursor = other.hook_cursor
-        self.hook_tags = other.hook_tags.copy()
-        self.hook_values = other.hook_values.copy()
-        self.context_keys = other.context_keys.copy()
-        self.context_values = other.context_values.copy()
-        self.is_error_boundary = other.is_error_boundary
-        self.has_error = other.has_error
-        self.error_message = other.error_message
-        self.is_suspense_boundary = other.is_suspense_boundary
-        self.is_pending = other.is_pending
+    fn __copyinit__(out self, copy: Self):
+        self.id = copy.id
+        self.height = copy.height
+        self.parent_id = copy.parent_id
+        self.dirty = copy.dirty
+        self.render_count = copy.render_count
+        self.hook_cursor = copy.hook_cursor
+        self.hook_tags = copy.hook_tags.copy()
+        self.hook_values = copy.hook_values.copy()
+        self.context_keys = copy.context_keys.copy()
+        self.context_values = copy.context_values.copy()
+        self.is_error_boundary = copy.is_error_boundary
+        self.has_error = copy.has_error
+        self.error_message = copy.error_message
+        self.is_suspense_boundary = copy.is_suspense_boundary
+        self.is_pending = copy.is_pending
 
     fn __moveinit__(out self, deinit take: Self):
         self.id = take.id

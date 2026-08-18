@@ -63,9 +63,9 @@
 #         var controls = scene.create_panel(PanelConfig(width_m=0.4, height_m=0.3))
 #         scene.set_panel_position(controls, 0.5, 1.2, -0.8)
 
-from memory import UnsafePointer
-from collections import List, Optional
-from math import sin, cos
+from std.memory import UnsafePointer
+from std.collections import List, Optional
+from std.math import sin, cos
 
 from .panel import (
     XRPanel,

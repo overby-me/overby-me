@@ -1,4 +1,4 @@
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 # Tests for Phase 10.4 — AppShell (component abstraction).
 #
@@ -17,7 +17,7 @@ from memory import UnsafePointer
 #   - Shell memo helpers (M13.5)
 #   - Counter memo demo (M13.6)
 
-from testing import assert_equal, assert_true, assert_false
+from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
     WasmInstance,
     no_args,

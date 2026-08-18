@@ -19,8 +19,8 @@ Usage:
     var fast_module = Module.deserialize_file(engine.ptr(), "module.cwasm")
 """
 
-from memory import UnsafePointer, alloc, free
-from pathlib import Path
+from std.memory import UnsafePointer, alloc, free
+from std.pathlib import Path
 
 from ._types import EnginePtr, ModulePtr, ErrorPtr, WasmByteVec
 from ._lib import (

@@ -20,7 +20,7 @@
 #   - DynamicAttr:  A dynamic attribute within a TemplateRef.
 #   - AttributeValue: The value of a dynamic attribute (tagged union).
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 
 # ── VNode kind tags ──────────────────────────────────────────────────────────
@@ -160,13 +160,13 @@ struct AttributeValue(Copyable, Equatable, Writable):
         self.bool_value = bool_value
         self.handler_id = handler_id
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.text_value = other.text_value
-        self.int_value = other.int_value
-        self.float_value = other.float_value
-        self.bool_value = other.bool_value
-        self.handler_id = other.handler_id
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.text_value = copy.text_value
+        self.int_value = copy.int_value
+        self.float_value = copy.float_value
+        self.bool_value = copy.bool_value
+        self.handler_id = copy.handler_id
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind
@@ -248,11 +248,11 @@ struct DynamicAttr(Copyable, Equatable, Writable):
         self.value = value^
         self.element_id = element_id
 
-    fn __copyinit__(out self, other: Self):
-        self.name = other.name
-        self.namespace = other.namespace
-        self.value = other.value.copy()
-        self.element_id = other.element_id
+    fn __copyinit__(out self, copy: Self):
+        self.name = copy.name
+        self.namespace = copy.namespace
+        self.value = copy.value.copy()
+        self.element_id = copy.element_id
 
     fn __moveinit__(out self, deinit take: Self):
         self.name = take.name^
@@ -301,9 +301,9 @@ struct DynamicNode(Copyable, Equatable, Writable):
         self.kind = kind
         self.text = text
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.text = other.text
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.text = copy.text
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind
@@ -510,18 +510,18 @@ struct VNode(Copyable):
         self.dyn_node_ids = dyn_node_ids^
         self.dyn_attr_ids = dyn_attr_ids^
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.template_id = other.template_id
-        self.dynamic_nodes = other.dynamic_nodes.copy()
-        self.dynamic_attrs = other.dynamic_attrs.copy()
-        self.key = other.key
-        self.text = other.text
-        self.element_id = other.element_id
-        self.fragment_children = other.fragment_children.copy()
-        self.root_ids = other.root_ids.copy()
-        self.dyn_node_ids = other.dyn_node_ids.copy()
-        self.dyn_attr_ids = other.dyn_attr_ids.copy()
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.template_id = copy.template_id
+        self.dynamic_nodes = copy.dynamic_nodes.copy()
+        self.dynamic_attrs = copy.dynamic_attrs.copy()
+        self.key = copy.key
+        self.text = copy.text
+        self.element_id = copy.element_id
+        self.fragment_children = copy.fragment_children.copy()
+        self.root_ids = copy.root_ids.copy()
+        self.dyn_node_ids = copy.dyn_node_ids.copy()
+        self.dyn_attr_ids = copy.dyn_attr_ids.copy()
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind

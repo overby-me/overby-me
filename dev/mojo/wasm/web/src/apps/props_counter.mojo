@@ -7,7 +7,7 @@
 #   - Count signal shared from parent to child via context (props)
 #   - Child's show_hex signal owned by child scope
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

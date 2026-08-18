@@ -29,7 +29,7 @@
 # SignalStore, HandlerRegistry, and ScopeArena, so effect IDs are stable
 # and reusable.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 
 # ── EffectEntry ──────────────────────────────────────────────────────────────
@@ -72,11 +72,11 @@ struct EffectEntry(Copyable, Equatable, Writable):
         self.pending = True
         self.running = False
 
-    fn __copyinit__(out self, other: Self):
-        self.context_id = other.context_id
-        self.scope_id = other.scope_id
-        self.pending = other.pending
-        self.running = other.running
+    fn __copyinit__(out self, copy: Self):
+        self.context_id = copy.context_id
+        self.scope_id = copy.scope_id
+        self.pending = copy.pending
+        self.running = copy.running
 
     fn __moveinit__(out self, deinit take: Self):
         self.context_id = take.context_id

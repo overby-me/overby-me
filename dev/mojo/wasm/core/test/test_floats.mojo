@@ -5,9 +5,9 @@
 # Run with:
 #   mojo test test/test_floats.mojo
 
-from math import nan as _get_nan, inf as _get_inf, isnan, copysign
-from memory import UnsafePointer
-from testing import assert_true, assert_equal
+from std.math import nan as _get_nan, inf as _get_inf, isnan, copysign
+from std.memory import UnsafePointer
+from std.testing import assert_true, assert_equal
 
 from wasm_harness import (
     WasmInstance,

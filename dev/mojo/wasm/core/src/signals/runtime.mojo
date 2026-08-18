@@ -28,8 +28,8 @@
 #   - subscribers  : List[UInt32]          — context IDs subscribed to this signal
 #   - version      : UInt32               — monotonic write counter (for staleness checks)
 
-from sys import size_of
-from memory import UnsafePointer, memcpy, alloc
+from std.sys import size_of
+from std.memory import UnsafePointer, memcpy, alloc
 from scope import ScopeArena, ScopeState, HOOK_SIGNAL, HOOK_MEMO, HOOK_EFFECT
 from vdom import TemplateRegistry, VNodeStore
 from .memo import MemoStore, MemoEntry, MEMO_NO_STRING
@@ -87,14 +87,14 @@ struct SignalEntry(Copyable):
         self.subscribers = List[UInt32]()
         self.version = 0
 
-    fn __copyinit__(out self, other: Self):
-        self.value_size = other.value_size
-        self.subscribers = other.subscribers.copy()
-        self.version = other.version
-        if other.value_ptr and other.value_size > 0:
-            self.value_ptr = alloc[UInt8](other.value_size)
+    fn __copyinit__(out self, copy: Self):
+        self.value_size = copy.value_size
+        self.subscribers = copy.subscribers.copy()
+        self.version = copy.version
+        if copy.value_ptr and copy.value_size > 0:
+            self.value_ptr = alloc[UInt8](copy.value_size)
             memcpy(
-                dest=self.value_ptr, src=other.value_ptr, count=other.value_size
+                dest=self.value_ptr, src=copy.value_ptr, count=copy.value_size
             )
         else:
             self.value_ptr = UnsafePointer[UInt8, MutExternalOrigin]()

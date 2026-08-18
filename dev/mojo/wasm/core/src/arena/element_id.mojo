@@ -15,7 +15,7 @@
 
 
 @fieldwise_init
-struct ElementId(Copyable, Equatable, Hashable, Stringable, Writable):
+struct ElementId(Copyable, Equatable, Hashable, Writable):
     """A lightweight handle identifying a DOM node.
 
     Internally just a `UInt32`.  ElementId(0) is reserved for the root
@@ -55,6 +55,14 @@ struct ElementId(Copyable, Equatable, Hashable, Stringable, Writable):
         return Int(self.id)
 
     # ── Trait implementations ────────────────────────────────────────
+
+    fn write_to[W: Writer](self, mut w: W):
+        """Write the value through a Writer, as Writable requires.
+
+        Delegates to __str__ so String(self) keeps producing the value
+        rather than the auto-derived struct representation.
+        """
+        w.write(self.__str__())
 
     fn __str__(self) -> String:
         return String("ElementId(") + String(self.id) + String(")")

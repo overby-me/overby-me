@@ -22,7 +22,7 @@
 # from the old VNode to know which DOM elements to target, and writes
 # updated mount state onto the new VNode.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 from arena import ElementId, ElementIdAllocator
 from signals import Runtime

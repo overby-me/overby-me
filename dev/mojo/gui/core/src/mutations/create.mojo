@@ -33,7 +33,7 @@
 #     1. Recursively create each child
 #     Result: all children's roots on the stack
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from bridge import MutationWriter
 from arena import ElementId, ElementIdAllocator
 from signals import Runtime

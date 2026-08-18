@@ -54,7 +54,7 @@
 # xr_launch() which creates an OpenXR session and enters the XR
 # frame loop.
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from platform.gui_app import GuiApp
 from platform.launch import AppConfig

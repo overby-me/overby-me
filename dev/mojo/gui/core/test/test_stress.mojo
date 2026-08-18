@@ -15,8 +15,8 @@
 # Run with:
 #   mojo test test/test_stress.mojo
 
-from memory import UnsafePointer
-from testing import assert_true, assert_equal
+from std.memory import UnsafePointer
+from std.testing import assert_true, assert_equal
 
 from wasm_harness import (
     WasmInstance,

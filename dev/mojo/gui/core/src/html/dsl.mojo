@@ -42,7 +42,7 @@
 #
 # Both forms produce identical Template and VNode structures.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 from vdom.builder import TemplateBuilder
 from vdom.template import Template
 from vdom.vnode import (
@@ -387,14 +387,14 @@ struct Node(Copyable):
         self.operand = operand
         self.items = items^
 
-    fn __copyinit__(out self, other: Self):
-        self.kind = other.kind
-        self.tag = other.tag
-        self.text = other.text
-        self.attr_value = other.attr_value
-        self.dynamic_index = other.dynamic_index
-        self.operand = other.operand
-        self.items = other.items.copy()
+    fn __copyinit__(out self, copy: Self):
+        self.kind = copy.kind
+        self.tag = copy.tag
+        self.text = copy.text
+        self.attr_value = copy.attr_value
+        self.dynamic_index = copy.dynamic_index
+        self.operand = copy.operand
+        self.items = copy.items.copy()
 
     fn __moveinit__(out self, deinit take: Self):
         self.kind = take.kind

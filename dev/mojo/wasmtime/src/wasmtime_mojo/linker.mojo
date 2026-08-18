@@ -36,7 +36,7 @@ Usage:
     var instance = linker.instantiate(store.context(), module.ptr())
 """
 
-from memory import UnsafePointer, memcpy, alloc
+from std.memory import UnsafePointer, memcpy, alloc
 
 from ._types import (
     EnginePtr,

@@ -23,7 +23,7 @@
 # The builder can also be used from WASM exports, where it is heap-allocated
 # and manipulated via pointer handles (Int64).
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from .template import (
     Template,
     TemplateNode,

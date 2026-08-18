@@ -11,7 +11,7 @@
 #   flush hides fallback, shows normal child (re-creates from scratch).
 # Count signal persists across crash/recovery since it lives on the parent.
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine

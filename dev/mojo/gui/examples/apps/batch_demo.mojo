@@ -23,7 +23,7 @@
 #   4. reset(): batch writes both names to "" + write_count to 0.
 #      full_name = " ".
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, SignalString, MemoString

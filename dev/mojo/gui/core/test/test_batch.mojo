@@ -31,8 +31,8 @@
 # Run with:
 #   mojo test test/test_batch.mojo
 
-from memory import UnsafePointer
-from testing import assert_equal, assert_true, assert_false
+from std.memory import UnsafePointer
+from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
     WasmInstance,

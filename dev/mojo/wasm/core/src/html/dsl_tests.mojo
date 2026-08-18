@@ -123,7 +123,7 @@ from .tags import (
 from vdom.template import TNODE_ELEMENT, TNODE_TEXT
 from vdom.vnode import VNodeStore, VNODE_TEMPLATE_REF
 from vdom.builder import TemplateBuilder
-from memory import alloc
+from std.memory import alloc
 from signals import create_runtime, destroy_runtime, Runtime
 from signals.handle import SignalString
 from events.registry import (

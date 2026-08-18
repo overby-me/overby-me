@@ -21,7 +21,7 @@
 #   3. Increment to 5: input=5 → doubled=10 → is_big=True → label="BIG".
 #   4. Increment to 6: input=6 → doubled=12 → is_big=True → label="BIG".
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import (

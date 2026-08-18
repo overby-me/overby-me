@@ -32,7 +32,7 @@
 # The store uses a slab allocator (free-list) identical to SignalStore,
 # HandlerRegistry, and ScopeArena, so memo IDs are stable and reusable.
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 comptime MEMO_NO_STRING: UInt32 = UInt32(0xFFFFFFFF)
 """Sentinel: this memo has no StringStore entry."""
@@ -119,14 +119,14 @@ struct MemoEntry(Copyable, Equatable, Writable):
         self.computing = False
         self.value_changed = True
 
-    fn __copyinit__(out self, other: Self):
-        self.context_id = other.context_id
-        self.output_key = other.output_key
-        self.string_key = other.string_key
-        self.scope_id = other.scope_id
-        self.dirty = other.dirty
-        self.computing = other.computing
-        self.value_changed = other.value_changed
+    fn __copyinit__(out self, copy: Self):
+        self.context_id = copy.context_id
+        self.output_key = copy.output_key
+        self.string_key = copy.string_key
+        self.scope_id = copy.scope_id
+        self.dirty = copy.dirty
+        self.computing = copy.computing
+        self.value_changed = copy.value_changed
 
     fn __moveinit__(out self, deinit take: Self):
         self.context_id = take.context_id

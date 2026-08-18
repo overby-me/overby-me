@@ -14,7 +14,7 @@ Usage:
     # ... pass ctx to instantiation, function calls, memory access ...
 """
 
-from memory import UnsafePointer
+from std.memory import UnsafePointer
 
 from ._types import EnginePtr, StorePtr, ContextPtr
 from ._lib import (

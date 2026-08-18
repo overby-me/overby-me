@@ -21,7 +21,7 @@
 # and parity.  The drain-and-run pattern ensures all derived state is
 # settled before render().
 
-from memory import UnsafePointer, alloc
+from std.memory import UnsafePointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, SignalString, EffectHandle
