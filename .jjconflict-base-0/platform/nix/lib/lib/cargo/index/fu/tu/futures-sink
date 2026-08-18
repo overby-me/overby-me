@@ -1,2 +1,0 @@
-{"name":"futures-sink","vers":"0.3.31","deps":[],"cksum":"e575fab7d1e0dcb8d0c7bcf9a63ee213816ab51902e6d244a95819acacf1d4f7","features":{"alloc":[],"default":["std"],"std":["alloc"]},"yanked":false,"rust_version":"1.36","pubtime":"2024-10-05T07:06:58Z"}
-{"name":"futures-sink","vers":"0.3.32","deps":[],"cksum":"c39754e157331b013978ec91992bde1ac089843443c49cbc7f46150b0fad0893","features":{"alloc":[],"default":["std"],"std":["alloc"]},"yanked":false,"rust_version":"1.36","pubtime":"2026-02-15T13:34:05Z"}

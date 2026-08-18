@@ -278,7 +278,11 @@ impl Engine for NixEngine {
         hako_cmd.env("USER", &user);
         hako_cmd.env("CI", "true");
 
-        for (k, v) in &workflow.environment {
+        // Sorted so the child environment (and any log of the invocation) is
+        // deterministic run to run.
+        let mut env_pairs: Vec<_> = workflow.environment.iter().collect();
+        env_pairs.sort();
+        for (k, v) in env_pairs {
             hako_cmd.env(k, v);
         }
 

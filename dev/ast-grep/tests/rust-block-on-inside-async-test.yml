@@ -1,0 +1,5 @@
+id: rust-block-on-inside-async
+valid:
+  - "fn sync_boundary(rt: &Handle) -> u8 { rt.block_on(async { 1 }) }"
+invalid:
+  - "async fn bad(rt: &Handle) -> u8 { rt.block_on(async { 1 }) }"

@@ -1,0 +1,5 @@
+id: mojo-alloc-freed-past-raise
+valid:
+  - "fn ok(c: ContextPtr) raises -> Int32:\n    var b = alloc[WasmtimeVal](1)\n    try:\n        wasmtime_global_get(c, b)\n        return b[].get_i32()\n    finally:\n        b.free()\n"
+invalid:
+  - "fn bad(c: ContextPtr) raises -> Int32:\n    var b = alloc[WasmtimeVal](1)\n    wasmtime_global_get(c, b)\n    b.free()\n    return 1\n"

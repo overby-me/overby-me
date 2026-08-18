@@ -1,1 +1,0 @@
-{"name":"malloc_buf","vers":"0.0.6","deps":[{"name":"libc","req":">= 0.1, < 0.3","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb","features":{},"yanked":false,"pubtime":"2015-11-06T16:33:16Z"}

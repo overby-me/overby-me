@@ -1,1 +1,0 @@
-{"name":"const-random","vers":"0.1.18","deps":[{"name":"const-random-macro","req":"^0.1.16","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"87e00182fe74b066627d63b85fd550ac2998d4b0bd86bfed477a0ae4c7c71359","features":{},"yanked":false,"pubtime":"2024-03-03T23:32:56Z"}

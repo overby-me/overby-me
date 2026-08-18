@@ -1,6 +1,0 @@
-id: rust-runtime-built-in-fn
-valid:
-  - "fn main() { let rt = Runtime::new().unwrap(); }"
-  - "fn build_runtime() -> Runtime { Runtime::new().unwrap() }"
-invalid:
-  - "fn handle_request() { let rt = Runtime::new().unwrap(); }"

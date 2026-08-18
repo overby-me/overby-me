@@ -1,0 +1,6 @@
+id: rust-vec-set-len
+valid:
+  - "fn truncate(f: &std::fs::File) { f.set_len(0).unwrap(); }"
+  - "fn ok(v: &mut Vec<u8>, n: usize) { v.resize(n, 0); }"
+invalid:
+  - "fn bad(v: &mut Vec<u8>, n: usize) { unsafe { v.set_len(n) } }"

@@ -1,4 +1,0 @@
-{"name":"icu_properties_data","vers":"1.5.1","deps":[],"cksum":"85fb8799753b75aee8d2a21d7c14d9f38921b54b3dbda10f5a3c7a7b82dba5e2","features":{},"yanked":false,"rust_version":"1.67","pubtime":"2025-03-26T19:48:23Z"}
-{"name":"icu_properties_data","vers":"2.0.1","deps":[],"cksum":"298459143998310acd25ffe6810ed544932242d3f07083eee1084d83a71bd632","features":{},"yanked":false,"rust_version":"1.82","pubtime":"2025-05-19T16:10:56Z"}
-{"name":"icu_properties_data","vers":"2.1.2","deps":[],"cksum":"616c294cf8d725c6afcd8f55abc17c56464ef6211f9ed59cccffe534129c77af","features":{},"yanked":false,"rust_version":"1.83","pubtime":"2025-12-09T16:06:44Z"}
-{"name":"icu_properties_data","vers":"2.2.0","deps":[],"cksum":"8e2bbb201e0c04f7b4b3e14382af113e17ba4f63e2c9d2ee626b720cbce54a14","features":{},"yanked":false,"rust_version":"1.86","pubtime":"2026-04-01T16:48:08Z"}

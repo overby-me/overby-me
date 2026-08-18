@@ -1,1 +1,0 @@
-{"name":"cmov","vers":"0.5.4","deps":[{"name":"proptest","req":"^1.11","features":[],"optional":false,"default_features":true,"target":"cfg(any(unix, windows))","kind":"dev"}],"cksum":"0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a","features":{},"yanked":false,"rust_version":"1.85","pubtime":"2026-05-28T19:07:33Z"}

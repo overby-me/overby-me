@@ -15,5 +15,10 @@ files:
 ignores:
   - "apps/wiki/vendor/**"
   - "safety/oxidized/**"
+# The unsafe-context requirement is the receiver-type check ast-grep cannot
+# do: Vec::set_len is an unsafe fn, File::set_len is safe - and the oxidized
+# ports call File::set_len (truncate a file) 15 times, which the bare pattern
+# wrongly matched.
 rule:
   pattern: $VEC.set_len($$$ARGS)
+  inside: {kind: unsafe_block, stopBy: end}

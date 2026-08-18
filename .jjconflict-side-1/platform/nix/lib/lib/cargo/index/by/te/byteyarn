@@ -1,1 +1,0 @@
-{"name":"byteyarn","vers":"0.5.1","deps":[{"name":"buf-trait","req":"^0.4","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"b93e51d26468a15ea59f8525e0c13dc405db43e644a0b1e6d44346c72cf4cf7b","features":{},"yanked":false,"pubtime":"2024-02-24T06:18:25Z"}

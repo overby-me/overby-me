@@ -1,5 +1,0 @@
-id: nix-getenv-in-eval
-valid:
-  - "{ x = config.services.foo.home; }"
-invalid:
-  - "{ home = builtins.getEnv \"HOME\"; }"

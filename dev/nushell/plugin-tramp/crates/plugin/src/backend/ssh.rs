@@ -551,6 +551,10 @@ fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+#[expect(
+    clippy::empty_drop,
+    reason = "the impl exists to carry the drop-order note below where a reader will look for cleanup, and to keep the type !Copy"
+)]
 impl Drop for SshBackend {
     fn drop(&mut self) {
         // `Session::close` and `Sftp::close` are async; we can't await here.

@@ -1,1 +1,0 @@
-{"name":"pure-rust-locales","vers":"0.8.2","deps":[{"name":"defmt","req":"^1.0.1","features":[],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"869675ad2d7541aea90c6d88c81f46a7f4ea9af8cd0395d38f11a95126998a0d","features":{},"features2":{"defmt":["dep:defmt"]},"yanked":false,"rust_version":"1.56.0","pubtime":"2025-10-15T12:29:12Z","v":2}

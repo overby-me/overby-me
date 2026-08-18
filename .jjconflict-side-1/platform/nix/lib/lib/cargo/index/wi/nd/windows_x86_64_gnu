@@ -1,5 +1,0 @@
-{"name":"windows_x86_64_gnu","vers":"0.42.2","deps":[],"cksum":"8de912b8b8feb55c064867cf047dda097f92d51efad5b491dfb98f6bbb70cb36","features":{},"yanked":false,"pubtime":"2023-03-13T14:49:25Z"}
-{"name":"windows_x86_64_gnu","vers":"0.48.5","deps":[],"cksum":"53d40abd2583d23e4718fddf1ebec84dbff8381c07cae67ff7768bbf19c6718e","features":{},"yanked":false,"pubtime":"2023-08-18T17:47:19Z"}
-{"name":"windows_x86_64_gnu","vers":"0.52.6","deps":[],"cksum":"147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:43:58Z"}
-{"name":"windows_x86_64_gnu","vers":"0.53.0","deps":[],"cksum":"2e55b5ac9ea33f2fc1716d1742db15574fd6fc8dadc51caab1c16a3d3b4190ba","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-01-07T15:42:54Z"}
-{"name":"windows_x86_64_gnu","vers":"0.53.1","deps":[],"cksum":"9c3842cdd74a865a8066ab39c8a7a473c0778a3f29370b5fd6b4b9aa7df4a499","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:33:55Z"}

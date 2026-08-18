@@ -562,6 +562,7 @@
 | ✅ | Spell Checker | [Typos 🦀](https://github.com/crate-ci/typos) | | 🆗 | |
 | ✅ | Commit Linter | [Commitlint-rs 🦀](https://github.com/KeisukeYamashita/commitlint-rs) | | 🆗 | |
 | ✅ | Secret Scanner | [Ripsecrets 🦀](https://github.com/sirwart/ripsecrets) | | 🆗 | |
+| ✅ | Structural Linter | [Ast-grep 🦀](https://github.com/ast-grep/ast-grep) + [own rules](https://tangled.org/@overby.me/overby.me/tree/main/dev/ast-grep) | | 🆗 | [Deslop 🦀](https://github.com/chinmay-sawant/deslop) |
 | ✅ | Markdown Linter | [Rumdl 🦀](https://github.com/rvben/rumdl) | | 🆗 | |
 | ✅ | Monorepo | [Josh 🦀](https://github.com/josh-project/josh) | [Mega 🦀🐒](https://github.com/web3infra-foundation/mega), [Google Piper 🔒](https://en.wikipedia.org/wiki/Piper_(source_control_system)) | 🆗 | |
 | 🚫 | Merge Queue | | | | [Bors 🦀](https://github.com/rust-lang/bors) |

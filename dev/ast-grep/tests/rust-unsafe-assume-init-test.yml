@@ -1,0 +1,5 @@
+id: rust-unsafe-assume-init
+valid:
+  - "let mut m = MaybeUninit::uninit(); m.write(7); let v = unsafe { init_of(&m) };"
+invalid:
+  - "let v = unsafe { m.assume_init() };"

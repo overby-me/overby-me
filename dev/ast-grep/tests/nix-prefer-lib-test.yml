@@ -1,0 +1,6 @@
+id: nix-prefer-lib
+valid:
+  - "{lib, ...}: { x = lib.map (a: a) [1 2]; }"
+  - "{ t = builtins.throw \"nope\"; }"
+invalid:
+  - "{lib, ...}: { x = builtins.map (a: a) [1 2]; }"

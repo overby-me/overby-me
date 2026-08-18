@@ -1,6 +1,0 @@
-id: rust-mem-uninitialized
-valid:
-  - "let mut m = MaybeUninit::uninit(); m.write(7); let v = unsafe { m.assume_init() };"
-invalid:
-  - "let v: u32 = unsafe { std::mem::uninitialized() };"
-  - "let v = unsafe { MaybeUninit::uninit().assume_init() };"

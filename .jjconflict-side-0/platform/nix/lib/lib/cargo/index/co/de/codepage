@@ -1,1 +1,0 @@
-{"name":"codepage","vers":"0.1.2","deps":[{"name":"encoding_rs","req":"^0.8.34","features":[],"optional":false,"default_features":false,"target":null,"kind":"normal"}],"cksum":"48f68d061bc2828ae826206326e61251aca94c1e4a5305cf52d9138639c918b4","features":{},"yanked":false,"rust_version":"1.36","pubtime":"2024-07-21T14:30:00Z"}

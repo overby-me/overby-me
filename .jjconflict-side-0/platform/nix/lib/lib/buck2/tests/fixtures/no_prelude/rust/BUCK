@@ -1,9 +1,0 @@
-load("//rust:rules.bzl", "rust_binary")
-
-oncall("build_infra")
-
-rust_binary(
-    name = "main",
-    file = "main.rs",
-    toolchain = "toolchains//:rust",
-)

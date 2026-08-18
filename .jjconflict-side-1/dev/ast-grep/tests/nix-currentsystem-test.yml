@@ -1,5 +1,0 @@
-id: nix-currentsystem
-valid:
-  - "{ system, ... }: { inherit system; }"
-invalid:
-  - "{ system = builtins.currentSystem; }"

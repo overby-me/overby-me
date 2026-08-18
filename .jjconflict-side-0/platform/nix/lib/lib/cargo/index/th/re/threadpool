@@ -1,1 +1,0 @@
-{"name":"threadpool","vers":"1.8.1","deps":[{"name":"num_cpus","req":"^1.13","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa","features":{},"yanked":false,"pubtime":"2020-05-11T15:44:07Z"}

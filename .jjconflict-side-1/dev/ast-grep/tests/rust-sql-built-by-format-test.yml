@@ -1,5 +1,0 @@
-id: rust-sql-built-by-format
-valid:
-  - "conn.execute(\"DELETE FROM users WHERE id = ?\", (id,))?;"
-invalid:
-  - "conn.execute(&format!(\"DELETE FROM {}\", table), ())?;"

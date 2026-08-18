@@ -1,6 +1,0 @@
-id: rust-join-absolute-literal
-valid:
-  - "let s = segments.join(\"/\");"
-  - "let p = base.join(\"subdir\");"
-invalid:
-  - "let p = base.join(\"/etc/passwd\");"

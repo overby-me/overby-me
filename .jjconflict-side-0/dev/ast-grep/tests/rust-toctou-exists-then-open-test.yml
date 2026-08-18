@@ -1,7 +1,0 @@
-id: rust-toctou-exists-then-open
-valid:
-  - "let s = fs::read_to_string(p)?;"
-  - "if !p.exists() { create(p)?; }"
-  - "if other.exists() { File::open(p)?; }"
-invalid:
-  - "if p.exists() { let f = File::open(p)?; }"

@@ -139,6 +139,10 @@ pub(crate) fn draw_all_of(dom_id: &str, cols: u32, rows: u32, cells: &HashMap<(u
     };
     ctx.set_fill_style_str(PALETTE[0]);
     ctx.fill_rect(0.0, 0.0, cols as f64, rows as f64);
+    #[expect(
+        clippy::iter_over_hash_type,
+        reason = "cells are disjoint grid squares, so paint order cannot show"
+    )]
     for (&(x, y), &c) in cells.iter() {
         if x < cols && y < rows {
             draw_cell(&ctx, x, y, c);

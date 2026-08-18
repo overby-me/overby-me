@@ -1,1 +1,0 @@
-{"name":"dbl","vers":"0.3.2","deps":[{"name":"generic-array","req":"^0.14","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"bd2735a791158376708f9347fe8faba9667589d82427ef3aed6794a8981de3d9","features":{},"yanked":false,"pubtime":"2021-12-21T08:20:26Z"}

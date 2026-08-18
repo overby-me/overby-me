@@ -1,0 +1,6 @@
+id: rust-handler-reads-env
+valid:
+  - "fn startup() { let _ = std::env::var(\"PORT\"); }"
+  - "fn build_path(p: Option<&Path>) { let _ = std::env::var(\"PATH\"); }"
+invalid:
+  - "async fn h(State(s): State<App>) -> String { std::env::var(\"KEY\").unwrap() }"

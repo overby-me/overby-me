@@ -367,7 +367,9 @@ async fn execute_pipeline(
 
     for (wid, mut workflow) in workflows {
         if let Some(ref env) = pipeline_env {
-            for (k, v) in env {
+            let mut pairs: Vec<_> = env.iter().collect();
+            pairs.sort();
+            for (k, v) in pairs {
                 workflow
                     .environment
                     .entry(k.clone())

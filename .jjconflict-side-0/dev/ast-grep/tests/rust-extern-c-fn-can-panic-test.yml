@@ -1,6 +1,0 @@
-id: rust-extern-c-fn-can-panic
-valid:
-  - "pub extern \"C\" fn ok(x: u32) -> u32 { x + 1 }"
-  - "pub extern \"C\" fn guarded() -> u32 { std::panic::catch_unwind(|| inner().unwrap()).unwrap_or(0) }"
-invalid:
-  - "pub extern \"C\" fn bad(p: *const u8) -> u32 { decode(p).unwrap() }"

@@ -298,7 +298,11 @@ impl JetstreamClient {
                 .append_pair("wantedCollections", collection);
         }
 
-        for did in dids {
+        // Sorted so the subscription URL is identical run to run - it shows
+        // in logs and in the upstream's view of the consumer.
+        let mut wanted: Vec<_> = dids.iter().collect();
+        wanted.sort();
+        for did in wanted {
             url.query_pairs_mut().append_pair("wantedDids", did);
         }
 

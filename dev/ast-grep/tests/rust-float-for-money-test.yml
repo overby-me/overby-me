@@ -1,0 +1,5 @@
+id: rust-float-for-money
+valid:
+  - "struct Price { amount_cents: i64 }"
+invalid:
+  - "struct Price { amount: f64, currency: String }"

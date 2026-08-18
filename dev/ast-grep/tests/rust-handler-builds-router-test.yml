@@ -1,0 +1,5 @@
+id: rust-handler-builds-router
+valid:
+  - "fn startup() -> Router { Router::new() }"
+invalid:
+  - "async fn h(State(s): State<App>) -> String { let _r = Router::new(); s.name }"

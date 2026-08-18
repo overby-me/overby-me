@@ -1,5 +1,0 @@
-id: rust-await-holding-sync-lock
-valid:
-  - "async fn ok(m: &tokio::sync::Mutex<u32>) { let g = m.lock().await; work().await; }"
-invalid:
-  - "async fn bad(m: &std::sync::Mutex<u32>) { let g = m.lock().unwrap(); work().await; }"

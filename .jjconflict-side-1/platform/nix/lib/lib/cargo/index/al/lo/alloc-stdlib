@@ -1,1 +1,0 @@
-{"name":"alloc-stdlib","vers":"0.2.2","deps":[{"name":"alloc-no-stdlib","req":"^2.0.4","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"94fb8275041c72129eb51b7d0322c29b8387a0386127718b096429201a5d6ece","features":{"unsafe":[]},"yanked":false,"pubtime":"2022-09-12T05:30:14Z"}

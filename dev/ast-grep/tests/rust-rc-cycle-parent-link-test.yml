@@ -1,0 +1,5 @@
+id: rust-rc-cycle-parent-link
+valid:
+  - "struct Node { parent: Weak<Node>, children: Vec<Rc<Node>> }"
+invalid:
+  - "struct Node { parent: Rc<Node>, children: Vec<Rc<Node>> }"

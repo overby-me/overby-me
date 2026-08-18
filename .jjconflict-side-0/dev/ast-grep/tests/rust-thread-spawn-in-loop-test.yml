@@ -1,5 +1,0 @@
-id: rust-thread-spawn-in-loop
-valid:
-  - "let h = std::thread::spawn(work); h.join().unwrap();"
-invalid:
-  - "for job in jobs { std::thread::spawn(move || run(job)); }"

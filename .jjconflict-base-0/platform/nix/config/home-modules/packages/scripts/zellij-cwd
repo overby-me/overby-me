@@ -1,3 +1,0 @@
-#!/usr/bin/env nu
-let session_name = (pwd | str replace $env.HOME "~" | str replace -a "/" "|")
-zellij attach -c $session_name

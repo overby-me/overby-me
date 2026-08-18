@@ -56,8 +56,11 @@ impl FramePlane {
     /// to hold `stride * height` bytes. Both are caller errors: a plane that
     /// cannot address its own pixels has no valid reading.
     pub fn with_stride(data: Vec<u8>, width: u32, height: u32, stride: u32) -> Self {
-        assert!(stride >= width);
-        assert!(data.len() >= (stride as usize) * (height as usize));
+        assert!(stride >= width, "stride must cover the row width");
+        assert!(
+            data.len() >= (stride as usize) * (height as usize),
+            "data must hold stride * height bytes"
+        );
         Self {
             data,
             width,

@@ -1,8 +1,0 @@
-id: rust-err-arm-swallowed
-valid:
-  - "match r { Err(m) if is_offline(m) => {}, _ => break }"
-  - "let _ = tx.send(msg);"
-  - "match r { Ok(v) => use_it(v), Err(e) => log::warn!(\"{e}\") }"
-invalid:
-  - "match r { Ok(v) => use_it(v), Err(_) => {} }"
-  - "if let Err(e) = flush() {}"

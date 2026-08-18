@@ -1,0 +1,5 @@
+id: rust-unsafe-unchecked-index
+valid:
+  - "let v = slice[i];"
+invalid:
+  - "let v = unsafe { *slice.get_unchecked(i) };"

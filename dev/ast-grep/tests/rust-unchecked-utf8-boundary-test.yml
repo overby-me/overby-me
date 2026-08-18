@@ -1,0 +1,5 @@
+id: rust-unchecked-utf8-boundary
+valid:
+  - "fn safe(b: &[u8]) -> &str { std::str::from_utf8(b).unwrap_or(\"\") }"
+invalid:
+  - "unsafe fn fast(b: &[u8]) -> &str { std::str::from_utf8_unchecked(b) }"

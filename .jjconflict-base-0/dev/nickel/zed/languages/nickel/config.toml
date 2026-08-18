@@ -1,3 +1,0 @@
-name = "Nickel"
-grammar = "nickel"
-path_suffixes = ["ncl"]

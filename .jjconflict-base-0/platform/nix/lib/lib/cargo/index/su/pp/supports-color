@@ -1,1 +1,0 @@
-{"name":"supports-color","vers":"3.0.2","deps":[{"name":"is_ci","req":"^1.2.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"c64fc7232dd8d2e4ac5ce4ef302b1d81e0b80d055b9d77c7c4f51f6aa4c867d6","features":{},"yanked":false,"rust_version":"1.70.0","pubtime":"2024-11-26T09:05:02Z"}

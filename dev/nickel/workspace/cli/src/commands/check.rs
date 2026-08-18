@@ -252,8 +252,14 @@ fn check_naming_conflicts(
     }
 
     // Find conflicts (entries with multiple sources)
-    for (convention, names) in &registry {
-        for (name, sources) in names {
+    // Sorted twice over: a conflict report has to read the same on every
+    // run to be diffable.
+    let mut conventions: Vec<_> = registry.iter().collect();
+    conventions.sort_by_key(|(c, _)| *c);
+    for (convention, names) in conventions {
+        let mut named: Vec<_> = names.iter().collect();
+        named.sort_by_key(|(n, _)| *n);
+        for (name, sources) in named {
             if sources.len() > 1 {
                 report.push(
                     Diagnostic::error(

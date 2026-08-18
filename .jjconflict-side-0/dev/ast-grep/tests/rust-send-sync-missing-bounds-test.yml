@@ -1,7 +1,0 @@
-id: rust-send-sync-missing-bounds
-valid:
-  - "unsafe impl<T: Send> Send for Wrapper<T> { }"
-  - "unsafe impl Sync for QCell { }"
-invalid:
-  - "unsafe impl<T> Send for Wrapper<T> { }"
-  - "unsafe impl<'a, T, U> Sync for Guard<'a, T, U> { }"

@@ -1,7 +1,0 @@
-id: rust-http-url-literal
-valid:
-  - "let p = url.strip_prefix(\"http://\");"
-  - "let u = \"http://localhost:8080/health\";"
-  - "let u = \"https://api.example.com\";"
-invalid:
-  - "let u = \"http://api.upstream.invalid/v1\";"

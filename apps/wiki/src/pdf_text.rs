@@ -1030,9 +1030,14 @@ fn read_cid_widths(doc: &Document, arr: &[Object], out: &mut HashMap<u32, f64>) 
                 i += 2;
             }
             _ => {
-                let (Ok(last), Some(w)) =
-                    (number(next), arr.get(i + 2).and_then(|o| number(o).ok()))
-                else {
+                let Ok(last) = number(next) else {
+                    i += 2;
+                    continue;
+                };
+                // Indexed before the closure: the lint cannot see that the
+                // closure never touches `i`.
+                let third = arr.get(i + 2);
+                let Some(w) = third.and_then(|o| number(o).ok()) else {
                     i += 2;
                     continue;
                 };
@@ -4898,7 +4903,10 @@ fn strip_running_furniture(pages: &mut [Vec<Line>]) -> Running {
         offered.push(here);
     }
     // A place is furniture when most of the document uses it.
-    let mut tally: HashMap<(i64, bool), Vec<(usize, usize)>> = HashMap::new();
+    // BTreeMap: which repeated band gets condemned first must not depend on
+    // hash order, or two runs disagree about the same document.
+    let mut tally: std::collections::BTreeMap<(i64, bool), Vec<(usize, usize)>> =
+        std::collections::BTreeMap::new();
     for (page_no, here) in offered.iter().enumerate() {
         for (index, k) in here {
             tally.entry(*k).or_default().push((page_no, *index));
@@ -5110,7 +5118,14 @@ fn mend_contents_links(
     // when nearly every folio agrees on it, because a book whose front matter is
     // numbered separately has no single offset and should not be guessed at.
     let offset = {
-        let mut tally: HashMap<i64, usize> = HashMap::new();
+        // BTreeMap: max_by_key keeps the LAST maximum, so with hash order a
+        // tied offset came out differently run to run; ordered keys make the
+        // tie-break (largest offset) deterministic.
+        let mut tally: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "commutative counting into an ordered tally; iteration order cannot show"
+        )]
         for (page, number) in printed {
             if let Ok(n) = number.parse::<i64>() {
                 *tally.entry(*page as i64 - n).or_default() += 1;

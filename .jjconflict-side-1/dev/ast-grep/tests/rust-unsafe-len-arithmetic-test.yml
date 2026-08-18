@@ -1,6 +1,0 @@
-id: rust-unsafe-len-arithmetic
-valid:
-  - "let s = unsafe { slice::from_raw_parts(p, n) };"
-  - "let n = w.checked_mul(h).ok_or(TooBig)?; let s = unsafe { slice::from_raw_parts(p, n) };"
-invalid:
-  - "let s = unsafe { slice::from_raw_parts(p, w * h) };"

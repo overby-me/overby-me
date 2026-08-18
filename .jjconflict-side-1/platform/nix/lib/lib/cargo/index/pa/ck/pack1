@@ -1,1 +1,0 @@
-{"name":"pack1","vers":"1.1.0","deps":[{"name":"bytemuck","req":"^1.13.1","features":["derive"],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"e3b7bb0ecf2e447b1f20ee94ee79ef6eed1e9d4b3c36ce1903b9dea3bf205523","features":{},"yanked":false,"pubtime":"2026-05-04T17:29:38Z"}

@@ -1,1 +1,0 @@
-{"name":"tinyjson","vers":"2.5.1","deps":[{"name":"walkdir","req":"^2","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"9ab95735ea2c8fd51154d01e39cf13912a78071c2d89abc49a7ef102a7dd725a","features":{},"yanked":false,"pubtime":"2022-12-31T09:41:26Z"}

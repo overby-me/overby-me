@@ -1,5 +1,0 @@
-id: rust-setlen-then-read
-valid:
-  - "let mut v = vec![0u8; n]; r.read_exact(&mut v)?;"
-invalid:
-  - "let mut v = Vec::with_capacity(n); unsafe { v.set_len(n) }; r.read_exact(&mut v)?;"

@@ -1,0 +1,5 @@
+id: rust-env-set-var
+valid:
+  - "let v = std::env::var(\"HOME\");"
+invalid:
+  - "std::env::set_var(\"KEY\", value);"

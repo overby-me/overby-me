@@ -1,0 +1,5 @@
+id: mojo-wasmtime-owner-is-a-local
+valid:
+  - "struct S:\n    var _engine: Engine\n    var _linker: Linker\n    fn __init__(out self) raises:\n        self._engine = Engine()\n        self._linker = Linker(self._engine.ptr())\n"
+invalid:
+  - "fn dangerous() raises:\n    var e = Engine()\n    var l = Linker(e.ptr())\n"

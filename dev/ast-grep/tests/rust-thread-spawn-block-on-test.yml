@@ -1,0 +1,5 @@
+id: rust-thread-spawn-block-on
+valid:
+  - "fn ok() { std::thread::spawn(|| do_sync_work()); }"
+invalid:
+  - "fn bad(rt: Handle) { std::thread::spawn(move || rt.block_on(fut())); }"

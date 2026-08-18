@@ -520,3 +520,34 @@ dangling_pointers_from_temporaries covers it (verified by compiling the
 shape); the Mojo C-ABI analogue has no such guard and stays on the Mojo
 list. Cookie-without-Secure: no first-party cookie issuance (Hasura/PDS own
 sessions). #[ctor]/#[dtor]: zero uses.
+
+## safety/oxidized coverage after deslop (measured verdict)
+
+The full rule set run over safety/oxidized with the excludes stripped: 144
+findings. The split settles the question.
+
+105 are the ports' own semantics: env-set-var 89 (a shell and PID1 set
+environment variables BY SPEC - bash 39, systemd 44), thread-spawn-in-loop
+16 (make -j and systemd worker pools). Flagging upstream's design in a
+fidelity-mandated port produces suppressions, not fixes.
+
+15 were a DEFECT IN THE SHIPPED RULE, which is the measurement's real
+yield: rust-vec-set-len matched File::set_len - a safe, unrelated API. The
+fix is the unsafe-context requirement (Vec::set_len is an unsafe fn, so it
+must sit in an unsafe block; File::set_len never does), now in the rule
+with a fixture. First-party had zero sites of either kind, so only this
+scan could have caught it. The same scan prompted backfilling durable
+fixture tests for the 18 pre-harness rules; all 48 rules now carry one.
+
+The remaining ~24 are the soundness/hygiene tier at port-shaped sites:
+debug-on-credential 7 (upstream's own struct definitions), swallowed Err
+arms 4, prefer-lib 3, the known protocol-mandated weak hashes 2 and curl's
+-k verifier 1, unchecked-utf8 2, toctou 2, extern-C-can-panic 2, client
+timeout 1. Each is upstream's shape; PORTING.md's rule is that divergence
+needs a reason stronger than a lint.
+
+VERDICT: safety/oxidized stays excluded from the ast-grep hook. Its gate is
+PORTING.md review plus upstream fidelity, as designed. The exclusion is a
+policy with a measured cost (~24 real-ish sites we choose not to chase) and
+a demonstrated benefit (the scan is now a rule-validation corpus - rerun it
+when adding rules).

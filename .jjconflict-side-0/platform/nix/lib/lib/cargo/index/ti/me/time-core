@@ -1,3 +1,0 @@
-{"name":"time-core","vers":"0.1.4","deps":[],"cksum":"c9e9a38711f559d9e3ce1cdb06dd7c5b8ea546bc90052da6d06bb76da74bb07c","features":{},"yanked":false,"rust_version":"1.67.1","pubtime":"2025-03-18T06:52:34Z"}
-{"name":"time-core","vers":"0.1.8","deps":[],"cksum":"7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca","features":{"large-dates":[]},"yanked":false,"rust_version":"1.88.0","pubtime":"2026-01-24T04:16:38Z"}
-{"name":"time-core","vers":"0.1.9","deps":[],"cksum":"9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109","features":{"large-dates":[]},"yanked":false,"rust_version":"1.88.0","pubtime":"2026-06-12T08:14:02Z"}

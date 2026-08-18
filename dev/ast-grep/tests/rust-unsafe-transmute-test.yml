@@ -1,0 +1,5 @@
+id: rust-unsafe-transmute
+valid:
+  - "let x: u32 = u32::from_ne_bytes(bytes);"
+invalid:
+  - "let x: u64 = unsafe { std::mem::transmute(p) };"

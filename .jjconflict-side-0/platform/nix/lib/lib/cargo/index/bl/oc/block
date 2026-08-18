@@ -1,1 +1,0 @@
-{"name":"block","vers":"0.1.6","deps":[{"name":"objc_test_utils","req":"^0.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a","features":{},"yanked":false,"pubtime":"2016-05-08T18:37:19Z"}

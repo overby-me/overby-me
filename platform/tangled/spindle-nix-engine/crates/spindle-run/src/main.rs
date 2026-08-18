@@ -346,7 +346,9 @@ async fn main() -> ExitCode {
             }
             if !deps.is_empty() {
                 eprintln!("\n  Dependencies:");
-                for (source, pkgs) in &deps {
+                let mut lines: Vec<_> = deps.iter().collect();
+                lines.sort();
+                for (source, pkgs) in lines {
                     eprintln!("    {source}: {}", pkgs.join(", "));
                 }
             }
@@ -381,7 +383,9 @@ async fn main() -> ExitCode {
             let mut step_env: Vec<(String, String)> =
                 vec![("PATH".into(), path.clone()), ("CI".into(), "true".into())];
 
-            for (k, v) in &env_vars {
+            let mut pairs: Vec<_> = env_vars.iter().collect();
+            pairs.sort();
+            for (k, v) in pairs {
                 step_env.push((k.clone(), v.clone()));
             }
 

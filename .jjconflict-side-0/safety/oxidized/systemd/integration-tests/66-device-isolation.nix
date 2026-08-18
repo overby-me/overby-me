@@ -1,1 +1,0 @@
-{name = "66-DEVICE-ISOLATION";}

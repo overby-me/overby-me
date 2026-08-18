@@ -1,0 +1,5 @@
+id: rust-serde-untagged-boundary
+valid:
+  - "#[derive(Deserialize)]\n#[serde(tag = \"kind\")]\nenum Msg { A { x: u32 } }"
+invalid:
+  - "#[derive(Deserialize)]\n#[serde(untagged)]\nenum Msg { A { x: u32 }, B { x: u32, y: u32 } }"

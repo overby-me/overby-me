@@ -99,8 +99,8 @@
         # plural all-caps SQL keywords, percent-encoded UTF-8 fixtures, ported
         # short identifiers. Allow-listing those in the shared typos.toml would
         # mask real typos monorepo-wide, so skip the app instead
-        # (its i18n strings were already excluded). deslop and lychee, which DO
-        # find real issues here, stay enabled with tuned configs.
+        # (its i18n strings were already excluded). lychee, which DOES find
+        # real issues here, stays enabled with a tuned config.
         #
         # The Surface Pro 11 kernel patches are vendored upstream code, so
         # their spelling is not ours to fix: the touchscreen one abbreviates
@@ -271,8 +271,8 @@
         # candidates, lib and bin targets only, which is what this hook checks).
         #
         # The first group never fired anywhere, so it costs nothing today and
-        # keeps the pattern from arriving. Seven of them are rules the
-        # .deslop.toml files suppress by hand in up to nine projects.
+        # keeps the pattern from arriving. Seven of them are rules deslop's
+        # per-project configs used to suppress by hand before it was retired.
         unusedToday = [
           "dbg_macro"
           "todo"
@@ -313,14 +313,13 @@
           "implicit_hasher"
           "too_many_lines"
           # The zero-cost tier from sweeping all 321 not-yet-enabled
-          # allow-by-default lints across 54 cargo roots: each of these had
-          # zero first-party findings, so enabling is a free ratchet. Four
-          # near-free ones (iter_over_hash_type 11, empty_drop 1,
+          # allow-by-default lints across 54 cargo roots, plus the near-free
+          # tier once its ~22 sites were cleared: hash iterations feeding
+          # anything order-visible now sort first (invocation env, report
+          # output, tie-broken maxima), asserts carry messages, and the two
+          # deliberate exceptions are declared with reasons in the source.
           # string_to_string turned out removed upstream (implicit_clone
           # covers it) and is not listed.
-          # missing_assert_message 2, mixed_read_write_in_expression 3) wait
-          # on their sites; map_err_ignore (77) and
-          # undocumented_unsafe_blocks (134) have their own clearing task.
           "path_buf_push_overwrite"
           "suspicious_xor_used_as_pow"
           "mutex_integer"
@@ -336,6 +335,11 @@
           # carry crate-level contracts) has a SAFETY comment.
           "map_err_ignore"
           "undocumented_unsafe_blocks"
+          "iter_over_hash_type"
+          "empty_drop"
+          "missing_assert_message"
+          "mixed_read_write_in_expression"
+          "self_named_module_files"
         ];
         # same_name_method was dropped after apps/wiki first ran it: 154 hits
         # across 74 files, every one the `builder` that dioxus's Props derive
@@ -476,52 +480,6 @@
           done
           exit $exit_code
         ''}";
-        pass_filenames = true;
-      };
-      deslop = {
-        enable = true;
-        name = "deslop";
-        entry = "${pkgs.writeShellScript "deslop-precommit" ''
-          exit_code=0
-          # Collect unique scan roots: walk up from each file to find a
-          # .deslop.toml; if found, scan the containing directory (once).
-          # Files without a .deslop.toml ancestor are scanned individually.
-          declare -A seen_dirs
-          individual_files=()
-          for file in "$@"; do
-            dir="$(dirname "$file")"
-            found=""
-            d="$dir"
-            while true; do
-              if [ -f "$d/.deslop.toml" ]; then
-                found="$d"
-                break
-              fi
-              parent="$(dirname "$d")"
-              if [ "$parent" = "$d" ]; then
-                break
-              fi
-              d="$parent"
-            done
-            if [ -n "$found" ]; then
-              seen_dirs["$found"]=1
-            else
-              individual_files+=("$file")
-            fi
-          done
-          for d in "''${!seen_dirs[@]}"; do
-            if ! ${pkgs.deslop}/bin/deslop scan "$d"; then
-              exit_code=1
-            fi
-          done
-          for file in "''${individual_files[@]}"; do
-            if ! ${pkgs.deslop}/bin/deslop scan "$file"; then
-              exit_code=1
-            fi
-          done
-          exit $exit_code
-        ''}";
-        files = "\\.(rs|go|py)$";
         pass_filenames = true;
       };
       cargo-profiles = {

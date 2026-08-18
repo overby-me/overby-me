@@ -1,9 +1,0 @@
-[package]
-name = "oauth-spike"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-atrium-identity = { version = "0.1.9", features = ["doh-handle-resolver"] }
-atrium-oauth = "0.1.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

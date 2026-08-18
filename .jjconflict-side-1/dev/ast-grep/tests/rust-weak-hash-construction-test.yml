@@ -1,6 +1,0 @@
-id: rust-weak-hash-construction
-valid:
-  - "let h = Sha256::digest(data);"
-invalid:
-  - "let h = Md5::new();"
-  - "let d = md5::compute(bytes);"

@@ -1,0 +1,5 @@
+id: mojo-destructor-frees-unguarded
+valid:
+  - "struct Good:\n    var _ptr: EnginePtr\n    fn __del__(deinit self):\n        if self._ptr:\n            wasm_engine_delete(self._ptr)\n"
+invalid:
+  - "struct Bad:\n    var _ptr: EnginePtr\n    fn __del__(deinit self):\n        wasm_engine_delete(self._ptr)\n"

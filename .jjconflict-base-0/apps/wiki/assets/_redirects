@@ -1,5 +1,0 @@
-# SPA fallback for statichost.eu (Netlify _redirects format): serve the app
-# shell for any deep link (e.g. /radikal_ungdom/landsmøde_2026) so the client
-# router can resolve it, instead of the host 404-ing on a non-existent file.
-# Real files (assets, sw.js, …) are served first; only unknown paths fall back.
-/* /index.html 200

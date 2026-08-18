@@ -1,1 +1,0 @@
-{"name":"waker-fn","vers":"1.2.0","deps":[{"name":"portable-atomic-util","req":"^0.2","features":["alloc"],"optional":true,"default_features":false,"target":null,"kind":"normal"}],"cksum":"317211a0dc0ceedd78fb2ca9a44aed3d7b9b26f81870d485c07122b4350673b7","features":{"portable-atomic":["portable-atomic-util"]},"yanked":false,"rust_version":"1.51","pubtime":"2024-05-13T00:24:30Z"}
