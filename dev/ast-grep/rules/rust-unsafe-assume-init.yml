@@ -1,0 +1,15 @@
+# Ratchet: zero sites today.
+#
+# assume_init on a MaybeUninit that is not fully initialised is UB, including
+# for types where every bit pattern looks valid. clippy's uninit_assumed_init
+# catches only the immediate `MaybeUninit::uninit().assume_init()` shape, not a
+# value initialised across intervening statements, which is where the mistake
+# actually happens.
+id: rust-unsafe-assume-init
+language: rust
+severity: warning
+message: >-
+  assume_init claims every field is initialised. Write down what initialised
+  them, or build the value with write() and assume_init() at the end.
+rule:
+  pattern: $RECV.assume_init()
