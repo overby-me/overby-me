@@ -10,6 +10,10 @@
 //! result of the sensor set the drone carries, and watching the drift build up
 //! is a large part of what the simulator is for.
 
+// Navigation works in metres and radians as f32; the casts are the unit
+// conversion, not an accidental widening.
+#![allow(clippy::cast_precision_loss)]
+
 use crate::fc::Fc;
 use crate::fix16::Fix16;
 use crate::io::{APin, DPin, Tx};

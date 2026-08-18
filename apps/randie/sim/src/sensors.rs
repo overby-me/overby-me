@@ -4,6 +4,9 @@
 //! finds into the firmware's own sensor struct. From the firmware's side there
 //! is no difference between this and a wire.
 
+// Simulated sensor readings are floats by definition.
+#![allow(clippy::cast_precision_loss)]
+
 use core::f64::consts::FRAC_PI_2;
 
 use randie_firmware::laser::{LASER_MAX_DISTANCE_CM, Laser};

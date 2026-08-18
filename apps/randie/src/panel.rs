@@ -4,6 +4,10 @@
 //! `drawText` call per line at a hand-computed offset. It is DOM here, so the
 //! numbers can be selected and copied and the layout is the browser's problem.
 
+// Dioxus's #[component] macro generates a props struct whose accessors share
+// names with the component function's own.
+#![allow(clippy::same_name_method)]
+
 use dioxus::prelude::*;
 use randie_sim::BlockType;
 

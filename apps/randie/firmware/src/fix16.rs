@@ -14,6 +14,10 @@
 //! [`Fix16::OVERFLOW`] (which shares its bit pattern with [`Fix16::MIN`])
 //! rather than by wrapping or panicking.
 
+// A Q16.16 fixed-point type exists to be converted to and from f32, and its
+// min/max deliberately mirror the names f32 uses so the two read alike.
+#![allow(clippy::cast_precision_loss, clippy::same_name_method)]
+
 use core::fmt;
 use core::ops::{Add, AddAssign, Div, Mul, Neg, Rem, Sub, SubAssign};
 

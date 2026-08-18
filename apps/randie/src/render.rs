@@ -5,6 +5,9 @@
 //! that was drawn as text there -- the readouts down the right-hand side -- is
 //! DOM here instead, which is why there is no font work in this file.
 
+// Canvas coordinates are floats; the casts turn counts and indices into them.
+#![allow(clippy::cast_precision_loss)]
+
 use randie_firmware::laser::LASER_MAX_DISTANCE_CM;
 use randie_firmware::map::{FieldState, MAP_HEIGHT, MAP_WIDTH, Map};
 use randie_sim::block::{Block, BlockType};
