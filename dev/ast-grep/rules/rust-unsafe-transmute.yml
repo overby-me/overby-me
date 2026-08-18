@@ -1,0 +1,27 @@
+# Ratchet for first-party code: the five files that transmute are all in
+# safety/oxidized, safety/fe-c or apps/wiki/vendor, and the first two are ports
+# whose shape upstream fixes.
+#
+# transmute reinterprets bytes with no check that the target type accepts them,
+# so the proof is entirely in the author's head. clippy's transmute lints cover
+# specific pairs (transmute_ptr_to_ref, transmute_undefined_repr, the latter
+# already enabled here) but not the general case.
+id: rust-unsafe-transmute
+language: rust
+severity: warning
+message: >-
+  transmute reinterprets bytes with no validity check. Write down why the target
+  type accepts every bit pattern the source can hold, or use a checked
+  conversion.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+  - "safety/fe-c/**"
+rule:
+  any:
+    - pattern: transmute($$$ARGS)
+    - pattern: transmute_copy($$$ARGS)
+    - pattern: std::mem::transmute($$$ARGS)
+    - pattern: mem::transmute($$$ARGS)

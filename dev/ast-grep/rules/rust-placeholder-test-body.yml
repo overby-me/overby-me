@@ -1,0 +1,37 @@
+# Ratchet: zero sites.
+#
+# A test whose body is empty or a single todo!()/unimplemented!() passes, and a
+# passing test is indistinguishable from a working one on the summary line.
+# This tree has already shipped one test that could not fail
+# (test_clamp_does_not_overflow, asserted `r <= 255` on a u8), which is the
+# shape this catches before it lands.
+#
+# Narrower than deslop's test_without_assertion_signal, which NOTES.md records
+# as measured and rejected: that fired 14 times and was wrong 14 times, because
+# deciding whether a test asserts means following calls into helpers. This only
+# looks at bodies that contain nothing to follow.
+id: rust-placeholder-test-body
+language: rust
+severity: warning
+message: >-
+  This test has no body to fail. Give it an assertion, or delete it - a
+  placeholder that passes is worse than a missing test, because the summary line
+  counts it as covered.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  kind: function_item
+  follows:
+    kind: attribute_item
+    regex: '^#\[(test|tokio::test)\]$'
+  has:
+    field: body
+    any:
+      - pattern: "{ }"
+      - pattern: "{ todo!() }"
+      - pattern: "{ unimplemented!() }"
+      - pattern: "{ todo!(); }"
+      - pattern: "{ unimplemented!(); }"
