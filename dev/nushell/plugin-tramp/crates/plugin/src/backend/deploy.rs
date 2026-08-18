@@ -397,17 +397,14 @@ pub enum DeployResult {
 ///
 /// On any failure, returns `DeployResult::Fallback` with a reason string.
 pub async fn deploy_and_start(session: Arc<Session>, sftp: Option<&Sftp>) -> DeployResult {
-    // Step 1: detect remote target.
     let target = match detect_remote_target(&session).await {
         Ok(t) => t,
         Err(e) => return DeployResult::Fallback(format!("arch detection failed: {e}")),
     };
 
-    // Step 2: check if the agent is already deployed.
     let needs_upload = !is_agent_deployed(&session).await;
 
     if needs_upload {
-        // Step 3: find a cached binary to upload.
         let agent_bytes = match find_cached_agent(&target) {
             Some(path) => match std::fs::read(&path) {
                 Ok(data) => data,
@@ -430,7 +427,6 @@ pub async fn deploy_and_start(session: Arc<Session>, sftp: Option<&Sftp>) -> Dep
             }
         };
 
-        // Step 4: upload to the remote host.
         let upload_result = if let Some(sftp) = sftp {
             upload_agent_sftp(sftp, &agent_bytes).await
         } else {
@@ -447,7 +443,6 @@ pub async fn deploy_and_start(session: Arc<Session>, sftp: Option<&Sftp>) -> Dep
         }
     }
 
-    // Step 5: start the agent process.
     let agent = match start_agent(session).await {
         Ok(a) => a,
         Err(e) => return DeployResult::Fallback(format!("agent start failed: {e}")),

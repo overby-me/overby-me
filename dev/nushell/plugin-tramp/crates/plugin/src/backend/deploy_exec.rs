@@ -506,17 +506,14 @@ pub async fn deploy_and_start_in_container(
     runner: &dyn CommandRunner,
     target: &ContainerTarget,
 ) -> ExecDeployResult {
-    // Step 1: detect container architecture.
     let remote_target = match detect_container_target(runner, target).await {
         Ok(t) => t,
         Err(e) => return ExecDeployResult::Fallback(format!("arch detection failed: {e}")),
     };
 
-    // Step 2: check if agent is already deployed.
     let needs_upload = !is_agent_deployed_in_container(runner, target).await;
 
     if needs_upload {
-        // Step 3: find cached binary.
         let agent_bytes = match deploy::find_cached_agent(&remote_target) {
             Some(path) => match std::fs::read(&path) {
                 Ok(data) => data,
@@ -535,7 +532,6 @@ pub async fn deploy_and_start_in_container(
             }
         };
 
-        // Step 4: upload into the container.
         let upload_result = match target.kind {
             ContainerKind::Docker => upload_agent_docker(runner, &target.name, &agent_bytes).await,
             ContainerKind::Kubernetes => {
@@ -554,7 +550,6 @@ pub async fn deploy_and_start_in_container(
         }
     }
 
-    // Step 5: start the agent as an interactive process.
     let mut agent = match target.kind {
         ContainerKind::Docker => match start_agent_docker(&target.name, target.user.as_deref()) {
             Ok(a) => a,
@@ -568,7 +563,6 @@ pub async fn deploy_and_start_in_container(
         }
     };
 
-    // Step 6: take stdin/stdout and create the RPC client.
     let stdin = agent.take_stdin();
     let stdout = agent.take_stdout();
 
@@ -583,7 +577,6 @@ pub async fn deploy_and_start_in_container(
 
     let client = RpcClient::new(stdout, stdin);
 
-    // Step 7: ping to verify it's alive.
     let ping_result = tokio::time::timeout(AGENT_PING_TIMEOUT, client.ping()).await;
     match ping_result {
         Ok(Ok(())) => {}

@@ -1,0 +1,104 @@
+# deslop configuration for nushell-plugin-tramp, a TRAMP-style remote
+# filesystem plugin for Nushell and its companion RPC agent.
+#
+# Both crates are tokio-async throughout and the plugin speaks a binary RPC
+# protocol over ssh/docker transports. That combination hits deslop's weakest
+# Rust rules; the entries below say which are false positives and which are
+# accepted.
+
+disabled_rules = [
+  # FALSE POSITIVE, verified. The rule matches method names rather than types:
+  # `ops::file::read(id, params).await` and `ops::file::write(..).await` are
+  # this crate's own async ops, and they are flagged as blocking. The same rule
+  # flags `tokio::fs::*` and `tokio::time::sleep` elsewhere in this tree.
+  "rust_blocking_io_in_async",
+
+  # FALSE POSITIVE, same family. The locks are `tokio::sync::Mutex`, which is
+  # the lock type meant to be held across an await. clippy's
+  # `await_holding_lock` is warn-by-default and this workspace builds under
+  # `-D warnings`, so the real check already passes.
+  "rust_lock_across_await",
+  "rust_async_hold_permit_across_await",
+  "rust_async_lock_order_cycle",
+
+  # A remote-filesystem RPC future carries the request and its buffer, so it is
+  # large by construction; that is the payload, not accidental capture.
+  "rust_large_future_stack",
+
+  # FALSE POSITIVE. The flagged comparisons are protocol method names and
+  # status values ("file.read" == method), not secrets. The one real secret
+  # this handles is an ssh key path, which is never compared.
+  "rust_secret_equality_compare",
+
+  # The agent is deployed as a static musl binary and talks over stdio or a
+  # socket; spawning it and awaiting its handshake is the transport, and the
+  # supervision is the transport's own lifetime.
+  "rust_async_spawn_cancel_at_await",
+  "rust_detached_spawn_without_handle",
+  "rust_async_missing_fuse_pin",
+  "rust_async_recreate_future_in_select",
+
+  # The wire protocol is length-prefixed with fixed-width headers, so encoding
+  # a payload length to u32 is the format.
+  "rust_narrowing_numeric_cast",
+
+  # libc calls for pty setup, socket options and stat: thin wrappers whose
+  # safety is argued in the surrounding code rather than per block, matching
+  # the convention in the other Rust packages here.
+  "unsafe_without_safety_comment",
+  "rust_unsafe_raw_pointer_cast",
+
+  # Reads stream a remote file to the caller a chunk at a time, which is the
+  # point; buffering the whole file would defeat streaming a large one.
+  "rust_unbuffered_file_writes",
+  "rust_lines_allocate_per_line",
+
+  # Connection and stat caches keyed by host and path, from the user's own
+  # config, and none in a hot path.
+  "rust_hashmap_default_hasher",
+  "rust_mutex_wrapped_collection",
+  "rust_arc_mutex_option_state",
+
+  # FALSE POSITIVE, verified. vfs.rs scopes each `std::sync::Mutex` guard in
+  # its own block so it drops before the `.await`, which is the correct shape.
+  # deslop sees a lock and an await in one function and does not track the
+  # guard's live range; clippy's `await_holding_lock` is MIR-based, is
+  # warn-by-default, and reports nothing here.
+  "rust_async_std_mutex_await",
+
+  # `force` and `recursive` mirror the flags of the nushell commands these back.
+  "rust_public_bool_parameter_api",
+
+  # Each transport (ssh, docker exec, socket) sets up its connection the same
+  # way because that is what a transport does.
+  "rust_duplicate_bootstrap_sequence",
+  "rust_broad_allow_dead_code",
+  "rust_oversized_module_file",
+  "rust_mod_rs_catchall",
+
+  # `unwrap` on a mutex this module is sole writer of, and `expect` on the
+  # runtime handle at plugin startup, where failing is fatal anyway.
+  "unwrap_in_non_test_code",
+  "expect_in_non_test_code",
+
+  # Agent deploys read a cached binary whose size the cache itself bounds.
+  "rust_unbounded_read_to_string",
+
+  # The RPC envelope is an open protocol: an unknown field is a newer agent.
+  "rust_serde_unknown_fields_allowed",
+
+  # A remote path is absolute by construction, and joining it onto the remote
+  # root is how it is resolved.
+  "rust_path_join_absolute",
+
+  # `deploy_agent_over_exec_transport` is named for what it does.
+  "overlong_name",
+
+  # The plugin owns one runtime for its lifetime; the flagged builder is the
+  # one that creates it.
+  "rust_tokio_runtime_built_per_call",
+
+  # Decoding the output of an ssh or docker command is what this plugin does,
+  # once per command rather than in a loop.
+  "rust_utf8_validate_hot_path",
+]

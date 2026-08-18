@@ -11,7 +11,7 @@
 # # In your flake.nix:
 # {
 #   outputs = { self, nixpkgs, ... }: let
-#     cross = import ./nu-plugin-tramp/cross.nix { inherit nixpkgs; };
+#     cross = import ./plugin-tramp/cross.nix { inherit nixpkgs; };
 #   in {
 #     packages.x86_64-linux = {
 #       tramp-agent-x86_64-linux = cross.x86_64-linux;

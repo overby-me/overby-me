@@ -118,7 +118,6 @@ fn resolve_tramp_path(
     remote_cwd: &Mutex<Option<TrampPath>>,
     span: Span,
 ) -> Result<TrampPath, LabeledError> {
-    // Try parsing as a full TRAMP URI first.
     match protocol::parse(raw) {
         Ok(Some(path)) => return Ok(path),
         Ok(None) => {} // Not a TRAMP URI — try relative resolution below.
@@ -167,7 +166,6 @@ fn resolve_relative(base: &str, relative: &str) -> String {
         return normalize_path(relative);
     }
 
-    // Start with the base directory's components.
     let base_trimmed = base.trim_end_matches('/');
     let mut components: Vec<&str> = base_trimmed.split('/').filter(|c| !c.is_empty()).collect();
 
@@ -220,9 +218,8 @@ fn bytes_to_value(data: &[u8], remote_path: &str, span: Span) -> Value {
         .and_then(|e| e.to_str())
         .unwrap_or("");
 
-    // If the file is a known structured format, try to parse it via the raw
-    // text so the user gets a rich Value.  For Phase 1 we only handle JSON
-    // and TOML — extending this is trivial.
+    // A known structured format is parsed from the raw text so the caller gets
+    // a rich Value. Only JSON and TOML so far.
     if let Ok(text) = std::str::from_utf8(data) {
         match ext {
             "json" => {
@@ -231,15 +228,13 @@ fn bytes_to_value(data: &[u8], remote_path: &str, span: Span) -> Value {
                 }
             }
             "toml" => {
-                // Return as string — let the user pipe through `from toml`
+                // A string, to pipe through `from toml`.
             }
             _ => {}
         }
-        // Return as string for any valid UTF-8 content
         return Value::string(text, span);
     }
 
-    // Binary fallback
     Value::binary(data, span)
 }
 
@@ -248,15 +243,13 @@ fn bytes_to_value(data: &[u8], remote_path: &str, span: Span) -> Value {
 /// We do a very thin parse here: the nushell `from json` command is richer,
 /// but having *some* auto-detection makes `tramp open` immediately useful.
 fn serde_like_json(text: &str, span: Span) -> Result<Value, ()> {
-    // Try to parse as a JSON value using a simple recursive descent.
-    // For Phase 1, just return the raw string — the user can pipe through
-    // `from json`.  A future version could use serde_json.
+    // The raw string, to pipe through `from json`. Parsing it here with
+    // serde_json would be the richer answer.
     let trimmed = text.trim();
     if (trimmed.starts_with('{') && trimmed.ends_with('}'))
         || (trimmed.starts_with('[') && trimmed.ends_with(']'))
     {
-        // Looks like JSON — return as string so the user can `from json`
-        // This is better than returning binary.
+        // JSON-shaped: a string rather than binary, so `from json` works.
         return Ok(Value::string(text, span));
     }
     Err(())
@@ -283,7 +276,6 @@ fn complete_tramp_arg(
     arg_type: ArgType,
     idx: usize,
 ) -> Option<Vec<DynamicSuggestion>> {
-    // Only handle the positional argument we care about.
     match &arg_type {
         ArgType::Positional(i) if *i == idx => {}
         _ => return None,
@@ -569,6 +561,10 @@ impl PluginCommand for TrampOpen {
                 _ => ByteStreamType::Binary,
             };
 
+            // ByteStream::from_fn fixes the closure's error type as
+            // nu_protocol::ShellError, which is 192 bytes. Boxing it is not
+            // ours to do.
+            #[allow(clippy::result_large_err)]
             let byte_stream = ByteStream::from_fn(span, signals, stream_type, {
                 let mut offset: u64 = 0;
                 let mut done = false;
