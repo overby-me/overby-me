@@ -248,14 +248,14 @@ impl<'a> Parser<'a> {
 
         // One-address commands with range address
         // q/Q always reject ranges; others only in --posix mode
-        if matches!(address, AddressRange::Range(_, _)) {
-            if let Some(ch) = self.peek() {
-                let always_one_addr = b"qQ";
-                let posix_one_addr = b"aicl=rR";
-                if always_one_addr.contains(&ch) || (self.posix && posix_one_addr.contains(&ch)) {
-                    self.advance();
-                    return Err(self.err("command only uses one address"));
-                }
+        if matches!(address, AddressRange::Range(_, _))
+            && let Some(ch) = self.peek()
+        {
+            let always_one_addr = b"qQ";
+            let posix_one_addr = b"aicl=rR";
+            if always_one_addr.contains(&ch) || (self.posix && posix_one_addr.contains(&ch)) {
+                self.advance();
+                return Err(self.err("command only uses one address"));
             }
         }
 
@@ -283,21 +283,19 @@ impl<'a> Parser<'a> {
                 | Command::Block(_)
                 | Command::Transliterate(_, _)
         );
-        if zero_arg {
-            if let Some(ch) = self.peek() {
-                if ch != b'\n'
-                    && ch != b';'
-                    && ch != b'}'
-                    && ch != b'#'
-                    && ch != b' '
-                    && ch != b'\t'
-                {
-                    return Err(self.err_at(
-                        self.pos - self.cmd_start + 1,
-                        "extra characters after command",
-                    ));
-                }
-            }
+        if zero_arg
+            && let Some(ch) = self.peek()
+            && ch != b'\n'
+            && ch != b';'
+            && ch != b'}'
+            && ch != b'#'
+            && ch != b' '
+            && ch != b'\t'
+        {
+            return Err(self.err_at(
+                self.pos - self.cmd_start + 1,
+                "extra characters after command",
+            ));
         }
 
         Ok(Some(SedCommand {
@@ -311,7 +309,7 @@ impl<'a> Parser<'a> {
         let first = self.try_parse_address()?;
         match first {
             Some(Address::Relative(_)) | Some(Address::Multiple(_)) => {
-                return Err(self.err("invalid usage of +N or ~N as first address"));
+                Err(self.err("invalid usage of +N or ~N as first address"))
             }
             None => Ok(AddressRange::None),
             Some(addr) => {
@@ -547,7 +545,7 @@ impl<'a> Parser<'a> {
         } else {
             fix_posix_char_class(&pat)
         };
-        SedRegex::new(&pat).map_err(|e| self.err(&format!("{e}")))
+        SedRegex::new(&pat).map_err(|e| self.err(&e.to_string()))
     }
 
     fn parse_command_char(&mut self) -> Result<Command, String> {
@@ -923,8 +921,7 @@ impl<'a> Parser<'a> {
                                 let mut count = 0;
                                 for _ in 0..3 {
                                     if let Some(d) = self.peek()
-                                        && d >= b'0'
-                                        && d <= b'7'
+                                        && (b'0'..=b'7').contains(&d)
                                     {
                                         n = n * 8 + (d - b'0') as u32;
                                         self.advance();
@@ -1112,10 +1109,10 @@ impl<'a> Parser<'a> {
                                 // \c at end of set — incomplete
                             } else if next == b'\\' {
                                 self.advance();
-                                if let Some(next2) = self.peek() {
-                                    if next2 == b'\\' || next2 == delim {
-                                        self.advance();
-                                    }
+                                if let Some(next2) = self.peek()
+                                    && (next2 == b'\\' || next2 == delim)
+                                {
+                                    self.advance();
                                 }
                                 chars.push(ctrl_char(b'\\') as char);
                             } else {
@@ -1142,8 +1139,7 @@ impl<'a> Parser<'a> {
                         let mut n: u32 = 0;
                         for _ in 0..3 {
                             if let Some(d) = self.peek()
-                                && d >= b'0'
-                                && d <= b'7'
+                                && (b'0'..=b'7').contains(&d)
                             {
                                 n = n * 8 + (d - b'0') as u32;
                                 self.advance();

@@ -110,7 +110,7 @@ impl Engine {
                 .split(|&b| b == 0)
                 .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
                 .collect();
-            if self.input_lines.last().map_or(false, |s| s.is_empty()) {
+            if self.input_lines.last().is_some_and(|s| s.is_empty()) {
                 self.input_lines.pop();
             }
         } else {
@@ -122,7 +122,7 @@ impl Engine {
                 // Split raw bytes on newlines
                 let mut raw: Vec<Vec<u8>> =
                     data.split(|&b| b == b'\n').map(|l| l.to_vec()).collect();
-                if self.input_had_trailing_newline && raw.last().map_or(false, |s| s.is_empty()) {
+                if self.input_had_trailing_newline && raw.last().is_some_and(|s| s.is_empty()) {
                     raw.pop();
                 }
                 // Create lossy string versions for regex matching
@@ -525,11 +525,11 @@ impl Engine {
             {
                 return Some(vec![i]);
             }
-            if let Command::Block(ref inner) = cmd.command {
-                if let Some(mut path) = Self::find_label_path(inner, label) {
-                    path.insert(0, i);
-                    return Some(path);
-                }
+            if let Command::Block(ref inner) = cmd.command
+                && let Some(mut path) = Self::find_label_path(inner, label)
+            {
+                path.insert(0, i);
+                return Some(path);
             }
         }
         None
@@ -595,18 +595,17 @@ impl Engine {
                     if flags.print && flags.print_before_exec {
                         self.write_pattern_space();
                     }
-                    if flags.execute {
-                        if let Ok(output) = std::process::Command::new("sh")
+                    if flags.execute
+                        && let Ok(output) = std::process::Command::new("sh")
                             .arg("-c")
                             .arg(&self.pattern_space)
                             .output()
-                        {
-                            let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-                            if text.ends_with('\n') {
-                                text.pop();
-                            }
-                            self.pattern_space = text;
+                    {
+                        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+                        if text.ends_with('\n') {
+                            text.pop();
                         }
+                        self.pattern_space = text;
                     }
                     if flags.print && !flags.print_before_exec {
                         self.write_pattern_space();
@@ -1019,15 +1018,15 @@ impl Engine {
         } else {
             // First match — use find_iter for position, captures for groups
             let matches = re.find_iter(&input);
-            if let Some((start, end)) = matches.into_iter().next() {
-                if let Some(caps) = re.captures(&input[start..]) {
-                    let mut result = String::new();
-                    result.push_str(&input[..start]);
-                    result.push_str(&build_replacement(&caps, replacement));
-                    result.push_str(&input[end..]);
-                    self.pattern_space = result;
-                    return true;
-                }
+            if let Some((start, end)) = matches.into_iter().next()
+                && let Some(caps) = re.captures(&input[start..])
+            {
+                let mut result = String::new();
+                result.push_str(&input[..start]);
+                result.push_str(&build_replacement(&caps, replacement));
+                result.push_str(&input[end..]);
+                self.pattern_space = result;
+                return true;
             }
         }
 

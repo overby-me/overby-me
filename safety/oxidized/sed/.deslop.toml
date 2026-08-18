@@ -1,0 +1,71 @@
+# deslop configuration for oxidized-sed
+#
+# A stream editor reimplementing GNU sed is shaped by two things it does not
+# choose: the sed language, and the byte-for-byte behaviour of the program it
+# replaces. The rules below fire on that shape. Rules that would catch a
+# defect introduced here are left on - the argument-parsing bug that this file
+# was written alongside was found by building nixpkgs with it, not by a lint,
+# and nothing here would have hidden it.
+
+disabled_rules = [
+  # ── The sed language ──────────────────────────────────────────────────
+  # Scripts are parsed character by character and bytes are addressable
+  # individually, because a sed script is not required to be UTF-8 and a
+  # replacement has to be able to reproduce the byte it matched. That is
+  # what the Latin-1 fallback is for, and every `as` in it is the cast the
+  # fallback is made of.
+  "rust_narrowing_numeric_cast",
+  "rust_utf8_validate_hot_path",
+
+  # The engine walks a command list and reads several fields of each command
+  # per line of input. That is what executing a program is.
+  "rust_aos_hot_path",
+
+  # Options are what the command line says: `-n`, `-s`, `-z`, `--posix` are
+  # booleans because they are flags, and `Options` carries them as the
+  # primitives they were parsed from.
+  "rust_constructor_many_flags",
+  "rust_public_bool_parameter_api",
+  "rust_domain_raw_primitive",
+  "rust_partial_init_escape",
+
+  # ── Matching GNU byte for byte ────────────────────────────────────────
+  # sed writes a line at a time because that is the observable behaviour
+  # `-u` exists to make unconditional; buffering it would change what a
+  # reader downstream sees and when.
+  "rust_unbuffered_file_writes",
+
+  # `-f -` reads a script from stdin, whose length is the user's business.
+  "rust_unbounded_read_to_string",
+
+  # Comparing a label, a command name or a flag with == is string handling.
+  # There are no secrets in a sed script.
+  "rust_secret_equality_compare",
+
+  # The default hasher is fine for the labels of one script.
+  "rust_hashmap_default_hasher",
+
+  # ── Low signal here ───────────────────────────────────────────────────
+  # The parser and engine call each other through short local helpers that
+  # deslop's symbol index does not resolve, and the `unreachable!` arms are
+  # exhaustiveness on command enums rather than leftovers.
+  "hallucinated_import_call",
+  "unreachable_macro_leftover",
+
+  # engine.rs allows dead_code for the command variants that are parsed and
+  # not yet executed, which is how a port in progress says what it has not
+  # reached. The list of those is docs/, not a lint.
+  "rust_broad_allow_dead_code",
+
+  # Overflow checks are off in release, and turning them on is a behaviour
+  # change rather than a tightening: line numbers, `s///N` counts and byte
+  # offsets all come from the script, and where GNU wraps this would panic.
+  # Deferred deliberately, not judged safe.
+  "rust_release_profile_missing_overflow_checks",
+
+  # One `unsafe` block: `File::from_raw_fd(0)` for the unbuffered path, so a
+  # one-byte reader leaves unconsumed input on the pipe for whoever runs
+  # next after `q`. The lines around it say that; what they do not say is
+  # the word SAFETY.
+  "unsafe_without_safety_comment",
+]

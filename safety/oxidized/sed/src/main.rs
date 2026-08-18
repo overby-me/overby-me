@@ -89,7 +89,7 @@ fn collect_branches(commands: &[types::SedCommand], branches: &mut Vec<String>) 
                 branches.push(l.clone());
             }
             types::Command::Block(inner) => {
-                collect_branches(&inner, branches);
+                collect_branches(inner, branches);
             }
             _ => {}
         }
@@ -107,6 +107,38 @@ fn validate_labels(commands: &[types::SedCommand]) {
             process::exit(1);
         }
     }
+}
+
+/// Whether `-e` or `-f` appears anywhere, which is what decides that no
+/// operand is the script.
+///
+/// Reads the same grammar the walk below does, and stops at the first option
+/// in a cluster that swallows the rest of it: `-e`/`-f` take what follows as
+/// their argument, and `-i` takes it as a suffix - so the `e` in `-ie` is a
+/// backup suffix, not an expression.
+fn has_script_option(args: &[String]) -> bool {
+    for arg in args {
+        if arg == "--" {
+            return false;
+        }
+        if arg == "--expression" || arg == "--file" {
+            return true;
+        }
+        if arg.starts_with("--expression=") || arg.starts_with("--file=") {
+            return true;
+        }
+        if !arg.starts_with('-') || arg.starts_with("--") || arg.len() < 2 {
+            continue;
+        }
+        for c in arg[1..].chars() {
+            match c {
+                'e' | 'f' => return true,
+                'i' => break,
+                _ => {}
+            }
+        }
+    }
+    false
 }
 
 fn read_script_file(path: &str) -> Result<String, String> {
@@ -149,6 +181,17 @@ fn parse_options() -> Options {
         follow_symlinks: false,
         line_length: 70,
     };
+
+    // Whether a script is supplied by an option, decided before the walk
+    // rather than during it.
+    //
+    // POSIX and GNU both say the first operand is the script only when no -e
+    // and no -f was given, and "was given" is about the whole command line,
+    // not about what has been seen so far. Deciding it positionally makes
+    // `sed -i FILE -e SCRIPT` take FILE as the script, which is the order
+    // nixpkgs' libtool fixup uses: it failed with "can't find label for jump
+    // to `.sh'", having parsed ./ltmain.sh as a `t` command.
+    let scripted = has_script_option(&args);
 
     let mut i = 0;
     let mut saw_dashdash = false;
@@ -363,7 +406,7 @@ fn parse_options() -> Options {
                 process::exit(2);
             }
             _ => {
-                if opts.scripts.is_empty() {
+                if !scripted && opts.scripts.is_empty() {
                     expr_count += 1;
                     opts.scripts.push(ScriptEntry {
                         source: ScriptSource::Expression(expr_count),
@@ -386,14 +429,13 @@ fn parse_options() -> Options {
     // GNU sed uses COLS - 1 as the wrap width
     if opts.line_length == 70 {
         // Only apply COLS if -l wasn't explicitly set
-        if let Ok(cols) = std::env::var("COLS") {
-            if let Ok(n) = cols.parse::<usize>() {
-                if n > 1 {
-                    opts.line_length = n - 1;
-                }
-                // COLS=0 or COLS=1 → use default
-            }
+        if let Ok(cols) = std::env::var("COLS")
+            && let Ok(n) = cols.parse::<usize>()
+            && n > 1
+        {
+            opts.line_length = n - 1;
         }
+        // COLS=0 or COLS=1 → use default
     }
 
     opts
@@ -473,18 +515,17 @@ fn main() {
         }
         for file in &opts.files {
             // Check file type for in-place editing
-            if let Ok(meta) = std::fs::metadata(file) {
-                if !meta.is_file() {
-                    if meta.file_type().is_fifo() || meta.file_type().is_char_device() {
-                        let kind = if meta.file_type().is_char_device() {
-                            "is a terminal"
-                        } else {
-                            "not a regular file"
-                        };
-                        eprintln!("sed: couldn't edit {file}: {kind}");
-                        process::exit(4);
-                    }
-                }
+            if let Ok(meta) = std::fs::metadata(file)
+                && !meta.is_file()
+                && (meta.file_type().is_fifo() || meta.file_type().is_char_device())
+            {
+                let kind = if meta.file_type().is_char_device() {
+                    "is a terminal"
+                } else {
+                    "not a regular file"
+                };
+                eprintln!("sed: couldn't edit {file}: {kind}");
+                process::exit(4);
             }
 
             let actual_read = if opts.follow_symlinks {

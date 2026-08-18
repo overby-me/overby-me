@@ -26,10 +26,10 @@ impl SedRegex {
                     .map(SedRegex::Fancy)
                     .map_err(|e| {
                         let msg = format!("{e}");
-                        if let Some(rest) = msg.strip_prefix("Parsing error at position ") {
-                            if let Some(colon_pos) = rest.find(": ") {
-                                return rest[colon_pos + 2..].to_string();
-                            }
+                        if let Some(rest) = msg.strip_prefix("Parsing error at position ")
+                            && let Some(colon_pos) = rest.find(": ")
+                        {
+                            return rest[colon_pos + 2..].to_string();
                         }
                         if let Some(rest) = msg.strip_prefix("Error compiling regex: ") {
                             return rest.to_string();
@@ -54,7 +54,7 @@ impl SedRegex {
         }
     }
 
-    pub fn find_iter<'r, 't>(&'r self, text: &'t str) -> Vec<(usize, usize)> {
+    pub fn find_iter(&self, text: &str) -> Vec<(usize, usize)> {
         match self {
             SedRegex::Fast(re) => re.find_iter(text).map(|m| (m.start(), m.end())).collect(),
             SedRegex::Fancy(re) => re
