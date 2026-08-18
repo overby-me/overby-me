@@ -7,6 +7,16 @@
   # RTK hook script path (managed via home.file)
   rtkHookPath = "${config.home.homeDirectory}/.claude/hooks/rtk-rewrite.sh";
 
+  # One `.claude/skills/<name>` entry per directory in skills/vendored, whose
+  # README says where they came from. A file there is documentation about the
+  # set rather than a skill, so only directories count.
+  vendoredSkills = let
+    dir = ./skills/vendored;
+  in
+    lib.mapAttrs' (name: _:
+      lib.nameValuePair ".claude/skills/${name}" {source = dir + "/${name}";})
+    (lib.filterAttrs (_: type: type == "directory") (builtins.readDir dir));
+
   inherit (pkgs.pkgsUnstable) rtk;
 
   # Thin delegating hook script — all rewrite logic lives in `rtk rewrite`.
@@ -245,23 +255,21 @@
   claudeMdPath = "${config.home.homeDirectory}/.claude/CLAUDE.md";
 in {
   home = {
-    file = {
-      # RTK hook script (thin delegator → rtk rewrite)
-      ".claude/hooks/rtk-rewrite.sh" = {
-        source = rtkRewriteHook;
-        executable = true;
-      };
+    file =
+      {
+        # RTK hook script (thin delegator → rtk rewrite)
+        ".claude/hooks/rtk-rewrite.sh" = {
+          source = rtkRewriteHook;
+          executable = true;
+        };
 
-      # RTK awareness instructions for Claude Code agents
-      ".claude/RTK.md".source = rtkAwarenessMd;
-
-      # Locally authored skills. Kept beside this module as real files rather
-      # than inlined the way RTK.md is above: they are markdown that wants
-      # diffing and editing as markdown, and a skill full of code examples would
-      # otherwise have to escape every dollar-brace and pair of single quotes
-      # to survive a Nix indented string.
-      ".claude/skills/code-comments".source = ./skills/code-comments;
-    };
+        # RTK awareness instructions for Claude Code agents
+        ".claude/RTK.md".source = rtkAwarenessMd;
+      }
+      # Skills, by reading the directory rather than listing them: they arrive
+      # as a set from one upstream, so naming each here would be a second list
+      # to keep in step with the first.
+      // vendoredSkills;
     # Copy settings.json and CLAUDE.md (not symlink) so Claude Code can write to them
     activation.claudeSettings = lib.hm.dag.entryAfter ["writeBoundary"] ''
       install -Dm644 ${claudeSettingsJson} ${settingsPath}
