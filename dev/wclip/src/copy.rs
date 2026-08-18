@@ -77,9 +77,14 @@ fn read_input(args: &Args) -> io::Result<Vec<u8>> {
         if file == "-" {
             io::stdin().lock().read_to_end(&mut data)?;
         } else {
-            let mut fh =
-                File::open(file).map_err(|e| io::Error::new(e.kind(), format!("{file}: {e}")))?;
-            fh.read_to_end(&mut data)?;
+            // fs::read would replace `data` rather than append to it, and it
+            // cannot name the file in the error the way this does.
+            #[allow(clippy::verbose_file_reads)]
+            {
+                let mut fh = File::open(file)
+                    .map_err(|e| io::Error::new(e.kind(), format!("{file}: {e}")))?;
+                fh.read_to_end(&mut data)?;
+            }
         }
     }
     Ok(data)

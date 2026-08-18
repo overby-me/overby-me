@@ -98,6 +98,8 @@ impl<'a> ArgReader<'a> {
         ArgReader { buf, pos: 0 }
     }
 
+    // The slice is a fixed four-byte window, so try_into always fits.
+    #[allow(clippy::unwrap_used)]
     pub fn uint(&mut self) -> u32 {
         let v = u32::from_ne_bytes(self.buf[self.pos..self.pos + 4].try_into().unwrap());
         self.pos += 4;
@@ -210,6 +212,9 @@ impl Connection {
     }
 
     /// Serialize and send a request.
+    // By value because every caller hands over a fresh `Msg::new(..)` builder
+    // chain; taking a reference would only put an `&` in front of each one.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn send(&mut self, msg: Msg) -> io::Result<()> {
         let total = 8 + msg.body.len();
         if total > u16::MAX as usize {
@@ -224,6 +229,9 @@ impl Connection {
     }
 
     /// Read and decode the next event from the compositor.
+    // The slices are fixed four-byte windows of an eight-byte header, so
+    // try_into always fits.
+    #[allow(clippy::unwrap_used, clippy::unwrap_in_result)]
     pub fn next_message(&mut self) -> io::Result<Message> {
         self.fill(8)?;
         let sender = u32::from_ne_bytes(self.read_buf[0..4].try_into().unwrap());
@@ -260,14 +268,14 @@ impl Connection {
         let mut buf = [0u8; CAP];
         let mut cmsg = [0u8; 512];
         let mut iov = libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+            iov_base: buf.as_mut_ptr().cast::<libc::c_void>(),
             iov_len: CAP,
         };
         // SAFETY: msghdr is plain data; we fully initialize the fields we use.
         let mut mhdr: libc::msghdr = unsafe { mem::zeroed() };
         mhdr.msg_iov = &mut iov;
         mhdr.msg_iovlen = 1;
-        mhdr.msg_control = cmsg.as_mut_ptr() as *mut libc::c_void;
+        mhdr.msg_control = cmsg.as_mut_ptr().cast::<libc::c_void>();
         mhdr.msg_controllen = cmsg.len() as _;
 
         let n =
@@ -298,7 +306,7 @@ impl Connection {
                         let mut fd: RawFd = 0;
                         ptr::copy_nonoverlapping(
                             data.add(i * FD_SIZE),
-                            &mut fd as *mut RawFd as *mut u8,
+                            std::ptr::from_mut::<RawFd>(&mut fd).cast::<u8>(),
                             FD_SIZE,
                         );
                         self.fds_in.push_back(OwnedFd::from_raw_fd(fd));
@@ -334,7 +342,7 @@ impl Connection {
 
             // Descriptors ride along only with the first chunk.
             if sent == 0 && !fds.is_empty() {
-                mhdr.msg_control = cmsg.as_mut_ptr() as *mut libc::c_void;
+                mhdr.msg_control = cmsg.as_mut_ptr().cast::<libc::c_void>();
                 mhdr.msg_controllen = cmsg.len() as _;
                 unsafe {
                     let hdr = libc::CMSG_FIRSTHDR(&mhdr);
@@ -344,7 +352,7 @@ impl Connection {
                     let data = libc::CMSG_DATA(hdr);
                     for (i, &fd) in fds.iter().enumerate() {
                         ptr::copy_nonoverlapping(
-                            &fd as *const RawFd as *const u8,
+                            std::ptr::from_ref::<RawFd>(&fd).cast::<u8>(),
                             data.add(i * FD_SIZE),
                             FD_SIZE,
                         );

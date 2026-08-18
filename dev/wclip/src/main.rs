@@ -4,6 +4,11 @@
 //! directly (no libwayland), using the `ext-data-control` or `wlr-data-control`
 //! protocol. See the module docs in `proto.rs` and `wire.rs` for details.
 
+// The libc wrappers here argue safety for the whole function: the sendmsg /
+// recvmsg / pipe2 / fork calls need their arguments read together, not one
+// operation at a time. Same reasoning .deslop.toml records.
+#![allow(clippy::multiple_unsafe_ops_per_block)]
+
 mod args;
 mod copy;
 mod paste;
