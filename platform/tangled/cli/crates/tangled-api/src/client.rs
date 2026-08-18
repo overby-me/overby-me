@@ -8,6 +8,25 @@ use tangled_config::session::Session;
 
 use crate::oauth::PersistedOAuthSession;
 
+/// The one HTTP client for this crate, built once with a total timeout.
+///
+/// `reqwest::Client::new()` can never carry a timeout, so every call through
+/// it could hang forever on a stuck peer; per-call construction also gave up
+/// connection pooling. Fallible rather than expect-ing: every caller is
+/// already in a Result, and the only build failure is TLS backend
+/// initialisation. A request that needs a different budget overrides it with
+/// `RequestBuilder::timeout`.
+pub(crate) fn http_client() -> Result<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    Ok(CLIENT.get_or_init(|| built))
+}
+
 /// Gzip-compress a byte slice.
 fn gzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -97,7 +116,7 @@ impl TangledClient {
                 )
             });
         }
-        let client = reqwest::Client::new();
+        let client = http_client()?;
         let mut reqb = client
             .post(url)
             .header(reqwest::header::CONTENT_TYPE, "application/json");
@@ -125,7 +144,7 @@ impl TangledClient {
             crate::oauth::oauth_post(oauth, &url, &json_body).await?;
             return Ok(());
         }
-        let client = reqwest::Client::new();
+        let client = http_client()?;
         let mut reqb = client
             .post(url)
             .header(reqwest::header::CONTENT_TYPE, "application/json");
@@ -159,9 +178,12 @@ impl TangledClient {
             return Ok(res["blob"].clone());
         }
 
-        let client = reqwest::Client::new();
+        let client = http_client()?;
         let res = client
             .post(&url)
+            // A large blob on a slow link can honestly need more than the
+            // shared 30s; the override budgets the whole transfer.
+            .timeout(std::time::Duration::from_secs(300))
             .header(
                 reqwest::header::AUTHORIZATION,
                 format!("Bearer {}", access_jwt),
@@ -202,7 +224,7 @@ impl TangledClient {
                 )
             });
         }
-        let client = reqwest::Client::new();
+        let client = http_client()?;
         let mut reqb = client
             .get(&url)
             .query(&params)
@@ -285,7 +307,7 @@ impl TangledClient {
             handle: String,
         }
         let url = self.xrpc_url("com.atproto.server.refreshSession");
-        let client = reqwest::Client::new();
+        let client = http_client()?;
         let res = client
             .post(url)
             .header(
@@ -1529,7 +1551,7 @@ impl TangledClient {
             "{}/xrpc/com.atproto.sync.getBlob?did={did}&cid={cid}",
             pds_base.trim_end_matches('/')
         );
-        let res = reqwest::Client::new().get(&url).send().await?;
+        let res = http_client()?.get(&url).send().await?;
         let status = res.status();
         let bytes = res.bytes().await?;
         if !status.is_success() {
@@ -1623,12 +1645,7 @@ impl TangledClient {
             Some(host) => format!("https://{host}/.well-known/did.json"),
             None => format!("https://plc.directory/{did}"),
         };
-        let body = reqwest::Client::new()
-            .get(&url)
-            .send()
-            .await?
-            .text()
-            .await?;
+        let body = http_client()?.get(&url).send().await?.text().await?;
         // plc.directory answers with a did+ld+json content type, so this is
         // parsed explicitly rather than through .json().
         let doc: DidDoc = serde_json::from_str(&body).map_err(|e| anyhow!("resolve {did}: {e}"))?;

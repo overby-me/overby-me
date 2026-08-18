@@ -28,7 +28,11 @@ struct DohJsonDnsTxtResolver {
 impl Default for DohJsonDnsTxtResolver {
     fn default() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            // Clone shares the pooled, timeout-carrying client (a Client is
+            // an Arc inside). Default is infallible, so the only build
+            // failure - TLS backend init - falls back to a bare client
+            // rather than panicking in a Default impl.
+            client: crate::client::http_client().cloned().unwrap_or_default(),
         }
     }
 }
@@ -210,7 +214,7 @@ pub async fn refresh(persisted: &PersistedOAuthSession) -> Result<PersistedOAuth
     struct ServerMetadata {
         token_endpoint: String,
     }
-    let metadata: ServerMetadata = reqwest::Client::new()
+    let metadata: ServerMetadata = crate::client::http_client()?
         .get(format!(
             "{}/.well-known/oauth-authorization-server",
             token_set.iss.trim_end_matches('/')

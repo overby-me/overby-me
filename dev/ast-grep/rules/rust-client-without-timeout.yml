@@ -16,5 +16,13 @@ files:
 ignores:
   - "apps/wiki/**"
   - "safety/oxidized/**"
+  # Test clients talk to local fixtures; a hang there is the test timeout's
+  # job.
+  - "**/tests/**"
 rule:
   pattern: reqwest::Client::new()
+  not:
+    inside:
+      kind: mod_item
+      stopBy: end
+      has: {field: name, regex: '^tests?$'}

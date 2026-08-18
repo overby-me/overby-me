@@ -317,6 +317,8 @@
           # allow-by-default lints across 54 cargo roots: each of these had
           # zero first-party findings, so enabling is a free ratchet. Four
           # near-free ones (iter_over_hash_type 11, empty_drop 1,
+          # string_to_string turned out removed upstream (implicit_clone
+          # covers it) and is not listed.
           # missing_assert_message 2, mixed_read_write_in_expression 3) wait
           # on their sites; map_err_ignore (77) and
           # undocumented_unsafe_blocks (134) have their own clearing task.
@@ -326,7 +328,6 @@
           "rc_clone_in_vec_init"
           "tests_outside_test_module"
           "disallowed_script_idents"
-          "string_to_string"
           "unwrap_in_result"
           "unnecessary_safety_comment"
           "create_dir"
