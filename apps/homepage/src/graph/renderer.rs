@@ -148,28 +148,25 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(gl: GL) -> Result<Self, String> {
-        // Enable blending and depth test
         gl.enable(GL::BLEND);
         gl.blend_func(GL::SRC_ALPHA, GL::ONE_MINUS_SRC_ALPHA);
         gl.enable(GL::DEPTH_TEST);
         gl.clear_color(0.133, 0.133, 0.133, 1.0); // #222222
 
-        // Compile shader programs
         let sprite_program = compile_program(&gl, SPRITE_VERT, SPRITE_FRAG)?;
         let sphere_program = compile_program(&gl, SPHERE_VERT, SPHERE_FRAG)?;
         let line_program = compile_program(&gl, LINE_VERT, LINE_FRAG)?;
         let particle_program = compile_program(&gl, PARTICLE_VERT, PARTICLE_FRAG)?;
 
-        // Create quad geometry (unit quad centered at origin)
+        // A unit quad, centred at the origin.
         let quad_verts: [f32; 8] = [-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5];
         let quad_indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
         let quad_buffer = create_buffer(&gl, GL::ARRAY_BUFFER, &quad_verts)?;
         let quad_index_buffer = create_buffer(&gl, GL::ELEMENT_ARRAY_BUFFER, &quad_indices)?;
 
-        // Create sphere geometry
         let sphere_mesh = create_sphere_mesh(&gl, 15.0, 48, 32)?;
 
-        // Create line buffer (dynamic, will be updated each frame)
+        // Dynamic: rewritten every frame.
         let line_buffer = gl.create_buffer().ok_or("failed to create line buffer")?;
 
         Ok(Self {

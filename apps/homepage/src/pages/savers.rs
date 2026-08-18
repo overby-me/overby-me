@@ -3654,43 +3654,34 @@ fn flipscreen3d_body(args: StartArgs) -> Runner3d {
 fn peepers_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::peepers::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn carousel_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(carousel_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn chompytower_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(chompytower_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn skytentacles_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(skytentacles_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gltext_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(gltext_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glmatrix_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glmatrix_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn starwars_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(starwars_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn fliptext_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(fliptext_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn flipflop_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(flipflop_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn flipscreen3d_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(flipscreen3d_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn peepers_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(peepers_body(args)) })
 }
@@ -3724,43 +3715,34 @@ fn mirrorblob_body(args: StartArgs) -> Runner3d {
 fn maze3d_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::maze3d::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn photopile_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(photopile_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gflux_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(gflux_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hexstrut_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hexstrut_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn sballs_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(sballs_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn sierpinski3d_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(sierpinski3d_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn noof_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(noof_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn moebius_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(moebius_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn moebiusgears_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(moebiusgears_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn mirrorblob_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(mirrorblob_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn maze3d_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(maze3d_body(args)) })
 }
@@ -3794,43 +3776,34 @@ fn antmaze_body(args: StartArgs) -> Runner3d {
 fn antspotlight_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::antspotlight::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn nakagin_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(nakagin_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn menger_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(menger_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hypnowheel_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hypnowheel_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cubestack_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cubestack_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cubestorm_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cubestorm_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn vigilance_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(vigilance_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn voronoi_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(voronoi_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn antinspect_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(antinspect_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn antmaze_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(antmaze_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn antspotlight_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(antspotlight_body(args)) })
 }
@@ -3864,43 +3837,34 @@ fn cubenetic_body(args: StartArgs) -> Runner3d {
 fn raverhoop_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::raverhoop::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn atunnel_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(atunnel_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn beats_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(beats_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn covid19_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(covid19_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn co_9_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(co_9_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn crumbler_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(crumbler_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cube21_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cube21_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cubetwist_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cubetwist_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cubocteversion_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cubocteversion_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cubenetic_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cubenetic_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn raverhoop_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(raverhoop_body(args)) })
 }
@@ -3934,43 +3898,34 @@ fn energystream_body(args: StartArgs) -> Runner3d {
 fn pinion_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::pinion::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn romanboy_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(romanboy_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn razzledazzle_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(razzledazzle_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn rubik_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(rubik_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn rubikblocks_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(rubikblocks_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn discoball_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(discoball_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn dumpsterfire_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(dumpsterfire_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn dymaxionmap_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(dymaxionmap_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn endgame_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(endgame_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn energystream_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(energystream_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn pinion_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(pinion_body(args)) })
 }
@@ -4004,43 +3959,34 @@ fn klondike_body(args: StartArgs) -> Runner3d {
 fn lament_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::lament::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn pipes_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(pipes_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn platonicfolding_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(platonicfolding_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn polyhedra_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(polyhedra_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn providence_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(providence_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn pulsar_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(pulsar_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn quasicrystal_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(quasicrystal_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn kallisti_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(kallisti_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn klein_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(klein_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn klondike_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(klondike_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn lament_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(lament_body(args)) })
 }
@@ -4074,43 +4020,34 @@ fn cage_body(args: StartArgs) -> Runner3d {
 fn circuit_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::circuit::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn lavalite_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(lavalite_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn lockward_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(lockward_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glsnake_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glsnake_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gravitywell_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(gravitywell_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hextrail_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hextrail_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn bouncingcow_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(bouncingcow_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn boxed_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(boxed_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn bubble3d_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(bubble3d_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn cage_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cage_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn circuit_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(circuit_body(args)) })
 }
@@ -4144,43 +4081,34 @@ fn hydrostat_body(args: StartArgs) -> Runner3d {
 fn topblock_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::topblock::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn cityflow_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(cityflow_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn blocktube_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(blocktube_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn boing_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(boing_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn blinkbox_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(blinkbox_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn surfaces_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(surfaces_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn tronbit_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(tronbit_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn morph3d_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(morph3d_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hopffibration_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hopffibration_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hydrostat_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hydrostat_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn topblock_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(topblock_body(args)) })
 }
@@ -4214,43 +4142,34 @@ fn esper_body(args: StartArgs) -> Runner3d {
 fn etruscanvenus_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::etruscanvenus::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn skulloop_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(skulloop_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn sphereeversion_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(sphereeversion_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn spheremonics_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(spheremonics_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hypertorus_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hypertorus_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn tangram_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(tangram_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn timetunnel_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(timetunnel_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn papercube_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(papercube_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn engine_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(engine_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn esper_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(esper_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn etruscanvenus_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(etruscanvenus_body(args)) })
 }
@@ -4284,43 +4203,34 @@ fn glslideshow_body(args: StartArgs) -> Runner3d {
 fn hilbert_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::hilbert::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn molecule_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(molecule_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn projectiveplane_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(projectiveplane_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn polytopes_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(polytopes_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn queens_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(queens_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn geodesic_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(geodesic_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn geodesicgears_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(geodesicgears_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glforestfire_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glforestfire_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gleidescope_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(gleidescope_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glslideshow_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glslideshow_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hilbert_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(hilbert_body(args)) })
 }
@@ -4354,43 +4264,34 @@ fn splodesic_body(args: StartArgs) -> Runner3d {
 fn jigglypuff_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::jigglypuff::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn jigsaw_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(jigsaw_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn superquadrics_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(superquadrics_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn unknownpleasures_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(unknownpleasures_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn sonar_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(sonar_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn squirtorus_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(squirtorus_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn stairs_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(stairs_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn stonerview_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(stonerview_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn splitflap_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(splitflap_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn splodesic_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(splodesic_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn jigglypuff_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(jigglypuff_body(args)) })
 }
@@ -4424,43 +4325,34 @@ fn glhanoi_body(args: StartArgs) -> Runner3d {
 fn glknots_body(args: StartArgs) -> Runner3d {
     xscreensaver::hacks3d::glknots::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn kaleidocycle_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(kaleidocycle_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glplanet_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glplanet_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glschool_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glschool_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn flyingtoasters_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(flyingtoasters_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gears_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(gears_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gibson_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(gibson_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glcells_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glcells_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glblur_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glblur_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glhanoi_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glhanoi_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn glknots_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(glknots_body(args)) })
 }
@@ -4494,43 +4386,34 @@ fn driftclouds_body(args: StartArgs) -> Shadertoy {
 fn elementalring_body(args: StartArgs) -> Shadertoy {
     xscreensaver::shadertoy::elementalring::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn dangerball_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(dangerball_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn deepstars_start(args: StartArgs) -> Runner3dFuture {
     Box::pin(async { Some(deepstars_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn alienbeacon_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(alienbeacon_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn batteredplanet_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(batteredplanet_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn bestill_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(bestill_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn bubblecolors_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(bubblecolors_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn darktransit_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(darktransit_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn downfall_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(downfall_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn driftclouds_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(driftclouds_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn elementalring_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(elementalring_body(args)) })
 }
@@ -4564,43 +4447,34 @@ fn prococean_body(args: StartArgs) -> Shadertoy {
 fn protophore_body(args: StartArgs) -> Shadertoy {
     xscreensaver::shadertoy::protophore::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn fluxcore_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(fluxcore_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn gimbalharmonics_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(gimbalharmonics_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn goldenapollian_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(goldenapollian_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn hexplasma_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(hexplasma_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn logarithmiccircles_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(logarithmiccircles_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn neongravity_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(neongravity_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn neontriangulator_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(neontriangulator_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn noxfire_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(noxfire_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn prococean_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(prococean_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn protophore_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(protophore_body(args)) })
 }
@@ -4634,43 +4508,34 @@ fn trainmandala_body(args: StartArgs) -> Shadertoy {
 fn trizm_body(args: StartArgs) -> Shadertoy {
     xscreensaver::shadertoy::trizm::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn rigrekt_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(rigrekt_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn selfreflect_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(selfreflect_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn skyline_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(skyline_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn stardome_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(stardome_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn starnest_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(starnest_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn stripeytorus_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(stripeytorus_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn synthwavecity_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(synthwavecity_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn topologica_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(topologica_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn trainmandala_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(trainmandala_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn trizm_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(trizm_body(args)) })
 }
@@ -4680,11 +4545,10 @@ fn truchetzoom_body(args: StartArgs) -> Shadertoy {
 fn universeball_body(args: StartArgs) -> Shadertoy {
     xscreensaver::shadertoy::universeball::start(args)
 }
-// Resident in the main module: see the note above on the split limit.
+// These stay resident in the main module: see the note above on the split limit.
 fn truchetzoom_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(truchetzoom_body(args)) })
 }
-// Resident in the main module: see the note above on the split limit.
 fn universeball_start(args: StartArgs) -> ShadertoyFuture {
     Box::pin(async { Some(universeball_body(args)) })
 }

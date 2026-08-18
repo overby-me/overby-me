@@ -56,7 +56,6 @@ pub fn Graph(data: GraphData) -> Element {
     // handle so a new graph remounts and re-reads the prop here.
     let data: Rc<GraphData> = use_hook(|| Rc::new(data));
 
-    // Shared state for the render loop
     let mut state: Signal<Option<Rc<RefCell<GraphState>>>> = use_signal(|| None);
 
     // Initialize WebGL on canvas mount
@@ -66,7 +65,6 @@ pub fn Graph(data: GraphData) -> Element {
             let elem: web_sys::Element = evt.data().try_as_web_event().unwrap();
             let canvas: web_sys::HtmlCanvasElement = elem.dyn_into().unwrap();
 
-            // Set canvas size to match display size
             let dpr = web_sys::window()
                 .map(|w| w.device_pixel_ratio())
                 .unwrap_or(1.0);
@@ -176,7 +174,6 @@ pub fn Graph(data: GraphData) -> Element {
                 on_wheel.forget();
             }
 
-            // Start animation loop
             start_animation_loop(gs);
         });
     };
