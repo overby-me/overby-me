@@ -84,7 +84,8 @@ struct Engine(Movable):
         """Return the raw engine pointer for FFI calls.
 
         The returned pointer carries MutExternalOrigin, which tells the
-        compiler it does NOT borrow self. A Engine held in a local is therefore
+        compiler it does NOT borrow self. An Engine held in a local is
+        therefore
         destroyed at its last use, so
 
             var e = Engine()
