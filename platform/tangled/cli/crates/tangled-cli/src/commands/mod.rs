@@ -30,7 +30,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::GitCredential(args) => git_credential::run(&cli, args.clone()).await,
         Command::SshKey(cmd) => ssh_key::run(&cli, cmd.clone()).await,
         Command::String(cmd) => string::run(&cli, cmd.clone()).await,
-        Command::Completion(args) => generate::completion(args.clone()),
+        Command::Completion(args) => generate::completion(args),
         Command::Man => generate::man(),
     }
 }

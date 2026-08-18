@@ -143,6 +143,9 @@ pub async fn dispatch(
 /// authenticated queries (e.g. `sh.tangled.repo.listSecrets`). For
 /// authenticated queries, the `ServiceAuth` extractor is invoked manually
 /// so that unauthenticated queries don't require a bearer token.
+// axum's Query extractor fixes the map type, so there is no hasher to
+// generalise over here.
+#[allow(clippy::implicit_hasher)]
 pub async fn dispatch_query(
     method: Path<String>,
     state: State<Arc<XrpcContext>>,

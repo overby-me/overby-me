@@ -348,6 +348,8 @@ impl Manager for OpenBaoManager {
         let url = self.metadata_path(&sanitized);
         let (header_name, header_value) = self.auth_header();
 
+        // b"LIST" is a valid method name, so from_bytes cannot fail here.
+        #[allow(clippy::unwrap_used)]
         // OpenBao LIST is either the LIST HTTP method or `?list=true` on a GET;
         // reqwest has no `.list()`, hence the custom method.
         let resp = self

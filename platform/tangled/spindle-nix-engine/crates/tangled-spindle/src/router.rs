@@ -105,6 +105,9 @@ async fn did_json_handler(State(state): State<Arc<AppState>>) -> impl IntoRespon
     });
     (
         [(header::CONTENT_TYPE, "application/did+ld+json")],
+        // `doc` is a json! value built just above, so serializing it back to
+        // a string has nothing to fail on.
+        #[allow(clippy::unwrap_used)]
         serde_json::to_string_pretty(&doc).unwrap(),
     )
 }

@@ -132,6 +132,9 @@ const MULTICODEC_SECP256K1: [u8; 2] = [0xe7, 0x01];
 const MULTICODEC_P256: [u8; 2] = [0x80, 0x24];
 
 /// Verify an AT Protocol service auth JWT.
+// Long because every claim is checked in turn, and the checks read as a list
+// of what the token has to satisfy.
+#[allow(clippy::too_many_lines)]
 async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, AuthError> {
     let parts: Vec<&str> = token.splitn(3, '.').collect();
     if parts.len() != 3 {

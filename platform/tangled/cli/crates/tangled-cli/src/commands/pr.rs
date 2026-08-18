@@ -578,12 +578,11 @@ fn order_stack(pulls: &mut Vec<tangled_api::PullRecord>) -> Result<()> {
         visited.insert(current_idx);
         ordered.push(current_idx);
 
-        let current_parent = &pulls[current_idx].pull.parent_change_id;
-        if current_parent.is_none() {
+        let Some(current_parent) = &pulls[current_idx].pull.parent_change_id else {
             break;
-        }
+        };
 
-        let next_idx = change_id_map.get(current_parent.as_ref().unwrap());
+        let next_idx = change_id_map.get(current_parent);
 
         if let Some(&next) = next_idx {
             current_idx = next;

@@ -446,11 +446,9 @@ async fn run_knot_connection(
 ///
 /// Format: `wss://{knot}/events[?cursor={cursor}]`
 fn build_events_url(knot: &str, cursor: Option<&str>) -> String {
-    let base = if knot.starts_with("http://") {
-        let host = knot.strip_prefix("http://").unwrap();
+    let base = if let Some(host) = knot.strip_prefix("http://") {
         format!("ws://{host}/events")
-    } else if knot.starts_with("https://") {
-        let host = knot.strip_prefix("https://").unwrap();
+    } else if let Some(host) = knot.strip_prefix("https://") {
         format!("wss://{host}/events")
     } else {
         format!("wss://{knot}/events")

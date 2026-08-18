@@ -38,6 +38,11 @@ disabled_rules = [
   # workspace has no local symbol to resolve against.
   "hallucinated_import_call",
 
+  # PARSER BUG. deslop reads `#[allow(clippy::unwrap_used)]` on an expression
+  # as a call to a function named `allow`, and then reports that it cannot
+  # resolve it. An attribute is not a call.
+  "hallucinated_local_call",
+
   # The engine is a long-running service, so the async shapes it flags are the
   # ordinary ones: a `select!` loop over a broadcast receiver and a keepalive
   # tick, work spawned under a `CancellationToken`, and futures that live for

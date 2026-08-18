@@ -35,6 +35,10 @@ pub enum ServerError {
 /// 5. Job queue (bounded worker pool, started implicitly)
 ///
 /// Shuts down gracefully on SIGTERM or SIGINT (Ctrl-C).
+// Long because it is the startup order: every subsystem has to be built before
+// the one that holds it, and splitting the run would only move the ordering
+// somewhere it is harder to read.
+#[allow(clippy::too_many_lines)]
 pub async fn run_server(
     cfg: Config,
     db: Arc<spindle_db::Database>,
@@ -141,6 +145,9 @@ pub async fn run_server(
         owner: cfg.owner.clone(),
         token: cfg.token.clone(),
         plc_url: cfg.plc_url.clone(),
+        // A client with nothing but a timeout set has no failing
+        // configuration, and a spindle that cannot make one has no work to do.
+        #[allow(clippy::expect_used)]
         http_client: reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
@@ -288,6 +295,9 @@ pub async fn run_server(
 }
 
 /// Wait for a shutdown signal (SIGTERM or Ctrl-C).
+// A process that cannot install its own signal handlers cannot be shut down
+// cleanly, so failing here at startup is the honest outcome.
+#[allow(clippy::expect_used)]
 async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()

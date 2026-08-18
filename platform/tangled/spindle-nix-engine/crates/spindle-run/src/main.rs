@@ -224,7 +224,11 @@ fn build_direct_cmd(
     cmd
 }
 
+// Long because it is the whole of a one-shot runner: parse, discover the
+// workflows, build each environment, run the steps, report. There is no
+// subsystem here to split it into.
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 

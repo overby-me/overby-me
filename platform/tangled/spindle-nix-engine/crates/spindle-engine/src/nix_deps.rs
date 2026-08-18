@@ -99,6 +99,8 @@ impl NixDeps {
     ///
     /// The expression uses `pkgs.buildEnv` to merge all requested packages
     /// into a single output with `bin/` and `sbin/` directories.
+    // The writeln! targets are Strings, whose fmt::Write cannot fail.
+    #[allow(clippy::unwrap_used)]
     pub fn to_nix_expr(&self) -> String {
         let mut expr = String::from("let\n");
 

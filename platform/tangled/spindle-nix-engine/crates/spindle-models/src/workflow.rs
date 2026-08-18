@@ -16,8 +16,12 @@ use crate::step::Step;
 
 /// Regex that replaces any character that is not `[a-zA-Z0-9_.-]` with `-`.
 /// Matches the upstream Go normalization: `regexp.MustCompile(`[^a-zA-Z0-9_.-]`)`.
-static NORMALIZE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[^a-zA-Z0-9_.\-]").expect("invalid normalize regex"));
+static NORMALIZE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // A literal pattern, so this cannot fail at runtime; if it ever did the
+    // crate could not normalize a name at all.
+    #[allow(clippy::expect_used)]
+    Regex::new(r"[^a-zA-Z0-9_.\-]").expect("invalid normalize regex")
+});
 
 /// Normalize a string by replacing non-alphanumeric characters (except `_`, `.`, `-`)
 /// with hyphens. Matches the upstream Go `normalize()` function.

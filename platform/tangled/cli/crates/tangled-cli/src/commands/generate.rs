@@ -6,7 +6,7 @@ use clap::CommandFactory;
 
 use crate::cli::{Cli, CompletionArgs, Shell};
 
-pub fn completion(args: CompletionArgs) -> Result<()> {
+pub fn completion(args: &CompletionArgs) -> Result<()> {
     let mut cmd = Cli::command();
     let name = cmd.get_name().to_string();
     let mut out = std::io::stdout();

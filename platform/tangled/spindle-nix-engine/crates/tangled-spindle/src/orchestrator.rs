@@ -77,6 +77,11 @@ pub struct OrchestratorContext {
 ///
 /// Parses the event, validates it, creates workflows, and submits a job
 /// to the queue for execution.
+// Long because it is the wiring: one pipeline event becomes a validated
+// record, an environment, a set of workflows and a queued job, in that order.
+// Both arguments are moved into the queue closure further down, whatever
+// needless_pass_by_value makes of the clones above it.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
 pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEvent) {
     let knot = event.knot.clone();
     let rkey = event.rkey.clone().unwrap_or_default();
