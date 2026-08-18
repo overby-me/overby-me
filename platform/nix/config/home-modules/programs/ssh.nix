@@ -12,6 +12,19 @@ in {
     enable = true;
     enableDefaultConfig = false;
     settings = {
+      # The agent holds an RSA and an ed25519 key, only the ed25519 one is
+      # published to the account, and a knot rejects the first key that does not
+      # match rather than trying the rest. Pinning also stops the `Host *` master
+      # socket below being opened by the wrong key, which no later -i can undo.
+      #
+      # Scoped to `user git`, not the whole host: publish.nu pushes to
+      # <handle>@tangled.org with its own bot key, and a `Host tangled.org` block
+      # shadows that key, so the bot keeps working while pushing as the wrong
+      # account.
+      "Match host tangled.org user git" = {
+        IdentityFile = "~/.ssh/id_ed25519";
+        IdentitiesOnly = true;
+      };
       "*" = {
         AddKeysToAgent = "yes";
         ControlMaster = "auto";
