@@ -65,6 +65,26 @@ in {
         name = "ssam-sp11-suspend-resume";
         patch = ./patches/ssam-sp11-suspend-resume.patch;
       }
+
+      # The touchscreen, which mainline cannot see at all: the digitizer is a
+      # quad-SPI MSHW0485 on QUP1 SE2 and every QUP SPI node in the denali
+      # devicetree is disabled, so there is no device to bind a driver to. The
+      # patch header says what the three pieces are and where they came from.
+      #
+      # This is the one patch here that is not a small fix. It is ~5,800 lines,
+      # its SPI half is register replay captured from Windows, and it is keyed
+      # to one serial engine by name. Expect it to be the thing that breaks on
+      # a kernel bump, and read the header before trying to forward-port it.
+      #
+      # It does not get the pen working. Nothing does, on any tree.
+      {
+        name = "mshw0485-touchscreen";
+        patch = ./patches/mshw0485-touchscreen.patch;
+        # Not in nixpkgs' aarch64 config, since the driver is not in any
+        # kernel it builds. SPI_QCOM_GENI and QCOM_GPI_DMA, which the patch
+        # also touches, are already modules there.
+        structuredExtraConfig.TOUCHSCREEN_MSHW0485 = lib.kernel.module;
+      }
     ];
 
     # Two further patches from that tree are deliberately not taken.
@@ -176,9 +196,13 @@ in {
 
     # Not ported from the upstream flake, all three worked around things this
     # repository never turns on:
-    #   services.iptsd.enable        IPTS is the Intel Surface touch stack; the
-    #                                Pro 11 panel is an I2C-HID Elan device
-    #                                driven by hid-multitouch.
+    #   services.iptsd.enable        iptsd is the Intel Surface touch stack and
+    #                                cannot reach this panel, which is a
+    #                                quad-SPI MSHW0485 rather than an Intel
+    #                                PCIe one. The shape is the same, a raw
+    #                                capacitance heatmap somebody has to
+    #                                classify; the patch above does it in the
+    #                                kernel instead of in a daemon.
     #   services.tlp.enable = false  only needed to undo nixos-hardware's
     #                                microsoft/surface module.
     #   boot.crashDump.enable        off by default.

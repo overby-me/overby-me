@@ -75,7 +75,15 @@
         # mask real typos monorepo-wide, so skip the app instead
         # (its i18n strings were already excluded). deslop and lychee, which DO
         # find real issues here, stay enabled with tuned configs.
-        excludes = ["^apps/wiki/"];
+        #
+        # The Surface Pro 11 kernel patches are vendored upstream code, so
+        # their spelling is not ours to fix: the touchscreen one abbreviates
+        # its register fields the way the hardware documents them rather than
+        # the way English spells them, and every shift-count field in it reads
+        # as a misspelling. Excluded here rather than in typos.toml because
+        # prek hands typos an explicit file list, which the config's
+        # `files.extend-exclude` does not filter.
+        excludes = ["^apps/wiki/" "^platform/nix/config/hardware/surface-pro-11/patches/"];
       };
       nickel-format = {
         enable = true;
