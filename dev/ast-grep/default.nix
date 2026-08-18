@@ -7,6 +7,11 @@
 # a clean tree are indistinguishable from scan output, which is how one
 # shipped silently once already. This check binds the fixture tests and a
 # full-tree scan to exactly the pinned inputs that can break them.
+#
+# `here` is where this directory sits inside `src`: `dev/ast-grep` when the
+# monorepo evaluates it, `.` in the published repo, whose root is this
+# directory. The same file serves both, so the check cannot pass in one place
+# and rot in the other.
 {src, ...}: {
   checks = pkgs: {
     ast-grep-rules = pkgs.stdenv.mkDerivation {
@@ -19,9 +24,11 @@
       # path), so the check writes its own against the same grammar package.
       buildPhase = ''
         export HOME=$TMPDIR
+        here=.
+        if [ -d dev/ast-grep ]; then here=dev/ast-grep; fi
         cat > sgconfig.yml <<EOF
         ruleDirs:
-          - dev/ast-grep/rules
+          - $here/rules
         customLanguages:
           mojo:
             libraryPath: ${pkgs.tree-sitter-mojo}/lib/mojo.so
@@ -30,7 +37,7 @@
         EOF
 
         echo "==> Rule fixture tests"
-        ast-grep test -t dev/ast-grep/tests --skip-snapshot-tests
+        ast-grep test -t $here/tests --skip-snapshot-tests
 
         echo "==> Full-tree scan"
         ast-grep scan .

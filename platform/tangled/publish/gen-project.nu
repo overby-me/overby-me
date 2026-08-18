@@ -320,8 +320,8 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 cli: "CLI", llvm: "LLVM", gcc: "GCC", pcre2: "PCRE2",
                 nixos: "NixOS", pipewire: "PipeWire", xz: "XZ", wasm: "WASM"
             }
-            let want = if ($p.name in ["fe-c" "h26xtoav1"]) {
-                if $p.name == "fe-c" { "Fe-C" } else { "h26xtoav1" }
+            let want = if ($p.name in ["fe-c" "h26xtoav1" "ast-grep-rules"]) {
+                if $p.name == "fe-c" { "Fe-C" } else if $p.name == "h26xtoav1" { "h26xtoav1" } else { "ast-grep rules" }
             } else if ($p.name | str ends-with "pkg-config") {
                 "Oxidized pkg-config"
             } else {

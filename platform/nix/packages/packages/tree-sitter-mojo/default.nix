@@ -38,7 +38,7 @@ stdenv.mkDerivation {
     hash = "sha256-ifnNO+DHwaSw/jxbVgxIvkqRJE+ONYBp/fWNCFrZ8YQ=";
   };
 
-  patches = [../../../../dev/ast-grep/mojo/mojo-grammar.patch];
+  patches = [./mojo-grammar.patch];
 
   nativeBuildInputs = [tree-sitter nodejs];
 

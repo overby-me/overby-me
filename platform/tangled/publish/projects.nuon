@@ -477,4 +477,10 @@
       {path: "platform/nix/config/packages" deps: []}
     ]
   }
+  {
+    name: "ast-grep-rules"
+    kind: "nix"
+    path: "dev/ast-grep"
+    description: "Structural ast-grep rules for Rust, Nix and Mojo, with fixture tests and a pinned Mojo grammar"
+  }
 ]
