@@ -792,6 +792,13 @@
         pname = "rust-nixpkgs-gnuawk-test";
         version = "5.3.1";
 
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
+
         nativeBuildInputs = [oxidized-texinfo oxidized-bison];
 
         src = fetchurl {
@@ -935,6 +942,13 @@
       rustShellStdenv.mkDerivation {
         pname = "rust-nixpkgs-bash-shell-test";
         version = "0.1.0";
+
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
 
         dontUnpack = true;
         dontPatch = true;
@@ -1170,6 +1184,13 @@
         pname = "rust-nixpkgs-xz-test";
         version = "5.6.4";
 
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
+
         nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
@@ -1234,6 +1255,13 @@
       rustStdenv.mkDerivation {
         pname = "rust-nixpkgs-gnufindutils-test";
         version = "4.10.0";
+
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
 
         nativeBuildInputs = [oxidized-texinfo];
 
@@ -1449,6 +1477,13 @@
         pname = "rust-nixpkgs-pcre2-test";
         version = "10.44";
 
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
+
         nativeBuildInputs = [oxidized-texinfo];
 
         src = fetchurl {
@@ -1513,6 +1548,13 @@
       rustStdenv.mkDerivation {
         pname = "rust-nixpkgs-m4-test";
         version = "1.4.19";
+
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
 
         nativeBuildInputs = [oxidized-texinfo];
 
@@ -1582,6 +1624,13 @@
       rustStdenv.mkDerivation {
         pname = "rust-nixpkgs-libtool-test";
         version = "2.5.4";
+
+        # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
+        # once it detects C23, and an attribute cannot follow a storage class
+        # there - so with a compiler defaulting to C23 the header does not
+        # parse. Asking for gnu17 puts gnulib back on
+        # __attribute__((warn_unused_result)), which goes anywhere.
+        env.NIX_CFLAGS_COMPILE = "-std=gnu17";
 
         nativeBuildInputs = [oxidized-texinfo m4];
 
