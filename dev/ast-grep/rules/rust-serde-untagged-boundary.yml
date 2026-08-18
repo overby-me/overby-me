@@ -1,0 +1,19 @@
+id: rust-serde-untagged-boundary
+language: rust
+severity: warning
+message: "#[serde(untagged)] makes the wire format ambiguous"
+note: |
+  An untagged enum is deserialized by trying each variant in order and taking
+  the first that fits, so two variants that can both accept a payload silently
+  resolve to whichever is declared first. On a boundary type that turns a
+  producer's change into a wrong parse rather than an error.
+ignores:
+  # Upstream code held at a pinned commit, and the ports governed by
+  # safety/oxidized/PORTING.md. Neither is ours to answer for; both are
+  # excluded from the clippy hook for the same reason. The vendored ooxml
+  # parsers even carry ast-grep-ignore comments from their own upstream
+  # ruleset, which is not this one.
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  pattern: '#[serde(untagged)]'

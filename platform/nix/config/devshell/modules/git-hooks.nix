@@ -43,6 +43,11 @@
       ast-grep = {
         enable = true;
         name = "ast-grep";
+        # Same two trees the clippy hook leaves alone: upstream code at a
+        # pinned commit, and the ports PORTING.md governs. The vendored ooxml
+        # parsers carry ignore annotations from their own upstream ruleset,
+        # which would otherwise be reported here as unused.
+        excludes = ["^apps/wiki/vendor/" "^safety/oxidized/"];
         # Structural rules that statix and clippy do not cover, in
         # dev/ast-grep/rules. Scans whole files rather than the changed hunk,
         # because a rule's ignore globs are how its exceptions are recorded and
