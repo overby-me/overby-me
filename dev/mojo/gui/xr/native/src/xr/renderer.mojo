@@ -243,10 +243,10 @@ struct XRMutationInterpreter(Movable):
         self._panel_id = panel_id
         self._stack = List[UInt32](capacity=64)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._xr = other._xr
-        self._panel_id = other._panel_id
-        self._stack = other._stack^
+    fn __moveinit__(out self, deinit take: Self):
+        self._xr = take._xr
+        self._panel_id = take._panel_id
+        self._stack = take._stack^
 
     # ── Public API ───────────────────────────────────────────────────────
 

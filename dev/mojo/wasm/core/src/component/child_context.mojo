@@ -101,12 +101,12 @@ struct ChildComponentContext(Movable):
         self.eid_alloc = eid_alloc
         self.child = child^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child = other.child^
-        self.scope_id = other.scope_id
-        self.runtime = other.runtime
-        self.store = other.store
-        self.eid_alloc = other.eid_alloc
+    fn __moveinit__(out self, deinit take: Self):
+        self.child = take.child^
+        self.scope_id = take.scope_id
+        self.runtime = take.runtime
+        self.store = take.store
+        self.eid_alloc = take.eid_alloc
 
     # ── Signal creation (under child scope) ──────────────────────────
 

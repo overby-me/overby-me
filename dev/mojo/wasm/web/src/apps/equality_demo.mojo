@@ -85,13 +85,13 @@ struct EqualityDemoApp(Movable):
         self.incr_handler = self.ctx.view_event_handler_id(0)
         self.decr_handler = self.ctx.view_event_handler_id(1)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.input = other.input.copy()
-        self.clamped = other.clamped.copy()
-        self.label = other.label.copy()
-        self.incr_handler = other.incr_handler
-        self.decr_handler = other.decr_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.input = take.input.copy()
+        self.clamped = take.clamped.copy()
+        self.label = take.label.copy()
+        self.incr_handler = take.incr_handler
+        self.decr_handler = take.decr_handler
 
     fn run_memos(mut self):
         """Recompute all memos in dependency order.

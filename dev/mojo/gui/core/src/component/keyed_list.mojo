@@ -93,10 +93,10 @@ struct _HandlerMapping(Copyable, Equatable, Writable):
         self.tag = other.tag
         self.data = other.data
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.handler_id = other.handler_id
-        self.tag = other.tag
-        self.data = other.data
+    fn __moveinit__(out self, deinit take: Self):
+        self.handler_id = take.handler_id
+        self.tag = take.tag
+        self.data = take.data
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -141,10 +141,10 @@ struct HandlerAction(Copyable, Equatable, Writable):
         self.data = other.data
         self.found = other.found
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.tag = other.tag
-        self.data = other.data
-        self.found = other.found
+    fn __moveinit__(out self, deinit take: Self):
+        self.tag = take.tag
+        self.data = take.data
+        self.found = take.found
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -217,11 +217,11 @@ struct ItemBuilder(Movable):
         self._runtime = runtime
         self._handler_map_ptr = handler_map_ptr
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.vb = other.vb^
-        self.scope_id = other.scope_id
-        self._runtime = other._runtime
-        self._handler_map_ptr = other._handler_map_ptr
+    fn __moveinit__(out self, deinit take: Self):
+        self.vb = take.vb^
+        self.scope_id = take.scope_id
+        self._runtime = take._runtime
+        self._handler_map_ptr = take._handler_map_ptr
 
     # ── Dynamic text ─────────────────────────────────────────────────
 
@@ -463,11 +463,11 @@ struct KeyedList(Movable):
         self.scope_ids = List[UInt32]()
         self.handler_map = List[_HandlerMapping]()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.template_id = other.template_id
-        self.slot = other.slot^
-        self.scope_ids = other.scope_ids^
-        self.handler_map = other.handler_map^
+    fn __moveinit__(out self, deinit take: Self):
+        self.template_id = take.template_id
+        self.slot = take.slot^
+        self.scope_ids = take.scope_ids^
+        self.handler_map = take.handler_map^
 
     # ── Slot initialization ──────────────────────────────────────────
 

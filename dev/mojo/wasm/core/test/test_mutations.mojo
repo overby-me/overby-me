@@ -127,16 +127,16 @@ struct MutationInfo(Copyable):
         self.path_len = other.path_len
         self.handler_id = other.handler_id
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.op = other.op
-        self.id = other.id
-        self.id2 = other.id2
-        self.id3 = other.id3
-        self.text_len = other.text_len
-        self.name_len = other.name_len
-        self.ns = other.ns
-        self.path_len = other.path_len
-        self.handler_id = other.handler_id
+    fn __moveinit__(out self, deinit take: Self):
+        self.op = take.op
+        self.id = take.id
+        self.id2 = take.id2
+        self.id3 = take.id3
+        self.text_len = take.text_len
+        self.name_len = take.name_len
+        self.ns = take.ns
+        self.path_len = take.path_len
+        self.handler_id = take.handler_id
 
 
 fn _read_mutations(
@@ -296,13 +296,13 @@ struct WasmTestContext(Movable):
             w[].call_i64("writer_create", args_ptr_i32(self.buf, BUF_CAP))
         )
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.w = other.w
-        self.rt = other.rt
-        self.eid = other.eid
-        self.store = other.store
-        self.buf = other.buf
-        self.writer = other.writer
+    fn __moveinit__(out self, deinit take: Self):
+        self.w = take.w
+        self.rt = take.rt
+        self.eid = take.eid
+        self.store = take.store
+        self.buf = take.buf
+        self.writer = take.writer
 
     fn finalize_and_read(mut self) raises -> List[MutationInfo]:
         """Finalize the writer and read back all mutations."""

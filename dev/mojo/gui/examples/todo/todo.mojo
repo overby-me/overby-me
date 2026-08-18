@@ -174,10 +174,10 @@ struct TodoItem(Copyable):
         self.text = other.text
         self.completed = other.completed
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.text = other.text^
-        self.completed = other.completed
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.text = take.text^
+        self.completed = take.completed
 
 
 # App-defined action tags for ItemBuilder.add_custom_event() dispatch.
@@ -321,19 +321,19 @@ struct TodoApp(GuiApp):
         self.data = List[TodoItem]()
         self.next_id = 1
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.list_version = other.list_version^
-        self.items = other.items^
-        self.data = other.data^
-        self.next_id = other.next_id
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.list_version = take.list_version^
+        self.items = take.items^
+        self.data = take.data^
+        self.next_id = take.next_id
         self.input_text = (
-            other.input_text.copy()
+            take.input_text.copy()
         )  # SignalString is Copyable (not ImplicitlyCopyable)
-        self.add_handler = other.add_handler
-        self.enter_handler = other.enter_handler
-        self.empty_msg_tmpl = other.empty_msg_tmpl
-        self.empty_msg_slot = other.empty_msg_slot.copy()
+        self.add_handler = take.add_handler
+        self.enter_handler = take.enter_handler
+        self.empty_msg_tmpl = take.empty_msg_tmpl
+        self.empty_msg_slot = take.empty_msg_slot.copy()
 
     fn add_item(mut self, text: String):
         """Add a new item and bump the list version signal."""

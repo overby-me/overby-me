@@ -60,11 +60,11 @@ struct ScopeArena(Movable):
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._scopes = other._scopes^
-        self._states = other._states^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._scopes = take._scopes^
+        self._states = take._states^
+        self._free_head = take._free_head
+        self._count = take._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 

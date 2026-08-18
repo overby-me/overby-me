@@ -58,9 +58,9 @@ struct RouteEntry(Copyable, Movable):
         self.path = other.path
         self.branch = other.branch
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.path = other.path^
-        self.branch = other.branch
+    fn __moveinit__(out self, deinit take: Self):
+        self.path = take.path^
+        self.branch = take.branch
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -100,12 +100,12 @@ struct Router(Movable):
         self.slot = ConditionalSlot()
         self.dirty = False
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.routes = other.routes^
-        self.current = other.current
-        self.current_path = other.current_path^
-        self.slot = other.slot.copy()
-        self.dirty = other.dirty
+    fn __moveinit__(out self, deinit take: Self):
+        self.routes = take.routes^
+        self.current = take.current
+        self.current_path = take.current_path^
+        self.slot = take.slot.copy()
+        self.dirty = take.dirty
 
     fn add_route(mut self, path: String, branch: UInt8):
         """Register a route mapping from a URL path to a branch tag.

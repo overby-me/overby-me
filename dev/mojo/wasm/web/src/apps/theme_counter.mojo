@@ -60,10 +60,10 @@ struct TCCounterChild(Movable):
         self.count = count^
         self.theme = theme^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
-        self.count = other.count^
-        self.theme = other.theme^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
+        self.count = take.count^
+        self.theme = take.theme^
 
     fn render(mut self) -> UInt32:
         """Build the child's VNode with count + optional theme label."""
@@ -97,10 +97,10 @@ struct TCSummaryChild(Movable):
         self.count = count^
         self.theme = theme^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
-        self.count = other.count^
-        self.theme = other.theme^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
+        self.count = take.count^
+        self.theme = take.theme^
 
     fn render(mut self) -> UInt32:
         """Build the child's VNode with summary text + class attr."""
@@ -185,13 +185,13 @@ struct ThemeCounterApp(Movable):
         var sc_theme = summary_ctx.consume_signal_bool(_TC_CTX_THEME)
         self.summary_child = TCSummaryChild(summary_ctx^, sc_count^, sc_theme^)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count^
-        self.theme = other.theme^
-        self.on_reset = other.on_reset^
-        self.counter_child = other.counter_child^
-        self.summary_child = other.summary_child^
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count^
+        self.theme = take.theme^
+        self.on_reset = take.on_reset^
+        self.counter_child = take.counter_child^
+        self.summary_child = take.summary_child^
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for child slots."""

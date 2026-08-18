@@ -75,12 +75,12 @@ struct MemoFormApp(Movable):
         # view_event_handler_id(0) returns the first event handler.
         self.input_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.input = other.input^
-        self.is_valid = other.is_valid.copy()
-        self.status = other.status.copy()
-        self.input_handler = other.input_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.input = take.input^
+        self.is_valid = take.is_valid.copy()
+        self.status = take.status.copy()
+        self.input_handler = take.input_handler
 
     fn run_memos(mut self):
         """Recompute both memos if dirty.

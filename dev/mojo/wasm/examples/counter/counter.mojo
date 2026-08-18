@@ -169,12 +169,12 @@ struct CounterApp(Movable):
         )
         self.cond_slot = ConditionalSlot()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count^
-        self.show_detail = other.show_detail^
-        self.detail_tmpl = other.detail_tmpl
-        self.cond_slot = other.cond_slot.copy()
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count^
+        self.show_detail = take.show_detail^
+        self.detail_tmpl = take.detail_tmpl
+        self.cond_slot = take.cond_slot.copy()
 
     fn render(mut self) -> UInt32:
         """Build a fresh VNode for the counter component.

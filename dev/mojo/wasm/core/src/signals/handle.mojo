@@ -90,9 +90,9 @@ struct SignalI32(Copyable, Stringable):
         self.key = other.key
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.key = other.key
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.key = take.key
+        self.runtime = take.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
@@ -238,9 +238,9 @@ struct MemoI32(Copyable, Stringable):
         self.id = other.id
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.runtime = take.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
@@ -375,9 +375,9 @@ struct EffectHandle(Copyable):
         self.id = other.id
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.runtime = take.runtime
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -456,9 +456,9 @@ struct SignalBool(Copyable, Stringable):
         self.key = other.key
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.key = other.key
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.key = take.key
+        self.runtime = take.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
@@ -594,10 +594,10 @@ struct SignalString(Copyable, Stringable):
         self.version_key = other.version_key
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.string_key = other.string_key
-        self.version_key = other.version_key
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.string_key = take.string_key
+        self.version_key = take.version_key
+        self.runtime = take.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
@@ -729,9 +729,9 @@ struct MemoBool(Copyable, Stringable):
         self.id = other.id
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.runtime = take.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
@@ -873,9 +873,9 @@ struct MemoString(Copyable, Stringable):
         self.id = other.id
         self.runtime = other.runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.runtime = other.runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.runtime = take.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 

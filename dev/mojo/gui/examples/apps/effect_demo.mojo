@@ -72,13 +72,13 @@ struct EffectDemoApp(Movable):
         )
         self.incr_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count.copy()
-        self.doubled = other.doubled.copy()
-        self.parity = other.parity^
-        self.count_effect = other.count_effect.copy()
-        self.incr_handler = other.incr_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count.copy()
+        self.doubled = take.doubled.copy()
+        self.parity = take.parity^
+        self.count_effect = take.count_effect.copy()
+        self.incr_handler = take.incr_handler
 
     fn run_effects(mut self):
         """Drain and execute pending effects.

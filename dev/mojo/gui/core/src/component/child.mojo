@@ -107,11 +107,11 @@ struct _ChildEventInfo(Copyable, Movable):
         self.signal_key = other.signal_key
         self.operand = other.operand
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.event_name = other.event_name^
-        self.action = other.action
-        self.signal_key = other.signal_key
-        self.operand = other.operand
+    fn __moveinit__(out self, deinit take: Self):
+        self.event_name = take.event_name^
+        self.action = take.action
+        self.signal_key = take.signal_key
+        self.operand = take.operand
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -137,9 +137,9 @@ struct ChildEventBinding(Copyable, Movable):
         self.event_name = other.event_name
         self.handler_id = other.handler_id
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.event_name = other.event_name^
-        self.handler_id = other.handler_id
+    fn __moveinit__(out self, deinit take: Self):
+        self.event_name = take.event_name^
+        self.handler_id = take.handler_id
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -216,13 +216,13 @@ struct ChildAutoBinding(Copyable, Movable):
         self.string_key = other.string_key
         self.version_key = other.version_key
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.kind = other.kind
-        self.event_name = other.event_name^
-        self.handler_id = other.handler_id
-        self.attr_name = other.attr_name^
-        self.string_key = other.string_key
-        self.version_key = other.version_key
+    fn __moveinit__(out self, deinit take: Self):
+        self.kind = take.kind
+        self.event_name = take.event_name^
+        self.handler_id = take.handler_id
+        self.attr_name = take.attr_name^
+        self.string_key = take.string_key
+        self.version_key = take.version_key
 
     fn is_event(self) -> Bool:
         """Check whether this is an event binding."""
@@ -279,11 +279,11 @@ struct ChildRenderBuilder(Movable):
         self._events = events^
         self._runtime = UnsafePointer[Runtime, MutExternalOrigin]()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._vb = other._vb^
-        self._auto_bindings = other._auto_bindings^
-        self._events = other._events^
-        self._runtime = other._runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self._vb = take._vb^
+        self._auto_bindings = take._auto_bindings^
+        self._events = take._events^
+        self._runtime = take._runtime
 
     # ── Dynamic text ─────────────────────────────────────────────────
 
@@ -439,13 +439,13 @@ struct ChildComponent(Copyable, Movable):
         self._event_bindings = other._event_bindings.copy()
         self._auto_bindings = other._auto_bindings.copy()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.scope_id = other.scope_id
-        self.template_id = other.template_id
-        self.current_vnode = other.current_vnode
-        self.slot = other.slot.copy()
-        self._event_bindings = other._event_bindings^
-        self._auto_bindings = other._auto_bindings^
+    fn __moveinit__(out self, deinit take: Self):
+        self.scope_id = take.scope_id
+        self.template_id = take.template_id
+        self.current_vnode = take.current_vnode
+        self.slot = take.slot.copy()
+        self._event_bindings = take._event_bindings^
+        self._auto_bindings = take._auto_bindings^
 
     # ── Slot initialization ──────────────────────────────────────────
 

@@ -32,9 +32,9 @@ struct SchedulerEntry(Copyable, Equatable, Writable):
         self.scope_id = other.scope_id
         self.height = other.height
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.scope_id = other.scope_id
-        self.height = other.height
+    fn __moveinit__(out self, deinit take: Self):
+        self.scope_id = take.scope_id
+        self.height = take.height
 
 
 struct Scheduler(Movable):
@@ -59,9 +59,9 @@ struct Scheduler(Movable):
         self._queue = List[SchedulerEntry]()
         self._sorted = False
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._queue = other._queue^
-        self._sorted = other._sorted
+    fn __moveinit__(out self, deinit take: Self):
+        self._queue = take._queue^
+        self._sorted = take._sorted
 
     fn collect(mut self, rt: UnsafePointer[Runtime, MutExternalOrigin]):
         """Drain the runtime's dirty queue into the scheduler.

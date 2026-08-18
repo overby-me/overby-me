@@ -62,12 +62,12 @@ struct ChildContextTestApp(Movable):
         self.child_count = self.child_ctx.consume_signal_i32(_CCT_PROP_COUNT)
         self.child_show_hex = self.child_ctx.use_signal_bool(False)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count^
-        self.child_ctx = other.child_ctx^
-        self.child_count = other.child_count^
-        self.child_show_hex = other.child_show_hex^
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count^
+        self.child_ctx = take.child_ctx^
+        self.child_count = take.child_count^
+        self.child_show_hex = take.child_show_hex^
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with a placeholder for the child slot."""

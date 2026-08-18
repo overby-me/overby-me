@@ -99,11 +99,11 @@ struct SignalEntry(Copyable):
         else:
             self.value_ptr = UnsafePointer[UInt8, MutExternalOrigin]()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.value_ptr = other.value_ptr
-        self.value_size = other.value_size
-        self.subscribers = other.subscribers^
-        self.version = other.version
+    fn __moveinit__(out self, deinit take: Self):
+        self.value_ptr = take.value_ptr
+        self.value_size = take.value_size
+        self.subscribers = take.subscribers^
+        self.version = take.version
 
     fn __del__(deinit self):
         """Destroy the entry, freeing value storage."""
@@ -190,11 +190,11 @@ struct SignalStore(Movable):
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._entries = other._entries^
-        self._states = other._states^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._entries = take._entries^
+        self._states = take._states^
+        self._free_head = take._free_head
+        self._count = take._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
@@ -371,11 +371,11 @@ struct StringStore(Movable):
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._entries = other._entries^
-        self._states = other._states^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._entries = take._entries^
+        self._states = take._states^
+        self._free_head = take._free_head
+        self._count = take._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
@@ -511,25 +511,25 @@ struct Runtime(Movable):
         self._batch_depth = 0
         self._batch_keys = List[UInt32]()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.signals = other.signals^
-        self.strings = other.strings^
-        self.scopes = other.scopes^
-        self.templates = other.templates^
-        self.vnodes = other.vnodes^
-        self.handlers = other.handlers^
-        self.memos = other.memos^
-        self.effects = other.effects^
-        self.current_context = other.current_context
-        self.current_scope = other.current_scope
-        self.dirty_scopes = other.dirty_scopes^
-        self._memo_ctx_ids = other._memo_ctx_ids^
-        self._memo_ids = other._memo_ids^
-        self._effect_ctx_ids = other._effect_ctx_ids^
-        self._effect_ids = other._effect_ids^
-        self._changed_signals = other._changed_signals^
-        self._batch_depth = other._batch_depth
-        self._batch_keys = other._batch_keys^
+    fn __moveinit__(out self, deinit take: Self):
+        self.signals = take.signals^
+        self.strings = take.strings^
+        self.scopes = take.scopes^
+        self.templates = take.templates^
+        self.vnodes = take.vnodes^
+        self.handlers = take.handlers^
+        self.memos = take.memos^
+        self.effects = take.effects^
+        self.current_context = take.current_context
+        self.current_scope = take.current_scope
+        self.dirty_scopes = take.dirty_scopes^
+        self._memo_ctx_ids = take._memo_ctx_ids^
+        self._memo_ids = take._memo_ids^
+        self._effect_ctx_ids = take._effect_ctx_ids^
+        self._effect_ids = take._effect_ids^
+        self._changed_signals = take._changed_signals^
+        self._batch_depth = take._batch_depth
+        self._batch_keys = take._batch_keys^
 
     # ── Context management ───────────────────────────────────────────
 

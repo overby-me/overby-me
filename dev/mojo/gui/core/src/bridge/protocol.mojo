@@ -57,10 +57,10 @@ struct MutationWriter(Movable):
     var offset: Int
     var capacity: Int
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.buf = other.buf
-        self.offset = other.offset
-        self.capacity = other.capacity
+    fn __moveinit__(out self, deinit take: Self):
+        self.buf = take.buf
+        self.offset = take.offset
+        self.capacity = take.capacity
 
     # ── Construction ─────────────────────────────────────────────────────
 

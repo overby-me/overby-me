@@ -130,22 +130,22 @@ struct ScopeState(Copyable):
         self.is_suspense_boundary = other.is_suspense_boundary
         self.is_pending = other.is_pending
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.height = other.height
-        self.parent_id = other.parent_id
-        self.dirty = other.dirty
-        self.render_count = other.render_count
-        self.hook_cursor = other.hook_cursor
-        self.hook_tags = other.hook_tags^
-        self.hook_values = other.hook_values^
-        self.context_keys = other.context_keys^
-        self.context_values = other.context_values^
-        self.is_error_boundary = other.is_error_boundary
-        self.has_error = other.has_error
-        self.error_message = other.error_message^
-        self.is_suspense_boundary = other.is_suspense_boundary
-        self.is_pending = other.is_pending
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.height = take.height
+        self.parent_id = take.parent_id
+        self.dirty = take.dirty
+        self.render_count = take.render_count
+        self.hook_cursor = take.hook_cursor
+        self.hook_tags = take.hook_tags^
+        self.hook_values = take.hook_values^
+        self.context_keys = take.context_keys^
+        self.context_values = take.context_values^
+        self.is_error_boundary = take.is_error_boundary
+        self.has_error = take.has_error
+        self.error_message = take.error_message^
+        self.is_suspense_boundary = take.is_suspense_boundary
+        self.is_pending = take.is_pending
 
     # ── Render lifecycle ─────────────────────────────────────────────
 

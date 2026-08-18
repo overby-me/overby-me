@@ -189,7 +189,7 @@
 #             return False
 
 from memory import UnsafePointer, alloc
-from sys.ffi import external_call
+from std.ffi import external_call
 from bridge import MutationWriter
 from mutations import CreateEngine
 
@@ -236,9 +236,9 @@ struct BenchRow(Copyable):
         self.id = other.id
         self.label = other.label
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.label = other.label^
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.label = take.label^
 
 
 # ── performance.now() WASM import ────────────────────────────────────────────
@@ -618,23 +618,23 @@ struct BenchmarkApp(Movable):
         self.timing_text = String("")
         self.row_count_text = String("")
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.version = other.version^
-        self.selected = other.selected^
-        self.rows_list = other.rows_list^
-        self.rows = other.rows^
-        self.next_id = other.next_id
-        self.rng_state = other.rng_state
-        self.op_name = other.op_name^
-        self.timing_text = other.timing_text^
-        self.row_count_text = other.row_count_text^
-        self.create1k_handler = other.create1k_handler
-        self.create10k_handler = other.create10k_handler
-        self.append_handler = other.append_handler
-        self.update_handler = other.update_handler
-        self.swap_handler = other.swap_handler
-        self.clear_handler = other.clear_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.version = take.version^
+        self.selected = take.selected^
+        self.rows_list = take.rows_list^
+        self.rows = take.rows^
+        self.next_id = take.next_id
+        self.rng_state = take.rng_state
+        self.op_name = take.op_name^
+        self.timing_text = take.timing_text^
+        self.row_count_text = take.row_count_text^
+        self.create1k_handler = take.create1k_handler
+        self.create10k_handler = take.create10k_handler
+        self.append_handler = take.append_handler
+        self.update_handler = take.update_handler
+        self.swap_handler = take.swap_handler
+        self.clear_handler = take.clear_handler
 
     fn _next_random(mut self) -> UInt32:
         """Simple LCG: state = state * 1664525 + 1013904223."""

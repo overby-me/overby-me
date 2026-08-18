@@ -81,13 +81,13 @@ struct MemoChainApp(Movable):
         )
         self.incr_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.input = other.input.copy()
-        self.doubled = other.doubled.copy()
-        self.is_big = other.is_big.copy()
-        self.label = other.label.copy()
-        self.incr_handler = other.incr_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.input = take.input.copy()
+        self.doubled = take.doubled.copy()
+        self.is_big = take.is_big.copy()
+        self.label = take.label.copy()
+        self.incr_handler = take.incr_handler
 
     fn run_memos(mut self):
         """Recompute all memos in dependency order.

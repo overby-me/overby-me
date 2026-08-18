@@ -79,13 +79,13 @@ struct TemplateBuilder(Movable):
         self._node_attr_start = List[Int]()
         self._node_attr_count = List[Int]()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._name = other._name^
-        self._nodes = other._nodes^
-        self._attrs = other._attrs^
-        self._root_indices = other._root_indices^
-        self._node_attr_start = other._node_attr_start^
-        self._node_attr_count = other._node_attr_count^
+    fn __moveinit__(out self, deinit take: Self):
+        self._name = take._name^
+        self._nodes = take._nodes^
+        self._attrs = take._attrs^
+        self._root_indices = take._root_indices^
+        self._node_attr_start = take._node_attr_start^
+        self._node_attr_count = take._node_attr_count^
 
     # ── Node insertion ───────────────────────────────────────────────
 

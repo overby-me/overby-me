@@ -127,11 +127,11 @@ struct AppConfig(Copyable, Movable):
         self.height = other.height
         self.debug = other.debug
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.title = other.title^
-        self.width = other.width
-        self.height = other.height
-        self.debug = other.debug
+    fn __moveinit__(out self, deinit take: Self):
+        self.title = take.title^
+        self.width = take.width
+        self.height = take.height
+        self.debug = take.debug
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -31,7 +31,7 @@ Import signatures are derived from `wasm-objdump -j Import -x build/out.wasm`:
 from collections import Dict
 from memory import UnsafePointer, memcpy, memset_zero, alloc
 from pathlib import Path
-from sys.ffi import OwnedDLHandle
+from std.ffi import OwnedDLHandle
 
 from wasmtime_mojo import (
     Engine,
@@ -126,16 +126,16 @@ struct SharedState(Movable):
         self.free_map = Dict[Int, List[Int]]()
         self.reuse_enabled = True
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.bump_ptr = other.bump_ptr
-        self.context = other.context
-        self.memory = other.memory
-        self.captured_stdout = other.captured_stdout^
-        self.has_memory = other.has_memory
-        self.mock_time = other.mock_time
-        self.ptr_size = other.ptr_size^
-        self.free_map = other.free_map^
-        self.reuse_enabled = other.reuse_enabled
+    fn __moveinit__(out self, deinit take: Self):
+        self.bump_ptr = take.bump_ptr
+        self.context = take.context
+        self.memory = take.memory
+        self.captured_stdout = take.captured_stdout^
+        self.has_memory = take.has_memory
+        self.mock_time = take.mock_time
+        self.ptr_size = take.ptr_size^
+        self.free_map = take.free_map^
+        self.reuse_enabled = take.reuse_enabled
 
     fn aligned_alloc(mut self, align: Int, size: Int) -> Int:
         """Allocate *size* bytes with the given alignment.
@@ -774,15 +774,15 @@ struct WasmInstance(Movable):
             self._state_ptr.destroy_pointee()
             self._state_ptr.free()
 
-    fn __moveinit__(out self, deinit other: Self):
+    fn __moveinit__(out self, deinit take: Self):
         """Move constructor."""
-        self._engine = other._engine^
-        self._store = other._store^
-        self._module = other._module^
-        self._linker = other._linker^
-        self._instance = other._instance
-        self._memory = other._memory
-        self._state_ptr = other._state_ptr
+        self._engine = take._engine^
+        self._store = take._store^
+        self._module = take._module^
+        self._linker = take._linker^
+        self._instance = take._instance
+        self._memory = take._memory
+        self._state_ptr = take._state_ptr
 
     # ------------------------------------------------------------------
     # Raw memory helpers

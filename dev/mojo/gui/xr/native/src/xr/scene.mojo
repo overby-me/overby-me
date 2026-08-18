@@ -242,12 +242,12 @@ struct XRScene(Movable):
         self.active = True
         self.destroyed = False
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.panels = other.panels^
-        self.focused_panel_index = other.focused_panel_index
-        self.hovered_panel_index = other.hovered_panel_index
-        self.active = other.active
-        self.destroyed = other.destroyed
+    fn __moveinit__(out self, deinit take: Self):
+        self.panels = take.panels^
+        self.focused_panel_index = take.focused_panel_index
+        self.hovered_panel_index = take.hovered_panel_index
+        self.active = take.active
+        self.destroyed = take.destroyed
 
     # ── Panel lifecycle ───────────────────────────────────────────────
 

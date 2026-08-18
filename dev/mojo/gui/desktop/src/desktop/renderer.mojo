@@ -238,9 +238,9 @@ struct MutationInterpreter(Movable):
         self._blitz = UnsafePointer(to=blitz)
         self._stack = List[UInt32](capacity=64)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._blitz = other._blitz
-        self._stack = other._stack^
+    fn __moveinit__(out self, deinit take: Self):
+        self._blitz = take._blitz
+        self._stack = take._stack^
 
     # ── Public API ───────────────────────────────────────────────────────
 

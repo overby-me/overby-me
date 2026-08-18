@@ -120,10 +120,10 @@ struct FragmentSlot(Copyable, Equatable, Writable):
         self.current_frag = other.current_frag
         self.mounted = other.mounted
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.anchor_id = other.anchor_id
-        self.current_frag = other.current_frag
-        self.mounted = other.mounted
+    fn __moveinit__(out self, deinit take: Self):
+        self.anchor_id = take.anchor_id
+        self.current_frag = take.current_frag
+        self.mounted = take.mounted
 
 
 # ── ConditionalSlot — State tracker for a single conditional VNode ────────────
@@ -188,10 +188,10 @@ struct ConditionalSlot(Copyable, Equatable, Writable):
         self.current_vnode = other.current_vnode
         self.mounted = other.mounted
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.anchor_id = other.anchor_id
-        self.current_vnode = other.current_vnode
-        self.mounted = other.mounted
+    fn __moveinit__(out self, deinit take: Self):
+        self.anchor_id = take.anchor_id
+        self.current_vnode = take.current_vnode
+        self.mounted = take.mounted
 
 
 # ── Conditional flush helper ──────────────────────────────────────────────────

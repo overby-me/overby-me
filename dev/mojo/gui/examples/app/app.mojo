@@ -218,19 +218,19 @@ struct MultiViewApp(GuiApp):
         # Navigate to initial route
         _ = self.router.navigate(String("/"))
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.router = other.router^
-        self.count = other.count^
-        self.counter_tmpl = other.counter_tmpl
-        self.counter_incr_handler = other.counter_incr_handler
-        self.counter_decr_handler = other.counter_decr_handler
-        self.todo_count = other.todo_count^
-        self.todo_next_id = other.todo_next_id
-        self.todo_tmpl = other.todo_tmpl
-        self.nav_counter_handler = other.nav_counter_handler
-        self.nav_todo_handler = other.nav_todo_handler
-        self.todo_add_handler = other.todo_add_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.router = take.router^
+        self.count = take.count^
+        self.counter_tmpl = take.counter_tmpl
+        self.counter_incr_handler = take.counter_incr_handler
+        self.counter_decr_handler = take.counter_decr_handler
+        self.todo_count = take.todo_count^
+        self.todo_next_id = take.todo_next_id
+        self.todo_tmpl = take.todo_tmpl
+        self.nav_counter_handler = take.nav_counter_handler
+        self.nav_todo_handler = take.nav_todo_handler
+        self.todo_add_handler = take.todo_add_handler
 
     fn render(mut self) -> UInt32:
         """Build a fresh VNode for the app shell.

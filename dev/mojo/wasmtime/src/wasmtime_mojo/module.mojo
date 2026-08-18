@@ -126,23 +126,25 @@ struct Module:
         # registers after a write through a cast pointer.)
         var bv_buf = alloc[WasmByteVec](1)
         bv_buf[] = WasmByteVec()
-        var byte_vec: WasmByteVec
+        # _as_ext is an address cast, so bv_ext aliases bv_buf. The vec has to
+        # be copied out and deleted through bv_ext while the buffer is still
+        # live; freeing bv_buf first would leave the delete reading freed
+        # memory.
+        var bv_ext = _as_ext(bv_buf)
+        var data = List[UInt8]()
         try:
-            var bv_ext = _as_ext(bv_buf)
             var err = wasmtime_module_serialize(self._ptr, bv_ext)
             if err:
                 raise Error("Failed to serialize module: " + error_message(err))
 
             # Read back the filled-in byte vec from the heap buffer
-            byte_vec = bv_buf[]
+            var byte_vec = bv_buf[]
+            data = List[UInt8](capacity=byte_vec.size)
+            for i in range(byte_vec.size):
+                data.append(byte_vec.data[i])
+            wasm_byte_vec_delete(bv_ext)
         finally:
             bv_buf.free()
-
-        # Write the serialized bytes to a file
-        var data = List[UInt8](capacity=byte_vec.size)
-        for i in range(byte_vec.size):
-            data.append(byte_vec.data[i])
-        wasm_byte_vec_delete(bv_ext)
 
         Path(path).write_bytes(data)
 

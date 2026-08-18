@@ -78,11 +78,11 @@ struct EffectEntry(Copyable, Equatable, Writable):
         self.pending = other.pending
         self.running = other.running
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.context_id = other.context_id
-        self.scope_id = other.scope_id
-        self.pending = other.pending
-        self.running = other.running
+    fn __moveinit__(out self, deinit take: Self):
+        self.context_id = take.context_id
+        self.scope_id = take.scope_id
+        self.pending = take.pending
+        self.running = take.running
 
 
 # ── Slot state for the effect store ──────────────────────────────────────────
@@ -129,11 +129,11 @@ struct EffectStore(Movable):
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._entries = other._entries^
-        self._states = other._states^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._entries = take._entries^
+        self._states = take._states^
+        self._free_head = take._free_head
+        self._count = take._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 

@@ -51,7 +51,7 @@
 
 from memory import UnsafePointer, alloc
 from os import getenv
-from sys.ffi import _DLHandle
+from std.ffi import _DLHandle
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -100,11 +100,11 @@ struct BlitzEvent(Copyable, Movable):
         self.event_type = other.event_type
         self.value = other.value
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.valid = other.valid
-        self.handler_id = other.handler_id
-        self.event_type = other.event_type
-        self.value = other.value^
+    fn __moveinit__(out self, deinit take: Self):
+        self.valid = take.valid
+        self.handler_id = take.handler_id
+        self.event_type = take.event_type
+        self.value = take.value^
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -245,9 +245,9 @@ struct Blitz(Movable):
         self._lib = lib
         self._ctx = ctx
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._lib = other._lib
-        self._ctx = other._ctx
+    fn __moveinit__(out self, deinit take: Self):
+        self._lib = take._lib
+        self._ctx = take._ctx
 
     # ── Factory ──────────────────────────────────────────────────────────
 

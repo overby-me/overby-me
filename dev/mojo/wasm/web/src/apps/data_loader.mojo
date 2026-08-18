@@ -54,8 +54,8 @@ struct DLContentChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self, data: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -74,8 +74,8 @@ struct DLSkeletonChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -127,12 +127,12 @@ struct DataLoaderApp(Movable):
         )
         self.skeleton = DLSkeletonChild(skel_ctx^)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.content = other.content^
-        self.skeleton = other.skeleton^
-        self.data_text = other.data_text^
-        self.load_handler = other.load_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.content = take.content^
+        self.skeleton = take.skeleton^
+        self.data_text = take.data_text^
+        self.load_handler = take.load_handler
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both slots."""

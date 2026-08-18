@@ -58,7 +58,7 @@
 
 from memory import UnsafePointer, alloc
 from os import getenv
-from sys.ffi import _DLHandle
+from std.ffi import _DLHandle
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -176,15 +176,15 @@ struct XREvent(Copyable, Movable):
         self.hit_v = other.hit_v
         self.hand = other.hand
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.valid = other.valid
-        self.panel_id = other.panel_id
-        self.handler_id = other.handler_id
-        self.event_type = other.event_type
-        self.value = other.value^
-        self.hit_u = other.hit_u
-        self.hit_v = other.hit_v
-        self.hand = other.hand
+    fn __moveinit__(out self, deinit take: Self):
+        self.valid = take.valid
+        self.panel_id = take.panel_id
+        self.handler_id = take.handler_id
+        self.event_type = take.event_type
+        self.value = take.value^
+        self.hit_u = take.hit_u
+        self.hit_v = take.hit_v
+        self.hand = take.hand
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -233,15 +233,15 @@ struct XRPose(Copyable, Movable):
         self.qz = other.qz
         self.qw = other.qw
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.valid = other.valid
-        self.px = other.px
-        self.py = other.py
-        self.pz = other.pz
-        self.qx = other.qx
-        self.qy = other.qy
-        self.qz = other.qz
-        self.qw = other.qw
+    fn __moveinit__(out self, deinit take: Self):
+        self.valid = take.valid
+        self.px = take.px
+        self.py = take.py
+        self.pz = take.pz
+        self.qx = take.qx
+        self.qy = take.qy
+        self.qz = take.qz
+        self.qw = take.qw
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -280,12 +280,12 @@ struct XRRaycastHit(Copyable, Movable):
         self.v = other.v
         self.distance = other.distance
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.hit = other.hit
-        self.panel_id = other.panel_id
-        self.u = other.u
-        self.v = other.v
-        self.distance = other.distance
+    fn __moveinit__(out self, deinit take: Self):
+        self.hit = take.hit
+        self.panel_id = take.panel_id
+        self.u = take.u
+        self.v = take.v
+        self.distance = take.distance
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -452,9 +452,9 @@ struct XRBlitz(Movable):
         self._lib = lib
         self._session = session
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._lib = other._lib
-        self._session = other._session
+    fn __moveinit__(out self, deinit take: Self):
+        self._lib = take._lib
+        self._session = take._session
 
     # ── Factory methods ──────────────────────────────────────────────────
 

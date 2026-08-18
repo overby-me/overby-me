@@ -57,12 +57,12 @@ struct AppShell(Movable):
         self.scheduler = Scheduler()
         self._alive = False
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.runtime = other.runtime
-        self.store = other.store
-        self.eid_alloc = other.eid_alloc
-        self.scheduler = other.scheduler^
-        self._alive = other._alive
+    fn __moveinit__(out self, deinit take: Self):
+        self.runtime = take.runtime
+        self.store = take.store
+        self.eid_alloc = take.eid_alloc
+        self.scheduler = take.scheduler^
+        self._alive = take._alive
 
     # ── Setup / Teardown ─────────────────────────────────────────────
 

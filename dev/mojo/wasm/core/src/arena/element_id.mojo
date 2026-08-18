@@ -114,10 +114,10 @@ struct ElementIdAllocator(Movable):
         self._count = 0
         self._reserve_root()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._slots = other._slots^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._slots = take._slots^
+        self._free_head = take._free_head
+        self._count = take._count
 
     fn _reserve_root(mut self):
         """Reserve slot 0 for the root element."""

@@ -123,9 +123,9 @@ struct EventBinding(Copyable, Equatable, Writable):
         self.event_name = other.event_name
         self.handler_id = other.handler_id
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.event_name = other.event_name^
-        self.handler_id = other.handler_id
+    fn __moveinit__(out self, deinit take: Self):
+        self.event_name = take.event_name^
+        self.handler_id = take.handler_id
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -212,13 +212,13 @@ struct AutoBinding(Copyable):
         self.string_key = other.string_key
         self.version_key = other.version_key
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.kind = other.kind
-        self.event_name = other.event_name^
-        self.handler_id = other.handler_id
-        self.attr_name = other.attr_name^
-        self.string_key = other.string_key
-        self.version_key = other.version_key
+    fn __moveinit__(out self, deinit take: Self):
+        self.kind = take.kind
+        self.event_name = take.event_name^
+        self.handler_id = take.handler_id
+        self.attr_name = take.attr_name^
+        self.string_key = take.string_key
+        self.version_key = take.version_key
 
     fn is_event(self) -> Bool:
         """Check whether this is an event binding."""
@@ -292,11 +292,11 @@ struct RenderBuilder(Movable):
         self._auto_bindings = auto_bindings^
         self._runtime = runtime
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._vb = other._vb^
-        self._events = other._events^
-        self._auto_bindings = other._auto_bindings^
-        self._runtime = other._runtime
+    fn __moveinit__(out self, deinit take: Self):
+        self._vb = take._vb^
+        self._events = take._events^
+        self._auto_bindings = take._auto_bindings^
+        self._runtime = take._runtime
 
     # ── Dynamic text ─────────────────────────────────────────────────
 
@@ -475,14 +475,14 @@ struct ComponentContext(Movable):
         self._view_events = List[EventBinding]()
         self._auto_bindings = List[AutoBinding]()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.shell = other.shell^
-        self.scope_id = other.scope_id
-        self.template_id = other.template_id
-        self.current_vnode = other.current_vnode
-        self._setup_done = other._setup_done
-        self._view_events = other._view_events^
-        self._auto_bindings = other._auto_bindings^
+    fn __moveinit__(out self, deinit take: Self):
+        self.shell = take.shell^
+        self.scope_id = take.scope_id
+        self.template_id = take.template_id
+        self.current_vnode = take.current_vnode
+        self._setup_done = take._setup_done
+        self._view_events = take._view_events^
+        self._auto_bindings = take._auto_bindings^
 
     @staticmethod
     fn create() -> Self:
@@ -2150,12 +2150,12 @@ struct _EventInfo(Copyable, Equatable, Writable):
         self.operand = other.operand
         self.attr_idx = other.attr_idx
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.event_name = other.event_name^
-        self.action = other.action
-        self.signal_key = other.signal_key
-        self.operand = other.operand
-        self.attr_idx = other.attr_idx
+    fn __moveinit__(out self, deinit take: Self):
+        self.event_name = take.event_name^
+        self.action = take.action
+        self.signal_key = take.signal_key
+        self.operand = take.operand
+        self.attr_idx = take.attr_idx
 
 
 struct _ValueBindingInfo(Copyable, Equatable, Writable):
@@ -2184,11 +2184,11 @@ struct _ValueBindingInfo(Copyable, Equatable, Writable):
         self.version_key = other.version_key
         self.attr_idx = other.attr_idx
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.attr_name = other.attr_name^
-        self.string_key = other.string_key
-        self.version_key = other.version_key
-        self.attr_idx = other.attr_idx
+    fn __moveinit__(out self, deinit take: Self):
+        self.attr_name = take.attr_name^
+        self.string_key = take.string_key
+        self.version_key = take.version_key
+        self.attr_idx = take.attr_idx
 
 
 fn _process_view_tree(

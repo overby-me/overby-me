@@ -158,9 +158,9 @@ struct WebApp(PlatformApp):
         self._config = AppConfig(title, width, height, debug)
         self._initialized = False
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._config = other._config^
-        self._initialized = other._initialized
+    fn __moveinit__(out self, deinit take: Self):
+        self._config = take._config^
+        self._initialized = take._initialized
 
     # ── PlatformApp trait implementation ──────────────────────────────
 

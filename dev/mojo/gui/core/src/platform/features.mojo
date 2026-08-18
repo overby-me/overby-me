@@ -162,20 +162,20 @@ struct PlatformFeatures(Copyable, Movable):
         self.has_xr_passthrough = other.has_xr_passthrough
         self.renderer_name = other.renderer_name
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.has_dom = other.has_dom
-        self.has_css = other.has_css
-        self.has_gpu = other.has_gpu
-        self.has_multi_window = other.has_multi_window
-        self.has_native_chrome = other.has_native_chrome
-        self.has_clipboard = other.has_clipboard
-        self.has_filesystem = other.has_filesystem
-        self.has_unrestricted_network = other.has_unrestricted_network
-        self.has_accessibility = other.has_accessibility
-        self.has_xr = other.has_xr
-        self.has_xr_hand_tracking = other.has_xr_hand_tracking
-        self.has_xr_passthrough = other.has_xr_passthrough
-        self.renderer_name = other.renderer_name^
+    fn __moveinit__(out self, deinit take: Self):
+        self.has_dom = take.has_dom
+        self.has_css = take.has_css
+        self.has_gpu = take.has_gpu
+        self.has_multi_window = take.has_multi_window
+        self.has_native_chrome = take.has_native_chrome
+        self.has_clipboard = take.has_clipboard
+        self.has_filesystem = take.has_filesystem
+        self.has_unrestricted_network = take.has_unrestricted_network
+        self.has_accessibility = take.has_accessibility
+        self.has_xr = take.has_xr
+        self.has_xr_hand_tracking = take.has_xr_hand_tracking
+        self.has_xr_passthrough = take.has_xr_passthrough
+        self.renderer_name = take.renderer_name^
 
 
 # ══════════════════════════════════════════════════════════════════════════════

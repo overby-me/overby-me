@@ -48,10 +48,10 @@ struct TemplateRegistry(Movable):
         self._names = List[String](capacity=capacity)
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._templates = other._templates^
-        self._names = other._names^
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._templates = take._templates^
+        self._names = take._names^
+        self._count = take._count
 
     # ── Register ─────────────────────────────────────────────────────
 

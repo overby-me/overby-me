@@ -128,14 +128,14 @@ struct MemoEntry(Copyable, Equatable, Writable):
         self.computing = other.computing
         self.value_changed = other.value_changed
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.context_id = other.context_id
-        self.output_key = other.output_key
-        self.string_key = other.string_key
-        self.scope_id = other.scope_id
-        self.dirty = other.dirty
-        self.computing = other.computing
-        self.value_changed = other.value_changed
+    fn __moveinit__(out self, deinit take: Self):
+        self.context_id = take.context_id
+        self.output_key = take.output_key
+        self.string_key = take.string_key
+        self.scope_id = take.scope_id
+        self.dirty = take.dirty
+        self.computing = take.computing
+        self.value_changed = take.value_changed
 
 
 # ── Slot state for the memo store ────────────────────────────────────────────
@@ -180,11 +180,11 @@ struct MemoStore(Movable):
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._entries = other._entries^
-        self._states = other._states^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._entries = take._entries^
+        self._states = take._states^
+        self._free_head = take._free_head
+        self._count = take._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 

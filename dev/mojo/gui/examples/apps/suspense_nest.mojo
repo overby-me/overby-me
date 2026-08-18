@@ -54,8 +54,8 @@ struct SNInnerContentChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self, data: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -74,8 +74,8 @@ struct SNInnerSkeletonChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -106,10 +106,10 @@ struct SNOuterContentChild(Movable):
         self.inner_content = inner_content^
         self.inner_skeleton = inner_skeleton^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
-        self.inner_content = other.inner_content^
-        self.inner_skeleton = other.inner_skeleton^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
+        self.inner_content = take.inner_content^
+        self.inner_skeleton = take.inner_skeleton^
 
     fn render(mut self, data: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -130,8 +130,8 @@ struct SNOuterSkeletonChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -225,14 +225,14 @@ struct SuspenseNestApp(Movable):
         )
         self.outer_skeleton = SNOuterSkeletonChild(outer_skeleton_ctx^)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.outer_content = other.outer_content^
-        self.outer_skeleton = other.outer_skeleton^
-        self.outer_data = other.outer_data^
-        self.inner_data = other.inner_data^
-        self.outer_load_handler = other.outer_load_handler
-        self.inner_load_handler = other.inner_load_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.outer_content = take.outer_content^
+        self.outer_skeleton = take.outer_skeleton^
+        self.outer_data = take.outer_data^
+        self.inner_data = take.inner_data^
+        self.outer_load_handler = take.outer_load_handler
+        self.inner_load_handler = take.inner_load_handler
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both outer slots."""

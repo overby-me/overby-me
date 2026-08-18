@@ -85,10 +85,10 @@ struct Vec3(Copyable, Movable):
         self.y = other.y
         self.z = other.z
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.x = other.x
-        self.y = other.y
-        self.z = other.z
+    fn __moveinit__(out self, deinit take: Self):
+        self.x = take.x
+        self.y = take.y
+        self.z = take.z
 
     fn __eq__(self, other: Self) -> Bool:
         return self.x == other.x and self.y == other.y and self.z == other.z
@@ -149,11 +149,11 @@ struct Quaternion(Copyable, Movable):
         self.z = other.z
         self.w = other.w
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.x = other.x
-        self.y = other.y
-        self.z = other.z
-        self.w = other.w
+    fn __moveinit__(out self, deinit take: Self):
+        self.x = take.x
+        self.y = take.y
+        self.z = take.z
+        self.w = take.w
 
     @staticmethod
     fn identity() -> Quaternion:
@@ -286,15 +286,15 @@ struct PanelConfig(Copyable, Movable):
         self.curvature_radius = other.curvature_radius
         self.interact = other.interact
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.width_m = other.width_m
-        self.height_m = other.height_m
-        self.pixels_per_meter = other.pixels_per_meter
-        self.position = other.position^
-        self.rotation = other.rotation^
-        self.curved = other.curved
-        self.curvature_radius = other.curvature_radius
-        self.interact = other.interact
+    fn __moveinit__(out self, deinit take: Self):
+        self.width_m = take.width_m
+        self.height_m = take.height_m
+        self.pixels_per_meter = take.pixels_per_meter
+        self.position = take.position^
+        self.rotation = take.rotation^
+        self.curved = take.curved
+        self.curvature_radius = take.curvature_radius
+        self.interact = take.interact
 
     fn texture_width(self) -> UInt32:
         """Compute the texture width in pixels from physical size and density.
@@ -464,19 +464,19 @@ struct XRPanel(Movable):
         self.interact = config.interact
         self.state = PanelState()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.panel_id = other.panel_id
-        self.position = other.position^
-        self.rotation = other.rotation^
-        self.width_m = other.width_m
-        self.height_m = other.height_m
-        self.pixels_per_meter = other.pixels_per_meter
-        self.texture_width = other.texture_width
-        self.texture_height = other.texture_height
-        self.curved = other.curved
-        self.curvature_radius = other.curvature_radius
-        self.interact = other.interact
-        self.state = other.state
+    fn __moveinit__(out self, deinit take: Self):
+        self.panel_id = take.panel_id
+        self.position = take.position^
+        self.rotation = take.rotation^
+        self.width_m = take.width_m
+        self.height_m = take.height_m
+        self.pixels_per_meter = take.pixels_per_meter
+        self.texture_width = take.texture_width
+        self.texture_height = take.texture_height
+        self.curved = take.curved
+        self.curvature_radius = take.curvature_radius
+        self.interact = take.interact
+        self.state = take.state
 
     # ── Transform manipulation ───────────────────────────────────────
 

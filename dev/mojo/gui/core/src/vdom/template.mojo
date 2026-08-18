@@ -102,11 +102,11 @@ struct TemplateAttribute(Copyable):
         self.value = other.value
         self.dynamic_index = other.dynamic_index
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.kind = other.kind
-        self.name = other.name^
-        self.value = other.value^
-        self.dynamic_index = other.dynamic_index
+    fn __moveinit__(out self, deinit take: Self):
+        self.kind = take.kind
+        self.name = take.name^
+        self.value = take.value^
+        self.dynamic_index = take.dynamic_index
 
     # ── Queries ──────────────────────────────────────────────────────
 
@@ -233,14 +233,14 @@ struct TemplateNode(Copyable):
         self.text = other.text
         self.dynamic_index = other.dynamic_index
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.kind = other.kind
-        self.html_tag = other.html_tag
-        self.children = other.children^
-        self.first_attr = other.first_attr
-        self.num_attrs = other.num_attrs
-        self.text = other.text^
-        self.dynamic_index = other.dynamic_index
+    fn __moveinit__(out self, deinit take: Self):
+        self.kind = take.kind
+        self.html_tag = take.html_tag
+        self.children = take.children^
+        self.first_attr = take.first_attr
+        self.num_attrs = take.num_attrs
+        self.text = take.text^
+        self.dynamic_index = take.dynamic_index
 
     # ── Kind queries ─────────────────────────────────────────────────
 
@@ -342,12 +342,12 @@ struct Template(Copyable):
         self.attrs = other.attrs.copy()
         self.root_indices = other.root_indices.copy()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.id = other.id
-        self.name = other.name^
-        self.nodes = other.nodes^
-        self.attrs = other.attrs^
-        self.root_indices = other.root_indices^
+    fn __moveinit__(out self, deinit take: Self):
+        self.id = take.id
+        self.name = take.name^
+        self.nodes = take.nodes^
+        self.attrs = take.attrs^
+        self.root_indices = take.root_indices^
 
     # ── Node access ──────────────────────────────────────────────────
 

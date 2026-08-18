@@ -82,13 +82,13 @@ struct EffectMemoApp(Movable):
         )
         self.incr_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.input = other.input.copy()
-        self.tripled = other.tripled.copy()
-        self.label = other.label^
-        self.label_effect = other.label_effect.copy()
-        self.incr_handler = other.incr_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.input = take.input.copy()
+        self.tripled = take.tripled.copy()
+        self.label = take.label^
+        self.label_effect = take.label_effect.copy()
+        self.incr_handler = take.incr_handler
 
     fn run_memos_and_effects(mut self):
         """Recompute memos, then drain and execute pending effects.

@@ -27,10 +27,10 @@ struct ContextTestApp(Movable):
         # Create a child scope under the root
         self.child_scope_id = self.ctx.create_child_scope()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.child_scope_id = other.child_scope_id
-        self.count = other.count^
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.child_scope_id = take.child_scope_id
+        self.count = take.count^
 
 
 fn _cta_init() -> UnsafePointer[ContextTestApp, MutExternalOrigin]:

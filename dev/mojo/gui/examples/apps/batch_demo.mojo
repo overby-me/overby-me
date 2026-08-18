@@ -82,14 +82,14 @@ struct BatchDemoApp(Movable):
         self.set_handler = self.ctx.view_event_handler_id(0)
         self.reset_handler = self.ctx.view_event_handler_id(1)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.first_name = other.first_name^
-        self.last_name = other.last_name^
-        self.full_name = other.full_name.copy()
-        self.write_count = other.write_count.copy()
-        self.set_handler = other.set_handler
-        self.reset_handler = other.reset_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.first_name = take.first_name^
+        self.last_name = take.last_name^
+        self.full_name = take.full_name.copy()
+        self.write_count = take.write_count.copy()
+        self.set_handler = take.set_handler
+        self.reset_handler = take.reset_handler
 
     fn run_memos(mut self):
         """Recompute the full_name memo if dirty.

@@ -51,9 +51,9 @@ struct SCNormalChild(Movable):
         self.child_ctx = child_ctx^
         self.count = count^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
-        self.count = other.count^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
+        self.count = take.count^
 
     fn render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -75,8 +75,8 @@ struct SCFallbackChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self, error_msg: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -158,13 +158,13 @@ struct SafeCounterApp(Movable):
         self.retry_handler = fallback_ctx.event_handler_id(0)
         self.fallback = SCFallbackChild(fallback_ctx^)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count^
-        self.normal = other.normal^
-        self.fallback = other.fallback^
-        self.crash_handler = other.crash_handler
-        self.retry_handler = other.retry_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count^
+        self.normal = take.normal^
+        self.fallback = take.fallback^
+        self.crash_handler = take.crash_handler
+        self.retry_handler = take.retry_handler
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both child slots."""

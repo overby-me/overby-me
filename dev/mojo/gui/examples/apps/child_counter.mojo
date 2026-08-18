@@ -76,10 +76,10 @@ struct ChildCounterApp(Movable):
             String("child-display"),
         )
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count^
-        self.child = other.child^
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count^
+        self.child = take.child^
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with a placeholder for the child slot.

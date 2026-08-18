@@ -396,14 +396,14 @@ struct Node(Copyable):
         self.operand = other.operand
         self.items = other.items.copy()
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.kind = other.kind
-        self.tag = other.tag
-        self.text = other.text^
-        self.attr_value = other.attr_value^
-        self.dynamic_index = other.dynamic_index
-        self.operand = other.operand
-        self.items = other.items^
+    fn __moveinit__(out self, deinit take: Self):
+        self.kind = take.kind
+        self.tag = take.tag
+        self.text = take.text^
+        self.attr_value = take.attr_value^
+        self.dynamic_index = take.dynamic_index
+        self.operand = take.operand
+        self.items = take.items^
 
     # ── Queries ──────────────────────────────────────────────────────
 
@@ -3373,9 +3373,9 @@ struct VNodeBuilder(Movable):
             VNode.template_ref_keyed(template_id, key)
         )
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._store = other._store
-        self._vnode_idx = other._vnode_idx
+    fn __moveinit__(out self, deinit take: Self):
+        self._store = take._store
+        self._vnode_idx = take._vnode_idx
 
     # ── Dynamic text nodes ───────────────────────────────────────────
 

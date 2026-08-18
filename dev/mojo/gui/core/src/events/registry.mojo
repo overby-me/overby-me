@@ -123,12 +123,12 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         self.operand = other.operand
         self.event_name = other.event_name
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.scope_id = other.scope_id
-        self.action = other.action
-        self.signal_key = other.signal_key
-        self.operand = other.operand
-        self.event_name = other.event_name^
+    fn __moveinit__(out self, deinit take: Self):
+        self.scope_id = take.scope_id
+        self.action = take.action
+        self.signal_key = take.signal_key
+        self.operand = take.operand
+        self.event_name = take.event_name^
 
     # ── Convenience constructors ─────────────────────────────────────
 
@@ -289,11 +289,11 @@ struct HandlerRegistry(Movable):
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit other: Self):
-        self._entries = other._entries^
-        self._states = other._states^
-        self._free_head = other._free_head
-        self._count = other._count
+    fn __moveinit__(out self, deinit take: Self):
+        self._entries = take._entries^
+        self._states = take._states^
+        self._free_head = take._free_head
+        self._count = take._count
 
     # ── Register / Remove ────────────────────────────────────────────
 

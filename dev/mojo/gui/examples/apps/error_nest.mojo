@@ -53,8 +53,8 @@ struct ENInnerNormalChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -73,8 +73,8 @@ struct ENInnerFallbackChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self, error_msg: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -105,10 +105,10 @@ struct ENOuterNormalChild(Movable):
         self.inner_normal = inner_normal^
         self.inner_fallback = inner_fallback^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
-        self.inner_normal = other.inner_normal^
-        self.inner_fallback = other.inner_fallback^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
+        self.inner_normal = take.inner_normal^
+        self.inner_fallback = take.inner_fallback^
 
     fn render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -129,8 +129,8 @@ struct ENOuterFallbackChild(Movable):
     fn __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
 
     fn render(mut self, error_msg: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
@@ -236,14 +236,14 @@ struct ErrorNestApp(Movable):
         self.outer_retry_handler = outer_fallback_ctx.event_handler_id(0)
         self.outer_fallback = ENOuterFallbackChild(outer_fallback_ctx^)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.outer_normal = other.outer_normal^
-        self.outer_fallback = other.outer_fallback^
-        self.outer_crash_handler = other.outer_crash_handler
-        self.inner_crash_handler = other.inner_crash_handler
-        self.outer_retry_handler = other.outer_retry_handler
-        self.inner_retry_handler = other.inner_retry_handler
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.outer_normal = take.outer_normal^
+        self.outer_fallback = take.outer_fallback^
+        self.outer_crash_handler = take.outer_crash_handler
+        self.inner_crash_handler = take.inner_crash_handler
+        self.outer_retry_handler = take.outer_retry_handler
+        self.inner_retry_handler = take.inner_retry_handler
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both outer slots."""

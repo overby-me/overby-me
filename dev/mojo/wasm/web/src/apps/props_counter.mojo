@@ -51,10 +51,10 @@ struct CounterDisplay(Movable):
         self.count = count^
         self.show_hex = show_hex^
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.child_ctx = other.child_ctx^
-        self.count = other.count^
-        self.show_hex = other.show_hex^
+    fn __moveinit__(out self, deinit take: Self):
+        self.child_ctx = take.child_ctx^
+        self.count = take.count^
+        self.show_hex = take.show_hex^
 
     fn render(mut self) -> UInt32:
         """Build the child's VNode with current count value."""
@@ -126,10 +126,10 @@ struct PropsCounterApp(Movable):
         var prop_count = child_ctx.consume_signal_i32(_PC_PROP_COUNT)
         self.display = CounterDisplay(child_ctx^, prop_count^, show_hex_handle^)
 
-    fn __moveinit__(out self, deinit other: Self):
-        self.ctx = other.ctx^
-        self.count = other.count^
-        self.display = other.display^
+    fn __moveinit__(out self, deinit take: Self):
+        self.ctx = take.ctx^
+        self.count = take.count^
+        self.display = take.display^
 
     fn render_parent(mut self) -> UInt32:
         """Build the parent VNode with a placeholder for the child slot."""
