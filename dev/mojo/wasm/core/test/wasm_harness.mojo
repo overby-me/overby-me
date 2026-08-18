@@ -570,7 +570,6 @@ struct WasmInstance(Movable):
         self._state_ptr = alloc[SharedState](1)
         self._state_ptr.init_pointee_move(SharedState())
         var env = self._state_ptr.bitcast[NoneType]()
-        var no_fin = UnsafePointer[NoneType, MutExternalOrigin]()
 
         # Create engine with module caching enabled.
         # Each mojo-test function runs in a separate process, so in-memory
