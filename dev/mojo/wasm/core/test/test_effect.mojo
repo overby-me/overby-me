@@ -271,7 +271,7 @@ fn _memo_output_key(
 
 def test_effect_create_returns_valid_id(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Creating an effect returns ID 0 and count becomes 1."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -286,7 +286,7 @@ def test_effect_create_returns_valid_id(
 
 def test_effect_starts_pending(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """A newly created effect starts pending (needs first run)."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -300,7 +300,7 @@ def test_effect_starts_pending(
 
 def test_effect_has_context_id(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """An effect has a valid reactive context ID (a signal key)."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -316,7 +316,7 @@ def test_effect_has_context_id(
 
 def test_effect_two_effects_distinct_ids(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Creating two effects returns distinct IDs."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -332,7 +332,7 @@ def test_effect_two_effects_distinct_ids(
 
 def test_effect_destroy_reduces_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Destroying an effect reduces the count."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -355,7 +355,7 @@ def test_effect_destroy_reduces_count(
 
 def test_effect_id_reuse_after_destroy(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Destroyed effect IDs are reused by the next create."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -372,7 +372,7 @@ def test_effect_id_reuse_after_destroy(
 
 def test_effect_destroy_cleans_up_context_signal(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroying an effect also destroys its context signal."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -401,7 +401,7 @@ def test_effect_destroy_cleans_up_context_signal(
 
 def test_effect_begin_end_run_clears_pending(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Running an effect (begin + end) clears the pending flag."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -422,7 +422,7 @@ def test_effect_begin_end_run_clears_pending(
 
 def test_effect_signal_read_during_run_subscribes(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Reading a signal during an effect run subscribes the effect's context."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -457,7 +457,7 @@ def test_effect_signal_read_during_run_subscribes(
 
 def test_effect_signal_write_marks_pending(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Writing to a signal that the effect depends on marks it pending."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -486,7 +486,7 @@ def test_effect_signal_write_marks_pending(
 
 def test_effect_signal_write_does_not_dirty_scope(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Writing to a signal that ONLY an effect subscribes to does NOT dirty any scope.
     """
     var rt = _create_runtime(w)
@@ -521,7 +521,7 @@ def test_effect_signal_write_does_not_dirty_scope(
 
 def test_effect_two_effects_same_signal(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Two effects reading the same signal both become pending on write."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -558,7 +558,7 @@ def test_effect_two_effects_same_signal(
 
 def test_effect_scope_and_effect_both_react(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """A signal with both a scope subscriber and an effect subscriber:
     writing marks the scope dirty AND the effect pending."""
     var rt = _create_runtime(w)
@@ -588,7 +588,7 @@ def test_effect_scope_and_effect_both_react(
 
 def test_effect_unsubscribed_signal_no_pending(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Writing to a signal that the effect does NOT read does not trigger pending.
     """
     var rt = _create_runtime(w)
@@ -629,7 +629,7 @@ def test_effect_unsubscribed_signal_no_pending(
 
 def test_effect_dependency_retracking(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Effect dependencies are re-tracked on each run.
 
     First run reads sig_a → subscribed to sig_a.
@@ -682,7 +682,7 @@ def test_effect_dependency_retracking(
 
 def test_effect_drain_pending_returns_pending_effects(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Drain_pending returns the correct count and IDs of pending effects."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -727,7 +727,7 @@ def test_effect_drain_pending_returns_pending_effects(
 
 def test_effect_drain_pending_after_partial_run(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """After running one of two pending effects, drain returns only the remaining one.
     """
     var rt = _create_runtime(w)
@@ -774,7 +774,7 @@ def test_effect_drain_pending_after_partial_run(
 
 def test_effect_reads_memo_output(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """An effect that reads a memo's output becomes pending when the memo changes.
 
     Chain: signal → memo (dirty → recompute) → memo output signal → effect pending.
@@ -822,7 +822,7 @@ def test_effect_reads_memo_output(
 
 def test_effect_destroy_while_pending(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Destroying a pending effect is safe and cleans up properly."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -850,7 +850,7 @@ def test_effect_destroy_while_pending(
 
 def test_effect_destroy_nonexistent(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Destroying a non-existent effect is a no-op."""
     var rt = _create_runtime(w)
 
@@ -869,7 +869,7 @@ def test_effect_destroy_nonexistent(
 
 def test_hook_use_effect_creates_on_first_render(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Use_effect on first render creates an effect and returns its ID."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -888,7 +888,7 @@ def test_hook_use_effect_creates_on_first_render(
 
 def test_hook_use_effect_returns_same_id_on_rerender(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Use_effect on re-render returns the same effect ID."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -912,7 +912,7 @@ def test_hook_use_effect_returns_same_id_on_rerender(
 
 def test_hook_use_effect_multiple_distinct_ids(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Multiple use_effect calls in one render create distinct effects."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -940,7 +940,7 @@ def test_hook_use_effect_multiple_distinct_ids(
 
 def test_hook_use_effect_interleaved_with_signal_and_memo(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Hooks use_effect interleaved with use_signal and use_memo all remain stable.
     """
     var rt = _create_runtime(w)
@@ -978,7 +978,7 @@ def test_hook_use_effect_interleaved_with_signal_and_memo(
 
 def test_effect_multiple_writes_single_pending(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Multiple writes to the same signal only produce one pending state (idempotent).
     """
     var rt = _create_runtime(w)
@@ -1004,7 +1004,7 @@ def test_effect_multiple_writes_single_pending(
 
 def test_effect_run_resubscribe_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin]
-):
+) raises:
     """Running an effect multiple times correctly re-subscribes each time."""
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)

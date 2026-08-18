@@ -213,7 +213,7 @@ fn _reset_handler(
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 
-def test_bd_initial_state():
+def test_bd_initial_state() raises:
     """After rebuild, full_name=' ' and write_count=0."""
     var w = _load()
     var t = _create_bd(w)
@@ -228,7 +228,7 @@ def test_bd_initial_state():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_set_names():
+def test_bd_set_names() raises:
     """Set names 'Alice'+'Smith' → full_name='Alice Smith', write_count=1."""
     var w = _load()
     var t = _create_bd(w)
@@ -246,7 +246,7 @@ def test_bd_set_names():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_reset():
+def test_bd_reset() raises:
     """Set names then reset → full_name=' ', write_count=0."""
     var w = _load()
     var t = _create_bd(w)
@@ -265,7 +265,7 @@ def test_bd_reset():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_set_names_flush():
+def test_bd_set_names_flush() raises:
     """Set names + flush produces DOM mutations (nonzero bytes)."""
     var w = _load()
     var t = _create_bd(w)
@@ -279,7 +279,7 @@ def test_bd_set_names_flush():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_reset_flush():
+def test_bd_reset_flush() raises:
     """Reset + flush produces DOM mutations (nonzero bytes)."""
     var w = _load()
     var t = _create_bd(w)
@@ -298,7 +298,7 @@ def test_bd_reset_flush():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_set_names_memo_dirty():
+def test_bd_set_names_memo_dirty() raises:
     """After set_names (before flush), full_name memo is dirty."""
     var w = _load()
     var t = _create_bd(w)
@@ -313,7 +313,7 @@ def test_bd_set_names_memo_dirty():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_not_batching_after_set():
+def test_bd_not_batching_after_set() raises:
     """Batching flag returns false after set_names completes (batch ended)."""
     var w = _load()
     var t = _create_bd(w)
@@ -328,7 +328,7 @@ def test_bd_not_batching_after_set():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_memo_stable_same_names():
+def test_bd_memo_stable_same_names() raises:
     """Set same names twice — second flush returns 0 (memo value-stable)."""
     var w = _load()
     var t = _create_bd(w)
@@ -350,7 +350,7 @@ def test_bd_memo_stable_same_names():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_set_then_reset():
+def test_bd_set_then_reset() raises:
     """Set names, flush, reset, flush — both flushes produce mutations."""
     var w = _load()
     var t = _create_bd(w)
@@ -371,7 +371,7 @@ def test_bd_set_then_reset():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_multiple_sets():
+def test_bd_multiple_sets() raises:
     """5 set_names calls with different values — final state correct."""
     var w = _load()
     var t = _create_bd(w)
@@ -395,7 +395,7 @@ def test_bd_multiple_sets():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_write_count_increments():
+def test_bd_write_count_increments() raises:
     """3 set_names calls → write_count=3."""
     var w = _load()
     var t = _create_bd(w)
@@ -417,7 +417,7 @@ def test_bd_write_count_increments():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_scope_count():
+def test_bd_scope_count() raises:
     """App has exactly 1 scope."""
     var w = _load()
     var t = _create_bd(w)
@@ -429,7 +429,7 @@ def test_bd_scope_count():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_memo_count():
+def test_bd_memo_count() raises:
     """App has exactly 1 memo (full_name)."""
     var w = _load()
     var t = _create_bd(w)
@@ -441,7 +441,7 @@ def test_bd_memo_count():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_destroy_clean():
+def test_bd_destroy_clean() raises:
     """Destroy does not crash."""
     var w = _load()
     var t = _create_bd(w)
@@ -452,7 +452,7 @@ def test_bd_destroy_clean():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_flush_returns_zero_when_clean():
+def test_bd_flush_returns_zero_when_clean() raises:
     """Flush without events returns 0."""
     var w = _load()
     var t = _create_bd(w)
@@ -465,7 +465,7 @@ def test_bd_flush_returns_zero_when_clean():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_handle_event_set():
+def test_bd_handle_event_set() raises:
     """Dispatch set_handler event marks scope dirty."""
     var w = _load()
     var t = _create_bd(w)
@@ -483,7 +483,7 @@ def test_bd_handle_event_set():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_handle_event_reset():
+def test_bd_handle_event_reset() raises:
     """Dispatch reset_handler event marks scope dirty."""
     var w = _load()
     var t = _create_bd(w)
@@ -501,7 +501,7 @@ def test_bd_handle_event_reset():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_rapid_10_sets():
+def test_bd_rapid_10_sets() raises:
     """10 rapid set_names calls — final state correct."""
     var w = _load()
     var t = _create_bd(w)
@@ -520,7 +520,7 @@ def test_bd_rapid_10_sets():
     _destroy_bd(w, app, buf)
 
 
-def test_bd_has_dirty_after_set():
+def test_bd_has_dirty_after_set() raises:
     """Dirty flag is true after set_names, false after flush."""
     var w = _load()
     var t = _create_bd(w)

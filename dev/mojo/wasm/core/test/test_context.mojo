@@ -65,7 +65,7 @@ fn _destroy_cta(
 
 def test_provide_context_stores_value(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Provide_context stores a value that can be consumed from the same scope.
     """
     var app = _create_cta(w)
@@ -82,7 +82,7 @@ def test_provide_context_stores_value(
 
 def test_consume_context_missing_key(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Consume_context returns 0 when the key is not found."""
     var app = _create_cta(w)
     var val = w[].call_i32("cta_consume_context", args_ptr_i32(app, 999))
@@ -95,7 +95,7 @@ def test_consume_context_missing_key(
 
 def test_has_context_true_false(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Has_context returns 1 for existing key and 0 for missing key."""
     var app = _create_cta(w)
     # Before provide: not found
@@ -117,7 +117,7 @@ def test_has_context_true_false(
 
 def test_consume_from_child_walks_up(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child scope can consume context provided at the parent scope."""
     var app = _create_cta(w)
     # Provide at root
@@ -133,7 +133,7 @@ def test_consume_from_child_walks_up(
 
 def test_consume_from_child_missing(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child scope consume returns 0 when key is not provided anywhere."""
     var app = _create_cta(w)
     var found = w[].call_i32(
@@ -148,7 +148,7 @@ def test_consume_from_child_missing(
 
 def test_provide_context_overwrites(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Providing the same key again overwrites the old value."""
     var app = _create_cta(w)
     w[].call_void("cta_provide_context", args_ptr_i32_i32(app, 5, 100))
@@ -166,7 +166,7 @@ def test_provide_context_overwrites(
 
 def test_provide_signal_i32_roundtrip(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Provide_signal_i32 stores the signal key; child can consume and read value.
     """
     var app = _create_cta(w)
@@ -185,7 +185,7 @@ def test_provide_signal_i32_roundtrip(
 
 def test_consumed_signal_reads_value(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """After the parent writes the signal, the child's consumed handle reads the new value.
     """
     var app = _create_cta(w)
@@ -210,7 +210,7 @@ def test_consumed_signal_reads_value(
 
 def test_consumed_signal_write_marks_dirty(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Writing a consumed signal (parent-owned) marks the parent scope dirty."""
     var app = _create_cta(w)
     # Should start clean
@@ -230,7 +230,7 @@ def test_consumed_signal_write_marks_dirty(
 
 def test_multiple_context_keys(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Multiple context keys can coexist without interference."""
     var app = _create_cta(w)
     w[].call_void("cta_provide_context", args_ptr_i32_i32(app, 1, 10))
@@ -250,7 +250,7 @@ def test_multiple_context_keys(
 
 def test_child_parent_scopes_distinct(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Root scope and child scope have different IDs."""
     var app = _create_cta(w)
     var root_id = w[].call_i32("cta_root_scope_id", args_ptr(app))
@@ -266,7 +266,7 @@ def test_child_parent_scopes_distinct(
 
 def test_consume_found_from_child(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Consume_found_from_child returns 1 when parent provides the key."""
     var app = _create_cta(w)
     w[].call_void("cta_provide_context", args_ptr_i32_i32(app, 88, 999))
@@ -282,7 +282,7 @@ def test_consume_found_from_child(
 
 def test_context_survives_signal_writes(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Context values survive after signal writes and dirty cycling."""
     var app = _create_cta(w)
     w[].call_void("cta_provide_context", args_ptr_i32_i32(app, 7, 777))
@@ -304,7 +304,7 @@ def test_context_survives_signal_writes(
 
 def test_destroy_does_not_crash(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Creating and destroying a context test app does not crash."""
     var app = _create_cta(w)
     w[].call_void("cta_provide_context", args_ptr_i32_i32(app, 1, 42))
@@ -318,7 +318,7 @@ def test_destroy_does_not_crash(
 
 def test_destroy_recreate_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroy then recreate cycle produces a fresh app with independent state.
     """
     var app1 = _create_cta(w)
@@ -337,7 +337,7 @@ def test_destroy_recreate_cycle(
 
 def test_ten_create_destroy_cycles(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """10 create/destroy cycles work correctly (no leaks, no crashes)."""
     for i in range(10):
         var app = _create_cta(w)
@@ -352,7 +352,7 @@ def test_ten_create_destroy_cycles(
 
 def test_scope_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """The app has exactly 2 live scopes (root + child)."""
     var app = _create_cta(w)
     var count = w[].call_i32("cta_scope_count", args_ptr(app))
@@ -365,7 +365,7 @@ def test_scope_count(
 
 def test_consume_signal_missing_key_sentinel(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Consume_signal_i32_from_child returns sentinel (-9999) for missing key.
     """
     var app = _create_cta(w)

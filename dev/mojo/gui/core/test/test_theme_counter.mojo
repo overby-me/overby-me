@@ -79,7 +79,7 @@ fn _flush(
 
 def test_tc_init_creates_app(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Init returns a non-zero app pointer with 3 distinct scopes."""
     var app = Int(w[].call_i64("tc_init", no_args()))
     assert_true(app != 0, "app pointer should be non-zero")
@@ -100,7 +100,7 @@ def test_tc_init_creates_app(
 
 def test_tc_scope_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """App has exactly 3 live scopes (parent + counter + summary)."""
     var app = Int(w[].call_i64("tc_init", no_args()))
     var count = w[].call_i32("tc_scope_count", args_ptr(app))
@@ -113,7 +113,7 @@ def test_tc_scope_count(
 
 def test_tc_initial_values(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Initial count is 0, theme is light, on_reset is 0."""
     var app = Int(w[].call_i64("tc_init", no_args()))
     assert_equal(w[].call_i32("tc_count_value", args_ptr(app)), 0)
@@ -127,7 +127,7 @@ def test_tc_initial_values(
 
 def test_tc_handler_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """At least 3 handlers registered (toggle theme, increment, reset)."""
     var app = Int(w[].call_i64("tc_init", no_args()))
     var hcount = w[].call_i32("tc_handler_count", args_ptr(app))
@@ -140,7 +140,7 @@ def test_tc_handler_count(
 
 def test_tc_increment_updates_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Dispatching increment handler increases count to 1."""
     var result = _create_tc(w)
     var app = result[0]
@@ -158,7 +158,7 @@ def test_tc_increment_updates_count(
 
 def test_tc_theme_toggle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Toggle theme switches from light to dark."""
     var result = _create_tc(w)
     var app = result[0]
@@ -177,7 +177,7 @@ def test_tc_theme_toggle(
 
 def test_tc_rebuild_produces_mutations(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Rebuild produces mutation bytes > 0 and mounts both children."""
     var app = Int(w[].call_i64("tc_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -196,7 +196,7 @@ def test_tc_rebuild_produces_mutations(
 
 def test_tc_flush_returns_zero_when_clean(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Flush after rebuild with no changes returns 0."""
     var result = _create_tc(w)
     var app = result[0]
@@ -211,7 +211,7 @@ def test_tc_flush_returns_zero_when_clean(
 
 def test_tc_callback_starts_zero(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """On_reset callback signal is 0 after init."""
     var result = _create_tc(w)
     var app = result[0]
@@ -225,7 +225,7 @@ def test_tc_callback_starts_zero(
 
 def test_tc_reset_writes_callback(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Dispatching reset handler sets on_reset to 1."""
     var result = _create_tc(w)
     var app = result[0]
@@ -242,7 +242,7 @@ def test_tc_reset_writes_callback(
 
 def test_tc_reset_clears_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """After increment + reset + flush, count returns to 0."""
     var result = _create_tc(w)
     var app = result[0]
@@ -267,7 +267,7 @@ def test_tc_reset_clears_count(
 
 def test_tc_mixed_increment_toggle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Mixed increment + theme toggle both apply correctly."""
     var result = _create_tc(w)
     var app = result[0]
@@ -292,7 +292,7 @@ def test_tc_mixed_increment_toggle(
 
 def test_tc_increment_reset_increment_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Increment → reset → increment cycle works correctly."""
     var result = _create_tc(w)
     var app = result[0]
@@ -321,7 +321,7 @@ def test_tc_increment_reset_increment_cycle(
 
 def test_tc_destroy_does_not_crash(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Creating and destroying the app does not crash."""
     var result = _create_tc(w)
     var app = result[0]
@@ -334,7 +334,7 @@ def test_tc_destroy_does_not_crash(
 
 def test_tc_destroy_with_dirty_state(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroying app with unflushed dirty state does not crash."""
     var result = _create_tc(w)
     var app = result[0]
@@ -354,7 +354,7 @@ def test_tc_destroy_with_dirty_state(
 
 def test_tc_destroy_recreate_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroy then recreate produces a fresh app with correct initial state."""
     var result1 = _create_tc(w)
     var app1 = result1[0]
@@ -383,7 +383,7 @@ def test_tc_destroy_recreate_cycle(
 
 def test_tc_ten_create_destroy_cycles(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Ten create/destroy cycles work without leaks or crashes."""
     for i in range(10):
         var result = _create_tc(w)
@@ -401,7 +401,7 @@ def test_tc_ten_create_destroy_cycles(
 
 def test_tc_rapid_increments(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Twenty rapid increments + flushes produce correct final count."""
     var result = _create_tc(w)
     var app = result[0]
@@ -419,7 +419,7 @@ def test_tc_rapid_increments(
 
 def test_tc_flush_after_increment(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Flush after increment emits mutations > 0."""
     var result = _create_tc(w)
     var app = result[0]
@@ -436,7 +436,7 @@ def test_tc_flush_after_increment(
 
 def test_tc_theme_does_not_affect_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Theme toggle does not change count value."""
     var result = _create_tc(w)
     var app = result[0]

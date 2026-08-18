@@ -77,7 +77,7 @@ fn _free_writer(writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin]):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_signal_i32_peek():
+def test_signal_i32_peek() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(42))
     var sig = SignalI32(key, rt)
@@ -85,7 +85,7 @@ def test_signal_i32_peek():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_read():
+def test_signal_i32_read() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     _ = rt[0].begin_scope_render(scope_id)
@@ -97,7 +97,7 @@ def test_signal_i32_read():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_set():
+def test_signal_i32_set() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(0))
     var sig = SignalI32(key, rt)
@@ -106,7 +106,7 @@ def test_signal_i32_set():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_iadd():
+def test_signal_i32_iadd() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(10))
     var sig = SignalI32(key, rt)
@@ -115,7 +115,7 @@ def test_signal_i32_iadd():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_isub():
+def test_signal_i32_isub() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(10))
     var sig = SignalI32(key, rt)
@@ -124,7 +124,7 @@ def test_signal_i32_isub():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_imul():
+def test_signal_i32_imul() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(5))
     var sig = SignalI32(key, rt)
@@ -133,7 +133,7 @@ def test_signal_i32_imul():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_ifloordiv():
+def test_signal_i32_ifloordiv() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(17))
     var sig = SignalI32(key, rt)
@@ -142,7 +142,7 @@ def test_signal_i32_ifloordiv():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_imod():
+def test_signal_i32_imod() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(17))
     var sig = SignalI32(key, rt)
@@ -151,7 +151,7 @@ def test_signal_i32_imod():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_toggle_from_zero():
+def test_signal_i32_toggle_from_zero() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(0))
     var sig = SignalI32(key, rt)
@@ -160,7 +160,7 @@ def test_signal_i32_toggle_from_zero():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_toggle_from_one():
+def test_signal_i32_toggle_from_one() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(1))
     var sig = SignalI32(key, rt)
@@ -169,7 +169,7 @@ def test_signal_i32_toggle_from_one():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_toggle_round_trip():
+def test_signal_i32_toggle_round_trip() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(0))
     var sig = SignalI32(key, rt)
@@ -179,7 +179,7 @@ def test_signal_i32_toggle_round_trip():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_version_increments():
+def test_signal_i32_version_increments() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(0))
     var sig = SignalI32(key, rt)
@@ -193,7 +193,7 @@ def test_signal_i32_version_increments():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_str():
+def test_signal_i32_str() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(42))
     var sig = SignalI32(key, rt)
@@ -202,7 +202,7 @@ def test_signal_i32_str():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_copy():
+def test_signal_i32_copy() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(5))
     var sig1 = SignalI32(key, rt)
@@ -214,7 +214,7 @@ def test_signal_i32_copy():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_chained_ops():
+def test_signal_i32_chained_ops() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(100))
     var sig = SignalI32(key, rt)
@@ -228,7 +228,7 @@ def test_signal_i32_chained_ops():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_marks_scope_dirty():
+def test_signal_i32_marks_scope_dirty() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     _ = rt[0].begin_scope_render(scope_id)
@@ -242,7 +242,7 @@ def test_signal_i32_marks_scope_dirty():
     _destroy_runtime(rt)
 
 
-def test_signal_i32_negative_values():
+def test_signal_i32_negative_values() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](Int32(-10))
     var sig = SignalI32(key, rt)
@@ -257,7 +257,7 @@ def test_signal_i32_negative_values():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_memo_i32_is_dirty_initially():
+def test_memo_i32_is_dirty_initially() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -266,7 +266,7 @@ def test_memo_i32_is_dirty_initially():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_compute_clears_dirty():
+def test_memo_i32_compute_clears_dirty() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -277,7 +277,7 @@ def test_memo_i32_compute_clears_dirty():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_read_after_compute():
+def test_memo_i32_read_after_compute() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -289,7 +289,7 @@ def test_memo_i32_read_after_compute():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_peek_after_compute():
+def test_memo_i32_peek_after_compute() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -303,7 +303,7 @@ def test_memo_i32_peek_after_compute():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_recompute_from():
+def test_memo_i32_recompute_from() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -314,7 +314,7 @@ def test_memo_i32_recompute_from():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_str():
+def test_memo_i32_str() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -325,7 +325,7 @@ def test_memo_i32_str():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_tracks_signal_deps():
+def test_memo_i32_tracks_signal_deps() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var sig_key = rt[0].create_signal[Int32](Int32(5))
@@ -353,7 +353,7 @@ def test_memo_i32_tracks_signal_deps():
     _destroy_runtime(rt)
 
 
-def test_memo_i32_copy():
+def test_memo_i32_copy() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var memo_id = rt[0].create_memo_i32(scope_id, Int32(0))
@@ -369,7 +369,7 @@ def test_memo_i32_copy():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_effect_handle_is_pending_initially():
+def test_effect_handle_is_pending_initially() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var effect_id = rt[0].create_effect(scope_id)
@@ -378,7 +378,7 @@ def test_effect_handle_is_pending_initially():
     _destroy_runtime(rt)
 
 
-def test_effect_handle_begin_end_run_clears_pending():
+def test_effect_handle_begin_end_run_clears_pending() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var effect_id = rt[0].create_effect(scope_id)
@@ -389,7 +389,7 @@ def test_effect_handle_begin_end_run_clears_pending():
     _destroy_runtime(rt)
 
 
-def test_effect_handle_tracks_signal_deps():
+def test_effect_handle_tracks_signal_deps() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var sig_key = rt[0].create_signal[Int32](Int32(0))
@@ -409,7 +409,7 @@ def test_effect_handle_tracks_signal_deps():
     _destroy_runtime(rt)
 
 
-def test_effect_handle_copy():
+def test_effect_handle_copy() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     var effect_id = rt[0].create_effect(scope_id)
@@ -426,7 +426,7 @@ def test_effect_handle_copy():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_signal_bool_get_false():
+def test_signal_bool_get_false() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -434,7 +434,7 @@ def test_signal_bool_get_false():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_get_true():
+def test_signal_bool_get_true() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](1)
     var sig = SignalBool(UInt32(key), rt)
@@ -442,7 +442,7 @@ def test_signal_bool_get_true():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_set_true():
+def test_signal_bool_set_true() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -451,7 +451,7 @@ def test_signal_bool_set_true():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_set_false():
+def test_signal_bool_set_false() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](1)
     var sig = SignalBool(UInt32(key), rt)
@@ -460,7 +460,7 @@ def test_signal_bool_set_false():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_toggle_from_false():
+def test_signal_bool_toggle_from_false() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -469,7 +469,7 @@ def test_signal_bool_toggle_from_false():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_toggle_from_true():
+def test_signal_bool_toggle_from_true() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](1)
     var sig = SignalBool(UInt32(key), rt)
@@ -478,7 +478,7 @@ def test_signal_bool_toggle_from_true():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_toggle_round_trip():
+def test_signal_bool_toggle_round_trip() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -491,7 +491,7 @@ def test_signal_bool_toggle_round_trip():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_read_subscribes():
+def test_signal_bool_read_subscribes() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     _ = rt[0].begin_scope_render(scope_id)
@@ -508,7 +508,7 @@ def test_signal_bool_read_subscribes():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_peek_i32():
+def test_signal_bool_peek_i32() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -518,7 +518,7 @@ def test_signal_bool_peek_i32():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_version_increments():
+def test_signal_bool_version_increments() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -532,7 +532,7 @@ def test_signal_bool_version_increments():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_str_true():
+def test_signal_bool_str_true() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](1)
     var sig = SignalBool(UInt32(key), rt)
@@ -540,7 +540,7 @@ def test_signal_bool_str_true():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_str_false():
+def test_signal_bool_str_false() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig = SignalBool(UInt32(key), rt)
@@ -548,7 +548,7 @@ def test_signal_bool_str_false():
     _destroy_runtime(rt)
 
 
-def test_signal_bool_copy():
+def test_signal_bool_copy() raises:
     var rt = _create_runtime()
     var key = rt[0].create_signal[Int32](0)
     var sig1 = SignalBool(UInt32(key), rt)
@@ -563,50 +563,50 @@ def test_signal_bool_copy():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_class_if_true():
+def test_class_if_true() raises:
     var result = class_if(True, String("active"))
     assert_equal(result, String("active"), "class_if(True) should return name")
 
 
-def test_class_if_false():
+def test_class_if_false() raises:
     var result = class_if(False, String("active"))
     assert_equal(result, String(""), "class_if(False) should return empty")
 
 
-def test_class_when_true():
+def test_class_when_true() raises:
     var result = class_when(True, String("open"), String("closed"))
     assert_equal(
         result, String("open"), "class_when(True) should return true_class"
     )
 
 
-def test_class_when_false():
+def test_class_when_false() raises:
     var result = class_when(False, String("open"), String("closed"))
     assert_equal(
         result, String("closed"), "class_when(False) should return false_class"
     )
 
 
-def test_text_when_true():
+def test_text_when_true() raises:
     var result = text_when(True, String("yes"), String("no"))
     assert_equal(
         result, String("yes"), "text_when(True) should return true_text"
     )
 
 
-def test_text_when_false():
+def test_text_when_false() raises:
     var result = text_when(False, String("yes"), String("no"))
     assert_equal(
         result, String("no"), "text_when(False) should return false_text"
     )
 
 
-def test_class_if_with_empty_name():
+def test_class_if_with_empty_name() raises:
     var result = class_if(True, String(""))
     assert_equal(result, String(""), "class_if with empty name returns empty")
 
 
-def test_text_when_with_expression():
+def test_text_when_with_expression() raises:
     var x = 5
     var result = text_when(x > 3, String("big"), String("small"))
     assert_equal(result, String("big"), "text_when with expression condition")
@@ -620,7 +620,7 @@ def test_text_when_with_expression():
 # ── ComponentContext — use_signal_bool / create_signal_bool ───────────────────
 
 
-def test_ctx_use_signal_bool_true():
+def test_ctx_use_signal_bool_true() raises:
     var ctx = ComponentContext.create()
     var flag = ctx.use_signal_bool(True)
     ctx.end_setup()
@@ -628,7 +628,7 @@ def test_ctx_use_signal_bool_true():
     ctx.destroy()
 
 
-def test_ctx_use_signal_bool_false():
+def test_ctx_use_signal_bool_false() raises:
     var ctx = ComponentContext.create()
     var flag = ctx.use_signal_bool(False)
     ctx.end_setup()
@@ -636,7 +636,7 @@ def test_ctx_use_signal_bool_false():
     ctx.destroy()
 
 
-def test_ctx_use_signal_bool_subscribes_scope():
+def test_ctx_use_signal_bool_subscribes_scope() raises:
     var ctx = ComponentContext.create()
     var flag = ctx.use_signal_bool(False)
     ctx.end_setup()
@@ -646,7 +646,7 @@ def test_ctx_use_signal_bool_subscribes_scope():
     ctx.destroy()
 
 
-def test_ctx_create_signal_bool_true():
+def test_ctx_create_signal_bool_true() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var flag = ctx.create_signal_bool(True)
@@ -654,7 +654,7 @@ def test_ctx_create_signal_bool_true():
     ctx.destroy()
 
 
-def test_ctx_create_signal_bool_false():
+def test_ctx_create_signal_bool_false() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var flag = ctx.create_signal_bool(False)
@@ -662,7 +662,7 @@ def test_ctx_create_signal_bool_false():
     ctx.destroy()
 
 
-def test_ctx_signal_bool_toggle_lifecycle():
+def test_ctx_signal_bool_toggle_lifecycle() raises:
     """Test full SignalBool lifecycle through ComponentContext."""
     var ctx = ComponentContext.create()
     var flag = ctx.use_signal_bool(False)
@@ -676,7 +676,7 @@ def test_ctx_signal_bool_toggle_lifecycle():
     ctx.destroy()
 
 
-def test_ctx_create_destroy():
+def test_ctx_create_destroy() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     assert_true(ctx.shell.is_alive(), "shell should be alive after create")
@@ -686,7 +686,7 @@ def test_ctx_create_destroy():
     )
 
 
-def test_ctx_use_signal():
+def test_ctx_use_signal() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -696,7 +696,7 @@ def test_ctx_use_signal():
     ctx.destroy()
 
 
-def test_ctx_use_signal_subscribes_scope():
+def test_ctx_use_signal_subscribes_scope() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -706,7 +706,7 @@ def test_ctx_use_signal_subscribes_scope():
     ctx.destroy()
 
 
-def test_ctx_use_memo():
+def test_ctx_use_memo() raises:
     var ctx = ComponentContext.create()
     var doubled = ctx.use_memo(0)
     ctx.end_setup()
@@ -716,7 +716,7 @@ def test_ctx_use_memo():
     ctx.destroy()
 
 
-def test_ctx_use_memo_subscribes_scope():
+def test_ctx_use_memo_subscribes_scope() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(5)
     var doubled = ctx.use_memo(0)
@@ -737,7 +737,7 @@ def test_ctx_use_memo_subscribes_scope():
     ctx.destroy()
 
 
-def test_ctx_use_effect():
+def test_ctx_use_effect() raises:
     var ctx = ComponentContext.create()
     var fx = ctx.use_effect()
     ctx.end_setup()
@@ -748,7 +748,7 @@ def test_ctx_use_effect():
     ctx.destroy()
 
 
-def test_ctx_create_signal_no_hook():
+def test_ctx_create_signal_no_hook() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var sig = ctx.create_signal(100)
@@ -758,7 +758,7 @@ def test_ctx_create_signal_no_hook():
     ctx.destroy()
 
 
-def test_ctx_create_memo_no_hook():
+def test_ctx_create_memo_no_hook() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var memo = ctx.create_memo(0)
@@ -768,7 +768,7 @@ def test_ctx_create_memo_no_hook():
     ctx.destroy()
 
 
-def test_ctx_create_effect_no_hook():
+def test_ctx_create_effect_no_hook() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var fx = ctx.create_effect()
@@ -776,7 +776,7 @@ def test_ctx_create_effect_no_hook():
     ctx.destroy()
 
 
-def test_ctx_register_template():
+def test_ctx_register_template() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var view = el_div(
@@ -789,7 +789,7 @@ def test_ctx_register_template():
     ctx.destroy()
 
 
-def test_ctx_on_click_add():
+def test_ctx_on_click_add() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -802,7 +802,7 @@ def test_ctx_on_click_add():
     ctx.destroy()
 
 
-def test_ctx_on_click_sub():
+def test_ctx_on_click_sub() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(10)
     ctx.end_setup()
@@ -812,7 +812,7 @@ def test_ctx_on_click_sub():
     ctx.destroy()
 
 
-def test_ctx_on_click_set():
+def test_ctx_on_click_set() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -822,7 +822,7 @@ def test_ctx_on_click_set():
     ctx.destroy()
 
 
-def test_ctx_on_click_toggle():
+def test_ctx_on_click_toggle() raises:
     var ctx = ComponentContext.create()
     var flag = ctx.use_signal(0)
     ctx.end_setup()
@@ -834,7 +834,7 @@ def test_ctx_on_click_toggle():
     ctx.destroy()
 
 
-def test_ctx_on_input_set():
+def test_ctx_on_input_set() raises:
     var ctx = ComponentContext.create()
     var text_sig = ctx.use_signal(0)
     ctx.end_setup()
@@ -843,7 +843,7 @@ def test_ctx_on_input_set():
     ctx.destroy()
 
 
-def test_ctx_vnode_builder():
+def test_ctx_vnode_builder() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var view = el_div(
@@ -861,7 +861,7 @@ def test_ctx_vnode_builder():
     ctx.destroy()
 
 
-def test_ctx_mount_produces_mutations():
+def test_ctx_mount_produces_mutations() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var view = el_div(
@@ -880,7 +880,7 @@ def test_ctx_mount_produces_mutations():
     ctx.destroy()
 
 
-def test_ctx_consume_dirty_after_signal_write():
+def test_ctx_consume_dirty_after_signal_write() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -892,7 +892,7 @@ def test_ctx_consume_dirty_after_signal_write():
     ctx.destroy()
 
 
-def test_ctx_consume_dirty_when_clean():
+def test_ctx_consume_dirty_when_clean() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -901,7 +901,7 @@ def test_ctx_consume_dirty_when_clean():
     ctx.destroy()
 
 
-def test_ctx_full_counter_lifecycle():
+def test_ctx_full_counter_lifecycle() raises:
     """End-to-end test: create counter, mount, click, flush, verify."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -961,7 +961,7 @@ def test_ctx_full_counter_lifecycle():
     ctx.destroy()
 
 
-def test_ctx_multiple_signals():
+def test_ctx_multiple_signals() raises:
     var ctx = ComponentContext.create()
     var a = ctx.use_signal(10)
     var b = ctx.use_signal(20)
@@ -978,7 +978,7 @@ def test_ctx_multiple_signals():
     ctx.destroy()
 
 
-def test_ctx_signal_and_memo_integration():
+def test_ctx_signal_and_memo_integration() raises:
     """Test signal → memo dependency chain via ComponentContext."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(5)
@@ -1004,7 +1004,7 @@ def test_ctx_signal_and_memo_integration():
     ctx.destroy()
 
 
-def test_ctx_signal_memo_effect_integration():
+def test_ctx_signal_memo_effect_integration() raises:
     """Test signal → memo → effect chain via ComponentContext."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -1030,7 +1030,7 @@ def test_ctx_signal_memo_effect_integration():
     ctx.destroy()
 
 
-def test_ctx_on_event_add_generic():
+def test_ctx_on_event_add_generic() raises:
     """Test generic event handler registration."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -1044,7 +1044,7 @@ def test_ctx_on_event_add_generic():
     ctx.destroy()
 
 
-def test_ctx_on_event_sub_generic():
+def test_ctx_on_event_sub_generic() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(100)
     ctx.end_setup()
@@ -1054,7 +1054,7 @@ def test_ctx_on_event_sub_generic():
     ctx.destroy()
 
 
-def test_ctx_on_event_set_generic():
+def test_ctx_on_event_set_generic() raises:
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
     ctx.end_setup()
@@ -1064,7 +1064,7 @@ def test_ctx_on_event_set_generic():
     ctx.destroy()
 
 
-def test_ctx_runtime_ptr():
+def test_ctx_runtime_ptr() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     assert_true(
@@ -1074,7 +1074,7 @@ def test_ctx_runtime_ptr():
     ctx.destroy()
 
 
-def test_ctx_store_ptr():
+def test_ctx_store_ptr() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     assert_true(
@@ -1084,14 +1084,14 @@ def test_ctx_store_ptr():
     ctx.destroy()
 
 
-def test_ctx_double_destroy():
+def test_ctx_double_destroy() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     ctx.destroy()
     ctx.destroy()  # Should be safe
 
 
-def test_ctx_setup_view_basic():
+def test_ctx_setup_view_basic() raises:
     """Test setup_view() combines end_setup + register_view."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -1117,7 +1117,7 @@ def test_ctx_setup_view_basic():
     ctx.destroy()
 
 
-def test_ctx_setup_view_auto_dyn_text():
+def test_ctx_setup_view_auto_dyn_text() raises:
     """Test auto-numbered dyn_text() via setup_view."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -1141,7 +1141,7 @@ def test_ctx_setup_view_auto_dyn_text():
     ctx.destroy()
 
 
-def test_ctx_setup_view_with_render_builder():
+def test_ctx_setup_view_with_render_builder() raises:
     """Test setup_view + render_builder end-to-end."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -1176,7 +1176,7 @@ def test_ctx_setup_view_with_render_builder():
     ctx.destroy()
 
 
-def test_ctx_flush_convenience():
+def test_ctx_flush_convenience() raises:
     """Test flush() combines diff + finalize."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)
@@ -1222,7 +1222,7 @@ def test_ctx_flush_convenience():
     ctx.destroy()
 
 
-def test_ctx_dioxus_style_counter_lifecycle():
+def test_ctx_dioxus_style_counter_lifecycle() raises:
     """Full Dioxus-style counter lifecycle: init, mount, click, flush.
 
     Mirrors the pattern used by CounterApp.__init__() with setup_view(),
@@ -1301,7 +1301,7 @@ def test_ctx_dioxus_style_counter_lifecycle():
     ctx.destroy()
 
 
-def test_ctx_vnode_builder_keyed():
+def test_ctx_vnode_builder_keyed() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var view = el_div([dyn_text(0)])
@@ -1313,7 +1313,7 @@ def test_ctx_vnode_builder_keyed():
     ctx.destroy()
 
 
-def test_ctx_vnode_builder_for():
+def test_ctx_vnode_builder_for() raises:
     """Test building a VNode for a specific template ID."""
     var ctx = ComponentContext.create()
     ctx.end_setup()
@@ -1341,7 +1341,7 @@ def test_ctx_vnode_builder_for():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_string_store_create_and_read():
+def test_string_store_create_and_read() raises:
     var store = StringStore()
     var key = store.create(String("hello"))
     assert_equal(
@@ -1349,14 +1349,14 @@ def test_string_store_create_and_read():
     )
 
 
-def test_string_store_write():
+def test_string_store_write() raises:
     var store = StringStore()
     var key = store.create(String("hello"))
     store.write(key, String("world"))
     assert_equal(store.read(key), String("world"), "should read updated value")
 
 
-def test_string_store_count():
+def test_string_store_count() raises:
     var store = StringStore()
     assert_equal(store.count(), 0, "empty store count should be 0")
     var k1 = store.create(String("a"))
@@ -1365,14 +1365,14 @@ def test_string_store_count():
     assert_equal(store.count(), 2, "count should be 2 after second create")
 
 
-def test_string_store_contains():
+def test_string_store_contains() raises:
     var store = StringStore()
     var key = store.create(String("hi"))
     assert_true(store.contains(key), "should contain created key")
     assert_false(store.contains(UInt32(999)), "should not contain unknown key")
 
 
-def test_string_store_destroy():
+def test_string_store_destroy() raises:
     var store = StringStore()
     var key = store.create(String("doomed"))
     assert_equal(store.count(), 1, "count before destroy")
@@ -1381,7 +1381,7 @@ def test_string_store_destroy():
     assert_false(store.contains(key), "should not contain destroyed key")
 
 
-def test_string_store_reuse_slot():
+def test_string_store_reuse_slot() raises:
     """Destroying a slot should allow it to be reused by the next create."""
     var store = StringStore()
     var k1 = store.create(String("first"))
@@ -1392,7 +1392,7 @@ def test_string_store_reuse_slot():
     assert_equal(store.read(k2), String("second"), "reused slot has new value")
 
 
-def test_string_store_multiple_entries():
+def test_string_store_multiple_entries() raises:
     var store = StringStore()
     var k1 = store.create(String("alpha"))
     var k2 = store.create(String("beta"))
@@ -1403,13 +1403,13 @@ def test_string_store_multiple_entries():
     assert_equal(store.count(), 3, "count should be 3")
 
 
-def test_string_store_empty_string():
+def test_string_store_empty_string() raises:
     var store = StringStore()
     var key = store.create(String(""))
     assert_equal(store.read(key), String(""), "should handle empty string")
 
 
-def test_string_store_overwrite_multiple_times():
+def test_string_store_overwrite_multiple_times() raises:
     var store = StringStore()
     var key = store.create(String("v1"))
     store.write(key, String("v2"))
@@ -1423,7 +1423,7 @@ def test_string_store_overwrite_multiple_times():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_signal_string_get():
+def test_signal_string_get() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("hello"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1431,7 +1431,7 @@ def test_signal_string_get():
     _destroy_runtime(rt)
 
 
-def test_signal_string_peek():
+def test_signal_string_peek() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("world"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1441,7 +1441,7 @@ def test_signal_string_peek():
     _destroy_runtime(rt)
 
 
-def test_signal_string_set():
+def test_signal_string_set() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("old"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1450,7 +1450,7 @@ def test_signal_string_set():
     _destroy_runtime(rt)
 
 
-def test_signal_string_set_empty():
+def test_signal_string_set_empty() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("not empty"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1459,7 +1459,7 @@ def test_signal_string_set_empty():
     _destroy_runtime(rt)
 
 
-def test_signal_string_read_subscribes():
+def test_signal_string_read_subscribes() raises:
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
     _ = rt[0].begin_scope_render(scope_id)
@@ -1476,7 +1476,7 @@ def test_signal_string_read_subscribes():
     _destroy_runtime(rt)
 
 
-def test_signal_string_read_returns_value():
+def test_signal_string_read_returns_value() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("readable"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1485,7 +1485,7 @@ def test_signal_string_read_returns_value():
     _destroy_runtime(rt)
 
 
-def test_signal_string_version_increments():
+def test_signal_string_version_increments() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("v0"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1499,7 +1499,7 @@ def test_signal_string_version_increments():
     _destroy_runtime(rt)
 
 
-def test_signal_string_is_empty_true():
+def test_signal_string_is_empty_true() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1507,7 +1507,7 @@ def test_signal_string_is_empty_true():
     _destroy_runtime(rt)
 
 
-def test_signal_string_is_empty_false():
+def test_signal_string_is_empty_false() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("content"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1515,7 +1515,7 @@ def test_signal_string_is_empty_false():
     _destroy_runtime(rt)
 
 
-def test_signal_string_is_empty_after_set():
+def test_signal_string_is_empty_after_set() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("something"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1525,7 +1525,7 @@ def test_signal_string_is_empty_after_set():
     _destroy_runtime(rt)
 
 
-def test_signal_string_str():
+def test_signal_string_str() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("display me"))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1535,7 +1535,7 @@ def test_signal_string_str():
     _destroy_runtime(rt)
 
 
-def test_signal_string_str_empty():
+def test_signal_string_str_empty() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1543,7 +1543,7 @@ def test_signal_string_str_empty():
     _destroy_runtime(rt)
 
 
-def test_signal_string_copy():
+def test_signal_string_copy() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("shared"))
     var sig1 = SignalString(keys[0], keys[1], rt)
@@ -1557,7 +1557,7 @@ def test_signal_string_copy():
     _destroy_runtime(rt)
 
 
-def test_signal_string_multiple_writes():
+def test_signal_string_multiple_writes() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt)
@@ -1568,7 +1568,7 @@ def test_signal_string_multiple_writes():
     _destroy_runtime(rt)
 
 
-def test_signal_string_concatenation_pattern():
+def test_signal_string_concatenation_pattern() raises:
     """Test the common pattern of building a display string from a signal."""
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("world"))
@@ -1581,7 +1581,7 @@ def test_signal_string_concatenation_pattern():
 # ── Runtime string signal count ──────────────────────────────────────────────
 
 
-def test_runtime_string_signal_count():
+def test_runtime_string_signal_count() raises:
     var rt = _create_runtime()
     assert_equal(rt[0].string_signal_count(), 0, "initial count should be 0")
     var keys1 = rt[0].create_signal_string(String("a"))
@@ -1591,7 +1591,7 @@ def test_runtime_string_signal_count():
     _destroy_runtime(rt)
 
 
-def test_runtime_destroy_signal_string():
+def test_runtime_destroy_signal_string() raises:
     var rt = _create_runtime()
     var keys = rt[0].create_signal_string(String("temp"))
     assert_equal(rt[0].string_signal_count(), 1, "before destroy")
@@ -1603,7 +1603,7 @@ def test_runtime_destroy_signal_string():
 # ── Runtime hook-based string signal ─────────────────────────────────────────
 
 
-def test_runtime_use_signal_string():
+def test_runtime_use_signal_string() raises:
     """Hook-based string signal creation stores keys in scope hooks."""
     var rt = _create_runtime()
     var scope_id = rt[0].create_scope(0, -1)
@@ -1625,7 +1625,7 @@ def test_runtime_use_signal_string():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_ctx_use_signal_string():
+def test_ctx_use_signal_string() raises:
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String("hello"))
     ctx.end_setup()
@@ -1633,7 +1633,7 @@ def test_ctx_use_signal_string():
     ctx.destroy()
 
 
-def test_ctx_use_signal_string_empty():
+def test_ctx_use_signal_string_empty() raises:
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String(""))
     ctx.end_setup()
@@ -1642,7 +1642,7 @@ def test_ctx_use_signal_string_empty():
     ctx.destroy()
 
 
-def test_ctx_use_signal_string_subscribes_scope():
+def test_ctx_use_signal_string_subscribes_scope() raises:
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String("initial"))
     ctx.end_setup()
@@ -1657,7 +1657,7 @@ def test_ctx_use_signal_string_subscribes_scope():
     ctx.destroy()
 
 
-def test_ctx_create_signal_string():
+def test_ctx_create_signal_string() raises:
     var ctx = ComponentContext.create()
     ctx.end_setup()
     var name = ctx.create_signal_string(String("created"))
@@ -1665,7 +1665,7 @@ def test_ctx_create_signal_string():
     ctx.destroy()
 
 
-def test_ctx_create_signal_string_no_subscribe():
+def test_ctx_create_signal_string_no_subscribe() raises:
     """Create_signal_string should NOT auto-subscribe the scope."""
     var ctx = ComponentContext.create()
     ctx.end_setup()
@@ -1680,7 +1680,7 @@ def test_ctx_create_signal_string_no_subscribe():
     ctx.destroy()
 
 
-def test_ctx_signal_string_set_and_get():
+def test_ctx_signal_string_set_and_get() raises:
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String("before"))
     ctx.end_setup()
@@ -1689,7 +1689,7 @@ def test_ctx_signal_string_set_and_get():
     ctx.destroy()
 
 
-def test_ctx_signal_string_version_lifecycle():
+def test_ctx_signal_string_version_lifecycle() raises:
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String("v0"))
     ctx.end_setup()
@@ -1703,7 +1703,7 @@ def test_ctx_signal_string_version_lifecycle():
     ctx.destroy()
 
 
-def test_ctx_signal_string_str_interpolation():
+def test_ctx_signal_string_str_interpolation() raises:
     """Test the pattern of using __str__ for display text building."""
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String("Mojo"))
@@ -1713,7 +1713,7 @@ def test_ctx_signal_string_str_interpolation():
     ctx.destroy()
 
 
-def test_ctx_signal_string_with_render_builder():
+def test_ctx_signal_string_with_render_builder() raises:
     """Test using a SignalString with RenderBuilder.add_dyn_text_signal()."""
     var ctx = ComponentContext.create()
     var name = ctx.use_signal_string(String("dynamic"))
@@ -1728,7 +1728,7 @@ def test_ctx_signal_string_with_render_builder():
     ctx.destroy()
 
 
-def test_ctx_multiple_signal_strings():
+def test_ctx_multiple_signal_strings() raises:
     """Test creating multiple string signals in one component."""
     var ctx = ComponentContext.create()
     var first = ctx.use_signal_string(String("Alice"))
@@ -1743,7 +1743,7 @@ def test_ctx_multiple_signal_strings():
     ctx.destroy()
 
 
-def test_ctx_signal_string_with_signal_i32():
+def test_ctx_signal_string_with_signal_i32() raises:
     """Test mixing SignalString with SignalI32 in one component."""
     var ctx = ComponentContext.create()
     var count = ctx.use_signal(0)

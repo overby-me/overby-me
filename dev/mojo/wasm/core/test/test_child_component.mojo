@@ -67,7 +67,7 @@ fn _destroy_cc(
 
 def test_cc_init_creates_app(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """cc_init returns a non-zero app pointer."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     assert_true(app != 0, "app pointer should be non-zero")
@@ -76,7 +76,7 @@ def test_cc_init_creates_app(
 
 def test_cc_init_count_starts_at_zero(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Initial count value should be 0."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var count = w[].call_i32("cc_count_value", args_ptr(app))
@@ -86,7 +86,7 @@ def test_cc_init_count_starts_at_zero(
 
 def test_cc_parent_child_scope_differ(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child scope ID should differ from parent scope ID."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var parent_scope = w[].call_i32("cc_parent_scope_id", args_ptr(app))
@@ -99,7 +99,7 @@ def test_cc_parent_child_scope_differ(
 
 def test_cc_parent_child_tmpl_differ(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child template ID should differ from parent template ID."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var parent_tmpl = w[].call_i32("cc_parent_tmpl_id", args_ptr(app))
@@ -112,7 +112,7 @@ def test_cc_parent_child_tmpl_differ(
 
 def test_cc_child_no_events(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child component has no event bindings (display only)."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var child_events = w[].call_i32("cc_child_event_count", args_ptr(app))
@@ -122,7 +122,7 @@ def test_cc_child_no_events(
 
 def test_cc_handler_count(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """At least 2 handlers registered (increment + decrement)."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var count = w[].call_i32("cc_handler_count", args_ptr(app))
@@ -132,7 +132,7 @@ def test_cc_handler_count(
 
 def test_cc_incr_decr_handlers_valid(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Increment and decrement handlers are valid and distinct."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var incr_h = w[].call_i32("cc_incr_handler", args_ptr(app))
@@ -148,7 +148,7 @@ def test_cc_incr_decr_handlers_valid(
 
 def test_cc_rebuild_produces_mutations(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """cc_rebuild produces a non-zero mutation buffer."""
     var app = Int(w[].call_i64("cc_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(4096)))
@@ -160,7 +160,7 @@ def test_cc_rebuild_produces_mutations(
 
 def test_cc_child_mounted_after_rebuild(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child should be mounted in the DOM after rebuild."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -172,7 +172,7 @@ def test_cc_child_mounted_after_rebuild(
 
 def test_cc_child_has_rendered_after_rebuild(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child should have rendered at least once after rebuild."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -187,7 +187,7 @@ def test_cc_child_has_rendered_after_rebuild(
 
 def test_cc_increment(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Handle event increment updates count signal."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -206,7 +206,7 @@ def test_cc_increment(
 
 def test_cc_decrement(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Handle event decrement updates count signal."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -221,7 +221,7 @@ def test_cc_decrement(
 
 def test_cc_mixed_incr_decr(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Mixed increment/decrement produces correct count."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -246,7 +246,7 @@ def test_cc_mixed_incr_decr(
 
 def test_cc_flush_after_increment(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """cc_flush produces mutations after increment."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -263,7 +263,7 @@ def test_cc_flush_after_increment(
 
 def test_cc_flush_returns_zero_when_clean(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """cc_flush returns 0 when nothing is dirty."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -277,7 +277,7 @@ def test_cc_flush_returns_zero_when_clean(
 
 def test_cc_multiple_flush_cycles(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Multiple flush cycles produce mutations each time."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -302,7 +302,7 @@ def test_cc_multiple_flush_cycles(
 
 def test_cc_destroy_does_not_crash(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroy after use does not crash."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -318,7 +318,7 @@ def test_cc_destroy_does_not_crash(
 
 def test_cc_destroy_with_dirty_state(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroy with unflushed dirty state does not crash."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -333,7 +333,7 @@ def test_cc_destroy_with_dirty_state(
 
 def test_cc_destroy_recreate_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroy → recreate cycle works correctly (clean state)."""
     # First instance: create, increment, destroy
     var tup1 = _create_cc(w)
@@ -369,7 +369,7 @@ def test_cc_destroy_recreate_cycle(
 
 def test_cc_ten_create_destroy_cycles(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """10 create/destroy cycles with state verification."""
     for cycle in range(10):
         var tup = _create_cc(w)
@@ -396,7 +396,7 @@ def test_cc_ten_create_destroy_cycles(
 
 def test_cc_rapid_increments(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Rapid 50 increments produce correct final count."""
     var tup = _create_cc(w)
     var app = tup[0]
@@ -416,7 +416,7 @@ def test_cc_rapid_increments(
 
 def test_cc_child_scope_survives_flush(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Child scope and template IDs remain valid across multiple flushes."""
     var tup = _create_cc(w)
     var app = tup[0]

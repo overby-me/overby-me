@@ -24,7 +24,7 @@ from ._lib import (
 )
 
 
-struct Store:
+struct Store(Movable):
     """RAII wrapper around wasmtime_store_t.
 
     Owns the underlying store pointer and deletes it on destruction.

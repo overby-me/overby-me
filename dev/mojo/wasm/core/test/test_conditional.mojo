@@ -40,7 +40,7 @@ fn _load() raises -> WasmInstance:
 
 def test_toggle_handler_valid(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Counter_toggle_handler returns a valid non-negative handler ID."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(4096)))
@@ -60,7 +60,7 @@ def test_toggle_handler_valid(
 
 def test_show_detail_starts_false(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Show_detail starts as 0 (false) and cond_mounted starts as 0."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(4096)))
@@ -78,7 +78,7 @@ def test_show_detail_starts_false(
 
 def test_toggle_on_sets_state(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Toggle detail ON → show_detail=1, cond_mounted=1, flush produces mutations.
     """
     var app = Int(w[].call_i64("counter_init", no_args()))
@@ -109,7 +109,7 @@ def test_toggle_on_sets_state(
 
 def test_toggle_off_clears_state(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Toggle ON then OFF → show_detail=0, cond_mounted=0."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -143,7 +143,7 @@ def test_toggle_off_clears_state(
 
 def test_toggle_on_off_on_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Toggle ON → OFF → ON restores mounted state correctly."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -187,7 +187,7 @@ def test_toggle_on_off_on_cycle(
 
 def test_increment_with_detail_visible(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Incrementing while detail is visible → flush produces mutations (diff).
     """
     var app = Int(w[].call_i64("counter_init", no_args()))
@@ -228,7 +228,7 @@ def test_increment_with_detail_visible(
 
 def test_increment_hidden_then_show(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Increment while hidden → toggle ON shows updated content."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -271,7 +271,7 @@ def test_increment_hidden_then_show(
 
 def test_decrement_with_detail_visible(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Decrement with detail visible works (negative values)."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -306,7 +306,7 @@ def test_decrement_with_detail_visible(
 
 def test_rapid_toggle_cycles(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """10 rapid ON/OFF toggle cycles don't corrupt state."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -361,7 +361,7 @@ def test_rapid_toggle_cycles(
 
 def test_detail_template_registered(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """The detail template is registered with a valid ID."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(4096)))
@@ -382,7 +382,7 @@ def test_detail_template_registered(
 
 def test_mixed_increment_toggle_sequence(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Mixed increment + toggle sequence: toggle ON, incr 3x, toggle OFF, incr 2x, toggle ON.
     """
     var app = Int(w[].call_i64("counter_init", no_args()))
@@ -459,7 +459,7 @@ def test_mixed_increment_toggle_sequence(
 
 def test_destroy_with_detail_mounted(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroying the app while detail is mounted doesn't crash."""
     var app = Int(w[].call_i64("counter_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -484,7 +484,7 @@ def test_destroy_with_detail_mounted(
 
 def test_destroy_recreate_with_conditional(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroy with detail mounted → recreate → detail starts hidden."""
     # First instance: mount detail
     var app1 = Int(w[].call_i64("counter_init", no_args()))
@@ -541,7 +541,7 @@ def test_destroy_recreate_with_conditional(
 
 def test_todo_empty_msg_on_initial_mount(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Empty state message is mounted on initial mount (0 items)."""
     var app = Int(w[].call_i64("todo_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -559,7 +559,7 @@ def test_todo_empty_msg_on_initial_mount(
 
 def test_todo_empty_msg_hidden_after_add(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Empty state message hides after adding an item."""
     var app = Int(w[].call_i64("todo_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -593,7 +593,7 @@ def test_todo_empty_msg_hidden_after_add(
 
 def test_todo_empty_msg_returns_after_remove_all(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Empty state message returns after removing all items."""
     var app = Int(w[].call_i64("todo_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -645,7 +645,7 @@ def test_todo_empty_msg_returns_after_remove_all(
 
 def test_todo_empty_msg_add_remove_add_cycle(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Add → remove all → add again: message toggles correctly."""
     var app = Int(w[].call_i64("todo_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -687,7 +687,7 @@ def test_todo_empty_msg_add_remove_add_cycle(
 
 def test_todo_destroy_with_empty_msg_mounted(
     w: UnsafePointer[WasmInstance, MutExternalOrigin],
-):
+) raises:
     """Destroying the todo app with empty msg mounted doesn't crash."""
     var app = Int(w[].call_i64("todo_init", no_args()))
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))

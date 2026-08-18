@@ -27,7 +27,7 @@ from ._lib import (
 )
 
 
-struct Engine:
+struct Engine(Movable):
     """RAII wrapper around wasm_engine_t.
 
     Owns the underlying engine pointer and deletes it on destruction.

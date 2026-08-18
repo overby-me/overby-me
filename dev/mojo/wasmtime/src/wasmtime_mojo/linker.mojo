@@ -62,7 +62,7 @@ from ._lib import (
 )
 
 
-struct Linker:
+struct Linker(Movable):
     """RAII wrapper around wasmtime_linker_t.
 
     Owns the underlying linker pointer and deletes it on destruction.

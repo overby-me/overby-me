@@ -34,7 +34,7 @@ from ._lib import (
 )
 
 
-struct Module:
+struct Module(Movable):
     """RAII wrapper around wasmtime_module_t.
 
     Owns the underlying module pointer and deletes it on destruction.
