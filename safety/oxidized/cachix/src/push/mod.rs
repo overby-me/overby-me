@@ -191,7 +191,11 @@ async fn do_multipart_upload(
         let sem = semaphore.clone();
 
         tasks.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
+            let Ok(_permit) = sem.acquire().await else {
+                // The semaphore is never closed while pushes run; if it ever
+                // is, skipping this part beats panicking the task set.
+                return Err(anyhow::anyhow!("upload semaphore closed"));
+            };
 
             let md5_hash = {
                 use md5::Digest;
@@ -309,7 +313,12 @@ pub async fn push_paths(
         let failures = failure_count.clone();
 
         tasks.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
+            let Ok(_permit) = sem.acquire().await else {
+                // The semaphore is never closed while pushes run; if it ever
+                // is, counting a failure beats panicking the task set.
+                failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return;
+            };
             if let Err(e) = push_store_path(&api, &cache_name, &path, &credential, &opts).await {
                 tracing::error!("failed to push {path}: {e:#}");
                 failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

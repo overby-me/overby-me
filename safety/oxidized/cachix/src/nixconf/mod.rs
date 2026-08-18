@@ -153,6 +153,10 @@ pub fn use_cache(
                         dirs::config_dir().context("could not determine config directory")?;
                     config_dir.join("nix").join("nix.conf")
                 }
+                #[expect(
+                    clippy::unreachable,
+                    reason = "the caller matched this arm's InstallMode variants just above; a new variant fails compilation there first"
+                )]
                 _ => unreachable!(),
             };
 
@@ -232,6 +236,10 @@ pub fn remove_cache(
                         dirs::config_dir().context("could not determine config directory")?;
                     config_dir.join("nix").join("nix.conf")
                 }
+                #[expect(
+                    clippy::unreachable,
+                    reason = "the caller matched this arm's InstallMode variants just above; a new variant fails compilation there first"
+                )]
                 _ => unreachable!(),
             };
 

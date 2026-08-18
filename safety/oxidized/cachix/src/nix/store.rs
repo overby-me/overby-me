@@ -112,10 +112,10 @@ pub async fn query_path_info(store_path: &str) -> Result<PathInfo> {
             // Map format: {"<store-path>": {narHash, narSize, ...}}
             let (path, info) = obj.into_iter().next().context("empty path-info response")?;
             let mut info = info.clone();
-            if info.get("path").is_none() {
-                info.as_object_mut()
-                    .unwrap()
-                    .insert("path".to_string(), serde_json::Value::String(path.clone()));
+            if info.get("path").is_none()
+                && let Some(map) = info.as_object_mut()
+            {
+                map.insert("path".to_string(), serde_json::Value::String(path.clone()));
             }
             serde_json::from_value(info).context("failed to parse path-info entry")?
         } else {
@@ -206,7 +206,11 @@ pub fn watch_store() -> Result<tokio::sync::mpsc::Receiver<String>> {
             }
         };
 
-        let stdout = child.stdout.take().unwrap();
+        let Some(stdout) = child.stdout.take() else {
+            // Spawned with stdout piped, so this cannot miss; if it ever
+            // does, ending the stream beats panicking the push task.
+            return;
+        };
         let reader = tokio::io::BufReader::new(stdout);
         let mut lines = reader.lines();
 

@@ -24,10 +24,26 @@ pub struct DaemonOptions {
     pub narinfo_max_cache_size: usize,
 }
 
+/// Where the daemon socket lives when nothing overrides it.
+///
+/// Mirrors upstream (Cachix.Daemon.Listen.getSocketDir): XDG_RUNTIME_DIR -
+/// systemd's /run/user/$UID, user-owned - falling back to the XDG cache dir,
+/// then "cachix/cachix-daemon.sock" inside it. The port used to hardcode
+/// /tmp/cachix-daemon.sock, which upstream never did; a fixed name in the
+/// shared /tmp is squattable by any local user.
+pub fn default_socket_path() -> PathBuf {
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    runtime_dir.join("cachix").join("cachix-daemon.sock")
+}
+
 impl Default for DaemonOptions {
     fn default() -> Self {
         Self {
-            socket_path: PathBuf::from("/tmp/cachix-daemon.sock"),
+            socket_path: default_socket_path(),
             allow_remote_stop: true,
             keep_alive_interval_secs: 30,
             keep_alive_timeout_secs: 180,

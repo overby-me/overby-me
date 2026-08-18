@@ -515,7 +515,7 @@ async fn cmd_import(
                     .arg("s3")
                     .arg("cp")
                     .arg(format!("s3://{bucket}/{nar_url}"))
-                    .arg(nar_path.to_str().unwrap())
+                    .arg(&nar_path)
                     .arg("--endpoint-url")
                     .arg(&endpoint)
                     .arg("--region")

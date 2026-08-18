@@ -91,6 +91,10 @@ pub fn nix_base32_encode(data: &[u8]) -> String {
         }
         out[len - 1 - i] = NIX_BASE32_CHARS[val & 0x1f];
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "every byte comes from the fixed NIX_BASE32_CHARS alphabet, which is ASCII by construction"
+    )]
     String::from_utf8(out).expect("nix base32 chars are ascii")
 }
 

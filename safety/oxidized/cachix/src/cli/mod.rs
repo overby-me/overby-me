@@ -321,7 +321,7 @@ pub struct DaemonArgs {
         short,
         long,
         env = "CACHIX_DAEMON_SOCKET",
-        default_value = "/tmp/cachix-daemon.sock"
+        default_value_os_t = crate::daemon::default_socket_path()
     )]
     pub socket: PathBuf,
 
