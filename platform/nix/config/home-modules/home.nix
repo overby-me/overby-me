@@ -15,7 +15,7 @@
     "Work/tmp/.keep".source = lib.toFile "keep" "";
     ".ssh/socket/.keep".source = lib.toFile "keep" "";
     ".config/helix/config.toml".text = ''
-      # System  clipboard
+      # System clipboard
       p = "paste_clipboard_after"
       P = "paste_clipboard_before"
       y = "yank_to_clipboard"

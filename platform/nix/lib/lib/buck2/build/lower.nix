@@ -1,15 +1,15 @@
 # Lower a Buck2 action graph to Nix derivations: one derivation per action, no
 # import-from-derivation.
 #
-# Model: a virtual "buck-out". Every artifact has a stable working-directory-
-# relative path (artPath); command lines and script contents reference those
-# relative paths (honoring cmd_args relative_to), NOT store paths, so an action
-# that only needs a peer's *path* (e.g. a generated script naming an output it
-# does not build) creates no derivation dependency and no cycle. Each action's
-# derivation stages its input artifacts into a working tree (copying each
-# producer's whole tree, so transitive files and symlink targets travel along),
-# runs, and exports the resulting tree as $out. Dependencies flow through
-# store-path interpolation in the staging commands only.
+# Actions run against a virtual "buck-out" where every artifact has a stable
+# working-directory-relative path. Command lines and script contents name those
+# relative paths, honouring cmd_args relative_to, never store paths, so an action
+# that needs only a peer's path - a generated script naming an output it does not
+# build - creates neither a derivation dependency nor a cycle. Each action stages
+# its inputs into a working tree, copying each producer's whole tree so that
+# transitive files and symlink targets travel along, runs, and exports that tree
+# as $out. Dependencies flow only through store-path interpolation in the staging
+# commands.
 #
 # mkLower { pkgs; root; toolchainPackages; } -> { lowerGraph; }
 # lowerGraph { actions; defaultOutput; } -> { defaultOutputDrv; defaultOutputRel; ... }
@@ -239,10 +239,10 @@
       strings = litStrings a.cmd.parts;
       tcPkgs = map (k: toolchainPackages.${k}) (filter (k: builtins.elem k strings) (builtins.attrNames toolchainPackages));
       patch = stagesDownload a;
-      # Build the working tree directly in $out (no separate export copy).
-      # Dependency trees are symlinked in (cp -rs: real dirs, file symlinks
-      # into the producer's store path), so a large toolchain is never copied
-      # and its patched binaries / symlink targets are reached through the link.
+      # The working tree is built directly in $out. Dependency trees come in
+      # through cp -rs, giving real dirs and file symlinks into the producer's
+      # store path, so a large toolchain is never copied and its patched binaries
+      # and symlink targets are reached through the link.
       stageDeps = builtins.concatStringsSep "\n" (map (id: "cp -rsf --no-preserve=mode ${drvById.${id}}/. ./") depIds);
       # Sources are copied (real files) so relative #include / sibling lookups
       # resolve within the staged package directory.
@@ -285,10 +285,9 @@
         ${lib.optionalString a.isExecutable ''chmod +x "$out/${outRel}"''}
       '';
 
-    # symlinked_dir: a directory of links to the mapped artifacts. Dependency trees are
-    # symlinked in the same way mkRun stages them (cp -rs), and each entry is then linked
-    # to its file inside that staged tree, so nothing is copied twice and a staged header
-    # still resolves through the link.
+    # A directory of links to the mapped artifacts. Dependency trees come in the
+    # way mkRun stages them, and each entry then links to its file inside that
+    # staged tree, so nothing is copied twice and a staged header still resolves.
     mkSymlinkedDir = a: let
       outRel = artPath a.output;
       srcs = filter (x: x.kind == "source") (collectInputs (map (e: e.src) a.entries));
@@ -370,10 +369,10 @@
     defaultOutputDrv =
       if defaultOut == null
       then throw "buck2: target has no DefaultInfo default output"
-      # A target whose default output IS a source file, which export_file is exactly:
-      # DefaultInfo(default_output = ctx.attrs.src). No action produces it, so asking
-      # which one does fails before it can even report why -- a source artifact carries
-      # no action id. Materialize the source itself, under the path a consumer expects.
+      # A target whose default output IS a source file, which is exactly what
+      # export_file gives. No action produces it, and a source artifact carries no
+      # action id, so asking which one does fails before it can say why. Hence
+      # materializing the source itself, under the path a consumer expects.
       else if defaultOut.kind == "source"
       then
         pkgs.runCommand (sanDrv "src-${defaultOut.name}") {preferLocalBuild = true;} ''

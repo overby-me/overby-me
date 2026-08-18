@@ -1,4 +1,4 @@
-# Run: nix eval -f platform/nix/config/cargo/tests/index.nix
+# Run: nix eval -f platform/nix/lib/lib/cargo/tests/index.nix
 let
   index = import ../lib/index.nix;
 

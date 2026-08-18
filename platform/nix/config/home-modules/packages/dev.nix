@@ -9,9 +9,8 @@
       glab
       granted
 
-      # AI
       #mistral-vibe
-      # AI tools/languages
+      # AI
 
       # System dev
       #lldb

@@ -1,12 +1,12 @@
 #!/usr/bin/env nu
-# Crate build driver: compiles one crate (lib and/or bins) with rustc
-# directly, no cargo. Implements the cargo build-script protocol: compile
-# build.rs with host deps, run it with the documented environment, parse
-# cargo: directives, apply them to the library compile, and persist links
-# metadata plus native link flags for dependents via $out/nix-support/.
+# Compiles one crate, lib and/or bins, with rustc directly and no cargo,
+# implementing the cargo build-script protocol: build.rs is compiled with host
+# deps, run with the documented environment, its cargo: directives parsed and
+# applied to the library compile, and links metadata plus native link flags
+# persisted for dependents under $out/nix-support/.
 #
-# Config (JSON, path in argv): see buildCrate.nix. Runs inside the sandbox
-# via `nu --no-config-file`.
+# The config is JSON, its path in argv; see buildCrate.nix. Runs inside the
+# sandbox via `nu --no-config-file`.
 
 def snake [s: string] {
   $s | str replace -a "-" "_"
@@ -101,9 +101,8 @@ def pkg-env [plan: record, features: list<string>] {
   $e
 }
 
-# CARGO_CFG_* for build scripts, from the compiler's own cfg set. Reads
-# the shared per-toolchain cfg file when provided (P5), falling back to
-# invoking rustc.
+# CARGO_CFG_* for build scripts, from the compiler's own cfg set: the shared
+# per-toolchain cfg file when provided, otherwise rustc itself.
 def rustc-cfg-env [rustc: string, cfg_file: any] {
   (
     if $cfg_file != null and ($cfg_file | path exists) {
@@ -521,12 +520,10 @@ def run-tests [cfg: record, plan: record, rustc: string, base_env: record, bs: a
   let test_dir = ($env.PWD | path join ".test-bins")
   mkdir $test_dir
 
-  # Unit-test targets: the lib and every bin source (own = false: the target
-  # IS the crate, no self-extern). Integration targets: tests/*.rs linked
-  # against the crate's lib (own = true).
-  # The lib target IS the crate (own = false: no self-extern). Bins in a
-  # lib+bin crate reference the crate's lib, so they link it like an
-  # integration test does (own = true; a no-op when the crate has no lib).
+  # The lib target IS the crate, so it takes no self-extern (own = false). Bins
+  # in a lib+bin crate reference the crate's lib, so they link it the way an
+  # integration test does (own = true, a no-op when the crate has no lib), as do
+  # the tests/*.rs integration targets.
   let unit_targets = (
     (if ($plan | get -o lib) != null { [{name: $plan.lib.name, path: $plan.lib.path, own: false}] } else { [] })
     | append (($plan | get -o bins | default []) | each {|b| {name: (snake $b.name), path: $b.path, own: true}})
@@ -582,10 +579,10 @@ def main [config_path: string] {
   let rustc = $rustc_row.path
   let plan = (if $cfg.plan == null { plan-from-manifest "." } else { $cfg.plan })
 
-  # P7 pipelining. Eligibility is decided here, in the sandbox, because
-  # evaluation cannot know a registry crate's targets. The rmeta
-  # derivation of an ineligible crate falls back to a full build; the
-  # full derivation then just copies its artifacts.
+  # Pipelining eligibility is decided here, in the sandbox, because evaluation
+  # cannot know a registry crate's targets. An ineligible crate's rmeta
+  # derivation falls back to a full build, and the full derivation then only
+  # copies its artifacts.
   let want_meta = ($cfg | get -o emitMetadataOnly | default false)
   let eligible = (
     ($plan | get -o lib) != null

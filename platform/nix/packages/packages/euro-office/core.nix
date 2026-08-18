@@ -1,27 +1,19 @@
-# Phase 4 (see ./PLAN.md): the Euro-Office `core` C++ engine — macOS port.
+# The Euro-Office `core` C++ engine, built from source against newer nixpkgs
+# libraries (ICU 76, Boost, OpenSSL) rather than the old pinned versions
+# upstream's build_3rdparty.py fetches. Phase 4; see ./PLAN.md.
 #
-# This is the from-source build of `Euro-Office/core`, ported to build natively
-# on macOS using *newer* nixpkgs third-party libraries (ICU 76, Boost, OpenSSL)
-# rather than the old pinned versions that upstream's build_3rdparty.py fetches.
+# `THIRD_PARTY_PREPARED=TRUE` skips that fetch-and-compile step, which is what
+# keeps the build pure. `EO_USE_SYSTEM_LIBS=ON` then makes common.cmake resolve
+# those libraries with find_package against buildInputs instead of a prebuilt
+# install-dir layout, and teaches it about Apple - MAC/_MAC defines,
+# @loader_path RPATH, no GNU-ld flags - mirroring the old qmake `core_mac`
+# scope. Both come from ./patches/0001-*.patch.
 #
-# How it works
-# ------------
-#   * `THIRD_PARTY_PREPARED=TRUE` makes common.cmake skip the network+compile
-#     `build_3rdparty.py` step entirely (no impurity).
-#   * `EO_USE_SYSTEM_LIBS=ON` (added by ./patches/0001-*.patch) makes
-#     common.cmake resolve ICU / Boost / OpenSSL via `find_package` against the
-#     nixpkgs `buildInputs` below, instead of the prebuilt install-dir layout.
-#   * ./patches/0001-*.patch also teaches common.cmake about Apple (defines
-#     MAC/_MAC + the Linux code paths, @loader_path RPATH, no GNU-ld flags),
-#     mirroring the historical qmake `core_mac` scope.
+# Everything but the Qt/CEF desktop shell builds on aarch64-darwin: x2t and the
+# format libraries (OOXML, ODF, RTF, MS-binary, PDF, EPUB, iWork, HWP), V8-free
+# because doctrenderer uses JavaScriptCore. See PLAN.md §10.
 #
-# STATUS: the entire non-desktop `core` builds on aarch64-darwin — the `x2t`
-# document converter (+ allfontsgen/allthemesgen) and all format libraries
-# (OOXML, ODF, RTF, MS-binary, PDF, EPUB, iWork, HWP, …), V8-free (doctrenderer
-# uses JavaScriptCore). Only the Qt/CEF desktop *shell* remains. See PLAN.md §10.
-#
-# The patches under ./patches are written to apply cleanly against upstream
-# `Euro-Office/core` and are intended to be submitted there.
+# The patches apply cleanly against upstream and are meant to be submitted.
 {
   lib,
   stdenv,

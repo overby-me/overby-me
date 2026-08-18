@@ -1,13 +1,10 @@
-# mojo-windows — KGEN runtime shim for cross-compiling Mojo to Windows
+# A KGEN runtime shim, for cross-compiling Mojo to Windows.
 #
-# The Mojo compiler (Linux) can emit Windows COFF objects via:
-#   mojo build --target-triple x86_64-pc-windows-gnu --emit object
-#
-# However, linking requires the KGEN CompilerRT symbols that are normally
-# provided by libKGENCompilerRTShared.so (Linux-only, closed-source).
-# This package cross-compiles a minimal C shim (kgen_rt_shim.c) that
-# implements those symbols for Windows, producing a static library
-# (libkgen_rt.a) that can be linked via MinGW-w64.
+# The Linux Mojo compiler emits Windows COFF objects with
+# `--target-triple x86_64-pc-windows-gnu --emit object`, but linking them needs
+# the KGEN CompilerRT symbols that libKGENCompilerRTShared.so provides, and that
+# is Linux-only and closed-source. So kgen_rt_shim.c implements those symbols and
+# cross-compiles to libkgen_rt.a, which MinGW-w64 can link.
 #
 # Usage in a dev shell:
 #   1. Compile Mojo source to Windows object:
@@ -31,7 +28,6 @@
   mingwPthreads = pkgsCross.mingwW64.windows.pthreads;
   mingwMcfgthreads = pkgsCross.mingwW64.windows.mcfgthreads;
 
-  # Cross-compile the KGEN runtime shim to a Windows static library
   kgenRtLib = stdenv.mkDerivation {
     pname = "mojo-windows-lib";
     version = "0.1.0";
@@ -84,13 +80,11 @@
     };
   };
 
-  # Helper: print the library directory path
   mojoWindowsLibdir = writeShellScriptBin "mojo-windows-libdir" ''
     echo -n "${kgenRtLib}/lib"
   '';
 
-  # Helper: one-shot cross-compile pipeline
-  #   Usage: mojo-windows-build [-I path]... -o output.exe input.mojo
+  # mojo-windows-build [-I path]... -o output.exe input.mojo
   mojoWindowsBuild = writeShellScriptBin "mojo-windows-build" ''
     set -euo pipefail
 
@@ -139,7 +133,7 @@
           shift
           ;;
         --emit|--target-triple|--target-cpu)
-          # Silently drop — we set these ourselves
+          # Dropped: set below instead.
           shift 2
           ;;
         -*)

@@ -35,15 +35,11 @@ lib: let
     isScalar
     ;
 
-  # ============================================================
   # Indentation
-  # ============================================================
 
   ind = depth: concatStringsSep "" (genList (_: "  ") depth);
 
-  # ============================================================
   # String Quoting
-  # ============================================================
 
   # Check if a string needs quoting in YAML
   needsQuoting = s: let
@@ -80,9 +76,7 @@ lib: let
     then "\"${escapeDoubleQuoted name}\""
     else name;
 
-  # ============================================================
   # Scalar Serialization
-  # ============================================================
 
   # Serialize a scalar value to its YAML string representation
   scalarToString = val:
@@ -114,9 +108,7 @@ lib: let
       else val
     else throw "toYAML: unsupported scalar type: ${typeOf val}";
 
-  # ============================================================
   # Multi-line String Handling
-  # ============================================================
 
   isMultilineString = val:
     isString val && hasInfix "\n" val;
@@ -142,9 +134,7 @@ lib: let
     contentLines;
   in "${indicator}\n${concatStringsSep "\n" indented}";
 
-  # ============================================================
   # Block Rendering
-  # ============================================================
 
   # Render a value as a YAML block at the given depth
   renderBlock = depth: val:
@@ -211,9 +201,7 @@ lib: let
       else "\n${renderBlock depth val}"
     else throw "toYAML: unsupported type: ${typeOf val}";
 in {
-  # ============================================================
   # toYAML — Main Entry Point
-  # ============================================================
 
   toYAML = val:
     if (val == null)

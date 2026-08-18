@@ -1,15 +1,10 @@
-# Phase 2 (see ./PLAN.md): font / dictionary / template data.
-#
-# These three submodules ship ready-to-use data — no compilation. We just fetch
-# and expose them under a single output so later phases (core's `allfontsgen`,
-# the final bundle) can reference them by subdirectory:
+# Font, dictionary and template data. Three submodules of ready-to-use files
+# with nothing to compile, fetched and exposed under one output so core's
+# `allfontsgen` and the final bundle can reach them by subdirectory:
 #
 #   $out/core-fonts          → fonts fed to allfontsgen
 #   $out/dictionaries        → spellcheck dictionaries
 #   $out/document-templates  → new-document templates
-#
-# This is the lowest-risk derivation in the graph and validates the callPackage
-# wiring before the heavy C++/JS phases land.
 {
   lib,
   stdenvNoCC,

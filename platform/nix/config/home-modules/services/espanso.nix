@@ -12,7 +12,7 @@
   #           an `Err` value: NoCompositor': espanso-detect/src/evdev/sync/wayland.rs:42
   #
   # systemd restarts it and it loops for as long as the session lasts.  Bind
-  # it to the desktop instead, the same way nixos/modules/services/netbird.nix
+  # it to the desktop instead, the same way platform/nix/config/nixos-modules/services/netbird.nix
   # handles its tray applet.
   systemd.user.services.espanso = {
     Unit = {
@@ -37,7 +37,7 @@
     # systemd restarts it and it loops.  espanso-wayland is the same version
     # built with the wayland feature, using EVDEV for detection and injection
     # throughout, which is also why it needs the uinput access granted in
-    # nixos/modules/core/uinput.nix.
+    # platform/nix/config/nixos-modules/core/uinput.nix.
     package = pkgs.espanso-wayland;
     configs = {
       default = {

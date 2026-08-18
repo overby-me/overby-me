@@ -23,8 +23,8 @@
   # Direct normal deps whose links metadata feeds DEP_* env vars.
   linksDepDrvs ? [],
   target,
-  # Cross-compilation: pass --target for lib/bin compiles (build scripts
-  # and proc-macros stay host); hostTriple feeds the HOST env var.
+  # --target for lib and bin compiles; build scripts and proc-macros stay on the
+  # host. hostTriple feeds the HOST env var.
   crossTarget ? null,
   hostTriple ? null,
   # Path to a file with the toolchain's `rustc --print cfg` output.
@@ -43,9 +43,9 @@
   # Toolchain override (a package providing bin/rustc); defaults to the
   # rustc this library was imported with.
   toolchain ? null,
-  # P7 pipelining: emit only crate metadata (.rmeta) when the crate is
-  # eligible (lib target, no build script, not a proc-macro); ineligible
-  # crates fall back to a full build inside this derivation.
+  # Emit only crate metadata (.rmeta) when the crate is eligible: a lib target,
+  # no build script, not a proc-macro. An ineligible crate falls back to a full
+  # build inside this derivation.
   emitMetadataOnly ? false,
   # In full mode: the crate's rmeta derivation. When that derivation fell
   # back to a full build, artifacts are copied instead of recompiling.
@@ -53,9 +53,8 @@
   # Bin links need real rlibs even when lib compiles use rmeta.
   linkExterns ? null,
   linkDepOuts ? null,
-  # Test mode: after the normal lib/build-script compile, compile the
-  # crate's test targets (lib/bin unit tests and tests/*.rs integration
-  # tests) with --test and run them; a nonzero exit fails the build.
+  # After the normal lib and build-script compile, build the crate's test targets
+  # with --test and run them; a nonzero exit fails the build.
   testMode ? false,
   # crateOverrides merge (buildInputs, env, patches, ...).
   extraAttrs ? {},

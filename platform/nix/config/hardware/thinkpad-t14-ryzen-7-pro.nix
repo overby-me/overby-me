@@ -21,7 +21,7 @@
       #   - Nitrokey 3 FIDO2 hmac-secret (enrolled out-of-band with
       #     `systemd-cryptenroll --fido2-device=auto /dev/nvme0n1p3`).
       # systemd-initrd (boot.initrd.systemd.enable) is required for
-      # FIDO2 unlock and is enabled in nixos/modules/core/boot.nix.
+      # FIDO2 unlock and is enabled in platform/nix/config/nixos-modules/core/boot.nix.
       luks.devices.cryptroot = {
         # Outer LUKS partition UUID (run `blkid /dev/nvme0n1p3` after
         # luksFormat, then update this).

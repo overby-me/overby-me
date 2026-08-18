@@ -54,9 +54,9 @@ in
           sha256 = "sha256-PC/OuJzvyomdzXyPJqYgKsrLKgc+TLLvNlUUpGXQHc0=";
         })
       ]
-      # Using nixpkgs ncurses, mojo fails with error:
-      # version `NCURSES6_5.0.19991023' not found (required by <NIX-STORE-PATH>/lib/liblldb20.0.0git.so)
-      # So let's use the ncurses from Conda (Linux only — macOS uses system ncurses)
+      # nixpkgs ncurses makes mojo fail with `NCURSES6_5.0.19991023 not found`,
+      # required by liblldb, so Conda's ncurses is used instead. Linux only;
+      # macOS uses the system one.
       ++ lib.optionals isLinux [
         (fetchurl {
           url = "https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda";
@@ -167,7 +167,6 @@ in
       cp -r bin/ $out/bin/
       cp -r share/ $out/share
 
-      # Install mblack (Mojo formatter)
       siteDir=$out/lib/${mblackPythonEnv.python.libPrefix}/site-packages
       mkdir -p $siteDir
       cp -r site-packages/* $siteDir/
@@ -183,23 +182,19 @@ in
       ''}
 
       ${lib.optionalString isDarwin ''
-        # Fix dylib install names and rpaths for macOS
         for dylib in $out/lib/*.dylib; do
           install_name_tool -id "$dylib" "$dylib" 2>/dev/null || true
         done
 
-        # Rewrite rpaths in binaries and dylibs to point to $out/lib
+        # Point every rpath at $out/lib.
         for f in $out/bin/* $out/lib/*.dylib; do
           [ -f "$f" ] || continue
-          # Remove any existing conda-prefix rpaths
           for rpath in $(otool -l "$f" 2>/dev/null | grep -A2 LC_RPATH | grep 'path ' | awk '{print $2}'); do
             install_name_tool -delete_rpath "$rpath" "$f" 2>/dev/null || true
           done
-          # Add our lib directory
           install_name_tool -add_rpath "$out/lib" "$f" 2>/dev/null || true
         done
 
-        # Rewrite references to conda-prefix dylibs in all Mach-O files
         for f in $out/bin/* $out/lib/*.dylib; do
           [ -f "$f" ] || continue
           for dep in $(otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -v '^/usr/lib\|^/System\|^@'); do
@@ -217,7 +212,6 @@ in
       ${modularCfg}
       EOF
 
-      # Create mojo wrapper that uses generated modular.cfg
       mkdir -p $out/bin
       mv $out/bin/mojo $out/bin/mojo-unwrapped
       cat > $out/bin/mojo << EOF
@@ -228,7 +222,6 @@ in
       EOF
       chmod +x $out/bin/mojo
 
-      # Create mojo-lldb wrapper that uses generated modular.cfg
       mkdir -p $out/bin
       mv $out/bin/mojo-lldb $out/bin/mojo-lldb-unwrapped
       cat > $out/bin/mojo-lldb << EOF
@@ -239,7 +232,6 @@ in
       EOF
       chmod +x $out/bin/mojo-lldb
 
-      # Create mojo-lsp-server wrapper that uses generated modular.cfg
       mv $out/bin/mojo-lsp-server $out/bin/mojo-lsp-server-unwrapped
       cat > $out/bin/mojo-lsp-server << EOF
       #!${stdenv.shell}

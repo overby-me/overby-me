@@ -8,10 +8,9 @@
 }: let
   cfg = config.nixos-fairphone-fp5;
 
-  # WirePlumber configuration for Fairphone 5 audio.
-  # Forces S32LE sample format for all ALSA output sinks.  The Qualcomm ADSP
-  # expects 24-bit audio padded into 32-bit frames; without this, PipeWire may
-  # negotiate S24_LE which the ADSP cannot handle correctly.
+  # S32LE on every ALSA output sink: the Qualcomm ADSP expects 24-bit audio
+  # padded into 32-bit frames, and without this PipeWire may negotiate S24_LE,
+  # which it cannot handle.
   # See: https://wiki.postmarketos.org/wiki/Fairphone_5_(fairphone-fp5)/Audio
   # From: https://gitlab.postmarketos.org/postmarketOS/pmaports device-fairphone-fp5
   wireplumberFp5Config =
@@ -78,7 +77,6 @@ in {
         # PostmarketOS kernel only has CONFIG_RD_GZIP=y.
         compressor = "gzip";
 
-        # Kernel modules required in initramfs for device boot.
         # See: https://gitlab.postmarketos.org/postmarketOS/pmaports/-/blob/master/device/testing/device-fairphone-fp5/modules-initfs
         availableKernelModules =
           [
@@ -99,9 +97,9 @@ in {
         systemd.enable = false;
       };
 
-      # Kernel modules for audio subsystem — loaded after boot (not in initrd).
-      # The device tree triggers automatic loading via udev/modalias, but
-      # listing them here ensures they are always available and loaded early.
+      # Audio, loaded after boot rather than in the initrd. The device tree
+      # already triggers these through udev/modalias; listing them keeps them
+      # available and loaded early.
       kernelModules = [
         "snd-soc-sm8250" # ASoC machine driver (registers the "Fairphone 5" card)
         "snd-soc-aw88261" # AW88261 speaker amplifier codec
@@ -113,7 +111,7 @@ in {
         "soundwire-qcom" # Qualcomm SoundWire controller
       ];
 
-      # Disable GRUB — we use Android boot image format.
+      # The Android boot image format is used instead.
       loader.grub.enable = false;
 
       # On first boot, register the contents of the initial Nix store.
@@ -162,7 +160,6 @@ in {
         );
     };
 
-    # Root filesystem.
     fileSystems."/" = {
       device = "/dev/disk/by-label/nixos";
       fsType = "ext4";
@@ -170,36 +167,29 @@ in {
 
     console.earlySetup = true;
 
-    # ── Audio (ALSA UCM & WirePlumber) ──────────────────────────────
-    # Install device-specific ALSA UCM profiles so PipeWire / ALSA can
-    # set up audio routes for the AW88261 speakers, WCD9385 microphones,
-    # and DisplayPort output.  The UCM profiles come from the
-    # sc7280-mainline/alsa-ucm-conf repository which is what PostmarketOS
-    # ships as alsa-ucm-conf-qcom-sc7280.
-    #
-    # The WirePlumber config forces S32LE output format (see comment at
-    # top of file).
+    # Device-specific ALSA UCM profiles, so PipeWire and ALSA can set up routes
+    # for the AW88261 speakers, WCD9385 microphones and DisplayPort output. They
+    # come from sc7280-mainline/alsa-ucm-conf, which is what PostmarketOS ships
+    # as alsa-ucm-conf-qcom-sc7280.
     environment = {
       systemPackages = [
         pkgs.alsa-ucm-conf-fairphone-fp5
       ];
 
-      # Point ALSA at the device-specific UCM profiles.  The sc7280-mainline
-      # UCM repo is a full replacement that includes both Fairphone-specific
-      # profiles and all upstream profiles it depends on.
+      # A full replacement set, carrying both the Fairphone-specific profiles and
+      # every upstream profile they depend on.
       sessionVariables.ALSA_CONFIG_UCM2 = "${pkgs.alsa-ucm-conf-fairphone-fp5}/share/alsa/ucm2";
 
-      # Drop the WirePlumber S32LE quirk into the global config directory
-      # so it is picked up by the WirePlumber instance that PipeWire spawns.
+      # In the global config dir, so the WirePlumber instance PipeWire spawns
+      # picks it up.
       etc."wireplumber/wireplumber.conf.d/52-fairphone-fp5.conf" = {
         source = "${wireplumberFp5Config}/share/wireplumber/wireplumber.conf.d/52-fairphone-fp5.conf";
       };
     };
 
-    # Serial gettys, A/B slot management, and first-boot resize service.
     systemd.services = {
-      # Mark the current A/B boot slot as successful so the bootloader
-      # does not exhaust its retry counter and fall back to fastboot.
+      # Otherwise the bootloader exhausts its retry counter and falls back to
+      # fastboot.
       mark-boot-successful = {
         description = "Mark current A/B slot as boot-successful";
         wantedBy = ["multi-user.target"];
@@ -223,9 +213,8 @@ in {
         serviceConfig.Restart = "always";
       };
 
-      # Automatically resize root filesystem to fill the entire partition on
-      # first boot.  The flashed ext4 image is sized to fit only the initial
-      # rootfs contents, while the userdata partition is much larger.
+      # The flashed ext4 image is sized to fit only the initial rootfs contents,
+      # while the userdata partition it lands on is much larger.
       resize-rootfs = {
         description = "Resize root filesystem to fill partition";
         wantedBy = ["local-fs.target"];

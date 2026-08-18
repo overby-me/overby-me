@@ -18,7 +18,7 @@
     hash = "sha256-hdN+errcdbIl9BRRO/rxoiyTjyXiwwgDiMGkHqG2/1I=";
   };
 
-  # Rust toolchain with wasm32-wasip2 target for building WASM channels
+  # wasm32-wasip2 is what the WASM channels build for.
   rustWithWasm = rust-bin.stable.latest.default.override {
     targets = ["wasm32-wasip2"];
   };
@@ -28,9 +28,9 @@
     rustc = rustWithWasm;
   };
 
-  # Extract the telegram channel source from the ironclaw repo.
-  # It lives at channels-src/telegram/ but references ../../wit/channel.wit,
-  # so we preserve the directory structure relative to the repo root.
+  # The telegram channel lives at channels-src/telegram/ but references
+  # ../../wit/channel.wit, so its directory structure relative to the repo root
+  # has to survive the extraction.
   telegramChannelSrc = stdenv.mkDerivation {
     name = "ironclaw-telegram-channel-src";
     inherit src;
@@ -40,20 +40,18 @@
       cp -r channels-src/telegram/* $out/channels-src/telegram/
       cp -r wit/* $out/wit/
 
-      # Fix duplicate [workspace] key in Cargo.toml (upstream bug)
+      # Upstream bug: a duplicate [workspace] key in Cargo.toml.
       awk '!seen[$0]++ || $0 != "[workspace]"' \
         $out/channels-src/telegram/Cargo.toml > tmp \
         && mv tmp $out/channels-src/telegram/Cargo.toml
     '';
   };
 
-  # Vendored cargo dependencies for the telegram channel workspace
   telegramChannelDeps = rustPlatform.fetchCargoVendor {
     src = telegramChannelSrc + "/channels-src/telegram";
     hash = "sha256-IDT/7DLItLRs2biE04qyb7OkizClObZs3+R6Xjc2LbQ=";
   };
 
-  # Pre-built telegram WASM channel component
   telegramChannelWasm = stdenv.mkDerivation {
     pname = "ironclaw-telegram-channel";
     inherit version;
@@ -64,7 +62,6 @@
     buildPhase = ''
       cd channels-src/telegram
 
-      # Set up vendored deps
       mkdir -p .cargo
       # The vendor's own config, which names <vendor>/source-registry-0 -
       # where fetchCargoVendor actually puts the crates. Pointing cargo at
@@ -74,7 +71,6 @@
 
       cargo build --release --target wasm32-wasip2 --offline
 
-      # Convert to WASM component and strip debug info
       wasm-tools component new \
         target/wasm32-wasip2/release/telegram_channel.wasm \
         -o telegram.wasm \
@@ -108,16 +104,15 @@ in
     ];
 
     preBuild = ''
-      # Place the pre-built telegram WASM where bundled.rs expects it
-      # (channels-src/telegram/target/wasm32-wasip2/release/telegram_channel.wasm)
+      # Where bundled.rs expects to find it.
       mkdir -p channels-src/telegram/target/wasm32-wasip2/release
       cp ${telegramChannelWasm}/telegram.wasm \
          channels-src/telegram/target/wasm32-wasip2/release/telegram_channel.wasm
       cp ${telegramChannelWasm}/telegram.capabilities.json \
          channels-src/telegram/telegram.capabilities.json
 
-      # Replace build.rs with one that only embeds the registry catalog
-      # (skipping the WASM channel build since we pre-build it above)
+      # A build.rs that only embeds the registry catalog: the WASM channel is
+      # already built above.
       cat > build.rs << 'BUILDRS'
       use std::env;
       use std::fs;
@@ -172,9 +167,8 @@ in
       BUILDRS
     '';
 
-    # Extension WASM artifacts are assembled in the NixOS module
-    # (wasmChannelsDir / wasmToolsDir) to avoid rebuilding ironclaw
-    # when only a channel or tool changes.
+    # Extension WASM artifacts are assembled in the NixOS module instead, so a
+    # change to one channel or tool does not rebuild ironclaw.
 
     passthru = {
       inherit telegramChannelWasm;

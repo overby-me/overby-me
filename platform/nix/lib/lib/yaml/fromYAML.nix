@@ -34,9 +34,7 @@ lib: let
     stripComment
     ;
 
-  # ============================================================
   # Line Preprocessing
-  # ============================================================
 
   preprocessAllLines = text: let
     rawLines = splitLines text;
@@ -61,9 +59,7 @@ lib: let
   filterMeaningful = allLines:
     filter (l: l.content != "") allLines;
 
-  # ============================================================
   # Content Detection
-  # ============================================================
 
   # Find the position of the mapping colon (': ' or ':' at end) outside quotes.
   # Returns -1 if not a mapping entry.
@@ -186,7 +182,6 @@ lib: let
       ">9+"
     ];
 
-  # Split a mapping line into key and value parts
   splitMappingLine = content: let
     colonPos = findMappingColon content;
     rawKey = trim (substring 0 colonPos content);
@@ -200,9 +195,7 @@ lib: let
     inherit key valueStr;
   };
 
-  # ============================================================
   # Flow Style Parser (for inline [...] and {...})
-  # ============================================================
 
   skipSpaces = str: pos: let
     len = stringLength str;
@@ -268,7 +261,6 @@ lib: let
         then let
           nextPos = skipSpaces str (afterValue + 1);
         in
-          # Handle trailing comma before ]
           if nextPos < len && charAt str nextPos == "]"
           then {
             value = items ++ [parsed.value];
@@ -330,7 +322,6 @@ lib: let
         then let
           nextPos = skipSpaces str (afterVal + 1);
         in
-          # Handle trailing comma before }
           if nextPos < len && charAt str nextPos == "}"
           then {
             value = listToAttrs (entries ++ [entry]);
@@ -442,9 +433,7 @@ lib: let
   in
     result.value;
 
-  # ============================================================
   # Block Scalar Parser (| and >)
-  # ============================================================
 
   parseBlockScalarContent = allLines: currentLineNo: parentIndent: indicator: let
     isLiteral = hasPrefix "|" indicator;
@@ -491,9 +480,7 @@ lib: let
         trimmedContent = trim rawLine;
       in
         if trimmedContent == ""
-        then
-          # Empty lines are part of block scalar
-          collectRawLines (lineNo + 1) (acc ++ [""]) scalarIndent
+        then collectRawLines (lineNo + 1) (acc ++ [""]) scalarIndent
         else if scalarIndent == null
         then
           # First content line determines the indent
@@ -525,7 +512,6 @@ lib: let
       then collected.indent
       else parentIndent + 2;
 
-    # Strip the indent from collected lines
     stripIndent = line:
       if trim line == ""
       then ""
@@ -609,9 +595,7 @@ lib: let
     inherit nextLineNo;
   };
 
-  # ============================================================
   # Block Style Parser
-  # ============================================================
 
   # Parse a value from the meaningful lines array.
   # allLines: all preprocessed lines (including empty ones)
@@ -940,9 +924,7 @@ lib: let
   in
     go startPos [];
 in {
-  # ============================================================
   # fromYAML — Main Entry Point
-  # ============================================================
 
   fromYAML = text: let
     allLines = preprocessAllLines text;

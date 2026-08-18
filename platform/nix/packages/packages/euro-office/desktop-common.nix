@@ -1,19 +1,7 @@
-# Phase 5 (see ./PLAN.md), approach (B): the Euro-Office editors JS/WASM payload.
-#
-# Rather than rebuild the entire Node20/grunt + Emscripten toolchain from source
-# (approach A — large and fiddly; tracked as future work), we fetch the
-# *official Euro-Office* `desktop-common` payload that their own CI builds from
-# source and publishes publicly at `ghcr.io/euro-office/desktop-common`.
-#
-# This is a genuine Euro-Office artifact (NOT ONLYOFFICE). The image is a single
-# layer containing the assembled editors tree:
-#
-#   $out/editors        → sdkjs + web-apps (the editors that run inside CEF)
-#   $out/converter      → x2t config, templates, DoctRenderer.config
-#   $out/fonts          → bundled fonts
-#   $out/dictionaries   → spellcheck dictionaries
-#   $out/providers      → cloud providers (nextcloud)
-#   $out/index.html     → login page
+# The Euro-Office editors JS/WASM payload, fetched from the image their own CI
+# builds and publishes at ghcr.io/euro-office/desktop-common rather than
+# rebuilt from the Node20/grunt + Emscripten toolchain. A genuine Euro-Office
+# artifact, not an ONLYOFFICE one. Phase 5, approach B; see ./PLAN.md.
 #
 # Pinned to a super-repo commit (`0bd0e7a`) that has a published image; this
 # tracks the submodule revs in ./sources.nix closely. `desktop-common` content

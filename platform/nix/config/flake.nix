@@ -1,22 +1,14 @@
 # What this tree's nix configuration talks to.
 #
-# The modules taken out of nix-workspace, declared here rather than in the
-# root flake. The framework itself is not among them: the root calls it, and
-# nothing in this directory talks to it.
+# Each workspace-* input is a flake owning one upstream and the module that
+# uses it, so a tree takes only what it talks to and the name says what taking
+# it costs. Project discovery stays with the root flake: a flake's source is
+# its own directory, so this one cannot see safety/ or apps/.
 #
-# Each module is a flake owning one upstream and the module that uses it, so a
-# tree takes only what it talks to and the name says what taking it costs -
-# and this is the directory doing the talking.
-#
-# It only carries inputs. A flake's own source is its directory, so this one
-# cannot see safety/ or apps/, and discovery over the whole tree stays with
-# the root flake, which reaches these through `inputs` on this input.
-#
-# nixpkgs comes through the framework rather than being declared here: without
-# that a module builds its upstream against a nixpkgs of its own, which is how
-# zen-browser came to want an ffmpeg the rest of the tree does not have. It was
-# declared here and followed onto the root's, which worked as long as every
-# consumer remembered to follow it - one input to follow cannot be half done.
+# nixpkgs comes through the framework rather than being declared here. Declared
+# separately it has to be followed separately, and a consumer that forgets
+# builds a module's upstream against a nixpkgs of its own - which is how
+# zen-browser came to want an ffmpeg the rest of the tree does not have.
 {
   description = "The framework and the modules this tree's nix configuration uses";
 

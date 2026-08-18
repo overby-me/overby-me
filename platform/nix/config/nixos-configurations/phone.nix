@@ -1,32 +1,18 @@
-# ╔═══════════════════════════════════════════════════════════════════════╗
-# ║  PHONE — Fairphone 5                                                ║
-# ║                                                                      ║
-# ║  NixOS on Fairphone 5 (QCM6490 / Qualcomm SC7280) with COSMIC DE.  ║
-# ║  Built natively for aarch64-linux via binfmt emulation on x86_64.   ║
-# ║                                                                      ║
-# ║  Based on: https://github.com/gian-reto/nixos-fairphone-fp5         ║
-# ╚═══════════════════════════════════════════════════════════════════════╝
+# NixOS on a Fairphone 5 (QCM6490 / Qualcomm SC7280) with COSMIC, based on
+# https://github.com/gian-reto/nixos-fairphone-fp5.
 #
-# Flashing (first time):
-#   1. Unlock the bootloader (see PostmarketOS wiki for Fairphone 5)
-#   2. Put device into fastboot mode (power off, hold volume-down + power)
-#   3. Connect via USB-C
-#   4. Build & flash boot image:
-#        nix build .#nixosConfigurations.phone.config.system.build.kernel
-#   5. Build & flash rootfs image (ext4 for userdata partition)
+# First flash: unlock the bootloader (PostmarketOS wiki), enter fastboot
+# (volume-down + power from off), connect USB-C, then flash the boot image from
+# `nix build .#nixosConfigurations.phone.config.system.build.kernel` and an ext4
+# rootfs onto userdata. After that:
 #
-# Subsequent updates (over SSH / on-device):
 #   nixos-rebuild switch --flake .#phone --target-host root@<phone-ip>
 #
-# Note on build strategy:
-#   Rather than cross-compiling (nixpkgs.buildPlatform = "x86_64-linux"),
-#   this configuration builds natively for aarch64-linux.  The x86_64 host
-#   must have binfmt emulation enabled (boot.binfmt.emulatedSystems =
-#   ["aarch64-linux"]).  This way:
-#     - Pre-built aarch64-linux packages are fetched from the binary cache
-#     - Only uncached packages (kernel, firmware, etc.) are built under
-#       QEMU emulation — slower per-package but far fewer to build
-#     - No cross-compilation workaround overlays are needed
+# Built natively for aarch64 under binfmt emulation rather than cross-compiled,
+# which needs boot.binfmt.emulatedSystems on the x86_64 host. Cross-compiling
+# would rebuild everything and need workaround overlays; this way the cache
+# supplies most packages and only the uncached ones (kernel, firmware) go
+# through QEMU.
 {
   inputs,
   src,

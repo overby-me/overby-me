@@ -41,8 +41,7 @@ let
       or (throw "cargo manifest: ${fieldName}.workspace = true but [workspace.package] has no ${fieldName}")
     else v;
 
-  # Normalize one dependency spec into the shared dep record shape.
-  # `wsDeps` is [workspace.dependencies] for `workspace = true` merging.
+  # `wsDeps` is [workspace.dependencies], for merging `workspace = true` specs.
   normalizeDep = wsDeps: kind: target: name: spec: let
     base = let
       b = wsDeps.${name} or (throw "cargo manifest: dependency ${name} sets workspace = true but [workspace.dependencies] has no entry for it");

@@ -17,33 +17,25 @@ in {
   config = lib.mkIf cfg.enable {
     nixpkgs.hostPlatform = lib.mkDefault "aarch64-linux";
 
-    # Stock nixpkgs kernel, no fork.  Linux 7.0 merged
-    # arch/arm64/boot/dts/qcom/x1e80100-microsoft-denali-oled.dts and the
-    # "microsoft,denali" match in drivers/platform/surface, and nixpkgs' aarch64
-    # config already builds every driver this machine needs as a module
-    # (SURFACE_*, ATH12K, DRM_MSM, SND_SOC_X1E80100, I2C_HID_OF_ELAN,
-    # NVMEM_SPMI_SDAM, UCSI_PMIC_GLINK, ...).  Hydra builds it, so this is a
-    # substitution rather than an hours-long aarch64 kernel compile.
+    # Stock kernel, no fork: Linux 7.0 merged the denali devicetree and the
+    # "microsoft,denali" match, and nixpkgs' aarch64 config already builds every
+    # driver this machine needs (SURFACE_*, ATH12K, DRM_MSM, SND_SOC_X1E80100,
+    # I2C_HID_OF_ELAN, NVMEM_SPMI_SDAM, UCSI_PMIC_GLINK). Hydra builds it, so
+    # this substitutes rather than compiling an aarch64 kernel for hours.
     boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
 
-    # The one thing that genuinely needs patching.  ath12k only learns that a
-    # machine wants rfkill disabled from an ACPI bitflag, which a
-    # devicetree-booted machine never reads, so Wi-Fi comes up hard-blocked
-    # with nothing in userspace able to clear it:
-    #
-    #   1: phy0: Wireless LAN
-    #     Soft blocked: no
-    #     Hard blocked: yes
-    #
-    # The chip is otherwise fine; the firmware loads and the radio is
-    # detected.  Two commits from dwhinham's tree fix it, five lines between
+    # The one thing that genuinely needs patching. ath12k learns that a machine
+    # wants rfkill disabled only from an ACPI bitflag, which a devicetree-booted
+    # machine never reads, so Wi-Fi comes up hard-blocked with nothing in
+    # userspace able to clear it. The chip is otherwise fine: firmware loads and
+    # the radio is detected. Two commits from dwhinham's tree fix it, five lines
     # them: one adds a `disable-rfkill` devicetree property to the driver, the
     # other sets it on this board.  Neither is upstream as of 7.1, and
     # mainline still only has ath12k_acpi_get_disable_rfkill.
     #
-    # This costs a full kernel build, and keeps costing one on every nixpkgs
-    # bump, because linuxPackages_latest is no longer the cached article.
-    # Build it on the machine itself rather than emulated:
+    # This costs a full kernel build on every nixpkgs bump, since
+    # linuxPackages_latest is no longer the cached article. Build on the machine
+    # rather than emulated:
     #
     #   nixos-rebuild switch --flake .#armitas \
     #     --target-host root@armitas --build-host root@armitas
@@ -59,19 +51,16 @@ in {
         patch = ./patches/denali-disable-rfkill.patch;
       }
 
-      # Once a kernel build is being paid for anyway, this one is free.  It
-      # flips d3_closes_handle to false in ssam_controller_caps_load_from_of,
-      # the defaults the Surface aggregator picks when it was described by a
-      # devicetree rather than ACPI, so it cannot affect an x86 Surface.
+      # Free once a kernel build is being paid for anyway. Flips
+      # d3_closes_handle false in ssam_controller_caps_load_from_of, the
+      # devicetree path only, so it cannot affect an x86 Surface.
       #
-      # It is a workaround, not a fix.  dwhinham checked the Surface Pro 11's
-      # SSDT and the upstream default of true matches what the ACPI tables
-      # say, so the real bug is somewhere in the EC blocking path
-      # (dwhinham/linux-surface-pro-11#23).  With the flag off, resume from
-      # the power key, an external keyboard or the lid is reported stable,
-      # with one known quirk: waking by opening the lid can leave the Surface
-      # keyboard and touchpad dead, and unplugging them does not help.
-      # Another suspend/resume cycle using the power key brings them back.
+      # A workaround, not a fix: the SSDT agrees with upstream's default, so the
+      # real bug is in the EC blocking path
+      # (dwhinham/linux-surface-pro-11#23). Resume from power key, external
+      # keyboard or lid is stable with it, with one quirk: waking by lid can
+      # leave the Surface keyboard and touchpad dead until another
+      # suspend/resume by power key.
       {
         name = "ssam-sp11-suspend-resume";
         patch = ./patches/ssam-sp11-suspend-resume.patch;
@@ -80,17 +69,13 @@ in {
 
     # Two further patches from that tree are deliberately not taken.
     #
-    # "HACK: Allow setting Wi-Fi MAC address via devicetree" is redundant:
-    # networking.nix sets the MAC from userspace with a udev rule, and the
-    # patch reads a local-mac-address property that mainline's devicetree does
-    # not set, so on its own it would do nothing.
+    # The Wi-Fi MAC one is redundant: networking.nix sets it from userspace, and
+    # the patch reads a local-mac-address property mainline does not set.
     #
-    # "drm/msm/dp: Enable support for eDP v1.4+ link rates table" fixes a
-    # panel probe failure on the Samsung ATNA30DW01-1 this machine has, but
-    # the panel probes fine here and offers two modes, so the failure it
-    # describes is not happening.  It is also the largest of them by far, 120
-    # lines rewriting DP link training.  Worth revisiting only if the display
-    # turns out to be capped below its native 120 Hz.
+    # The eDP v1.4+ link rates one fixes a panel probe failure this machine does
+    # not have - the Samsung ATNA30DW01-1 probes fine and offers two modes - and
+    # is 120 lines rewriting DP link training. Revisit only if the display turns
+    # out capped below its native 120 Hz.
 
     assertions = [
       {
@@ -103,11 +88,9 @@ in {
       }
     ];
 
-    # The UEFI on Snapdragon X machines describes the hardware with ACPI, for
-    # Windows.  Linux needs the devicetree handed to it by the bootloader
-    # instead; systemd-boot picks this up through
-    # boot.loader.systemd-boot.installDeviceTree, which defaults to on once
-    # `name` is set.
+    # Snapdragon X UEFI describes the hardware with ACPI, for Windows; Linux
+    # needs the devicetree from the bootloader instead. systemd-boot picks this
+    # up via installDeviceTree, which defaults on once `name` is set.
     hardware.deviceTree = {
       enable = true;
       name = "qcom/x1e80100-microsoft-denali-oled.dtb";

@@ -1,33 +1,21 @@
-# Phase 6 (see ./PLAN.md): the Euro-Office `desktop-sdk` Qt/CEF integration —
-# macOS port.
+# `ascdocumentscore`, the CEF client library that hosts the editors payload:
+# desktop-sdk's own ABI-matched libcef_dll wrapper for CEF branch 109, linked
+# against the prebuilt framework. Phase 6; see ./PLAN.md.
 #
-# This builds the native CEF client library that hosts the editors payload:
+# The Qt `qtascdocumentscore`/QCefView wrapper is deliberately not built: its
+# platform impl is X11/Win32-only, so it is the Linux and Windows hosting path.
+# On macOS the Cocoa app links this library and embeds CEF in NSViews itself.
 #
-#   * ascdocumentscore  — the CEF client library (compiles desktop-sdk's own
-#                         ABI-matched libcef_dll wrapper for CEF branch 109 and
-#                         links the prebuilt "Chromium Embedded Framework").
+# Recompiles `core` alongside the desktop bits, because desktop-sdk's
+# CMakeLists pulls core in as add_subdirectory()s. That is the upstream build
+# graph; core.nix is the converter-only subset of it.
 #
-# On macOS this is the integration point the GUI uses: the Cocoa app
-# (desktop-apps/macos, an Xcode project) links `ascdocumentscore` and embeds
-# CEF in NSViews via the mac .mm wrappers (mac_cefview.mm / widget_impl.mm /
-# NSCefView.mm). The Qt `qtascdocumentscore`/QCefView wrapper is the Linux &
-# Windows hosting path and is NOT used on macOS (its QCefView platform impl is
-# X11/Win32-only), so we do not build it here.
+# What distinguishes it from core.nix: Qt 5.15 (reached through common.cmake's
+# EO_USE_SYSTEM_LIBS + BUILD_DESKTOP, added in ./patches/0008-*), the CEF 109
+# package passed via CEF_ROOT, and hunspell for the spellchecker wrapper.
 #
-# It reuses the from-source `core` engine: the desktop-sdk CMakeLists pulls in
-# core's libraries as add_subdirectory()s, so this derivation re-compiles core
-# alongside the desktop bits (the upstream build graph; core.nix is the
-# converter-only subset).
-#
-# Dependencies that distinguish this from core.nix:
-#   * Qt 5.15 from nixpkgs (resolved by common.cmake's EO_USE_SYSTEM_LIBS +
-#     BUILD_DESKTOP path, added in ./patches/0008-*).
-#   * The standalone CEF 109 framework package (./cef.nix), passed via CEF_ROOT.
-#   * hunspell from nixpkgs (the spellchecker wrapper links it).
-#
-# STATUS: macOS aarch64 port in progress. The GUI application bundle itself is a
-# separate Xcode project in `desktop-apps/macos`; this derivation builds the
-# reusable native libraries + helper that the app links against.
+# The GUI bundle itself is a separate Xcode project; this builds only the
+# libraries it links.
 {
   lib,
   stdenv,

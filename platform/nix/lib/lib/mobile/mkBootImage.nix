@@ -1,9 +1,9 @@
 # Builds an Android boot image that can be flashed to the `boot` partition
 # using fastboot.
 #
-# Originally replicated from
-# https://github.com/gian-reto/nixos-fairphone-fp5/blob/main/flake.nix
-# and parameterized to support any Android-bootloader device.
+# Replicated from
+# https://github.com/gian-reto/nixos-fairphone-fp5/blob/main/flake.nix and
+# parameterized for any Android-bootloader device.
 #
 # Usage:
 #   lib.mkBootImage {
@@ -41,21 +41,17 @@ lib: {
     pkgs.runCommand "boot.img" {
       nativeBuildInputs = [pkgs.android-tools];
     } ''
-      # Get paths from NixOS configuration.
       kernelPath="${nixosConfig.config.system.build.kernel}"
       initrdPath="${nixosConfig.config.system.build.initialRamdisk}/initrd"
       initPath="${lib.unsafeDiscardStringContext nixosConfig.config.system.build.toplevel}/init"
 
-      # Build kernel command line from NixOS config parameters.
       kernelParams="${lib.toString nixosConfig.config.boot.kernelParams}"
       cmdline="$kernelParams init=$initPath"
 
-      # Concatenate kernel (Image.gz) with device tree blob.
-      # The bootloader expects them as a single file.
+      # The bootloader expects the kernel and the device tree blob as one file.
       echo "Concatenating kernel and DTB..."
       cat "$kernelPath/Image.gz" "$kernelPath/dtbs/${cfg.dtb}" > Image-with-dtb.gz
 
-      # Build Android boot image using mkbootimg.
       echo "Building boot image with mkbootimg..."
       echo "Using cmdline: $cmdline"
       mkbootimg \

@@ -1,17 +1,14 @@
-# Lower a Ninja build graph (from `oxidized-ninja -t graph-json`) to Nix
-# derivations: one derivation per edge, no import-from-derivation beyond the
-# single graph-extraction step. A sibling to platform/nix/lib/buck2/build/lower.nix.
+# Lower a Ninja build graph (from `oxidized-ninja -t graph-json`) to one Nix
+# derivation per edge, with no import-from-derivation past the single
+# graph-extraction step. Sibling to ../../buck2/build/lower.nix.
 #
-# Model: a virtual build tree rooted at the Ninja build directory. Every edge
-# output has a stable build-dir-relative path (exactly the string Ninja uses).
-# Each edge's derivation stages its inputs into a working tree — a producer
-# edge's whole `$out` tree is symlinked in (cp -rs, so transitive files and
-# symlink targets travel along and large trees are never copied), while source
-# inputs are copied as real files so relative `#include` and sibling lookups
-# resolve — then runs the fully-expanded command (which references build-dir-
-# relative paths) and exports the resulting tree as `$out`. Dependencies flow
-# through store-path interpolation in the staging commands only, so an edge
-# that merely names a peer's path creates no derivation dependency.
+# Each edge runs in a virtual build tree rooted at the Ninja build directory,
+# where every output keeps the build-dir-relative path Ninja names it by. A
+# producer's whole `$out` is symlinked in (cp -rs, so large trees are never
+# copied); source inputs are copied as real files so relative `#include` and
+# sibling lookups resolve; the resulting tree becomes this edge's `$out`.
+# Dependencies flow only through store-path interpolation in the staging
+# commands, so naming a peer's path is not itself a dependency.
 #
 # mkLower { pkgs; src; toolchain; } -> { lowerGraph }
 # lowerGraph graph -> { drvForOutput; producerOf; edgeDrvs; ... }
@@ -48,14 +45,13 @@
   # `-I` cannot express), and only those individual files are staged. Requires
   # `rewriteRoots` to cover the same trees. Empty = the include-dir heuristic.
   scanMounts ? [],
-  # The graph-json derivation (the shared build graph as a file). Required by the
-  # build-time grouped lowerer (task #80): each group derivation reads it to
-  # reconstruct + run its edges, instead of Nix eval building every edge's command.
+  # The build graph as a file. Read at build time by each group derivation under
+  # `buildTimeLowering`, so it is required there and unused otherwise.
   graphDrv ? null,
-  # Task #80: when true, a group's derivation is produced by invoking lower_group.py
-  # at BUILD time (reads graphDrv, rewrites/stages/runs its edges) so Nix eval only
-  # computes the group dependency graph (~1-2min vs ~15-40min). false keeps the
-  # legacy eval-time mkGroup (every edge's command built as a Nix string).
+  # Build each group by running lower_group.py in the sandbox (it reads graphDrv
+  # and rewrites/stages/runs the group's edges) rather than building every edge's
+  # command as a Nix string during evaluation: 1-2 minutes of eval instead of
+  # 15-40. False keeps the eval-time mkGroup.
   buildTimeLowering ? false,
 }: let
   inherit (pkgs) lib;
@@ -130,13 +126,11 @@ in {
 
     isProduced = p: producerOf ? ${p};
 
-    # Resolve an input to the set of *real* (command-bearing) producer edge
-    # indices it depends on, flattening no-op aliases/ordering edges.
-    # MEMOISED per produced path. Unmemoised this recurses through no-op alias/order chains
-    # with a per-level lib.unique AND is recomputed at each of its ~dozen call sites; summed
-    # over the ~17e3-edge whole-Darling graph it dominated eval (rawGroupDeps alone did not
-    # finish in 500s). mapAttrs over producerOf gives one cached thunk per produced path, and
-    # the recursion reads those cached values -- linear in the graph instead of superlinear.
+    # The *real* (command-bearing) producer edges an input depends on, flattening
+    # no-op alias/ordering edges. Memoised per produced path: unmemoised it
+    # recurses through alias chains with a per-level lib.unique and is recomputed
+    # at each of its dozen call sites, which on the 17e3-edge Darling graph never
+    # finished. One cached thunk per produced path makes it linear.
     realProducersMemo = builtins.mapAttrs (_p: i: let
       e = elemAt edges i;
     in
@@ -146,13 +140,12 @@ in {
     producerOf;
     realProducers = p: realProducersMemo.${p} or [];
 
-    # Producers of paths NAMED IN AN EDGE'S COMMAND but not declared as inputs -- the few
-    # undeclared cross-component LINK deps Darling's ninja graph omits (e.g. system_duct's
-    # command names libsystem_notify.dylib). Restricted to UNDER-ROOT (absolute, real produced
-    # file) tokens so bare words never match, and metadata-flag arguments (-install_name /
-    # -reexport_library / -o / ...) are dropped -- those are Mach-O header strings (the umbrella
-    # reexports), not build deps, and counting them forges the libSystem umbrella into one
-    # un-orderable SCC. -Xlinker/-Wl wrappers stripped so the flag before a path is visible.
+    # Producers of paths named in an edge's command but never declared as inputs:
+    # the undeclared cross-component link deps Darling's ninja graph omits (e.g.
+    # system_duct's command names libsystem_notify.dylib). Only under-root tokens
+    # count, so a bare word never matches, and arguments of the flags below are
+    # dropped: those are Mach-O header strings, not build deps, and counting them
+    # forges the whole libSystem umbrella into one un-orderable SCC.
     cmdMetaFlags = [
       "-o"
       "-install_name"
@@ -167,9 +160,10 @@ in {
     ];
     cmdProducersOf = i: let
       e = elemAt edges i;
-      # split on '=' too: a produced tool path can be a flag ARGUMENT, e.g. cctools' ar bakes
-      # `-DRANLIB=<...>/ranlib` (ranlib is a SEPARATE group), so ar must depend on + stage
-      # ranlib's group for its baked absolute path to resolve when ar runs elsewhere.
+      # Split on `=` as well, because a produced tool path can be a flag argument:
+      # cctools' ar bakes `-DRANLIB=<...>/ranlib`, built by a separate group, so ar
+      # must stage that group for its baked path to resolve when ar runs elsewhere.
+      # The `-Xlinker`/`-Wl` wrappers go so the flag before a path stays visible.
       toks =
         filter (t: t != "-Xlinker" && t != "-Wl")
         (concatMap (lib.splitString "=")
@@ -212,26 +206,20 @@ in {
     # so an edge depends only on the specific inputs it reads.
     indivOf = p:
       builtins.path {
-        # unsafeDiscardStringContext: the path is built from `rootFor p` (a rewrite
-        # root, e.g. cmakeSrcStore), whose string context would otherwise propagate
-        # into this content-addressed copy -- making the whole source tree an input
-        # of every edge/group derivation and defeating per-input isolation. The file
-        # still exists at eval time, so builtins.path imports it fresh with no ref
-        # back to the containing store path.
+        # The context of the rewrite root this is built from would otherwise ride
+        # along into the copy, making the whole source tree an input of every edge
+        # and defeating the per-input isolation this exists for. The file is there
+        # at eval time, so it imports fresh with no reference back.
         path = builtins.unsafeDiscardStringContext (toString (rootFor p) + "/" + relUnder p);
         name = "src-" + lib.strings.sanitizeDerivationName (relUnder p);
       };
 
-    # True if `p` is itself a symlink. `builtins.readFileType` follows symlinks
-    # (so it never returns "symlink"); the parent's `readDir` is lstat-based and
-    # does report "symlink". Staging a symlink via `builtins.path` aborts eval,
-    # so callers skip these — the real target is reachable under its own path.
-    # `builtins.path`/`readFileType` *abort* (and NOT tryEval-catchable — the
-    # error propagates through `tryEval`) when any component of the path is a
-    # symlink. CMake produces such paths (e.g. `.../libsyscall/foo` where
-    # `libsyscall` is a symlink to the top-level libsyscall). So detect symlink
-    # components without ever traversing one: walk from the (real) rewrite root
-    # down via `readDir` of real dirs, stopping at the first symlink.
+    # Whether any component of `p` is a symlink. CMake produces such paths (e.g.
+    # `.../libsyscall/foo`, where `libsyscall` links to the top-level libsyscall)
+    # and `builtins.path` aborts on them - past `tryEval`, so it cannot be caught.
+    # Hence the walk: `readDir` is lstat-based and does report "symlink", where
+    # `readFileType` follows links and never would, so descend real dirs from the
+    # rewrite root and stop at the first link rather than traversing one.
     hasSymlinkComponent = p: let
       root = rootFor p;
       parts = filter (x: x != "") (lib.splitString "/" (relUnder p));
@@ -264,14 +252,12 @@ in {
     # through `<mach/...>` / `<device/...>` includes but whose target dir it does
     # not itself stage as an -I.
     ifaceDirs = ["mach" "mach_debug" "device" "servers" "machine"];
-    # Relative paths of every symlink under one of `ifaceDirs` in real dir `base`
-    # (walking real dirs only, lstat readDir, never following a symlink). We stage
-    # the *followed* content of just these in place — scoping to the interface
-    # dirs (a couple hundred files) rather than the whole SDK (thousands of
-    # framework symlinks), and using content-addressed `builtins.path` rather than
-    # a cp -rL of the tree, keeps fine-grained caching intact. Other headers a
-    # compile edge reads are found by the depfile scan; mig edges (no scan)
-    # resolve their `<mach/*>` includes here.
+    # Every symlink under one of `ifaceDirs`, relative to real dir `base`. Their
+    # followed content is what gets staged, and staying inside the interface dirs
+    # (a couple hundred files, content-addressed) rather than cp -rL of the whole
+    # SDK (thousands of framework symlinks) is what keeps caching fine-grained.
+    # Compile edges find their headers through the depfile scan instead; mig edges
+    # have no scan, so this is where their `<mach/*>` includes resolve.
     ifaceSymlinksUnder = base: let
       collectAll = sub: let
         dir = toString base + "/${sub}";
@@ -386,26 +372,24 @@ in {
     in
       lib.unique (filter (t: t != "" && t != "\\") toks);
 
-    # A generated header may be `#include <...>`d by a compile edge that does not
-    # declare a dependency on it: the monolithic build only satisfies the ordering
-    # by luck of build order, which the ninja graph never encodes (e.g. libsyscall's
-    # mach_init.c includes the generated `darlingserver/rpc.h`, yet the libsyscall
-    # target's order-only barrier lists no darlingserver output). Collect once,
-    # across the whole graph, every generated header's containing directories (each
-    # ancestor up to the producing derivation's root) as -I flags, so any compile
-    # scan can resolve such an include whatever prefix names it. clang ignores -I
-    # dirs that do not exist, so the (deliberate) over-inclusion is harmless.
+    # A generated header may be `#include <...>`d by a compile edge that declares
+    # no dependency on it: the monolithic build satisfies the ordering by luck and
+    # the ninja graph never encodes it (libsyscall's mach_init.c includes the
+    # generated `darlingserver/rpc.h`, yet the libsyscall target's order-only
+    # barrier lists no darlingserver output). So collect every generated header's
+    # containing directories graph-wide as -I flags, and any scan resolves such an
+    # include whatever prefix names it. clang ignores -I dirs that do not exist,
+    # so the over-inclusion is deliberate and harmless.
     headerExts = [".h" ".hpp" ".hxx" ".hh" ".ipp" ".inc" ".def" ".defs"];
     isHeaderPath = o: lib.any (ext: lib.hasSuffix ext o) headerExts;
-    # True if edge `i` reaches a compile edge through its real producers. A
-    # compile edge's derivation forces a scan that itself references
-    # `generatedHeaderIncs`, so a header producer that transitively depends on one
-    # (e.g. a mig edge, via migcom) cannot appear in that set without forming an
-    # eval cycle. This is pure graph analysis (indices only, never a derivation),
-    # so it is itself cycle-free. Pure generators (a python/awk codegen reading
-    # only sources — e.g. the darlingserver rpc.h generator) are false, and their
-    # headers are exactly the undeclared ones the scan cannot otherwise resolve;
-    # a mig header, by contrast, already resolves through its declared producer.
+    # Whether edge `i` reaches a compile edge through its real producers. A
+    # compile's derivation forces a scan that references `generatedHeaderIncs`, so
+    # a header producer that transitively depends on a compile (a mig edge, via
+    # migcom) cannot join that set without closing an eval cycle. Pure graph
+    # analysis over indices, never a derivation, so it is itself cycle-free. Pure
+    # generators (python/awk codegen reading only sources, like the darlingserver
+    # rpc.h generator) are false, and theirs are exactly the undeclared headers no
+    # scan can otherwise reach; a mig header already resolves through its producer.
     dependsOnCompileMemo = listToAttrs (map (i: {
         name = toString i;
         value = let
@@ -443,16 +427,13 @@ in {
           && lib.any isHeaderPath (edgeOutputs (elemAt edges i)))
         (indices edges)));
 
-    # GROUP variant of migHeaderIncs, MODULE-SCOPED. A group compile takes the
-    # $out-relative -I dirs of generated headers produced in ITS OWN source module only.
-    # Graph-wide would pollute the search path with unrelated generated dirs that shadow
-    # standard headers (libsyscall/mach/string.h shadowing <string.h> for migcom). In a
-    # group these headers are materialised in $out (internal topo order + external groups
-    # staged via extGroupDrvs through cmake order-only deps), and -I$out carries NO
-    # derivation reference so there is no edgeDrvs eval cycle -- no per-producer closure
-    # filter needed. Covers mig AND non-mig generated headers (migHeadersByModule is
-    # mig-only), so build a fresh module map over every header-producing edge. moduleKey
-    # is defined further down; the recursive let makes the forward reference fine.
+    # The group variant of migHeaderIncs, scoped to a compile's own source module.
+    # Graph-wide would pollute the search path with unrelated generated dirs that
+    # shadow standard headers (libsyscall/mach/string.h over <string.h>, for
+    # migcom). Inside a group these headers are already materialised in $out, and
+    # `-I$out` carries no derivation reference, so there is no edgeDrvs cycle to
+    # filter against. Covers non-mig generated headers too, which migHeadersByModule
+    # does not, hence a fresh module map over every header-producing edge.
     genHeaderDirsByModule =
       lib.foldl' (
         acc: i:
@@ -509,15 +490,14 @@ in {
       map (d: "-I$out" + lib.optionalString (d != "" && d != ".") "/${d}") (lib.unique (moduleDirs ++ prodDirs));
 
     # A generated mig header may be `#include <...>`d by a compile in the same
-    # source module without the ninja graph declaring the dependency, and (unlike
-    # rpc.h) without the compile even carrying a literal `-I` to the mig output dir
-    # (cmake wires it via object-library/target includes, e.g. syslog's asl.c ->
-    # <asl_ipc.h> generated in aslcommon). `generatedHeaderIncs` excludes mig headers
-    # to avoid an eval cycle, and the per-edge `genIncs` only covers *declared*
-    # producers, so neither resolves it. Fix: give each compile the mig-header dirs
-    # from producers *in its own source module* (src/external/<m> or src/<m>). Far
-    # lighter than a graph-wide set (a compile depends only on its module's mig
-    # edges), and it keys on the module rather than a literal -I dir.
+    # source module with the ninja graph declaring nothing, and (unlike rpc.h)
+    # without the compile carrying even a literal `-I` to the mig output dir, cmake
+    # having wired it through object-library includes: syslog's asl.c reaches
+    # <asl_ipc.h>, generated in aslcommon. `generatedHeaderIncs` excludes mig
+    # headers to avoid an eval cycle and per-edge `genIncs` covers only declared
+    # producers, so neither resolves it. Each compile therefore takes the mig-header
+    # dirs of producers in its own source module: lighter than a graph-wide set, and
+    # keyed on the module rather than on a literal -I dir.
     migHeaderProducerIdxs =
       filter
       (i:
@@ -566,20 +546,17 @@ in {
           acc (filter isHeaderPath (edgeOutputs (elemAt edges i)))
       ) {}
       migHeaderProducerIdxs;
-    # Per-mig-producer FULL transitive input closure (data + order-only). nix-ninja
-    # stages order-only inputs as real derivation deps too, so any of them can close
-    # a Nix eval cycle. Memoized per producer index; the BFS is over the acyclic
-    # ninja graph so it terminates.
+    # The full transitive input closure of each mig producer, order-only inputs
+    # included: those are staged as real derivation deps too, so any of them can
+    # close an eval cycle. The BFS is over the acyclic ninja graph, so it ends.
     #
-    # Cycle to avoid: giving compile i the flag -I<M> makes edgeDrvs.i depend on
-    # edgeDrvs.M; if M transitively depends on i that is
-    # edgeDrvs.i -> edgeDrvs.M -> ... -> edgeDrvs.i (infinite recursion). So i may
-    # take producer M's mig -I only if i is NOT in M's closure -- exactly the unsafe
-    # set. History: a global "any mig producer reaches i" exclusion was correct for
-    # the migcom cycle but, at full-graph scope, over-excluded compiles a far
-    # producer merely order-only-reached (syslog asl.c lost its aslcommon inc and
-    # could not find generated <asl_ipc.h>); a data-only variant fixed asl.c but let
-    # an order-only cycle back in. Per-pair against the full closure does both.
+    # The cycle to avoid: giving compile i the flag -I<M> makes edgeDrvs.i depend
+    # on edgeDrvs.M, so if M transitively depends on i that recurses forever. i may
+    # therefore take M's mig -I only when i is not in M's closure. A global "any mig
+    # producer reaches i" exclusion also breaks the cycle but over-excludes at
+    # full-graph scope (syslog's asl.c lost its aslcommon inc to a producer it only
+    # order-only reached); excluding data deps only let the order-only cycle back
+    # in. Per-pair against the full closure is what does both.
     migProducerClosure = let
       producersOf = j: concatMap realProducers (edgeInputs (elemAt edges j));
       closureOf = m: let
@@ -624,23 +601,19 @@ in {
     in
       lib.unique (map (h: "-I${edgeDrvs.${toString h.p}}/${h.dir}") safe);
 
-    # The exact project files (under a rewrite root) a compile edge reads,
-    # discovered by scanning. System headers (toolchain store paths) are already
-    # mounted and need no staging, so they are filtered out here.
+    # The exact project files under a rewrite root a compile edge reads, found by
+    # scanning. System headers are already mounted, so they are filtered out.
     #
-    # A generated input (a source/header produced by another edge, e.g. a bison
-    # `parser.c` or a mig header) exists in neither mounted tree — it is built,
-    # not configured — so the raw command's absolute `<root>/<gen>` reference
-    # would be a missing file and the scan would abort. Rewrite each such
-    # reference to the producing edge's output (which the string then pulls in
-    # as a dependency) so the preprocessor can read it. Non-generated inputs are
-    # untouched and still resolve through the mounted source/configured trees.
+    # A generated input (a bison `parser.c`, a mig header) is built rather than
+    # configured, so it exists in neither mounted tree and the command's absolute
+    # `<root>/<gen>` reference would abort the scan on a missing file. Each such
+    # reference is rewritten to the producing edge's output, which the string then
+    # pulls in as a dependency. Non-generated inputs are untouched.
     scanDrvOf = i: let
       e = elemAt edges i;
-      # Each generated input (produced by another edge), normalised to the
-      # build-dir-relative path the producer writes plus that producer's drv.
-      # An input may be listed absolutely (`<root>/rel`, CMake's usual form and
-      # also the producer's implicit output) or relatively (`rel`).
+      # Each generated input, as the build-dir-relative path its producer writes
+      # plus that producer's drv. An input may be listed absolutely (CMake's usual
+      # form, and the producer's implicit output) or relatively.
       genPairs =
         concatMap (
           g: let
@@ -657,9 +630,7 @@ in {
             ]
         )
         (filter isProduced (edgeInputs e));
-      # (a) Rewrite every `<root>/rel` the command could use to the producer's
-      # copy, so a generated file referenced by path resolves (and the string
-      # pulls the producer in as a dependency).
+      # Every `<root>/rel` the command could use, pointed at the producer's copy.
       genSubs =
         concatMap (
           x:
@@ -670,17 +641,13 @@ in {
             rewriteRoots
         )
         genPairs;
-      # (b) Add producer output directories as include paths so a generated
-      # header pulled in by name resolves during the preprocess:
-      #   - directly next to another producer output (`#include "parser.h"`, a
-      #     bison `-d` header beside a flex `lexer.c`), and
-      #   - via `<...>` by mirroring the compile's own under-root -I dirs onto
-      #     each *declared* producer of this edge (flattening phony order-only
-      #     barriers, so a mig header like `<mach/mach_port_internal.h>` resolves
-      #     from the mig edge that wrote it). This stays a DAG — an edge's own
-      #     declared producers are upstream of it — so unlike the graph-wide
-      #     `generatedHeaderIncs` it needs no compile-dependency filter. clang
-      #     ignores -I dirs that do not exist.
+      # Producer output directories as include paths, so a generated header pulled
+      # in by name resolves during the preprocess: beside another producer output
+      # (a bison `-d` header next to a flex `lexer.c`), and through `<...>` by
+      # mirroring this compile's own under-root -I dirs onto each of its declared
+      # producers, so `<mach/mach_port_internal.h>` resolves from the mig edge that
+      # wrote it. An edge's declared producers are upstream of it, so this stays a
+      # DAG and needs no compile-dependency filter, unlike generatedHeaderIncs.
       genDrvs =
         lib.unique (map (i: edgeDrvs.${toString i})
           (concatMap realProducers (filter isProduced (edgeInputs e))));
@@ -704,26 +671,20 @@ in {
     in
       scanDrv;
 
-    # NOTE on parallelism: each per-edge scan is an import-from-derivation, and Nix's
-    # evaluator forces IFDs serially, so at CMake scale the scans dominate first-build
-    # wall-clock. They cannot simply be batched into one parallel realization, though:
-    # a compile's scan must resolve `<generated.h>` includes, which requires that
-    # header's PRODUCER edge to be built first, and when that producer is itself a
-    # compile its build needs ITS scan -- so the scans form a genuine build-order DAG
-    # (forcing them all up front closes a scan -> producer-edge -> scan cycle). Nix
-    # DOES schedule the real build graph in parallel; only this eval-time discovery is
-    # serial, and every scan is content-addressed so it is paid once and then cached.
-    # Eliminating it for grouped builds (resolve headers at group-build time instead
-    # of scanning) is the real fix -- tracked separately.
+    # On parallelism: each scan is an import-from-derivation and Nix forces those
+    # serially, so at CMake scale the scans dominate first-build wall-clock. They
+    # cannot be batched into one parallel realization: a compile's scan resolves
+    # `<generated.h>` includes, which needs that header's producer built, and a
+    # producer that is itself a compile needs its own scan first, so forcing them
+    # all up front closes a scan -> producer -> scan cycle. Only this eval-time
+    # discovery is serial, and each scan is content-addressed, so it is paid once.
+    # The real fix is grouped builds, which resolve headers at build time instead.
     scanDepsOf = i:
-    # unsafeDiscardStringContext: the depfile paths are substrings of the scan
-    # derivation's OUTPUT, whose string context transitively references the mounted
-    # source tree (cmakeSrcStore). That context would otherwise ride along on every
-    # `relUnder p` substring (via `esc (relUnder p)` in the staging script) and make
-    # the WHOLE source tree an inputSrc of each consuming edge/group derivation --
-    # silently defeating per-input isolation (an edit to any source rehashes every
-    # edge). indivOf re-imports each header content-addressed via `rootFor`, so the
-    # real per-file dependency is preserved without the whole-tree reference.
+    # The depfile paths are substrings of the scan's output, whose context reaches
+    # the mounted source tree. Left on, that context rides every `relUnder p` into
+    # the staging script and makes the whole source tree an inputSrc of each
+    # consuming derivation, so an edit to any source rehashes every edge. indivOf
+    # re-imports each header content-addressed, keeping the per-file dependency.
       filter underAnyRoot
       (parseDepfile (builtins.unsafeDiscardStringContext (builtins.readFile (scanDrvOf i))));
 
@@ -742,21 +703,19 @@ in {
       relSrcs = lib.unique (filter
         (r: safeNotSymlink (src + "/${r}"))
         (concatMap realSources ins));
-      # An `-I` dir or explicit input can point at a path that is absent from the
-      # store copy of a root (an empty dir Nix does not preserve, or an optional
-      # include CMake emits unconditionally). Staging it via `builtins.path`
-      # would abort eval, so skip anything that no longer exists; clang tolerates
-      # a missing `-I` dir.
+      # An `-I` dir or explicit input can name a path absent from the store copy of
+      # a root: an empty dir Nix does not preserve, or an optional include CMake
+      # emits unconditionally. `builtins.path` would abort eval on those, and clang
+      # tolerates a missing `-I` dir, so anything gone is skipped.
       rootSrcs =
         if useScan
         then filter builtins.pathExists (scanDepsOf i)
         else
-          # Declared under-root inputs, plus under-root *files named in the
-          # command* that CMake did not declare (custom commands often reference
-          # a helper script/template like `awk -f .../mig.awk` without listing it
-          # in DEPENDS; a linker names an alias list inside a comma-joined
-          # `-Wl,-alias_list,<path>` token, so split on commas as well as spaces).
-          # Directories and not-yet-produced outputs are excluded.
+          # Declared under-root inputs, plus under-root files the command names
+          # that CMake did not declare: custom commands reference a helper script
+          # like `awk -f .../mig.awk` without listing it in DEPENDS, and a linker
+          # names an alias list inside a comma-joined `-Wl,-alias_list,<path>`,
+          # hence splitting on commas as well as spaces.
           lib.unique (
             (filter (p: underAnyRoot p && safeNotSymlink p) ins)
             ++ (filter
@@ -770,13 +729,12 @@ in {
         if useScan
         then []
         else filter safeNotSymlink (incAbsDirs e.command);
-      # -I dirs, inputs and command-named paths that traverse a symlink
-      # (`.../libsyscall/mach/x.defs`, libsyscall -> ../../../libsyscall). The
-      # symlink they go through is otherwise pruned as broken (its target is not
-      # staged), so the reference dangles. `builtins.path` (via indivOf) *does*
-      # follow symlinks whose target exists, so stage the followed real content
-      # directly at the reference's own path (only when it exists — a broken
-      # symlink would abort eval, so pathExists filters those out).
+      # -I dirs, inputs and command-named paths that traverse a symlink, such as
+      # `.../libsyscall/mach/x.defs` where libsyscall links out of the tree. The
+      # symlink they pass through is pruned as broken, its target not being staged,
+      # so the reference would dangle. `builtins.path` does follow a symlink whose
+      # target exists, so the followed content is staged at the reference's own
+      # path; pathExists filters the broken ones, which would abort eval.
       symlinkTargets = lib.unique (filter
         (p: underAnyRoot p && hasSymlinkComponent p && builtins.pathExists p)
         (incAbsDirs e.command
@@ -795,26 +753,22 @@ in {
           (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs)
           withSubs;
       in
-        # A compile may `#include <generated/header.h>` (a generated
-        # `darlingserver/rpc.h`) that ninja never declared as a dependency, so it
+        # A compile may `#include` a generated header ninja never declared, so it
         # is not staged into $out and the command's own $out-relative -I cannot
-        # find it. Append the producer-output include dirs (the same set the scan
-        # uses) so the compiler reads it straight from the producer; the store
-        # path in the flag makes Nix mount that output.
+        # find it. The producer-output include dirs, the same set the scan uses,
+        # let the compiler read it straight from the producer, and the store path
+        # in the flag is what makes Nix mount that output.
         base
         + lib.optionalString (useScan && generatedHeaderIncs != [])
         (" " + lib.concatStringsSep " " generatedHeaderIncs)
         + lib.optionalString (useScan && migHeaderIncsFor i != [])
         (" " + lib.concatStringsSep " " (migHeaderIncsFor i));
 
-      # `cp -rs` each producer's whole output tree in. A path one producer
-      # provides as a real dir may already be a symlink (or under a symlinked
-      # parent) from an earlier producer — cp cannot overwrite a non-dir with a
-      # dir. For each dir this producer contributes whose dest is currently a
-      # non-dir, realize_writable it first (de-symlinks the path, re-linking the
-      # content) so cp merges into a real dir; the exit is tolerated for any
-      # residual conflict. The test is cheap and realize_writable runs only on
-      # the rare conflict.
+      # `cp -rs` each producer's whole output tree in. A path one producer provides
+      # as a real dir may already be a symlink, or sit under a symlinked parent,
+      # from an earlier producer, and cp cannot overwrite a non-dir with a dir - so
+      # de-symlink such a destination first and let cp merge into a real dir. The
+      # test is cheap and realize_writable runs only on the rare conflict.
       stageDeps =
         lib.concatMapStringsSep "\n"
         (id: let
@@ -825,12 +779,11 @@ in {
             if [ -L "$s" ] || { [ -e "$s" ] && [ ! -d "$s" ]; }; then realize_writable "$s"; fi
           done
           cp -rsf --no-preserve=mode ${d}/. ./ || true
-          # Replace staged executable *tools* (not libraries) with real copies: a
-          # tool that resolves its own argv[0] and execs a sibling by that resolved
-          # dir would otherwise look inside the producer store path, which lacks
-          # siblings staged from other producers (cctools `ar` execs a co-located
-          # `ranlib`, built by a separate edge). Libraries are excluded — they are
-          # linked, not run, and are large.
+          # Staged executable tools become real copies: one that resolves its own
+          # argv[0] and execs a sibling by that dir would otherwise look inside the
+          # producer store path, which holds no siblings from other producers
+          # (cctools `ar` execs a co-located `ranlib`, built by a separate edge).
+          # Libraries are excluded, being linked rather than run, and large.
           (cd ${d} && find . -type f -perm -u+x ! -name '*.dylib' ! -name '*.so' ! -name '*.so.*' ! -name '*.a' ! -name '*.o') | while IFS= read -r f; do
             g=''${f#./}
             if [ -L "$g" ]; then
@@ -842,12 +795,11 @@ in {
         depIds;
       # Skip if the path is already staged: the same header can be both a scanned
       # input here and a producer output copied in by stageDeps (a source header
-      # `install`ed into the SDK, e.g. darling/emulation/*.h), whose read-only
-      # symlinked parent then makes a second `install` fail "cannot remove". The
-      # first copy is authoritative, so leave it. Preserve the execute bit (a
-      # command may run a staged file directly, the rpc.h generator is
-      # `.../generate-rpc-wrappers.py <args>`); `builtins.path` keeps the source's
-      # exec bit, so test the content-addressed copy.
+      # `install`ed into the SDK), whose read-only symlinked parent then makes a
+      # second `install` fail "cannot remove". The first copy is authoritative. The
+      # execute bit is preserved because a command may run a staged file directly,
+      # the rpc.h generator being one; `builtins.path` keeps the source's bit, so
+      # the content-addressed copy is what to test.
       stageRelSrcs =
         lib.concatMapStringsSep "\n"
         (s: ''
@@ -869,25 +821,22 @@ in {
       stageIncs =
         lib.concatMapStringsSep "\n"
         (p: ''
-          # A prior dir copy (a peer `-I` whose tree contains this path as a
-          # child symlink) may have recreated this target as a dangling symlink;
-          # `mkdir -p` then fails "File exists". Drop it first (only if it is a
-          # broken symlink — never a real dir or a valid link).
+          # A peer `-I` whose tree holds this path as a child symlink may have
+          # recreated it dangling, and `mkdir -p` then fails "File exists". Only a
+          # broken symlink is dropped, never a real dir or a valid link.
           if [ -L ${esc (relUnder p)} ] && [ ! -e ${esc (relUnder p)} ]; then rm -f ${esc (relUnder p)}; fi
           mkdir -p ${esc (relUnder p)}
-          # A real dir already staged here (e.g. a producer output tree under
-          # `libsyscall`, or another -I copy) must win over an incoming symlink of
-          # the same name; cp reports that one conflict but still copies the rest,
-          # so tolerate its exit (diagnostics stay visible) rather than abort.
+          # A real dir already staged here, a producer output tree or another -I
+          # copy, must win over an incoming symlink of the same name. cp reports
+          # that one conflict but copies the rest, so its exit is tolerated rather
+          # than fatal, and the diagnostics stay visible.
           cp -rsf --no-preserve=mode ${indivOf p}/. ${esc (relUnder p)}/ || true
-          # `cp -rs` turns each *source symlink* in the tree into a link into the
-          # read-only content-addressed copy, whose own relative target then points
-          # outside that copy and dangles (an SDK `mach/*.defs` -> the tree's
-          # osfmk, a `libsyscall` -> the top-level one). Re-create those links with
-          # their *original* relative target so they resolve against the merged
-          # $out tree, where the target is itself staged by another -I copy — and
-          # so the later broken-link prune does not delete them. A path already
-          # present as a real dir wins (never replaced by a link).
+          # `cp -rs` turns each source symlink into a link into the read-only
+          # copy, whose own relative target then points outside it and dangles (an
+          # SDK `mach/*.defs` to the tree's osfmk). Re-created with their original
+          # relative target, they resolve against the merged $out tree, where
+          # another -I copy stages the target - and the broken-link prune below
+          # leaves them alone. A path already present as a real dir wins.
           (cd ${indivOf p} && find . -type l 2>/dev/null) | while IFS= read -r l; do
             d=${esc (relUnder p)}/"$l"
             if [ -d "$d" ] && [ ! -L "$d" ]; then continue; fi
@@ -896,15 +845,12 @@ in {
           done
         '')
         rootIncs;
-      # Stage the followed real content of each Mach/kernel interface file reached
-      # through a symlink whose osfmk target dir this edge does not itself stage,
-      # so a mig `<mach/...>` / `<device/...>` include resolves. builtins.path
-      # follows the link and is content-addressed, keeping fine-grained caching (a
-      # cp -rL of the whole dir would pull in the entire source tree). Runs after
-      # the prune and the -I copies so its real files win over a peer -I's
-      # dangling symlink of the same name. Only the source tree (first rewrite
-      # root) is walked — the configured tree's interface dirs hold symlinks to
-      # not-yet-generated headers (a mig `clock.h`) that `builtins.path` aborts on.
+      # The followed content of each Mach/kernel interface file reached through a
+      # symlink whose osfmk target dir this edge does not stage itself, so a mig
+      # `<mach/...>` include resolves. Runs after the prune and the -I copies so
+      # its real files win over a peer -I's dangling symlink of the same name.
+      # Only the source tree is walked: the configured tree's interface dirs hold
+      # symlinks to not-yet-generated headers that `builtins.path` aborts on.
       stageIfaceDeref =
         lib.concatMapStringsSep "\n"
         (p:
@@ -926,17 +872,14 @@ in {
             )
             (ifaceSymlinksUnder (toString (rootFor p) + "/" + relUnder p))))
         rootIncs;
-      # Stage the followed real content of each symlinked *file* reference (e.g.
-      # a mig `.defs`) at its own through-symlink path, replacing the pruned
-      # dangling symlink with a real file. `indivOf` follows the symlink;
-      # readFileType on its (symlink-free) store path tells file from dir.
+      # The followed content of each symlinked *file* reference, a mig `.defs` say,
+      # at its own through-symlink path, replacing the pruned dangling symlink.
       #
-      # Directories are deliberately NOT staged wholesale: a symlinked include
-      # dir often holds child symlinks that point outside it (so a store copy of
-      # the dir carries them as *broken* links), and cp -rs'ing that over the
-      # tree would clobber real files the header scan already staged. Compile
-      # edges get their exact headers from the scan (rootSrcs); other edges get
-      # each file they name here.
+      # Directories are deliberately not staged wholesale: a symlinked include dir
+      # often holds child symlinks pointing outside it, which a store copy carries
+      # as broken links, and cp -rs'ing that over the tree would clobber real files
+      # the header scan already staged. Compile edges get their exact headers from
+      # the scan; other edges get each file they name here.
       stageSymlinkTargets =
         lib.concatMapStringsSep "\n"
         (p: let
@@ -953,11 +896,10 @@ in {
         lib.concatMapStringsSep "\n"
         (o: ''
           realize_writable "$(dirname ${esc o})"
-          # The output path itself may be a staged read-only symlink: a checked-in
-          # source file (e.g. a committed mig `X.h`) that maps to the same merged
-          # $out path as this edge's generated output. Drop the symlink so the
-          # command writes a fresh real file instead of following the link into the
-          # read-only store (mig's fopen would otherwise fail EACCES).
+          # The output path itself may be a staged read-only symlink, a committed
+          # source file mapping to the same merged $out path as this edge's
+          # generated output. Dropping it makes the command write a fresh real file
+          # rather than follow the link into the store, where fopen gets EACCES.
           if [ -L ${esc o} ]; then rm -f ${esc o}; fi
         '')
         outs;
@@ -968,13 +910,11 @@ in {
       rspClean =
         lib.optionalString (e.rspfile != null && e.rspfile != "")
         ''rm -f ${esc e.rspfile}'';
-      # Rewrite a script's absolute shebang to the toolchain's: `#!/bin/bash` and
-      # `#!/usr/bin/env bash` -> the toolchain bash, `#!/usr/bin/env <x>` -> the
-      # toolchain `env` (which then finds <x> on the edge PATH). The pure edge
-      # sandbox provides neither /bin/bash nor /usr/bin/env; `/bin/sh` is left
-      # alone (Nix mounts it). A direct sed, not `patchShebangs`, which silently
-      # leaves the line when it cannot resolve the interpreter in the minimal
-      # PATH. `p` is a shell-quoted path expression; no-op for non-scripts.
+      # Point a script's absolute shebang at the toolchain, since the pure edge
+      # sandbox has neither /bin/bash nor /usr/bin/env. `/bin/sh` is left alone,
+      # Nix mounting it. A direct sed rather than `patchShebangs`, which silently
+      # leaves the line when it cannot resolve the interpreter in the minimal PATH.
+      # `p` is a shell-quoted path expression; a no-op for non-scripts.
       shebangSed = p: ''
         if [ -f ${p} ] && [ "$(head -c2 ${p} 2>/dev/null)" = "#!" ]; then
           chmod u+w ${p} 2>/dev/null || true
@@ -998,15 +938,13 @@ in {
         in
           shebangSed ''"$out/${rel}"'')
         outs;
-      # A ninja link/archive command whose linker step fails does not abort the
-      # edge (the body has no `set -e`, and cmake link rules often end `&& :`), so
-      # it exits 0 having produced no artifact; the miss then surfaces only far
-      # downstream. Fail such an edge in place when it did not produce a declared
-      # FINAL artifact (a dylib/archive, or an executable — a basename with no
-      # extension, excluding CMake bookkeeping), so the real linker error is
-      # visible in *this* edge's log. Object files / depfiles / generated sources
-      # (with extensions) are left alone, so edges that skip an implicit output
-      # are not tripped.
+      # A link command whose linker step fails does not abort the edge: the body
+      # has no `set -e` and cmake link rules often end `&& :`, so it exits 0 with
+      # no artifact and the miss surfaces far downstream. Failing here instead
+      # keeps the real linker error in this edge's log. Only declared final
+      # artifacts count - anything with an extension other than .dylib/.a is an
+      # object, depfile or generated source, and an edge that skips one of those
+      # implicit outputs must not be tripped.
       checkOutputs =
         lib.concatMapStringsSep "\n"
         (o: let
@@ -1037,11 +975,10 @@ in {
         mkdir -p $out
         cd $out
         # Make an output directory real and writable. cp -rs stages -I dirs as
-        # read-only symlinks into the source/configured store; when an edge (e.g.
-        # mig) both reads inputs from and writes outputs into such a dir, writing
-        # fails EACCES. Walk the path, and for each symlinked component replace it
-        # with a real dir that re-links the original target's content (inputs stay
-        # readable, new outputs are writable).
+        # read-only symlinks into the store, so an edge that both reads inputs from
+        # and writes outputs into such a dir gets EACCES. Each symlinked component
+        # becomes a real dir re-linking the original target's content: inputs stay
+        # readable, new outputs writable.
         realize_writable() {
           local p="$1" cur="" comp tgt oldIFS="$IFS"
           IFS='/'; set -- $p; IFS="$oldIFS"
@@ -1124,66 +1061,36 @@ in {
     #   the per-edge behaviour (each edge its own group).
     lowerGroupsBy = groupOf: let
       realIds = filter (i: !(isNoOp (elemAt edges i))) (indices edges);
-      # groupOf receives the EDGE (has .rule/.outputs/.command) so a caller can group
-      # by rule or output path. The grouping MUST be acyclic across groups: a group
-      # drv depends on its external dependency groups' drvs, so a cycle is an infinite
-      # Nix-eval recursion (component-dag condenses SCCs to guarantee this).
-      # Raw per-edge grouping from the caller's groupOf.
+      # groupOf receives the edge, not its index, so a caller can group by rule or
+      # by output path.
       rawGidOf = listToAttrs (map (i: {
           name = toString i;
           value = groupOf (elemAt edges i);
         })
         realIds);
       rawGid = i: rawGidOf.${toString i};
-      # Single-pass O(edges) grouping via builtins.groupBy -- NOT O(groups*edges)
-      # filter-per-group nor O(edges*distinct) lib.unique. At whole-Darling scale
-      # (~1e3 groups * ~38e3 edges) the quadratic forms dominated eval (tens of minutes);
-      # groupBy is one linear pass. rawGroupIds is then just the residency keys.
+      # groupBy, one linear pass. A filter per group is O(groups*edges) and
+      # lib.unique O(edges*distinct); at 1e3 groups over 38e3 edges either
+      # quadratic form ran for tens of minutes.
       rawIdsInGroup = builtins.groupBy rawGid realIds;
       rawGroupIds = builtins.attrNames rawIdsInGroup;
-      # SCC CONDENSATION. A group derivation depends on its external dependency groups'
-      # derivations, so the group graph MUST be acyclic or Nix eval infinitely recurses
-      # (group A -> B -> A). A path-based grouping (componentGrouping) can produce cyclic
-      # groups -- two CMake targets that link each other, common in libc/libsystem. So
-      # merge each strongly-connected set of groups into one derivation (the condensation
-      # of a digraph is always a DAG). rawGroupDeps: g -> h when an edge in g consumes an
-      # output produced by an edge in h.
-      # Cross-cutting generated headers (e.g. darlingserver/rpc.h) are #include <...>d by
-      # many groups via a literal -I but with NO declared ninja dependency, so a consumer's
-      # realProducers never names them and extProducerIds misses them. Make EVERY group
-      # depend on every such producer's group, so those headers are always materialised in
-      # $out for their literal -I to resolve.
-      #
-      # Restrict to PURE GENERATORS (!dependsOnCompileMemo): python/awk codegen that reads
-      # only sources (the rpc.h generator), whose outputs are exactly the undeclared headers
-      # no scan can otherwise reach. This is deliberately NOT "every header producer":
-      #  - mig/compile-derived headers already resolve through their declared producer, so
-      #    they need no dense staging; and
-      #  - a pure generator has NO compile in its dependency closure, so no compile group can
-      #    be in its reach -- staging it into every group therefore cannot form a cycle, and
-      #    its closure stays tiny, so the reach fixpoint below stays cheap. Including compile-
-      #    dependent producers would instead drag whole libraries (via e.g. migcom) into one
-      #    giant SCC and make eval pathological. Routed through rawGroupDeps anyway so the SCC
-      #    condensation still absorbs any accidental cycle from a mixed group.
-      # O(n) dedup via groupBy (identity key), NOT lib.unique's O(n*distinct) elem-scan.
-      # rawGroupDeps builds one dep list per group whose pre-dedup length is the group's
-      # (edges * inputs); at whole-Darling scale a big library's list is huge and lib.unique
-      # on it is quadratic. groupBy-dedup is one linear pass. Order within the result is not
-      # semantically meaningful here (dep sets, reach sets), so losing insertion order is fine.
+      # Dedup by attrset key rather than lib.unique's O(n*distinct) elem-scan: the
+      # lists deduped below are one per group and as long as that group's
+      # (edges * inputs) before dedup. Insertion order is not meaningful for the
+      # dep and reach sets this builds, so losing it costs nothing.
       fastUniq = xs: builtins.attrNames (builtins.groupBy (x: x) xs);
-      # PURE-GENERATOR headers only (!dependsOnCompileMemo): the undeclared -I-reached headers
-      # (rpc.h class), staged everywhere, bounded + cycle-free. NOT dense "every header producer"
-      # -- dense routes every group -> every header producer through rawGroupDeps, and since
-      # header producers mutually depend under that rule they collapse into one giant SCC
-      # (build-mig mega-group), so a single deep failure blocks a whole swath. The few undeclared
-      # cross-component LINK deps (libnotify etc.) are handled targeted-ly by cmdProducersOf.
-      # A group may be a UNIVERSAL dep (staged into every group so undeclared -I headers resolve)
-      # only if it is CYCLE-FREE in that role: the WHOLE group must be pure-generator (no edge
-      # depends on a compile). The old per-edge test admitted MIXED groups -- a pure-gen header
-      # edge sitting next to a compile-dependent one (the mig-wrapper group is exactly this) --
-      # and a mixed universal-dep group cycles with its own compile deps, forming the build-mig
-      # mega-SCC that swallows duct-tape/bootstrap_cmds/darlingserver/... The header producers in
-      # mixed groups are handled per-component by migByCompDir below instead.
+      # Groups staged into *every* group, so that a cross-cutting generated header
+      # (darlingserver/rpc.h) reached only through a literal -I, with no declared
+      # ninja dependency for realProducers to find, is always materialised in $out.
+      #
+      # A group qualifies only if the whole of it is a pure generator - codegen
+      # that reads sources and nothing a compile produced. That is what makes the
+      # role cycle-free: with no compile in its closure it can never reach a group
+      # it was staged into. Testing per edge instead admits mixed groups (the
+      # mig-wrapper group is one), and a mixed universal dep cycles with its own
+      # compile deps into the build-mig mega-SCC that swallows
+      # duct-tape/bootstrap_cmds/darlingserver. Their headers go through
+      # migByCompDir below instead, and undeclared link deps through cmdProducersOf.
       rawHeaderProducerGroups = filter (g:
         lib.all (i: !dependsOnCompileMemo.${toString i}) (rawIdsInGroup.${g} or [])
         && lib.any (i:
@@ -1196,13 +1103,13 @@ in {
           value = true;
         })
         rawHeaderProducerGroups);
-      # Header producers whose GROUP is NOT a pure universal producer above (mixed or compile-
-      # dependent groups, e.g. the mig-wrapper group producing xnu/osfmk/mach/notify.h). Their
-      # headers are still #include<>d UNDECLARED via -I by consumers in the same source subtree,
-      # so stage each as a TARGETED dep of the compile groups whose component directory OWNS the
-      # header path (longest-prefix match), NOT universally -- universal staging would make the
-      # producer's group a universal dep and re-form the mega-SCC; targeted stays a per-component
-      # DAG (any real cycle is absorbed locally by the SCC condensation).
+      # Header producers whose group did not qualify above (mixed or compile-
+      # dependent, like the mig-wrapper group producing xnu/osfmk/mach/notify.h).
+      # Consumers in the same source subtree still reach their headers through an
+      # undeclared -I, so each is staged as a targeted dep of the compile groups
+      # whose component directory owns the header path. Staging them universally
+      # instead would make their groups universal deps and re-form the mega-SCC;
+      # targeted stays a per-component DAG.
       migHeaderProducerIds = filter (i:
         !(isNoOp (elemAt edges i))
         && !(isCompile (elemAt edges i))
@@ -1224,13 +1131,13 @@ in {
           (length dirs);
       in
         lib.findFirst (a: compDirToGids ? ${a}) null ancestors;
-      # A generated header is SOURCE-BACKED when a real file of the same rel path exists in the
-      # source rewrite-root: the mounted srcHeaders base already serves it, and it is authoritative
-      # (e.g. xnu/osfmk/mach/notify.h -- the hand-written header defines MACH_NOTIFY_*/the notify
-      # structs, while mig re-emits a DIFFERENT notify.h from notify.defs that lacks them). Never
-      # target such a header: staging the generated copy would (a) clobber the authoritative source
-      # in the consumer's sandbox and (b) add a SPURIOUS producer->consumer dep that, paired with a
-      # real reverse link dep, forms a cycle (duct-tape<->darlingserver) the SCC then re-merges.
+      # When the source rewrite-root holds a real file at the same relative path,
+      # that one is authoritative and the mounted srcHeaders base already serves
+      # it: the hand-written xnu/osfmk/mach/notify.h defines MACH_NOTIFY_* and the
+      # notify structs, while mig emits a different notify.h from notify.defs
+      # without them. Targeting such a header would clobber the real one in the
+      # consumer's sandbox and add a spurious producer -> consumer dep that, against
+      # a real reverse link dep, is the duct-tape <-> darlingserver cycle.
       srcRoot =
         if rewriteRoots == []
         then null
@@ -1258,6 +1165,8 @@ in {
             })
             owners)
           migHeaderProducerIds));
+      # g -> h when an edge in g consumes an output an edge in h produces, plus the
+      # two undeclared-header routes above.
       rawGroupDeps = listToAttrs (map (g: {
           name = g;
           value =
@@ -1269,16 +1178,18 @@ in {
               ++ (migByCompDir.${builtins.head (lib.splitString "::" g)} or [])));
         })
         rawGroupIds);
-      # SCC condensation, cycle-core optimised. Only a group that lies ON A CYCLE can merge
-      # with another; every acyclic group is its own SCC. Full all-pairs reachability over the
-      # ~1e3 whole-Darling groups is O(G * reachSize^2). So first PEEL the DAG fringes:
-      # iteratively drop any live group with no live successor OR no live predecessor (it
-      # cannot sit on a cycle) to a fixpoint; the residual `cyclic` is exactly the union of
-      # all non-trivial SCCs. Lifted out of sccRep so its size is measurable (groupStats) and
-      # sccRep can reuse it. Keep g iff it has a live successor AND is some live node's
-      # successor (a live predecessor) -- derive the latter from the live nodes' successor
-      # lists, no predecessor map. alive' is a subset each round, so a length match is a valid
-      # fixpoint test.
+      # A group derivation depends on its external groups' derivations, so the
+      # group graph must be acyclic or eval recurses forever - and a path-based
+      # grouping does produce cycles, two CMake targets linking each other being
+      # routine in libc/libsystem. Merging each strongly-connected set into one
+      # derivation fixes that, since a condensation is always a DAG.
+      #
+      # Only a group on a cycle can merge, and all-pairs reachability over the 1e3
+      # groups is O(G * reachSize^2), so peel the DAG fringes first: drop any live
+      # group with no live successor or no live predecessor, to a fixpoint. What
+      # remains is exactly the union of the non-trivial SCCs. The predecessor test
+      # reads the live nodes' successor lists, so no predecessor map is built, and
+      # alive' is a subset each round, so comparing lengths is a valid fixpoint.
       cyclicSet = let
         toSet = xs:
           listToAttrs (map (x: {
@@ -1354,16 +1265,13 @@ in {
                  -e "1s|^#! */usr/bin/env  *|#!${pkgs.coreutils}/bin/env |" ${p}
         fi
       '';
-      # #79: one shared, content-addressed copy of the WHOLE source tree filtered to
-      # headers (+ every symlink + the dir structure) -- the entire include namespace,
-      # with the darling/include -> SDK -> xnu shim maze intact. Every group mounts it
-      # (cp -rs) so its compiles resolve <...>/"..." includes at BUILD time, which
-      # ELIMINATES the per-edge -M scan (an eval-time import-from-derivation that Nix
-      # forces serially -- the dominant first-build cost). Dropping .c/.cpp/.m/.mm keeps
-      # this base STABLE across source edits: editing a component's .c does not rehash
-      # the header base, so only that component's group rebuilds -- component-level
-      # input isolation, now without any scan. Header edits (rarer) rehash it, as they
-      # should. Built once and shared, so its ~300MB is paid a single time.
+      # One shared copy of the whole source tree filtered to headers, symlinks and
+      # dir structure: the entire include namespace with the darling/include -> SDK
+      # -> xnu shim maze intact. Every group mounts it and resolves its includes at
+      # build time, which is what removes the per-edge -M scan and with it the
+      # dominant first-build cost. Leaving the compiled sources out is what keeps
+      # the base stable across source edits, so editing a .c rebuilds only its own
+      # group; a header edit rehashes it, as it should.
       hdrExts = [
         "h"
         "hpp"
@@ -1389,40 +1297,26 @@ in {
         "list"
       ];
       srcExts = ["c" "cc" "cpp" "cxx" "c++" "m" "mm"];
-      # Sources that ARE compiled by some edge. These are staged per-group individually
-      # (rootSrcs), so they stay OUT of the shared header base -- that is what keeps a
-      # .c edit from rehashing the base and rebuilding every group. Their complement --
-      # sources #included AS headers (darling's emulation *_generic.c helpers, included
-      # via `#include <darling/emulation/.../x.c>`) -- must stay IN the base, or those
-      # includes fail (they are not declared edge inputs).
-      # The compiled-source exclusion list (one ./-prefixed rel path per line), so the
-      # header-base build can drop compiled .c while keeping #included .c helpers.
       findNames = exts: lib.concatMapStringsSep " -o " (e: ''-name "*.${e}"'') exts;
-      # Build srcHeaders as a DERIVATION rather than builtins.path. builtins.path
-      # re-walks + re-hashes the entire 4G source tree on EVERY evaluation (minutes of
-      # eval-blocking work, and the window where long builds here kept getting killed);
-      # a derivation is input-addressed by cmakeSrcStore, so it is built ONCE and reused
-      # across every lower.nix edit that leaves the source unchanged, and it builds as a
-      # normal (resumable, cached) graph node. Contents mirror the old filter exactly:
-      # dirs + every symlink (the darling/include -> SDK -> xnu shim maze) + headers +
-      # extensionless include/Headers files + sources NOT compiled by any edge (so
-      # `#include <.../x.c>` helpers resolve; compiled .c stay out to keep .c isolation).
+      # A derivation, not builtins.path: builtins.path re-walks and re-hashes the
+      # whole 4G source tree on every evaluation, minutes of eval-blocking work.
+      # Input-addressed by the source store path, this is built once and reused
+      # across every edit here that leaves the source alone, as a normal cached
+      # graph node.
       srcHeaders =
         if rewriteRoots == []
         then null
         else
           pkgs.runCommand "darling-src-headers" {nativeBuildInputs = [pkgs.cpio];} ''
             mkdir -p "$out"
-            # Cover BOTH rewrite roots: the source tree (cmakeSrcStore) for source
-            # headers/sources/assembly + the shim maze, AND the configured build dir
-            # (ninjaRoot) for cmake-generated headers (darling-config.h etc.). Keep every
-            # dir + symlink + header + ALL sources (.c/.s/...) + extensionless
-            # include/Headers files; drop only the large framework binaries/data. Size is
-            # irrelevant per group -- groups mount this lazily as directory symlinks and
-            # never copy it -- and the compiled-vs-included distinction buys no isolation
-            # here (this derivation is already input-addressed by the source tree), so
-            # keeping all sources also covers compiled sources that live under symlink
-            # dirs (e.g. libsyscall/mach/mach_traps.S) which per-file staging cannot reach.
+            # Both rewrite roots: the source tree for headers, sources, assembly and
+            # the shim maze, and the configured build dir for cmake-generated headers.
+            # Everything but the large framework binaries is kept. Size does not
+            # matter per group, which mounts this as directory symlinks and never
+            # copies it, and holding compiled sources back buys no isolation here
+            # (the derivation is already input-addressed by the source tree) - while
+            # keeping them covers the ones under symlink dirs, like
+            # libsyscall/mach/mach_traps.S, that per-file staging cannot reach.
             # 1. Source tree (bulk cpio): headers + all sources + assembly + the shim maze.
             cd ${builtins.head rewriteRoots}
             {
@@ -1461,17 +1355,17 @@ in {
           })
           myIds);
         allIns = concatMap (i: edgeInputs (elemAt edges i)) myIds;
-        # #80: undeclared mig/tool-generated headers (see mkGroupViaTool). Targeted per owning
-        # component (migByCompDir), keyed off member compDirs, sccRep-mapped like the reps below.
+        # The undeclared tool-generated headers this group's compiles reach through
+        # an -I. Keyed off member component dirs so the targeting survives SCC
+        # merging, then mapped through sccRep like the reps below.
         migGids = map (h: sccRep.${h}) (fastUniq (concatMap
           (cd: migByCompDir.${cd} or [])
           (fastUniq (map (i: builtins.head (lib.splitString "::" (rawGid i))) myIds))));
-        # External dependency GROUPS: producers of this group's inputs that live in another
-        # condensed group, plus the cross-cutting header-producer groups. Dedup at the GROUP
-        # level (fastUniq of gids) -- NOT lib.unique on the raw producer-EDGE list, whose
-        # length is this group's total inputs; lib.unique is O(n^2) and for libSystem-scale
-        # groups that dominated eval. Mapping producers to gid collapses same-group producers
-        # to g, which the `h != g` filter then drops (subsuming the old per-edge mySet filter).
+        # Producers of this group's inputs that live in another condensed group,
+        # plus the cross-cutting header-producer groups. Deduped at the group level:
+        # lib.unique on the raw producer-edge list is O(n^2) in this group's total
+        # inputs and dominated eval at libSystem scale. Mapping to gid first also
+        # collapses same-group producers to g, which `h != g` then drops.
         extGids =
           filter (h: h != g)
           (fastUniq ((map gid (concatMap realProducers allIns))
@@ -1482,10 +1376,10 @@ in {
         relSrcs =
           fastUniq (filter (r: safeNotSymlink (src + "/${r}"))
             (concatMap (i: concatMap realSources (edgeInputs (elemAt edges i))) myIds));
-        # #79: no per-edge scan. Headers come from the mounted srcHeaders base at
-        # build time; here stage only each edge's DECLARED under-root inputs (the .c
-        # source and any explicitly-listed files) plus under-root files named in the
-        # command (a linker's alias list, a custom command's template, ...).
+        # No per-edge scan here: headers come from the mounted srcHeaders base at
+        # build time, so this stages only each edge's declared under-root inputs
+        # plus the under-root files its command names (a linker's alias list, a
+        # custom command's template).
         rootSrcs = fastUniq (concatMap (i: let
           e = elemAt edges i;
         in
@@ -1493,20 +1387,11 @@ in {
           ++ (filter (p: underAnyRoot p && safeRegular p)
             (concatMap (lib.splitString ",") (lib.splitString " " e.command))))
         myIds);
-        # Only NON-compile edges contribute -I dir staging. Compile edges use the
-        # scan (rootSrcs) for exact headers; staging their -I dirs would cp -rsf the
-        # shim symlinks over the scan's real headers (mkEdge sets rootIncs=[] for
-        # useScan edges for exactly this reason).
-        # cp -rs each -I dir, then re-create its source symlinks with their original
-        # targets so they resolve against the merged tree (mkEdge's stageIncs).
-        # Deref the Mach/kernel interface symlinks (mach/*.h etc.) to real content
-        # so a `<mach/boolean.h>` include resolves (mkEdge's stageIfaceDeref).
-        # topological order of the group's internal edges (producers first). The
-        # group is acyclic (SCC-condensed), so this terminates; the ready==[] arm
-        # is a defensive residue-dump, not expected.
+        # The group's internal edges in topological order, producers first. It is
+        # SCC-condensed and so acyclic; the ready == [] arm is a defensive
+        # residue-dump, not an expected path.
         topo = let
-          # Intra-group producer deps per edge, computed ONCE. The old code recomputed this
-          # (concatMap realProducers over every still-remaining edge) on EVERY layer.
+          # Once per edge, not recomputed on every layer.
           intDepsOf = listToAttrs (map (i: {
               name = toString i;
               value =
@@ -1514,10 +1399,10 @@ in {
                 (concatMap realProducers (edgeInputs (elemAt edges i)));
             })
             myIds);
-          # Kahn by layers. remaining shrinks each round; the residue filter uses attrset
-          # membership (O(1)/edge) rather than `lib.elem i batch` (O(batch)) -- the latter made
-          # the whole sort O(edges^2), the dominant per-group eval cost at libSystem scale.
-          # Accumulate layers and concat once (not `order ++ batch` per round).
+          # Kahn by layers. The residue filter tests attrset membership rather than
+          # `lib.elem i batch`, which made the whole sort O(edges^2) and was the
+          # dominant per-group eval cost at libSystem scale. Layers accumulate and
+          # concat once.
           go = remaining: doneSet: acc:
             if remaining == []
             then acc
@@ -1609,11 +1494,11 @@ in {
               else mkdir -p "$cur"; fi
             done
           }
-          # #79 fast mount: the shared source-header namespace (headers + the shim maze)
-          # goes in as a handful of TOP-LEVEL directory symlinks, NOT a 1.3GB deep cp -rs.
-          # A compile's `-I $out/src/.../include` resolves straight through the top-level
-          # symlink into the content-addressed base; realize_writable lazily materialises
-          # real dirs only along paths this group writes. No per-group bulk copy.
+          # The shared source-header namespace goes in as a handful of top-level
+          # directory symlinks rather than a 1.3GB deep cp -rs: a compile's
+          # `-I $out/src/.../include` resolves straight through into the base, and
+          # realize_writable materialises real dirs only along paths this group
+          # writes.
           ${lib.optionalString (srcHeaders != null) ''
             find ${srcHeaders} -mindepth 1 -maxdepth 1 2>/dev/null | while IFS= read -r e; do
               if [ ! -e "''${e##*/}" ]; then ln -s "$e" "''${e##*/}" 2>/dev/null || true; fi
@@ -1631,22 +1516,18 @@ in {
           ${lib.concatMapStringsSep "\n" (p: ''
             if [ ! -e ${esc (relUnder p)} ] || [ -L ${esc (relUnder p)} ]; then realize_writable "$(dirname ${esc (relUnder p)})"; rm -f ${esc (relUnder p)}; install -Dm644 ${indivOf p} ${esc (relUnder p)}; if [ -x ${indivOf p} ]; then chmod +x ${esc (relUnder p)}; ${shebangSedG (esc (relUnder p))} fi; fi'')
           rootSrcs}
-          # (stageIncs / stageIfaceDeref / stageSymlinkTargets and the broken-symlink
-          # prune are gone: srcHeaders already provides every source header + the intact
-          # shim maze via the lazy symlink tree, so the old per-edge -I staging is both
-          # redundant and unsafe against the top-level directory symlinks.)
+          # No -I staging or broken-symlink prune here, unlike mkEdge: srcHeaders
+          # already provides every source header and the intact shim maze through
+          # the lazy symlink tree, and copying over that would clobber it.
           ${lib.concatMapStringsSep "\n" runEdge topo}
         '';
-      # Task #80: build-time variant. Nix eval computes only this group's edge list +
-      # external-group drvs; lower_group.py (run in the sandbox) reads graphDrv and does the
-      # per-edge rewrite/stage/run that mkGroup used to build as Nix strings. Same dep wiring
-      # (rewriteRoots, srcHeaders, extGroupDrvs all referenced -> Nix mounts/builds them).
+      # The build-time variant of mkGroup: eval computes only this group's edge list
+      # and external-group drvs, and lower_group.py does the per-edge rewrite, stage
+      # and run inside the sandbox. The dep wiring is the same, since referencing
+      # rewriteRoots / srcHeaders / extGroupDrvs is what makes Nix mount them.
       mkGroupViaTool = g: let
         myIds = idsInGroup.${g};
         allIns = concatMap (i: edgeInputs (elemAt edges i)) myIds;
-        # #80: undeclared mig/tool-generated headers (mach/notify.h etc.) this group's compiles
-        # include via -I but never declare. Targeted per owning component (migByCompDir), keyed
-        # off member compDirs so it survives SCC merging, sccRep-mapped like headerProducerReps.
         migGids = map (h: sccRep.${h}) (fastUniq (concatMap
           (cd: migByCompDir.${cd} or [])
           (fastUniq (map (i: builtins.head (lib.splitString "::" (rawGid i))) myIds))));
@@ -1688,11 +1569,9 @@ in {
         })
         groupIds);
       groupDrvForOutput = p: groupDrvs.${groupOfOutput p};
-      # Group-aware realOutputsForTarget: every real output of the edges a (possibly
-      # phony) target resolves to, paired with the GROUP derivation that produces it.
-      # Lets buildOne materialize a whole-graph build (`all`) from group drvs instead
-      # of per-edge drvs -- each final output's group (and its dependency groups) is
-      # built transitively, so cp-ing them all yields the full staged tree.
+      # realOutputsForTarget against group derivations, so buildOne can materialize
+      # a whole-graph build from groups: each final output's group and its
+      # dependency groups build transitively, and copying them all gives the tree.
       realOutputsForTargetG = p:
         lib.concatMap
         (i:

@@ -1,4 +1,4 @@
-# Run: nix eval -f platform/nix/config/cargo/tests/resolve.nix
+# Run: nix eval -f platform/nix/lib/lib/cargo/tests/resolve.nix
 #
 # Synthetic workspace "root" depending on fixture crate foo 1.1.0:
 #   foo has a build-dep on ab, an optional renamed dep "renamed" -> bar-baz

@@ -1,24 +1,17 @@
-# ╔═══════════════════════════════════════════════════════════════════════╗
-# ║  ARMITAS · Surface Pro 11                                            ║
-# ║                                                                       ║
-# ║  NixOS on the Microsoft Surface Pro 11 (Qualcomm Snapdragon X Elite,  ║
-# ║  board name "Denali") with COSMIC.  Built natively for aarch64-linux  ║
-# ║  via binfmt emulation on x86_64.                                      ║
-# ║                                                                       ║
-# ║  Hardware support vendored from:                                      ║
-# ║  https://github.com/andre4ik3/nixos-surface-pro-11                    ║
-# ╚═══════════════════════════════════════════════════════════════════════╝
+# NixOS on a Microsoft Surface Pro 11 (Snapdragon X Elite, board "Denali")
+# with COSMIC. Hardware support vendored from
+# https://github.com/andre4ik3/nixos-surface-pro-11.
 #
-# Installation.  The disk is wiped, so everything below happens once and the
-# only thing typed on the tablet is a Wi-Fi password.
+# Installation wipes the disk, happens once, and the only thing typed on the
+# tablet is a Wi-Fi password.
 #
 #   1. In Windows, while it is still there: disable BitLocker, and note the
 #      MAC addresses from `ipconfig /all` (see
-#      nixos/hardware/surface-pro-11/networking.nix).  They are the one thing
+#      platform/nix/config/hardware/surface-pro-11/networking.nix).  They are the one thing
 #      that cannot be recovered afterwards.
 #   2. Disable Secure Boot in UEFI (hold volume-up while powering on).
 #   3. Build and write the installer:
-#        just -f platform/nix/config/nixos/justfile build-iso
+#        just -f platform/nix/config/nixos-configurations/justfile build-iso
 #        sudo dd if=result-armitas-iso/iso/*.iso of=/dev/sdX bs=4M status=progress
 #   4. Boot it.  Putting USB at the top of the boot order is not enough: hold
 #      volume-up and swipe left on the USB entry each time.  The ISO carries
@@ -26,19 +19,16 @@
 #   5. On the tablet, join a network with `nmtui` and read off its address
 #      with `ip -brief addr`.
 #   6. From this workstation, one command does the rest:
-#        just -f platform/nix/config/nixos/justfile install-armitas <tablet-ip>
+#        just -f platform/nix/config/nixos-configurations/justfile install-armitas <tablet-ip>
 #      It partitions and formats per the disko layout below, copies the
 #      closure built here, installs, and reboots.
 #
 # Subsequent updates:
 #   nixos-rebuild switch --flake .#armitas --target-host root@armitas
 #
-# Note on build strategy:
-#   As with `phone`, this builds natively for aarch64-linux rather than
-#   cross-compiling, so the x86_64 host needs
-#   `boot.binfmt.emulatedSystems = ["aarch64-linux"]` (gravitas has it via
-#   nixos/modules/core/boot.nix).  Nearly everything, the 7.1.2 kernel
-#   included, then substitutes from cache.nixos.org instead of being built.
+# Built natively for aarch64 under binfmt emulation rather than cross-compiled,
+# so the x86_64 host needs `boot.binfmt.emulatedSystems` (gravitas has it).
+# Nearly everything, the 7.1.2 kernel included, then substitutes from the cache.
 {
   inputs,
   src,
@@ -53,26 +43,22 @@
     # No armitas host key exists yet, so nothing in nixos/secrets is
     # encrypted to this machine and boot-time decryption would fail.
     # To turn this on: install, then add the generated
-    # /etc/ssh/ssh_host_ed25519_key.pub to nixos/secrets/publicKeys.nix as
-    # `armitas-ssh-ed25519`, include it in `all`, run `just -f platform/nix/config/nixos/justfile
+    # /etc/ssh/ssh_host_ed25519_key.pub to platform/nix/config/secrets/publicKeys.nix as
+    # `armitas-ssh-ed25519`, include it in `all`, run `just -f platform/nix/config/nixos-configurations/justfile
     # rekey`, and flip this to true.
     hasSecrets = false;
   };
 
   modules = [
-    # ── Surface Pro 11 hardware support ───────────────────────────────
     inputs.self.hardware.surface-pro-11
 
-    # ── Disk layout ───────────────────────────────────────────────────
-    # Also generates fileSystems, so there is nothing to hand-write and
-    # nothing to keep in sync with what was actually formatted.
+    # Also generates fileSystems, so there is nothing to hand-write and keep in
+    # sync with what was actually formatted.
     inputs.disko.nixosModules.disko
 
-    # ── Home Manager ──────────────────────────────────────────────────
     inputs.home-manager.nixosModules.home-manager
     inputs.self.nixosModules.home-manager
 
-    # ── Secrets ───────────────────────────────────────────────────────
     inputs.ragenix.nixosModules.default
     inputs.self.nixosModules.age
 
@@ -80,7 +66,7 @@
     inputs.self.desktops.cosmic
 
     # ── Shared configuration ──────────────────────────────────────────
-    # The portable slice of nixos/modules/core.  Deliberately not the whole
+    # The portable slice of platform/nix/config/nixos-modules/core.  Deliberately not the whole
     # `core` module: core/boot.nix pins the x86-only zen kernel and enables
     # aarch64 binfmt, core/hardware.nix wants amdgpu and a Nitrokey, and
     # core/virtualisation.nix pulls in docker, libvirtd and waydroid.  The
@@ -116,7 +102,7 @@
       # boot here is indistinguishable from a hung one: the panel stays black
       # from kernel handoff until the greeter either appears or does not, and
       # there is no plymouth in between.  Once it boots reliably, put back
-      # what nixos/modules/core/boot.nix uses: consoleLogLevel = 0,
+      # what platform/nix/config/nixos-modules/core/boot.nix uses: consoleLogLevel = 0,
       # initrd.verbose = false, and quiet + loglevel=3 + the rd.* params.
       #
       # editor stays on for the same reason.  core/boot.nix turns it off so

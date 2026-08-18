@@ -1,19 +1,15 @@
-# Phase 7 (Linux): the Euro-Office DesktopEditors GUI application.
+# The Linux DesktopEditors GUI: the Qt application under
+# `desktop-apps/win-linux`, whose CMakeLists builds the whole graph from source
+# as subdirectories - ascdocumentscore, the QCefView/X11 host wrapper, and core
+# - and links against Qt 5.15, GTK3, X11 and CEF 109. macOS takes a different
+# path entirely; see app.nix. Phase 7, ./PLAN.md option B.
 #
-# Unlike macOS (a Cocoa Xcode project, see app.nix), the Linux GUI is the Qt
-# application under `desktop-apps/win-linux` (CMake). Its CMakeLists builds the
-# whole graph from source as subdirectories — `ascdocumentscore` (the CEF
-# client), `qtascdocumentscore` (the QCefView/X11 Qt host wrapper) and core —
-# then links the `DesktopEditors` binary against Qt 5.15 + GTK3 + X11 + the
-# CEF 109 package. It is V8-free (the `doctrenderer` stub, -DDISABLE_DOCT_RENDERER):
-# the editor renders through CEF's own V8, so core's headless DoctRenderer is
-# unused by the GUI. See ./PLAN.md (Linux, option B).
+# V8-free via -DDISABLE_DOCT_RENDERER: the editor renders through CEF's own V8,
+# so core's headless DoctRenderer is dead weight in the GUI.
 #
-# The CMake `install` lays out the classic ONLYOFFICE-style flat tree
-# (`desktopeditors/`: the binary + ascdocumentscore/qtascdocumentscore .so +
-# libcef.so + CEF Resources). On top of that we overlay the genuine editors
-# payload (desktop-common), the converter (core's x2t + format libs), and the
-# fonts/dictionaries, then add a wrapped launcher + desktop entry.
+# The CMake install lays out a flat `desktopeditors/` tree; on top of it go the
+# editors payload, the converter, the fonts and dictionaries, a wrapped
+# launcher and a desktop entry.
 {
   lib,
   stdenv,

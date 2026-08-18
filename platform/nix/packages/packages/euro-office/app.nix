@@ -1,10 +1,8 @@
-# Phase 7 (see ./PLAN.md): the Euro-Office macOS GUI application bundle.
-#
-# Builds `Euro-Office.app` from source WITHOUT Xcode/xcodebuild: the app is pure
-# Objective-C++ (no Swift), so we compile the 72 sources with clang, compile the
-# storyboards / asset catalog with the CommandLineTools `ibtool`/`actool`
-# (provided by nixpkgs `xcbuild`), assemble the .app bundle by hand, embed the
-# frameworks + CEF helper, and ad-hoc code-sign it.
+# The Euro-Office macOS GUI application bundle, built from source without Xcode
+# or xcodebuild. The app is pure Objective-C++ with no Swift, so the sources
+# compile with clang, the storyboards and asset catalog with the CommandLineTools
+# `ibtool`/`actool`, and the .app bundle is assembled by hand: frameworks and CEF
+# helper embedded, then ad-hoc code-signed. See ./PLAN.md.
 #
 # Runtime layout produced (the CEF-on-macOS bundle contract, derived from the
 # upstream Xcode "copy frameworks" build script):
@@ -20,9 +18,9 @@
 #       lib*.dylib                              (ascdocumentscore + core libs)
 #       editors_helper.app/                     CEF subprocess helper
 #
-# Sparkle (the upstream auto-updater) is intentionally skipped: it is not
-# referenced from any source file, only linked as a vendored framework. Skipping
-# it keeps the bundle free of that prebuilt blob.
+# Sparkle, the upstream auto-updater, is skipped: no source file references it,
+# it is only linked as a vendored framework, so leaving it out keeps the bundle
+# free of that prebuilt blob.
 #
 # Code signing is ad-hoc (`codesign -s -`), which is sufficient to launch on the
 # local machine (Apple Silicon requires *a* signature, but not a Developer ID).
@@ -59,12 +57,11 @@ in
 
     buildInputs = [hunspell];
 
-    # We reference /usr/bin/codesign (ad-hoc). The machine has sandbox=false.
+    # For /usr/bin/codesign. The machine has sandbox=false.
     __noChroot = true;
 
     dontConfigure = true;
 
-    # Carry the dependency store paths into the build environment.
     cefRoot = cef;
     sdkRoot = desktop-sdk;
     coreRoot = core;
@@ -234,7 +231,6 @@ in
       fi
 
       # ---- Editors payload + converter + data -----------------------------
-      # desktop-common ships the assembled editors/converter/fonts/dictionaries.
       mkdir -p "$contents/Resources/editors" "$contents/Resources/converter" \
                "$contents/Resources/dictionaries" "$contents/Resources/login/fonts"
       cp -r "$payloadRoot/editors/." "$contents/Resources/editors/" 2>/dev/null || true

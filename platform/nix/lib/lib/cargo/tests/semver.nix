@@ -1,4 +1,4 @@
-# Run: nix eval -f platform/nix/config/cargo/tests/semver.nix
+# Run: nix eval -f platform/nix/lib/lib/cargo/tests/semver.nix
 let
   semver = import ../lib/semver.nix;
 

@@ -12,7 +12,8 @@ in {
   config.shellHook = ''
     # Only copy config files when running at the root of a git/jj repo.
     if [ -d .jj ] || [ -d .git ]; then
-      # Copy (not symlink) configs so they are real, writable files, not symlinks into the read-only Nix store.
+      # Copied rather than symlinked, so they are real writable files and not
+      # links into the read-only Nix store.
       install -m 644 ${./biome-nix.jsonc} biome.jsonc
       install -m 644 ${./deno.jsonc} deno.jsonc
       install -m 644 ${./lychee.toml} lychee.toml
@@ -25,7 +26,6 @@ in {
       install -m 644 ${./ai-rules.md} .rules
       install -D -m 644 ${./ai-rules.md} .claude/rules/rules.md
 
-      # Generate tangled workflow YAML files from Nickel config
       if [ -f .tangled/workflows.ncl ]; then
         mkdir -p .tangled/workflows
         for key in $(${pkgs.pkgsUnstable.nickel}/bin/nickel export --format yaml .tangled/workflows.ncl | ${pkgs.yq-go}/bin/yq 'keys | .[]'); do

@@ -101,7 +101,7 @@ in {
       };
     };
 
-    # Ensure bluez is available for btmgmt command (required for Bluetooth).
+    # For btmgmt.
     services.blueman.enable = lib.mkIf cfg.bluetooth.enable true;
   };
 }

@@ -8,23 +8,17 @@
     settings = {
       max-jobs = "auto";
 
-      # How many cores one derivation may use, which `auto` leaves at all of
-      # them. That multiplies: on a 22-core machine `max-jobs = "auto"` is 22
-      # builders, each entitled to 22 compilers, and building the whole
-      # package set at once put the machine far enough into swap that it had
-      # to be power-cycled. A build is rarely 22-way parallel for long, so
-      # the ceiling costs little and the product is what matters.
+      # Cores per derivation, which `auto` leaves at all of them. That
+      # multiplies: 22 builders each entitled to 22 compilers put this machine
+      # far enough into swap to need a power cycle. A build is rarely 22-way
+      # parallel for long, so the ceiling costs little.
       cores = 4;
 
       keep-going = true;
       # A .drv is a GC root for the whole build-time closure of what it built,
-      # so keeping them holds on to the sources and compilers behind everything
-      # installed, which is most of what a store grows. Evaluating writes one
-      # back whenever it is actually needed again.
-      #
-      # Prompted by this machine running out of room in a way df cannot show:
-      # btrfs metadata at 99.7% of 172 GiB with no unallocated space left, which
-      # fails a rename with ENOSPC while still reporting 210 GiB free.
+      # so keeping them holds the sources and compilers behind everything
+      # installed - most of what a store grows. Evaluating writes one back when
+      # it is needed again.
       keep-derivations = false;
       connect-timeout = 10;
       stalled-download-timeout = 10;
@@ -41,17 +35,13 @@
         "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
       ];
     };
-    # Collect on a schedule rather than when the disk looks full, because on
-    # btrfs it never does.
-    #
-    # This replaces a min-free/max-free pair that used to sit in extraOptions.
-    # Those ask the filesystem how many bytes are free, and btrfs answers about
-    # DATA: this machine reported 210 GiB free while its metadata stood at 99.7%
-    # of 172 GiB with no unallocated space left to grow into. That is a
-    # filesystem which fails a rename with ENOSPC and a daemon which sees no
-    # reason to collect anything. Gone rather than tuned, since no threshold
-    # helps against a number that does not move. What actually reclaims the
-    # space metadata needs is `btrfs balance`, which is not nix's to run.
+    # On a schedule rather than when the disk looks full, because on btrfs it
+    # never does. min-free/max-free ask how many bytes are free and btrfs
+    # answers about DATA: this machine reported 210 GiB free with metadata at
+    # 99.7% of 172 GiB and nothing left to grow into, so renames failed with
+    # ENOSPC while the daemon saw no reason to collect. No threshold helps
+    # against a number that does not move; what reclaims metadata space is
+    # `btrfs balance`, which is not nix's to run.
     gc = {
       automatic = true;
       dates = "weekly";
@@ -61,7 +51,6 @@
     daemonIOSchedClass = "idle";
   };
 
-  # Enforce Niceness
   systemd.services.nix-daemon.serviceConfig = {
     Nice = lib.mkForce 15;
     IOSchedulingClass = lib.mkForce "idle";

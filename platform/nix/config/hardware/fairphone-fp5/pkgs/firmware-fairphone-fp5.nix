@@ -7,7 +7,7 @@
 }:
 stdenv.mkDerivation {
   pname = "firmware-fairphone-fp5";
-  # No versioned releases, so let's use the commit hash for now.
+  # There are no versioned releases, hence the commit hash.
   version = "a4908f548e6f88965e78b1478af1751b6a854fc9";
 
   src = fetchFromGitHub {
@@ -30,14 +30,13 @@ stdenv.mkDerivation {
     platforms = lib.platforms.linux;
   };
 
-  # pil-squasher is a build-time tool that runs on the build machine to convert
-  # firmware files; it must be nativeBuildInputs for cross-compilation.
+  # pil-squasher converts the firmware on the build machine, so it belongs in
+  # nativeBuildInputs for cross-compilation to work.
   nativeBuildInputs = [pil-squasher findutils];
 
   buildPhase = ''
     runHook preBuild
 
-    # Squash all .mdt firmware files to .mbn format.
     echo "Squashing firmware files..."
     find . -name "*.mdt" -type f | while read -r mdtfile; do
       echo "Processing: $mdtfile"
@@ -50,7 +49,7 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    # Install GPU/DSP/modem firmware to qcom/qcm6490/fairphone5/.
+    # GPU, DSP and modem firmware.
     mkdir -p "$out/lib/firmware/qcom/qcm6490/fairphone5"
     install -Dm644 -t "$out/lib/firmware/qcom/qcm6490/fairphone5" \
       a660_zap.mbn \
@@ -59,7 +58,6 @@ stdenv.mkDerivation {
       modem.mbn \
       wpss.mbn
 
-    # Install JSON config files.
     install -Dm644 -t "$out/lib/firmware/qcom/qcm6490/fairphone5" \
       adspr.jsn \
       adsps.jsn \
@@ -68,41 +66,35 @@ stdenv.mkDerivation {
       cdspr.jsn \
       modemr.jsn
 
-    # Install IPA firmware (renamed to ipa_fws.mbn for kernel compatibility).
+    # Renamed: the kernel looks for ipa_fws.mbn.
     install -Dm644 yupik_ipa_fws.mbn \
       "$out/lib/firmware/qcom/qcm6490/fairphone5/ipa_fws.mbn"
 
-    # Install Venus video firmware (renamed to venus.mbn for kernel compatibility).
+    # Renamed: the kernel looks for venus.mbn.
     install -Dm644 vpu20_1v.mbn \
       "$out/lib/firmware/qcom/qcm6490/fairphone5/venus.mbn"
 
-    # Install AW88261 speaker amplifier firmware.
-    # The file in the repo is named aw882xx_acf.bin but the kernel driver
-    # (via DTS firmware-name property) expects aw88261_acf.bin.
+    # The speaker amplifier firmware, renamed: the repo calls it aw882xx_acf.bin
+    # but the DTS firmware-name property points the driver at aw88261_acf.bin.
     install -Dm644 aw882xx_acf.bin \
       "$out/lib/firmware/qcom/qcm6490/fairphone5/aw88261_acf.bin"
 
-    # Install Bluetooth firmware to qca/.
+    # Bluetooth.
     mkdir -p "$out/lib/firmware/qca"
     install -Dm644 -t "$out/lib/firmware/qca" \
       msbtfw11.mbn \
       msnv11.bin
 
-    # Install modem_pr directory recursively.
     mkdir -p "$out/lib/firmware/qcom/qcm6490/fairphone5"
     cp -r modem_pr "$out/lib/firmware/qcom/qcm6490/fairphone5/"
 
-    # Set permissions to 0644 for all modem_pr files.
     find "$out/lib/firmware/qcom/qcm6490/fairphone5/modem_pr" -type f -exec chmod 0644 {} \;
 
-    # Install HexagonFS to /usr/share (excluding acdb/ and dsp/ subdirs).
+    # HexagonFS, sensors and socinfo only: acdb/ and dsp/ stay out.
     mkdir -p "$out/usr/share/qcom/qcm6490/Fairphone/fp5"
-
-    # Copy only sensors/ and socinfo/ subdirectories (exclude acdb/ and dsp/).
     cp -r hexagonfs/sensors "$out/usr/share/qcom/qcm6490/Fairphone/fp5/"
     cp -r hexagonfs/socinfo "$out/usr/share/qcom/qcm6490/Fairphone/fp5/"
 
-    # Set permissions to 0644 for HexagonFS files.
     find "$out/usr/share/qcom/qcm6490/Fairphone/fp5" -type f -exec chmod 0644 {} \;
 
     runHook postInstall

@@ -7,7 +7,7 @@
 # ╚═══════════════════════════════════════════════════════════════════════╝
 #
 # Build:
-#   just -f platform/nix/config/nixos/justfile build-iso
+#   just -f platform/nix/config/nixos-configurations/justfile build-iso
 #
 # The Surface Pro 11's UEFI hands Linux no devicetree, and stock nixpkgs
 # cannot put a `devicetree` line in the ISO's GRUB entry, so booting it
@@ -20,7 +20,7 @@
 # is one `e` away at the menu: x1p64100-microsoft-denali.dtb.
 #
 # Note: this is built with nixpkgs.lib.nixosSystem rather than handed to
-# flakelight as a { system, modules } attrset, and that is load-bearing.
+# the framework as a { system, modules } attrset, and that is load-bearing.
 # platform/nix/config/workspace-modules/colmena.nix registers every nixosConfiguration that is
 # *not* already a built system as a deploy target, so an installer image
 # would otherwise show up as a node at armitas-installer.overby.me.
@@ -57,7 +57,7 @@ inputs.nixpkgs.lib.nixosSystem {
         inputs.self.nixosModules.iso-image
       ];
 
-      # Built outside flakelight's mkNixos, so flakelight's propagationModule
+      # Built outside the framework's mkNixos, so its propagationModule
       # does not forward the flake's nixpkgs.config here.  The Denali firmware
       # is unfree and would refuse to evaluate without this.
       nixpkgs.config.allowUnfree = true;

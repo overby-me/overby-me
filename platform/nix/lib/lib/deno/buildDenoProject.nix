@@ -45,13 +45,12 @@ in
       buildPhase = ''
         runHook preBuild
 
-        # Create writable copy of pre-fetched Deno cache
+        # A writable copy: the pre-fetched cache is a read-only store path.
         cp -r ${deps} $TMPDIR/deno-cache
         chmod -R u+w $TMPDIR/deno-cache
         export DENO_DIR=$TMPDIR/deno-cache
         export HOME=$TMPDIR
 
-        # Install dependencies from cache (creates node_modules/)
         deno install --frozen
 
         ${buildCommand}

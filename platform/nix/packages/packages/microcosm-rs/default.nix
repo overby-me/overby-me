@@ -26,7 +26,6 @@ rustPlatform.buildRustPackage rec {
     # Pin fjall to avoid update to 3.0.1 which breaks compilation
     sed -i 's|fjall = { git = "https://github.com/fjall-rs/fjall.git", features = \["lz4"\] }|fjall = { git = "https://github.com/fjall-rs/fjall.git", rev = "42d811f7c8cc9004407d520d37d2a1d8d246c03d", features = ["lz4"] }|' ufos/Cargo.toml
 
-    # Pin jwt-compact
     sed -i 's|jwt-compact = { git = "https://github.com/fatfingers23/jwt-compact.git", features = \["es256k"\] }|jwt-compact = { git = "https://github.com/fatfingers23/jwt-compact.git", rev = "aed088b8ff5ad44ef2785c453f6a4b7916728b1c", features = ["es256k"] }|' pocket/Cargo.toml
 
     # Pin fjall in quasar to use git version instead of registry

@@ -1,13 +1,8 @@
-# Fairphone 5 modem module: Qualcomm QDM5577 cellular modem userspace services.
+# Userspace services for the Qualcomm QDM5577 cellular modem: ModemManager,
+# pd-mapper, rmtfs, tqftpserv and msm-modem-uim-selection, each described where
+# it is defined below.
 #
-# Services configured:
-#   - ModemManager: High-level modem management
-#   - pd-mapper: Protection Domain Mapper (routes messages between subsystems)
-#   - rmtfs: Remote Filesystem Service (provides calibration partition access)
-#   - tqftpserv: TFTP server over QRTR (provides firmware to modem)
-#   - msm-modem-uim-selection: SIM card slot selection
-#
-# Note: qrtr-ns is not needed as the kernel provides QRTR namespace functionality.
+# qrtr-ns is not among them: the kernel provides QRTR namespace functionality.
 {
   config,
   lib,
@@ -57,8 +52,7 @@ in {
         "${pkgs.modemmanager}/sbin/ModemManager${lib.optionalString cfg.quickSuspendResume " --test-quick-suspend-resume"}"
       ];
 
-      # TFTP server over QRTR.  Provides firmware files to the modem at
-      # runtime via the QRTR protocol.
+      # A TFTP server over QRTR, serving firmware files to the modem at runtime.
       tqftpserv = {
         description = "TFTP server over QRTR";
         wantedBy = ["multi-user.target"];
@@ -69,7 +63,7 @@ in {
         };
       };
 
-      # Protection Domain Mapper.  Routes messages between modem and DSP
+      # The Protection Domain Mapper, routing messages between the modem and DSP
       # subsystems.
       pd-mapper = {
         description = "Qualcomm Protection Domain Mapper";
@@ -81,9 +75,9 @@ in {
         };
       };
 
-      # Remote Filesystem Service.  Provides access to the modem's calibration
-      # partitions.  Uses -P flag to access raw EFS partitions (modemst1,
-      # modemst2, fsg, fsc) from /dev/disk/by-partlabel/ instead of files.
+      # The Remote Filesystem Service, giving access to the modem's calibration
+      # partitions. -P reads the raw EFS partitions (modemst1, modemst2, fsg,
+      # fsc) from /dev/disk/by-partlabel/ rather than files.
       rmtfs = {
         description = "Qualcomm Remote Filesystem Service";
         wantedBy = ["multi-user.target"];
@@ -94,8 +88,7 @@ in {
         };
       };
 
-      # SIM card slot selection.  Runs before ModemManager and configures
-      # which SIM slot to use.  Automatically selects the first present SIM.
+      # Picks the SIM slot, the first one present, before ModemManager starts.
       msm-modem-uim-selection = {
         description = "Qualcomm modem SIM card slot selection";
         before = ["ModemManager.service"];

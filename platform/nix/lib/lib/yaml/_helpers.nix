@@ -19,9 +19,7 @@ lib: let
     fromJSON
     ;
 
-  # ============================================================
   # String Utilities
-  # ============================================================
 
   charAt = s: i: substring i 1 s;
 
@@ -88,9 +86,7 @@ lib: let
   in
     suflen <= slen && substring (slen - suflen) suflen str == suffix;
 
-  # ============================================================
   # Scalar Constants & Utilities
-  # ============================================================
 
   boolTrueValues = ["true" "True" "TRUE" "yes" "Yes" "YES" "on" "On" "ON"];
   boolFalseValues = ["false" "False" "FALSE" "no" "No" "NO" "off" "Off" "OFF"];
@@ -148,9 +144,7 @@ lib: let
       else {success = false;}
     else {success = false;};
 
-  # ============================================================
   # Quoted String Handling
-  # ============================================================
 
   unescapeDoubleQuoted = s:
     replaceStrings
@@ -186,9 +180,7 @@ lib: let
     ["\\\\" "\\\"" "\\n" "\\t" "\\r"]
     s;
 
-  # ============================================================
   # Scalar Parsing
-  # ============================================================
 
   parseScalar = s: let
     trimmed = trim s;
@@ -208,9 +200,7 @@ lib: let
       then num.value
       else trimmed;
 
-  # ============================================================
   # Comment Stripping
-  # ============================================================
 
   stripComment = line: let
     len = stringLength line;
@@ -248,9 +238,7 @@ lib: let
   in
     go 0 false false;
 
-  # ============================================================
   # Scalar Type Detection
-  # ============================================================
 
   isScalar = val:
     (val == null) || isBool val || isInt val || isFloat val || isString val;

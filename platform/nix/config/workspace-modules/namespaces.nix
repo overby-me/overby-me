@@ -1,32 +1,20 @@
-# A project may only name packages inside its own namespace.
+# A project may only name packages inside its own namespace: every name it
+# defines starts with its own short label.
 #
-# This is the guarantee Bazel and Buck2 actually provide. Not derived names -
-# a BUILD file does type `name = "lib"` - but that you cannot claim a name
-# outside your own package, so `//foo:lib` and `//bar:lib` never race and
-# nobody has to coordinate. Here the namespace is the project's label, and a
-# flat flake attribute is a rendering of it, so the rule is that every name a
-# project defines starts with its own short label.
-#
-# The module system already refuses two definitions of one name, but only
-# after both exist and only saying `<unknown-file>`. This says which project
-# reached outside its namespace, before the collision it would eventually
-# cause.
-#
-# `exports` is the deliberate exception, and it is spelled out rather than
-# inferred: a crate that is published under its own identity keeps that
-# identity here, the same way a package wrapping upstream software keeps the
-# upstream name.
+# This is the guarantee Bazel and Buck2 provide - not derived names, but that
+# you cannot claim a name outside your own package, so nobody has to
+# coordinate. The module system already refuses two definitions of one name,
+# but only after both exist and only saying `<unknown-file>`; this names the
+# project that reached out, before the collision it would cause.
 {
   options,
   config,
   lib,
   ...
 }: let
-  # From the framework rather than from a sibling directory: labels left this
-  # tree with nix-workspace, and the path this used to name has been dead
-  # since. Taken through `inputs` because the module system has it, and
-  # only ever forced inside the check below, so it cannot be the `imports`
-  # loop the flake warns about.
+  # Through `inputs` rather than a path: labels left this tree with
+  # nix-workspace. Forced only inside the check below, so it cannot become the
+  # `imports` loop the flake warns about.
   labels = import (config.inputs.workspace + "/labels.nix");
 
   exports = {
@@ -45,9 +33,8 @@
   };
 
   # Which project a definition came from, by the file the module system
-  # recorded for it. A definition from outside any project - the workspace's
-  # own autoloading, which names platform/nix/packages/packages by filename -
-  # is not a project's to answer for.
+  # recorded for it. One from outside any project - the workspace autoloading
+  # packages/ by filename - is nobody's to answer for.
   projectOf = file: let
     hits = builtins.filter (l: lib.hasSuffix "/${l.path}" file || lib.hasInfix "/${l.path}/" file) projects;
   in

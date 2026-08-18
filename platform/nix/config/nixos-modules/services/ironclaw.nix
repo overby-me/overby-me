@@ -1,13 +1,9 @@
-# IronClaw – secure personal AI assistant
+# IronClaw, a secure personal AI assistant: PostgreSQL with pgvector, the
+# service, and an environment file for its secrets.
 #
-# NixOS service module that manages:
-#   • PostgreSQL with pgvector extension
-#   • ironclaw systemd service
-#   • environment file for secrets (API keys, DATABASE_URL, etc.)
-#
-# After first deployment run `ironclaw onboard` interactively on the device
-# to complete NEAR AI authentication and secrets encryption setup, or
-# pre-populate the environment file managed by agenix / manually.
+# After the first deployment, run `ironclaw onboard` on the device to finish
+# NEAR AI authentication and secrets setup, or pre-populate that environment
+# file yourself.
 {
   config,
   lib,
@@ -15,15 +11,13 @@
   ...
 }: let
   cfg = config.services.ironclaw;
-  # URL-encode the database host so Unix socket paths (/run/postgresql)
-  # become valid URL components (%2Frun%2Fpostgresql).
-  # Double the % signs so systemd doesn't interpret them as specifiers.
+  # URL-encode the host so a Unix socket path becomes a valid URL component,
+  # and double the % signs so systemd does not read them as specifiers.
   urlEncodeHost = host:
     lib.replaceStrings ["/"] ["%%2F"] host;
 
-  # Build a flat WASM channels directory with patched capabilities configs.
-  # IronClaw v0.18.0 loads WASM channels from WASM_CHANNELS_DIR as a flat
-  # directory: <name>.wasm + <name>.capabilities.json per channel.
+  # v0.18.0 loads channels from WASM_CHANNELS_DIR as a flat directory:
+  # <name>.wasm plus <name>.capabilities.json per channel.
   matrixConfigJson = lib.toJSON {
     inherit (cfg.matrix) homeserver;
     dm_policy = cfg.matrix.dmPolicy;

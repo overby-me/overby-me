@@ -1,21 +1,15 @@
 #!/usr/bin/env nu
-# Differential oracle: compare this library's pure-eval resolution against
-# cargo for a project (see PLAN.md, M7).
+# The differential oracle: this library's pure-eval resolution against cargo's,
+# for one project (PLAN.md M7).
 #
-# Compares the built package set and the per-package enabled feature sets
-# against `cargo tree`, which reflects the feature-pruned build graph.
-# (cargo metadata is unsuitable as the oracle: its resolve graph includes
-# optional deps that no feature activates, and its feature sets
-# over-approximate the resolver-v2 result.) Our resolution runs with
-# includeDev = true because workspace dev-dependencies are part of the
-# tree. Packages appearing multiple times with different feature sets
-# (resolver v2 host/target splits) are unioned, matching our stage-1
-# unified model; the per-unit comparison is the M8 follow-up.
-#
-# Note: strong "R/F" entries enable the feature R itself when R is an
-# implicit-or-explicit feature (old-style optional deps); dep:-referenced
-# deps have no such feature. The resolver implements this, so feature sets
-# compare directly against cargo tree with no normalization.
+# The package set and per-package feature sets are compared against `cargo tree`,
+# which reflects the feature-pruned build graph. `cargo metadata` will not do as
+# the oracle: its resolve graph carries optional deps no feature activates, and
+# its feature sets over-approximate the resolver-v2 result. Resolution runs with
+# includeDev = true, workspace dev-dependencies being part of the tree, and a
+# package appearing several times with different feature sets - a resolver v2
+# host/target split - is unioned to match the stage-1 unified model. Comparing
+# per unit is the M8 follow-up.
 #
 # Needs `cargo` on PATH (e.g. `nix shell nixpkgs#cargo`) and network access
 # the first time (cargo downloads manifests of locked crates).
@@ -33,9 +27,9 @@ const TRIPLES = {
 
 const SELF = (path self)
 
-# Our pure-eval resolution: record of "name-version" -> [features]. The
-# workspace loads with src = the project's parent so that path dependencies
-# on sibling projects stay inside the source root; all members are roots.
+# "name-version" -> [features]. The workspace loads with src = the project's
+# parent, so path dependencies on sibling projects stay inside the source root;
+# all members are roots.
 def our-resolution [lib_dir: string, proj: string, platform: string] {
   let parent = ($proj | path dirname)
   let mdir = ($proj | path basename)
@@ -56,9 +50,9 @@ def our-resolution [lib_dir: string, proj: string, platform: string] {
   ^nix eval --json --impure --expr $expr | from json
 }
 
-# cargo's resolution via cargo tree: record of "name-version" -> [features].
-# Lines look like "name v1.2.3 (/path)|feat1,feat2"; duplicate packages
-# (host/target units) get their feature sets unioned.
+# The same shape from cargo tree, whose lines look like
+# "name v1.2.3 (/path)|feat1,feat2". Duplicate packages, the host/target units,
+# get their feature sets unioned.
 def cargo-resolution [proj: string, triple: string] {
   if (which cargo | is-empty) {
     error make {msg: "cargo not found in PATH; try: nix shell nixpkgs#cargo -c nu ..."}

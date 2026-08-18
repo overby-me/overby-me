@@ -1,16 +1,13 @@
 # Bounded-memory stand-in for `nix flake check`.
 #
-# `nix flake check` instantiates every check in a single evaluator process, and
-# Nix keeps the whole value graph reachable until that process exits. With 3265
-# checks (686 of them NixOS VM tests) peak evaluation memory passes 30 GiB and
-# the run is OOM-killed. `--max-jobs` does not help: it caps build concurrency,
-# and the memory is spent before a single build starts. `nix flake check
-# --no-build --max-jobs 1` dies just the same, after ~490 of 3265 checks.
+# `nix flake check` instantiates every check in one evaluator and keeps the
+# whole value graph reachable until it exits, so on this tree it passes 30 GiB
+# and is OOM-killed. `--max-jobs` does not help: it caps build concurrency, and
+# the memory goes before a single build starts.
 #
-# nix-eval-jobs evaluates each attribute in a worker process that it restarts
-# once the worker exceeds --max-memory-size, so peak memory is bounded by
-# (workers * max-memory-size) rather than by the size of the check set. Keep
-# max-memory-size generous: a worker restart re-evaluates nixpkgs from scratch,
+# nix-eval-jobs restarts a worker once it exceeds --max-memory-size, bounding
+# peak memory by (workers * max-memory-size) instead of by the size of the
+# check set. Keep that generous: a restart re-evaluates nixpkgs from scratch,
 # so a tight cap trades memory for a large slowdown.
 {
   writeShellApplication,
@@ -30,11 +27,10 @@ writeShellApplication {
 
     out="$(mktemp -d)"
 
-    # Nothing pushes check outputs to the binary cache today: CI's `nix flake
-    # archive` only uploads the flake source and its inputs, so every run
-    # rebuilds all checks from scratch. Record what we realise here, and let the
-    # caller push it. Written even when a check fails, so a partial run still
-    # makes the next one cheaper.
+    # Nothing pushes check outputs to the cache today - CI's `nix flake archive`
+    # uploads only the flake source and its inputs - so every run rebuilds from
+    # scratch. Record what we realise and let the caller push it. Written even
+    # when a check fails, so a partial run still makes the next one cheaper.
     cleanup() {
       if [ -n "''${OUT_PATHS_FILE:-}" ] && [ -s "$out/built-paths.txt" ]; then
         sort -u "$out/built-paths.txt" > "$OUT_PATHS_FILE"

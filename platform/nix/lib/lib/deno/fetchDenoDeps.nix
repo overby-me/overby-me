@@ -1,13 +1,8 @@
-# Fetches npm dependencies from a deno.lock file using dynamic derivations.
-#
-# Instead of a single fixed-output derivation with a manually-maintained hash,
-# this parses the lock file at Nix evaluation time (lib.fromJSON) and
-# creates individual fetchurl derivations for each npm package using the
-# integrity hashes already present in the lock file.
-#
-# The derivation graph is dynamically determined by the lock file content:
-# each npm entry becomes its own fetchurl call, and a pure derivation
-# assembles them into a Deno-compatible DENO_DIR cache layout.
+# npm dependencies from a deno.lock, one fetchurl per package rather than a
+# single fixed-output derivation with a hand-maintained hash. The lock is parsed
+# at evaluation time and its integrity hashes are the fetch hashes, so the
+# derivation graph follows the lock's content: each npm entry becomes its own
+# fetch, and a pure derivation assembles them into a DENO_DIR cache layout.
 {
   lib,
   stdenvNoCC,
@@ -97,13 +92,12 @@ in
         tar xzf "$tarball" -C "$dir" --strip-components=1
       done
 
-      # Phase 2: Generate registry.json for each package.
-      # Deno needs these for npm resolution (especially packages with bin/scripts).
+      # Phase 2: a registry.json per package, which Deno needs to resolve npm,
+      # and above all for packages carrying bin or scripts.
       jq -r '.[].name' ${manifestFile} | sort -u | while read -r name; do
         pkg_dir="$out/npm/registry.npmjs.org/$name"
         registry_json="$pkg_dir/registry.json"
 
-        # Build versions object from all versions of this package
         versions_json='{}'
         for version_dir in "$pkg_dir"/*/; do
           [ -d "$version_dir" ] || continue
@@ -136,7 +130,6 @@ in
             '. + {($ver): $entry}')
         done
 
-        # Write registry.json
         jq -n --arg name "$name" --argjson versions "$versions_json" \
           '{name: $name, versions: $versions}' > "$registry_json"
       done

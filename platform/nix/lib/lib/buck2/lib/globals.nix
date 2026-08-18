@@ -67,7 +67,7 @@
         __sk = "provider_instance";
         providerId = id;
         providerName = name;
-        # Declared fields default to None; extra named kept too (lenient).
+        # Declared fields default to None; extra named ones are kept as well.
         attrs =
           builtins.listToAttrs (map (f: {
               name = f;
@@ -289,8 +289,8 @@
     inherit world;
   });
 
-  # select({...}): no configuration yet; return the DEFAULT branch (or the
-  # first entry) so the common unconfigured case degrades gracefully.
+  # select({...}): there is no configuration yet, so the DEFAULT branch (or the
+  # first entry) keeps the common unconfigured case working.
   selectGlobal = builtin ({
     pos,
     world,
@@ -307,12 +307,12 @@
     inherit world;
   });
 
-  # ---- glob --------------------------------------------------------------
+  # ---- config -----------------------------------------------------------
   # read_root_config(section, key, default = None): a value from the project's
-  # .buckconfig, with .buckconfig.local layered on top. Buck2 uses it for values that
-  # are machine-local rather than checked in -- a toolchain's compiler or linker path --
-  # so a rule can name one without hardcoding it. read_config is the same lookup for the
-  # root cell, which is all this interpreter models.
+  # .buckconfig, with .buckconfig.local layered on top. Buck2 uses it for what is
+  # machine-local rather than checked in, a toolchain's compiler or linker path,
+  # so a rule can name one without hardcoding it. read_config is the same lookup
+  # against the root cell, which is all this interpreter models.
   readRootConfigGlobal = builtin ({
     pos,
     world,
@@ -331,6 +331,7 @@
     inherit world;
   });
 
+  # ---- glob --------------------------------------------------------------
   globGlobal = builtin ({
     pos,
     named,

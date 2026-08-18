@@ -3,7 +3,7 @@
 # Imports board support from the nixos-raspberrypi flake and provides
 # a baseline hardware configuration suitable for a headless RPi5.
 # Machine-specific settings (filesystems, hostName, …) belong in the
-# corresponding nixosConfiguration under nixos/config/.
+# corresponding nixosConfiguration under nixos-configurations/.
 {
   lib,
   inputs,

@@ -1,32 +1,18 @@
-# Activate a standalone home-manager configuration as part of a single
-# `system-manager switch`, so one deploy provisions both the system layer and
-# the user layer on a non-NixOS host.
+# Activate a standalone home-manager configuration from `system-manager switch`,
+# so one deploy provisions both the system and the user layer on a non-NixOS
+# host.
 #
-# Why a systemd service instead of home-manager's NixOS module
-# -----------------------------------------------------------
-# home-manager ships `home-manager.nixosModules.home-manager`, but it drives
-# activation off `config.users.users.<name>` (username, home directory, uid) and
-# NixOS-managed systemd services. system-manager deliberately does *not* manage
-# users (`users.users` is a no-op in its module set), so that NixOS module can't
-# be used here.
+# home-manager's own NixOS module cannot be used: it drives activation off
+# `config.users.users.<name>`, and system-manager does not manage users. So this
+# runs the `activate` script of an already-built standalone configuration from a
+# oneshot service. The standalone config stays the single source of truth; this
+# only changes who triggers it.
 #
-# Instead we reuse an already-built standalone `homeConfiguration` — the exact
-# config you'd otherwise apply with `home-manager switch --flake .#<name>` — and
-# run its generated `activate` script from a oneshot systemd service. There is a
-# single source of truth for the user environment (the standalone config); this
-# module just changes *who* triggers activation. The unit mirrors home-manager's
-# own NixOS activation service: it runs as the user, waits for the home directory
-# to be mounted, and activates through a login shell so the environment is sane.
+# Pick one owner: activating through this module *and* running `home-manager
+# switch` for the same user makes the two fight over one generation.
 #
-# Pick one owner for the user layer: if you activate home-manager via this
-# module, do not also run `home-manager switch` for the same user, or the two
-# will fight over the same generation/profile.
-#
-# This module is generic: the consumer picks *which* home configuration to
-# activate by setting `home-manager.standalone.configuration` to a built
-# `homeManagerConfiguration` (e.g.
-# `inputs.self.homeConfigurations.<name>`). When it is left null this module
-# does nothing, so it is safe to include in a base config.
+# Does nothing until the consumer sets `home-manager.standalone.configuration`,
+# so it is safe in a base config.
 {
   pkgs,
   lib,
@@ -52,9 +38,8 @@ in {
 
     unitName = "home-manager-${username}";
 
-    # Activate through a login shell so PATH, locale, etc. are sane, and pull in
-    # the user's live session env if they happen to be logged in (mirrors
-    # home-manager's own NixOS activation service).
+    # A login shell so PATH and locale are sane, and to pick up the user's live
+    # session env if they are logged in. Mirrors home-manager's own unit.
     setupEnv = pkgs.writeShellScript "hm-setup-env" ''
       #! ${pkgs.runtimeShell} -el
       exec "${activationPackage}/activate"

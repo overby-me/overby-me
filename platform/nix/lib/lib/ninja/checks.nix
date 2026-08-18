@@ -50,12 +50,12 @@
         touch $out
       '';
 
-    # M4: build the real Darling launcher (src/startup/darling) via nix-ninja —
-    # configure the 38k-edge tree, target-filter to the launcher subtree, lower
-    # and build. Per-file (depfile-precise) mode: the compile scan discovers the
-    # source-relative `#include "../shellspawn/shellspawn.h"` and stages exactly
-    # the files read. Impure (references the Darling source store path); build
-    # with `nix build .#checks.x86_64-linux._ninja-darling-launcher --impure`.
+    # The real Darling launcher: configure the 38k-edge tree, target-filter to
+    # the launcher subtree, lower and build. In per-file mode, so the compile
+    # scan finds the source-relative `#include "../shellspawn/shellspawn.h"` and
+    # stages exactly what is read. Impure, referencing the Darling source store
+    # path, so it needs
+    # `nix build .#checks.x86_64-linux._ninja-darling-launcher --impure`.
     _ninja-darling-launcher = pkgs: let
       drv = pkgs.lib.buildNinjaProject {
         cmakeSource = builtins.storePath "/nix/store/zb85186kdllqgqdhnc08zmkh5iqrnr7v-qwyd0df0afrwmfdjy68a4gvjyhh30m6d-source";

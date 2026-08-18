@@ -1,24 +1,15 @@
-# Kanata keyboard remapping, ported to system-manager.
+# Kanata keyboard remapping for system-manager, kept in sync with the NixOS
+# module at platform/nix/config/nixos-modules/services/kanata.nix.
 #
-# This machine runs kanata on NixOS via `services.kanata` (see
-# `nixos/modules/services/kanata.nix`). That NixOS module can't be reused under
-# system-manager: it sets `hardware.uinput.enable` and references
-# `config.users.groups`, neither of which exists in system-manager's module set
-# (system-manager doesn't manage kernel modules, udev, or users/groups).
+# That module cannot be reused here: it sets `hardware.uinput.enable` and reads
+# `config.users.groups`, and system-manager manages neither kernel modules nor
+# users. So this reproduces its output - the config file and a hardened service
+# - with two deviations for a non-NixOS host:
 #
-# So this replicates the essential output of the NixOS `services.kanata` module
-# — the generated config file plus a hardened systemd service — but adapted for
-# a non-NixOS host:
-#
-#   - No `hardware.uinput.enable`: the host is expected to already have
-#     `/dev/uinput` (owned `root:input`) with the `uinput` kernel module
-#     available, so no module-loading/udev management is needed.
-#   - `SupplementaryGroups = ["input"]` only: NixOS uses both `input` and
-#     `uinput` groups, but a stock Ubuntu host has no `uinput` group; the
-#     `input` group grants the rw access to `/dev/uinput` that kanata needs.
-#
-# The keyboard config below is kept in sync with
-# `nixos/modules/services/kanata.nix` (caps-lock as a nav-layer tap-hold).
+#   - No `hardware.uinput.enable`: the host is expected to have /dev/uinput
+#     (root:input) and the module available already.
+#   - `SupplementaryGroups = ["input"]` only, because a stock Ubuntu host has
+#     no `uinput` group and `input` already grants rw on /dev/uinput.
 {
   pkgs,
   lib,
@@ -52,9 +43,8 @@
     )
   '';
 
-  # Same `defcfg` wrapper the NixOS module generates: no `linux-dev` (empty
-  # devices means kanata auto-detects all keyboards), continue if none found,
-  # and `process-unmapped-keys yes` (from the NixOS extraDefCfg).
+  # The wrapper the NixOS module generates. No `linux-dev`, so kanata
+  # auto-detects every keyboard.
   configFile = pkgs.writeTextFile {
     name = "${serviceName}-config.kbd";
     text = ''

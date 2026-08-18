@@ -1,9 +1,9 @@
-# Flakelight module: checks for the cargo library. Imported explicitly from
-# flake.nix (the platform/nix/lib/lib autoloader only routes default.nix, on purpose:
-# checks are not lib content).
+# Checks for the cargo library, imported explicitly because the lib autoloader
+# routes only default.nix - checks are not lib content.
 #
-# Run one: nix build .#checks.x86_64-linux.cargo-lib
-# (never `nix flake check`, see the repo rules)
+#   nix build .#checks.x86_64-linux.cargo-lib
+#
+# Never `nix flake check`; see the repo rules.
 {
   checks = {
     # Pure eval unit tests: importing a test file throws on failure, so
@@ -11,12 +11,11 @@
     cargo-lib = pkgs: let
       names = ["semver" "cfg" "lock" "index" "manifest" "shapes" "profile" "resolve" "resolve-real" "patch"];
 
-      # Three of them resolve real workspaces and take them as arguments; the
-      # rest are self-contained. Applied by shape rather than by naming which
-      # is which, so that a test gaining or losing a fixture is a change to
-      # that file alone. Their defaults are the monorepo paths, which is what
-      # `nix eval -f` on one of them uses; these are the same sources reached
-      # as inputs, so a clone of this directory runs them too.
+      # Three resolve real workspaces and take them as arguments; the rest are
+      # self-contained. Applied by shape rather than by name, so a test gaining
+      # or losing a fixture is a change to that file alone. Their defaults are
+      # the monorepo paths, which is what `nix eval -f` uses; these are the same
+      # sources as inputs, so a clone of this directory runs them too.
       #
       # Handed over as paths rather than as the inputs themselves. An input is
       # an attribute set that coerces to its store path, which is enough for a

@@ -17,8 +17,7 @@
     # so this is not optional while any of those are set.
     primaryUser = "overby.me";
 
-    # Sensible macOS defaults. These map to `defaults write` settings and are
-    # applied on `darwin-rebuild switch`.
+    # These map to `defaults write` and apply on `darwin-rebuild switch`.
     defaults = {
       NSGlobalDomain = {
         AppleInterfaceStyle = "Dark";
@@ -70,6 +69,5 @@
     };
   };
 
-  # Enable Touch ID for sudo.
   security.pam.services.sudo_local.touchIdAuth = true;
 }

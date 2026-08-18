@@ -12,14 +12,12 @@
   version = "9.4.0";
   buildNumber = "nix.1";
 
-  # Chromium Embedded Framework — pinned to the EXACT build whose C++ wrapper
-  # (`libcef_dll`) is vendored in `desktop-sdk` under
-  # `ChromiumBasedEditors/lib/src/cef/mac` (see that tree's `include/cef_version.h`:
-  # CEF_VERSION "109.1.18+gf1c41e4+chromium-109.0.5414.120"). The wrapper is
-  # ABI-locked to this branch, so the prebuilt framework MUST match it exactly.
+  # Pinned to the exact build whose libcef_dll wrapper desktop-sdk vendors
+  # (CEF_VERSION 109.1.18+gf1c41e4+chromium-109.0.5414.120). The wrapper is
+  # ABI-locked to that branch, so the framework must match it exactly.
   #
   # nixpkgs' `cef-binary` cannot be used: it tracks a far newer branch and is
-  # Linux-only (throws on aarch64-darwin). We fetch the official upstream
+  # Linux-only, throwing on aarch64-darwin. We fetch the official upstream
   # prebuilt from the Spotify CDN instead (see ./cef.nix). This is the only
   # binaryNativeCode artifact in the build — and it is genuine upstream CEF, not
   # an ONLYOFFICE binary.

@@ -13,7 +13,7 @@
     };
   };
 in {
-  # Add unstable packages to attributeset to pkgs.pkgsUnstable
+  # nixpkgs-unstable, as pkgs.pkgsUnstable.
   pkgsUnstable =
     (import prev.inputs.nixpkgs-unstable {
       inherit (final.stdenv.hostPlatform) system;

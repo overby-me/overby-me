@@ -1,48 +1,28 @@
-# Chromium Embedded Framework (CEF) — standalone prebuilt package.
+# Chromium Embedded Framework, prebuilt.
 #
-# Why this exists
-# ---------------
-# Euro-Office's `desktop-sdk` vendors its own copy of the CEF C++ wrapper layer
-# (`ChromiumBasedEditors/lib/src/cef/mac/libcef_dll`), which is ABI-locked to a
-# specific CEF binary branch — `109.1.18+gf1c41e4+chromium-109.0.5414.120` (see
-# that tree's `include/cef_version.h`). The wrapper compiles against a matching
-# prebuilt `Chromium Embedded Framework.framework`.
+# desktop-sdk vendors its own copy of the CEF C++ wrapper layer, ABI-locked to
+# branch 109.1.18+gf1c41e4+chromium-109.0.5414.120, so the framework it compiles
+# against has to be that exact branch. Both platforms below therefore pin it, and
+# desktop-sdk always supplies the wrapper sources itself.
 #
-# nixpkgs' `cef-binary` cannot be used:
-#   * it tracks a much newer CEF branch (wrong ABI for EO's vendored wrapper);
-#   * it is Linux-only and throws "Unsupported system aarch64-darwin".
+# On macOS this fetches the official upstream distribution from the Spotify CDN,
+# the canonical CEF binary host, since nixpkgs' `cef-binary` tracks a far newer
+# branch and throws on aarch64-darwin. Genuine upstream CEF, not an ONLYOFFICE
+# binary, and the one `binaryNativeCode` artifact in the euro-office build. It
+# provides:
 #
-# So we fetch the official upstream prebuilt distribution from the Spotify CDN
-# (the canonical CEF binary host) and expose it as a framework + headers. This
-# is genuine upstream CEF — NOT an ONLYOFFICE binary. It is the only
-# `binaryNativeCode` artifact in the euro-office build (nixpkgs ships CEF
-# prebuilt too).
-#
-# What this package provides
-# --------------------------
 #   $out/Release/Chromium Embedded Framework.framework   the runtime framework
 #   $out/Release/cef_sandbox.a                            the sandbox static lib
 #   $out/include/                                         the C/C++ API headers
 #   $out/cmake/, $out/cef_paths*.gypi                     upstream build glue
 #
-# (On macOS the locales / .pak resources live INSIDE the .framework bundle, so
-# there is no separate top-level Resources/ dir as on Linux/Windows.)
+# The locales and .pak resources live inside the bundle, so unlike Linux and
+# Windows there is no top-level Resources/ dir.
 #
-# The desktop-sdk build links against the framework with
-#   -F"$out/Release" -framework "Chromium Embedded Framework"
-# and pairs it with desktop-sdk's own vendored `libcef_dll` wrapper sources.
-#
-# Linux
-# -----
-# On Linux there is no .framework: CEF ships `Release/libcef.so` plus a separate
-# `Resources/` tree (locales + .pak + icudtl.dat). nixpkgs already packages CEF
-# (`cef-binary`) from this same Spotify CDN, including the load-bearing
-# `patchelf --set-rpath` on `libcef.so`/`libEGL.so`/… that makes it loadable in
-# the Nix store. nixpkgs' default is a far newer branch (147), so we *pin it to
-# the same branch 109.1.18 the desktop-sdk wrapper is ABI-locked to* via
-# `.override`, reusing all of nixpkgs' ELF fixup. The desktop-sdk build still
-# supplies its OWN ABI-matched `libcef_dll` wrapper sources (as on macOS); from
-# this package it consumes `include/`, `Release/libcef.so` and `Resources/`.
+# On Linux there is no framework at all: CEF ships `Release/libcef.so` and a
+# separate `Resources/` tree. nixpkgs packages that from the same CDN, including
+# the load-bearing `patchelf --set-rpath` that makes it loadable from the store,
+# so overriding its version to branch 109 reuses all of that ELF fixup.
 {
   lib,
   stdenv,
@@ -77,17 +57,14 @@
       inherit (cef.macosarm64) hash;
     };
 
-    # The framework inside contains symlinks and code-signed Mach-O; cpio
-    # preserves them faithfully when we relocate the tree.
     nativeBuildInputs = [cpio];
 
-    # No build/configure — this is a prebuilt distribution.
     dontConfigure = true;
     dontBuild = true;
     dontPatchELF = true;
     dontStrip = true;
-    # The framework is binaryNativeCode; do not let fixup mangle its install
-    # names or signature.
+    # The framework is binaryNativeCode; fixup would mangle its install names
+    # and its signature.
     dontFixup = true;
 
     # unpackPhase already cd's into the single top-level cef_binary_* dir.
@@ -96,10 +73,10 @@
 
       mkdir -p "$out"
 
-      # Keep the framework (+ cef_sandbox.a), headers and the upstream CMake glue
-      # the desktop-sdk wrapper references. We deliberately drop the sample apps
-      # and the prebuilt libcef_dll_wrapper: desktop-sdk supplies its OWN
-      # ABI-matched wrapper sources.
+      # The framework, cef_sandbox.a, headers and the upstream CMake glue the
+      # desktop-sdk wrapper references. The sample apps and the prebuilt
+      # libcef_dll_wrapper are dropped: desktop-sdk brings its own ABI-matched
+      # wrapper sources.
       cp -R Release         "$out/Release"
       cp -R include         "$out/include"
       cp -R cmake           "$out/cmake"

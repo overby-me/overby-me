@@ -28,18 +28,13 @@
       };
       biome = {
         enable = true;
-        # apps/wiki used to be excluded here, on the grounds that its incidental
-        # JS is hand-authored and governed by the app's own gates rather than by
-        # biome. That was not true of the whole toolchain: `nix fmt` maps *.js to
-        # biome (platform/nix/config/formatters.nix) for every path in the tree, and biome
-        # formats a file handed to it explicitly whatever `files.includes` says.
-        # So checks.formatting DID format these, this hook did not, and a new .js
-        # under apps/wiki passed every local gate and then failed CI -- which is
-        # exactly how assets/heic-worker.js reached main unformatted.
-        #
-        # The hook now sees what the check sees. Whichever way that disagreement
-        # is resolved they have to agree; this is the direction that finds out
-        # before pushing rather than after.
+        # apps/wiki is deliberately not excluded. It used to be, and the hook
+        # then disagreed with the check: `nix fmt` maps *.js to biome for every
+        # path in the tree, and biome formats a file handed to it explicitly
+        # whatever `files.includes` says. So a new .js under apps/wiki passed
+        # every local gate and failed CI, which is how assets/heic-worker.js
+        # reached main unformatted. The two have to agree; this direction finds
+        # out before pushing rather than after.
       };
       alejandra.enable = true;
       deadnix.enable = true;
@@ -56,10 +51,9 @@
         enable = true;
         settings.configPath = "./platform/nix/config/devshell/modules/configs/typos.toml";
         # Every typos hit in apps/wiki was a false positive on technical content:
-        # plural all-caps SQL keywords (a trailing lowercase "s" confuses the
-        # tokenizer), percent-encoded UTF-8 test fixtures, and ported short
-        # identifiers. Allow-listing those tokens in the shared typos.toml would
-        # mask real typos monorepo-wide, so scope typos to skip the app instead
+        # plural all-caps SQL keywords, percent-encoded UTF-8 fixtures, ported
+        # short identifiers. Allow-listing those in the shared typos.toml would
+        # mask real typos monorepo-wide, so skip the app instead
         # (its i18n strings were already excluded). deslop and lychee, which DO
         # find real issues here, stay enabled with tuned configs.
         excludes = ["^apps/wiki/"];

@@ -9,7 +9,7 @@
 # +25/-10 and has been open upstream since 2025-04.
 #
 # DELETE THIS FILE once #396334 lands: drop the import from
-# nixos/config/armitas-installer.nix and everything keeps working.
+# platform/nix/config/nixos-configurations/armitas-installer.nix and everything keeps working.
 #
 # Re-syncing on a nixpkgs bump: copy
 # <nixpkgs>/nixos/modules/installer/cd-dvd/iso-image.nix over this file, then

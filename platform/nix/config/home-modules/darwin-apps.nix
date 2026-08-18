@@ -3,21 +3,13 @@
   pkgs,
   ...
 }:
-# Make home-manager GUI apps discoverable by macOS Spotlight, Launchpad and the
-# Dock.
+# Spotlight and Launch Services refuse to index symlinked .app bundles, so
+# home-manager's default `linkApps` leaves GUI apps invisible to Spotlight,
+# Launchpad and the Dock. `copyApps` materialises real bundles instead, which
+# they do index; it needs App Management permission on first activation, or
+# Full Disk Access over SSH.
 #
-# By default (with home.stateVersion < 25.11) home-manager links GUI apps into
-# ~/Applications/Home Manager Apps as symlinks pointing into the Nix store
-# (targets.darwin.linkApps). macOS Spotlight / Launch Services refuse to index
-# symlinked .app bundles, so apps like Zed never show up in Spotlight, Launchpad
-# or the Dock.
-#
-# copyApps instead materializes real .app bundle copies (via
-# rsync --copy-unsafe-links), which Spotlight does index. It requires the App
-# Management permission on first activation (or Full Disk Access over SSH).
-#
-# Once home.stateVersion >= 25.11, copyApps becomes the default and this module
-# can be removed.
+# Removable once home.stateVersion reaches 25.11, where copyApps is the default.
 lib.mkIf pkgs.stdenv.isDarwin {
   targets.darwin = {
     linkApps.enable = false;

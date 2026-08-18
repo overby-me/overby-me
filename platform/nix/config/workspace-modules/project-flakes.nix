@@ -1,39 +1,25 @@
-# Check the flakes this tree publishes, against the tree's own build of them.
+# Check the flakes this tree publishes against the tree's own build of them.
 #
-# A published project ships a flake of its own, and for as long as nothing
-# here read it, it could break without anything noticing: that is what made
-# the generated ones inert, and moving them under publish/generated/ tidied
-# the tree without changing it. A project taken as a root input is built by
-# this check, so a change to nix-workspace's module API that breaks a published
-# repo fails here rather than in someone's clone.
+# Until something here read them, a published flake could break without anyone
+# noticing until a clone failed. A change to nix-workspace's module API now
+# fails here instead.
 #
-# It builds the crate a second time, which is deliberate. The two builds do
-# not share a builder and should not: the tree builds with
-# `lib.buildCargoProject`, per-crate derivations against a committed 7.3 MB
-# registry index shared by all 39 projects, and a published repo builds with
-# `rustPlatform.buildRustPackage`, one derivation and nothing bespoke.
-# Converging them would mean either slicing that index into every published
-# repo or making each one do IFD against the sparse index on every `nix flake
-# check` - paying, in 39 repos an outsider clones, for a property only the
-# monorepo benefits from.
-#
-# So the duplication is kept and turned into the check: two independent
-# builders over one source should produce the same program, and that is worth
-# more than either build alone. It is a differential, in the same spirit as
-# the oracles the ports are held to.
+# The second build is deliberate. The tree builds with `lib.buildCargoProject`,
+# per-crate derivations against a committed 7.3 MB index shared by all 39
+# projects; a published repo builds with `rustPlatform.buildRustPackage`, one
+# derivation and nothing bespoke. Converging them would mean slicing that index
+# into every published repo, or IFD against the sparse index on every clone's
+# `nix flake check` - paying in 39 repos for a property only the monorepo
+# benefits from. So the duplication becomes the check: two independent builders
+# over one source should produce the same program.
 {
   config,
   lib,
   ...
 }: let
-  # What publish/checks declares, which is the list itself: that flake takes
-  # one input per published project and exports them minus itself and the
-  # framework, so adding a project is one entry there and nothing here.
-  #
-  # Discovered rather than named, unlike everything else that reads an input.
-  # `input-usage` proves a root input has a consumer by grepping for
-  # `inputs.<name>`, and there is one root input here to find - the twenty-two
-  # behind it are not this flake's to justify.
+  # The list is publish/checks itself: it takes one input per published project
+  # and exports them minus itself and the framework, so adding a project is one
+  # entry there and nothing here.
   published = config.inputs.publish-checks.published;
 
   check = name: input: pkgs: let

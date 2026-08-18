@@ -1,28 +1,13 @@
 # Every root input must have a consumer.
 #
-# Flake inputs cannot belong to a project: nix resolves `inputs` from
-# flake.nix before anything is evaluated, so no module, project or framework
-# can add one. A project only owns its inputs where it is its own flake,
-# which is what the published repos are - fe-c declares rust-overlay itself,
-# and the monorepo declares nothing on its behalf.
+# Inputs cannot belong to a project: nix resolves them from flake.nix before
+# anything evaluates, so no module or framework can add one. An input earns its
+# place by being read (`inputs.<name>`) or followed; five had accumulated here,
+# one of them printing a warning on every evaluation because the input it
+# overrode no longer existed.
 #
-# What is left for the workspace is to keep its list answerable to the tree.
-# An input earns its place by being read somewhere (`inputs.<name>`) or by
-# being followed by another input; anything else is a declaration nobody
-# asked for. Five of them had accumulated here, one of which - gitignore -
-# had been printing a warning on every evaluation because the input it was
-# meant to override no longer existed.
-#
-# Checked by grepping the source rather than by evaluating it, because an
-# input's absence cannot be observed from inside the evaluation that would
-# have used it.
-#
-# One kind of use is invisible to a grep: the workspace takes every input
-# that exports a project module, so an integration is consumed without
-# `inputs.project-darwin` appearing anywhere. That is not a hole in the
-# reasoning above - absence is what cannot be evaluated, and this is a
-# presence - so those are recognised by the same predicate the workspace
-# uses, and only the rest are grepped for.
+# Grepped rather than evaluated, because an input's absence cannot be observed
+# from inside the evaluation that would have used it.
 {
   config,
   lib,
@@ -30,16 +15,15 @@
   ...
 }: {
   checks.input-usage = pkgs: let
-    # What flake.nix declares, read from the lock, which records exactly that
-    # under root. Not `config.inputs`: a module hands its own pin to the
-    # consumer by setting one, so that set holds entries nobody declared here
-    # and which nothing here reads - `system-manager` arrives from the module
-    # that pins it, and the file reading it lives in nix-workspace now. Those
-    # are not this tree's to justify.
+    # From the lock rather than `config.inputs`: a module hands its own pin to
+    # the consumer by setting one, so that set holds entries nobody declared
+    # here and nothing here reads.
     declared =
       builtins.attrNames
       (builtins.fromJSON (builtins.readFile "${src}/flake.lock")).nodes.root.inputs;
 
+    # An input exporting a module is consumed by the workspace taking it, which
+    # no grep can see. Recognised by the predicate the workspace itself uses.
     integrations =
       builtins.attrNames
       (lib.filterAttrs
@@ -54,16 +38,13 @@
         # `self` is nix's own, not ours to justify.
         [ "$name" = "self" ] && continue
 
-        # `|| true` because a search that matches nothing exits non-zero, and
-        # stdenv runs this under `set -o pipefail`: without it the first input
-        # that is followed rather than read - flake-compat is the one - killed
-        # the whole check before reaching the `followed` test written for it.
-        # Builder output is not surfaced here, so it failed with no message
-        # and validated nothing.
+        # `|| true` because a search matching nothing exits non-zero under
+        # stdenv's `set -o pipefail`, and builder output is not surfaced here:
+        # without it the first followed-but-unread input killed the check
+        # silently, before reaching the `followed` test written for it.
         #
-        # A declaration is `<name>.url = ...`, never `inputs.<name>`, so a
-        # read inside a flake.nix counts like any other - which is how the
-        # sub-flake of pins justifies itself.
+        # A declaration is `<name>.url = ...`, never `inputs.<name>`, so a read
+        # inside a flake.nix counts like any other.
         read_somewhere=$(${pkgs.ripgrep}/bin/rg -l --no-messages \
           -g '*.nix' -g '*.nu' -g '*.yml' \
           "inputs\.$name\b" . || true)

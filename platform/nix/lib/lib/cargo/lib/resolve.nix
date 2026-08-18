@@ -4,11 +4,10 @@
 # workspace manifests into a build graph, then computes enabled features by
 # monotone fixpoint.
 #
-# Stage 1 semantics (see PLAN.md): one unified feature set per package,
-# resolver-v1-like. Build/normal deps share the feature space; host/target
-# splitting (resolver v2) is a later milestone. This over-approximates: it
-# can enable a feature or optional dep that cargo's v2 resolver would not,
-# which is correctness-preserving in the same way cargo's own v1 was.
+# One unified feature set per package, as cargo's v1 resolver had it: build and
+# normal deps share the feature space, and the host/target split of v2 is a later
+# milestone (PLAN.md M8). It over-approximates, enabling a feature or optional dep
+# v2 would not, which is correctness-preserving in the way v1 itself was.
 let
   inherit
     (builtins)
@@ -106,8 +105,6 @@ let
       in
         acc
         // {
-          # .outPath: fetchGit returns an attrset, downstream wants
-          # the store path.
           ${key} =
             (builtins.fetchGit {
               inherit (p.sourceInfo) url rev;
@@ -405,8 +402,6 @@ let
 
     final = fix seed;
 
-    # Assemble output nodes: only active packages, with sorted feature lists
-    # and deduplicated active edges.
     nodes =
       mapAttrs (
         id: st: let

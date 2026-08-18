@@ -1,21 +1,15 @@
-# Auto-discovers lib functions from platform/nix/lib/lib/.
-# Each .nix file can be an attrset or a function taking lib, returning an attrset.
-# Results are merged flat into the lib flake output.
-# Uses mkForce to override nixDir's raw auto-discovery with resolved values.
+# Auto-discovers lib functions from lib/, merging them flat into the `lib`
+# output. A .nix file is an attrset or a function of lib; a directory holding
+# default.nix is one unit, one without is recursed into, and a leading _ means
+# private.
 #
-# Discovery rules:
-#   - .nix files are imported, resolved (called with lib if a function), and merged.
-#   - Directories with default.nix are imported as a single unit.
-#   - Directories without default.nix are recursed into.
-#   - Files and directories starting with _ are considered private and skipped.
-#
-# Modules that define `perSystemLib` attrs are automatically routed to
-# the perSystemLib option (system-dependent functions taking pkgs).
-# All other attrs are merged into the flake's lib output (system-independent).
+# `perSystemLib` attrs are routed to that option instead, being the ones that
+# take pkgs. mkForce, because the outputs autoloader has already put the raw
+# unresolved files there.
 {lib, ...}: let
-  # Named directly rather than through nixDir: this is a second rule over the
-  # same directory - resolve each file and merge the results flat - and it
-  # runs whether or not anything else is scanning the tree.
+  # Named directly rather than through the outputs autoloader: this is a second
+  # rule over the same directory, and it runs whether or not anything else is
+  # scanning the tree.
   libDir = ../lib;
   hasLibDir = lib.pathExists libDir;
 
@@ -24,7 +18,6 @@
     then v lib
     else v;
 
-  # Recursively discover and import .nix files from a directory.
   importLibDir = dir: let
     entries = lib.readDir dir;
     names = lib.attrNames entries;
@@ -64,7 +57,6 @@
     then importLibDir libDir
     else {};
 
-  # Separate perSystemLib attrs from pure lib attrs.
   mergedPerSystemLib = discovered.perSystemLib or {};
   mergedLib = removeAttrs discovered ["perSystemLib"];
   # A tool's checks live inside that tool's library, next to what they test,

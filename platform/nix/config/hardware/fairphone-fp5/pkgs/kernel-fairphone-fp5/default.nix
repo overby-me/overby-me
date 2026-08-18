@@ -8,7 +8,6 @@
   buildPackages,
   ...
 }: let
-  # Kernel source from `sc7280-mainline` repository.
   kernelSrc = fetchFromGitHub {
     owner = "sc7280-mainline";
     repo = "linux";
@@ -16,7 +15,6 @@
     hash = "sha256-k6Fp5Dhy1s7Jnpc1qywHZxmkH2+OAYk1Yy8vSBSyR5k=";
   };
 
-  # Source of postmarketOS `pmaports` repository.
   pmaportsSrc = fetchFromGitLab {
     domain = "gitlab.postmarketos.org";
     owner = "postmarketOS";
@@ -25,40 +23,23 @@
     hash = "sha256-QInrf7Sf9j+bB26bsC1hYOnWPz/n5K3WlC50cq7megQ=";
   };
 
-  # Use the kernel configuration from PostmarketOS for the `sc7280` chipset as the base.
+  # PostmarketOS' sc7280 config as the base, with the options below - all
+  # disabled there - turned back on. Why each one:
   #
-  # We override some options that are disabled in PostmarketOS config to make it
-  # compatible with NixOS and enable useful functionality:
-  # - CONFIG_DMIID: NixOS asserts that this is enabled.
-  # - CONFIG_U_SERIAL_CONSOLE: Enables USB serial gadget console output for debugging (module).
-  # - CONFIG_USB_G_SERIAL: Classic USB serial gadget driver (module, so it doesn't
-  #     lock the DWC3 controller in device mode and block USB host for keyboards).
-  # - CONFIG_ANDROID_BINDERFS: Required for Waydroid (Android container support).
-  #
-  # Additional netfilter/iptables extensions required by NixOS firewall:
-  # - CONFIG_NETFILTER_XT_MATCH_PKTTYPE: Packet type matching.
-  # - CONFIG_NETFILTER_XT_MATCH_LIMIT: Rate limiting for firewall rules.
-  # - CONFIG_NETFILTER_XT_MATCH_RECENT: Recent connections tracking.
-  # - CONFIG_NETFILTER_XT_MATCH_STATE: Connection state matching.
-  # - CONFIG_NETFILTER_XT_TARGET_LOG: Logging target for firewall rules.
-  #
-  # Audio subsystem (Fairphone 5 speakers, microphones, SoundWire):
-  # - CONFIG_SOUNDWIRE_QCOM: Qualcomm SoundWire controller (bus for WCD938X codec).
-  # - CONFIG_SND_SOC_AW88261: AW88261 speaker amplifier codec driver.
-  # - CONFIG_SND_SOC_WCD938X_SDW: WCD9385 codec SoundWire interface (mic/headphone/HAC).
-  # - CONFIG_SND_SOC_LPASS_RX_MACRO: LPASS RX macro (SoundWire RX path).
-  # - CONFIG_SND_SOC_LPASS_TX_MACRO: LPASS TX macro (SoundWire TX path).
-  # - CONFIG_SND_SOC_LPASS_VA_MACRO: LPASS VA macro (voice activity / digital mic path).
-  #
-  # DisplayPort output over USB-C:
-  # - CONFIG_TYPEC_DP_ALTMODE: Required for DP Alt Mode over USB-C to work.
+  # - DMIID: NixOS asserts it is enabled.
+  # - U_SERIAL_CONSOLE, USB_G_SERIAL: the USB serial gadget console, for
+  #   debugging. As modules, so they do not lock the DWC3 controller in device
+  #   mode and block USB host for keyboards.
+  # - ANDROID_BINDERFS: Waydroid.
+  # - NETFILTER_XT_*: the extensions the NixOS firewall needs.
+  # - SOUNDWIRE_QCOM, SND_SOC_*: the speakers, microphones and SoundWire bus.
+  # - TYPEC_DP_ALTMODE: DisplayPort over USB-C.
   configfile = buildPackages.stdenv.mkDerivation {
     name = "kernel-config";
     src = "${pmaportsSrc}/device/testing/linux-postmarketos-qcom-sc7280/config-postmarketos-qcom-sc7280.aarch64";
     dontUnpack = true;
 
     buildPhase = ''
-      # Read the original config and apply our modifications.
       sed \
         -e 's/# CONFIG_DMIID is not set/CONFIG_DMIID=y/' \
         -e 's/# CONFIG_U_SERIAL_CONSOLE is not set/CONFIG_U_SERIAL_CONSOLE=m/' \
@@ -84,7 +65,6 @@
     '';
   };
 
-  # Parse kernel version from Makefile.
   kernelVersion = rec {
     file = "${kernelSrc}/Makefile";
     version = lib.head (lib.match ".*VERSION = ([0-9]+).*" (lib.readFile file));
@@ -113,9 +93,8 @@ in
     inherit modDirVersion;
     src = kernelSrc;
     stdenv =
-      # Override `stdenv` to produce compressed kernel image target.
-      # Use the derivation's own stdenv (which is already a cross stdenv when
-      # cross-compiling) so the correct cross-compiler is used.
+      # For the compressed kernel image target. The derivation's own stdenv,
+      # already a cross stdenv when cross-compiling, so the compiler is right.
       stdenv.override {
         hostPlatform =
           stdenv.hostPlatform
@@ -130,12 +109,11 @@ in
       };
     version = kernelVersion.string;
   }).overrideAttrs (oldAttrs: {
-    # Also install the uncompressed `Image` for NixOS compatibility. NixOS expects `Image`
-    # to exist, even though we'll use `Image.gz` for boot.
+    # NixOS expects an uncompressed `Image` to exist, even though `Image.gz` is
+    # what boots.
     postInstall =
       (oldAttrs.postInstall or "")
       + ''
-        # Decompress Image.gz to Image for NixOS compatibility.
         if [ -f "$out/Image.gz" ] && [ ! -f "$out/Image" ]; then
           echo "Decompressing Image.gz to Image for NixOS compatibility..."
           ${lib.getExe' gzip "gunzip"} -c "$out/Image.gz" > "$out/Image"

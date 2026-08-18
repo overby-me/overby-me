@@ -27,9 +27,9 @@
 # (x ? config.system.build.toplevel) and passes them through without
 # re-wrapping in nixpkgs.lib.nixosSystem.
 #
-# IMPORTANT: Do NOT pass `lib` from flakelight's module args into
-# specialArgs — that would inject the unpatched nixpkgs lib and break the
-# patched disabledModules mechanism that resolves the boot.loader conflict.
+# Do not pass `lib` from the framework's module args into specialArgs: that
+# injects the unpatched nixpkgs lib and breaks the patched disabledModules
+# mechanism resolving the boot.loader conflict.
 # The self overlay is added explicitly so pkgs.ironclaw is available.
 #
 # Hardware note:
