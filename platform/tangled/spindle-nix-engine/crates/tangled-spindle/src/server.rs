@@ -52,7 +52,6 @@ pub async fn run_server(
         Err(e) => warn!(%e, "failed to cancel orphaned workflows"),
     }
 
-    // Initialize secrets manager.
     let secrets: Arc<dyn spindle_secrets::Manager + Send + Sync> = match cfg.secrets.provider {
         SecretsProvider::Sqlite => {
             let key_material = ring::digest::digest(&ring::digest::SHA256, cfg.token.as_bytes());
@@ -70,12 +69,10 @@ pub async fn run_server(
         )),
     };
 
-    // Create event notifier (broadcast channel).
     let notifier = Arc::new(Notifier::new(1024));
 
-    // Create Nix engine.
-    // Derive workspace and cache dirs from the state directory (db_path parent),
-    // which is writable under systemd's StateDirectory sandbox.
+    // Workspace and cache dirs sit beside the database, which is the one place
+    // writable under systemd's StateDirectory sandbox.
     let state_dir = cfg
         .db_path
         .parent()
@@ -95,43 +92,36 @@ pub async fn run_server(
         },
     ));
 
-    // Create job queue.
     let queue = Arc::new(spindle_queue::JobQueue::new(
         cfg.engine.max_jobs,
         cfg.engine.queue_size,
         shutdown.clone(),
     ));
 
-    // Create pipeline event channel (knot consumer → orchestrator).
+    // knot consumer → orchestrator.
     let (pipeline_tx, mut pipeline_rx) = tokio::sync::mpsc::channel(256);
 
-    // Create knot consumer.
     let knot_consumer = Arc::new(spindle_knot::KnotConsumer::new(
         Arc::clone(&db),
         pipeline_tx,
         shutdown.clone(),
     ));
 
-    // Restore knot subscriptions from previous session.
     if let Err(e) = knot_consumer.restore_subscriptions().await {
         warn!(%e, "failed to restore knot subscriptions");
     }
 
-    // Create Jetstream event channel.
     let (jetstream_tx, mut jetstream_rx) =
         tokio::sync::mpsc::channel::<spindle_jetstream::ParsedEvent>(256);
 
-    // Load initial watched DIDs from database.
     let initial_dids: HashSet<String> = db.get_all_dids().unwrap_or_default().into_iter().collect();
 
-    // Create Jetstream client.
     let jetstream_client = Arc::new(spindle_jetstream::JetstreamClient::new(
         &cfg.jetstream_endpoint,
         initial_dids,
         jetstream_tx,
     ));
 
-    // Create ingestion context with knot subscriber adapter.
     let knot_adapter = Arc::new(orchestrator::KnotSubscriberAdapter(Arc::clone(
         &knot_consumer,
     )));
@@ -143,7 +133,6 @@ pub async fn run_server(
         knot_subscriber: knot_adapter,
     });
 
-    // Create XRPC context.
     let xrpc = Arc::new(spindle_xrpc::XrpcContext {
         db: Arc::clone(&db),
         rbac,
@@ -159,7 +148,6 @@ pub async fn run_server(
         dev: cfg.dev,
     });
 
-    // Create orchestrator context.
     let orch_ctx = Arc::new(OrchestratorContext {
         db: Arc::clone(&db),
         engine,
@@ -172,7 +160,6 @@ pub async fn run_server(
         dev: cfg.dev,
     });
 
-    // Build application state for the HTTP router.
     let state = Arc::new(AppState {
         db: Arc::clone(&db),
         notifier,
@@ -183,7 +170,6 @@ pub async fn run_server(
 
     let app = build_router(state);
 
-    // Bind HTTP listener.
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
     let local_addr = listener.local_addr()?;
 
@@ -295,7 +281,6 @@ pub async fn run_server(
     info!("shutdown signal received, stopping subsystems");
     shutdown.cancel();
 
-    // Wait for all tasks to complete.
     let _ = tokio::join!(http_handle, js_handle, ingest_handle, pipeline_handle);
 
     info!("all subsystems shut down gracefully");

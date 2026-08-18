@@ -92,7 +92,6 @@ impl SqliteManager {
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| SecretsError::Database(e.to_string()))?;
 
-        // Create the secrets table if it doesn't exist.
         conn.execute_batch(CREATE_TABLE_SQL)
             .map_err(|e| SecretsError::Database(e.to_string()))?;
 

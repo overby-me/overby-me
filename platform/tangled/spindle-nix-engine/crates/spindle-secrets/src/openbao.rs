@@ -228,13 +228,11 @@ impl Manager for OpenBaoManager {
     async fn get_secrets_unlocked(&self, repo: &str) -> Result<Vec<UnlockedSecret>, SecretsError> {
         let sanitized = sanitize_repo_path(repo);
 
-        // First, list all secret keys for this repo.
         let keys = self.list_secrets(repo).await?;
         if keys.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Then, read each secret individually.
         let mut secrets = Vec::with_capacity(keys.len());
         for key in &keys {
             let url = self.data_path(&sanitized, key);
@@ -350,9 +348,8 @@ impl Manager for OpenBaoManager {
         let url = self.metadata_path(&sanitized);
         let (header_name, header_value) = self.auth_header();
 
-        // OpenBao LIST is done via the LIST HTTP method or GET with `?list=true`.
-        // The reqwest crate doesn't have a `.list()` method, so we use the
-        // `LIST` custom method or add `?list=true` to a GET request.
+        // OpenBao LIST is either the LIST HTTP method or `?list=true` on a GET;
+        // reqwest has no `.list()`, hence the custom method.
         let resp = self
             .inner
             .client
@@ -382,7 +379,7 @@ impl Manager for OpenBaoManager {
 
         let mut keys = body.data.and_then(|d| d.keys).unwrap_or_default();
 
-        // Filter out directory-like entries (trailing `/`), which are sub-paths.
+        // A trailing `/` marks a sub-path, not a secret.
         keys.retain(|k| !k.ends_with('/'));
         keys.sort();
 
@@ -397,8 +394,7 @@ impl Manager for OpenBaoManager {
 
 impl Stopper for OpenBaoManager {
     fn stop(&self) {
-        // Signal the token renewal task to exit (if running).
-        // Ignore the error if no receivers are listening (task already exited).
+        // The error just means the renewal task already exited.
         let _ = self.inner.stop_tx.send(true);
     }
 }
@@ -512,7 +508,6 @@ mod tests {
         assert_eq!(json["data"]["value"], "secret-value");
     }
 
-    // NOTE: Full integration tests against a real (or mock) OpenBao server
-    // are in Phase 8. The unit tests here verify serialization, path
-    // construction, and basic behavior without network access.
+    // Serialization, path construction and basic behaviour, without a network.
+    // Testing against a real or mocked OpenBao server is separate.
 }

@@ -190,7 +190,6 @@ pub async fn ingest_member<K: KnotSubscriber>(
                 "ingesting spindle member addition"
             );
 
-            // Add to database
             if let Err(e) = ctx.db.add_spindle_member(member_did) {
                 error!(%e, member = %member_did, "failed to add spindle member to database");
                 return Err(JetstreamError::Ingestion(format!(
@@ -198,7 +197,6 @@ pub async fn ingest_member<K: KnotSubscriber>(
                 )));
             }
 
-            // Add to RBAC
             if let Err(e) = ctx.rbac.add_spindle_member(member_did).await {
                 error!(%e, member = %member_did, "failed to add spindle member to RBAC");
                 return Err(JetstreamError::Ingestion(format!(
@@ -206,7 +204,7 @@ pub async fn ingest_member<K: KnotSubscriber>(
                 )));
             }
 
-            // Add to Jetstream DID watch list so we see their repo events
+            // On the DID watch list, so their repo events arrive.
             if let Err(e) = ctx.db.add_did(member_did) {
                 warn!(%e, member = %member_did, "failed to add member DID to watch list");
             }
@@ -214,31 +212,25 @@ pub async fn ingest_member<K: KnotSubscriber>(
             info!(member = %member_did, "spindle member added successfully");
         }
         CommitOperation::Delete => {
-            // For deletes, the `author_did` is the one who authored the record.
-            // The member being removed is identified by the rkey or we need to
-            // look it up. In practice, the author is the spindle owner and the
-            // member DID was in the original record. Since we don't have the
-            // record on delete, we look up by the author's member records.
-            //
-            // However, in the AT Protocol pattern, the rkey for member records
-            // often encodes the member DID. For now, we handle this by noting
-            // the deletion — the main server can reconcile by re-fetching
-            // the member list from the PDS if needed.
+            // A delete carries no record, so which member was removed cannot be
+            // read off the event: `author_did` is who authored it, in practice
+            // the spindle owner. The rkey often encodes the member DID under the
+            // AT Protocol pattern, but not reliably, so the deletion is only
+            // noted here and the main server reconciles by re-fetching the
+            // member list from the PDS.
             info!(
                 author = %author_did,
                 "ingesting spindle member deletion"
             );
 
-            // Try to remove the author as a member (in case the member
-            // deleted their own record). The orchestrator may need more
-            // sophisticated logic here.
+            // Removing the author covers a member deleting their own record,
+            // which is the case this can actually identify.
             if let Ok(true) = ctx.db.remove_member(author_did) {
                 if let Err(e) = ctx.rbac.remove_spindle_member(author_did).await {
                     warn!(%e, did = %author_did, "failed to remove member from RBAC");
                 }
 
-                // Optionally remove from DID watch list
-                // (only if they're not also a repo owner we care about)
+                // Only when they are not also a repo owner worth watching.
                 debug!(did = %author_did, "spindle member removed");
             }
         }
@@ -272,7 +264,6 @@ pub async fn ingest_repo<K: KnotSubscriber>(
             let repo_record: RepoRecord = serde_json::from_value(record.clone())
                 .map_err(|e| JetstreamError::Parse(format!("failed to parse repo record: {e}")))?;
 
-            // Check if this repo is associated with our spindle
             let spindle_hostname = match &repo_record.spindle {
                 Some(s) if s == &ctx.hostname => s.clone(),
                 Some(s) => {
@@ -301,7 +292,6 @@ pub async fn ingest_repo<K: KnotSubscriber>(
                 "ingesting repo registration"
             );
 
-            // Add repo to the database watch list
             if let Err(e) = ctx
                 .db
                 .add_repo(author_did, &repo_record.name, &repo_record.knot)
@@ -312,12 +302,11 @@ pub async fn ingest_repo<K: KnotSubscriber>(
                 )));
             }
 
-            // Add the knot to our knot tracking table
             if let Err(e) = ctx.db.add_knot(&repo_record.knot) {
                 warn!(%e, knot = %repo_record.knot, "failed to add knot to tracking table");
             }
 
-            // Subscribe to the knot's event stream for pipeline events
+            // Its event stream is where pipeline events come from.
             if let Err(e) = ctx.knot_subscriber.subscribe(&repo_record.knot).await {
                 warn!(
                     %e,
@@ -326,7 +315,6 @@ pub async fn ingest_repo<K: KnotSubscriber>(
                 );
             }
 
-            // Add repo owner to RBAC
             if let Err(e) = ctx.rbac.add_repo(author_did, &repo_record.name).await {
                 warn!(%e, repo = %repo_record.name, "failed to add repo to RBAC");
             }
@@ -338,10 +326,10 @@ pub async fn ingest_repo<K: KnotSubscriber>(
             );
         }
         CommitOperation::Delete => {
-            // The upstream Go spindle ignores repo deletion events.
-            // Repo records are frequently deleted and re-created during
-            // normal AT Protocol operations, so we should not remove
-            // repos or knot subscriptions on delete events.
+            // Repo records are deleted and re-created routinely under normal
+            // AT Protocol operation, so removing repos or knot subscriptions
+            // on a delete would be wrong. The upstream Go spindle ignores
+            // these too.
             debug!(
                 did = %author_did,
                 "ignoring repo deletion event (matching upstream behavior)"
@@ -386,8 +374,7 @@ pub async fn ingest_collaborator<K: KnotSubscriber>(
                 "ingesting collaborator addition"
             );
 
-            // The author of the collaborator record is the repo owner.
-            // Add the collaborator to RBAC for this repo.
+            // The record's author is the repo owner.
             if let Err(e) = ctx
                 .rbac
                 .add_collaborator(author_did, repo_name, collaborator_did)
@@ -404,7 +391,7 @@ pub async fn ingest_collaborator<K: KnotSubscriber>(
                 )));
             }
 
-            // Add collaborator DID to Jetstream watch list so we see their events
+            // On the watch list, so their events arrive.
             if let Err(e) = ctx.db.add_did(collaborator_did) {
                 warn!(
                     %e,
@@ -425,9 +412,8 @@ pub async fn ingest_collaborator<K: KnotSubscriber>(
                 "ingesting collaborator deletion"
             );
 
-            // On delete we don't have the record, so we can't easily determine
-            // which collaborator was removed. The orchestrator may need to
-            // re-sync collaborators from the PDS. For now, log the event.
+            // A delete carries no record, so which collaborator went is not
+            // knowable here; the orchestrator re-syncs from the PDS.
             debug!(
                 author = %author_did,
                 "collaborator record deleted — may need reconciliation"
@@ -490,7 +476,6 @@ mod tests {
         let db = Arc::new(spindle_db::Database::open_in_memory().unwrap());
         let rbac = Arc::new(spindle_rbac::SpindleEnforcer::new().await.unwrap());
 
-        // Bootstrap RBAC
         rbac.add_spindle("did:web:spindle.example.com")
             .await
             .unwrap();
@@ -498,7 +483,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Add owner to DB
         db.add_spindle_owner("did:plc:owner").unwrap();
         db.add_did("did:plc:owner").unwrap();
 

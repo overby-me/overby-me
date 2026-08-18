@@ -148,7 +148,6 @@ impl FileWorkflowLogger {
     ) -> io::Result<Self> {
         let path = log_file_path(base_dir, workflow_id);
 
-        // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -227,7 +226,6 @@ impl Write for DataWriter {
         let text = String::from_utf8_lossy(buf);
         let trimmed = text.trim_end_matches(['\r', '\n']);
 
-        // Apply secret masking
         let content = {
             let inner = self
                 .logger

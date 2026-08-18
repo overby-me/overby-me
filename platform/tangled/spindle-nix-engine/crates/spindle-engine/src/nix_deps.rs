@@ -63,7 +63,7 @@ impl NixDeps {
             return None;
         }
 
-        // Use BTreeMap for deterministic ordering (important for content hashing).
+        // BTreeMap for deterministic ordering, which the content hash needs.
         let sorted: BTreeMap<&String, &Vec<String>> = deps.iter().collect();
 
         let mut sources = Vec::new();
@@ -87,7 +87,6 @@ impl NixDeps {
             return None;
         }
 
-        // Compute content hash for caching.
         let content_hash = compute_content_hash(&sorted);
 
         Some(Self {
@@ -108,7 +107,6 @@ impl NixDeps {
         }
 
         expr.push_str("in\n");
-        // Use the first nixpkgs source for buildEnv, or fall back to <nixpkgs>.
         let build_env_source = self
             .sources
             .iter()
@@ -204,7 +202,6 @@ pub async fn build_nix_env(
 ) -> EngineResult<PathBuf> {
     let hash = deps.content_hash();
 
-    // Check cache.
     let cache_file = cache_dir.join(format!("env-{hash}.path"));
     if let Ok(cached_path) = tokio::fs::read_to_string(&cache_file).await {
         let path = PathBuf::from(cached_path.trim());
@@ -216,7 +213,6 @@ pub async fn build_nix_env(
         debug!(%hash, "cached Nix environment was garbage-collected, rebuilding");
     }
 
-    // Write the Nix expression to a temp file.
     let nix_file = cache_dir.join(format!("env-{hash}.nix"));
     let nix_expr = deps.to_nix_expr();
     tokio::fs::create_dir_all(cache_dir)
@@ -228,14 +224,12 @@ pub async fn build_nix_env(
 
     debug!(?nix_file, "building Nix environment");
 
-    // Log the build start.
     let mut setup_writer = logger.data_writer(0, "stdout".into());
     use std::io::Write;
     let _ = write!(setup_writer, "Building Nix environment (hash: {hash})...");
 
-    // Build the Nix closure.
-    // Set HOME to the cache directory so nix can write to ~/.cache/nix
-    // (under DynamicUser, HOME may be unset or point to a read-only path).
+    // HOME points at the cache dir so nix can write ~/.cache/nix: under
+    // DynamicUser it may be unset or read-only.
     let mut cmd = Command::new("nix");
     cmd.env("HOME", cache_dir)
         .arg("build")
@@ -248,13 +242,12 @@ pub async fn build_nix_env(
         cmd.arg(flag);
     }
 
-    // Capture both stdout (store path) and stderr (build log).
+    // stdout is the store path, stderr the build log.
     let output = cmd
         .output()
         .await
         .map_err(|e| EngineError::SetupFailed(format!("failed to spawn nix build: {e}")))?;
 
-    // Stream stderr to the logger.
     if !output.stderr.is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         for line in stderr.lines() {
@@ -286,7 +279,6 @@ pub async fn build_nix_env(
         )));
     }
 
-    // Cache the result.
     if let Err(e) = tokio::fs::write(&cache_file, store_path).await {
         warn!(%hash, "failed to write cache file: {e}");
     }

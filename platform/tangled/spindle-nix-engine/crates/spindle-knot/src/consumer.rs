@@ -299,7 +299,6 @@ impl KnotConsumer {
             return Ok(());
         }
 
-        // Load cursor from database
         let cursor = self.db.get_knot_cursor(knot).map_err(|e| {
             KnotError::Database(format!("failed to load cursor for knot {knot}: {e}"))
         })?;
@@ -330,7 +329,7 @@ impl KnotConsumer {
         if let Some(conn) = connections.remove(knot) {
             conn.cancel.cancel();
             if let Some(task) = conn.task {
-                // Give the task a moment to clean up, but don't block indefinitely
+                // A moment to clean up, without blocking indefinitely.
                 let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
             }
             info!(knot = %knot, "unsubscribed from knot event stream");
@@ -548,14 +547,13 @@ async fn process_ws_message(
     db: &Arc<spindle_db::Database>,
     connections: &Arc<RwLock<HashMap<String, KnotConnection>>>,
 ) -> Result<(), KnotError> {
-    // Parse the knot message envelope
     let msg: KnotMessage = serde_json::from_str(text).map_err(|e| {
         KnotError::Parse(format!(
             "failed to parse WebSocket message as JSON for {knot}: {e}"
         ))
     })?;
 
-    // Update cursor using current timestamp (matches Go consumer behavior)
+    // The current timestamp, which is what the Go consumer uses.
     let now_nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -574,13 +572,11 @@ async fn process_ws_message(
         }
     }
 
-    // Only process pipeline events
     if msg.nsid != PIPELINE_NSID {
         debug!(knot = %knot, nsid = %msg.nsid, "ignoring non-pipeline event");
         return Ok(());
     }
 
-    // Extract DID from triggerMetadata.repo.did
     let did = msg
         .event
         .get("triggerMetadata")

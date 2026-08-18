@@ -87,7 +87,6 @@ async fn create(args: RepoCreateArgs) -> Result<()> {
     let base = std::env::var("TANGLED_API_BASE").unwrap_or_else(|_| "https://tngl.sh".into());
     let client = crate::util::make_client(&base);
 
-    // Determine PDS base and target knot hostname
     let pds = session
         .pds
         .clone()
@@ -371,7 +370,7 @@ async fn fork(args: RepoForkArgs) -> Result<()> {
     let fork_name = args.name.unwrap_or_else(|| source_name.clone());
     let knot = args.knot.unwrap_or_else(|| info.knot.clone());
 
-    // Build HTTPS source URL for the knot to clone (knot uses DID-based paths)
+    // The knot clones over HTTPS, and addresses repos by DID.
     let source_url = format!("https://{}/{}/{}", info.knot, info.did, source_name);
 
     // AT URI of the source repo record (marks this as a fork in the PDS)

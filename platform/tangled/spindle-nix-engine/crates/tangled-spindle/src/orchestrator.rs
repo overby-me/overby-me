@@ -81,7 +81,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
     let knot = event.knot.clone();
     let rkey = event.rkey.clone().unwrap_or_default();
 
-    // Parse the pipeline record from the event payload.
     let record: PipelineRecord = match serde_json::from_value(event.payload.clone()) {
         Ok(r) => r,
         Err(e) => {
@@ -95,7 +94,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         rkey: rkey.clone(),
     };
 
-    // Extract repo info from the record's trigger metadata.
     let repo_did = match record.repo_did() {
         Some(d) => d.to_string(),
         None => {
@@ -125,7 +123,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         "processing pipeline event"
     );
 
-    // Verify the repo is registered on this spindle instance.
     match ctx.db.get_repo(&repo_did, &repo_name) {
         Ok(Some(_)) => {} // Repo is tracked — proceed.
         Ok(None) => {
@@ -147,7 +144,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         }
     }
 
-    // Extract workflows from the record.
     let workflow_manifests = match &record.workflows {
         Some(wfs) if !wfs.is_empty() => wfs.clone(),
         _ => {
@@ -156,16 +152,15 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         }
     };
 
-    // Parse trigger metadata by re-serializing the event payload's triggerMetadata.
+    // Re-serialized rather than read field by field: the shape is the event's.
     let trigger: Option<TriggerMetadata> = event
         .payload
         .get("triggerMetadata")
         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-    // Build pipeline environment variables.
     let pipeline_env = PipelineEnvVars::build(trigger.as_ref(), &pipeline_id, ctx.dev);
 
-    // Extract commit SHA from trigger metadata for the clone step.
+    // The clone step needs the commit SHA.
     let commit_sha = trigger.as_ref().and_then(|t| {
         t.push
             .as_ref()
@@ -173,7 +168,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
             .or_else(|| t.pull_request.as_ref().map(|pr| pr.source_sha.clone()))
     });
 
-    // Create the Pipeline struct.
     let pipeline = Pipeline {
         repo_owner: repo_did.clone(),
         repo_name: repo_name.clone(),
@@ -181,7 +175,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         workflows: Vec::new(), // Workflows are processed individually below.
     };
 
-    // Initialize workflows via the engine.
     let mut workflow_entries = Vec::new();
 
     for manifest in &workflow_manifests {
@@ -200,7 +193,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
             }
         };
 
-        // Parse clone options from the workflow manifest.
         let clone_opts: Option<PipelineCloneOpts> = manifest
             .clone
             .as_ref()
@@ -234,7 +226,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         return;
     }
 
-    // Register all workflows as pending in the database.
     for (wid, _) in &workflow_entries {
         let wid_str = wid.to_string();
         if let Err(e) = ctx.db.status_pending(
@@ -247,7 +238,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
             error!(%e, workflow_id = %wid_str, "failed to create pending status");
         }
 
-        // Emit a status event.
         emit_status_event(
             &ctx,
             &pipeline_id,
@@ -264,7 +254,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         .map(|(wid, _)| wid.clone())
         .collect();
 
-    // Submit a job to execute all workflows.
     let job_ctx = ctx.clone();
     let job_pipeline_id = pipeline_id.clone();
     let job_repo_path = format!("{}/{}", repo_did, repo_name);
@@ -291,7 +280,7 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
 
             match result {
                 Ok(handles) => {
-                    // Pipeline completed within timeout. Handles already joined inside.
+                    // Handles are already joined inside.
                     drop(handles);
                 }
                 Err(_) => {
@@ -313,7 +302,6 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         }
         Err(e) => {
             error!(%e, pipeline = %pipeline_id, "failed to submit pipeline job to queue");
-            // Mark all workflows as failed.
             for wid in &workflow_ids {
                 let wid_str = wid.to_string();
                 let _ = ctx.db.status_failed(&wid_str);
@@ -362,7 +350,6 @@ async fn execute_pipeline(
         "executing pipeline"
     );
 
-    // Fetch secrets for this repo.
     let secrets = match ctx.secrets.get_secrets_unlocked(repo_path).await {
         Ok(s) => s,
         Err(e) => {
@@ -371,7 +358,6 @@ async fn execute_pipeline(
         }
     };
 
-    // Execute all workflows in parallel.
     let mut handles = Vec::new();
 
     for (wid, mut workflow) in workflows {
@@ -407,8 +393,7 @@ async fn execute_pipeline(
     }
     let _guard = AbortGuard(abort_handles);
 
-    // Now await all handles. If the outer timeout drops this future,
-    // _guard's Drop fires and aborts all workflow tasks.
+    // If the outer timeout drops this future, _guard's Drop fires here.
     for handle in handles {
         match handle.await {
             Ok(()) => {}
@@ -437,7 +422,6 @@ async fn execute_workflow(
 
     info!(workflow_id = %wid_str, name = %workflow.name, "starting workflow execution");
 
-    // Transition to running.
     if let Err(e) = ctx.db.status_running(&wid_str) {
         error!(%e, workflow_id = %wid_str, "failed to set running status");
     }
@@ -450,7 +434,6 @@ async fn execute_workflow(
         None,
     );
 
-    // Create the workflow logger.
     let secret_values: Vec<String> = secrets.iter().map(|s| s.value.clone()).collect();
     let logger: Arc<dyn WorkflowLogger> =
         match FileWorkflowLogger::new(&ctx.log_dir, &wid, &secret_values) {
@@ -470,7 +453,6 @@ async fn execute_workflow(
             }
         };
 
-    // Wrap the entire execution in a timeout.
     let result = tokio::time::timeout(timeout, async {
         run_workflow_steps(&ctx, &wid, &workflow, &secrets, logger.as_ref()).await
     })
@@ -537,7 +519,6 @@ async fn execute_workflow(
         }
     }
 
-    // Close the logger.
     if let Err(e) = logger.close() {
         warn!(%e, workflow_id = %wid_str, "failed to close workflow logger");
     }
@@ -553,11 +534,10 @@ async fn run_workflow_steps(
 ) -> Result<(), EngineError> {
     use spindle_models::log_line::StepStatus;
 
-    // Setup the workflow environment (build Nix closure, create workspace).
+    // Builds the Nix closure and creates the workspace.
     info!(workflow_id = %wid, "setting up workflow environment");
     ctx.engine.setup_workflow(wid, workflow, logger).await?;
 
-    // Execute each step sequentially.
     for (step_idx, step) in workflow.steps.iter().enumerate() {
         info!(
             workflow_id = %wid,
@@ -566,21 +546,17 @@ async fn run_workflow_steps(
             "executing step"
         );
 
-        // Write control log: step start.
         let mut start_writer = logger.control_writer(step_idx, step.as_ref(), StepStatus::Start);
         let _ = start_writer.write_all(b"start");
 
-        // Run the step.
         let step_result = ctx
             .engine
             .run_step(wid, workflow, step_idx, secrets, logger)
             .await;
 
-        // Write control log: step end.
         let mut end_writer = logger.control_writer(step_idx, step.as_ref(), StepStatus::End);
         let _ = end_writer.write_all(b"end");
 
-        // Propagate step failures.
         step_result?;
 
         info!(
@@ -624,10 +600,8 @@ fn emit_status_event(
         pipeline_id.knot, PIPELINE_NSID, pipeline_id.rkey
     );
 
-    // Generate a simple rkey from the nanosecond timestamp.
     let rkey = created_nanos.to_string();
 
-    // Build the PipelineStatus record matching the AT Protocol schema.
     let mut payload = serde_json::json!({
         "$type": PIPELINE_STATUS_NSID,
         "createdAt": now.to_rfc3339(),
@@ -652,10 +626,8 @@ fn emit_status_event(
         created: created_nanos,
     };
 
-    // Insert into the events table.
     match ctx.db.insert_event(&params) {
         Ok(event_id) => {
-            // Broadcast to WebSocket clients.
             let event = spindle_db::events::Event {
                 id: event_id,
                 kind: PIPELINE_STATUS_NSID.into(),

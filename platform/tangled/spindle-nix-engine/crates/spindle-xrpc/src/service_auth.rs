@@ -166,7 +166,6 @@ async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, Aut
         message: "invalid JWT payload".into(),
     })?;
 
-    // Validate audience matches this spindle's DID.
     if payload.aud != state.did_web {
         return Err(AuthError {
             status: StatusCode::FORBIDDEN,
@@ -177,7 +176,7 @@ async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, Aut
         });
     }
 
-    // Validate expiration (with 30s grace for clock skew).
+    // 30s of grace for clock skew.
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -189,7 +188,6 @@ async fn verify_jwt(token: &str, state: &XrpcContext) -> Result<ServiceAuth, Aut
         });
     }
 
-    // Validate issuer is a DID.
     if !payload.iss.starts_with("did:") {
         return Err(AuthError {
             status: StatusCode::UNAUTHORIZED,

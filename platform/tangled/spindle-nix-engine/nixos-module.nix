@@ -1,9 +1,5 @@
-# NixOS module: services.tangled-spindles
-#
-# Declarative multi-runner deployment for tangled-spindle-nix-engine,
-# modeled after services.github-runners.
-#
-# See PLAN.md Phase 7 for the full specification.
+# services.tangled-spindles: declarative multi-runner deployment for
+# tangled-spindle-nix-engine, modeled after services.github-runners.
 #
 # Usage:
 #   services.tangled-spindles = {
@@ -243,7 +239,6 @@ in {
   config = let
     enabledRunners = lib.filterAttrs (_: runner: runner.enable) cfg;
 
-    # Generate a systemd service for a single runner instance
     mkRunnerService = name: runner: let
       stateDir = "tangled-spindle/${name}";
       logsDir = "tangled-spindle/${name}";
@@ -347,11 +342,6 @@ in {
             # because they create a parent mount namespace with restricted proc
             # options ("mount too revealing") that prevent hakoniwa from mounting
             # procfs in its nested PID namespace.
-
-            # Kernel hardening options that create mount namespaces are omitted
-            # because they cause "mount too revealing" when hakoniwa tries to
-            # mount procfs in its PID namespace. Hakoniwa provides its own
-            # mount namespace isolation per workflow.
 
             # Privilege hardening
             NoNewPrivileges = true;

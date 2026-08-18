@@ -52,16 +52,14 @@ impl SecretMask {
                 continue;
             }
 
-            // Add the raw secret value
             patterns.push(value.to_owned());
 
-            // Add base64-encoded variant
             let b64 = BASE64.encode(value.as_bytes());
             if b64 != value {
                 patterns.push(b64.clone());
             }
 
-            // Add base64 without padding (if different from padded version and raw value)
+            // Unpadded base64, when it differs from both of the above.
             let b64_no_pad = b64.trim_end_matches('=');
             if b64_no_pad != b64 && b64_no_pad != value {
                 patterns.push(b64_no_pad.to_owned());
@@ -72,9 +70,9 @@ impl SecretMask {
             return None;
         }
 
-        // Sort longest-first so longer matches are replaced before shorter substrings
+        // Longest first, so a longer match is replaced before a substring of it
         patterns.sort_by_key(|b| std::cmp::Reverse(b.len()));
-        // Deduplicate (after sorting, duplicates are adjacent)
+        // and duplicates are adjacent once sorted.
         patterns.dedup();
 
         Some(Self { patterns })

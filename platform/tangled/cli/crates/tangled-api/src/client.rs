@@ -59,7 +59,6 @@ impl TangledClient {
 
     fn xrpc_url(&self, method: &str) -> String {
         let base = self.base_url.trim_end_matches('/');
-        // Add https:// if no protocol is present
         let base_with_protocol = if base.starts_with("http://") || base.starts_with("https://") {
             base.to_string()
         } else {
@@ -188,7 +187,6 @@ impl TangledClient {
     ) -> Result<TRes> {
         let url = self.xrpc_url(method);
         if let Some(oauth) = self.should_use_oauth(bearer) {
-            // Build full URL with query params
             let mut full_url = reqwest::Url::parse(&url)?;
             for (k, v) in params {
                 full_url.query_pairs_mut().append_pair(k, v);
@@ -321,7 +319,6 @@ impl TangledClient {
         // NOTE: Repo listing is done via the user's PDS using com.atproto.repo.listRecords
         // for the collection "sh.tangled.repo". This does not go through the Tangled API base.
         // Here, `self.base_url` must be the PDS base (e.g., https://bsky.social).
-        // Resolve handle to DID if needed
         let did = match user {
             Some(u) if u.starts_with("did:") => u.to_string(),
             Some(handle) => {
@@ -1345,7 +1342,6 @@ impl TangledClient {
             )
             .await?;
             let resp_text = String::from_utf8_lossy(&resp_body);
-            // Look for the PR URL in the response
             if let Some(pr_path) = resp_text
                 .lines()
                 .find(|l| l.contains("/pulls/"))
@@ -1892,13 +1888,11 @@ impl TangledClient {
         pds_base: &str,
         access_jwt: &str,
     ) -> Result<()> {
-        // Fetch the pull request to get patch and target branch
         let pds_client = self.derive(pds_base);
         let pull = pds_client
             .get_pull_record(pull_did, pull_rkey, Some(access_jwt))
             .await?;
 
-        // Get service auth token for the knot
         let sa = self
             .service_auth_token(knot, pds_base, access_jwt, "sh.tangled.repo.merge")
             .await?;

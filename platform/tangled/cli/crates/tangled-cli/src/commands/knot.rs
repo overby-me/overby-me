@@ -13,7 +13,6 @@ pub async fn run(_cli: &Cli, cmd: KnotCommand) -> Result<()> {
 
 async fn migrate(args: KnotMigrateArgs) -> Result<()> {
     let session = crate::util::load_session_with_refresh().await?;
-    // 1) Ensure we're inside a git repository and working tree is clean
     let repo = GitRepository::discover(Path::new("."))?;
     let mut status_opts = StatusOptions::new();
     status_opts.include_untracked(false).include_ignored(false);
@@ -24,7 +23,6 @@ async fn migrate(args: KnotMigrateArgs) -> Result<()> {
         ));
     }
 
-    // 2) Derive current branch and ensure it's pushed to origin
     let head = match repo.head() {
         Ok(h) => h,
         Err(_) => return Err(anyhow!("repository does not have a HEAD")),
@@ -49,7 +47,6 @@ async fn migrate(args: KnotMigrateArgs) -> Result<()> {
         })
     })?;
 
-    // Connect and list remote heads to find refs/heads/<branch>
     let mut remote = origin;
     remote.connect(Direction::Fetch)?;
     let remote_heads = remote.list()?;
@@ -73,7 +70,6 @@ async fn migrate(args: KnotMigrateArgs) -> Result<()> {
         ));
     }
 
-    // 3) Parse origin URL to verify repo identity
     let origin_url = remote
         .url()
         .ok_or_else(|| anyhow!("origin has no URL"))?
@@ -103,7 +99,7 @@ async fn migrate(args: KnotMigrateArgs) -> Result<()> {
         .get_repo_info(owner, &name, Some(session.access_jwt.as_str()))
         .await?;
 
-    // Build a publicly accessible source URL on tangled.org for the existing repo
+    // A publicly reachable source URL for the knot to seed from.
     let owner_path = if owner.starts_with('@') {
         owner.to_string()
     } else {
@@ -120,7 +116,6 @@ async fn migrate(args: KnotMigrateArgs) -> Result<()> {
         )
     };
 
-    // Create the repo on the target knot, seeding from source
     let client = crate::util::make_default_client();
     let opts = tangled_api::client::CreateRepoOptions {
         did: &session.did,
@@ -135,7 +130,6 @@ async fn migrate(args: KnotMigrateArgs) -> Result<()> {
     };
     client.create_repo(opts).await?;
 
-    // Update the PDS record to point to the new knot
     if args.update_record {
         client
             .update_repo_knot(

@@ -1,0 +1,138 @@
+# deslop configuration for tangled-spindle-nix-engine, a Tangled CI runner
+# that executes workflows in hakoniwa containers with Nix-built environments.
+#
+# The service is tokio-async end to end and handles secrets, which is the two
+# things deslop's Rust rules are weakest at. Several entries below are recorded
+# false positives rather than accepted risk; each says which.
+
+disabled_rules = [
+  # FALSE POSITIVE, verified. The rule flags `tokio::fs::read_to_string`,
+  # `tokio::fs::write`, `tokio::fs::create_dir_all` and `tokio::time::sleep`,
+  # which are the async forms, and it also lands on lines that do no I/O at
+  # all (a closing paren of a signature, a `PathBuf::join`, a `format!`). It
+  # appears to match names rather than types, so it cannot tell std from
+  # tokio. 87 of the 289 findings here are this rule; spindle-queue's 11 are
+  # all `tokio::time::sleep(..).await` inside `#[tokio::test]`.
+  "rust_blocking_io_in_async",
+
+  # FALSE POSITIVE, verified. Every site is `self.states.lock().await` on a
+  # `tokio::sync::Mutex`, which is the lock type meant to be held across an
+  # await. clippy's `await_holding_lock` is warn-by-default and this workspace
+  # builds under `-D warnings`, so the real check already passes.
+  "rust_lock_across_await",
+  "rust_async_hold_permit_across_await",
+
+  # FALSE POSITIVE, verified. The flagged comparisons are `key == "nixpkgs"`,
+  # `resp.status() == StatusCode::NOT_FOUND` and a `to_string()` on an error
+  # message. Nothing secret is compared. Token comparison in this tree goes
+  # through spindle-xrpc's service auth, which compares JWT claims after
+  # signature verification, not raw secrets.
+  "rust_secret_equality_compare",
+
+  # FALSE POSITIVE, verified. Both sites are test fixtures inside
+  # spindle-models/src/secret_mask.rs — the crate whose job is redacting
+  # secrets, whose tests necessarily contain secret-shaped literals.
+  "hardcoded_secret",
+
+  # deslop indexes one file at a time, so a call into a sibling crate of the
+  # workspace has no local symbol to resolve against.
+  "hallucinated_import_call",
+
+  # The engine is a long-running service, so the async shapes it flags are the
+  # ordinary ones: a `select!` loop over a broadcast receiver and a keepalive
+  # tick, work spawned under a `CancellationToken`, and futures that live for
+  # the length of a websocket connection. Cancellation is by token and by the
+  # AbortOnDrop guard in orchestrator.rs, neither of which the rule reads.
+  "rust_async_missing_fuse_pin",
+  "rust_async_recreate_future_in_select",
+  "rust_async_spawn_cancel_at_await",
+  "rust_async_monopolize_executor",
+  "rust_async_lock_order_cycle",
+  "rust_detached_spawn_without_handle",
+  "rust_large_future_stack",
+
+  # Drop impls here remove a container and close a logger. Both are cleanup
+  # that must finish before the workflow is reported done, so they are
+  # deliberately synchronous.
+  "rust_blocking_drop",
+  "rust_async_blocking_drop",
+
+  # Secrets reach this service as OpenBao responses and workflow env, which
+  # have to deserialize and serialize to be usable at all. Redaction happens
+  # at the log boundary instead, in spindle-models' secret_mask.
+  "rust_debug_secret",
+  "rust_serde_sensitive_deserialize",
+  "rust_serde_sensitive_serialize",
+
+  # The AT Protocol lexicons this speaks are open by design: an unknown field
+  # in a `sh.tangled.*` record is a newer publisher, not an error, so
+  # deny_unknown_fields would break forward compatibility.
+  "rust_serde_unknown_fields_allowed",
+
+  # DIDs, rkeys, knot hostnames and workflow names are AT Protocol strings.
+  # They are the wire types, and narrowing them to enums here would only move
+  # the parsing to a place with less context.
+  "rust_stringly_typed_enum_boundary",
+
+  # Accepted, with the sites named. Three in total, all infallible or fatal:
+  # `Method::from_bytes(b"LIST")` on a literal, `to_string_pretty` on a
+  # `json!` value we just built, and `expect` on installing the Ctrl-C and
+  # SIGTERM handlers at startup, where failing to install one should abort.
+  "unwrap_in_non_test_code",
+  "expect_in_non_test_code",
+
+  # Maps here are per-repo secret sets and per-workflow state keyed by ids the
+  # spindle owner controls, not adversarial input, and none sit in a hot path.
+  "rust_hashmap_default_hasher",
+
+  # The queue, db and engine own their state behind a lock by design; that is
+  # what makes them shareable across the axum handlers and the ingest tasks.
+  "rust_mutex_wrapped_collection",
+
+  # Log files are streamed to websocket clients line by line, which is the
+  # point: a buffered write would hold output back from a running build.
+  "rust_unbuffered_file_writes",
+  "rust_lines_allocate_per_line",
+
+  # Reads are of our own generated Nix expressions and workflow manifests from
+  # the repo being built, both already bounded by the knot's limits.
+  "rust_unbounded_read_to_string",
+
+  # The cache lookup checks a store path exists before using it; a race there
+  # means a rebuild, not a fault.
+  "rust_check_then_open_path",
+
+  # Wire-format work: nanosecond timestamps to the i64 the AT Protocol cursor
+  # uses, and byte counts to the u32 a log frame header carries.
+  "rust_narrowing_numeric_cast",
+
+  # `dev` and `force` are the two flags in question, both mirroring a CLI flag
+  # of the same name.
+  "rust_public_bool_parameter_api",
+
+  # The engine trait is public so an alternative backend can implement it, and
+  # its error type is boxed for exactly that reason.
+  "rust_public_box_dyn_error",
+
+  # Config structs are filled from the environment in one pass and validated
+  # after, which the rule reads as partial initialisation.
+  "rust_partial_init_escape",
+
+  # Crate roots re-export their own public types; the workspace has ten small
+  # crates rather than one large one, which is what makes those lists long.
+  "rust_root_reexport_wall",
+  "rust_oversized_module_file",
+  "rust_duplicate_bootstrap_sequence",
+
+  # Boxed trait objects behind a Vec are how the engine holds its steps; the
+  # indirection is the polymorphism, not a layout mistake.
+  "rust_pointer_chasing_vec_box",
+
+  # Config fields read only under a cfg or by a not-yet-wired subsystem.
+  "rust_broad_allow_dead_code",
+
+  # FALSE POSITIVE, verified. The three sites are `.output()`, a `write!` of
+  # one already-decoded line, and `status.code()`. The decoding they are near
+  # is one pass over a `nix build` log, which is not a hot path.
+  "rust_utf8_validate_hot_path",
+]

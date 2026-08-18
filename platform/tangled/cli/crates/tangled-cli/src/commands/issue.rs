@@ -121,7 +121,6 @@ async fn show(args: IssueShowArgs) -> Result<()> {
         .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
         .unwrap_or_else(|| "https://bsky.social".into());
     let client = crate::util::make_client(&pds);
-    // Fetch all issues by this DID and find rkey
     let items = client
         .list_issues(&did, None, Some(session.access_jwt.as_str()))
         .await?;
@@ -140,7 +139,6 @@ async fn show(args: IssueShowArgs) -> Result<()> {
 }
 
 async fn edit(args: IssueEditArgs) -> Result<()> {
-    // Simple edit: fetch existing record and putRecord with new title/body
     let session = crate::util::load_session_with_refresh().await?;
     let (did, rkey) = parse_record_id(&args.id, &session.did)?;
     let pds = session
@@ -148,7 +146,6 @@ async fn edit(args: IssueEditArgs) -> Result<()> {
         .clone()
         .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
         .unwrap_or_else(|| "https://bsky.social".into());
-    // Get existing
     let client = crate::util::make_client(&pds);
     let mut rec: Issue = client
         .get_issue_record(&did, &rkey, Some(session.access_jwt.as_str()))
@@ -159,12 +156,10 @@ async fn edit(args: IssueEditArgs) -> Result<()> {
     if let Some(b) = args.body.as_deref() {
         rec.body = b.to_string();
     }
-    // Put record back
     client
         .put_issue_record(&did, &rkey, &rec, Some(session.access_jwt.as_str()))
         .await?;
 
-    // Optional state change
     if let Some(state) = args.state.as_deref() {
         let state_nsid = match state {
             "open" => "sh.tangled.repo.issue.state.open",
@@ -199,7 +194,6 @@ async fn comment(args: IssueCommentArgs) -> Result<()> {
         .clone()
         .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
         .unwrap_or_else(|| "https://bsky.social".into());
-    // Resolve issue AT-URI
     let client = crate::util::make_client(&pds);
     let issue_at = client
         .get_issue_record(&did, &rkey, Some(session.access_jwt.as_str()))

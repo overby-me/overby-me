@@ -293,18 +293,16 @@ impl JetstreamClient {
             JetstreamError::Connection(format!("invalid Jetstream endpoint URL: {e}"))
         })?;
 
-        // Add wanted collections
         for collection in WANTED_COLLECTIONS {
             url.query_pairs_mut()
                 .append_pair("wantedCollections", collection);
         }
 
-        // Add wanted DIDs
         for did in dids {
             url.query_pairs_mut().append_pair("wantedDids", did);
         }
 
-        // Add cursor if we have one (non-zero means we have a saved position)
+        // Non-zero means a saved position.
         if cursor > 0 {
             url.query_pairs_mut()
                 .append_pair("cursor", &cursor.to_string());
@@ -340,7 +338,6 @@ impl JetstreamClient {
                 return;
             }
 
-            // Snapshot the current DIDs for this connection
             let dids = self.watched_dids.read().await.clone();
 
             if dids.is_empty() {
@@ -420,7 +417,7 @@ impl JetstreamClient {
 
         let (mut _write, mut read) = ws_stream.split();
 
-        // Track how many events since last cursor save for batching
+        // Cursor saves are batched.
         let mut events_since_save: u64 = 0;
         const CURSOR_SAVE_INTERVAL: u64 = 100;
 
@@ -431,7 +428,6 @@ impl JetstreamClient {
                         Some(Ok(Message::Text(text))) => {
                             match self.handle_message(&text, cursor).await {
                                 Ok(true) => {
-                                    // Event was processed and cursor updated
                                     events_since_save += 1;
                                     if events_since_save >= CURSOR_SAVE_INTERVAL {
                                         if let Err(e) = save_cursor(*cursor) {
@@ -441,7 +437,6 @@ impl JetstreamClient {
                                     }
                                 }
                                 Ok(false) => {
-                                    // Message was not a relevant event (ignored)
                                 }
                                 Err(e) => {
                                     debug!(%e, "failed to process Jetstream message");
@@ -510,7 +505,6 @@ impl JetstreamClient {
             *cursor = event.time_us;
         }
 
-        // We only care about commit events
         if event.kind != "commit" {
             return Ok(false);
         }
@@ -560,7 +554,6 @@ impl JetstreamClient {
             }
         };
 
-        // Send to the ingestion channel
         if self.event_tx.send(parsed).await.is_err() {
             debug!("event channel closed, receiver dropped");
             return Err(JetstreamError::Connection(

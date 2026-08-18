@@ -52,12 +52,11 @@ async fn login_browser(_cli: &Cli, args: AuthLoginBrowserArgs) -> Result<()> {
     println!("Opening browser for authentication...");
     let result = tangled_api::oauth::login_browser(&input).await?;
 
-    // Save the OAuth session for DPoP-authenticated requests
     let oauth_json = serde_json::to_string(&result.persisted)?;
     tangled_config::keychain::Keychain::new("tangled-cli-oauth", "default")
         .set_password(&oauth_json)?;
 
-    // Also save a basic session for compatibility with existing commands
+    // A basic session too, for the commands that still expect one.
     let session = tangled_config::session::Session {
         access_jwt: String::new(),
         refresh_jwt: String::new(),

@@ -99,9 +99,8 @@ async fn create(args: PrCreateArgs) -> Result<()> {
         &title_buf
     };
 
-    // The appview requires a cookie-based OAuth session to create PRs,
-    // which cannot be done programmatically from the CLI. Open the
-    // browser to the PR creation page with pre-filled parameters.
+    // Creating a PR needs a cookie-based OAuth session, which the CLI cannot
+    // establish, so the browser opens the creation page pre-filled instead.
     let appview_base =
         std::env::var("TANGLED_APPVIEW_BASE").unwrap_or_else(|_| "https://tangled.org".to_string());
     let mut pr_url = url::Url::parse(&format!("{}/{}/{}/pulls/new", appview_base, owner, name))?;
@@ -296,14 +295,12 @@ async fn checkout(args: PrCheckoutArgs) -> Result<()> {
 
     let branch_name = args.branch.unwrap_or_else(|| format!("pr/{}", rkey));
 
-    // Create and checkout the branch from the PR's target branch
     let target_branch = &pr.target.branch;
 
     let status = Command::new("git")
         .args(["checkout", "-b", &branch_name, target_branch])
         .status()?;
     if !status.success() {
-        // Branch might already exist, try switching to it
         let status = Command::new("git")
             .args(["checkout", &branch_name])
             .status()?;
@@ -315,7 +312,6 @@ async fn checkout(args: PrCheckoutArgs) -> Result<()> {
         }
     }
 
-    // Apply the patch via git am
     let mut child = Command::new("git")
         .args(["am", "--3way"])
         .stdin(std::process::Stdio::piped())
@@ -345,16 +341,13 @@ async fn merge(args: PrMergeArgs) -> Result<()> {
         .or_else(|| std::env::var("TANGLED_PDS_BASE").ok())
         .unwrap_or_else(|| "https://bsky.social".into());
 
-    // Get the PR
     let pds_client = crate::util::make_client(&pds);
     let pull = pds_client
         .get_pull_record(&did, &rkey, Some(session.access_jwt.as_str()))
         .await?;
 
-    // Parse target repo info
     let (repo_did, repo_name, knot) = parse_target_repo_info(&pull, &pds_client, &session).await?;
 
-    // Check if PR is part of a stack
     if let Some(stack_id) = &pull.stack_id {
         merge_stacked_pr(
             &pds_client,
@@ -370,7 +363,6 @@ async fn merge(args: PrMergeArgs) -> Result<()> {
         )
         .await?;
     } else {
-        // Single PR merge (existing logic)
         merge_single_pr(&session, &did, &rkey, &repo_did, &repo_name, &knot, &pds).await?;
     }
 
@@ -442,7 +434,6 @@ async fn merge_stacked_pr(
     stack_id: &str,
     pds: &str,
 ) -> Result<()> {
-    // Step 1: Get full stack
     println!("🔍 Detecting stack...");
     let stack = get_stack_pulls(pds_client, &session.did, stack_id, &session.access_jwt).await?;
 
@@ -450,7 +441,7 @@ async fn merge_stacked_pr(
         return Err(anyhow!("Stack is empty"));
     }
 
-    // Step 2: Find substack (current PR and all below it)
+    // The current PR and everything below it.
     let substack = find_substack(&stack, current_pull.change_id.as_deref())?;
 
     println!(
@@ -470,7 +461,6 @@ async fn merge_stacked_pr(
     }
     println!();
 
-    // Step 3: Check for conflicts
     println!("✓ Checking for conflicts...");
     let api = crate::util::make_default_client();
     let conflicts = check_stack_conflicts(
@@ -504,16 +494,14 @@ async fn merge_stacked_pr(
     println!("✓ All PRs can be merged cleanly");
     println!();
 
-    // Step 4: Confirmation prompt
     if !prompt_confirmation(&format!("Merge {} pull request(s)?", substack.len()))? {
         println!("Merge cancelled.");
         return Ok(());
     }
 
-    // Step 5: Merge the stack (backend handles combined patch)
     println!("Merging {} PR(s)...", substack.len());
 
-    // Use the current PR's merge endpoint - backend will handle the stack
+    // The current PR's merge endpoint; the backend combines the stack's patches.
     api.merge_pull(
         current_did,
         current_rkey,
@@ -536,7 +524,6 @@ async fn get_stack_pulls(
     stack_id: &str,
     bearer: &str,
 ) -> Result<Vec<tangled_api::PullRecord>> {
-    // List all user's PRs and filter by stack_id
     let all_pulls = client.list_pulls(user_did, None, Some(bearer)).await?;
 
     let mut stack_pulls: Vec<_> = all_pulls
@@ -544,7 +531,6 @@ async fn get_stack_pulls(
         .filter(|p| p.pull.stack_id.as_deref() == Some(stack_id))
         .collect();
 
-    // Order by parent relationships (top to bottom)
     order_stack(&mut stack_pulls)?;
 
     Ok(stack_pulls)
@@ -555,7 +541,6 @@ fn order_stack(pulls: &mut Vec<tangled_api::PullRecord>) -> Result<()> {
         return Ok(());
     }
 
-    // Build parent map: parent_change_id -> pull
     let mut change_id_map: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     let mut parent_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -569,7 +554,7 @@ fn order_stack(pulls: &mut Vec<tangled_api::PullRecord>) -> Result<()> {
         }
     }
 
-    // Find top of stack (not a parent of any other PR)
+    // The top is the one no other PR names as its parent.
     let mut top_idx = None;
     for (idx, pr) in pulls.iter().enumerate() {
         if let Some(cid) = &pr.pull.change_id {
@@ -582,7 +567,6 @@ fn order_stack(pulls: &mut Vec<tangled_api::PullRecord>) -> Result<()> {
 
     let top_idx = top_idx.ok_or_else(|| anyhow!("Could not find top of stack"))?;
 
-    // Walk down the stack to build ordered list
     let mut ordered = Vec::new();
     let mut current_idx = top_idx;
     let mut visited = std::collections::HashSet::new();
@@ -594,7 +578,6 @@ fn order_stack(pulls: &mut Vec<tangled_api::PullRecord>) -> Result<()> {
         visited.insert(current_idx);
         ordered.push(current_idx);
 
-        // Find child (PR that has this PR as parent)
         let current_parent = &pulls[current_idx].pull.parent_change_id;
         if current_parent.is_none() {
             break;
@@ -609,7 +592,6 @@ fn order_stack(pulls: &mut Vec<tangled_api::PullRecord>) -> Result<()> {
         }
     }
 
-    // Reorder pulls based on ordered indices
     let original = pulls.clone();
     pulls.clear();
     for idx in ordered {
@@ -630,7 +612,6 @@ fn find_substack<'a>(
         .position(|p| p.pull.change_id.as_deref() == Some(change_id))
         .ok_or_else(|| anyhow!("PR not found in stack"))?;
 
-    // Return from current position to end (including current)
     Ok(stack[position..].iter().collect())
 }
 
@@ -648,7 +629,7 @@ async fn check_stack_conflicts(
     let mut conflicts = Vec::new();
     let mut cumulative_patch = String::new();
 
-    // Check each PR in order (bottom to top of substack)
+    // Bottom to top of the substack.
     for pr in substack.iter().rev() {
         cumulative_patch.push_str(pr.pull.patch.as_deref().unwrap_or(""));
         cumulative_patch.push('\n');
@@ -704,7 +685,6 @@ async fn parse_target_repo_info(
     let repo_did = parts[0].to_string();
     let repo_rkey = parts[3];
 
-    // Get repo name and knot
     #[derive(serde::Deserialize)]
     struct Rec {
         name: String,

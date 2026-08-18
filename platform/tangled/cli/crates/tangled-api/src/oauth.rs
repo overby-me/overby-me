@@ -302,7 +302,6 @@ pub async fn login_browser(handle: &str) -> Result<OAuthLoginResult> {
         .context("failed to get authorization URL")?;
     open::that(&auth_url).context("failed to open browser")?;
 
-    // Wait for the OAuth callback redirect
     let (stream, _) = listener
         .accept()
         .await

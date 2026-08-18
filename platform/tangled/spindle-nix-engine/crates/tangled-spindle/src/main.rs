@@ -66,10 +66,8 @@ async fn main() -> ExitCode {
         "tangled-spindle-nix starting"
     );
 
-    // Load configuration from environment variables
     let cfg = match config::Config::from_env() {
         Ok(mut cfg) => {
-            // Apply CLI overrides
             if cli.dev {
                 cfg.dev = true;
             }
@@ -122,7 +120,6 @@ async fn main() -> ExitCode {
         "configuration loaded"
     );
 
-    // Initialize database
     let db = match spindle_db::Database::open(&cfg.db_path) {
         Ok(db) => {
             info!(path = %cfg.db_path.display(), "database opened");
@@ -134,7 +131,6 @@ async fn main() -> ExitCode {
         }
     };
 
-    // Initialize RBAC enforcer
     let rbac = match spindle_rbac::SpindleEnforcer::new().await {
         Ok(enforcer) => {
             info!("RBAC enforcer initialized");
@@ -146,7 +142,6 @@ async fn main() -> ExitCode {
         }
     };
 
-    // Bootstrap RBAC: register spindle and owner
     if let Err(e) = rbac.add_spindle(&cfg.did_web).await {
         error!(%e, "failed to register spindle in RBAC");
         return ExitCode::FAILURE;
@@ -156,7 +151,6 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // Ensure owner is in the database and DID watch list
     if let Err(e) = db.add_spindle_owner(&cfg.owner) {
         error!(%e, "failed to add spindle owner to database");
         return ExitCode::FAILURE;

@@ -127,7 +127,6 @@ done"#,
 #[async_trait]
 impl Engine for NixEngine {
     fn init_workflow(&self, twf: PipelineWorkflow, pipeline: &Pipeline) -> EngineResult<Workflow> {
-        // Validate engine field.
         let engine = twf.engine.to_lowercase();
         if engine != "nix" && engine != "nixery" {
             return Err(EngineError::InvalidWorkflow(format!(
@@ -138,12 +137,11 @@ impl Engine for NixEngine {
 
         let mut workflow = Workflow::new(&twf.name);
 
-        // Parse the raw YAML.
         let deps = parse_dependencies_from_yaml(&twf.raw)?;
         let user_steps = parse_steps_from_yaml(&twf.raw)?;
         let env = parse_env_from_yaml(&twf.raw)?;
 
-        // Store the parsed dependency map as workflow data for use in setup_workflow.
+        // setup_workflow reads this back out.
         if let Some(nix_deps) = NixDeps::parse(&deps) {
             workflow.data = Some(serde_json::to_value(&deps).map_err(|e| {
                 EngineError::InvalidWorkflow(format!("failed to serialize deps: {e}"))
@@ -151,17 +149,14 @@ impl Engine for NixEngine {
             debug!(hash = %nix_deps.content_hash(), "parsed Nix dependencies");
         }
 
-        // Merge workflow-level env vars.
         workflow.environment = env;
 
-        // Build the clone step (unless skipped).
         let clone_opts = twf.clone.as_ref().map(|c| spindle_models::step::CloneOpts {
             depth: c.depth,
             skip: c.skip,
             submodules: c.submodules,
         });
 
-        // Build the repo URL from the pipeline's owner/name.
         let repo_url = if self.dev_mode {
             format!(
                 "http://localhost/{}/{}",
@@ -184,7 +179,6 @@ impl Engine for NixEngine {
             workflow.add_step(clone_step);
         }
 
-        // Add user-defined steps.
         for (name, command) in user_steps {
             workflow.add_step(UserStep::new(name, command));
         }
@@ -202,10 +196,8 @@ impl Engine for NixEngine {
         workflow: &Workflow,
         logger: &dyn WorkflowLogger,
     ) -> EngineResult<()> {
-        // Create the workspace directory.
         let workspace_dir = self.workspace_mgr.create(wid).await?;
 
-        // Build the Nix environment if dependencies are specified.
         let nix_env_path = if let Some(data) = &workflow.data {
             let deps: HashMap<String, Vec<String>> =
                 serde_json::from_value(data.clone()).map_err(|e| {
@@ -223,12 +215,11 @@ impl Engine for NixEngine {
             None
         };
 
-        // Build the hakoniwa container.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
 
-        // Mount system paths read-only (/etc excluded — handled separately for DNS).
+        // /etc is excluded here and handled below, for DNS.
         for dir in ["/bin", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix"] {
             if Path::new(dir).exists() {
                 container.bindmount_ro(dir, dir);
@@ -247,12 +238,10 @@ impl Engine for NixEngine {
             container.dir("/etc/ssl/certs", 0o755);
             container.file("/etc/ssl/certs/ca-certificates.crt", &contents);
         }
-        // Nix config (experimental features, substituters, etc.).
         if let Ok(contents) = std::fs::read_to_string("/etc/nix/nix.conf") {
             container.dir("/etc/nix", 0o755);
             container.file("/etc/nix/nix.conf", &contents);
         }
-        // Minimal passwd/group for the container user.
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
         container.file(
             "/etc/passwd",
@@ -260,7 +249,6 @@ impl Engine for NixEngine {
         );
         container.file("/etc/group", &format!("{user}:x:0:\n"));
 
-        // Writable workspace, /dev, /tmp, /proc.
         container.tmpfsmount("/workspace");
         container.dir("/proc", 0o555);
         container.devfsmount("/dev");
@@ -273,11 +261,10 @@ impl Engine for NixEngine {
             container.setrlimit(hakoniwa::Rlimit::Nofile, limit, limit);
         }
 
-        // Build environment variables for the container.
         let path = build_path(nix_env_path.as_deref());
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
 
-        // Spawn the container with a runner script that reads commands from stdin.
+        // The runner script reads commands from stdin.
         let runner_script = build_runner_script();
         let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
         hako_cmd.args(["-c", &runner_script]);
@@ -291,7 +278,6 @@ impl Engine for NixEngine {
         hako_cmd.env("USER", &user);
         hako_cmd.env("CI", "true");
 
-        // Add workflow-level env vars.
         for (k, v) in &workflow.environment {
             hako_cmd.env(k, v);
         }
@@ -317,7 +303,6 @@ impl Engine for NixEngine {
     }
 
     async fn destroy_workflow(&self, wid: &WorkflowId) -> EngineResult<()> {
-        // Remove the state and kill the container.
         if let Some(mut state) = self.states.lock().await.remove(&wid.to_string())
             && let Some(mut child) = state.container.take()
         {
@@ -328,7 +313,6 @@ impl Engine for NixEngine {
             }
         }
 
-        // Destroy the workspace directory.
         self.workspace_mgr.destroy(wid).await?;
 
         Ok(())
@@ -374,10 +358,9 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Send the command to the container's stdin and read output.
-        // This runs in a blocking task because hakoniwa uses sync I/O.
-        // Stderr is redirected to stdout in the runner script, so all output
-        // comes through the stdout pipe with sentinel markers.
+        // A blocking task, because hakoniwa uses sync I/O. The runner script
+        // redirects stderr into stdout, so everything arrives on the one pipe,
+        // delimited by sentinel markers.
         let wid_str = wid.to_string();
         let step_name = step.name().to_string();
         let mut output_writer = logger.data_writer(step_idx, "stdout".into());
@@ -395,7 +378,7 @@ impl Engine for NixEngine {
         drop(states);
 
         let result = tokio::task::spawn_blocking(move || {
-            // Write the command to stdin (null-byte delimited).
+            // Null-byte delimited.
             let stdin = child
                 .stdin
                 .as_mut()
@@ -416,8 +399,7 @@ impl Engine for NixEngine {
                 message: format!("failed to flush container stdin: {e}"),
             })?;
 
-            // Read stdout line by line until we see the sentinel.
-            // Stderr is merged into stdout by the runner script (2>&1).
+            // Until the sentinel.
             let mut exit_code: Option<i32> = None;
             if let Some(ref mut stdout) = child.stdout {
                 let reader = std::io::BufReader::new(stdout);
@@ -440,7 +422,6 @@ impl Engine for NixEngine {
 
         let (child, exit_code) = result?;
 
-        // Put the container back into the state for the next step.
         let mut states = self.states.lock().await;
         if let Some(state) = states.get_mut(&wid.to_string()) {
             state.container = Some(child);
@@ -479,7 +460,6 @@ fn build_path(nix_env: Option<&Path>) -> String {
         parts.push(format!("{}/sbin", env.display()));
     }
 
-    // Include the parent process's PATH.
     if let Ok(parent_path) = std::env::var("PATH") {
         parts.push(parent_path);
     }

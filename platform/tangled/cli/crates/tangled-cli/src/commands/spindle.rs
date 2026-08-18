@@ -199,7 +199,6 @@ async fn config(args: SpindleConfigArgs) -> Result<()> {
     } else if let Some(url) = args.url.as_deref() {
         Some(url)
     } else if args.enable {
-        // Default spindle URL
         Some("https://spindle.tangled.sh")
     } else {
         return Err(anyhow!("Invalid flags combination"));
@@ -327,7 +326,6 @@ async fn secret_list(args: SpindleSecretListArgs) -> Result<()> {
         .await?;
     let repo_at = format!("at://{}/sh.tangled.repo/{}", info.did, info.rkey);
 
-    // Get spindle base from repo config or use default
     let spindle_base = info
         .spindle
         .clone()
@@ -380,13 +378,11 @@ async fn secret_add(args: SpindleSecretAddArgs) -> Result<()> {
     // nothing about the newline. The literal --value form is left verbatim,
     // since there the caller wrote exactly what they meant.
     let value = if args.value == "-" {
-        // Read from stdin
         use std::io::Read;
         let mut buffer = String::new();
         std::io::stdin().read_to_string(&mut buffer)?;
         buffer.trim_end().to_string()
     } else if let Some(path) = args.value.strip_prefix('@') {
-        // Read from file, expand ~ if needed
         let expanded_path = if path.starts_with("~/") {
             if let Ok(home) = std::env::var("HOME") {
                 path.replacen("~/", &format!("{}/", home), 1)
@@ -401,7 +397,6 @@ async fn secret_add(args: SpindleSecretAddArgs) -> Result<()> {
             .trim_end()
             .to_string()
     } else {
-        // Use value as-is
         args.value
     };
 

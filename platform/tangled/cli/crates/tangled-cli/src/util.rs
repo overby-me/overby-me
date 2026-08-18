@@ -89,7 +89,6 @@ pub async fn refresh_session(session: &Session) -> Result<Session> {
     // Preserve PDS from old session
     new_session.pds = session.pds.clone();
 
-    // Save the refreshed session
     let mgr = session_manager();
     mgr.save(&new_session)?;
 
@@ -136,7 +135,6 @@ pub async fn load_session_with_refresh() -> Result<Session> {
         });
     }
 
-    // Check if session is older than 30 minutes - if so, proactively refresh
     let age = chrono::Utc::now()
         .signed_duration_since(session.created_at)
         .num_minutes();

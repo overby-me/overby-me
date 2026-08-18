@@ -45,7 +45,6 @@ fn resolve_repo_path(ctx: &XrpcContext, repo: &str) -> Result<String, String> {
         .next()
         .ok_or_else(|| "invalid AT URI: missing DID".to_string())?;
 
-    // Look up repos for this DID in our database
     let repos = ctx
         .db
         .get_repos_by_did(did)
@@ -55,11 +54,10 @@ fn resolve_repo_path(ctx: &XrpcContext, repo: &str) -> Result<String, String> {
         return Err(format!("no repos found for DID {did}"));
     }
 
-    // If there's only one repo, use it. Otherwise, try to match by rkey.
     let repo_name = if repos.len() == 1 {
         repos[0].name.clone()
     } else {
-        // Try matching by name — the rkey in the AT URI might be the repo name
+        // The rkey in the AT URI may be the repo name.
         let rkey = without_scheme.rsplit('/').next().unwrap_or("");
         repos
             .iter()
@@ -257,7 +255,6 @@ async fn add_member(
         }
     };
 
-    // Add to database
     if let Err(e) = ctx.db.add_spindle_member(&req.did) {
         warn!(%e, did = %req.did, "failed to add member to database");
         return (
@@ -267,7 +264,6 @@ async fn add_member(
             .into_response();
     }
 
-    // Add to RBAC
     if let Err(e) = ctx.rbac.add_spindle_member(&req.did).await {
         warn!(%e, did = %req.did, "failed to add member to RBAC");
         return (
@@ -277,7 +273,6 @@ async fn add_member(
             .into_response();
     }
 
-    // Add DID to Jetstream watch list
     if let Err(e) = ctx.db.add_did(&req.did) {
         warn!(%e, did = %req.did, "failed to add DID to watch list");
         return (
@@ -318,7 +313,6 @@ async fn remove_member(
         }
     };
 
-    // Remove from database
     if let Err(e) = ctx.db.remove_member(&req.did) {
         warn!(%e, did = %req.did, "failed to remove member from database");
         return (
@@ -328,7 +322,6 @@ async fn remove_member(
             .into_response();
     }
 
-    // Remove from RBAC
     if let Err(e) = ctx.rbac.remove_spindle_member(&req.did).await {
         warn!(%e, did = %req.did, "failed to remove member from RBAC");
         return (
@@ -338,7 +331,6 @@ async fn remove_member(
             .into_response();
     }
 
-    // Remove DID from Jetstream watch list
     if let Err(e) = ctx.db.remove_did(&req.did) {
         warn!(%e, did = %req.did, "failed to remove DID from watch list");
         return (
@@ -564,7 +556,6 @@ async fn cancel_pipeline(
         }
     };
 
-    // Check that the workflow exists
     match ctx.db.get_status(&req.workflow_id) {
         Ok(Some(status)) => {
             if status.status == "success"
@@ -643,7 +634,6 @@ async fn list_runs(
 
     match rows {
         Ok(rows) => {
-            // Return most recent first, limited
             let runs: Vec<serde_json::Value> = rows
                 .into_iter()
                 .rev()

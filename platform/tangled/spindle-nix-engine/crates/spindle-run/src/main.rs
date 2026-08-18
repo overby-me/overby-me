@@ -145,10 +145,8 @@ fn build_systemd_run_cmd(
         "--wait",
         "--collect",
         "--quiet",
-        // Timeout
         "-p",
         &format!("RuntimeMaxSec={timeout_secs}"),
-        // Working directory
         &format!("--working-directory={}", workdir.display()),
     ]);
 
@@ -159,16 +157,14 @@ fn build_systemd_run_cmd(
         cmd.args(["-p", "PrivateTmp=yes"]);
     }
 
-    // Set environment variables.
     for (k, v) in env_vars {
         cmd.arg("--setenv");
         cmd.arg(format!("{k}={v}"));
     }
 
-    // Set HOME and XDG directories to the ephemeral home dir.
-    // Tools like cachix and nix resolve config paths via XDG dirs
-    // or the passwd entry rather than $HOME, so we must set these
-    // explicitly to keep writes inside the ephemeral home.
+    // cachix and nix resolve their config paths through the XDG dirs or the
+    // passwd entry rather than $HOME, so all of them have to point at the
+    // ephemeral home or the writes land elsewhere.
     cmd.arg("--setenv");
     cmd.arg(format!("HOME={}", home_dir.display()));
     cmd.arg("--setenv");
@@ -241,7 +237,6 @@ async fn main() -> ExitCode {
         .without_time()
         .init();
 
-    // Resolve working directory.
     let workdir = match &cli.workdir {
         Some(dir) => std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()),
         None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -252,7 +247,6 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // Discover or validate workflow files.
     let workflow_files = if cli.workflows.is_empty() {
         match discover_workflows(&workdir) {
             Ok(files) if files.is_empty() => {
@@ -280,7 +274,6 @@ async fn main() -> ExitCode {
 
     let logger = TerminalLogger;
 
-    // Set up cache and ephemeral home directories.
     let cache_dir = workdir.join(".tangled").join(".cache");
     let user_cache = std::env::var("XDG_CACHE_HOME")
         .map(PathBuf::from)
@@ -323,7 +316,6 @@ async fn main() -> ExitCode {
             }
         };
 
-        // Parse the workflow.
         let steps = match parse_steps_from_yaml(&raw_yaml) {
             Ok(s) => s,
             Err(e) => {
@@ -341,7 +333,6 @@ async fn main() -> ExitCode {
             continue;
         }
 
-        // Dry-run: just list steps.
         if cli.dry_run {
             for (i, (name, command)) in steps.iter().enumerate() {
                 eprintln!("  Step {}: {name}", i + 1);
@@ -358,7 +349,6 @@ async fn main() -> ExitCode {
             continue;
         }
 
-        // Build Nix environment if dependencies are specified.
         let nix_env_path = if let Some(nix_deps) = NixDeps::parse(&deps) {
             eprintln!("\x1b[1;33m> Building Nix dependencies...\x1b[0m");
             match build_nix_env(&nix_deps, &cache_dir, &cli.nix_flags, &logger).await {
@@ -379,10 +369,8 @@ async fn main() -> ExitCode {
             None
         };
 
-        // Build PATH.
         let path = build_local_path(nix_env_path.as_deref());
 
-        // Execute each step.
         for (i, (name, command)) in steps.iter().enumerate() {
             eprintln!("\x1b[1;34m> Step {}: {name}\x1b[0m", i + 1);
 
@@ -398,10 +386,9 @@ async fn main() -> ExitCode {
                 step_env.push(("TERM".into(), term));
             }
 
-            // Override USER with the real user running spindle-run.
-            // Workflows may set USER for CI environments (e.g. "nobody"
-            // for DynamicUser), but locally the real user is needed for
-            // Nix daemon trust and other user-dependent tooling.
+            // A workflow may set USER for CI ("nobody", under DynamicUser),
+            // but locally the real user is what Nix daemon trust and other
+            // user-dependent tooling need.
             if let Ok(real_user) = std::env::var("USER") {
                 step_env.retain(|(k, _)| k != "USER");
                 step_env.push(("USER".into(), real_user));
@@ -452,7 +439,6 @@ async fn main() -> ExitCode {
         }
     }
 
-    // Clean up ephemeral home.
     let _ = std::fs::remove_dir_all(&run_home);
 
     if any_failed {

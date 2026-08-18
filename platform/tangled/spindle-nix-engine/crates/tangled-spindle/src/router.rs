@@ -157,11 +157,9 @@ fn event_to_envelope(event: &spindle_db::events::Event) -> Result<String, serde_
 ///
 /// Events are sent in the envelope format: `{"rkey":"...","nsid":"...","event":{...}}`
 async fn events_ws(mut socket: WebSocket, state: Arc<AppState>, cursor: i64) {
-    // Subscribe first to avoid missing events between backfill and live.
     let mut rx = state.notifier.subscribe();
     let mut last_sent_cursor = cursor;
 
-    // Backfill from database.
     match state.db.get_events_after(cursor) {
         Ok(events) => {
             for event in events {
@@ -189,7 +187,6 @@ async fn events_ws(mut socket: WebSocket, state: Arc<AppState>, cursor: i64) {
         "events backfill complete, switching to live stream"
     );
 
-    // Live stream loop.
     let mut keepalive = tokio::time::interval(Duration::from_secs(30));
     keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -273,7 +270,6 @@ async fn logs_ws(
     let log_path = workflow_logger::log_file_path(&state.log_dir, &workflow_id);
     let wid_str = workflow_id.to_string();
 
-    // Check if workflow is in a terminal state.
     let is_finished = match state.db.get_status(&wid_str) {
         Ok(Some(status)) => {
             matches!(
@@ -292,7 +288,6 @@ async fn logs_ws(
     };
 
     if is_finished {
-        // Send the complete log file and close.
         if send_log_file(&mut socket, &log_path).await.is_err() {
             return;
         }
@@ -300,9 +295,6 @@ async fn logs_ws(
         return;
     }
 
-    // Workflow is pending or running — stream existing + live tail.
-    //
-    // Set up a filesystem watcher to detect new lines appended to the log file.
     let (notify_tx, mut notify_rx) = mpsc::channel::<()>(16);
 
     let watcher = setup_file_watcher(&log_path, notify_tx);
@@ -312,11 +304,9 @@ async fn logs_ws(
     // Keep the watcher alive for the duration of the connection.
     let _watcher = watcher.ok();
 
-    // Read existing content from the log file.
     let mut file = match std::fs::File::open(&log_path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // File doesn't exist yet. Wait for it to appear.
             debug!(path = %log_path.display(), "log file not found, waiting for creation");
             match wait_for_file(&log_path, &mut socket, &mut notify_rx).await {
                 Some(f) => f,
@@ -329,12 +319,10 @@ async fn logs_ws(
         }
     };
 
-    // Send existing content.
     if send_lines_from_file(&mut socket, &mut file).await.is_err() {
         return;
     }
 
-    // Live tail loop.
     let mut keepalive = tokio::time::interval(Duration::from_secs(30));
     keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -349,9 +337,7 @@ async fn logs_ws(
                     return;
                 }
 
-                // Re-check if workflow finished.
                 if check_finished(&state.db, &wid_str) {
-                    // Send any remaining lines and close.
                     let _ = send_lines_from_file(&mut socket, &mut file).await;
                     let _ = socket.send(Message::Close(None)).await;
                     return;
@@ -427,7 +413,7 @@ async fn send_lines_from_file(socket: &mut WebSocket, file: &mut std::fs::File) 
                         .await
                         .is_err()
                 {
-                    // Update file position before returning error.
+                    // On the error path too, or the next read repeats these bytes.
                     let pos = reader.stream_position().unwrap_or(0);
                     let _ = file.seek(SeekFrom::Start(pos));
                     return Err(());

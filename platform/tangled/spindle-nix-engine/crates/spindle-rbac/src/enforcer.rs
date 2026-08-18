@@ -211,7 +211,7 @@ impl SpindleEnforcer {
     pub async fn remove_spindle_member(&self, member_did: &str) -> Result<(), RbacError> {
         let mut e = self.enforcer.write().await;
 
-        // Try removing both roles (ok if they don't exist)
+        // Either may be absent.
         e.remove_named_grouping_policy(
             "g",
             vec![
@@ -254,7 +254,6 @@ impl SpindleEnforcer {
     pub async fn get_spindle_users_by_role(&self, role: &str) -> Result<Vec<String>, RbacError> {
         let e = self.enforcer.read().await;
 
-        // Get all grouping policies and filter for the spindle resource + requested role
         let policies = e.get_named_grouping_policy("g");
         let users: Vec<String> = policies
             .into_iter()
@@ -304,7 +303,6 @@ impl SpindleEnforcer {
         .await
         .ok();
 
-        // Assign the repo owner DID as owner of this repo resource
         e.add_named_grouping_policy(
             "g",
             vec![owner_did.to_string(), "owner".to_string(), resource],
