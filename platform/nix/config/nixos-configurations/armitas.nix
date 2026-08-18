@@ -203,6 +203,11 @@
         };
       };
 
+      # ── Virtualisation ──────────────────────────────────────────────
+      # Waydroid alone, not core/virtualisation.nix, which would bring
+      # docker and libvirtd with it.  Runs arm64 Android apps natively.
+      virtualisation.waydroid.enable = true;
+
       # ── TPM ─────────────────────────────────────────────────────────
       # systemd tags /dev/tpm0 and /dev/tpmrm0 and pulls in tpm2.target, and
       # on this machine those device units never settle, so boot stalls for
