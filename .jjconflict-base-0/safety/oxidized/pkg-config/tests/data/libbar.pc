@@ -1,0 +1,22 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+bardir=${prefix}/share/bar
+
+Name: Bar
+Description: A comprehensive test library for bar operations
+Version: 2.3.1
+URL: https://example.com/bar
+License: MIT
+Maintainer: Bar Maintainers <bar@example.com>
+Copyright: Copyright (c) 2025 Bar Authors
+Source: https://github.com/example/bar
+Requires: libfoo >= 1.0
+Requires.private: zlib >= 1.2.8, libm
+Conflicts: libbar-legacy < 1.0
+Provides: libbar = 2.3.1, libbar-compat = 2.3
+Libs: -L${libdir} -lbar
+Libs.private: -lm -lpthread
+Cflags: -I${includedir}/bar -DBAR_VERSION=231
+Cflags.private: -DBAR_INTERNAL

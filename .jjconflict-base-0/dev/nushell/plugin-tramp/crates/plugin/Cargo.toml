@@ -1,0 +1,45 @@
+[package]
+name = "nushell-plugin-tramp"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+license = "MIT"
+repository = "https://tangled.org/overby.me/overby.me/tree/main/nushell-plugin-tramp"
+description = "A TRAMP-inspired remote filesystem plugin for Nushell"
+
+[[bin]]
+name = "nu_plugin_tramp"
+path = "src/main.rs"
+
+[dependencies]
+# Nushell plugin API
+nu-plugin = "0.110.0"
+nu-protocol = "0.110.0"
+
+# SSH transport (shells out to system OpenSSH)
+openssh = { version = "0.11", features = ["native-mux"] }
+openssh-sftp-client = { version = "0.15", features = ["openssh"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+rmp-serde = { workspace = true }
+rmpv = { workspace = true }
+# Serialization / MsgPack-RPC (for communicating with tramp-agent)
+serde = { workspace = true }
+
+async-trait = "0.1"
+base64 = "0.22"
+# Utilities
+bytes = "1"
+chrono = "0.4"
+dirs = "6"
+glob-match = "0.2"
+thiserror = "2"
+
+# Terminal handling for `tramp shell` (raw mode, /dev/tty, winsize)
+libc = "0.2"
+
+# Pin interprocess to ~2.2 to stay compatible with nu-plugin-core's API
+# (2.3+ moved ListenerNonblockingMode out of the traits module)
+interprocess = "~2.2"

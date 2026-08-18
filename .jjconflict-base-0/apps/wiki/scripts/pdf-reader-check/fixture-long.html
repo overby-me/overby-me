@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Long fixture</title>
+<!--
+  Sixty pages, built here rather than written out, so the file stays small.
+
+  The length is the point. The page control learns where the reader is from
+  scroll progress, which is a whole PERCENT: on a document of four pages one
+  page is a quarter of the scroll and the control is told several times per
+  page, but on a document of sixty it is told about once per page -- and that
+  once falls in the middle of a smooth scroll, over the page being left. A
+  short fixture cannot show that, and did not: it passed while the songbook
+  needed two presses for one page.
+-->
+<style>
+  @page { size: A4; margin: 22mm 20mm; }
+  body { font-family: Georgia, serif; font-size: 12pt; line-height: 1.5; }
+  h2 { font-size: 15pt; }
+  .break { break-before: page; }
+</style>
+<h1>A long document</h1>
+<p>Sixty pages, so that one page is a small share of the whole.</p>
+<div id="rest"></div>
+<script>
+  const parts = [];
+  for (let page = 2; page <= 60; page++) {
+    parts.push(`<div class="break"></div><h2>Section ${page}</h2>`);
+    for (let n = 1; n <= 6; n++) {
+      parts.push(
+        `<p>Page ${page}, paragraph ${n}. Filler long enough that a page holds a` +
+        ` realistic amount of text, so the reflowed document is tall and one page` +
+        ` of it is a small share of the scroll, as it is in a songbook of a` +
+        ` hundred and four sheets.</p>`,
+      );
+    }
+  }
+  document.getElementById("rest").innerHTML = parts.join("");
+</script>

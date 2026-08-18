@@ -1,0 +1,13 @@
+# The legacy C string functions have no bounds respect (strcpy/strcat), or
+# hidden global state (strtok); Mojo's external_call reaches them with one
+# string parameter. Zero uses today, zero false positives possible - the
+# symbol name IS the hazard.
+id: mojo-external-call-banned-c
+language: mojo
+severity: warning
+message: >-
+  This calls a legacy C function with no bounds checking. Use the sized
+  variant (strncpy at minimum) or do the work in Mojo.
+rule:
+  kind: call
+  regex: 'external_call\["(strcpy|strcat|sprintf|gets|strtok|scanf)"'

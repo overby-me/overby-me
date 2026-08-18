@@ -1,0 +1,15 @@
+# Ratchet: zero sites today, in a tree with a lot of unsafe FFI.
+#
+# get_unchecked skips the bounds check, so the index has to be proven in range
+# by something other than the code at the call. clippy has no lint for it, and
+# undocumented_unsafe_blocks would only ask for a comment, not for the proof.
+id: rust-unsafe-unchecked-index
+language: rust
+severity: warning
+message: >-
+  get_unchecked skips the bounds check. Write the argument that keeps the index
+  in range next to the call, or use normal indexing and let the panic happen.
+rule:
+  any:
+    - pattern: $RECV.get_unchecked($$$ARGS)
+    - pattern: $RECV.get_unchecked_mut($$$ARGS)

@@ -1,0 +1,33 @@
+build:
+    cargo build
+
+test:
+    cargo test
+
+# Ship to Scaleway Serverless Containers: build the OCI image with Nix, push it to
+# the `wiki-dioxus` registry namespace, and redeploy the `wiki-backend` container.
+# (The registry + container namespaces and the container itself were created once;
+# env vars/secrets live on the container — manage them in the Scaleway console.)
+deploy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # skopeo + scaleway-cli aren't on PATH by default; provision them reproducibly
+    # from nixpkgs so `just deploy` works standalone.
+    export PATH="$(nix build --no-link --print-out-paths nixpkgs#skopeo)/bin:$(nix build --no-link --print-out-paths nixpkgs#scaleway-cli)/bin:$PATH"
+    root="$(git rev-parse --show-toplevel)"
+    image="rg.fr-par.scw.cloud/wiki-dioxus/wiki-backend:latest"
+    out="$(nix build --no-link --print-out-paths "$root#wiki-backend-image")"
+    sk="$(awk '/^secret_key/{print $2}' ~/.config/scw/config.yaml | head -1)"
+    printf '%s' "$sk" | skopeo login rg.fr-par.scw.cloud -u nologin --password-stdin
+    skopeo copy --insecure-policy "docker-archive:$out" "docker://$image"
+    cid="$(scw container container list region=fr-par name=wiki-backend -o json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')"
+    scw container container deploy "$cid" region=fr-par
+    echo "redeployed container $cid; waiting for ready…"
+    for _ in $(seq 1 40); do
+        status="$(scw container container get "$cid" region=fr-par -o json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+        echo "  status: $status"
+        [ "$status" = "ready" ] && break
+        sleep 5
+    done

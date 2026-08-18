@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: dos-lineendings
+Description: A test library with DOS line endings
+Version: 1.0.0
+Libs: -L${libdir} -ldos-lineendings
+Cflags: -I${includedir}/dos-lineendings

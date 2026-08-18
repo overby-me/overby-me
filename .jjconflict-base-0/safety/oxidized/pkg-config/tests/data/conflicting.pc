@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: conflicting
+Description: A test library that conflicts with simple < 2.0
+Version: 1.0.0
+Conflicts: simple < 2.0
+Libs: -L${libdir} -lconflicting
+Cflags: -I${includedir}/conflicting

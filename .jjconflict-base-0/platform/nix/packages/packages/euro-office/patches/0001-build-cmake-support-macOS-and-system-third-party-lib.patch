@@ -1,0 +1,239 @@
+From ccaaf31bf6becff518c0bdbd2dd968e9bf1a5018 Mon Sep 17 00:00:00 2001
+From: Niclas Overby <niclas@overby.me>
+Date: Mon, 29 Jun 2026 13:01:13 +0200
+Subject: [PATCH 1/5] build(cmake): support macOS and system third-party libs
+ in common.cmake
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The shared common.cmake only knew two worlds: MSVC (Windows) and Linux.
+Building on macOS from this CMake project (rather than the separate Xcode
+project) therefore produced binaries with no platform define set and used
+GNU-ld-only flags.
+
+This teaches common.cmake about Apple, faithfully to the historical qmake
+build (Common/base.pri, scope core_mac), which compiles macOS with the Linux
+code paths plus the Mac ones:
+
+  * Treat APPLE like LINUX for the many LINUX-gated branches.
+  * Additionally define _MAC (+ the libc++ removed-functions shim) on Apple;
+    sources select Apple code via #ifdef _MAC. (base.pri also defines a bare
+    MAC, but that collides with template parameters named MAC in the vendored
+    Crypto++, so we use _MAC consistently — see the Directory.cpp change.)
+  * Use @loader_path instead of $ORIGIN for RPATH on Mach-O.
+  * Drop -Wl,--disable-new-dtags (GNU ld only) on Apple.
+
+It also adds an opt-in EO_USE_SYSTEM_LIBS option that resolves ICU, Boost,
+OpenSSL and CURL through find_package() instead of the prebuilt 3rd-party
+install dir, so distro / Nix packaging can feed system copies. The desktop
+stack (Qt/CEF) and V8 are intentionally left on the prebuilt path.
+---
+
+diff --git a/common.cmake b/common.cmake
+index 6a96c02cd..6989d69ae 100644
+--- a/common.cmake
++++ b/common.cmake
+@@ -8,6 +8,16 @@ set(CMAKE_CXX_STANDARD 17)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ set(CMAKE_CXX_EXTENSIONS OFF)
+ 
++# macOS targets compile Objective-C(++) sources (e.g. the JavaScriptCore engine
++# in doctrenderer, the Cocoa file transport, CoreText font enumeration). Enable
++# the languages at the top-level project scope so the .mm/.m compile rules exist
++# wherever those targets are defined (incl. when an entry point pulls them in as
++# a subdirectory, such as x2t -> doctrenderer).
++if(APPLE)
++    enable_language(OBJC)
++    enable_language(OBJCXX)
++endif()
++
+ cmake_path( APPEND DEFAULT_EO_CORE_OUTPUT_DIR "${CMAKE_BINARY_DIR}" "package" )
+ cmake_path( APPEND DEFAULT_EO_CORE_TOOLS_DIR "${CMAKE_BINARY_DIR}" "package" )
+ 
+@@ -57,6 +67,23 @@ if(NOT DEFINED LINUX AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+     set(LINUX TRUE)
+ endif()
+ 
++# On Apple/macOS the historical qmake build (Common/base.pri, scope core_mac)
++# compiles with the Linux code paths *plus* the Mac ones: it defines
++# "LINUX _LINUX MAC _MAC". Mirror that here so the many LINUX-gated branches in
++# this project (defines, sources, flags) are also taken on macOS, and add the
++# Mac-specific defines on top in the COMMON_DEFINES block below.
++if(APPLE)
++    set(LINUX TRUE)
++endif()
++
++# When EO_USE_SYSTEM_LIBS is enabled, resolve the non-desktop third-party
++# libraries (ICU, Boost, OpenSSL) with the standard find_package() machinery
++# instead of the prebuilt EO_CORE_3RD_PARTY_INSTALL_DIR layout produced by
++# build_3rdparty.py. This lets distro / Nix packaging feed system copies. It
++# only covers libraries with a stable cross-version ABI for our use; the desktop
++# stack (Qt/CEF) and V8 are intentionally left on the prebuilt path.
++option(EO_USE_SYSTEM_LIBS "Resolve ICU/Boost/OpenSSL via find_package instead of the prebuilt 3rd-party dir" OFF)
++
+ message("3rdparty dir: " ${EO_CORE_3RD_PARTY_DIR})
+ message("workdir: " ${EO_CORE_3RD_PARTY_WORK_DIR})
+ message("install: " ${EO_CORE_3RD_PARTY_INSTALL_DIR})
+@@ -161,6 +188,12 @@ else()
+ 
+ 
+     # Setup icu
++    if( EO_USE_SYSTEM_LIBS )
++        find_package(ICU REQUIRED COMPONENTS uc data)
++        # Downstream targets link the raw library files via ${LIBICUUC}/${LIBICUDATA}.
++        set(LIBICUUC   ICU::uc)
++        set(LIBICUDATA ICU::data)
++    else()
+     # These version numbers don't affect what build_3rdparty.py builds. They just have to match.
+     set(ICU_MAJOR_VER "74")
+     set(ICU_MINOR_VER "2")
+@@ -173,14 +206,25 @@ else()
+         set(LIBICUUC "${ICU_INSTALL_DIR_ABS}/lib/libicuuc.so.${ICU_MAJOR_VER}")
+         set(LIBICUDATA "${ICU_INSTALL_DIR_ABS}/lib/libicudata.so.${ICU_MAJOR_VER}")
+     endif()
++    endif()
+ 
+     # Setup boost
++    if( EO_USE_SYSTEM_LIBS )
++        # Boost.System has been header-only since 1.69, so modern Boost configs
++        # ship no boost_system component. Find the compiled components and alias
++        # Boost::system to the header-only target when it is absent.
++        find_package( Boost CONFIG REQUIRED COMPONENTS filesystem regex date_time )
++        if( NOT TARGET Boost::system )
++            add_library( Boost::system ALIAS Boost::headers )
++        endif()
++    else()
+     set( BOOST_INSTALL_DIR "${EO_CORE_3RD_PARTY_INSTALL_DIR}/boost" )
+     get_filename_component(BOOST_INSTALL_DIR_ABS "${BOOST_INSTALL_DIR}" ABSOLUTE)
+     list( APPEND CMAKE_PREFIX_PATH "${BOOST_INSTALL_DIR_ABS}" )
+     include_directories( "${BOOST_INSTALL_DIR_ABS}/include" )
+     set(Boost_USE_STATIC_LIBS ON)
+     find_package( Boost REQUIRED COMPONENTS system filesystem regex date_time )
++    endif()
+ 
+     # Setup v8
+     set(V8_INSTALL_DIR "${EO_CORE_3RD_PARTY_INSTALL_DIR}/v8")
+@@ -191,7 +235,19 @@ else()
+         set(V8_MONOLITH "${V8_INSTALL_DIR_ABS}/libv8_monolith.a")
+     endif()
+ 
++    # Setup curl (system builds only; the prebuilt path uses the bundled curl
++    # via the install-dir include path and an implicit system link).
++    if( EO_USE_SYSTEM_LIBS )
++        find_package(CURL REQUIRED)
++        set(EO_CURL_LIB CURL::libcurl)
++    endif()
++
+     # Setup openssl
++    if( EO_USE_SYSTEM_LIBS )
++        find_package(OpenSSL REQUIRED)
++        set(OPENSSL_LIBSSL    OpenSSL::SSL)
++        set(OPENSSL_LIBCRYPTO OpenSSL::Crypto)
++    else()
+     set(OPENSSL_INSTALL_DIR "${EO_CORE_3RD_PARTY_INSTALL_DIR}/openssl")
+     get_filename_component(OPENSSL_INSTALL_DIR_ABS "${OPENSSL_INSTALL_DIR}" ABSOLUTE)
+     if( MSVC )
+@@ -201,6 +257,7 @@ else()
+         set(OPENSSL_LIBSSL "${OPENSSL_INSTALL_DIR_ABS}/lib/libssl.a")
+         set(OPENSSL_LIBCRYPTO "${OPENSSL_INSTALL_DIR_ABS}/lib/libcrypto.a")
+     endif()
++    endif()
+ 
+ endif()
+ 
+@@ -237,6 +294,18 @@ if( LINUX )
+         DONT_WRITE_EMBEDDED_FONTS
+         UNICODE
+     )
++
++    # macOS desktop: in addition to the Linux defines above, the qmake build
++    # (Common/base.pri, scope core_mac) defines _MAC and the libc++ shim.
++    # Many .cpp files select Apple code via "#ifdef _MAC". (base.pri also defines
++    # a bare "MAC", but that collides with template parameters named MAC in the
++    # vendored Crypto++; we use _MAC consistently instead — see Directory.cpp.)
++    if( APPLE )
++        list(APPEND COMMON_DEFINES
++            _MAC
++            _LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION
++        )
++    endif()
+ else() # Assume win+msvc
+     set(COMMON_DEFINES
+         _REENTRANT
+@@ -309,9 +378,22 @@ else()
+         -O2 #Remove for debugging
+     )
+ 
+-    set(COMMON_LINK_OPTIONS
+-        "-Wl,--disable-new-dtags"
+-    )
++    if( APPLE )
++        # Apple's clang turns on -Werror=format-security by default; the codebase
++        # has non-literal format strings that the Linux/MSVC builds tolerate.
++        list(APPEND COMMON_CXX_FLAGS -Wno-error=format-security)
++        list(APPEND COMMON_C_FLAGS   -Wno-error=format-security)
++    endif()
++
++    if( APPLE )
++        # Apple's linker has no --disable-new-dtags / DT_RUNPATH concept.
++        set(COMMON_LINK_OPTIONS
++        )
++    else()
++        set(COMMON_LINK_OPTIONS
++            "-Wl,--disable-new-dtags"
++        )
++    endif()
+ 
+ endif()
+ 
+@@ -322,9 +404,14 @@ function(set_default_options target)
+     endif()
+ 
+     if( NOT MSVC )
+-        # Base RPATHs
+-        set_property(TARGET ${target} PROPERTY BUILD_RPATH "\$ORIGIN;\$ORIGIN/system")
+-        set_property(TARGET ${target} PROPERTY INSTALL_RPATH "\$ORIGIN;\$ORIGIN/system")
++        # Base RPATHs. ELF uses the $ORIGIN token; Mach-O uses @loader_path.
++        if( APPLE )
++            set(_eo_origin "@loader_path")
++        else()
++            set(_eo_origin "\$ORIGIN")
++        endif()
++        set_property(TARGET ${target} PROPERTY BUILD_RPATH "${_eo_origin};${_eo_origin}/system")
++        set_property(TARGET ${target} PROPERTY INSTALL_RPATH "${_eo_origin};${_eo_origin}/system")
+ 
+         # Optional: additional runtime paths from env variable RUN_PATH_ADDON
+         if(DEFINED ENV{RUN_PATH_ADDON})
+@@ -335,14 +422,16 @@ function(set_default_options target)
+         endif()
+     endif()
+ 
+-    # C++ flags
++    # C++ flags (also for Objective-C++ on Apple, which is C++).
+     target_compile_options(${target} PRIVATE
+         $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_FLAGS}>
++        $<$<COMPILE_LANGUAGE:OBJCXX>:${COMMON_CXX_FLAGS}>
+     )
+ 
+-    # C flags
++    # C flags (also for Objective-C on Apple, which is C).
+     target_compile_options(${target} PRIVATE
+         $<$<COMPILE_LANGUAGE:C>:${COMMON_C_FLAGS}>
++        $<$<COMPILE_LANGUAGE:OBJC>:${COMMON_C_FLAGS}>
+     )
+ 
+     target_compile_definitions(${target} PRIVATE
+@@ -446,6 +535,12 @@ function(copy_artifacts_to_folder artifacts dest_dir)
+ endfunction()
+ 
+ function(copy_icu_libs artifact)
++    if( EO_USE_SYSTEM_LIBS )
++        # System ICU is resolved by find_package and discovered at runtime via
++        # the normal loader paths; nothing to stage next to the artifacts.
++        return()
++    endif()
++
+     if( MSVC )
+ 
+         file(GLOB ICU_DLLS

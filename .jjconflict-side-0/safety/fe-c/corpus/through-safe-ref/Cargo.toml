@@ -1,0 +1,22 @@
+[package]
+name = "through-safe-ref"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# corpus-through-safe-ref (Task C1): the through-mode safe-reference
+# use-after-scope reproducer. A closure captures a safe &u64 to a stack local,
+# is kept past the frame, and reads it back through a safe dereference — which
+# only `through` mode checks (`case` elides it). Its own workspace. cementite
+# is a path dependency (this leaf binary installs FecAlloc); the injected
+# checks are symbol-level (A4b / I11). The fe-c-through-safe-ref check builds it
+# with FEC_MODE=through and asserts it aborts UseAfterScopeExit, and with
+# FEC_MODE unset (case-like) asserts it runs clean — the mode distinction.
+[workspace]
+
+[[bin]]
+name = "through-safe-ref"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }

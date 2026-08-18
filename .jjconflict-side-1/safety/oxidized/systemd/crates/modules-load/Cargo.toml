@@ -1,0 +1,13 @@
+[package]
+name = "systemd-modules-load"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-modules-load"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+log = "0.4"

@@ -1,0 +1,93 @@
+[package]
+name = "wiki-backend"
+version = "0.1.0"
+edition = "2021"
+
+# The request handler `handle(req) -> response` lives in the lib; the binary
+# (src/main.rs) serves it over HTTP on $PORT as a Serverless Container.
+[lib]
+path = "src/handle.rs"
+
+[[bin]]
+name = "wiki-backend"
+path = "src/main.rs"
+
+[dependencies]
+# Crash symbolication: resolve the wasm code offsets in a reported stack back to
+# `file:line` against the DWARF sidecar the frontend build produces. `addr2line`
+# wraps `gimli` with the lookup logic; `object` parses the wasm container. Both
+# are pure Rust, so the minimal rustls container needs nothing new.
+addr2line = "0.24"
+axum = "0.8.6"
+# Renders Word/PowerPoint metafile figures (EMF/EMF+/WMF) to PNG, which no
+# browser can draw. Here rather than in the wasm: the renderer is ~400 KB
+# gzipped, and the app is already the heaviest thing a delegate downloads.
+#
+# A FORK of the v0.2.0 tag, carrying one fix: `dib_to_png` decoded only 24- and
+# 32-bit bitmaps, so a figure holding a palettised one failed outright with
+# "unsupported BI_RGB bit depth: 4" and fell back to a placeholder.
+#
+# Forked rather than tracking upstream main, which fixes the same bug and is
+# not usable: it also changed font selection to try the family the metafile
+# NAMES before generic sans, and metafiles name Windows fonts, so both figures
+# come out all-caps with boxes where the Danish letters should be. Verified
+# against the two real files, and against a font set matching this container's.
+#
+# Pinned to a rev, like dioxus-primitives in the frontend: a branch would let
+# `cargo update` float and stale the Nix outputHashes in default.nix. Drop the
+# fork once a release carries the bitmap fix without the font regression.
+emfsdk = { git = "https://github.com/overby-me/emfsdk", rev = "4e4269f9ed35d2a204dba9880060ea17cf0fc9e4", default-features = false, features = [
+  "render"
+] }
+# Just the pure-Rust stream combinators (buffer_unordered) for concurrent push
+# fan-out; no executor/thread-pool pulled in.
+futures = { version = "0.3", default-features = false, features = [
+  "async-await",
+  "std"
+] }
+http = "1.3.1"
+object = { version = "0.36", default-features = false, features = [
+  "read",
+  "wasm"
+] }
+# rustls-tls (not the default native-tls/openssl): self-contained TLS with the CA
+# roots compiled in (webpki-roots), so the minimal container image needs no system
+# libssl and no ca-certificates for outbound HTTPS.
+reqwest = { version = "0.12.24", default-features = false, features = [
+  "charset",
+  "http2",
+  "json",
+  "rustls-tls"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+# Structured logging: handlers emit tracing events (replacing eprintln); main.rs
+# installs the minimal fmt subscriber so they reach the container's stdout logs.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+  "fmt"
+] }
+
+# Background Web Push (RFC 8291 message encryption + RFC 8292 VAPID) is hand-rolled
+# on pure-Rust RustCrypto primitives, since the `web-push` crate pulls libcurl/
+# openssl that the minimal rustls container omits: `ecdh` on p256 for the ECDH
+# agreement, `hkdf` for key derivation, and `aes-gcm` for the aes128gcm content
+# encoding. VAPID JWTs reuse the p256 `ecdsa` (ES256) already used for DPoP.
+aes-gcm = "0.10"
+# atproto OAuth (public client, PKCE + DPoP) needs URL-safe base64, SHA-256
+# (PKCE challenge, JWK thumbprint, DPoP `ath`), HMAC (verify the HS256 NHost
+# access token), P-256 ES256 signing (DPoP proofs), a CSRNG, and an AEAD to
+# carry the ephemeral link state (incl. the DPoP private key) across the redirect.
+base64 = "0.22"
+# Parse the bulk member-import .xlsx server-side, so the pure-Rust xlsx/zip/inflate
+# stack ships in the backend (an owner-only, once-per-event path) instead of every
+# phone's wasm bundle.
+calamine = "0.36"
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa", "jwk"] }
+rand = "0.8"
+sha2 = "0.10"

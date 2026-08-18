@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW003",
+			"severity": "error",
+			"field": "machines.bad-machine.system",
+			"message": "invalid system \"x86-linux\" — did you mean \"x86_64-linux\"?",
+			"hint": "Valid systems: x86_64-linux, aarch64-linux, x86_64-darwin, aarch64-darwin",
+			"contract": "MachineConfig.system"
+		}
+	]
+}

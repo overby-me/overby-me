@@ -1,0 +1,25 @@
+# Known divergences between rust-systemd and real systemd.
+#
+# Each [[divergence]] entry records a differential test that is expected to
+# produce divergent results. The `test` field must match the test function
+# name registered via `#[difftest]`. The `reason` field should explain why
+# the divergence exists and/or link to a tracking issue.
+#
+# Optional fields:
+#   systemd_version  — version constraint (e.g. ">=255", "==256") limiting
+#                      when the divergence applies.
+#
+# When a divergence is resolved, remove the corresponding entry so that CI
+# will catch any regressions.
+#
+# Format:
+#
+#   [[divergence]]
+#   test = "test_function_name"
+#   reason = "explanation or issue link"
+#   systemd_version = ">=256"   # optional
+#
+# ── Currently known divergences ──────────────────────────────────────────────
+#
+# (none yet — this file will be populated as differential tests are added
+# and intentional behavioral differences are catalogued)

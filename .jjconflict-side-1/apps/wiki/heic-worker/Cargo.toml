@@ -1,0 +1,20 @@
+# The HEIC decoder, built as its own wasm module so it can run in a Web Worker.
+#
+# Separate from the app rather than a function inside it: a worker instantiates
+# its own module, and instantiating the app's would run `main` and try to launch
+# a second Dioxus app against a `document` that does not exist off the main
+# thread. Keeping it apart also keeps heif-oxide out of the bundle every visitor
+# downloads -- this one is fetched the first time a HEIC actually appears.
+[package]
+name = "heic-worker"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+heif-oxide = { path = "../vendor/heif-oxide" }
+js-sys = "0.3"
+# Pinned with the app, so one wasm-bindgen-cli can process both artifacts.
+wasm-bindgen = "=0.2.121"

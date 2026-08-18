@@ -1,0 +1,35 @@
+id: rust-rc-cycle-parent-link
+language: rust
+severity: warning
+message: "A parent link held as Rc to the same type is a cycle; use Weak"
+note: |
+  A child holding Rc to its parent while the parent holds Rc to the child is a
+  reference cycle, so neither is ever dropped. The back edge is the one to
+  weaken: std::rc::Weak, or std::sync::Weak for Arc.
+
+  Narrowed to a field whose type names the struct it sits in. A `parent` of
+  some other type is a delegation chain rather than a cycle: plugin-tramp's
+  RemoteRunner holds `Arc<dyn Backend>` so a Docker backend can run through an
+  SSH hop, and nothing points back.
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  kind: struct_item
+  all:
+    - has:
+        field: name
+        pattern: $S
+    - has:
+        stopBy: end
+        kind: field_declaration
+        all:
+          - has:
+              field: name
+              regex: '^(parent|owner|back)$'
+          - has:
+              stopBy: end
+              regex: '^(Rc|Arc)$'
+          - has:
+              stopBy: end
+              pattern: $S

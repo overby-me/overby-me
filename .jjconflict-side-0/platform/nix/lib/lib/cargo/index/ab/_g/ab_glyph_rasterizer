@@ -1,0 +1,1 @@
+{"name":"ab_glyph_rasterizer","vers":"0.1.10","deps":[{"name":"libm","req":"^0.2.1","features":[],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618","features":{"default":["std"],"std":[]},"yanked":false,"pubtime":"2025-08-12T11:15:33Z"}

@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: diamond-a
+Description: Top of diamond dependency pattern (depends on diamond-b and diamond-c)
+Version: 1.0.0
+Requires: diamond-b >= 1.0, diamond-c >= 1.0
+Libs: -L${libdir} -ldiamond-a
+Cflags: -I${includedir}/diamond-a

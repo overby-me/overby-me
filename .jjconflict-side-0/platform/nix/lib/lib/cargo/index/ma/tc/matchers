@@ -1,0 +1,1 @@
+{"name":"matchers","vers":"0.2.0","deps":[{"name":"regex-automata","req":"^0.4","features":["syntax","dfa-build","dfa-search"],"optional":false,"default_features":false,"target":null,"kind":"normal"}],"cksum":"d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9","features":{"unicode":["regex-automata/unicode"]},"yanked":false,"pubtime":"2024-07-01T22:20:07Z"}

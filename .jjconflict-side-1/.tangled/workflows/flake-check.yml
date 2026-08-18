@@ -1,0 +1,35 @@
+clone:
+  depth: 1
+  skip: false
+  submodules: false
+dependencies:
+  - git
+engine: microvm
+image: nixos
+steps:
+  - command: |-
+      echo "=== runs as: $(id -un) ==="
+      ulimit -n 65536
+      mkdir -p $HOME/.config/nix
+      echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
+      echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
+
+      # Flake inputs come from GitHub's archive endpoint, which allows an
+      # unauthenticated caller 60 requests an hour - shared with every other
+      # build on the runner's address, so a run fails partway with 429 on
+      # whichever input it happens to reach next. The same token the mirror
+      # steps use raises that to 5000. Written to nix.conf rather than passed
+      # on the command line, so it stays out of the log; skipped when unset,
+      # because a missing secret should slow CI down rather than stop it.
+      if [ -n "${GITHUB_MIRROR_TOKEN}" ]; then
+        echo "access-tokens = github.com=${GITHUB_MIRROR_TOKEN}" >> $HOME/.config/nix/nix.conf
+      fi
+
+      export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix"
+      nix build --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --max-jobs 1 --cores 2 \
+        --no-link --print-build-logs .#checks.x86_64-linux.formatting
+    name: Nix flake check (formatting)
+when:
+  - branch: '**'
+    event:
+      - push

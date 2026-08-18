@@ -1,0 +1,585 @@
+use crate::model;
+use dioxus::prelude::*;
+
+use crate::graphql;
+use crate::i18n::t;
+use crate::route::Route;
+use crate::session::use_session;
+
+use super::loader::{icon_el, user_avatar};
+
+/// ProfileApp — the signed-in user's profile (#78): who they are, plus what they
+/// have contributed. Reachable via `?app=profile`. Their groups and events are
+/// not listed here; the home page and the navigation tree are where those live.
+#[component]
+pub fn ProfileApp() -> Element {
+    let session = use_session();
+    let user = session.read().user.clone();
+    let access_token = session.read().access_token.clone();
+    let user_id = user.as_ref().map(|u| u.id.clone());
+    // Bluesky handle to link — declared before the no-user early return below so
+    // the hook order stays stable across renders.
+    let mut bsky_handle = use_signal(String::new);
+    // Whether the account was just unlinked this session (flips the card back to
+    // the link form without needing to refetch), and the current link status.
+    let mut just_unlinked = use_signal(|| false);
+    let status_token = access_token.clone();
+    let bsky_status = crate::use_data_resource!(move || {
+        let token = status_token.clone();
+        async move {
+            match token {
+                Some(t) => crate::backend_api::atproto_status(&t).await,
+                None => crate::backend_api::AtprotoLink::default(),
+            }
+        }
+    });
+
+    // Bluesky handle typeahead: preview matching accounts as the user types, so
+    // they can pick their handle instead of typing it exactly. Hidden once a
+    // suggestion is chosen (until they edit the field again).
+    let mut sug_dismissed = use_signal(|| false);
+    let suggestions = crate::use_data_resource!(move || {
+        let q = bsky_handle.read().trim().to_string();
+        async move {
+            if q.len() < 2 {
+                return Vec::new();
+            }
+            // Debounce: while the user keeps typing, this resource re-runs and the
+            // pending future is dropped before the request fires.
+            gloo_timers::future::TimeoutFuture::new(220).await;
+            crate::backend_api::search_bsky_actors(&q).await
+        }
+    });
+
+    // Background Web Push (#128): whether THIS browser is subscribed (None until
+    // the async check resolves). Declared before the early return for hook order.
+    let mut push_on = use_signal(|| None::<bool>);
+    use_hook(|| {
+        spawn(async move {
+            push_on.set(Some(crate::pwa::push_subscribed().await));
+        });
+    });
+
+    // The user's most recent authored contributions (resolutions, amendments,
+    // candidacies, comments, questions), each linking to the item.
+    let contrib_token = access_token.clone();
+    let contrib_uid = user_id.clone();
+    let contributions = crate::use_data_resource!(|(contrib_token, contrib_uid)| async move {
+        match contrib_uid {
+            Some(uid) => {
+                graphql::query_user_contributions(contrib_token.as_deref(), &uid, 12).await
+            }
+            None => Vec::new(),
+        }
+    });
+
+    let Some(user) = user else {
+        return rsx! {
+            div { class: "card app-card",
+                div { class: "card-content",
+                    p { class: "body-large", "{t(\"node.maybeLoginForAccess\")}" }
+                    Link { to: Route::Login {}, class: "btn btn-primary", "{t(\"common.logIn\")}" }
+                }
+            }
+        };
+    };
+
+    let contrib_state = contributions.read().clone();
+    let link = bsky_status.read().clone().unwrap_or_default();
+    let show_linked = link.linked && !*just_unlinked.read();
+
+    rsx! {
+        div { class: "card app-card",
+            div { class: "card-header",
+                div { class: "avatar", {user_avatar(&user.avatar_url, icon_el("app/profile"))} }
+                div {
+                    h3 { class: "title-medium", "{user.display_name}" }
+                    p {
+                        class: "body-medium",
+                        class: "text-muted",
+                        "{t(\"profile.signedInAs\")} {user.email}"
+                    }
+                }
+            }
+            div { class: "card-content",
+                p {
+                    class: "body-small",
+                    class: "text-muted",
+                    "{t(\"profile.userId\")}: {user.id}"
+                }
+            }
+        }
+
+        // Bluesky (atproto) account: when linked, show the handle + an unlink
+        // action; otherwise hand off to the backend OAuth flow with the handle +
+        // current NHost access token (it redirects back to APP_ORIGIN with
+        // ?linked=bluesky|error, surfaced in a snackbar by App on load).
+        div { class: "card app-card",
+            div { class: "card-header",
+                div { class: "avatar small", {crate::components::loader::bsky_logo()} }
+                h3 { class: "title-medium",
+                    if show_linked { "{t(\"profile.blueskyAccount\")}" } else { "{t(\"profile.linkBluesky\")}" }
+                }
+            }
+            div { class: "card-content",
+                if show_linked {
+                    p { class: "body-medium mb-1",
+                        "{t(\"profile.linkedAs\")} "
+                        a {
+                            class: "link-accent",
+                            href: "https://bsky.app/profile/{link.handle}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            "@{link.handle}"
+                        }
+                    }
+                    button {
+                        class: "btn btn-secondary mt-1",
+                        onclick: move |_| {
+                            let tok = session.read().access_token.clone();
+                            spawn(async move {
+                                let Some(tok) = tok else { return };
+                                if crate::backend_api::atproto_unlink(&tok).await {
+                                    just_unlinked.set(true);
+                                    crate::snackbar::show_snackbar(&t("profile.unlinkedOk"));
+                                } else {
+                                    crate::snackbar::show_snackbar(&t("profile.unlinkErr"));
+                                }
+                            });
+                        },
+                        span { class: "material-icons", "link_off" }
+                        " {t(\"profile.unlink\")}"
+                    }
+                } else {
+                    p { class: "body-medium text-muted mb-1", "{t(\"profile.linkBlueskyHint\")}" }
+                    div { class: "text-field",
+                        label { "{t(\"profile.blueskyHandle\")}" }
+                        input {
+                            r#type: "text",
+                            placeholder: "alice.bsky.social",
+                            autocomplete: "off",
+                            value: "{bsky_handle}",
+                            oninput: move |e| {
+                                bsky_handle.set(e.value());
+                                sug_dismissed.set(false);
+                            },
+                        }
+                    }
+                    // Live preview of matching Bluesky accounts — click to pick.
+                    {
+                        let items = suggestions.read().clone().unwrap_or_default();
+                        if !items.is_empty() && !*sug_dismissed.read() {
+                            rsx! {
+                                div { class: "list mt-1",
+                                    for actor in items.iter() {
+                                        {
+                                            let handle = actor.handle.clone();
+                                            rsx! {
+                                                div {
+                                                    key: "{actor.handle}",
+                                                    class: "list-item",
+                                                    onclick: move |_| {
+                                                        bsky_handle.set(handle.clone());
+                                                        sug_dismissed.set(true);
+                                                    },
+                                                    div { class: "avatar small",
+                                                        {user_avatar(&actor.avatar, icon_el("wiki/user"))}
+                                                    }
+                                                    div { class: "list-item-text",
+                                                        div { class: "list-item-primary", "@{actor.handle}" }
+                                                        if !actor.display_name.is_empty() {
+                                                            div { class: "list-item-secondary", "{actor.display_name}" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
+                        }
+                    }
+                    button {
+                        // mt-2 (16px), the gap .auth-form puts between a field and
+                        // its submit. At mt-1 the button crowded the input, whose
+                        // floating label makes the pair read tighter still.
+                        class: "btn btn-primary mt-2",
+                        disabled: bsky_handle.read().trim().is_empty(),
+                        onclick: move |_| {
+                            let handle = bsky_handle.read().trim().to_string();
+                            let token = session.read().access_token.clone();
+                            if let (false, Some(token)) = (handle.is_empty(), token) {
+                                // handle (a domain) and the base64url JWT are URL-safe.
+                                let url = crate::backend_api::atproto_start_url(&handle, &token);
+                                if let Some(w) = web_sys::window() {
+                                    let _ = w.location().set_href(&url);
+                                }
+                            }
+                        },
+                        span { class: "material-icons", "link" }
+                        " {t(\"profile.linkBluesky\")}"
+                    }
+                }
+            }
+        }
+
+        // Background Web Push: opt this device in/out of notifications that arrive
+        // even when the app is closed (e.g. a vote opening in a group you're in).
+        if crate::pwa::push_supported() {
+            div { class: "card app-card",
+                div { class: "card-header",
+                    div { class: "avatar small", span { class: "material-icons", "notifications" } }
+                    h3 { class: "title-medium", "{t(\"profile.notifications\")}" }
+                }
+                div { class: "card-content",
+                    p { class: "body-medium text-muted mb-1", "{t(\"profile.notifyHint\")}" }
+                    {
+                        let on = *push_on.read();
+                        let label = match on {
+                            Some(true) => t("profile.disableNotify"),
+                            _ => t("profile.enableNotify"),
+                        };
+                        rsx! {
+                            button {
+                                class: if on == Some(true) { "btn btn-secondary mt-1" } else { "btn btn-primary mt-1" },
+                                disabled: on.is_none(),
+                                onclick: move |_| {
+                                    let tok = session.read().access_token.clone();
+                                    let currently = (*push_on.read()).unwrap_or(false);
+                                    spawn(async move {
+                                        let Some(tok) = tok else { return };
+                                        if currently {
+                                            let _ = crate::pwa::unsubscribe_push(&tok).await;
+                                            push_on.set(Some(false));
+                                            crate::snackbar::show_snackbar(&t("profile.notifyDisabled"));
+                                        } else {
+                                            match crate::pwa::subscribe_push(&tok).await {
+                                                Ok(()) => {
+                                                    push_on.set(Some(true));
+                                                    crate::snackbar::show_snackbar(&t("profile.notifyEnabled"));
+                                                }
+                                                Err(_) => {
+                                                    crate::snackbar::show_snackbar(&t("profile.notifyErr"));
+                                                }
+                                            }
+                                        }
+                                    });
+                                },
+                                span { class: "material-icons",
+                                    if on == Some(true) { "notifications_off" } else { "notifications_active" }
+                                }
+                                " {label}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Latest contributions the user authored, each linking to the item.
+        div { class: "card app-card",
+            div { class: "card-header",
+                div { class: "avatar small", span { class: "material-icons", "history_edu" } }
+                h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
+            }
+            {match &contrib_state {
+                None => rsx! {
+                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                },
+                Some(items) => rsx! {
+                    ContributionList { items: items.clone() }
+                },
+            }}
+        }
+    }
+}
+
+/// An authored-contributions list, revealed a handful at a time via an
+/// incremental "show more".
+///
+/// Shared with the group page: a group is credited on content the same way a
+/// person is, so it lists the same way (see `FolderApp`).
+#[component]
+pub(crate) fn ContributionList(items: Vec<model::ChildNodeFields>) -> Element {
+    const STEP: usize = 5;
+    let mut shown = use_signal(|| STEP);
+    if items.is_empty() {
+        return rsx! {
+            div { class: "card-content",
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "history_edu" }
+                    }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                }
+            }
+        };
+    }
+    let n = (*shown.read()).min(items.len());
+    rsx! {
+        div { class: "list",
+            for node in items[..n].iter() {
+                ContributionItem { key: "{node.id.0}", node: node.clone() }
+            }
+        }
+        if items.len() > n {
+            button {
+                class: "btn btn-text",
+                onclick: move |_| {
+                    let s = *shown.read();
+                    shown.set(s + STEP);
+                },
+                "{t(\"layout.showMore\")}"
+            }
+        }
+    }
+}
+
+/// One authored contribution row: its mime icon, a primary line (the comment text
+/// for a comment, else the node name) and its parent as context. Clicking resolves
+/// the node's full path (like the home "Newest" list) and navigates to it.
+#[component]
+fn ContributionItem(node: model::ChildNodeFields) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let node_id = node.id.0.clone();
+    let mime = node.mime_id.clone().unwrap_or_default();
+    let primary = if mime == "vote/comment" {
+        node.data
+            .as_ref()
+            .and_then(|d| d.0.get("text"))
+            .and_then(|t| t.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| t("vote.comments"))
+    } else {
+        node.name.clone()
+    };
+    let parent_name = node.parent.as_ref().map(|p| p.name.clone());
+    let created = node.created_at.as_ref().map(|c| c.0.clone());
+    let is_comment = mime == "vote/comment";
+
+    rsx! {
+        div {
+            class: "list-item",
+            onclick: move |_| {
+                let node_id = node_id.clone();
+                let token = session.read().access_token.clone();
+                spawn(async move {
+                    // A comment is not a page: open the content hosting its
+                    // thread. Only comments pay for the extra lookup.
+                    let target = if is_comment {
+                        graphql::thread_host_id(token.as_deref(), &node_id).await
+                    } else {
+                        node_id.clone()
+                    };
+                    if let Ok(segments) = graphql::path_from_id(token.as_deref(), &target).await {
+                        if !segments.is_empty() {
+                            nav.push(Route::PathPage { segments, app: None });
+                        }
+                    }
+                });
+            },
+            div { class: "avatar small", {icon_el(&mime)} }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{primary}" }
+                // Where and when, on one secondary line — the same relative time
+                // (with the exact date on hover) the home "Newest" list shows.
+                if parent_name.is_some() || created.is_some() {
+                    div { class: "list-item-secondary",
+                        if let Some(pn) = parent_name.as_ref() {
+                            span { "{pn}" }
+                        }
+                        if let Some(iso) = created.as_ref() {
+                            if parent_name.is_some() {
+                                span { " \u{00b7} " }
+                            }
+                            span {
+                                title: "{super::loader::full_datetime(iso)}",
+                                "{super::loader::relative_time(iso)}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The profile route (`/profile/:id`) — the one place a person is shown.
+///
+/// Your own id renders the full self view ([`ProfileApp`]: identity, the Bluesky
+/// link, your contributions). Anyone else's renders what you may see of them:
+/// their name + avatar and the groups and events you share. The memberships
+/// query is filtered by what the VIEWER may see, so it is the intersection —
+/// permission-safe. User representations across the app link here via
+/// [`super::loader::UserPopover`].
+#[component]
+pub fn UserProfile(id: String) -> Element {
+    let session = use_session();
+    let access_token = session.read().access_token.clone();
+
+    // Your own profile is the richer view, and it is the same page — there is no
+    // separate `?app=profile` any more.
+    let is_me = session.read().user.as_ref().map(|u| u.id.clone()) == Some(id.clone());
+    if is_me {
+        return rsx! { ProfileApp {} };
+    }
+
+    let uid = id.clone();
+    let tok = access_token.clone();
+    let user_res = crate::use_data_resource!(|(uid, tok)| async move {
+        graphql::query_user(tok.as_deref(), &uid).await
+    });
+
+    let uid2 = id.clone();
+    let tok2 = access_token.clone();
+    let memberships = crate::use_data_resource!(|(uid2, tok2)| async move {
+        let mut out = Vec::new();
+        for mime in crate::model::CONTEXT_MIMES {
+            if let Ok(nodes) = graphql::query_contexts(tok2.as_deref(), &uid2, mime).await {
+                out.extend(nodes);
+            }
+        }
+        out
+    });
+
+    // What this person has written, the same list your own profile shows. The
+    // query is row-filtered by Hasura, so it is the intersection of their work
+    // and what you may see — never a window into contexts you are not in.
+    let uid3 = id.clone();
+    let tok3 = access_token.clone();
+    let contributions = crate::use_data_resource!(|(uid3, tok3)| async move {
+        graphql::query_user_contributions(tok3.as_deref(), &uid3, 12).await
+    });
+
+    let user = user_res.read().clone().flatten();
+    let name = user
+        .as_ref()
+        .map(|u| u.display_name.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| t("common.unknown"));
+    let avatar_url = user
+        .as_ref()
+        .map(|u| u.avatar_url.clone())
+        .unwrap_or_default();
+    let contexts = memberships.read().clone().unwrap_or_default();
+    // Their linked Bluesky account, read off the avatar: once linked, the picture
+    // is served from the bsky CDN and its path carries the account's DID, which
+    // bsky.app resolves. `/atproto/status` only answers for the caller, so this
+    // is the only way to show someone else's. Same trick as `UserPopover`.
+    let bsky_did = avatar_url
+        .contains("cdn.bsky.app/")
+        .then(|| avatar_url.split('/').find(|seg| seg.starts_with("did:")))
+        .flatten()
+        .map(str::to_string);
+    let contrib_state = contributions.read().clone();
+
+    rsx! {
+        div { class: "card app-card",
+            div { class: "profile-hero",
+                div { class: "profile-hero-avatar",
+                    {user_avatar(&avatar_url, icon_el("wiki/user"))}
+                }
+                div {
+                    h3 { class: "profile-hero-name", "{name}" }
+                    if let Some(did) = bsky_did.as_ref() {
+                        a {
+                            // stack stack-h so the mark sits on the text baseline
+                            // row; .bsky-logo is already sized for inline use.
+                            class: "link-accent stack stack-h",
+                            href: "https://bsky.app/profile/{did}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            {crate::components::loader::bsky_logo()}
+                            "{t(\"profile.blueskyAccount\")}"
+                        }
+                    }
+                }
+            }
+        }
+        // What they have written, first: it is why you opened someone's profile.
+        // The same card your own profile carries, but titled without the "Your",
+        // since this is someone else's page.
+        div { class: "card app-card mt-1",
+            div { class: "card-header",
+                div { class: "avatar small", span { class: "material-icons", "history_edu" } }
+                h3 { class: "title-medium", "{t(\"profile.contributionsOther\")}" }
+            }
+            {match &contrib_state {
+                None => rsx! {
+                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                },
+                Some(items) => rsx! {
+                    ContributionList { items: items.clone() }
+                },
+            }}
+        }
+        // Where you overlap, below it: context for the reader, not the point.
+        div { class: "card app-card mt-1",
+            div { class: "card-header",
+                // join_inner, the set-intersection mark: this card is precisely
+                // the overlap between their memberships and yours, and it does not
+                // read as the plain "Groups" list, which owns the `groups` glyph.
+                div { class: "avatar small", span { class: "material-icons", "join_inner" } }
+                h3 { class: "title-medium", "{t(\"profile.sharedMemberships\")}" }
+            }
+            if contexts.is_empty() {
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "groups" }
+                    }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                }
+            } else {
+                div { class: "list",
+                    for ctx in contexts.iter() {
+                        SharedContextItem { key: "{ctx.id.0}", node: ctx.clone() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One shared group/event row. Resolves the context's full ancestor path on
+/// click rather than linking to its bare key: a group or event nested inside
+/// another lives at `/parent/child`, so the one-segment link 404'd for exactly
+/// those. Mirrors the home list's `ContextItem`.
+#[component]
+fn SharedContextItem(node: model::ContextNodeFields) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let node_id = node.id.0.clone();
+    let key = node.key.clone();
+
+    rsx! {
+        div {
+            class: "list-link",
+            onclick: move |_| {
+                let node_id = node_id.clone();
+                let key = key.clone();
+                let token = session.read().access_token.clone();
+                spawn(async move {
+                    let mut segments = graphql::path_from_id(token.as_deref(), &node_id)
+                        .await
+                        .unwrap_or_default();
+                    // A path we cannot resolve is still better attempted than
+                    // dropped: the bare key works for a top-level context.
+                    if segments.is_empty() {
+                        segments = vec![key];
+                    }
+                    nav.push(Route::PathPage { segments, app: None });
+                });
+            },
+            super::widgets::ListItem {
+                headline: node.name.clone(),
+                leading: rsx! {
+                    div { class: "avatar small", {icon_el(node.mime_id.as_deref().unwrap_or(""))} }
+                },
+            }
+        }
+    }
+}

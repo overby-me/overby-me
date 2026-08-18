@@ -1,0 +1,14 @@
+source ../helpers.nu
+
+# Format 2 SMF (independent tracks). Header reports format:2.
+let mid = (
+    0x[4d 54 68 64 00 00 00 06 00 02 00 01 01 e0]
+    ++ 0x[4d 54 72 6b 00 00 00 04]
+    ++ 0x[00 ff 2f 00]
+)
+$mid | save -f --raw ($env.TMPDIR | path join in.mid)
+
+^$env.REF ($env.TMPDIR | path join in.mid) o+e> ($env.TMPDIR | path join expected)
+^$env.RUST ($env.TMPDIR | path join in.mid) o+e> ($env.TMPDIR | path join actual)
+^sed -i $"s|($env.TMPDIR)|TMPDIR|g" ($env.TMPDIR | path join expected) ($env.TMPDIR | path join actual)
+compare "pw-mididump format-2-smf (MThd format=2 accepted, opened as such)"

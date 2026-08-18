@@ -1,0 +1,315 @@
+# Root justfile — delegates to sub-project build systems.
+#
+# mojo-gui is a multi-renderer reactive GUI framework. This root justfile
+# provides convenience aliases for common operations across all renderers.
+#
+# Sub-project justfiles:
+#   - web/justfile    — WASM build, JS tests, browser serving
+#   - desktop/        — Blitz shim build (via cargo), native Mojo build
+#
+# Shared examples (examples/) compile identically for both targets:
+#
+#   # Web (WASM):
+#   mojo build examples/counter/main.mojo --target wasm64-wasi -I core/src -I web/src -I examples
+#
+#   # Desktop (native, Wayland-only):
+#   mojo build examples/counter/main.mojo -I core/src -I desktop/src -I examples
+
+# Default: build the web target
+default: build
+
+# ── Runtime library path (Nix) ───────────────────────────────────────────────
+#
+# The Blitz renderer (via Winit) uses dlopen to load Wayland and GPU libraries
+# at runtime. In a Nix environment these live in /nix/store paths that aren't
+# on the default ld search path. We use nix eval to resolve the paths and
+# patchelf to bake them into libmojo_blitz.so during build-shim.
+#
+# The same paths are also used as LD_LIBRARY_PATH fallback for run-desktop.
+
+_blitz-rpath := `nix eval --raw --impure --expr 'let pkgs = import <nixpkgs> {}; in pkgs.lib.makeLibraryPath (with pkgs; [ wayland libxkbcommon vulkan-loader libGL fontconfig freetype ])' 2>/dev/null || echo ""`
+
+# ── Windows cross-compilation sysroot (Nix) ──────────────────────────────
+#
+# The rust-sysroot-windows helper script (from the Nix dev shell) prints the
+# path to a Rust sysroot that includes the x86_64-pc-windows-gnu standard
+# library. This is used by build-shim-windows and test-desktop-wine to pass
+# --sysroot to rustc without replacing the native Rust toolchain.
+
+_rust-sysroot-windows := `rust-sysroot-windows 2>/dev/null || echo ""`
+_mingw-lib-path := `mingw-lib-path 2>/dev/null || echo ""`
+_mingw-mcf-lib-path := `mingw-mcf-lib-path 2>/dev/null || echo ""`
+
+# ── Windows Mojo cross-compilation (KGEN runtime shim) ──────────────────
+#
+# The mojo-windows package (from the Nix dev shell) provides:
+#   - libkgen_rt.a: KGEN CompilerRT shim for Windows (MinGW static lib)
+#   - mojo-windows-libdir: prints the path to libkgen_rt.a
+#   - mojo-windows-build: one-shot mojo → .exe cross-compile pipeline
+#
+# The Mojo compiler emits Windows COFF objects via --target-triple, and
+# MinGW-w64 links them against libkgen_rt.a + the Windows CRT.
+
+_kgen-lib-path := `mojo-windows-libdir 2>/dev/null || echo ""`
+
+# ── Web target ───────────────────────────────────────────────────────────────
+
+# Build the WASM binary (delegates to web/justfile)
+build:
+    cd web && just build
+
+# Incremental build — skip if out.wasm is newer than all source files
+build-if-changed:
+    cd web && just build-if-changed
+
+# Precompile WASM for faster loading
+precompile:
+    cd web && just precompile
+
+# Build Mojo test binaries (parallel, incremental)
+test-build *FILTER:
+    cd web && just test-build {{ FILTER }}
+
+# Run precompiled Mojo test binaries
+test-run *FILTER:
+    cd web && just test-run {{ FILTER }}
+
+# Build + run Mojo test binaries
+test *FILTER:
+    cd web && just test {{ FILTER }}
+
+# Run JS integration tests
+test-js:
+    cd web && just test-js
+
+# Run all tests (Mojo + JS)
+test-all:
+    cd web && just test-all
+
+# End-to-end browser tests via headless Servo + WebDriver
+test-browser:
+    cd web && just test-browser
+
+# Browser tests with verbose Servo output
+test-browser-verbose:
+    cd web && just test-browser-verbose
+
+# Single app browser test
+test-browser-app app:
+    cd web && just test-browser-app {{ app }}
+
+# Serve examples in browser
+serve: build
+    @echo "Open http://localhost:4507/web/examples/counter/"
+    @echo "Open http://localhost:4507/web/examples/todo/"
+    @echo "Open http://localhost:4507/web/examples/bench/"
+    @echo "Open http://localhost:4507/web/examples/app/"
+    deno run --allow-net --allow-read jsr:@std/http/file-server
+
+# ── Desktop target (Wayland-only) ───────────────────────────────────────────
+
+# Build the Blitz C shim (Rust cdylib) and patchelf runtime rpaths
+build-shim:
+    cd desktop/shim && cargo build --release --lib
+    @# Bake Wayland/GPU library rpaths into the cdylib so dlopen finds them
+    @if [ -n "{{ _blitz-rpath }}" ] && command -v patchelf >/dev/null 2>&1; then \
+        patchelf --set-rpath "{{ _blitz-rpath }}" desktop/shim/target/release/libmojo_blitz.so && \
+        echo "patchelf: set rpath on libmojo_blitz.so"; \
+    fi
+
+# Build a shared example for desktop (native binary)
+# Usage: just build-desktop counter
+build-desktop app:
+    mkdir -p build
+    mojo build examples/{{ app }}/main.mojo \
+        -I core/src -I desktop/src -I xr/native/src -I examples \
+        -o build/{{ app }}-desktop
+
+# Build all shared examples for desktop
+build-desktop-all: (build-desktop "counter") (build-desktop "todo") (build-desktop "bench") (build-desktop "app")
+
+# Run a shared example on desktop (Wayland)
+# Usage: just run-desktop counter
+run-desktop app: (build-desktop app)
+    LD_LIBRARY_PATH="{{ _blitz-rpath }}:${LD_LIBRARY_PATH:-}" \
+    MOJO_BLITZ_LIB="{{ justfile_directory() }}/desktop/shim/target/release" \
+    ./build/{{ app }}-desktop
+
+# Run all shared examples on desktop (sequentially — each opens a window)
+run-desktop-all: build-desktop-all
+    @echo "Running counter…"
+    just run-desktop counter
+    @echo "Running todo…"
+    just run-desktop todo
+    @echo "Running bench…"
+    just run-desktop bench
+    @echo "Running app…"
+    just run-desktop app
+
+# ── Desktop tests (Rust integration tests for the Blitz shim) ───────────
+
+# Run Blitz shim integration tests (headless — no display needed)
+test-desktop:
+    cd desktop/shim && cargo test
+
+# ── XR target (OpenXR native) ───────────────────────────────────────────
+
+# Build the XR C shim (Rust cdylib)
+build-xr-shim:
+    cd xr/native/shim && cargo build --release --lib
+
+# Build a shared example for XR (native binary)
+# Usage: just build-xr counter
+build-xr app: build-xr-shim
+    mkdir -p build
+    mojo build examples/{{ app }}/main.mojo \
+        -D MOJO_TARGET_XR \
+        -I core/src -I xr/native/src -I desktop/src -I examples \
+        -o build/{{ app }}-xr
+
+# NOTE: Both desktop and XR builds include all renderer include paths
+# (-I desktop/src -I xr/native/src) because Mojo's @parameter if does
+# not prevent import resolution in dead branches. The compile-time
+# dispatch in launch.mojo imports from both desktop.launcher and
+# xr.launcher — the linker only pulls in the active branch's code.
+
+# Build all shared examples for XR
+build-xr-all: (build-xr "counter") (build-xr "todo") (build-xr "bench") (build-xr "app")
+
+# Run a shared example in XR (headless — no XR runtime needed for testing)
+# Usage: just run-xr counter
+run-xr app: (build-xr app)
+    MOJO_XR_LIB="{{ justfile_directory() }}/xr/native/shim/target/release" \
+    ./build/{{ app }}-xr
+
+# ── XR tests (Rust integration tests for the XR shim) ───────────────────
+
+# Run XR shim integration tests (headless — no XR runtime or GPU needed)
+test-xr:
+    cd xr/native/shim && cargo test
+
+# Run XR web runtime JS tests (Deno — headless DOM via linkedom)
+test-xr-js:
+    cd xr/web && deno run --allow-read --allow-env test-js/run.ts
+
+# ── XR web target (WebXR browser) ───────────────────────────────────────
+
+# Bundle XR web examples (TS→JS via esbuild for browser consumption)
+# Requires WASM binary: run `just build` first.
+build-xr-web: build
+    cd xr/web && deno run --allow-read --allow-write --allow-env --allow-run scripts/bundle.ts
+
+# Bundle a single XR web example
+# Usage: just build-xr-web-app counter
+build-xr-web-app app:
+    cd xr/web && deno run --allow-read --allow-write --allow-env --allow-run scripts/bundle.ts {{ app }}
+
+# Clean XR web bundles
+clean-xr-web:
+    cd xr/web && deno run --allow-read --allow-write --allow-env --allow-run scripts/bundle.ts --clean
+
+# Serve XR web examples in browser (builds WASM + bundles first)
+serve-xr: build-xr-web
+    @echo "Open http://localhost:4507/xr/web/examples/counter/"
+    @echo "Open http://localhost:4507/xr/web/examples/todo/"
+    @echo "Open http://localhost:4507/xr/web/examples/bench/"
+    @echo "Open http://localhost:4507/xr/web/examples/app/"
+    deno run --allow-net --allow-read jsr:@std/http/file-server
+
+# End-to-end browser tests for XR flat fallback via headless Servo + WebDriver
+test-browser-xr: build-xr-web
+    nu xr/web/test-browser.nu
+
+# Browser tests with verbose Servo output
+test-browser-xr-verbose: build-xr-web
+    nu xr/web/test-browser.nu --verbose
+
+# Single app XR browser test
+test-browser-xr-app app: build-xr-web
+    nu xr/web/test-browser.nu --app {{ app }}
+
+# ── Windows cross-compilation & Wine verification (S-3) ─────────────────
+
+# Build a shared example for Windows (cross-compiled .exe via MinGW-w64)
+# Requires both the Blitz shim DLL and the KGEN runtime shim.
+# Usage: just build-desktop-windows counter
+build-desktop-windows app: build-shim-windows
+    mkdir -p build
+    mojo build --target-triple x86_64-pc-windows-gnu --emit object \
+        -D MOJO_TARGET_WINDOWS \
+        -I core/src -I desktop/src -I xr/native/src -I examples \
+        -o build/{{ app }}-desktop-windows.obj \
+        examples/{{ app }}/main.mojo
+    x86_64-w64-mingw32-gcc \
+        build/{{ app }}-desktop-windows.obj \
+        -o build/{{ app }}-desktop.exe \
+        -L"{{ _kgen-lib-path }}" \
+        -L"{{ _mingw-lib-path }}" \
+        -L"{{ _mingw-mcf-lib-path }}" \
+        -lkgen_rt
+    rm -f build/{{ app }}-desktop-windows.obj
+    @echo "✅ build/{{ app }}-desktop.exe"
+
+# Build all shared examples for Windows
+build-desktop-windows-all: (build-desktop-windows "counter") (build-desktop-windows "todo") (build-desktop-windows "bench") (build-desktop-windows "app")
+
+# Run a shared example on Windows via Wine
+# Usage: just run-desktop-windows-wine counter
+run-desktop-windows-wine app: (build-desktop-windows app)
+    MOJO_BLITZ_LIB="{{ justfile_directory() }}/desktop/shim/target/x86_64-pc-windows-gnu/release" \
+    WINEPATH="{{ _mingw-mcf-lib-path }}/../bin;{{ _mingw-lib-path }}/../bin" \
+    wine64 ./build/{{ app }}-desktop.exe
+
+# Build the Blitz C shim for Windows (cross-compile via MinGW-w64)
+# Prepends the rust-bin toolchain (with Windows target std) to PATH so that
+# rustc, cargo, and the sysroot all match. The native devenv Rust is unchanged.
+build-shim-windows:
+    cd desktop/shim && \
+    PATH="{{ _rust-sysroot-windows }}/bin:$PATH" \
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-L native={{ _mingw-lib-path }}" \
+    cargo build --release --lib --target x86_64-pc-windows-gnu
+
+# Run Blitz shim integration tests under Wine (headless — no GPU needed)
+# cargo test cross-compiles the test binary, then Wine runs it automatically
+# via the runner setting in .cargo/config.toml.
+# --test-threads=1: Wine's COM/threading layer crashes with parallel test threads
+# (misaligned pointer in windows-core interface dispatch). Single-threaded is stable.
+test-desktop-wine:
+    cd desktop/shim && \
+    PATH="{{ _rust-sysroot-windows }}/bin:$PATH" \
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-L native={{ _mingw-lib-path }}" \
+    cargo test --target x86_64-pc-windows-gnu -- --test-threads=1
+    @echo "✅ All desktop integration tests pass under Wine"
+
+# Build the shim for both Linux and Windows
+build-shim-all: build-shim build-shim-windows
+
+# Build both the Rust shim and Mojo examples for Windows
+build-windows-all: build-shim-windows build-desktop-windows-all
+
+# ── Cross-target builds ──────────────────────────────────────────────────
+
+# Build for web (WASM) — delegates to web/justfile.
+# The web pipeline uses web/src/main.mojo as its entry point (with @export
+# functions for all examples), not individual example main.mojo files.
+# Per-app web builds are not supported — use `just build` instead.
+build-web:
+    cd web && just build
+
+# Build all shared examples for all targets (web + desktop-linux + desktop-windows + xr + xr-web)
+build-all: build build-desktop-all build-desktop-windows-all build-xr-all build-xr-web
+
+# Run all tests (Mojo + JS + desktop + XR + XR JS + Wine shim + Wine desktop)
+test-all-targets: test-all test-desktop test-xr test-xr-js test-desktop-wine
+
+# Run all tests including browser E2E (requires servo)
+test-all-browser: test-all-targets test-browser test-browser-xr
+
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+
+# Remove build artifacts
+clean:
+    rm -rf build/
+    rm -rf web/build/
+    cd desktop/shim && cargo clean 2>/dev/null || true
+    cd xr/web && deno run --allow-read --allow-write --allow-env --allow-run scripts/bundle.ts --clean 2>/dev/null || true

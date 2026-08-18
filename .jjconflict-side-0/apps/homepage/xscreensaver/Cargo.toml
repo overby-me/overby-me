@@ -1,0 +1,14 @@
+[package]
+name = "xscreensaver"
+version = "0.1.0"
+edition = "2024"
+description = "Rust ports of the XScreenSaver hacks, on a software framebuffer"
+
+# Deliberately dependency-free and platform-independent: the whole Tier-A
+# runtime is plain Rust over a `Vec<u32>`, so every saver can be driven from a
+# native `cargo test` with no browser and no wasm toolchain. The host (the
+# homepage crate) owns the canvas and blits `Fb::as_bytes` with `putImageData`.
+[dependencies]
+
+[lints.clippy]
+too_many_arguments = "allow"

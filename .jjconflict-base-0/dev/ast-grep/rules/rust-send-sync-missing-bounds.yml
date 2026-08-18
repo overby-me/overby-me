@@ -1,0 +1,28 @@
+# Rudra's highest-yield class and the largest RustSec cluster (~50 advisories):
+# an `unsafe impl Send/Sync` on a GENERIC type whose parameter carries no
+# Send/Sync bound lets safe code move or share values the parameter type
+# forbids - data races from safe Rust (RUSTSEC-2020-0121/0122).
+#
+# Generic impls only, deliberately. The tree's three non-generic impls
+# (fe-c's cementite) each carry a SAFETY comment arguing the serialization,
+# which is this shape done right; flagging them would be noise. Which bound a
+# parameter needs (Sync impls sometimes need T: Send) is type-level knowledge,
+# so flag-for-audit is this rule's honest ceiling.
+id: rust-send-sync-missing-bounds
+language: rust
+severity: warning
+message: >-
+  An unsafe Send/Sync impl on a generic type is a promise about every possible
+  parameter. Bound the parameters (T: Send / T: Sync), or write down why any T
+  is safe here.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: unsafe impl<$$$G> Send for $TY { }
+    - pattern: unsafe impl<$$$G> Sync for $TY { }
+  not:
+    regex: '(Send|Sync)[,>]'

@@ -1,0 +1,76 @@
+{
+	"version": "0.1.0",
+	"wit_version": "0.3.0",
+	"type": "channel",
+	"name": "bluesky",
+	"description": "Bluesky/AT Protocol channel for receiving and responding to Bluesky posts and DMs",
+	"auth": {
+		"secret_name": "bluesky_app_password",
+		"display_name": "Bluesky",
+		"instructions": "Create an app password in Bluesky Settings > App Passwords. Also set BLUESKY_IDENTIFIER to your handle or DID.",
+		"token_hint": "Looks like xxxx-xxxx-xxxx-xxxx",
+		"env_var": "BLUESKY_APP_PASSWORD"
+	},
+	"setup": {
+		"required_secrets": [
+			{
+				"name": "bluesky_identifier",
+				"prompt": "Enter your Bluesky handle or DID (e.g. agent.bsky.social)",
+				"optional": false
+			},
+			{
+				"name": "bluesky_app_password",
+				"prompt": "Enter your Bluesky app password",
+				"optional": false
+			}
+		],
+		"validation_endpoint": "{pds_url}/xrpc/com.atproto.server.createSession"
+	},
+	"capabilities": {
+		"http": {
+			"allowlist": [{ "host": "*", "path_prefix": "/xrpc/" }],
+			"credentials": {
+				"bluesky_identifier": {
+					"secret_name": "bluesky_identifier",
+					"location": {
+						"type": "body",
+						"placeholder": "{BLUESKY_IDENTIFIER}"
+					},
+					"host_patterns": ["*"]
+				},
+				"bluesky_app_password": {
+					"secret_name": "bluesky_app_password",
+					"location": {
+						"type": "body",
+						"placeholder": "{BLUESKY_APP_PASSWORD}"
+					},
+					"host_patterns": ["*"]
+				}
+			},
+			"max_response_bytes": 10485760,
+			"rate_limit": {
+				"requests_per_minute": 60,
+				"requests_per_hour": 3000
+			}
+		},
+		"secrets": {
+			"allowed_names": ["bluesky_*"]
+		},
+		"channel": {
+			"allowed_paths": ["/webhook/bluesky"],
+			"allow_polling": true,
+			"min_poll_interval_ms": 30000,
+			"workspace_prefix": "channels/bluesky/",
+			"emit_rate_limit": {
+				"messages_per_minute": 30,
+				"messages_per_hour": 1000
+			}
+		}
+	},
+	"config": {
+		"pds_url": "https://bsky.social",
+		"dm_policy": "pairing",
+		"allow_from": [],
+		"respond_to_mentions": true
+	}
+}

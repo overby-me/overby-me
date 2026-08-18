@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW003",
+			"severity": "error",
+			"field": "packages.bad-pkg.build-system",
+			"message": "unknown build-system \"python\"",
+			"hint": "Supported build systems: \"rust\", \"go\", \"generic\". Omit build-system to use generic (stdenv.mkDerivation).",
+			"contract": "PackageConfig.build-system"
+		}
+	]
+}

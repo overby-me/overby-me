@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW002",
+			"severity": "error",
+			"field": "machines.my-machine.system",
+			"message": "missing required field \"system\" in MachineConfig",
+			"hint": "Each machine must declare a target system, e.g.: system = \"x86_64-linux\"",
+			"contract": "MachineConfig.system"
+		}
+	]
+}

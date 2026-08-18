@@ -1,0 +1,22 @@
+[package]
+name = "smallvec-0009"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# corpus-smallvec-0009 (RUSTSEC-2019-0009): a heap use-after-free. Calling
+# `SmallVec::grow(current_capacity)` on a spilled (heap) SmallVec frees the
+# existing data, leaving the SmallVec pointing at freed memory; a subsequent
+# access reads it. Both modes abort UseAfterFree: the spilled buffer is a
+# global-allocator (FecAlloc) allocation, grow frees it (poison, findable in
+# quarantine), and the read of the freed buffer aborts. cementite is a path
+# dependency; injected checks are symbol-level (A4b / I11).
+[workspace]
+
+[[bin]]
+name = "smallvec-0009"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }
+smallvec = "=0.6.9"

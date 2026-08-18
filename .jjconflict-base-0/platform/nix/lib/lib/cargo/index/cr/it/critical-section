@@ -1,0 +1,1 @@
+{"name":"critical-section","vers":"1.2.0","deps":[],"cksum":"790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b","features":{"restore-state-bool":[],"restore-state-none":[],"restore-state-u16":[],"restore-state-u32":[],"restore-state-u64":[],"restore-state-u8":[],"restore-state-usize":[],"std":["restore-state-bool"]},"yanked":false,"pubtime":"2024-10-16T13:28:54Z"}

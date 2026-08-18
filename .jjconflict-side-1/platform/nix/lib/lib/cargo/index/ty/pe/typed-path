@@ -1,0 +1,1 @@
+{"name":"typed-path","vers":"0.12.3","deps":[],"cksum":"8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e","features":{"default":["std"],"std":[]},"yanked":false,"rust_version":"1.65.0","pubtime":"2026-02-11T02:30:37Z"}

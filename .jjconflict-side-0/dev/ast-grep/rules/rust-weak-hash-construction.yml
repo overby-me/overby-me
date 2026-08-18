@@ -1,0 +1,25 @@
+# MD5/SHA-1/MD4 constructors: collision-broken, so anything integrity-shaped
+# built on them is void. The two in-tree uses are protocol-mandated (curl's
+# digest/NTLM auth, cachix narinfo) and live in safety/oxidized outside this
+# hook - so this is a ratchet against NEW weak-hash uses, which is where the
+# damage happens. CodeQL's weak-name lists (MIT) informed the set.
+id: rust-weak-hash-construction
+language: rust
+severity: warning
+message: >-
+  This constructs a collision-broken hash. For integrity or identity use
+  SHA-256+ or BLAKE3; if a legacy protocol mandates this, say which one here.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: Md5::new()
+    - pattern: Md5::digest($$$A)
+    - pattern: md5::compute($$$A)
+    - pattern: Sha1::new()
+    - pattern: Sha1::digest($$$A)
+    - pattern: Md4::new()
+    - pattern: Md4::digest($$$A)

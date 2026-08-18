@@ -1,0 +1,1 @@
+{"name":"nu-glob","vers":"0.110.0","deps":[{"name":"doc-comment","req":"^0.3","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"2903117d41a34ba425ab738f78029999a09622818a1adb3b1e93d1fd8ab18ec6","features":{},"yanked":false,"pubtime":"2026-01-18T02:39:31Z"}

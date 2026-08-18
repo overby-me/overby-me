@@ -1,0 +1,1 @@
+{"name":"content_disposition","vers":"0.4.0","deps":[{"name":"charset","req":"^0.1.5","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"ebc14a88e1463ddd193906285abe5c360c7e8564e05ccc5d501755f7fbc9ca9c","features":{},"yanked":false,"pubtime":"2024-08-16T07:53:38Z"}

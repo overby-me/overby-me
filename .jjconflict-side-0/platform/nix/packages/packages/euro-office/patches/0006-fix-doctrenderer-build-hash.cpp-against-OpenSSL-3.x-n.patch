@@ -1,0 +1,94 @@
+From fbf0aad6d335ead5ab15e82fe94c58f177d47243 Mon Sep 17 00:00:00 2001
+From: Niclas Overby <niclas@overby.me>
+Date: Mon, 29 Jun 2026 14:39:40 +0200
+Subject: [PATCH] fix(doctrenderer): build hash.cpp against OpenSSL without MD2
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+OpenSSL deprecates the legacy MD2 digest and many builds (most distros,
+nixpkgs) compile it with OPENSSL_NO_MD2 — openssl/md2.h then exists but does
+not declare MD2(), so hash.cpp failed to compile.
+
+Include md2.h only when present (__has_include), define EO_HAVE_OPENSSL_MD2
+only when MD2 is actually enabled (!OPENSSL_NO_MD2), and compile out the three
+haMD2 cases otherwise. The digest-length table is unaffected. MD2 has been
+insecure for decades, so dropping it where the system OpenSSL lacks it is the
+right behaviour.
+---
+ DesktopEditor/doctrenderer/hash.cpp | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/DesktopEditor/doctrenderer/hash.cpp b/DesktopEditor/doctrenderer/hash.cpp
+index c7ea04d81..1a24ef0fe 100644
+--- a/DesktopEditor/doctrenderer/hash.cpp
++++ b/DesktopEditor/doctrenderer/hash.cpp
+@@ -5,7 +5,18 @@
+ #endif
+ 
+ #include "openssl/sha.h"
+-#include "openssl/md2.h"
++// OpenSSL 3.x deprecates/disables the legacy MD2 digest. Many builds (incl.
++// most distros and nixpkgs) compile OpenSSL with OPENSSL_NO_MD2, in which case
++// openssl/md2.h exists but does not declare MD2(). Only use MD2 when the header
++// is present AND MD2 is actually enabled.
++#if defined(__has_include)
++#  if __has_include("openssl/md2.h")
++#    include "openssl/md2.h"
++#  endif
++#endif
++#if !defined(OPENSSL_NO_MD2)
++#  define EO_HAVE_OPENSSL_MD2 1
++#endif
+ #include "openssl/md4.h"
+ #include "openssl/md5.h"
+ #include "openssl/whrlpool.h"
+@@ -37,6 +48,7 @@ unsigned char* CHash::hash(const unsigned char* data, int size, int alg)
+ 
+ 	switch (alg)
+ 	{
++#ifdef EO_HAVE_OPENSSL_MD2
+ 	case haMD2:
+ 	{
+ 		nBufLen = 16;
+@@ -44,6 +56,7 @@ unsigned char* CHash::hash(const unsigned char* data, int size, int alg)
+ 		MD2(data, d, pBufData);
+ 		break;
+ 	}
++#endif
+ 	case haMD4:
+ 	{
+ 		nBufLen = 16;
+@@ -246,11 +259,13 @@ void hash_iteration(unsigned char*& input, int iter, unsigned char*& tmp, int al
+ 
+ 	switch (alg)
+ 	{
++#ifdef EO_HAVE_OPENSSL_MD2
+ 	case CHash::haMD2:
+ 	{
+ 		MD2(input, alg_size + 4, tmp);
+ 		break;
+ 	}
++#endif
+ 	case CHash::haMD4:
+ 	{
+ 		MD4(input, alg_size + 4, tmp);
+@@ -319,6 +334,7 @@ unsigned char* CHash::hash2(const char* password, const char* salt, int spinCoun
+ 	unsigned char* pBuffer1 = NULL;
+ 	switch (alg)
+ 	{
++#ifdef EO_HAVE_OPENSSL_MD2
+ 	case haMD2:
+ 	{
+ 		alg_size = 16;
+@@ -326,6 +342,7 @@ unsigned char* CHash::hash2(const char* password, const char* salt, int spinCoun
+ 		MD2(inputData, inputDataLen, pBuffer1);
+ 		break;
+ 	}
++#endif
+ 	case haMD4:
+ 	{
+ 		alg_size = 16;
+-- 
+2.54.0
+

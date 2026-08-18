@@ -1,0 +1,15 @@
+id = "mojo"
+name = "Mojo"
+description = "Mojo Language Support"
+version = "0.1.0"
+schema_version = 1
+authors = ["Niclas Overby <niclas@overby.me>"]
+repository = "https://tangled.org/@overby.me/overby.me"
+
+[grammars.mojo]
+repository = "https://github.com/lsh/tree-sitter-mojo"
+commit = "564d5a8489e20e5f723020ae40308888699055c0"
+
+[language_servers.mojo]
+name = "Mojo LSP"
+language = "Mojo"

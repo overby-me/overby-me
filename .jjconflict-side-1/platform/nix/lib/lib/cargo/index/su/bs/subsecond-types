@@ -1,0 +1,1 @@
+{"name":"subsecond-types","vers":"0.7.9","deps":[{"name":"serde","req":"^1.0.225","features":["derive"],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"e9798bfed58797aed51c672aa99810aac30a50d3120ecfdcf28c13784e9a8f1c","features":{},"yanked":false,"pubtime":"2026-05-08T00:05:38Z"}

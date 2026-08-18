@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: tilde-version
+Description: A test library with a tilde pre-release version
+Version: 1.0.0~beta1
+Libs: -L${libdir} -ltilde-version
+Cflags: -I${includedir}/tilde-version

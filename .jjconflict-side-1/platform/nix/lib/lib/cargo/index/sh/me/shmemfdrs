@@ -1,0 +1,1 @@
+{"name":"shmemfdrs","vers":"0.1.4","deps":[{"name":"libc","req":"^0.2.132","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"a07caaa5573b8fa1142d19783d30ba2999c6a221169784f3bb7e2b9b308bcbdb","features":{"default":["memfd"],"memfd":[]},"yanked":false,"pubtime":"2022-10-01T23:39:57Z"}

@@ -1,0 +1,28 @@
+[package]
+name = "rust-xz"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "rust_xz"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xz"
+path = "src/main.rs"
+
+[[bench]]
+harness = false
+name = "roundtrip"
+
+[dependencies]
+liblzma = "0.4"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+proptest = "1"
+
+[profile.release]
+strip = true
+lto = true

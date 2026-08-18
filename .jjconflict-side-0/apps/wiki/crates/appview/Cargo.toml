@@ -1,0 +1,61 @@
+[package]
+name = "appview"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "appview"
+path = "src/lib.rs"
+
+[[bin]]
+name = "appview"
+path = "src/main.rs"
+
+[dependencies]
+atrium-api = { version = "0.25.8", default-features = false, features = [
+  "agent"
+] }
+atrium-common = "0.1.4"
+atrium-identity = { version = "0.1.9", features = ["doh-handle-resolver"] }
+# atproto OAuth: the thin atrium-oauth wrapper (proven in crates/oauth-spike),
+# now with durable SQLite-backed state/session stores and the /callback slice.
+atrium-oauth = "0.1.7"
+# The AppView is a stateful persistent process (not scale-to-zero serverless):
+# axum HTTP + WebSocket, a Turso datastore, an in-process broadcast channel.
+axum = { version = "0.8", features = ["ws"] }
+ballot-spec = { path = "../ballot-spec" }
+# The durable ballot service: the public board (kill-9-proven atomic cast) + the
+# private roster DDL, plus the off-node replica sink wired into this datastore.
+ballot-store = { path = "../ballot-store" }
+# Transferred backend infra: URL-safe base64 + CSRNG (util), and the state-cookie
+# seal (HKDF-SHA256 key + XChaCha20-Poly1305) that survives the OAuth redirect.
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+hkdf = "0.12"
+http = "1"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = [
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time"
+] }
+# The Jetstream firehose consumer: a WebSocket CLIENT (axum only serves WS) over
+# the public wss endpoint, self-contained TLS via rustls + webpki roots.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+  "env-filter",
+  "fmt",
+  "json"
+] }
+turso = "0.2"
+wiki-domain-types = { path = "../domain-types" }
+wiki-schema = { path = "../schema" }

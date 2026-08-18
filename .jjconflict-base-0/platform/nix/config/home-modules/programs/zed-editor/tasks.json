@@ -1,0 +1,40 @@
+[
+	{
+		"label": "File Finder",
+		"command": "zeditor (tv files)",
+		"hide": "always",
+		"allow_concurrent_runs": true,
+		"show_summary": false,
+		"show_command": false,
+		"use_new_terminal": true,
+		"shell": { "program": "nu" }
+	},
+	{
+		"label": "Find in Files",
+		"command": "zeditor (tv text)",
+		"hide": "always",
+		"allow_concurrent_runs": true,
+		"show_summary": false,
+		"show_command": false,
+		"use_new_terminal": true,
+		"shell": { "program": "nu" }
+	},
+	{
+		"label": "Find in File",
+		"command": "bat --style=numbers --color=always --theme=TwoDark --paging=never $env.ZED_FILE | tv --ansi --input-header=$\"($env.ZED_RELATIVE_FILE)\" | ansi strip | str trim | split row \" \" | first | zeditor $\"($env.ZED_FILE):($in)\"",
+		"hide": "always",
+		"allow_concurrent_runs": true,
+		"use_new_terminal": true,
+		"shell": { "program": "nu" }
+	},
+	{
+		"label": "Lazyjj",
+		"command": "lazyjj",
+		"hide": "on_success",
+		"reveal_target": "center",
+		"show_summary": false,
+		"show_command": false,
+		"allow_concurrent_runs": true,
+		"use_new_terminal": true
+	}
+]

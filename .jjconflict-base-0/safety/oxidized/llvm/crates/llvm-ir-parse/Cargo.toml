@@ -1,0 +1,17 @@
+[package]
+name = "llvm-ir-parse"
+version.workspace = true
+edition.workspace = true
+description = "Textual LLVM IR lexer and parser"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+llvm-ir.workspace = true
+llvm-support.workspace = true
+
+[dev-dependencies]
+llvm-ir-print.workspace = true
+
+[lints]
+workspace = true

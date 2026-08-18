@@ -1,0 +1,10 @@
+prefix=/home/user/build/simple
+exec_prefix=${prefix}
+libdir=${exec_prefix}/.libs
+includedir=${prefix}/src
+
+Name: simple
+Description: A simple test library (uninstalled version)
+Version: 1.0.0
+Libs: -L${libdir} -lsimple
+Cflags: -I${includedir}

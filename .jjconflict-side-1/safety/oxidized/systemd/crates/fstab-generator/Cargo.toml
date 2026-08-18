@@ -1,0 +1,15 @@
+[package]
+name = "systemd-fstab-generator"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-fstab-generator"
+path = "src/main.rs"
+
+[dependencies]
+libsystemd = { path = "../libsystemd" }
+
+[dev-dependencies]
+tempfile = "3"

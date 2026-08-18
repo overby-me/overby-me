@@ -1,0 +1,12 @@
+[package]
+name = "h264-decode"
+version.workspace = true
+edition.workspace = true
+description = "A pure Rust H.264 decoder that parses NAL units and decodes frames to YUV/RGB"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+h264-reader.workspace = true
+log.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "closure-escape"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# corpus-closure-escape (Task B5, I9): the heap-escape stack use-after-scope
+# reproducer. A raw pointer to a stack local is captured by-move into a boxed
+# closure kept past the frame, then dereferenced when the closure is invoked
+# later. Its own workspace. cementite is a path dependency (this leaf binary
+# installs FecAlloc); the injected checks are symbol-level (A4b / I11). The
+# fe-c-closure-escape check builds it with FEC_INSTRUMENT_ONLY=closure_escape
+# and asserts it aborts UseAfterScopeExit naming the dead stack scope.
+[workspace]
+
+[[bin]]
+name = "closure-escape"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }

@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: depender
+Description: A test library that depends on simple
+Version: 2.0.0
+Requires: simple >= 1.0
+Libs: -L${libdir} -ldepender
+Cflags: -I${includedir}/depender

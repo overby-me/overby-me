@@ -1,0 +1,436 @@
+// A UI crate's f64 casts are chart geometry, list counts and epoch millis -
+// all far below 2^52, so usize/i64 -> f64 is exact here. The lint stays on
+// for the decoders and wire formats where truncation is real.
+#![allow(clippy::cast_precision_loss)]
+mod backend_api;
+mod build_info;
+mod components;
+mod crash;
+mod errors;
+mod export;
+// cynic query-result structs must select fields the code doesn't read (e.g. an
+// insert's returned `id`, a delete's `affected_rows`), which reads as dead code.
+/// The trail of what the reader did, kept in every build: a crash report says
+/// what broke, and this says what they were doing when it did.
+mod breadcrumbs;
+#[allow(dead_code)]
+mod graphql;
+mod i18n;
+#[cfg(feature = "remote-logging")]
+mod logging;
+/// Frontend-owned domain types (the anti-corruption seam over `graphql.rs`).
+pub mod model;
+mod nav_memory;
+mod nhost;
+/// Last-read pages kept in localStorage, served when nothing can be reached.
+mod offline;
+mod pdf_text;
+mod pwa;
+mod query_cache;
+mod route;
+mod runtime;
+mod scroll_host;
+mod session;
+pub mod snackbar;
+mod subscription;
+mod theme;
+mod update;
+mod window_size;
+
+use dioxus::prelude::*;
+use route::Route;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+
+const STYLE_CSS: Asset = asset!("/assets/style.css");
+// The dioxus-components (shadcn-style) theme tokens, loaded before our own CSS
+// so app styles can build on / override them as screens migrate to primitives.
+const DX_THEME_CSS: Asset = asset!("/assets/dx-components-theme.css");
+// The Material Design 3 colour scheme (generated from the Radikale brand seeds
+// by scripts/gen-theme.ts). Defines the canonical --md-sys-color-* roles that
+// style.css's --md-* tokens alias, so the whole app re-skins from one file.
+const M3_THEME_CSS: Asset = asset!("/assets/m3-theme.css");
+// Non-colour M3 system tokens (type scale, shape/corner scale, elevation,
+// state-layer opacities, motion) — hand-authored from the M3 spec.
+const M3_TOKENS_CSS: Asset = asset!("/assets/m3-tokens.css");
+
+// Self-hosted fonts (privacy + offline + sovereignty: no Google Fonts CDN). The
+// body face (Atkinson Hyperlegible, latin subset) and the Material Icons ligature
+// font are bundled via asset!() and declared with @font-face at mount, replacing
+// the two CDN @imports style.css used to carry. Bundling them means the service
+// worker's cache-first /assets rule also caches them, so they work offline.
+const FONT_ATK_400: Asset = asset!("/assets/fonts/atkinson-400.woff2");
+const FONT_ATK_700: Asset = asset!("/assets/fonts/atkinson-700.woff2");
+const FONT_ATK_400I: Asset = asset!("/assets/fonts/atkinson-400i.woff2");
+const FONT_ATK_700I: Asset = asset!("/assets/fonts/atkinson-700i.woff2");
+const FONT_MATERIAL: Asset = asset!("/assets/fonts/material-icons.woff2");
+// Metric-compatible with Calibri, and used for ONE thing: laying a Word
+// document out at the size Word would, to work out where its pages end (see
+// `components::docx::PagedDocx`). Nothing on screen is set in it. A face is
+// fetched only when something actually renders in it, so declaring it here
+// costs nothing until someone opens a Word document -- and then the service
+// worker keeps it, like the others.
+//
+// It has to be shipped rather than hoped for: Calibri is on no Linux or
+// Android device and few Macs, so the measurement fell back to whatever the
+// browser chose, which is 8% wider and lays the text out somewhere else. That
+// made the page numbers depend on the reader's machine.
+const FONT_CARLITO_400: Asset = asset!("/assets/fonts/carlito-400.woff2");
+const FONT_CARLITO_700: Asset = asset!("/assets/fonts/carlito-700.woff2");
+// And the same for a document set in Times New Roman, which several of these
+// are: Liberation Serif has Times' metrics, as Carlito has Calibri's. One face
+// cannot serve both -- a Times document measured in Carlito came out a tenth
+// too tall, which is a page.
+const FONT_SERIF_400: Asset = asset!("/assets/fonts/serif-400.woff2");
+const FONT_SERIF_700: Asset = asset!("/assets/fonts/serif-700.woff2");
+// And for Cambria, which is what Word's older Danish templates set their body
+// in: Caladea has Cambria's metrics. Times' are not close enough to borrow --
+// Cambria is the wider face, and measuring a Cambria document in Liberation
+// Serif fitted five list items too many onto every page.
+const FONT_CALADEA_400: Asset = asset!("/assets/fonts/caladea-400.woff2");
+const FONT_CALADEA_700: Asset = asset!("/assets/fonts/caladea-700.woff2");
+// And for Arial, which the older attachments are set in outright: Liberation
+// Sans has Arial's metrics. Calibri's are not a stand-in for them -- Arial is
+// the wider face by about a tenth, so an Arial table measured in Carlito wraps
+// later than Word wraps it and comes out rows short.
+const FONT_SANS_400: Asset = asset!("/assets/fonts/sans-400.woff2");
+const FONT_SANS_700: Asset = asset!("/assets/fonts/sans-700.woff2");
+
+fn main() {
+    // Print real panic messages (with a JS stack trace) to the console instead
+    // of a bare `unreachable executed` wasm trap — the single highest-value
+    // change for debugging authenticated-load traps in Servo.
+    console_error_panic_hook::set_once();
+    // With `remote-logging`, ship warn/error (plus breadcrumbs + panics) to
+    // Logtail and mirror to the console; otherwise just log to the console.
+    // Whether or not anyone is collecting logs, the trail is collected: it is
+    // what a crash report needs to be worth reading.
+    breadcrumbs::watch();
+    #[cfg(feature = "remote-logging")]
+    logging::init();
+    #[cfg(not(feature = "remote-logging"))]
+    {
+        wasm_logger::init(wasm_logger::Config::default());
+        // `logging::init` installs the same hook with a reporter attached;
+        // without that feature the app still needs to tell the reader it died.
+        crash::install_hook(|_| {});
+    }
+    log::info!("RadikalWiki starting...");
+
+    // Clean the stray trailing "?" the router emits for the optional `app` query
+    // before the first navigation writes it to the address bar.
+    install_history_query_shim();
+
+    // Capture a password-reset deep link (`/?type=passwordReset&refreshToken=...`)
+    // now, before the router mounts and rewrites `/`'s query away; Layout then
+    // exchanges the token and shows the set-password form.
+    components::layout::capture_reset_token();
+
+    // PWA: install the manifest / icon / theme-color head tags and register the
+    // service worker (offline where the SW controls the root).
+    pwa::setup();
+
+    dioxus::launch(App);
+}
+
+/// Strip the stray trailing "?" the Dioxus router writes for the optional `app`
+/// query (a route with no `app=` serializes to e.g. "/group?"). Wrap
+/// `history.pushState` / `history.replaceState` so any URL ending in a bare "?"
+/// is cleaned at the source, before it reaches the address bar. This is
+/// race-free, unlike stripping after the fact in an effect: the router rewrites
+/// the URL on its own schedule and would re-add the "?" after such a strip.
+fn install_history_query_shim() {
+    use wasm_bindgen::JsValue;
+    let Some(win) = web_sys::window() else { return };
+    let Ok(history) = js_sys::Reflect::get(&win, &JsValue::from_str("history")) else {
+        return;
+    };
+    for method in ["pushState", "replaceState"] {
+        let key = JsValue::from_str(method);
+        let Ok(orig) = js_sys::Reflect::get(&history, &key) else {
+            continue;
+        };
+        let Ok(orig_fn) = orig.dyn_into::<js_sys::Function>() else {
+            continue;
+        };
+        let this = history.clone();
+        let wrapper = Closure::wrap(
+            Box::new(move |state: JsValue, title: JsValue, url: JsValue| {
+                let url = match url.as_string().as_deref().and_then(|s| s.strip_suffix('?')) {
+                    Some(stripped) => JsValue::from_str(stripped),
+                    _ => url,
+                };
+                let args = js_sys::Array::of3(&state, &title, &url);
+                let _ = js_sys::Reflect::apply(&orig_fn, &this, &args);
+            }) as Box<dyn FnMut(JsValue, JsValue, JsValue)>,
+        );
+        let _ = js_sys::Reflect::set(&history, &key, wrapper.as_ref().unchecked_ref());
+        // Leak the closure so the wrapped method lives for the app's lifetime.
+        wrapper.forget();
+    }
+}
+
+/// Extract the `claim` query-param value from a `location.search` string
+/// (e.g. `?claim=abc&x=1` → `abc`). The token is a uuid, so no decoding needed.
+fn claim_token_from_search(search: &str) -> Option<String> {
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("claim="))
+        .map(str::to_string)
+        .filter(|v| !v.is_empty())
+}
+
+/// How long the boot screen will wait for the stylesheets before giving up on
+/// them, and how often it checks. A ceiling is required: a stylesheet that 404s
+/// or is blocked never applies, and unstyled content is bad where a loading
+/// screen that never leaves is worse.
+const CSS_WAIT_MS: u32 = 3000;
+const POLL_MS: u32 = 16;
+
+/// True once every stylesheet on the page has actually applied.
+///
+/// A `<link>` that has been fetched and parsed exposes a `sheet`; one still in
+/// flight — or one that failed — has null there. Read through `Reflect` because
+/// `HtmlLinkElement` is not among this crate's web-sys features, the same way
+/// `back_to_top` reaches VisualViewport.
+///
+/// No links yet means not ready rather than ready: at the moment this starts
+/// running, Dioxus may not have injected them.
+fn stylesheets_applied(doc: &web_sys::Document) -> bool {
+    let Ok(links) = doc.query_selector_all("link[rel=stylesheet]") else {
+        // Nothing can be checked, so nothing can be waited for.
+        return true;
+    };
+    if links.length() == 0 {
+        return false;
+    }
+    (0..links.length()).all(|i| {
+        links.item(i).is_some_and(|node| {
+            js_sys::Reflect::get(&node, &wasm_bindgen::JsValue::from_str("sheet"))
+                .is_ok_and(|sheet| !sheet.is_null() && !sheet.is_undefined())
+        })
+    })
+}
+
+#[component]
+fn App() -> Element {
+    // Hand the runtime to the raw JS callbacks (scroll, focus, socket messages),
+    // which the browser calls with nothing of ours on the stack. Here because
+    // this is the outermost place that is unambiguously inside it.
+    use_hook(crate::runtime::remember);
+
+    // Initialize global state once, *inside* the Dioxus runtime. Writing to a
+    // `GlobalSignal` (SESSION / LANG) from `main` before `launch` panics with
+    // "Must be called from inside a Dioxus runtime" — and did so non-obviously
+    // only when localStorage already held a session (so `load_session` wrote),
+    // which is exactly the flaky authenticated-load trap from PLAN.md issue 1.
+    // Take the boot screen down. It is in `index.html` so it can be drawn before
+    // the stylesheet or the wasm exist (see the comment there); this is the
+    // other half — the app is on screen now, so the placeholder goes. An effect
+    // rather than the hook below, because a hook runs BEFORE the first render
+    // and would clear the screen a frame early.
+    use_effect(|| {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let Some(boot) = doc.get_element_by_id("boot") else {
+            return;
+        };
+        spawn(async move {
+            // Mounted is not the same as ready. Dioxus adds its `asset!`
+            // stylesheets as <link> elements at RUNTIME, so the first render can
+            // land before any of them have applied — for those frames the page
+            // is real content with no CSS, which reads as an avatar at its full
+            // natural size and unstyled text. Hold the screen until the CSS is
+            // actually on.
+            //
+            // Twice in a row, because the links are injected around the same
+            // render this effect follows: a single pass can fall in the gap
+            // before the last one exists and call an empty set ready.
+            let mut settled = 0;
+            for _ in 0..(CSS_WAIT_MS / POLL_MS) {
+                if stylesheets_applied(&doc) {
+                    settled += 1;
+                    if settled == 2 {
+                        break;
+                    }
+                } else {
+                    settled = 0;
+                }
+                gloo_timers::future::TimeoutFuture::new(POLL_MS).await;
+            }
+            // Fade, then remove: the class starts the transition in `index.html`,
+            // and the node goes once it is over so it can never swallow a click.
+            let _ = boot.set_attribute("class", "is-done");
+            gloo_timers::future::TimeoutFuture::new(300).await;
+            boot.remove();
+        });
+    });
+
+    use_hook(|| {
+        // Load persisted session from localStorage.
+        session::load_session();
+
+        // Watch for a newer deploy. A single-page app in a tab left open never
+        // re-fetches itself, and the service worker can serve a stale shell even
+        // on reload, so being out of date is otherwise invisible.
+        update::spawn_update_check();
+
+        // If we just came back from the atproto (Bluesky) linking flow, surface the
+        // outcome and drop the ?linked query so it does not re-fire on refresh.
+        if let Some(win) = web_sys::window() {
+            if let Ok(search) = win.location().search() {
+                let msg = if search.contains("linked=bluesky") {
+                    Some(i18n::t("profile.linkedOk"))
+                } else if search.contains("linked=error") {
+                    Some(i18n::t("profile.linkedErr"))
+                } else {
+                    None
+                };
+                if let Some(msg) = msg {
+                    snackbar::show_snackbar(&msg);
+                    if let Ok(history) = win.history() {
+                        let _ = history.replace_state_with_url(
+                            &wasm_bindgen::JsValue::NULL,
+                            "",
+                            Some("/"),
+                        );
+                    }
+                }
+
+                // A `?claim=<token>` invitation link: stash the token (so it
+                // survives a login) and strip it from the URL so the secret token
+                // isn't left in history. Consumed by the effect below once signed in.
+                if let Some(tok) = claim_token_from_search(&search) {
+                    *session::PENDING_CLAIM.write() = Some(tok);
+                    if let Ok(history) = win.history() {
+                        let _ = history.replace_state_with_url(
+                            &wasm_bindgen::JsValue::NULL,
+                            "",
+                            Some("/"),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Detect browser language for i18n.
+        if let Some(window) = web_sys::window() {
+            if let Some(lang) = window.navigator().language() {
+                if lang.starts_with("da") {
+                    *i18n::LANG.write() = i18n::Lang::Da;
+                }
+            }
+        }
+        // Reflect the language on <html lang> so `hyphens: auto` works.
+        i18n::apply_lang(&i18n::LANG.read());
+
+        // Load the persisted theme, then apply it to the document element.
+        theme::load_theme();
+        theme::apply_theme(&theme::THEME.read());
+        // Load any user-picked M3 seed colours and inject the override scheme.
+        theme::load_seeds();
+
+        // Nudge the token-refresh loop whenever the tab becomes visible again:
+        // a backgrounded tab throttles timers, so the access token can lapse
+        // while it sits stale. Refreshing on return keeps the session alive.
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            let doc = document.clone();
+            let closure = Closure::wrap(Box::new(move || {
+                if !doc.hidden() {
+                    session::nudge_refresh();
+                }
+            }) as Box<dyn FnMut()>);
+            let _ = document.add_event_listener_with_callback(
+                "visibilitychange",
+                closure.as_ref().unchecked_ref(),
+            );
+            // Leak the closure so the listener lives for the app's lifetime.
+            closure.forget();
+        }
+    });
+
+    // Consume a pending `?claim=` invitation once signed in: bind the membership
+    // to this account (regardless of the roster email) and land on the context.
+    let session_sig = session::use_session();
+    use_effect(move || {
+        let authed = session_sig.read().is_authenticated();
+        let pending = session::PENDING_CLAIM();
+        if authed {
+            if let Some(claim) = pending {
+                *session::PENDING_CLAIM.write() = None;
+                let token = session_sig.read().access_token.clone();
+                spawn(async move {
+                    let Some(token) = token else { return };
+                    match backend_api::claim_membership(&token, &claim).await {
+                        Ok(context) => {
+                            session::bump_data_version();
+                            snackbar::show_snackbar(&i18n::t("invite.claimedOk"));
+                            if let Ok(segments) =
+                                graphql::path_from_id(Some(&token), &context).await
+                            {
+                                if !segments.is_empty() {
+                                    if let Some(win) = web_sys::window() {
+                                        let _ = win
+                                            .location()
+                                            .set_href(&format!("/{}", segments.join("/")));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => snackbar::show_snackbar(&i18n::t("invite.claimErr")),
+                    }
+                });
+            }
+        }
+    });
+
+    // Keep the NHost access token fresh (renew before expiry / on return).
+    use_future(session::run_token_refresh);
+
+    // @font-face for the self-hosted (asset-bundled) fonts. Built here so the src
+    // URLs are the content-hashed asset paths, avoiding any CSS url() rewriting
+    // dependency. `block` display for icons prevents a flash of ligature text.
+    let font_face = format!(
+        concat!(
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Material Icons';font-style:normal;font-weight:400;font-display:block;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Carlito';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Carlito';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Serif';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Caladea';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Caladea';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Sans';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Liberation Sans';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+        ),
+        FONT_ATK_400,
+        FONT_ATK_700,
+        FONT_ATK_400I,
+        FONT_ATK_700I,
+        FONT_MATERIAL,
+        FONT_CARLITO_400,
+        FONT_CARLITO_700,
+        FONT_SERIF_400,
+        FONT_SERIF_700,
+        FONT_CALADEA_400,
+        FONT_CALADEA_700,
+        FONT_SANS_400,
+        FONT_SANS_700
+    );
+
+    rsx! {
+        style { dangerous_inner_html: font_face }
+        document::Stylesheet { href: DX_THEME_CSS }
+        document::Stylesheet { href: M3_THEME_CSS }
+        document::Stylesheet { href: M3_TOKENS_CSS }
+        document::Stylesheet { href: STYLE_CSS }
+        Router::<Route> {}
+        snackbar::Snackbar {}
+        update::UpdateBanner {}
+    }
+}

@@ -1,0 +1,23 @@
+# GNU patch → oxidized-patch
+#
+# GNU patch applies diff/patch files to source trees. It is used
+# extensively in mkDerivation's patchPhase to apply nixpkgs patches.
+# oxidized-patch supports unified, context, and normal diff formats with
+# fuzz matching, reverse patching, and all common flags.
+{
+  pkgs,
+  mkComponent,
+  status,
+  source,
+  ...
+}:
+mkComponent {
+  name = "patch";
+  original = pkgs.gnupatch;
+  replacement = pkgs.oxidized-patch;
+  status = status.available;
+  source = source.repo;
+  phase = 4;
+  description = "Apply diff files to source trees";
+  notes = "Using oxidized-patch from safety/oxidized/patch — unified/context/normal diff with fuzz matching";
+}

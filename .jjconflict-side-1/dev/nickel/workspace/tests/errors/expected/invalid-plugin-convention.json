@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW002",
+			"severity": "error",
+			"field": "conventions.broken.path",
+			"message": "missing required field \"path\" in PluginConvention",
+			"hint": "Each plugin convention must declare a directory path, e.g.: path = \"crates\"",
+			"contract": "PluginConvention.path"
+		}
+	]
+}

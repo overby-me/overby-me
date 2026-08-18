@@ -1,0 +1,19 @@
+# Single source of truth for the Fe-C toolchain (PLAN.md §8), shared with
+# ../libc once it vendors. Consumed by rustup/cargo in dev and by
+# rust-overlay's fromRustupToolchainFile in default.nix, so the pin lives in
+# exactly one place.
+#
+# Pin policy: newest dated nightly available in the repo's locked
+# rust-overlay input (currently 2026-06-30), with rustc-dev + rust-src +
+# miri all published for x86_64-unknown-linux-gnu. Bumped by the weekly
+# nightly-bump pipeline, not by hand.
+[toolchain]
+channel = "nightly-2026-06-29"
+components = [
+  "rustc-dev",
+  "rust-src",
+  "miri",
+  "clippy",
+  "rustfmt",
+]
+profile = "minimal"

@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: needs-provider
+Description: A test library that depends on provider-alias (provided by provider)
+Version: 1.0.0
+Requires: provider-alias >= 1.0
+Libs: -L${libdir} -lneeds-provider
+Cflags: -I${includedir}/needs-provider

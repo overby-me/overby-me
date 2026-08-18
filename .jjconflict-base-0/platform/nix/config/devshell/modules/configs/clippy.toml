@@ -1,0 +1,11 @@
+# Thresholds for the clippy lints the pre-commit hook enables. Lint levels are
+# set centrally in devshell/modules/git-hooks.nix; only values that have no
+# command-line form belong here.
+#
+# Run `touch .envrc && direnv export json` to copy this to the repository root.
+
+# 100 is clippy's default and too tight for a sequential parse of a spec
+# structure: h265's SPS parser reads 199 lines of fields in the order the
+# standard lists them, and splitting it would only hide where a field came
+# from. 150 still catches a function that has grown a second job.
+too-many-lines-threshold = 150

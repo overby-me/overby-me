@@ -1,0 +1,400 @@
+//! The canvas app (`canvas/canvas` + `canvas/pixel`).
+//!
+//! A canvas is an ordinary node; each painted cell is a hidden child keyed
+//! `p_<x>_<y>`, so the unique index on `(parent_id, key)` makes a cell's identity
+//! the database's problem rather than ours, and repainting is an update of that
+//! row. The mimes mirror pairs the app already has (`vote/poll` + `vote/vote`,
+//! `speak/list` + `speak/speak`).
+//!
+//! Raw GraphQL rather than cynic fragments throughout: these are three small
+//! operations over one lean row shape, and the cost of a wire type per operation
+//! is not repaid here.
+
+use super::*;
+
+/// How many cells a canvas may be across or down.
+///
+/// A cap, not a recommendation. 128x128 is 16,384 rows, which inserts in about
+/// three seconds and is far more than a room will ever fill; the point is that a
+/// mistyped number cannot ask the database for a million nodes.
+pub const MAX_CANVAS_SIDE: u32 = 128;
+
+/// The colour of every painted cell of a canvas, as `((x, y), colour)`.
+///
+/// Only `key` and `data` are selected. The rest of a node row (name, path,
+/// ancestors, timestamps, the owner relation) is dead weight multiplied by the
+/// number of cells, which is the whole reason this is fast.
+pub async fn load_canvas(access_token: Option<&str>, canvas_id: &str) -> Result<Vec<Cell>, String> {
+    let data = execute_raw_vars(
+        access_token,
+        "query($p: uuid!) { \
+           nodes(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}}) \
+             { key data ownerId updatedAt } \
+         }",
+        serde_json::json!({ "p": canvas_id }),
+    )
+    .await?;
+    // `execute_raw_vars` returns the `data` OBJECT, so `nodes` is at the top.
+    let rows = data
+        .get("nodes")
+        .and_then(|n| n.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(rows.iter().filter_map(parse_cell_full).collect())
+}
+
+/// One painted cell: where it is, what colour, and who put it there.
+///
+/// `owner` is the user id, not a name. Names are resolved once for the whole
+/// board rather than per cell — a thousand cells are usually a handful of
+/// people, and the id is what the row actually carries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cell {
+    pub at: (u32, u32),
+    pub colour: u8,
+    pub owner: Option<String>,
+    /// When it was last painted, as an ISO timestamp. `updated_at` rather than
+    /// `created_at`: a repainted cell is the new painter's, and the question the
+    /// tooltip answers is who put THIS colour here, not who was first.
+    pub when: Option<String>,
+}
+
+/// One `{ key, data, ownerId }` row as a [`Cell`], or `None` if it is not one.
+///
+/// Pure, so the wire shape can be tested without a browser or a server.
+pub fn parse_cell_full(row: &serde_json::Value) -> Option<Cell> {
+    let ((x, y), colour) = parse_cell(row)?;
+    // Missing rather than empty: a row whose owner this reader may not see is
+    // unattributed, which is different from being painted by nobody.
+    let text = |key: &str| {
+        row.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(Cell {
+        at: (x, y),
+        colour,
+        owner: text("ownerId"),
+        when: text("updatedAt"),
+    })
+}
+
+/// One `{ key, data }` row as `((x, y), colour)`, or `None` if it is not a cell.
+///
+/// Pure, so the wire shape can be tested without a browser or a server.
+pub fn parse_cell(row: &serde_json::Value) -> Option<((u32, u32), u8)> {
+    let key = row.get("key")?.as_str()?;
+    let colour = row.get("data")?.get("c")?.as_u64()? as u8;
+    let (x, y) = parse_key(key)?;
+    Some(((x, y), colour))
+}
+
+/// `p_<x>_<y>` back into coordinates.
+pub fn parse_key(key: &str) -> Option<(u32, u32)> {
+    let rest = key.strip_prefix("p_")?;
+    let (x, y) = rest.split_once('_')?;
+    Some((x.parse().ok()?, y.parse().ok()?))
+}
+
+/// The key a cell is stored under.
+pub fn cell_key(x: u32, y: u32) -> String {
+    format!("p_{x}_{y}")
+}
+
+/// Paint one cell, creating it or repainting it.
+///
+/// Update first, insert only if the cell was untouched. The obvious `on_conflict`
+/// upsert is not available: `(parent_id, key)` is a PARTIAL unique index
+/// (`where deleted_at is null`), and Postgres `on conflict on constraint` takes
+/// only real constraints, so Hasura answers "constraint … does not exist".
+/// Verified against production rather than inferred from the schema, which lists
+/// the index in `nodes_constraint` as though it were usable.
+///
+/// A repaint is therefore one round trip and a fresh cell is two, both bounded by
+/// the cooldown the database enforces (`migrations/0007`).
+pub async fn paint_cell(
+    access_token: Option<&str>,
+    canvas_id: &str,
+    context_id: &str,
+    painter_id: &str,
+    x: u32,
+    y: u32,
+    colour: u8,
+) -> Result<(), String> {
+    let key = cell_key(x, y);
+    // The repaint takes the cell over: `ownerId` as well as the colour. Hasura
+    // presets the owner on INSERT only, so without this a repainted cell kept
+    // the first painter's name — and the board would credit the wrong person
+    // for a colour they did not choose. `updatedAt` follows from the trigger.
+    let updated = execute_raw_vars_quiet(
+        access_token,
+        "mutation($p: uuid!, $k: String!, $d: jsonb!, $u: uuid!) { \
+           updateNodes(where: {parentId: {_eq: $p}, key: {_eq: $k}}, \
+                       _set: {data: $d, ownerId: $u}) \
+           { affected_rows } }",
+        serde_json::json!({ "p": canvas_id, "k": key, "d": { "c": colour }, "u": painter_id }),
+    )
+    .await?;
+    if affected_rows(&updated) > 0 {
+        return Ok(());
+    }
+    execute_raw_vars_quiet(
+        access_token,
+        "mutation($o: nodes_insert_input!) { insertNode(object: $o) { id } }",
+        serde_json::json!({ "o": {
+            "parentId": canvas_id,
+            "contextId": context_id,
+            "key": key,
+            "name": "px",
+            "mimeId": "canvas/pixel",
+            "mutable": false,
+            "data": { "c": colour },
+        }}),
+    )
+    .await
+    .map(|_| ())
+}
+
+/// How many rows an `updateNodes` touched. Zero means the cell is new.
+fn affected_rows(data: &serde_json::Value) -> u64 {
+    data.get("updateNodes")
+        .and_then(|u| u.get("affected_rows"))
+        .and_then(|a| a.as_u64())
+        .unwrap_or(0)
+}
+
+/// When this person last painted here, as an ISO timestamp.
+///
+/// The cooldown is enforced by the database, and the database's refusal does not
+/// reliably reach the client: Hasura puts the trigger's `retry_after_ms` in
+/// `extensions.internal`, which it omits outside dev mode. So the countdown is
+/// derived from a fact the client can always fetch instead. It also survives a
+/// reload, which parsing an error never could.
+pub async fn my_last_paint(
+    access_token: Option<&str>,
+    canvas_id: &str,
+    user_id: &str,
+) -> Option<String> {
+    let data = execute_raw_vars(
+        access_token,
+        "query($p: uuid!, $u: uuid!) { \
+           nodesAggregate(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}, \
+                                  ownerId: {_eq: $u}}) \
+           { aggregate { max { updatedAt } } } }",
+        serde_json::json!({ "p": canvas_id, "u": user_id }),
+    )
+    .await
+    .ok()?;
+    data.get("nodesAggregate")?
+        .get("aggregate")?
+        .get("max")?
+        .get("updatedAt")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Create a canvas under `context_id`, granting the two permissions it needs if
+/// this context has never had one.
+///
+/// Mirrors `create_speaker_list`: an owner may seed permissions for their own
+/// context, so a feature can arrive in an existing context without a migration
+/// touching every row in the database.
+///
+/// `cooldown` is the rate limit written onto the member permission, and it is
+/// what makes the canvas survivable in a hall: it bounds the whole feature's
+/// write rate to one placement per person per interval, enforced by the trigger
+/// rather than by the client asking nicely.
+pub async fn create_canvas(
+    access_token: Option<&str>,
+    context_id: &str,
+    name: &str,
+    width: u32,
+    height: u32,
+    cooldown_seconds: u32,
+) -> Result<model::InsertedNode, String> {
+    let width = width.clamp(1, MAX_CANVAS_SIDE);
+    let height = height.clamp(1, MAX_CANVAS_SIDE);
+
+    let existing = node_insert_mimes(access_token, context_id).await;
+    if !existing.iter().any(|m| m == "canvas/canvas") {
+        execute_raw_vars(
+            access_token,
+            "mutation($objs: [permissions_insert_input!]!) { \
+               insertPermissions(objects: $objs) { affected_rows } }",
+            serde_json::json!({ "objs": [
+                {
+                    "contextId": context_id,
+                    "nodeId": context_id,
+                    "mimeId": "canvas/canvas",
+                    "role": "owner",
+                    "parents": ["wiki/event", "wiki/group", "wiki/folder"],
+                    "active": true,
+                    "insert": true, "select": true, "update": true, "delete": true,
+                },
+                {
+                    "contextId": context_id,
+                    "nodeId": context_id,
+                    "mimeId": "canvas/pixel",
+                    "role": "member",
+                    "parents": ["canvas/canvas"],
+                    "active": true,
+                    // No delete: a cell is repainted, never removed, so the
+                    // canvas cannot be quietly erased one cell at a time.
+                    "insert": true, "select": true, "update": true, "delete": false,
+                    "rate_limit": format!("{cooldown_seconds} seconds"),
+                },
+            ] }),
+        )
+        .await?;
+    }
+
+    // And bring the limit the DATABASE enforces in step with the one this canvas
+    // states. They are stored apart -- the trigger reads the context's
+    // permission, the countdown reads the canvas -- and a context seeded when
+    // the default was a minute went on enforcing a minute while every canvas
+    // made in it since said twenty seconds. The stated cooldown has to be the
+    // real one, or the board tells a painter to try again at a moment it will
+    // refuse them.
+    //
+    // Per CONTEXT, so this moves the limit for canvases already in it. That is
+    // the seam the permission is on, and one limit a room can rely on beats two
+    // that disagree.
+    execute_raw_vars(
+        access_token,
+        "mutation($c: uuid!, $r: interval!) { \
+           updatePermissions(where: {contextId: {_eq: $c}, mimeId: {_eq: \"canvas/pixel\"}}, \
+                             _set: {rate_limit: $r}) { affected_rows } }",
+        serde_json::json!({ "c": context_id, "r": format!("{cooldown_seconds} seconds") }),
+    )
+    .await?;
+
+    insert_node_named(
+        access_token,
+        model::NodesInsertInput {
+            name: Some(name.to_string()),
+            key: None,
+            mime_id: Some("canvas/canvas".to_string()),
+            parent_id: Some(model::Uuid(context_id.to_string())),
+            context_id: Some(model::Uuid(context_id.to_string())),
+            data: Some(model::Jsonb(serde_json::json!({
+                "w": width, "h": height, "cooldown": cooldown_seconds,
+            }))),
+            ..Default::default()
+        },
+        name,
+    )
+    .await?
+    .ok_or_else(|| "canvas not created".to_string())
+}
+
+/// The canvas a context is currently showing, if its owner chose one.
+///
+/// Stored as a `pixel` relation on the context, the same mechanism the projector
+/// uses for its active node: `(parent_id, name)` is unique, so choosing one
+/// replaces the previous choice rather than accumulating.
+pub async fn focused_canvas(access_token: Option<&str>, context_id: &str) -> Option<String> {
+    let data = execute_raw_vars(
+        access_token,
+        "query($p: uuid!) { \
+           relations(where: {parentId: {_eq: $p}, name: {_eq: \"canvas\"}}) { nodeId } }",
+        serde_json::json!({ "p": context_id }),
+    )
+    .await
+    .ok()?;
+    data.get("relations")?
+        .as_array()?
+        .iter()
+        .find_map(|r| r.get("nodeId")?.as_str().map(str::to_string))
+}
+
+/// Choose the canvas this context shows, or clear it with `None`.
+///
+/// Owner-only by the permission on `relations`; the relation table has a real
+/// unique constraint, so unlike a node this genuinely can be upserted.
+pub async fn set_focused_canvas(
+    access_token: Option<&str>,
+    context_id: &str,
+    canvas_id: Option<&str>,
+) -> Result<(), String> {
+    execute_raw_vars(
+        access_token,
+        "mutation($o: relations_insert_input!) { \
+           insertRelation(object: $o, on_conflict: { \
+             constraint: relations_parent_id_name_key, update_columns: [nodeId] \
+           }) { id } }",
+        serde_json::json!({ "o": {
+            "parentId": context_id,
+            "name": "canvas",
+            "nodeId": canvas_id,
+        }}),
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Open a canvas to the room, or lock it so it takes no more paint.
+///
+/// The state lives on the canvas node's `mutable`, which is what the board
+/// already reads to decide whether to offer itself and what draws the "Closed"
+/// chip. Setting it here is only half the lock: the other half is a trigger
+/// (`migrations/0014`) that refuses a placement on a locked canvas, so a board
+/// closed to the room is closed to anything that is not the board too.
+pub async fn set_canvas_open(
+    access_token: Option<&str>,
+    canvas_id: &str,
+    open: bool,
+) -> Result<(), String> {
+    execute_raw_vars(
+        access_token,
+        "mutation($id: uuid!, $m: Boolean!) { \
+           updateNode(pk_columns: {id: $id}, _set: {mutable: $m}) { id mutable } }",
+        serde_json::json!({ "id": canvas_id, "m": open }),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cell_key_round_trips() {
+        assert_eq!(cell_key(0, 0), "p_0_0");
+        assert_eq!(parse_key(&cell_key(12, 34)), Some((12, 34)));
+        // Anything that is not a cell is ignored rather than guessed at.
+        assert_eq!(parse_key("p_12"), None);
+        assert_eq!(parse_key("12_34"), None);
+        assert_eq!(parse_key("p_x_1"), None);
+    }
+
+    #[test]
+    fn a_row_becomes_a_coloured_cell() {
+        let row = serde_json::json!({"key": "p_3_4", "data": {"c": 7}});
+        assert_eq!(parse_cell(&row), Some(((3, 4), 7)));
+        // A row without a colour is not a cell; better to skip it than to paint
+        // an arbitrary one.
+        assert_eq!(parse_cell(&serde_json::json!({"key": "p_3_4"})), None);
+        assert_eq!(parse_cell(&serde_json::json!({"data": {"c": 1}})), None);
+    }
+
+    /// A repaint is an update; only an untouched cell is inserted.
+    #[test]
+    fn a_painted_cell_is_updated_rather_than_inserted() {
+        let updated = serde_json::json!({"updateNodes": {"affected_rows": 1}});
+        assert_eq!(affected_rows(&updated), 1);
+        let missing = serde_json::json!({"updateNodes": {"affected_rows": 0}});
+        assert_eq!(affected_rows(&missing), 0, "zero means insert it");
+        // A shape we do not recognise must not be read as "already painted", or
+        // the cell would silently never appear.
+        assert_eq!(affected_rows(&serde_json::json!({})), 0);
+    }
+
+    /// A mistyped size cannot ask the database for a million rows.
+    #[test]
+    fn a_canvas_side_is_capped() {
+        assert_eq!(1000u32.clamp(1, MAX_CANVAS_SIDE), MAX_CANVAS_SIDE);
+        assert_eq!(0u32.clamp(1, MAX_CANVAS_SIDE), 1);
+    }
+}

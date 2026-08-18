@@ -1,0 +1,20 @@
+#!/usr/bin/env nu
+# Generate a flamegraph from a nix flake evaluation
+# Usage: script.nu <flake-path>
+
+def main [flake_path: string] {
+    print $"Evaluating flake: ($flake_path)"
+
+    # Create temporary directory for profile data
+    let tmp_dir = (mktemp -d)
+    let profile_path = ($tmp_dir | path join "nix.profile")
+    print $"Profile path: ($profile_path)"
+
+    # Run nix eval with profiler output
+    nix eval --impure --no-eval-cache $flake_path --option eval-profiler flamegraph --option eval-profile-file $profile_path
+
+    # Generate flamegraph SVG from profile data
+    open $profile_path | inferno-flamegraph | save -f flamegraph.svg
+
+    print "Flamegraph saved to flamegraph.svg"
+}

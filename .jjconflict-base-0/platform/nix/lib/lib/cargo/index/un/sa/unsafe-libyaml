@@ -1,0 +1,1 @@
+{"name":"unsafe-libyaml","vers":"0.2.11","deps":[{"name":"pretty_assertions","req":"^1.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-03-17T05:44:18Z"}

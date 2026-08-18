@@ -1,0 +1,15 @@
+# This is a comment at the top of the file
+prefix=/usr
+exec_prefix=${prefix}
+# Comment between variables
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+# Comment before fields
+Name: comments
+Description: A test library with various comment styles
+# Comment between fields
+Version: 1.0.0
+Libs: -L${libdir} -lcomments
+# Another comment
+Cflags: -I${includedir}/comments

@@ -1,0 +1,5 @@
+# The repository ignores *.ll everywhere, because everywhere else a .ll file
+# is compiler output. Here it is the product: these are the conformance
+# fixtures the round-trip check reads, committed so that no check ever has to
+# run rustc or LLVM.
+!*.ll

@@ -1,0 +1,5 @@
+id: rust-sizehint-in-unsafe
+valid:
+  - "fn safe_use<I: Iterator>(i: &I) -> usize { i.size_hint().0 }"
+invalid:
+  - "fn extend<I: Iterator>(i: &I) { let n = i.size_hint().0; unsafe { grow(n) } }"

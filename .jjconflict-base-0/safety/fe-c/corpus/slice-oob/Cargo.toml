@@ -1,0 +1,23 @@
+[package]
+name = "slice-oob"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# corpus-slice-oob (point 1 / case-mode slice-reborrow gap): a `&[T]` built with
+# a too-large length over a small buffer (`from_raw_parts(buf.as_ptr(), 1000)`
+# over a 4-element buffer) is indexed in bounds of its *claimed* length but past
+# the real allocation. The slice-index reborrow `_r = &(*s)[i]` mints a safe
+# reference off the end; `through` checks the later safe deref, but `case` elides
+# it, so the slice-index reborrow must get a point-1 ensure or `case` misses the
+# OOB entirely. Its own workspace; cementite is a path dependency (this leaf
+# binary installs FecAlloc, which tracks the Vec buffer). The fe-c-slice-oob
+# check builds it in both modes and asserts both abort OutOfBounds.
+[workspace]
+
+[[bin]]
+name = "slice-oob"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }

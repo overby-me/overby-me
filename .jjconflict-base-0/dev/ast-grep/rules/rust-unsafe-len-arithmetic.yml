@@ -1,0 +1,23 @@
+# Arithmetic that feeds from_raw_parts or Layout wraps silently in release
+# mode, and the unsafe consumer then trusts the wrong size (RUSTSEC-2026-0007,
+# 2023-0080; CodeQL CWE-770). The general with_capacity form was measured and
+# rejected - 45 benign graphics-grid sites - so this matches only the sinks
+# whose consumer is unsafe by construction.
+id: rust-unsafe-len-arithmetic
+language: rust
+severity: warning
+message: >-
+  Unchecked arithmetic feeding an unsafe size. In release builds this wraps
+  instead of panicking; use checked_mul/checked_add and handle the overflow.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: slice::from_raw_parts($P, $A * $B)
+    - pattern: slice::from_raw_parts($P, $A + $B)
+    - pattern: slice::from_raw_parts_mut($P, $A * $B)
+    - pattern: std::slice::from_raw_parts($P, $A * $B)
+    - pattern: Layout::from_size_align($A * $B, $AL)

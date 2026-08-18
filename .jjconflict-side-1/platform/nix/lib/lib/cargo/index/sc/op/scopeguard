@@ -1,0 +1,1 @@
+{"name":"scopeguard","vers":"1.2.0","deps":[],"cksum":"94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49","features":{"default":["use_std"],"use_std":[]},"yanked":false,"pubtime":"2023-07-17T13:47:53Z"}

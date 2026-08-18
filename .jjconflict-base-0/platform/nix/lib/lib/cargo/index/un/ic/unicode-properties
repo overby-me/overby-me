@@ -1,0 +1,1 @@
+{"name":"unicode-properties","vers":"0.1.4","deps":[],"cksum":"7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d","features":{"default":["general-category","emoji"],"emoji":[],"general-category":[]},"yanked":false,"pubtime":"2025-10-30T16:34:55Z"}

@@ -1,0 +1,25 @@
+# A spawn per iteration creates threads proportional to input size; the OS
+# limit arrives before the loop does. The spawn-collect-join idiom (push the
+# handle, join after) is still matched - the handles bound the joins, not the
+# creation rate - so this stays a warning to justify, not an error.
+id: rust-thread-spawn-in-loop
+language: rust
+severity: warning
+message: >-
+  This spawns an OS thread per iteration. Bound the concurrency: a fixed pool,
+  scoped threads over chunks, or async tasks.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: thread::spawn($$$A)
+    - pattern: std::thread::spawn($$$A)
+  inside:
+    any:
+      - {kind: for_expression}
+      - {kind: while_expression}
+      - {kind: loop_expression}
+    stopBy: end

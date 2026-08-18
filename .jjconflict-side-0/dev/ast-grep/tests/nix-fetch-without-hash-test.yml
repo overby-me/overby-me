@@ -1,0 +1,6 @@
+id: nix-fetch-without-hash
+valid:
+  - "builtins.fetchTarball { url = u; sha256 = \"0000000000000000000000000000000000000000000000000000\"; }"
+invalid:
+  - "builtins.fetchTarball \"https://example.com/src.tar.gz\""
+  - "builtins.fetchTarball { url = \"https://example.com/src.tar.gz\"; }"

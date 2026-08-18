@@ -1,0 +1,192 @@
+use std::ffi::CString;
+
+pub struct PwEntry {
+    pub name: String,
+    pub pw: Option<Vec<u8>>,
+    pub uid: nix::unistd::Uid,
+    pub gid: nix::unistd::Gid,
+    pub home: String,
+    pub shell: String,
+}
+
+fn make_user_from_libc(username: &str, user: &libc::passwd) -> Result<PwEntry, String> {
+    let uid = nix::unistd::Uid::from_raw(user.pw_uid);
+    let gid = nix::unistd::Gid::from_raw(user.pw_gid);
+    let pw = if user.pw_passwd.is_null() {
+        None
+    } else {
+        let mut vec = Vec::new();
+        let mut ptr = user.pw_passwd;
+        loop {
+            let byte = unsafe { *ptr } as u8;
+            if byte == b'\0' {
+                break;
+            }
+            vec.push(byte);
+            unsafe { ptr = ptr.add(1) };
+        }
+        Some(vec)
+    };
+    let home = if user.pw_dir.is_null() {
+        "/".to_string()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(user.pw_dir) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let shell = if user.pw_shell.is_null() {
+        "/bin/sh".to_string()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(user.pw_shell) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    Ok(PwEntry {
+        name: username.to_string(),
+        uid,
+        gid,
+        pw,
+        home,
+        shell,
+    })
+}
+
+// TODO PR to nix
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+// keep around for a PR to the nix crate
+fn getpwnam(username: &str) -> Result<PwEntry, String> {
+    let c_username =
+        CString::new(username).map_err(|e| format!("Invalid username '{username}': {e}"))?;
+    // TODO check errno
+    let res = unsafe { libc::getpwnam(c_username.as_ptr()) };
+    if res.is_null() {
+        return Err(format!("No entry found for username: {username}"));
+    }
+    let res = unsafe { *res };
+
+    make_user_from_libc(username, &res)
+}
+
+#[cfg(target_os = "linux")]
+const fn make_new_pw() -> libc::passwd {
+    libc::passwd {
+        pw_name: std::ptr::null_mut(),
+        pw_passwd: std::ptr::null_mut(),
+        pw_uid: 0,
+        pw_gid: 0,
+        pw_gecos: std::ptr::null_mut(),
+        pw_dir: std::ptr::null_mut(),
+        pw_shell: std::ptr::null_mut(),
+    }
+}
+
+#[cfg(target_os = "freebsd")]
+fn make_new_pw() -> libc::passwd {
+    libc::passwd {
+        pw_name: std::ptr::null_mut(),
+        pw_passwd: std::ptr::null_mut(),
+        pw_uid: 0,
+        pw_gid: 0,
+        pw_change: 0,
+        pw_class: std::ptr::null_mut(),
+        pw_gecos: std::ptr::null_mut(),
+        pw_dir: std::ptr::null_mut(),
+        pw_shell: std::ptr::null_mut(),
+        pw_expire: 0,
+        pw_fields: 0,
+    }
+}
+
+#[cfg(any(target_os = "freebsd", target_os = "linux"))]
+pub fn getpwnam_r(username: &str) -> Result<PwEntry, String> {
+    let c_username =
+        CString::new(username).map_err(|e| format!("Invalid username '{username}': {e}"))?;
+    let mut buf_size = 32;
+    let mut user = make_new_pw();
+    loop {
+        let mut buf = vec![0i8; buf_size];
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+
+        let rc = unsafe {
+            libc::getpwnam_r(
+                c_username.as_ptr(),
+                &mut user,
+                buf.as_mut_ptr(),
+                buf_size,
+                &mut result,
+            )
+        };
+
+        if rc == libc::ERANGE {
+            // Buffer too small, retry with a larger one
+            buf_size *= 2;
+            continue;
+        }
+
+        if rc != 0 {
+            return Err(format!(
+                "Error calling getpwnam_r for username '{username}': errno {rc}"
+            ));
+        }
+
+        if result.is_null() {
+            return Err(format!("No entry found for username: {username}"));
+        }
+
+        return make_user_from_libc(username, &user);
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+pub fn getpwnam_r(_username: &str) -> Result<PwEntry, String> {
+    compile_error!("getpwnam_r is not yet implemented for this platform");
+}
+
+/// Look up a passwd entry by numeric UID. Needed so a unit that sets User= to a
+/// bare UID (e.g. user@%i.service, whose %i is the numeric UID) can still land
+/// in that user's primary group rather than the manager's GID.
+#[cfg(any(target_os = "freebsd", target_os = "linux"))]
+pub fn getpwuid_r(uid: libc::uid_t) -> Result<PwEntry, String> {
+    let mut buf_size = 32;
+    let mut user = make_new_pw();
+    loop {
+        let mut buf = vec![0i8; buf_size];
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+
+        let rc =
+            unsafe { libc::getpwuid_r(uid, &mut user, buf.as_mut_ptr(), buf_size, &mut result) };
+
+        if rc == libc::ERANGE {
+            // Buffer too small, retry with a larger one
+            buf_size *= 2;
+            continue;
+        }
+
+        if rc != 0 {
+            return Err(format!(
+                "Error calling getpwuid_r for uid '{uid}': errno {rc}"
+            ));
+        }
+
+        if result.is_null() {
+            return Err(format!("No entry found for uid: {uid}"));
+        }
+
+        // The canonical name comes from the record itself (pw_name); fall back
+        // to the numeric UID if the platform leaves it null.
+        let name = if user.pw_name.is_null() {
+            uid.to_string()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(user.pw_name) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        return make_user_from_libc(&name, &user);
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+pub fn getpwuid_r(_uid: libc::uid_t) -> Result<PwEntry, String> {
+    compile_error!("getpwuid_r is not yet implemented for this platform");
+}

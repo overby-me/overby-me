@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW002",
+			"severity": "error",
+			"field": "name",
+			"message": "missing required field \"name\" in WorkspaceConfig",
+			"hint": "Add a \"name\" field to your workspace.ncl, e.g.: name = \"my-project\"",
+			"contract": "WorkspaceConfig.name"
+		}
+	]
+}

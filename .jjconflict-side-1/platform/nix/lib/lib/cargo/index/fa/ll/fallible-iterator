@@ -1,0 +1,1 @@
+{"name":"fallible-iterator","vers":"0.3.0","deps":[],"cksum":"2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649","features":{"alloc":[],"default":["alloc"],"std":["alloc"]},"yanked":false,"pubtime":"2023-05-22T23:12:37Z"}

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🔥 Mojo Todo — WebXR</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        background: linear-gradient(
+          135deg,
+          #1a1a2e 0%,
+          #16213e 50%,
+          #0f3460 100%
+        );
+        color: #e0e0e0;
+        padding: 1rem;
+      }
+
+      #xr-status {
+        margin: 1rem 0;
+        padding: 0.5rem 1.5rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        text-align: center;
+        transition: all 0.3s ease;
+      }
+
+      .xr-status-info {
+        background: rgba(100, 149, 237, 0.2);
+        border: 1px solid rgba(100, 149, 237, 0.4);
+        color: #93b5f0;
+      }
+
+      .xr-status-success {
+        background: rgba(76, 175, 80, 0.2);
+        border: 1px solid rgba(76, 175, 80, 0.4);
+        color: #81c784;
+      }
+
+      .xr-status-error {
+        background: rgba(233, 69, 96, 0.2);
+        border: 1px solid rgba(233, 69, 96, 0.4);
+        color: #e94560;
+      }
+
+      #root {
+        text-align: center;
+        margin-top: 1rem;
+      }
+
+      .loading {
+        color: #888;
+        font-size: 1.2rem;
+      }
+
+      .error {
+        color: #e94560;
+        font-size: 1.2rem;
+      }
+
+      /* ── Flat-fallback panel styling ───────────────────────────────────
+       * When WebXR is unavailable, the XR runtime makes panel containers
+       * visible as normal DOM elements. These styles provide a pleasant
+       * appearance for the flat-fallback panels rendered by the runtime.
+       */
+      [data-xr-panel] h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+      }
+
+      [data-xr-panel] input[type="text"] {
+        font-size: 1rem;
+        padding: 0.5rem 0.8rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        margin-right: 0.5rem;
+      }
+
+      [data-xr-panel] button {
+        font-size: 1rem;
+        font-weight: 600;
+        padding: 0.5rem 1.2rem;
+        margin: 0.2rem;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition:
+          transform 0.1s,
+          box-shadow 0.1s;
+        color: #fff;
+        background: linear-gradient(135deg, #533483, #3b1f6e);
+        box-shadow: 0 4px 15px rgba(83, 52, 131, 0.3);
+      }
+
+      [data-xr-panel] button:hover {
+        transform: translateY(-2px);
+      }
+
+      [data-xr-panel] button:active {
+        transform: translateY(0);
+      }
+
+      [data-xr-panel] ul {
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0;
+        text-align: left;
+      }
+
+      [data-xr-panel] li {
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h2 style="margin-top: 1rem; font-weight: 400; opacity: 0.7">
+      🔥 Mojo Todo — WebXR
+    </h2>
+
+    <div id="xr-status" class="xr-status xr-status-info">Loading WASM…</div>
+
+    <div id="root">
+      <p class="loading">Initializing XR runtime…</p>
+    </div>
+
+    <!-- XR panels are appended to <body> by the runtime -->
+
+    <!-- bundle.js is built by: just build-xr-web
+         It bundles main.js + the full XR runtime (TS→JS via esbuild).
+         Use main.js directly only with Deno or a TS-aware dev server. -->
+    <script type="module" src="bundle.js"></script>
+  </body>
+</html>

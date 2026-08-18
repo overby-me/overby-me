@@ -1,0 +1,51 @@
+config := "rust-nixos"
+
+default: run
+
+build:
+    nixos-rebuild build-image --image-variant qemu --flake .#{{ config }}
+    qemu-img convert -p -f qcow2 -O raw result/nixos-image-*-x86_64-linux.qcow2 {{ config }}.raw
+
+run:
+    #!/usr/bin/env nu
+    let kernel = $"(^nix build --print-out-paths '.#nixosConfigurations.{{ config }}.config.system.build.kernel' | str trim)/bzImage"
+    let initrd = $"(^nix build --print-out-paths '.#nixosConfigurations.{{ config }}.config.system.build.initialRamdisk' | str trim)/initrd"
+    ^cloud-hypervisor --kernel $kernel --initramfs $initrd --disk $"path={{ config }}.raw" --cmdline "console=ttyS0 quiet root=LABEL=nixos init=/nix/var/nix/profiles/system/init" --cpus boot=2 --memory size=4096M --net "tap=vmtap0,mac=12:34:56:78:90:ab" --serial tty --console off
+
+# Run NixOS VM integration test
+test:
+    nix build ..#checks.x86_64-linux.rust-nixos-boot -L
+
+# Run NixOS VM test interactively (drops into a Python REPL with the VM)
+test-interactive:
+    nix build ..#checks.x86_64-linux.rust-nixos-boot.driverInteractive -L && ./result/bin/nixos-test-driver
+
+clean:
+    rm -f result
+    rm -f {{ config }}.raw
+
+tree:
+    nix-tree --derivation .#nixosConfigurations.{{ config }}.config.system.build.toplevel
+
+# Compare closure size between nixos-nix and rust-nixos
+compare-closure:
+    #!/usr/bin/env nu
+    print "=== nixos-nix (vanilla) ==="
+    ^nix path-info --closure-size -h ".#nixosConfigurations.nixos-nix.config.system.build.toplevel"
+    print ""
+    print "=== rust-nixos (oxidized) ==="
+    ^nix path-info --closure-size -h ".#nixosConfigurations.rust-nixos.config.system.build.toplevel"
+
+# Compare package lists between nixos-nix and rust-nixos
+compare-packages:
+    #!/usr/bin/env nu
+    let nix_toplevel = (^nix build --print-out-paths ".#nixosConfigurations.nixos-nix.config.system.build.toplevel" | str trim)
+    let rs_toplevel = (^nix build --print-out-paths ".#nixosConfigurations.rust-nixos.config.system.build.toplevel" | str trim)
+    let nix_paths = (^nix path-info -r $nix_toplevel | lines | sort)
+    let rs_paths = (^nix path-info -r $rs_toplevel | lines | sort)
+    let nix_tmp = (^mktemp | str trim)
+    let rs_tmp = (^mktemp | str trim)
+    $nix_paths | str join "\n" | save -f $nix_tmp
+    $rs_paths | str join "\n" | save -f $rs_tmp
+    do -i { ^diff --color=auto -u $nix_tmp $rs_tmp }
+    rm -f $nix_tmp $rs_tmp

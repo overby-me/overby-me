@@ -1,0 +1,19 @@
+[package]
+name = "spindle-models"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared model types for tangled-spindle-nix (Pipeline, Workflow, Step, LogLine, etc.)"
+
+[dependencies]
+base64 = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

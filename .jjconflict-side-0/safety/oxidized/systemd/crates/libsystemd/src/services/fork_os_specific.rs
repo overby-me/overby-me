@@ -1,0 +1,705 @@
+use crate::units::PlatformSpecificServiceFields;
+use crate::units::ServiceConfig;
+
+#[cfg(feature = "cgroups")]
+use crate::platform::cgroups;
+#[cfg(feature = "cgroups")]
+use crate::units::Delegate;
+#[cfg(feature = "cgroups")]
+use crate::units::TasksMax;
+#[cfg(feature = "cgroups")]
+use log::trace;
+
+/// Recursively remove child cgroup directories (depth-first) left over from
+/// previous service runs. Only removes subdirectories, not cgroup pseudo-files.
+#[cfg(feature = "cgroups")]
+fn remove_delegate_children(path: &std::path::Path) {
+    let entries = match std::fs::read_dir(path) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let child = entry.path();
+        if child.is_dir() {
+            remove_delegate_children(&child);
+            let _ = std::fs::remove_dir(&child);
+        }
+    }
+}
+
+/// This is the place to do anything that is not standard unix but specific to one os. Like cgroups
+///
+/// `dynamic_uid` carries the UID/GID allocated for `DynamicUser=yes` services
+/// (allocated once by the caller before the fork). Cgroup delegation must chown
+/// the delegated files to this UID; resolving `exec_config.user` would give root
+/// because the dynamic user is not recorded there.
+#[cfg_attr(not(feature = "cgroups"), allow(unused_variables))]
+pub fn pre_fork_os_specific(srvc: &ServiceConfig, dynamic_uid: Option<u32>) -> Result<(), String> {
+    #[cfg(feature = "cgroups")]
+    {
+        std::fs::create_dir_all(&srvc.platform_specific.cgroup_path).map_err(|e| {
+            format!(
+                "Couldnt create service cgroup ({:?}): {}",
+                srvc.platform_specific.cgroup_path, e
+            )
+        })?;
+
+        // Clean up child cgroup directories from previous runs (e.g. created
+        // by Delegate=yes services). Without this, a second start of a delegated
+        // service would fail with "File exists" when creating sub-cgroups.
+        remove_delegate_children(&srvc.platform_specific.cgroup_path);
+
+        // Enable required cgroup controllers on the parent before writing limits.
+        // We collect which controllers are needed based on the configured directives
+        // and enable them all at once.
+        {
+            let mut needed_controllers: Vec<&str> = Vec::new();
+            if srvc.tasks_max.is_some() || srvc.tasks_accounting == Some(true) {
+                needed_controllers.push("pids");
+            }
+            if srvc.memory_min.is_some()
+                || srvc.memory_low.is_some()
+                || srvc.memory_high.is_some()
+                || srvc.memory_max.is_some()
+                || srvc.memory_swap_max.is_some()
+                || srvc.memory_accounting == Some(true)
+            {
+                needed_controllers.push("memory");
+            }
+            if srvc.cpu_weight.is_some()
+                || srvc.startup_cpu_weight.is_some()
+                || srvc.cpu_quota.is_some()
+                || srvc.cpu_accounting == Some(true)
+            {
+                needed_controllers.push("cpu");
+            }
+            if srvc.io_weight.is_some()
+                || srvc.startup_io_weight.is_some()
+                || !srvc.io_device_weight.is_empty()
+                || !srvc.io_read_bandwidth_max.is_empty()
+                || !srvc.io_write_bandwidth_max.is_empty()
+                || !srvc.io_read_iops_max.is_empty()
+                || !srvc.io_write_iops_max.is_empty()
+                || srvc.io_accounting == Some(true)
+            {
+                needed_controllers.push("io");
+            }
+            if !needed_controllers.is_empty() {
+                needed_controllers.dedup();
+                if let Err(e) = cgroups::cgroup2::enable_controllers_on_parent(
+                    &srvc.platform_specific.cgroup_path,
+                    &needed_controllers,
+                ) {
+                    trace!(
+                        "Could not enable cgroup controllers {:?} for {:?}: {}",
+                        needed_controllers, &srvc.platform_specific.cgroup_path, e
+                    );
+                }
+            }
+        }
+
+        // When MemoryPressureWatch is enabled the service (possibly a
+        // DynamicUser) must be able to WRITE the PSI trigger to its cgroup's
+        // memory.pressure file. The Delegate= chown below only runs for
+        // delegated services and never covers memory.pressure, so chown that one
+        // file to the service user here for any watched service. Mirrors systemd
+        // making memory.pressure writable for MemoryPressureWatch= (79-MEMPRESS).
+        if !matches!(
+            srvc.memory_pressure_watch,
+            crate::units::MemoryPressureWatch::Off | crate::units::MemoryPressureWatch::Skip
+        ) {
+            use std::os::unix::fs::PermissionsExt;
+            let pressure = srvc.platform_specific.cgroup_path.join("memory.pressure");
+            if pressure.exists() {
+                let uid = match dynamic_uid {
+                    Some(u) => u,
+                    None => super::start_service::resolve_uid(&srvc.exec_config.user).unwrap_or(0),
+                };
+                let gid = match dynamic_uid {
+                    Some(g) if srvc.exec_config.group.is_none() => g,
+                    _ => super::start_service::resolve_gid(&srvc.exec_config.group).unwrap_or(uid),
+                };
+                let _ = std::fs::set_permissions(&pressure, std::fs::Permissions::from_mode(0o644));
+                let _ = nix::unistd::chown(
+                    &pressure,
+                    Some(nix::unistd::Uid::from_raw(uid)),
+                    Some(nix::unistd::Gid::from_raw(gid)),
+                );
+            }
+        }
+
+        // When Delegate is enabled, hand the service's cgroup to the service
+        // user so it can manage its own sub-hierarchy. This runs AFTER
+        // controllers are enabled on the parent, so controller-specific
+        // interface files (memory.oom.group, memory.reclaim) already exist and
+        // can be chowned. Mirrors systemd's cg_set_access(): the directory
+        // plus a fixed set of delegation control files. Best-effort on the
+        // files: those absent on the current kernel/controller set are skipped.
+        if srvc.delegate != Delegate::No {
+            use std::os::unix::fs::PermissionsExt;
+            // For DynamicUser=yes the allocated UID is passed in via
+            // `dynamic_uid` (exec_config.user is None, which resolve_uid would
+            // map to root). Otherwise resolve the explicit User=/Group=.
+            let uid = match dynamic_uid {
+                Some(u) => u,
+                None => super::start_service::resolve_uid(&srvc.exec_config.user)
+                    .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?,
+            };
+            let uid = nix::unistd::Uid::from_raw(uid);
+            let gid = match dynamic_uid {
+                // DynamicUser=yes uses GID == UID unless Group= is explicit.
+                Some(g) if srvc.exec_config.group.is_none() => g,
+                _ => super::start_service::resolve_gid(&srvc.exec_config.group)
+                    .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?,
+            };
+            let gid = nix::unistd::Gid::from_raw(gid);
+            trace!(
+                "Delegating cgroup {:?} to uid={} gid={}",
+                &srvc.platform_specific.cgroup_path, uid, gid
+            );
+            // Directory: mode 0755, owned by the service user.
+            let _ = std::fs::set_permissions(
+                &srvc.platform_specific.cgroup_path,
+                std::fs::Permissions::from_mode(0o755),
+            );
+            nix::unistd::chown(&srvc.platform_specific.cgroup_path, Some(uid), Some(gid)).map_err(
+                |e| {
+                    format!(
+                        "Couldnt chown service cgroup ({:?}) to uid={} gid={}: {}",
+                        srvc.platform_specific.cgroup_path, uid, gid, e
+                    )
+                },
+            )?;
+            // Delegation control files: mode 0644, owned by the service user.
+            // The chmod is essential (not just chown): the kernel exposes some
+            // attributes read-only by default (e.g. cgroup.threads in a domain
+            // cgroup), so without restoring the owner-write bit the delegated
+            // user cannot manage them. Mirrors systemd's chmod_and_chown() in
+            // cg_set_access(). Best-effort: attributes absent on the current
+            // kernel/controller set are skipped.
+            for attr in [
+                "cgroup.procs",
+                "cgroup.subtree_control",
+                "cgroup.threads",
+                "memory.oom.group",
+                "memory.reclaim",
+            ] {
+                let attr_path = srvc.platform_specific.cgroup_path.join(attr);
+                let _ =
+                    std::fs::set_permissions(&attr_path, std::fs::Permissions::from_mode(0o644));
+                if let Err(e) = nix::unistd::chown(&attr_path, Some(uid), Some(gid)) {
+                    trace!(
+                        "Couldn't chown delegation file {:?} to uid={} gid={}: {} (continuing)",
+                        attr_path, uid, gid, e
+                    );
+                }
+            }
+
+            // DelegateSubgroup=NAME: create the named subgroup under the (now
+            // delegated) service cgroup and delegate it to the same user. The
+            // service's own process is placed here (post_fork), keeping the main
+            // delegated cgroup free of internal processes so it can carry child
+            // cgroups + controllers (cgroup v2 no-internal-process rule).
+            if let Some(ref sub) = srvc.delegate_subgroup {
+                let subpath = srvc.platform_specific.cgroup_path.join(sub);
+                if let Err(e) = std::fs::create_dir_all(&subpath) {
+                    trace!("Could not create delegate subgroup {:?}: {}", subpath, e);
+                }
+                let _ = std::fs::set_permissions(&subpath, std::fs::Permissions::from_mode(0o755));
+                let _ = nix::unistd::chown(&subpath, Some(uid), Some(gid));
+                // Beyond the main-cgroup delegation files, a subgroup also gets
+                // cgroup.max.depth / cgroup.max.descendants delegated so the owner
+                // can bound its own subtree (TEST-19-CGROUP.delegate testcase_subgroup).
+                for attr in [
+                    "cgroup.procs",
+                    "cgroup.subtree_control",
+                    "cgroup.threads",
+                    "cgroup.max.depth",
+                    "cgroup.max.descendants",
+                ] {
+                    let ap = subpath.join(attr);
+                    let _ = std::fs::set_permissions(&ap, std::fs::Permissions::from_mode(0o644));
+                    let _ = nix::unistd::chown(&ap, Some(uid), Some(gid));
+                }
+            }
+        }
+
+        // Apply TasksMax limit via the pids cgroup controller
+        if let Some(ref tasks_max) = srvc.tasks_max {
+            let pids_max_path = srvc.platform_specific.cgroup_path.join("pids.max");
+            if pids_max_path.exists() || pids_max_path.parent().is_some_and(|p| p.exists()) {
+                let value = match tasks_max {
+                    TasksMax::Value(n) => n.to_string(),
+                    TasksMax::Percent(pct) => {
+                        // Read the system-wide pid limit and compute the percentage
+                        let pid_max = std::fs::read_to_string("/proc/sys/kernel/pid_max")
+                            .unwrap_or_else(|_| "32768".to_owned());
+                        let pid_max: u64 = pid_max.trim().parse().unwrap_or(32768);
+                        let limit = (pid_max * pct / 100).max(1);
+                        limit.to_string()
+                    }
+                    TasksMax::Infinity => "max".to_owned(),
+                };
+                trace!(
+                    "Setting TasksMax={} for cgroup {:?}",
+                    value, &srvc.platform_specific.cgroup_path
+                );
+                if let Err(e) = std::fs::write(&pids_max_path, &value) {
+                    trace!(
+                        "Could not write pids.max for service cgroup ({:?}): {}",
+                        pids_max_path, e
+                    );
+                }
+            } else {
+                trace!(
+                    "pids.max not available for cgroup {:?}, skipping TasksMax",
+                    &srvc.platform_specific.cgroup_path
+                );
+            }
+        }
+
+        // ── Memory controller limits ───────────────────────────────────────
+        if let Some(ref limit) = srvc.memory_min {
+            trace!(
+                "Setting MemoryMin={:?} for cgroup {:?}",
+                limit, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_memory_min(&srvc.platform_specific.cgroup_path, limit)
+            {
+                trace!("Could not set memory.min: {}", e);
+            }
+        }
+        if let Some(ref limit) = srvc.memory_low {
+            trace!(
+                "Setting MemoryLow={:?} for cgroup {:?}",
+                limit, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_memory_low(&srvc.platform_specific.cgroup_path, limit)
+            {
+                trace!("Could not set memory.low: {}", e);
+            }
+        }
+        if let Some(ref limit) = srvc.memory_high {
+            trace!(
+                "Setting MemoryHigh={:?} for cgroup {:?}",
+                limit, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_memory_high(&srvc.platform_specific.cgroup_path, limit)
+            {
+                trace!("Could not set memory.high: {}", e);
+            }
+        }
+        if let Some(ref limit) = srvc.memory_max {
+            trace!(
+                "Setting MemoryMax={:?} for cgroup {:?}",
+                limit, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_memory_max(&srvc.platform_specific.cgroup_path, limit)
+            {
+                trace!("Could not set memory.max: {}", e);
+            }
+        }
+        if let Some(ref limit) = srvc.memory_swap_max {
+            trace!(
+                "Setting MemorySwapMax={:?} for cgroup {:?}",
+                limit, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_memory_swap_max(&srvc.platform_specific.cgroup_path, limit)
+            {
+                trace!("Could not set memory.swap.max: {}", e);
+            }
+        }
+
+        // ── CPU controller limits ──────────────────────────────────────────
+        if let Some(weight) = srvc.cpu_weight {
+            trace!(
+                "Setting CPUWeight={} for cgroup {:?}",
+                weight, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_cpu_weight(&srvc.platform_specific.cgroup_path, weight)
+            {
+                trace!("Could not set cpu.weight: {}", e);
+            }
+        }
+        if let Some(quota) = srvc.cpu_quota {
+            trace!(
+                "Setting CPUQuota={}% for cgroup {:?}",
+                quota, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_cpu_quota(&srvc.platform_specific.cgroup_path, quota)
+            {
+                trace!("Could not set cpu.max: {}", e);
+            }
+        }
+
+        // ── IO controller limits ───────────────────────────────────────────
+        if let Some(weight) = srvc.io_weight {
+            trace!(
+                "Setting IOWeight={} for cgroup {:?}",
+                weight, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) =
+                cgroups::cgroup2::set_io_weight(&srvc.platform_specific.cgroup_path, weight)
+            {
+                trace!("Could not set io.weight: {}", e);
+            }
+        }
+        for entry in &srvc.io_device_weight {
+            trace!(
+                "Setting IODeviceWeight={} {} for cgroup {:?}",
+                entry.device, entry.value, &srvc.platform_specific.cgroup_path
+            );
+            if let Err(e) = cgroups::cgroup2::set_io_device_weight(
+                &srvc.platform_specific.cgroup_path,
+                &entry.device,
+                entry.value,
+            ) {
+                trace!("Could not set io.weight for {}: {}", entry.device, e);
+            }
+        }
+
+        // Per-device bandwidth and IOPS limits — group by device to write
+        // a single io.max line per device with all applicable limits.
+        {
+            type IoMaxLimits = (Option<u64>, Option<u64>, Option<u64>, Option<u64>);
+            let mut io_max_devices: std::collections::HashMap<String, IoMaxLimits> =
+                std::collections::HashMap::new();
+
+            for entry in &srvc.io_read_bandwidth_max {
+                io_max_devices
+                    .entry(entry.device.clone())
+                    .or_insert((None, None, None, None))
+                    .0 = Some(entry.value);
+            }
+            for entry in &srvc.io_write_bandwidth_max {
+                io_max_devices
+                    .entry(entry.device.clone())
+                    .or_insert((None, None, None, None))
+                    .1 = Some(entry.value);
+            }
+            for entry in &srvc.io_read_iops_max {
+                io_max_devices
+                    .entry(entry.device.clone())
+                    .or_insert((None, None, None, None))
+                    .2 = Some(entry.value);
+            }
+            for entry in &srvc.io_write_iops_max {
+                io_max_devices
+                    .entry(entry.device.clone())
+                    .or_insert((None, None, None, None))
+                    .3 = Some(entry.value);
+            }
+
+            for (device, (rbps, wbps, riops, wiops)) in &io_max_devices {
+                trace!(
+                    "Setting io.max for {} rbps={:?} wbps={:?} riops={:?} wiops={:?} in cgroup {:?}",
+                    device, rbps, wbps, riops, wiops, &srvc.platform_specific.cgroup_path
+                );
+                if let Err(e) = cgroups::cgroup2::set_io_max(
+                    &srvc.platform_specific.cgroup_path,
+                    device,
+                    *rbps,
+                    *wbps,
+                    *riops,
+                    *wiops,
+                ) {
+                    trace!("Could not set io.max for {}: {}", device, e);
+                }
+            }
+        }
+        // ── Device access policy (BPF device controller) ─────────────────
+        {
+            use crate::units::unit_parsing::DevicePolicy;
+            if srvc.device_policy != DevicePolicy::Auto || !srvc.device_allow.is_empty() {
+                trace!(
+                    "Applying DevicePolicy={:?} with {} DeviceAllow rules for cgroup {:?}",
+                    srvc.device_policy,
+                    srvc.device_allow.len(),
+                    &srvc.platform_specific.cgroup_path
+                );
+                match cgroups::bpf_devices::apply_device_policy(
+                    &srvc.platform_specific.cgroup_path,
+                    &srvc.device_policy,
+                    &srvc.device_allow,
+                ) {
+                    Ok(()) => {
+                        trace!(
+                            "Device policy applied for cgroup {:?}",
+                            &srvc.platform_specific.cgroup_path
+                        );
+                    }
+                    Err(e) => {
+                        trace!("Could not apply device policy: {}", e);
+                    }
+                }
+            }
+        }
+        // ── Network interface restriction (BPF cgroup/skb) ────────────────
+        if !srvc.restrict_network_interfaces.is_empty() {
+            match cgroups::bpf_devices::apply_restrict_network_interfaces(
+                &srvc.platform_specific.cgroup_path,
+                &srvc.restrict_network_interfaces,
+            ) {
+                Ok(()) => trace!(
+                    "RestrictNetworkInterfaces applied for cgroup {:?}",
+                    &srvc.platform_specific.cgroup_path
+                ),
+                Err(e) => trace!("Could not apply RestrictNetworkInterfaces: {}", e),
+            }
+        }
+        // ── IPAddressAllow= / IPAddressDeny= (BPF cgroup/skb) ─────────────
+        if !srvc.ip_address_allow.is_empty() || !srvc.ip_address_deny.is_empty() {
+            match cgroups::bpf_devices::apply_ip_address_policy(
+                &srvc.platform_specific.cgroup_path,
+                &srvc.ip_address_allow,
+                &srvc.ip_address_deny,
+            ) {
+                Ok(()) => trace!(
+                    "IPAddress policy applied for cgroup {:?}",
+                    &srvc.platform_specific.cgroup_path
+                ),
+                Err(e) => trace!("Could not apply IPAddress policy: {}", e),
+            }
+        }
+    }
+    let _ = srvc;
+    Ok(())
+}
+
+pub fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(), String> {
+    #[cfg(feature = "cgroups")]
+    {
+        use log::trace;
+        // With DelegateSubgroup=NAME the process runs in the named subgroup
+        // beneath the delegated service cgroup rather than the cgroup itself.
+        let target = match &conf.delegate_subgroup {
+            Some(sub) => conf.cgroup_path.join(sub),
+            None => conf.cgroup_path.clone(),
+        };
+        trace!("Move service to cgroup: {:?}", &target);
+        // Ensure the cgroup directory exists before moving into it.
+        // For socket-activated services, PID 1 may not have created the
+        // cgroup yet when the exec helper runs.
+        if let Err(e) = std::fs::create_dir_all(&target) {
+            trace!("Could not create cgroup dir {:?}: {}", &target, e);
+        }
+        cgroups::move_self_to_cgroup(&target)
+            .map_err(|e| format!("postfork os specific: {}", e))?;
+    }
+    let _ = conf;
+    Ok(())
+}
+
+/// Create the slice cgroup directory and apply its resource-control limits.
+///
+/// This must be called before the service's own cgroup is created so that
+/// the slice's cgroup hierarchy exists and has controllers enabled.
+#[cfg(feature = "cgroups")]
+pub fn setup_slice_cgroup(
+    slice_conf: &crate::units::SliceConfig,
+    service_cgroup_path: &std::path::Path,
+) {
+    // Walk up from the service cgroup to find the slice cgroup directory.
+    // The service cgroup is at {root}/{slice.slice}/{service_name}, so
+    // the slice directory is the parent.
+    let Some(slice_path) = service_cgroup_path.parent() else {
+        return;
+    };
+
+    // Whether the slice cgroup already existed: its IP filter is attached once,
+    // when the cgroup is first created (see the end of this function).
+    let slice_existed = slice_path.exists();
+
+    // Create the slice cgroup directory
+    if let Err(e) = std::fs::create_dir_all(slice_path) {
+        trace!("Could not create slice cgroup {:?}: {}", slice_path, e);
+        return;
+    }
+
+    // Enable required controllers on the slice's parent
+    {
+        let mut needed_controllers: Vec<&str> = Vec::new();
+        if slice_conf.tasks_max.is_some() || slice_conf.tasks_accounting == Some(true) {
+            needed_controllers.push("pids");
+        }
+        if slice_conf.memory_min.is_some()
+            || slice_conf.memory_low.is_some()
+            || slice_conf.memory_high.is_some()
+            || slice_conf.memory_max.is_some()
+            || slice_conf.memory_swap_max.is_some()
+            || slice_conf.memory_accounting == Some(true)
+        {
+            needed_controllers.push("memory");
+        }
+        if slice_conf.cpu_weight.is_some()
+            || slice_conf.startup_cpu_weight.is_some()
+            || slice_conf.cpu_quota.is_some()
+            || slice_conf.cpu_accounting == Some(true)
+        {
+            needed_controllers.push("cpu");
+        }
+        if slice_conf.io_weight.is_some()
+            || slice_conf.startup_io_weight.is_some()
+            || !slice_conf.io_device_weight.is_empty()
+            || !slice_conf.io_read_bandwidth_max.is_empty()
+            || !slice_conf.io_write_bandwidth_max.is_empty()
+            || !slice_conf.io_read_iops_max.is_empty()
+            || !slice_conf.io_write_iops_max.is_empty()
+            || slice_conf.io_accounting == Some(true)
+        {
+            needed_controllers.push("io");
+        }
+        if !needed_controllers.is_empty() {
+            needed_controllers.dedup();
+            if let Err(e) =
+                cgroups::cgroup2::enable_controllers_on_parent(slice_path, &needed_controllers)
+            {
+                trace!(
+                    "Could not enable cgroup controllers {:?} for slice {:?}: {}",
+                    needed_controllers, slice_path, e
+                );
+            }
+        }
+    }
+
+    // Apply memory limits
+    if let Some(ref limit) = slice_conf.memory_min
+        && let Err(e) = cgroups::cgroup2::set_memory_min(slice_path, limit)
+    {
+        trace!("Could not set slice memory.min: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_low
+        && let Err(e) = cgroups::cgroup2::set_memory_low(slice_path, limit)
+    {
+        trace!("Could not set slice memory.low: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_high
+        && let Err(e) = cgroups::cgroup2::set_memory_high(slice_path, limit)
+    {
+        trace!("Could not set slice memory.high: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_max
+        && let Err(e) = cgroups::cgroup2::set_memory_max(slice_path, limit)
+    {
+        trace!("Could not set slice memory.max: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_swap_max
+        && let Err(e) = cgroups::cgroup2::set_memory_swap_max(slice_path, limit)
+    {
+        trace!("Could not set slice memory.swap.max: {}", e);
+    }
+
+    // Apply CPU limits
+    if let Some(weight) = slice_conf.cpu_weight
+        && let Err(e) = cgroups::cgroup2::set_cpu_weight(slice_path, weight)
+    {
+        trace!("Could not set slice cpu.weight: {}", e);
+    }
+    if let Some(quota) = slice_conf.cpu_quota
+        && let Err(e) = cgroups::cgroup2::set_cpu_quota(slice_path, quota)
+    {
+        trace!("Could not set slice cpu.max: {}", e);
+    }
+
+    // Apply I/O limits
+    if let Some(weight) = slice_conf.io_weight
+        && let Err(e) = cgroups::cgroup2::set_io_weight(slice_path, weight)
+    {
+        trace!("Could not set slice io.weight: {}", e);
+    }
+
+    // Apply TasksMax
+    if let Some(ref tasks_max) = slice_conf.tasks_max {
+        let value = match tasks_max {
+            TasksMax::Value(n) => n.to_string(),
+            TasksMax::Percent(pct) => {
+                let pid_max = std::fs::read_to_string("/proc/sys/kernel/pid_max")
+                    .unwrap_or_else(|_| "32768".to_owned());
+                let pid_max: u64 = pid_max.trim().parse().unwrap_or(32768);
+                let limit = (pid_max * pct / 100).max(1);
+                limit.to_string()
+            }
+            TasksMax::Infinity => "max".to_owned(),
+        };
+        let pids_max_path = slice_path.join("pids.max");
+        if let Err(e) = std::fs::write(&pids_max_path, &value) {
+            trace!("Could not write slice pids.max: {}", e);
+        }
+    }
+
+    // Also enable controllers within the slice's subtree_control so
+    // child cgroups (the service) can have limits applied.
+    {
+        // Enable memory/pids/cpu for children — the service's own
+        // pre_fork_os_specific may need them.  `io` is deliberately NOT
+        // enabled unconditionally: the service-level path already enables io
+        // up the ancestor chain when a service actually needs it (io_accounting
+        // / IO* limits, see enable_controllers_on_parent above), and enabling
+        // io in EVERY slice's subtree_control keeps it pinned in each slice's
+        // cgroup.controllers forever — a controller can only be removed once no
+        // sibling still delegates it, so the unconditional +io blocked the
+        // controller-mask trim on unit exit (TEST-19-CGROUP.delegate
+        // testcase_controllers: `io` must vanish from system.slice once the
+        // last IOAccounting unit exits).
+        let child_controllers: Vec<&str> = vec!["memory", "pids", "cpu"];
+        let subtree_control = slice_path.join("cgroup.subtree_control");
+        let value = child_controllers
+            .iter()
+            .map(|c| format!("+{c}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Err(e) = std::fs::write(&subtree_control, &value) {
+            trace!(
+                "Could not enable controllers in slice subtree_control {:?}: {}",
+                subtree_control, e
+            );
+        }
+    }
+
+    // Slice-level DeviceAllow=/DevicePolicy= apply to every unit in the slice,
+    // attached on first creation like the IP filter below. apply_device_policy
+    // no-ops for the default auto policy with no DeviceAllow=, and ALLOW_MULTI
+    // makes the slice's device filter combine with each unit's own.
+    if !slice_existed
+        && let Err(e) = cgroups::bpf_devices::apply_device_policy(
+            slice_path,
+            &slice_conf.device_policy,
+            &slice_conf.device_allow,
+        )
+    {
+        trace!(
+            "Could not apply slice device policy to {:?}: {}",
+            slice_path, e
+        );
+    }
+
+    // Slice-level IPAddressAllow=/IPAddressDeny= apply to every unit in the
+    // slice. Attach the filter to the slice cgroup when it is first created;
+    // BPF_F_ALLOW_MULTI (see bpf_prog_attach) makes it run in addition to each
+    // member unit's own IP filter, so both the slice's and the unit's rules are
+    // enforced hierarchically. Re-running this per service start would stack
+    // duplicate programs, so gate on first creation: an emptied slice cgroup is
+    // pruned and recreated fresh, which re-attaches with the current config.
+    if !slice_existed
+        && (!slice_conf.ip_address_allow.is_empty() || !slice_conf.ip_address_deny.is_empty())
+    {
+        match cgroups::bpf_devices::apply_ip_address_policy(
+            slice_path,
+            &slice_conf.ip_address_allow,
+            &slice_conf.ip_address_deny,
+        ) {
+            Ok(()) => trace!("Applied slice IPAddress policy to {:?}", slice_path),
+            Err(e) => trace!(
+                "Could not apply slice IPAddress policy to {:?}: {}",
+                slice_path, e
+            ),
+        }
+    }
+}

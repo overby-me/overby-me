@@ -1,0 +1,4 @@
+#!/usr/bin/env nu
+def main [file: string] {
+  $"($file) (open $file)" | uf
+}

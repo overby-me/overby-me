@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW003",
+			"severity": "error",
+			"field": "name",
+			"message": "invalid name \"123-bad-name\"",
+			"hint": "Names must match the pattern [a-zA-Z_][a-zA-Z0-9_-]*. Names must start with a letter or underscore. Only alphanumeric characters, hyphens, and underscores are allowed.",
+			"contract": "PluginConfig.name"
+		}
+	]
+}

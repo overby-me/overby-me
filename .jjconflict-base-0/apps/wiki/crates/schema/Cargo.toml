@@ -1,0 +1,15 @@
+[package]
+name = "wiki-schema"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wiki-domain-types = { path = "../domain-types" }
+
+[dev-dependencies]
+# Real SQLite (bundled, hermetic) validates the SQLite-dialect claim and the
+# lossless file-format bridge; the turso crate validates the target engine.
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt"] }
+turso = "0.2"

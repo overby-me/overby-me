@@ -1,0 +1,10 @@
+[package]
+name = "tangled-git"
+version = "0.1.0"
+edition = "2021"
+description = "Git integration helpers for Tangled CLI"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+git2 = { workspace = true }

@@ -1,0 +1,11 @@
+[package]
+name = "fe-c-driver"
+version.workspace = true
+edition.workspace = true
+description = "Fe-C rustc-as-a-library driver: MIR analysis and rewriting into cementite calls"
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fe-c-driver"
+path = "src/main.rs"

@@ -1,0 +1,70 @@
+{
+	"version": "0.1.0",
+	"wit_version": "0.3.0",
+	"type": "channel",
+	"name": "signal",
+	"description": "Signal channel for receiving and responding to Signal messages via signal-cli REST API",
+	"auth": {
+		"secret_name": "signal_api_token",
+		"display_name": "Signal",
+		"instructions": "Set up signal-cli-rest-api (https://github.com/bbernhard/signal-cli-rest-api) and register or link a phone number. If your API requires authentication, provide the token.",
+		"token_hint": "Optional API token for authenticated signal-cli-rest-api",
+		"env_var": "SIGNAL_API_TOKEN"
+	},
+	"setup": {
+		"required_secrets": [
+			{
+				"name": "signal_phone_number",
+				"prompt": "Enter the Signal phone number registered with signal-cli (e.g. +1234567890)",
+				"optional": false
+			},
+			{
+				"name": "signal_api_token",
+				"prompt": "Enter the signal-cli-rest-api authentication token (leave empty if not required)",
+				"optional": true
+			}
+		],
+		"validation_endpoint": "{api_url}/v1/about"
+	},
+	"capabilities": {
+		"http": {
+			"allowlist": [{ "host": "*", "path_prefix": "/" }],
+			"credentials": {
+				"signal_token": {
+					"secret_name": "signal_api_token",
+					"location": {
+						"type": "header",
+						"name": "Authorization",
+						"prefix": "Bearer "
+					},
+					"host_patterns": ["*"]
+				}
+			},
+			"max_response_bytes": 52428800,
+			"rate_limit": {
+				"requests_per_minute": 60,
+				"requests_per_hour": 3000
+			}
+		},
+		"secrets": {
+			"allowed_names": ["signal_*"]
+		},
+		"channel": {
+			"allowed_paths": ["/webhook/signal"],
+			"allow_polling": true,
+			"min_poll_interval_ms": 5000,
+			"workspace_prefix": "channels/signal/",
+			"emit_rate_limit": {
+				"messages_per_minute": 60,
+				"messages_per_hour": 3000
+			}
+		}
+	},
+	"config": {
+		"api_url": "http://localhost:8080",
+		"dm_policy": "pairing",
+		"allow_from": [],
+		"group_ids": [],
+		"require_mention": false
+	}
+}

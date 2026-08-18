@@ -1,0 +1,755 @@
+use log::trace;
+
+use crate::runtime_info::{RuntimeInfo, UnitTable};
+use crate::units;
+
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::fs;
+use std::path::PathBuf;
+
+fn find_new_unit_path(unit_dirs: &[PathBuf], find_name: &str) -> Result<Option<PathBuf>, String> {
+    for dir in unit_dirs {
+        let read_dir = match fs::read_dir(dir) {
+            Ok(rd) => rd,
+            // A search-path entry may be absent (e.g. the system.control
+            // override dirs before the first `systemctl set-property`); skip it
+            // rather than failing the whole lookup.
+            Err(_) => continue,
+        };
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let entry_name = entry.file_name();
+            // Use symlink_metadata so we can handle symlinks explicitly.
+            // NixOS unit files in /etc/systemd/system/ are symlinks into
+            // the Nix store; entry.metadata() (which follows symlinks) can
+            // fail on complex symlink chains, so we match on the raw type.
+            let symlink_meta = match entry.path().symlink_metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if symlink_meta.file_type().is_symlink() {
+                if entry_name == find_name {
+                    return Ok(Some(entry.path()));
+                }
+                continue;
+            }
+            if symlink_meta.file_type().is_file() && entry_name == find_name {
+                return Ok(Some(entry.path()));
+            }
+            if symlink_meta.file_type().is_dir()
+                && let Some(p) = find_new_unit_path(&[entry.path()], find_name)?
+            {
+                return Ok(Some(p));
+            }
+        }
+    }
+
+    // For template instances (e.g. foo@bar.socket), fall back to the template
+    // file (e.g. foo@.socket) so that on-demand loading works.
+    if let Some(at_pos) = find_name.find('@')
+        && let Some(dot_pos) = find_name[at_pos..].find('.')
+    {
+        let template_name = format!(
+            "{}@{}",
+            &find_name[..at_pos],
+            &find_name[at_pos + dot_pos..]
+        );
+        if template_name != find_name {
+            return find_new_unit_path(unit_dirs, &template_name);
+        }
+    }
+
+    Ok(None)
+}
+
+/// Collect drop-in overrides for a unit from all unit directories.
+/// Scans for type-level, hierarchical prefix, and exact name `.d/` dirs.
+fn collect_dropins_for_unit(
+    unit_dirs: &[PathBuf],
+    unit_name: &str,
+) -> HashMap<String, Vec<(String, String)>> {
+    use crate::units::loading::directory_deps::collect_dropin_entries;
+
+    let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+    // Build the list of drop-in directory names to search for:
+    // 1. Type-level (e.g., "service.d" for any .service unit)
+    // 2. Hierarchical prefixes (e.g., "a-.service.d", "a-b-.service.d")
+    // 3. Exact unit name (e.g., "a-b-c.service.d")
+    let mut dropin_dir_keys: Vec<String> = Vec::new();
+
+    // Type-level
+    if let Some(dot_pos) = unit_name.rfind('.') {
+        let type_suffix = &unit_name[dot_pos + 1..]; // e.g., "service"
+        dropin_dir_keys.push(type_suffix.to_owned());
+
+        // Hierarchical prefixes
+        let base = &unit_name[..dot_pos]; // e.g., "a-b-c"
+        let suffix = &unit_name[dot_pos..]; // e.g., ".service"
+        let parts: Vec<&str> = base.split('-').collect();
+        for i in 1..parts.len() {
+            let prefix = parts[..i].join("-");
+            dropin_dir_keys.push(format!("{prefix}-{suffix}")); // e.g., "a-.service"
+        }
+    }
+    // Exact name
+    dropin_dir_keys.push(unit_name.to_owned());
+
+    for dir in unit_dirs {
+        for key in &dropin_dir_keys {
+            let dropin_dir = dir.join(format!("{key}.d"));
+            if dropin_dir.is_dir() {
+                collect_dropin_entries(&dropin_dir, key, &mut dropins);
+            }
+        }
+    }
+
+    dropins
+}
+
+/// Scan unit directories for symlinks that resolve to the same unit as
+/// `find_name`. Checks both canonical path equality and symlink target
+/// name matching (for template instances where the target doesn't exist
+/// as a real file).
+pub fn find_symlink_aliases(
+    unit_dirs: &[PathBuf],
+    unit_path: &std::path::Path,
+    find_name: &str,
+) -> Vec<String> {
+    let canonical = fs::canonicalize(unit_path).ok();
+    let mut aliases = Vec::new();
+    for dir in unit_dirs {
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let is_instance = find_name.contains('@') && !find_name.contains("@.");
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == find_name {
+                continue;
+            }
+            // When looking for aliases of an instance (bar@0.service),
+            // skip template-level symlinks (bar-alias@.service) in this
+            // loop — they are handled by the template-level discovery below.
+            if is_instance && name.contains("@.") {
+                continue;
+            }
+            // Only consider symlinks
+            let meta = match entry.path().symlink_metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if !meta.file_type().is_symlink() {
+                continue;
+            }
+            let target_name = fs::read_link(entry.path())
+                .ok()
+                .and_then(|t| t.file_name().map(|f| f.to_string_lossy().to_string()))
+                .unwrap_or_default();
+            // A symlink whose target is a *template* (e.g. bar-alias@2.service
+            // -> yup@.service) aliases the target template instantiated with
+            // the CANDIDATE symlink's OWN instance (yup@2), not this find_name
+            // in general.  Match it only against that specific instance —
+            // otherwise the canonical-path check below spuriously attaches it
+            // to every yup@N, because a non-existent instance's unit_path falls
+            // back to the shared template file that both canonicalize to.
+            if let Some((tgt_prefix, tgt_suffix)) = target_name.split_once("@.") {
+                if let Some((_, cand_inst)) =
+                    crate::units::loading::directory_deps::parse_template_instance(&name)
+                    && !cand_inst.is_empty()
+                {
+                    let resolved = format!("{tgt_prefix}@{cand_inst}.{tgt_suffix}");
+                    if resolved == find_name && !aliases.contains(&name) {
+                        aliases.push(name);
+                    }
+                }
+                continue;
+            }
+            // Check by canonical path (works for regular files)
+            if let Some(ref canonical) = canonical
+                && let Ok(c) = fs::canonicalize(entry.path())
+                && c == *canonical
+                && !aliases.contains(&name)
+            {
+                aliases.push(name);
+                continue;
+            }
+            // Check by symlink target name (works for template instances
+            // where the target file doesn't exist on disk)
+            if !target_name.is_empty() && target_name == find_name && !aliases.contains(&name) {
+                aliases.push(name);
+            }
+        }
+    }
+
+    // For template instances (e.g., bar@0.service), also discover aliases
+    // from template-level symlinks (e.g., bar-alias@.service → bar@.service
+    // implies bar-alias@0.service is an alias for bar@0.service).
+    if let Some((template_name, instance)) =
+        crate::units::loading::directory_deps::parse_template_instance(find_name)
+    {
+        let template_path = unit_dirs
+            .iter()
+            .map(|d| d.join(&template_name))
+            .find(|p| p.exists());
+        let template_canonical = template_path
+            .as_ref()
+            .and_then(|p| fs::canonicalize(p).ok());
+
+        for dir in unit_dirs {
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == template_name {
+                    continue;
+                }
+                // Only consider template symlinks (e.g., bar-alias@.service)
+                if !name.contains("@.") {
+                    continue;
+                }
+                let meta = match entry.path().symlink_metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if !meta.file_type().is_symlink() {
+                    continue;
+                }
+                // Check if this template symlink points to our template
+                let is_template_alias = if let Some(ref tc) = template_canonical
+                    && let Ok(c) = fs::canonicalize(entry.path())
+                {
+                    c == *tc
+                } else if let Ok(target) = fs::read_link(entry.path()) {
+                    let target_name = target
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    target_name == template_name
+                } else {
+                    false
+                };
+
+                if !is_template_alias {
+                    continue;
+                }
+
+                // Derive instance alias: bar-alias@.service + instance "0" → bar-alias@0.service
+                if let Some(at_pos) = name.find("@.")
+                    && let Some(dot_pos) = name.rfind('.')
+                {
+                    let derived = format!("{}@{}{}", &name[..at_pos], instance, &name[dot_pos..]);
+                    // Check for instance-level override: if bar-alias@0.service
+                    // exists as its own symlink to a DIFFERENT unit, don't add it
+                    let has_override = unit_dirs.iter().any(|d| {
+                        let candidate = d.join(&derived);
+                        if let Ok(m) = candidate.symlink_metadata()
+                            && m.file_type().is_symlink()
+                            && let Ok(target) = fs::read_link(&candidate)
+                        {
+                            let target_name = target
+                                .file_name()
+                                .map(|f| f.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            // It's an override if it points to a different template
+                            target_name != find_name && target_name != template_name
+                        } else {
+                            false
+                        }
+                    });
+                    if !has_override && !aliases.contains(&derived) {
+                        trace!(
+                            "Template alias for {}: {} (via {} → {})",
+                            find_name, derived, name, template_name
+                        );
+                        aliases.push(derived);
+                    }
+                }
+            }
+        }
+    }
+
+    aliases
+}
+
+/// Loads a unit with a given name. It searches all paths recursively until it finds a file with a matching name.
+/// Also scans for and applies drop-in overrides from `.d/` directories.
+pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Unit, String> {
+    if let Some(unit_path) = find_new_unit_path(unit_dirs, find_name)? {
+        let content = fs::read_to_string(&unit_path).map_err(|e| {
+            format!(
+                "{}",
+                units::ParsingError::new(
+                    units::ParsingErrorReason::from(Box::new(e)),
+                    unit_path.clone()
+                )
+            )
+        })?;
+
+        // Collect and apply drop-in overrides
+        let dropins = collect_dropins_for_unit(unit_dirs, find_name);
+        let final_content = if dropins.is_empty() {
+            content
+        } else {
+            use crate::units::loading::directory_deps::collect_applicable_dropins_pub;
+            let overrides = collect_applicable_dropins_pub(find_name, &dropins);
+            if overrides.is_empty() {
+                content
+            } else {
+                trace!(
+                    "Applying {} drop-in(s) to on-demand loaded unit {}",
+                    overrides.len(),
+                    find_name
+                );
+                crate::units::loading::directory_deps::merge_unit_contents_pub(&content, &overrides)
+            }
+        };
+
+        // Extract instance name for template instances (e.g. "cat-test" from
+        // "systemd-journald@cat-test.socket") so %i/%I resolve correctly.
+        let instance = if let Some(at_pos) = find_name.find('@')
+            && let Some(dot_pos) = find_name[at_pos..].find('.')
+        {
+            &find_name[at_pos + 1..at_pos + dot_pos]
+        } else {
+            ""
+        };
+        // Resolve specifiers (%n, %i, %p, etc.) before parsing
+        let final_content = crate::units::loading::directory_deps::resolve_specifiers(
+            &final_content,
+            find_name,
+            instance,
+        );
+
+        let parsed = units::parse_file(&final_content)
+            .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?;
+        // For template instances, use a synthetic path with the instance name
+        // so the parser derives the correct unit ID.
+        let parse_path = if !instance.is_empty() {
+            unit_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(find_name)
+        } else {
+            unit_path.clone()
+        };
+        let mut unit: units::Unit = if find_name.ends_with(".service") {
+            units::parse_service(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".socket") {
+            units::parse_socket(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".target") {
+            units::parse_target(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".slice") {
+            units::parse_slice(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".timer") {
+            units::parse_timer(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".path") {
+            units::parse_path(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".mount") {
+            units::parse_mount(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".swap") {
+            units::parse_swap(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".device") {
+            units::parse_device(parsed, &parse_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else {
+            return Err(format!("File suffix not recognized for file {unit_path:?}"));
+        };
+
+        // Discover filesystem-level symlink aliases (e.g. test15-b.service → test15-a.service)
+        let aliases = find_symlink_aliases(unit_dirs, &unit_path, find_name);
+        for alias in aliases {
+            if !unit.common.unit.aliases.contains(&alias) {
+                trace!("Discovered symlink alias for {}: {}", find_name, alias);
+                unit.common.unit.aliases.push(alias);
+            }
+        }
+
+        Ok(unit)
+    } else {
+        Err(format!("Cannot find unit file for unit: {find_name}"))
+    }
+}
+
+// check that all names referenced in the new units exist either in the old units
+// or in the new units
+fn check_all_names_exist(
+    new_units: &HashMap<units::UnitId, units::Unit>,
+    unit_table_locked: &UnitTable,
+) -> Result<(), String> {
+    let mut names_needed = Vec::new();
+    for new_unit in new_units.values() {
+        names_needed.extend(new_unit.common.unit.refs_by_name.iter().cloned());
+    }
+
+    let mut names_needed: std::collections::HashMap<_, _> =
+        names_needed.iter().map(|name| (name, ())).collect();
+
+    for unit in unit_table_locked.values() {
+        for new_unit in new_units.values() {
+            if unit.id == new_unit.id {
+                return Err(format!("Id {} exists already", new_unit.id));
+            }
+            if unit.id.name == new_unit.id.name {
+                return Err(format!("Name {} exists already", new_unit.id.name));
+            }
+        }
+        if names_needed.contains_key(&unit.id) {
+            names_needed.remove(&unit.id).unwrap();
+        }
+    }
+    for unit in new_units.values() {
+        if names_needed.contains_key(&unit.id) {
+            names_needed.remove(&unit.id).unwrap();
+        }
+    }
+    if !names_needed.is_empty() {
+        // Log missing references but don't fail — real systemd does not reject
+        // units that reference non-existent dependencies (Wants= is soft, and
+        // even Requires= is only enforced at activation time). Failing here
+        // would break daemon-reload when refs_by_name contains original dep
+        // names for units that haven't been created yet.
+        log::trace!(
+            "Names referenced by unit but not found in the known set of units: {:?}",
+            names_needed.keys().collect::<Vec<_>>()
+        );
+    }
+    Ok(())
+}
+
+/// Inserts a single unit without checking that all referenced dependencies exist.
+/// Used for on-demand unit loading (e.g. `systemctl restart` for a unit that wasn't
+/// part of the initial boot dependency graph). Missing dependency references are
+/// silently ignored — the unit is inserted and wired up to whatever units are
+/// already present in the table.
+pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo) {
+    let new_id = unit.id.clone();
+    let unit_table = &mut run_info.unit_table;
+
+    // Wire up bidirectional dependency relations with existing units.
+    // Direction 1: new unit references existing units → update existing units.
+    // Direction 2: existing units reference new unit → update new unit.
+    for existing in unit_table.values_mut() {
+        // Direction 1: new → existing
+        if unit.common.dependencies.after.contains(&existing.id) {
+            existing.common.dependencies.before.push(new_id.clone());
+        }
+        if unit.common.dependencies.before.contains(&existing.id) {
+            existing.common.dependencies.after.push(new_id.clone());
+        }
+        if unit.common.dependencies.requires.contains(&existing.id) {
+            existing
+                .common
+                .dependencies
+                .required_by
+                .push(new_id.clone());
+        }
+        if unit.common.dependencies.wants.contains(&existing.id) {
+            existing.common.dependencies.wanted_by.push(new_id.clone());
+        }
+        if unit.common.dependencies.required_by.contains(&existing.id) {
+            existing.common.dependencies.requires.push(new_id.clone());
+        }
+        if unit.common.dependencies.wanted_by.contains(&existing.id) {
+            existing.common.dependencies.wants.push(new_id.clone());
+        }
+        if unit.common.dependencies.conflicts.contains(&existing.id) {
+            existing
+                .common
+                .dependencies
+                .conflicted_by
+                .push(new_id.clone());
+        }
+        if unit
+            .common
+            .dependencies
+            .conflicted_by
+            .contains(&existing.id)
+        {
+            existing.common.dependencies.conflicts.push(new_id.clone());
+        }
+        if unit.common.dependencies.binds_to.contains(&existing.id) {
+            existing.common.dependencies.bound_by.push(new_id.clone());
+        }
+        if unit.common.dependencies.bound_by.contains(&existing.id) {
+            existing.common.dependencies.binds_to.push(new_id.clone());
+        }
+        if unit.common.dependencies.upholds.contains(&existing.id) {
+            existing.common.dependencies.upheld_by.push(new_id.clone());
+        }
+        if unit.common.dependencies.upheld_by.contains(&existing.id) {
+            existing.common.dependencies.upholds.push(new_id.clone());
+        }
+
+        // Direction 2: existing → new (e.g., existing has Before=new_unit)
+        if existing.common.dependencies.before.contains(&new_id) {
+            unit.common.dependencies.after.push(existing.id.clone());
+        }
+        if existing.common.dependencies.after.contains(&new_id) {
+            unit.common.dependencies.before.push(existing.id.clone());
+        }
+        if existing.common.dependencies.wants.contains(&new_id) {
+            unit.common.dependencies.wanted_by.push(existing.id.clone());
+        }
+        if existing.common.dependencies.requires.contains(&new_id) {
+            unit.common
+                .dependencies
+                .required_by
+                .push(existing.id.clone());
+        }
+        if existing.common.dependencies.wanted_by.contains(&new_id) {
+            unit.common.dependencies.wants.push(existing.id.clone());
+        }
+        if existing.common.dependencies.required_by.contains(&new_id) {
+            unit.common.dependencies.requires.push(existing.id.clone());
+        }
+        if existing.common.dependencies.conflicts.contains(&new_id) {
+            unit.common
+                .dependencies
+                .conflicted_by
+                .push(existing.id.clone());
+        }
+        if existing.common.dependencies.conflicted_by.contains(&new_id) {
+            unit.common.dependencies.conflicts.push(existing.id.clone());
+        }
+        if existing.common.dependencies.binds_to.contains(&new_id) {
+            unit.common.dependencies.bound_by.push(existing.id.clone());
+        }
+        if existing.common.dependencies.bound_by.contains(&new_id) {
+            unit.common.dependencies.binds_to.push(existing.id.clone());
+        }
+        if existing.common.dependencies.upholds.contains(&new_id) {
+            unit.common.dependencies.upheld_by.push(existing.id.clone());
+        }
+        if existing.common.dependencies.upheld_by.contains(&new_id) {
+            unit.common.dependencies.upholds.push(existing.id.clone());
+        }
+
+        // Direction 2 (refs_by_name fallback): if the existing unit originally
+        // referenced the new unit (recorded in refs_by_name) but the dep was
+        // pruned because the new unit didn't exist at load time, restore it as
+        // a Wants dependency. This enables on-demand loading of units created
+        // after daemon-reload (e.g. a service file dropped in after a target
+        // with Wants= was loaded).
+        if existing.common.unit.refs_by_name.contains(&new_id)
+            && !existing.common.dependencies.wants.contains(&new_id)
+            && !existing.common.dependencies.requires.contains(&new_id)
+            && !existing.common.dependencies.after.contains(&new_id)
+            && !existing.common.dependencies.before.contains(&new_id)
+            && !existing.common.dependencies.binds_to.contains(&new_id)
+            && !existing.common.dependencies.conflicts.contains(&new_id)
+        {
+            trace!(
+                "Restoring pruned dep: {} wants {} (from refs_by_name)",
+                existing.id.name, new_id.name
+            );
+            existing.common.dependencies.wants.push(new_id.clone());
+            unit.common.dependencies.wanted_by.push(existing.id.clone());
+        }
+
+        // Implicit same-name socket<->service association (foo.socket <->
+        // foo.service), mirroring apply_sockets_to_services' names_match rule.
+        // The batch resolver (fill_dependencies) runs only at boot/daemon-reload,
+        // so establish it here for on-demand (find_or_load_unit) loads too —
+        // otherwise a socket-activated service loaded on demand never learns
+        // about its socket (empty conf.sockets), which breaks re-arming the
+        // socket when the service stops and passing the socket fd to the service.
+        if unit.id.name_without_suffix() == existing.id.name_without_suffix() {
+            let new_is_socket = matches!(&unit.specific, units::Specific::Socket(_))
+                && matches!(&existing.specific, units::Specific::Service(_));
+            let new_is_service = matches!(&unit.specific, units::Specific::Service(_))
+                && matches!(&existing.specific, units::Specific::Socket(_));
+            if new_is_socket {
+                if let units::Specific::Socket(s) = &mut unit.specific
+                    && !s.conf.services.contains(&existing.id)
+                {
+                    s.conf.services.push(existing.id.clone());
+                }
+                if let units::Specific::Service(s) = &mut existing.specific
+                    && !s.conf.sockets.contains(&new_id)
+                {
+                    s.conf.sockets.push(new_id.clone());
+                }
+                // socket Before/RequiredBy service; service After/Requires socket
+                if !unit.common.dependencies.before.contains(&existing.id) {
+                    unit.common.dependencies.before.push(existing.id.clone());
+                }
+                if !unit.common.dependencies.required_by.contains(&existing.id) {
+                    unit.common
+                        .dependencies
+                        .required_by
+                        .push(existing.id.clone());
+                }
+                if !existing.common.dependencies.after.contains(&new_id) {
+                    existing.common.dependencies.after.push(new_id.clone());
+                }
+                if !existing.common.dependencies.requires.contains(&new_id) {
+                    existing.common.dependencies.requires.push(new_id.clone());
+                }
+            } else if new_is_service {
+                if let units::Specific::Service(s) = &mut unit.specific
+                    && !s.conf.sockets.contains(&existing.id)
+                {
+                    s.conf.sockets.push(existing.id.clone());
+                }
+                if let units::Specific::Socket(s) = &mut existing.specific
+                    && !s.conf.services.contains(&new_id)
+                {
+                    s.conf.services.push(new_id.clone());
+                }
+                if !unit.common.dependencies.after.contains(&existing.id) {
+                    unit.common.dependencies.after.push(existing.id.clone());
+                }
+                if !unit.common.dependencies.requires.contains(&existing.id) {
+                    unit.common.dependencies.requires.push(existing.id.clone());
+                }
+                if !existing.common.dependencies.before.contains(&new_id) {
+                    existing.common.dependencies.before.push(new_id.clone());
+                }
+                if !existing.common.dependencies.required_by.contains(&new_id) {
+                    existing
+                        .common
+                        .dependencies
+                        .required_by
+                        .push(new_id.clone());
+                }
+            }
+        }
+    }
+
+    trace!("Leniently inserted unit: {}", unit.id.name);
+    unit_table.insert(new_id, unit);
+}
+
+/// Inserts new units but first checks that the units referenced by the new units do exist
+pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Result<(), String> {
+    // TODO check if new unit only refs existing units
+    // TODO check if all ref'd units are not failed
+    {
+        let unit_table = &mut run_info.unit_table;
+        trace!("Check all names exist");
+        check_all_names_exist(&new_units, unit_table)?;
+
+        // Collect new unit IDs and their forward dependencies before insertion,
+        // so we can wire up reverse deps in a second pass. This avoids
+        // order-dependent bugs when multiple new units reference each other
+        // (e.g., unit A has BindsTo=B and both A and B are new).
+        let new_dep_info: Vec<_> = new_units
+            .iter()
+            .map(|(id, unit)| {
+                (
+                    id.clone(),
+                    unit.common.dependencies.after.clone(),
+                    unit.common.dependencies.before.clone(),
+                    unit.common.dependencies.requires.clone(),
+                    unit.common.dependencies.wants.clone(),
+                    unit.common.dependencies.required_by.clone(),
+                    unit.common.dependencies.wanted_by.clone(),
+                    unit.common.dependencies.conflicts.clone(),
+                    unit.common.dependencies.conflicted_by.clone(),
+                    unit.common.dependencies.binds_to.clone(),
+                    unit.common.dependencies.bound_by.clone(),
+                    unit.common.dependencies.upholds.clone(),
+                    unit.common.dependencies.upheld_by.clone(),
+                )
+            })
+            .collect();
+
+        // First pass: insert all new units into the table
+        for (new_id, new_unit) in new_units {
+            trace!("Add new unit: {}", new_unit.id.name);
+            unit_table.insert(new_id, new_unit);
+        }
+
+        // Second pass: wire up reverse dependencies now that all units exist
+        for (
+            new_id,
+            dep_after,
+            dep_before,
+            dep_requires,
+            dep_wants,
+            _dep_required_by,
+            _dep_wanted_by,
+            dep_conflicts,
+            dep_conflicted_by,
+            dep_binds_to,
+            dep_bound_by,
+            dep_upholds,
+            dep_upheld_by,
+        ) in new_dep_info
+        {
+            for unit in unit_table.values_mut() {
+                if unit.id == new_id {
+                    continue;
+                }
+                if dep_after.contains(&unit.id) {
+                    unit.common.dependencies.before.push(new_id.clone());
+                }
+                if dep_before.contains(&unit.id) {
+                    unit.common.dependencies.after.push(new_id.clone());
+                }
+                if dep_requires.contains(&unit.id) {
+                    unit.common.dependencies.required_by.push(new_id.clone());
+                }
+                if dep_wants.contains(&unit.id) {
+                    unit.common.dependencies.wanted_by.push(new_id.clone());
+                }
+                // NOTE: [Install] WantedBy=/RequiredBy= must NOT create a live
+                // forward dependency on the target. They are enable-time
+                // metadata: `systemctl enable` writes the `.wants/`/`.requires/`
+                // symlink (control.rs enable), and directory_deps scans those
+                // symlinks into real edges. Wiring `target.wants += new` here
+                // made a never-enabled unit (e.g. one created by `systemctl
+                // edit --full` with WantedBy=multi-user.target) a live want of
+                // the target, so it got started whenever the target
+                // re-activated — surfacing as the intermittent 26-SYSTEMCTL
+                // is-active failure. The reverse-index maintenance below
+                // (dep_wants -> wanted_by, dep_requires -> required_by) stays;
+                // only the forward-edge synthesis is removed.
+                if dep_conflicts.contains(&unit.id) {
+                    unit.common.dependencies.conflicted_by.push(new_id.clone());
+                }
+                if dep_conflicted_by.contains(&unit.id) {
+                    unit.common.dependencies.conflicts.push(new_id.clone());
+                }
+                if dep_binds_to.contains(&unit.id) {
+                    unit.common.dependencies.bound_by.push(new_id.clone());
+                }
+                if dep_bound_by.contains(&unit.id) {
+                    unit.common.dependencies.binds_to.push(new_id.clone());
+                }
+                if dep_upholds.contains(&unit.id) {
+                    unit.common.dependencies.upheld_by.push(new_id.clone());
+                }
+                if dep_upheld_by.contains(&unit.id) {
+                    unit.common.dependencies.upholds.push(new_id.clone());
+                }
+            }
+        }
+    }
+    Ok(())
+}

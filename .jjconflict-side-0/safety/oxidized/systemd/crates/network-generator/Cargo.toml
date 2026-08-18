@@ -1,0 +1,15 @@
+[package]
+name = "systemd-network-generator"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-network-generator"
+path = "src/main.rs"
+
+[dependencies]
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,17 @@
+# repr(packed) without C leaves field ORDER up to rustc, which reordered
+# fields in 1.80 and broke real crates (RUSTSEC-2024-0346/0347). A packed
+# struct exists to match an external layout, and that intent needs repr(C).
+id: rust-repr-packed-without-c
+language: rust
+severity: warning
+message: >-
+  repr(packed) fixes padding but not field order; rustc may reorder fields.
+  If this mirrors an external layout, it needs repr(C, packed).
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  kind: attribute_item
+  regex: 'repr\s*\(\s*packed'

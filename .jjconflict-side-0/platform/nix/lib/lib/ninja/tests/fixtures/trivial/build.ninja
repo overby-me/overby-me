@@ -1,0 +1,18 @@
+# Minimal hand-written Ninja project: the first end-to-end target for
+# nix-ninja (compile one C file, link an executable). Analogous to the buck2
+# library's no_prelude/cpp/hello_world fixture.
+
+cflags = -O2 -Wall
+
+rule cc
+  command = cc $cflags -c $in -o $out
+  description = CC $out
+
+rule link
+  command = cc $in -o $out
+  description = LINK $out
+
+build hello.o: cc hello.c
+build hello: link hello.o
+
+default hello

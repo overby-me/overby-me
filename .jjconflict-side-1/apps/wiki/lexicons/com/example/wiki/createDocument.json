@@ -1,0 +1,62 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.createDocument",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Author a content node in a context (Phase 1: the authenticated caller becomes the sole author). Requires authentication; the caller's DID is taken from the request's authorization, not the body.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["context_id", "kind", "title"],
+					"properties": {
+						"context_id": {
+							"type": "string",
+							"description": "The owning context (group/event)."
+						},
+						"parent_id": {
+							"type": "string",
+							"description": "The parent node, when nesting under another document."
+						},
+						"kind": {
+							"type": "string",
+							"knownValues": [
+								"document",
+								"folder",
+								"file",
+								"policy",
+								"position",
+								"candidate",
+								"change",
+								"question"
+							],
+							"description": "The content sub-kind."
+						},
+						"title": { "type": "string" },
+						"content": {
+							"type": "unknown",
+							"description": "The Slate document JSON, stored verbatim."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": { "type": "string", "description": "The new document's id." }
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				}
+			]
+		}
+	}
+}

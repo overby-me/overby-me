@@ -1,0 +1,6 @@
+id: rust-walker-filters-disabled
+valid:
+  - "let w = WalkBuilder::new(root).build();"
+invalid:
+  - "let w = WalkBuilder::new(root).hidden(false).build();"
+  - "let w = walkdir::WalkDir::new(root).follow_links(true);"

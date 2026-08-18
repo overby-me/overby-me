@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: overby.me <nix@overby.me>
+Date: Tue, 30 Jun 2026 00:00:00 +0000
+Subject: [PATCH] fix: guard X11-only qt_wrapper code against _MAC
+
+The macOS build compiles with _LINUX defined (it shares the Linux code
+paths and adds _MAC on top, mirroring the historical qmake core_mac
+scope). The Qt wrapper's X11-specific pieces (QX11Info include + usage)
+were guarded with a bare "#ifdef _LINUX", so they were wrongly pulled in
+on macOS, where QX11Info does not exist.
+
+Tighten those guards to "defined(_LINUX) && !defined(_MAC)" so macOS
+takes the generic (non-X11) branches that already exist alongside them.
+---
+ .../lib/qt_wrapper/src/qcefview_media.cpp | 2 +-
+ .../lib/qt_wrapper/src/qdpichecker.cpp     | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/ChromiumBasedEditors/lib/qt_wrapper/src/qcefview_media.cpp b/ChromiumBasedEditors/lib/qt_wrapper/src/qcefview_media.cpp
+--- a/ChromiumBasedEditors/lib/qt_wrapper/src/qcefview_media.cpp
++++ b/ChromiumBasedEditors/lib/qt_wrapper/src/qcefview_media.cpp
+@@ -45,7 +45,7 @@ QCefView_Media::~QCefView_Media()
+ 	OnMediaEnd();
+ }
+ 
+-#ifdef _LINUX
++#if defined(_LINUX) && !defined(_MAC)
+ #include <QX11Info>
+ QWidget* getMainPanel(QWidget* widget, int& x, int& y)
+ {
+diff --git a/ChromiumBasedEditors/lib/qt_wrapper/src/qdpichecker.cpp b/ChromiumBasedEditors/lib/qt_wrapper/src/qdpichecker.cpp
+--- a/ChromiumBasedEditors/lib/qt_wrapper/src/qdpichecker.cpp
++++ b/ChromiumBasedEditors/lib/qt_wrapper/src/qdpichecker.cpp
+@@ -33,7 +33,7 @@
+ #include <QDesktopWidget>
+ #endif
+ 
+-#ifdef _LINUX
++#if defined(_LINUX) && !defined(_MAC)
+ #ifndef QT_VERSION_6
+ #include <QX11Info>
+ #else
+@@ -74,7 +74,7 @@ int QDpiChecker::GetMonitorDpi(int nScreenNumber, unsigned int* dx, unsigned int
+ 	int nDpiX = _screen->physicalDotsPerInchX();
+ 	int nDpiY = _screen->physicalDotsPerInchY();
+ 
+-#ifdef _LINUX
++#if defined(_LINUX) && !defined(_MAC)
+ 	if ( QX11Info::isPlatformX11() )
+ 	{
+ 		int _x11_dpix = QX11Info::appDpiX(nScreenNumber),
+

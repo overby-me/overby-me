@@ -1,0 +1,34 @@
+build:
+    cargo build --workspace
+
+test:
+    cargo test --workspace
+
+check:
+    cargo check --workspace
+
+clippy:
+    cargo clippy --workspace -- -D warnings
+
+fmt:
+    cargo fmt --all
+
+fmt-check:
+    cargo fmt --all -- --check
+
+doc:
+    cargo doc --workspace --no-deps --open
+
+decode input output="":
+    cargo run --release -p h264-decode-cli -- {{ input }} {{ if output != "" { "-o " + output } else { "" } }}
+
+decode-rgb input output:
+    cargo run --release -p h264-decode-cli -- {{ input }} -o {{ output }} -f rgb24
+
+decode-info input:
+    cargo run --release -p h264-decode-cli -- {{ input }} --info -v
+
+clean:
+    cargo clean
+
+all: fmt-check clippy test build

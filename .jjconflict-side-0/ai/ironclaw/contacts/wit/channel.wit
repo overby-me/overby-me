@@ -1,0 +1,159 @@
+package near:agent@0.3.0;
+
+interface channel-host {
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    log: func(level: log-level, message: string);
+
+    now-millis: func() -> u64;
+
+    workspace-read: func(path: string) -> option<string>;
+
+    record http-response {
+        status: u16,
+        headers-json: string,
+        body: list<u8>,
+    }
+
+    http-request: func(
+        method: string,
+        url: string,
+        headers-json: string,
+        body: option<list<u8>>,
+        timeout-ms: option<u32>,
+    ) -> result<http-response, string>;
+
+    secret-exists: func(name: string) -> bool;
+
+    record inbound-attachment {
+        id: string,
+        mime-type: string,
+        filename: option<string>,
+        size-bytes: option<u64>,
+        source-url: option<string>,
+        storage-key: option<string>,
+        extracted-text: option<string>,
+        extras-json: string,
+    }
+
+    store-attachment-data: func(attachment-id: string, data: list<u8>) -> result<_, string>;
+
+    record emitted-message {
+        user-id: string,
+        user-name: option<string>,
+        content: string,
+        thread-id: option<string>,
+        metadata-json: string,
+        attachments: list<inbound-attachment>,
+    }
+
+    emit-message: func(msg: emitted-message);
+
+    workspace-write: func(path: string, content: string) -> result<_, string>;
+
+    record pairing-upsert-result {
+        code: string,
+        created: bool,
+    }
+
+    pairing-upsert-request: func(
+        channel: string,
+        id: string,
+        meta-json: string
+    ) -> result<pairing-upsert-result, string>;
+
+    pairing-is-allowed: func(
+        channel: string,
+        id: string,
+        username: option<string>
+    ) -> result<bool, string>;
+
+    pairing-read-allow-from: func(channel: string) -> result<list<string>, string>;
+}
+
+interface channel {
+    record http-endpoint-config {
+        path: string,
+        methods: list<string>,
+        require-secret: bool,
+    }
+
+    record poll-config {
+        interval-ms: u32,
+        enabled: bool,
+    }
+
+    record channel-config {
+        display-name: string,
+        http-endpoints: list<http-endpoint-config>,
+        poll: option<poll-config>,
+    }
+
+    record incoming-http-request {
+        method: string,
+        path: string,
+        headers-json: string,
+        query-json: string,
+        body: list<u8>,
+        secret-validated: bool,
+    }
+
+    record outgoing-http-response {
+        status: u16,
+        headers-json: string,
+        body: list<u8>,
+    }
+
+    record attachment {
+        filename: string,
+        mime-type: string,
+        data: list<u8>,
+    }
+
+    record agent-response {
+        message-id: string,
+        content: string,
+        thread-id: option<string>,
+        metadata-json: string,
+        attachments: list<attachment>,
+    }
+
+    enum status-type {
+        thinking,
+        done,
+        interrupted,
+        tool-started,
+        tool-completed,
+        tool-result,
+        approval-needed,
+        status,
+        job-started,
+        auth-required,
+        auth-completed,
+    }
+
+    record status-update {
+        status: status-type,
+        message: string,
+        metadata-json: string,
+    }
+
+    on-start: func(config-json: string) -> result<channel-config, string>;
+    on-http-request: func(req: incoming-http-request) -> outgoing-http-response;
+    on-poll: func();
+    on-respond: func(response: agent-response) -> result<_, string>;
+    on-status: func(update: status-update);
+    on-broadcast: func(user-id: string, response: agent-response) -> result<_, string>;
+    on-shutdown: func();
+}
+
+world sandboxed-channel {
+    import channel-host;
+    export channel;
+}

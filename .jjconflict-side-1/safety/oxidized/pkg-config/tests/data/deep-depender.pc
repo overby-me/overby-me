@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: deep-depender
+Description: A test library that depends on depender (which depends on simple)
+Version: 3.0.0
+Requires: depender >= 2.0
+Libs: -L${libdir} -ldeep-depender
+Cflags: -I${includedir}/deep-depender

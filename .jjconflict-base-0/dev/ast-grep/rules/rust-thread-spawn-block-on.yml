@@ -1,0 +1,23 @@
+id: rust-thread-spawn-block-on
+language: rust
+severity: warning
+message: "block_on inside thread::spawn: no runtime handoff"
+note: |
+  A raw OS thread has no reactor, so a future driven with block_on there gets a
+  fresh runtime per thread, or panics because none exists. Hand work to the
+  runtime with tokio::spawn, or pass a Handle in and use Handle::block_on.
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  kind: call_expression
+  has:
+    field: function
+    regex: 'block_on$'
+  inside:
+    stopBy:
+      kind: function_item
+    kind: call_expression
+    has:
+      field: function
+      regex: 'thread::spawn$'

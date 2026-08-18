@@ -1,0 +1,1 @@
+{"name":"cast","vers":"0.3.0","deps":[{"name":"quickcheck","req":"^1.0.3","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5","features":{"std":[]},"yanked":false,"pubtime":"2021-09-04T11:07:33Z"}

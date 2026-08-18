@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/libpkgconf", "crates/pkgconf"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+description = "A Rust rewrite and drop-in replacement of pkg-config"
+repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/pkg-config"
+license = "ISC"
+
+[workspace.dependencies]
+libpkgconf = { path = "crates/libpkgconf" }
+thiserror = "2"

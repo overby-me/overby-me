@@ -1,0 +1,12 @@
+[package]
+name = "randie-sim"
+version = "0.1.0"
+edition = "2024"
+description = "Randsim: the room, the drone and the sensors the Randie firmware flies in"
+
+# The world the firmware is flown in. No rendering and no platform: the whole
+# simulation is plain Rust over `f64`, so a scenario can be run from a native
+# `cargo test` with no browser. The frontend owns the canvas and draws what it
+# finds here.
+[dependencies]
+randie-firmware = { path = "../firmware" }

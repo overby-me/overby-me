@@ -1,0 +1,18 @@
+mod alu;
+mod asm_emitter;
+mod atomics;
+mod calls;
+mod cast_ops;
+mod comparison;
+pub(crate) mod emit;
+mod f128;
+mod float_ops;
+mod globals;
+mod i128_ops;
+mod inline_asm;
+mod intrinsics;
+mod memory;
+pub(crate) mod peephole;
+mod prologue;
+mod returns;
+mod variadic;

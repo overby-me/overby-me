@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW003",
+			"severity": "error",
+			"field": "dependencies.bad",
+			"message": "invalid name \"3invalid\"",
+			"hint": "Names must match the pattern [a-zA-Z_][a-zA-Z0-9_-]*. Names must start with a letter or underscore. Only alphanumeric characters, hyphens, and underscores are allowed.",
+			"contract": "DependencyRef"
+		}
+	]
+}

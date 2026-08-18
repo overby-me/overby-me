@@ -1,0 +1,22 @@
+{
+	"version": "0.1.0",
+	"wit_version": "0.3.0",
+	"type": "tool",
+	"name": "searxng",
+	"description": "Search the web using a SearXNG instance",
+	"capabilities": {
+		"http": {
+			"allowlist": [
+				{
+					"host": "*",
+					"path_prefix": "/search",
+					"methods": ["GET"]
+				}
+			],
+			"rate_limit": {
+				"requests_per_minute": 30,
+				"requests_per_hour": 500
+			}
+		}
+	}
+}

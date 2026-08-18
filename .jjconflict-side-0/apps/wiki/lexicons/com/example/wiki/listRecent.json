@@ -1,0 +1,38 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listRecent",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "List the newest documents across all contexts, most recent first. Identity-free.",
+			"parameters": {
+				"type": "params",
+				"properties": {
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 200,
+						"default": 20,
+						"description": "Maximum documents to return (clamped to 1..200)."
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["documents"],
+					"properties": {
+						"documents": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "com.example.wiki.defs#documentView"
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

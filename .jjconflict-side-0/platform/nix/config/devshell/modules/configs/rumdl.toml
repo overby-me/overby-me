@@ -1,0 +1,11 @@
+# Run `touch .envrc && direnv export json` to apply changes to the repository.
+[global]
+line-length = 300
+
+disable = [
+  "MD033",  # no-inline-html - Allow inline HTML
+  "MD004",  # ul-style - Allow inconsistent unordered list style
+  "MD013",  # line-length - Allow long lines (handled by line-length setting above)
+  "MD047",  # single-trailing-newline - Allow files without trailing newline
+  "MD041",  # first-line-heading - Allow first line to not be a heading
+]

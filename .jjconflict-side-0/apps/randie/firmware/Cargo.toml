@@ -1,0 +1,16 @@
+[package]
+name = "randie-firmware"
+version = "0.1.0"
+edition = "2024"
+description = "The Randie indoor navigation drone firmware, ported from C"
+
+# Deliberately dependency-free and `no_std`: this is the code that ran on an
+# ATmega328p, so it must stay buildable for a bare-metal target and runnable
+# from a plain `cargo test`. Only `alloc` is pulled in, for the matrix and
+# search structures the C allocated with malloc.
+[dependencies]
+
+[lints.clippy]
+# The C API takes the drone's world representation and its navigation state as
+# two separate pointers; the port keeps that shape.
+too_many_arguments = "allow"

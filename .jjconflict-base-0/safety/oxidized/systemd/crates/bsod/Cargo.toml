@@ -1,0 +1,14 @@
+[package]
+name = "systemd-bsod"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-bsod"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+libc = "0.2"
+libsystemd = { path = "../libsystemd" }

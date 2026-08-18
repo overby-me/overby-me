@@ -1,0 +1,65 @@
+{
+	"version": "0.1.0",
+	"wit_version": "0.3.0",
+	"type": "channel",
+	"name": "mail",
+	"description": "Email channel for receiving and responding to emails via JMAP (RFC 8621)",
+	"auth": {
+		"secret_name": "mail_auth_token",
+		"display_name": "Email (JMAP)",
+		"instructions": "Provide a JMAP server URL and authentication token. For Fastmail, generate an app password or API token at https://www.fastmail.com/settings/security/tokens. For other providers, consult their JMAP documentation.",
+		"token_hint": "JMAP authentication token or app password",
+		"env_var": "MAIL_AUTH_TOKEN"
+	},
+	"setup": {
+		"required_secrets": [
+			{
+				"name": "mail_auth_token",
+				"prompt": "Enter the JMAP authentication token or app password",
+				"optional": false
+			}
+		],
+		"validation_endpoint": "{jmap_url}/.well-known/jmap"
+	},
+	"capabilities": {
+		"http": {
+			"allowlist": [{ "host": "*", "path_prefix": "/" }],
+			"credentials": {
+				"mail_token": {
+					"secret_name": "mail_auth_token",
+					"location": {
+						"type": "header",
+						"name": "Authorization",
+						"prefix": "Bearer "
+					},
+					"host_patterns": ["*"]
+				}
+			},
+			"max_response_bytes": 52428800,
+			"rate_limit": {
+				"requests_per_minute": 60,
+				"requests_per_hour": 3000
+			}
+		},
+		"secrets": {
+			"allowed_names": ["mail_*"]
+		},
+		"channel": {
+			"allowed_paths": ["/webhook/mail"],
+			"allow_polling": true,
+			"min_poll_interval_ms": 30000,
+			"workspace_prefix": "channels/mail/",
+			"emit_rate_limit": {
+				"messages_per_minute": 30,
+				"messages_per_hour": 500
+			}
+		}
+	},
+	"config": {
+		"jmap_url": "https://api.fastmail.com",
+		"dm_policy": "allowlist",
+		"allow_from": [],
+		"mailbox_name": "Inbox",
+		"send_from_name": "IronClaw"
+	}
+}

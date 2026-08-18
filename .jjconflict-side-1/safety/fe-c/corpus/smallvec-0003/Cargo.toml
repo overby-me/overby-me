@@ -1,0 +1,21 @@
+[package]
+name = "smallvec-0003"
+version = "0.0.0"
+edition = "2018"
+publish = false
+
+# corpus-smallvec-0003: the RUSTSEC-2021-0003 reproducer (spatial / heap
+# overflow, the I10 provenance canary). Its own workspace. cementite is a
+# path dependency (this leaf binary installs FecAlloc); smallvec itself gets
+# symbol-level instrumentation with no cementite edge (A4b / I11). Built + run
+# by the fe-c-corpus-smallvec check, which asserts it aborts naming the
+# SmallVec allocation, not the neighbouring String.
+[workspace]
+
+[[bin]]
+name = "smallvec-0003"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }
+smallvec = "=1.6.0"

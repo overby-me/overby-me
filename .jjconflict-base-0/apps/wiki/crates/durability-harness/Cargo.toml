@@ -1,0 +1,12 @@
+[package]
+name = "durability-harness"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The writer loops the exact atomic dedup+append transaction the durable board
+# runs, against the board's real schema, so the kill-9 proof covers those rows.
+ballot-store = { path = "../ballot-store" }
+rusqlite = { version = "0.37", features = ["bundled"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+turso = "0.2"

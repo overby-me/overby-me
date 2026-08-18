@@ -1,0 +1,6 @@
+id: rust-thread-sleep-in-async
+valid:
+  - "fn sync_wait() { std::thread::sleep(D); }"
+  - "async fn ok() { tokio::task::spawn_blocking(|| std::thread::sleep(D)).await; }"
+invalid:
+  - "async fn bad() { std::thread::sleep(D); }"

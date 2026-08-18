@@ -1,0 +1,18 @@
+# Pre-commit configuration for Tangled workspace
+# Uses local hooks to avoid network fetches and to run with system toolchain
+
+repos:
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt (cargo fmt --check)
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: clippy
+        name: clippy (cargo clippy -D warnings)
+        entry: bash -lc 'cargo clippy --all-targets -- -D warnings'
+        language: system
+        types: [rust]
+        pass_filenames: false

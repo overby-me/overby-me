@@ -1,0 +1,25 @@
+# Run `direnv reload` to apply changes to the repository.
+rules:
+  description-empty:
+    level: error
+  description-format:
+    level: error
+    format: ^[A-Z].*$
+  subject-empty:
+    level: error
+  type-empty:
+    level: error
+  type:
+    level: error
+    options:
+      - feat
+      - fix
+      - chore
+      - doc
+  scope-empty:
+    level: error
+  scope:
+    level: error
+    optional: false
+    options:
+@SCOPE_OPTIONS@

@@ -1,0 +1,14 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: static-libs
+Description: A test library with private libs for static linking
+Version: 2.0.0
+Requires: simple >= 1.0
+Requires.private: zlib >= 1.2
+Libs: -L${libdir} -lstatic-libs
+Libs.private: -lm -lpthread -ldl
+Cflags: -I${includedir}/static-libs
+Cflags.private: -DSTATIC_LIBS_INTERNAL

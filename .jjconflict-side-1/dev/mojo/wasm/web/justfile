@@ -1,0 +1,86 @@
+# Web renderer build system — builds WASM from mojo-gui/web
+#
+# After the Phase 1/2 separation:
+#   - Core packages live in ../core/src/ (signals, scope, vdom, html, etc.)
+#   - Shared examples live in ../examples/ (counter, todo, bench, app)
+#   - Web-specific source lives in src/ (main.mojo, apps/)
+#   - Web runtime lives in runtime/ (TypeScript)
+#   - JS tests live in test-js/
+
+build:
+    mkdir -p build
+    rm -f build/out.cwasm
+    mojo build -Werror --emit llvm -I ../core/src -I ../examples -I src -o build/out.ll src/main.mojo
+    sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
+    sed -i 's/ nocreateundeforpoison//g' build/out.ll
+    sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
+    sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
+    llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
+    wasm-ld --no-entry --export-all --allow-undefined -mwasm64 --initial-memory=268435456 -o build/out.wasm build/out.o
+
+# Incremental build — skip if out.wasm is newer than all source files.
+build-if-changed:
+    #!/usr/bin/env nu
+    mkdir build
+    if ("build/out.wasm" | path exists) and ([(glob "../core/src/**/*.mojo"), (glob "../examples/**/*.mojo"), (glob "src/**/*.mojo")] | flatten | where { |f| (ls $f | get 0.modified) > (ls "build/out.wasm" | get 0.modified) } | is-empty) {
+      print "build: out.wasm is up-to-date, skipping."
+    } else {
+      ^just build
+    }
+
+precompile: build
+    wasmtime compile -o build/out.cwasm build/out.wasm
+
+# Incremental precompile — skip if cwasm is newer than wasm.
+precompile-if-changed: build-if-changed
+    #!/usr/bin/env nu
+    if ("build/out.cwasm" | path exists) and ((ls "build/out.cwasm" | get 0.modified) > (ls "build/out.wasm" | get 0.modified)) {
+      print "precompile: out.cwasm is up-to-date, skipping."
+    } else {
+      ^just precompile
+    }
+
+# Build precompiled test binaries (parallel, incremental).
+# Depends on precompile-if-changed so .cwasm exists for fast WASM loading.
+# Pass optional filter args to build only matching modules:
+#   just test-build signals       # build only test_signals
+# just test-build signals mut   # build test_signals + test_mutations
+test-build *FILTER: precompile-if-changed
+    nu scripts/build-test-binaries.nu {{ FILTER }}
+
+# Run precompiled test binaries (parallel, ~10s).
+# Pass optional filter args to run only matching modules:
+#   just test-run signals         # run only test_signals
+# just test-run -v dsl          # verbose, only test_dsl
+test-run *FILTER:
+    nu scripts/run-test-binaries.nu {{ FILTER }}
+
+# Build + run precompiled test binaries (fastest full Mojo test cycle).
+# Pass optional filter args to target specific modules:
+#   just test signals             # build + run only test_signals
+# just test signals mutations   # build + run test_signals + test_mutations
+test *FILTER: (test-build FILTER) (test-run FILTER)
+
+test-js: build
+    deno run --allow-read test-js/run.ts
+
+test-all: test test-js
+
+# End-to-end browser tests via headless Servo + WebDriver
+test-browser:
+    nu test-browser.nu
+
+# Browser tests with verbose Servo output (debugging)
+test-browser-verbose:
+    nu test-browser.nu --verbose
+
+# Single app browser test
+test-browser-app app:
+    nu test-browser.nu --app {{ app }}
+
+serve: build
+    @echo "Open http://localhost:4507/examples/counter/"
+    @echo "Open http://localhost:4507/examples/todo/"
+    @echo "Open http://localhost:4507/examples/bench/"
+    @echo "Open http://localhost:4507/examples/app/"
+    cd .. && deno run --allow-net --allow-read jsr:@std/http/file-server

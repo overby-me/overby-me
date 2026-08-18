@@ -1,0 +1,65 @@
+# Nix
+.devenv
+.direnv
+result*
+
+# Caches
+.cache
+
+# Environment
+.env
+tmp
+
+# Build artifacts
+build
+# Anchored to what a build directory looks like rather than to where one
+# project happened to live: these named rust/*/src/build, so moving the
+# projects into areas silently untracked nine of oxidized-ninja's source
+# files, and both its own build and the published repo's CI failed on a
+# module that was no longer in git.
+!**/src/build
+!**/src/build/**
+!**/lib/cargo/build
+!**/lib/cargo/build/**
+!**/lib/buck2/build
+!**/lib/buck2/build/**
+!**/lib/ninja/build
+!**/lib/ninja/build/**
+dist
+target/
+deployment.zip
+
+# Compiled files
+*.ll
+*.o
+*.wasm
+
+# Disk images
+*.img
+*.qcow2
+*.raw
+
+# JavaScript
+node_modules
+
+# Profiling & tracing
+flamegraph.svg
+kgen.trace.json.*
+
+# Linting & formatting caches
+.rumdl_cache
+
+# Generated configs
+/.claude
+/.commitlintrc.yml
+/.pre-commit-config.yaml
+/.rules
+/.secretsignore
+/.zed
+/biome.jsonc
+/deno.jsonc
+/lychee.toml
+/rumdl.toml
+/sgconfig.yml
+/statix.toml
+/typos.toml

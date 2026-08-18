@@ -1,0 +1,28 @@
+build:
+    cargo build
+
+build-release:
+    cargo build --release
+
+test:
+    cargo test
+
+check:
+    cargo check
+
+clippy:
+    cargo clippy -- -D warnings
+
+fmt:
+    cargo fmt
+
+fmt-check:
+    cargo fmt -- --check
+
+doc:
+    cargo doc --no-deps --open
+
+clean:
+    cargo clean
+
+all: fmt-check clippy test build

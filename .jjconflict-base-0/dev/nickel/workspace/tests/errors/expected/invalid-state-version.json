@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW003",
+			"severity": "error",
+			"field": "machines.bad-machine.state-version",
+			"message": "invalid state version \"unstable\"",
+			"hint": "State version must match the pattern \"YY.MM\" (e.g. \"24.11\", \"25.05\"). This corresponds to the NixOS release version.",
+			"contract": "MachineConfig.state-version"
+		}
+	]
+}

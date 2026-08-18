@@ -1,0 +1,11 @@
+[package]
+name = "test-sleep"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "test-sleep"
+path = "src/main.rs"
+
+[dependencies]

@@ -1,0 +1,16 @@
+# Cache policy for statichost.eu (Netlify _headers format). Later matches win,
+# so the site-wide rule comes first and /assets/* overrides it.
+#
+# Everything under /assets/ is content-hashed by dx (style-dxh43d5a6….css), so a
+# changed file is a changed URL and the old one is never asked for again. Those
+# can be cached forever. The unhashed files at the root cannot: index.html is the
+# entry point that names the current asset hashes, and sw.js must be re-fetched
+# for a service worker update to ever reach a returning visitor.
+*
+    Cache-Control: public, max-age=0, must-revalidate
+/assets/*
+    Cache-Control: public, max-age=31536000, immutable
+# Debug symbols, keyed by the same content hash, so equally immutable. Fetched
+# only by the backend when it symbolicates a crash report — never by a reader.
+/symbols/*
+    Cache-Control: public, max-age=31536000, immutable

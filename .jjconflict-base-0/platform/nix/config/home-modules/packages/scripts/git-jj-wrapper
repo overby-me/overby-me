@@ -1,0 +1,28 @@
+#!/usr/bin/env nu
+
+# Git wrapper that refuses to run git and suggests using jj instead
+
+def main [...args: string] {
+    print "❌ Git is disabled in this environment."
+    print "💡 Please use 'jj' (Jujutsu) instead for version control operations."
+    print ""
+    print "Common jj commands:"
+    print "  jj status       - Show working copy status"
+    print "  jj log          - Show commit history"
+    print "  jj diff         - Show changes"
+    print "  jj new          - Create a new, empty change"
+    print "  jj commit       - Update description and create new change on top"
+    print "  jj describe     - Update the change description"
+    print "  jj bookmark     - List and manage bookmarks (branches)"
+    print "  jj git push     - Push changes to remote"
+    print "  jj git fetch    - Fetch changes from remote"
+    print ""
+    print "For more information, run: jj help"
+    print ""
+    let git_path = (which git | get 0.path)
+    let args_str = ($args | str join " ")
+    print "If you really need to use git, you can use the full path:"
+    print $"  ($git_path) ($args_str)"
+
+    exit 1
+}

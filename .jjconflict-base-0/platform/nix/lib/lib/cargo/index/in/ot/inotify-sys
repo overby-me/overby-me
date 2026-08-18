@@ -1,0 +1,1 @@
+{"name":"inotify-sys","vers":"0.1.5","deps":[{"name":"libc","req":"^0.2","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb","features":{},"yanked":false,"pubtime":"2021-01-16T09:40:08Z"}

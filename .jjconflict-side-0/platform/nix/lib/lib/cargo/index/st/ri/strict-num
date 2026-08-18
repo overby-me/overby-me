@@ -1,0 +1,1 @@
+{"name":"strict-num","vers":"0.1.1","deps":[{"name":"float-cmp","req":"^0.9","features":["std"],"optional":true,"default_features":false,"target":null,"kind":"normal"}],"cksum":"6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731","features":{"approx-eq":["float-cmp"],"default":["approx-eq"]},"yanked":false,"pubtime":"2023-05-27T11:09:54Z"}

@@ -1,0 +1,21 @@
+[package]
+name = "spindle-run"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CLI tool for running Tangled CI workflows locally"
+
+[[bin]]
+name = "spindle-run"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+serde_yaml = { workspace = true }
+spindle-engine = { workspace = true }
+spindle-models = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

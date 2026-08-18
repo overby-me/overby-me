@@ -1,0 +1,8 @@
+# C-tool output artifacts produced by sandbox-irrelevant local probes.
+Timing*.plot
+Timings.html
+generate_timings.sh
+profiler.log
+pw.dot
+foo
+target/

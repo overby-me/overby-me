@@ -1,0 +1,38 @@
+[package]
+name = "tangled-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for interacting with Tangled (AT Protocol-based git collaboration)."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = [
+  "derive",
+  "env",
+  "unicode",
+  "wrap_help",
+] }
+clap_complete = { workspace = true }
+clap_complete_nushell = { workspace = true }
+clap_mangen = { workspace = true }
+colored = { workspace = true }
+dialoguer = { workspace = true }
+dirs = { workspace = true }
+futures-util = { workspace = true }
+git2 = { workspace = true }
+indicatif = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true }
+url = { workspace = true }
+
+open = { workspace = true }
+reqwest = { workspace = true }
+
+tangled-api = { path = "../tangled-api" }
+# Internal crates
+tangled-config = { path = "../tangled-config" }
+tangled-git = { path = "../tangled-git" }

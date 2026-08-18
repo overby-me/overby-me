@@ -1,0 +1,12 @@
+[package]
+name = "systemd-battery-check"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-battery-check"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

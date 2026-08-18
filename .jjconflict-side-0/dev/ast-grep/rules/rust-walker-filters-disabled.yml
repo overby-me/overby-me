@@ -1,0 +1,22 @@
+# A directory walker told to enter hidden/ignored files sweeps in secrets and
+# build artifacts; follow_links(true) walks out of the intended root through
+# any symlink. Zero uses today; the rule exists for the first scanner someone
+# writes here.
+id: rust-walker-filters-disabled
+language: rust
+severity: warning
+message: >-
+  This disables a walker safety filter. If scanning hidden or ignored files
+  is the point, say so here; otherwise the filter is protecting you.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: $W.hidden(false)
+    - pattern: $W.git_ignore(false)
+    - pattern: $W.git_exclude(false)
+    - pattern: $W.ignore(false)
+    - pattern: $W.follow_links(true)

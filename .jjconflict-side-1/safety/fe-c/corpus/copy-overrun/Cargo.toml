@@ -1,0 +1,20 @@
+[package]
+name = "copy-overrun"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# corpus-copy-overrun (write-intrinsic extent, point 0): a `ptr::copy_nonoverlapping`
+# whose destination pointer is in bounds but whose write extent
+# (`count * size_of::<T>()`) overruns the end of the buffer. The write-call check
+# faults on the destination and verifies the whole `[dst, dst+size)` extent, so
+# both modes abort OutOfBounds — a single-address destination check would pass.
+# cementite is a path dependency; the injected checks are symbol-level (A4b / I11).
+[workspace]
+
+[[bin]]
+name = "copy-overrun"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }

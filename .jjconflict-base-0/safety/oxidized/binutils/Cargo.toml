@@ -1,0 +1,34 @@
+[package]
+name = "rust-binutils"
+version = "0.1.0"
+edition = "2024"
+description = "GNU binutils-compatible binary utilities written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "rust-binutils"
+path = "src/main.rs"
+
+[dependencies]
+cpp_demangle = "0.4"
+flate2 = { version = "1", default-features = false, features = ["zlib"] }
+gimli = { version = "0.31", default-features = false, features = [
+  "read",
+  "std",
+] }
+iced-x86 = { version = "1.21", default-features = false, features = [
+  "decoder",
+  "gas",
+  "intel",
+  "std",
+] }
+object = { version = "0.36", features = [
+  "compression",
+  "elf",
+  "read",
+  "write",
+] }
+
+[profile.release]
+strip = true
+lto = true

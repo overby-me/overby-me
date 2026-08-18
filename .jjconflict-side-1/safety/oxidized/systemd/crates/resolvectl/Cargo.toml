@@ -1,0 +1,17 @@
+[package]
+name = "resolvectl"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "resolvectl"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+log = "0.4"
+nix = { version = "0.31", features = ["net", "socket"] }
+
+[dev-dependencies]
+tempfile = "3"

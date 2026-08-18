@@ -1,0 +1,1 @@
+{"name":"typed-builder","vers":"0.23.2","deps":[{"name":"typed-builder-macro","req":"=0.23.2","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"31aa81521b70f94402501d848ccc0ecaa8f93c8eb6999eb9747e72287757ffda","features":{},"yanked":false,"pubtime":"2025-11-19T11:12:56Z"}

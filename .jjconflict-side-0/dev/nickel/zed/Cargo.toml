@@ -1,0 +1,12 @@
+[package]
+name = "nickel-zed"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/nickel.rs"
+
+[dependencies]
+zed_extension_api = "0.7.0"

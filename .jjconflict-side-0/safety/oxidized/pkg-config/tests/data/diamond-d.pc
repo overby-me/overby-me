@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: diamond-d
+Description: Base of diamond dependency pattern (no dependencies)
+Version: 1.0.0
+Libs: -L${libdir} -ldiamond-d
+Cflags: -I${includedir}/diamond-d

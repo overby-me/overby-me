@@ -1,0 +1,15 @@
+[package]
+name = "systemd-networkd-wait-online"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-networkd-wait-online"
+path = "src/main.rs"
+
+[dependencies]
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

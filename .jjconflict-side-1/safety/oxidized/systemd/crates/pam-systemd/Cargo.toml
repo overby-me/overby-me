@@ -1,0 +1,17 @@
+[package]
+name = "pam-systemd"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+description = "PAM module for systemd-logind session management (pam_systemd equivalent)"
+
+[lib]
+crate-type = ["cdylib"]
+name = "pam_systemd"
+
+[dependencies]
+libc = "0.2"
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

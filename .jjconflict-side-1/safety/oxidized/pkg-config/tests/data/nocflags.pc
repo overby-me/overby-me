@@ -1,0 +1,9 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: nocflags
+Description: A test library with no Cflags field
+Version: 1.0.0
+Libs: -L${libdir} -lnocflags

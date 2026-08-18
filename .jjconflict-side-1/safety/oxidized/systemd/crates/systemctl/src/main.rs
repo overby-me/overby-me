@@ -1,0 +1,2925 @@
+//! systemctl — CLI control tool for the rust-systemd service manager.
+//!
+//! This is the successor to `rsdctl`. It packs CLI arguments into the
+//! JSON-RPC 2.0 format and sends them to the rust-systemd control socket.
+//! It reads the response and pretty-prints it.
+//!
+//! Handles common systemctl flags (stripping them before sending to PID 1):
+//!   --no-block, --quiet, --no-wall, --force, --system, --user,
+//!   --no-pager, --no-legend, --no-ask-password, --plain, --full,
+//!   --show-types, --failed, --all, -a, -f, -q, -l, -t, -p, -n
+//!
+//! Also handles special commands:
+//!   poweroff, reboot, halt, kexec  → mapped to "shutdown" with verb as param
+//!   daemon-reload           → mapped to "reload"
+//!   try-restart             → forwarded as "try-restart"
+//!   reload-or-restart       → forwarded as "reload-or-restart"
+//!   condrestart             → alias for "try-restart"
+//!   is-active               → checks unit state, exits 0 if active, 3 if not
+//!   is-enabled              → checks unit enablement
+//!   is-failed               → checks if unit is in failed state
+//!   list-dependencies       → show dependency tree for a unit
+//!   list-unit-files         → list all unit files on disk with their state
+//!   mask                    → symlink unit files to /dev/null
+//!   unmask                  → remove /dev/null symlinks for units
+//!   disable                 → disable unit(s) (no-op for now)
+//!   reset-failed            → clear failed state of unit(s)
+//!   kill                    → send signal to a unit's processes
+//!   suspend                 → suspend the system (sleep to RAM)
+//!   hibernate               → hibernate the system (sleep to disk)
+//!   hybrid-sleep            → hybrid sleep (RAM + disk)
+//!   suspend-then-hibernate  → suspend first, then hibernate after delay
+
+use serde_json::Value;
+use std::io::Write;
+
+use libsystemd::control::jsonrpc2::Call;
+
+/// Flags we recognize and strip from the argument list before sending
+/// the command to PID 1. These are common systemctl flags that don't
+/// affect the wire protocol.
+const KNOWN_FLAGS: &[&str] = &[
+    "--no-block",
+    "--quiet",
+    "--no-wall",
+    "--force",
+    "--system",
+    "--user",
+    "--no-pager",
+    "--no-legend",
+    "--no-ask-password",
+    "--plain",
+    "--full",
+    "--show-types",
+    "--failed",
+    "--all",
+    "--wait",
+    "--now",
+    "--runtime",
+    "--global",
+    "--no-reload",
+    "--no-warn",
+    "--check-inhibitors=auto",
+    "--check-inhibitors=yes",
+    "--check-inhibitors=no",
+    "--show-transaction",
+    "--recursive",
+    "--with-dependencies",
+    // `systemctl bind` specific flags
+    "--mkdir",
+    "--read-only",
+    "--dry-run",
+    "-T",
+];
+
+/// Short flags we recognize and strip.
+const KNOWN_SHORT_FLAGS: &[&str] = &["-a", "-f", "-q", "-l"];
+
+/// Short flags that consume the next argument (e.g. `-t service`, `-p MainPID`).
+const SHORT_FLAGS_WITH_VALUE: &[&str] = &["-t", "-p", "-n", "-o", "-H", "-M", "-s"];
+
+/// Long flags that consume `=value` or the next argument.
+const LONG_FLAGS_WITH_VALUE: &[&str] = &[
+    "--type",
+    "--property",
+    "--lines",
+    "--output",
+    "--host",
+    "--machine",
+    "--signal",
+    "--kill-mode",
+    "--job-mode",
+    "--root",
+    "--preset-mode",
+    "--what",
+    "--legend",
+    "--timestamp",
+    "--message",
+];
+
+/// The grouped state catalog printed by `--state=help`, mirroring C 260's
+/// per-enum string tables in enum order: unit-def.h UnitLoadState /
+/// UnitActiveState / unit-file states, then each unit type's *_state_to_string
+/// substates. Group order, headers, and member order match `systemctl
+/// --state=help` byte-for-byte (verified against the C binary).
+const STATE_HELP_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "Available unit load states:",
+        &[
+            "stub",
+            "loaded",
+            "not-found",
+            "bad-setting",
+            "error",
+            "merged",
+            "masked",
+        ],
+    ),
+    (
+        "Available unit active states:",
+        &[
+            "active",
+            "reloading",
+            "inactive",
+            "failed",
+            "activating",
+            "deactivating",
+            "maintenance",
+            "refreshing",
+        ],
+    ),
+    (
+        "Available unit file states:",
+        &[
+            "enabled",
+            "enabled-runtime",
+            "linked",
+            "linked-runtime",
+            "alias",
+            "masked",
+            "masked-runtime",
+            "static",
+            "disabled",
+            "indirect",
+            "generated",
+            "transient",
+            "bad",
+        ],
+    ),
+    (
+        "Available automount unit substates:",
+        &["dead", "waiting", "running", "failed"],
+    ),
+    (
+        "Available device unit substates:",
+        &["dead", "tentative", "plugged"],
+    ),
+    (
+        "Available mount unit substates:",
+        &[
+            "dead",
+            "mounting",
+            "mounting-done",
+            "mounted",
+            "remounting",
+            "unmounting",
+            "remounting-sigterm",
+            "remounting-sigkill",
+            "unmounting-sigterm",
+            "unmounting-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    (
+        "Available path unit substates:",
+        &["dead", "waiting", "running", "failed"],
+    ),
+    (
+        "Available scope unit substates:",
+        &[
+            "dead",
+            "start-chown",
+            "running",
+            "abandoned",
+            "stop-sigterm",
+            "stop-sigkill",
+            "failed",
+        ],
+    ),
+    (
+        "Available service unit substates:",
+        &[
+            "dead",
+            "condition",
+            "start-pre",
+            "start",
+            "start-post",
+            "running",
+            "exited",
+            "refresh-extensions",
+            "refresh-credentials",
+            "reload",
+            "reload-signal",
+            "reload-notify",
+            "reload-post",
+            "mounting",
+            "stop",
+            "stop-watchdog",
+            "stop-sigterm",
+            "stop-sigkill",
+            "stop-post",
+            "final-watchdog",
+            "final-sigterm",
+            "final-sigkill",
+            "failed",
+            "dead-before-auto-restart",
+            "failed-before-auto-restart",
+            "dead-resources-pinned",
+            "auto-restart",
+            "auto-restart-queued",
+            "cleaning",
+        ],
+    ),
+    ("Available slice unit substates:", &["dead", "active"]),
+    (
+        "Available socket unit substates:",
+        &[
+            "dead",
+            "start-pre",
+            "start-open",
+            "start-chown",
+            "start-post",
+            "listening",
+            "deferred",
+            "running",
+            "stop-pre",
+            "stop-pre-sigterm",
+            "stop-pre-sigkill",
+            "stop-post",
+            "final-sigterm",
+            "final-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    (
+        "Available swap unit substates:",
+        &[
+            "dead",
+            "activating",
+            "activating-done",
+            "active",
+            "deactivating",
+            "deactivating-sigterm",
+            "deactivating-sigkill",
+            "failed",
+            "cleaning",
+        ],
+    ),
+    ("Available target unit substates:", &["dead", "active"]),
+    (
+        "Available timer unit substates:",
+        &["dead", "waiting", "running", "elapsed", "failed"],
+    ),
+];
+
+fn print_state_help() {
+    // C separates the groups with a blank line and prints no leading or
+    // trailing blank; reproduce that exactly.
+    for (i, (header, members)) in STATE_HELP_GROUPS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        println!("{header}");
+        for s in *members {
+            println!("{s}");
+        }
+    }
+}
+
+/// Standard signal short names (no "SIG" prefix), indexed by signal number.
+/// Index 0 and any gap are empty and fall through to the numeric/RT rendering.
+/// This matches C's per-arch static signal table on Linux (x86_64/generic).
+const SIGNAL_STATIC_NAMES: [&str; 32] = [
+    "", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV", "USR2",
+    "PIPE", "ALRM", "TERM", "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG",
+    "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS",
+];
+
+/// Render a signal number exactly as C `signal_to_string` (basic/signal-util.c)
+/// does: the bare short name for the standard signals, "RTMIN+n" for the
+/// realtime range SIGRTMIN..=SIGRTMAX, and the raw number for everything else
+/// (signal 0, and the glibc-reserved slots between __SIGRTMIN and SIGRTMIN, i.e.
+/// 32 and 33 on x86_64).
+fn signal_to_string(signo: i32) -> String {
+    if signo >= 1 && (signo as usize) < SIGNAL_STATIC_NAMES.len() {
+        let name = SIGNAL_STATIC_NAMES[signo as usize];
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    if signo >= libc::SIGRTMIN() && signo <= libc::SIGRTMAX() {
+        return format!("RTMIN+{}", signo - libc::SIGRTMIN());
+    }
+    signo.to_string()
+}
+
+fn print_signal_help() {
+    // C `systemctl --signal=help` dumps the signal string table via
+    // DUMP_STRING_TABLE(signal, int, _NSIG): one entry per line for numbers
+    // 0..=SIGRTMAX, with no header. Match it byte-for-byte.
+    for signo in 0..=libc::SIGRTMAX() {
+        println!("{}", signal_to_string(signo));
+    }
+}
+
+fn print_type_help() {
+    println!("Available unit types:");
+    // C `systemctl --type=help` dumps the unit-type string table in UnitType
+    // enum order (unit-def.h): service, mount, swap, socket, target, device,
+    // automount, timer, path, slice, scope. Match it exactly.
+    for t in UNIT_TYPES_IN_ENUM_ORDER {
+        println!("{t}");
+    }
+}
+
+/// Unit type names in C's `UnitType` enum order, as printed by `--type=help`.
+const UNIT_TYPES_IN_ENUM_ORDER: [&str; 11] = [
+    "service",
+    "mount",
+    "swap",
+    "socket",
+    "target",
+    "device",
+    "automount",
+    "timer",
+    "path",
+    "slice",
+    "scope",
+];
+
+/// Build the interactive drop-in scaffold handed to `$EDITOR` for a fresh
+/// override. Mirrors upstream `edit-util.c` (`create_edit_temp_file`): the two
+/// `###` markers wrap an EMPTY content area, with no `[Service]` (or any other)
+/// section header pre-seeded. That emptiness is load-bearing: an unmodified
+/// edit (e.g. `EDITOR=true`) must trim back to nothing and be discarded, so the
+/// scaffold itself must contribute no real content. (A prior version seeded a
+/// literal `[Service]` line here, which survived the marker strip and caused a
+/// no-op edit to write a bogus `override.conf` — TEST-26 line 49-50.)
+fn dropin_edit_scaffold(unit_name: &str) -> String {
+    format!(
+        "### Editing drop-in override for {unit_name}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n\n### Lines below this comment will be discarded\n"
+    )
+}
+
+/// Extract the real drop-in body from an edited scaffold: drop the `### ` marker
+/// lines and trim surrounding whitespace. Returns `None` when only markers and
+/// whitespace remain, i.e. the edit introduced no real change and the override
+/// must be discarded (upstream `trim_edit_markers` returns 0 == "file is
+/// empty"). Otherwise returns the body with a single trailing newline.
+fn dropin_edit_extract(edited: &str) -> Option<String> {
+    let clean: String = edited
+        .lines()
+        .filter(|l| !l.starts_with("### "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed = clean.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut final_content = trimmed.to_owned();
+    if !final_content.ends_with('\n') {
+        final_content.push('\n');
+    }
+    Some(final_content)
+}
+
+fn main() {
+    // Ignore SIGPIPE so piping systemctl output to grep/head/etc. doesn't
+    // cause a panic when the reader closes the pipe early.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
+    // Rust's println!() panics on broken pipe even with SIGPIPE ignored.
+    // Install a custom panic hook that exits cleanly for BrokenPipe errors.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info.to_string();
+        if msg.contains("Broken pipe") {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
+
+    let mut args: Vec<_> = std::env::args().collect();
+    let exec_name = args.remove(0);
+
+    // When invoked as "poweroff", "reboot", "halt", or "kexec" (e.g. via
+    // symlink), treat it as if "systemctl <verb>" was called.
+    let implicit_command: &[&str] = &["poweroff", "reboot", "halt", "kexec"];
+    for cmd in implicit_command {
+        if exec_name.ends_with(cmd) {
+            args.insert(0, cmd.to_string());
+            break;
+        }
+    }
+
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+        print_help();
+        return;
+    }
+
+    if args[0] == "--version" {
+        println!("systemctl (rust-systemd) 258");
+        // Build feature-flags line, mirroring `systemd --version`. Features
+        // rust-systemd does not implement are reported with a leading '-' so
+        // upstream tests that gate on them behave as on a build compiled without
+        // that feature (e.g. TEST-62-RESTRICT-IFACES and TEST-07-PID1 check
+        // `-BPF_FRAMEWORK` to skip their cgroup-BPF sections).
+        println!(
+            "+ACL +BLKID +KMOD +PAM +SECCOMP +TPM2 +OPENSSL +LZ4 +XZ +ZSTD +ZLIB \
+             -BPF_FRAMEWORK -BPF_LSM -APPARMOR -SMACK -SELINUX -IMA -IPE"
+        );
+        return;
+    }
+
+    // `systemctl list-machines` is a systemd-machined feature; rust-systemd has
+    // no machined, so the only machine is the local host. Handle it client-side,
+    // mirroring real `systemctl list-machines` output on a container-less system.
+    if let Some(sub) = args.iter().find(|a| !a.starts_with('-'))
+        && sub == "list-machines"
+    {
+        let no_legend = args.iter().any(|a| a == "--no-legend");
+        if !no_legend {
+            println!("{:<12} {:<8} {:<7} {}", "NAME", "STATE", "FAILED", "JOBS");
+        }
+        println!("{:<12} {:<8} {:<7} {}", ".host", "running", "0", "0");
+        if !no_legend {
+            println!("\n1 machines listed.");
+        }
+        return;
+    }
+
+    // Determine the control socket address.
+    let addr = if let Ok(env_addr) = std::env::var("SYSTEMCTL_ADDR") {
+        env_addr
+    } else if args.len() >= 2 && (args[0].contains(':') || args[0].starts_with('/')) {
+        // First arg looks like an address (host:port or /path/to/socket)
+        args.remove(0)
+    } else if args.iter().any(|a| a == "--user") {
+        // `--user` connects to the per-user manager's control socket under
+        // $XDG_RUNTIME_DIR (see run_user_manager in libsystemd). Without this,
+        // `systemctl --user ...` would talk to the system manager, which does
+        // not know the user's units: e.g. `systemctl stop --user <svc>` would
+        // silently no-op and the service (and its cgroup) would leak. Mirrors
+        // the socket resolution in systemd-run --user.
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+        format!("{runtime_dir}/systemd/control.socket")
+    } else {
+        // Default to the rust-systemd control socket
+        "/run/systemd/rust-systemd-notify/control.socket".to_owned()
+    };
+
+    // Extract known flags and separate them from positional arguments.
+    let mut quiet = false;
+    let mut no_block = false;
+    let mut positional: Vec<String> = Vec::new();
+    let mut property_filter: Vec<String> = Vec::new();
+    let mut value_only = false;
+    let mut timestamp_unix = false;
+    let mut state_filter: Option<String> = None;
+    let mut type_filter: Option<String> = None;
+
+    let mut no_legend = false;
+    let mut force = false;
+    let mut full = false;
+    let mut wait = false;
+    let mut root_path: Option<String> = None;
+    let mut runtime = false;
+    let mut dry_run = false;
+    let mut marked = false;
+    let mut output_format: Option<String> = None;
+    let mut what_filter: Option<String> = None;
+    let mut now = false;
+    let mut bind_mkdir = false;
+    let mut bind_read_only = false;
+    let mut preset_mode: Option<String> = None;
+    let mut kill_whom: Option<String> = None;
+    let mut kill_subgroup: Option<String> = None;
+    let mut kill_value: Option<i32> = None;
+    let mut kill_signal_str: Option<String> = None;
+    let mut job_mode: Option<String> = None;
+    let mut stdin_mode = false;
+    let mut global = false;
+    let mut dropin_name: Option<String> = None;
+
+    let mut i = 0;
+    let mut end_of_options = false;
+    while i < args.len() {
+        let arg = &args[i];
+
+        // `--` signals end-of-options: all remaining args are positional.
+        if arg == "--" && !end_of_options {
+            end_of_options = true;
+            i += 1;
+            continue;
+        }
+        if end_of_options {
+            positional.push(arg.clone());
+            i += 1;
+            continue;
+        }
+
+        // --stdin flag (for `edit --stdin`)
+        if arg == "--stdin" {
+            stdin_mode = true;
+            i += 1;
+            continue;
+        }
+
+        // --drop-in flag (for `edit --drop-in=name.conf`)
+        if arg == "--drop-in" {
+            if i + 1 < args.len() {
+                dropin_name = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--drop-in=") {
+            dropin_name = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --what flag (for `clean --what=configuration`)
+        if arg == "--what" {
+            if i + 1 < args.len() {
+                what_filter = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--what=") {
+            what_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-whom flag (for `kill --kill-whom=main`)
+        if arg == "--kill-whom" || arg == "--kill-who" {
+            if i + 1 < args.len() {
+                kill_whom = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg
+            .strip_prefix("--kill-whom=")
+            .or_else(|| arg.strip_prefix("--kill-who="))
+        {
+            kill_whom = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-subgroup flag (for `kill --kill-subgroup=app.slice/foo.service`)
+        if arg == "--kill-subgroup" {
+            if i + 1 < args.len() {
+                kill_subgroup = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--kill-subgroup=") {
+            kill_subgroup = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-value flag (for `kill --kill-value=4`)
+        if arg == "--kill-value" {
+            if i + 1 < args.len() {
+                kill_value = args[i + 1].parse::<i32>().ok();
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--kill-value=") {
+            kill_value = rest.parse::<i32>().ok();
+            i += 1;
+            continue;
+        }
+
+        // --signal / -s flag (for `kill --signal=SIGKILL`)
+        if arg == "--signal" || arg == "-s" {
+            if i + 1 < args.len() {
+                if args[i + 1] == "help" {
+                    print_signal_help();
+                    std::process::exit(0);
+                }
+                kill_signal_str = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--signal=") {
+            if rest == "help" {
+                print_signal_help();
+                std::process::exit(0);
+            }
+            kill_signal_str = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --output flag (for show-environment --output=json)
+        if arg == "--output" || arg == "-o" {
+            if i + 1 < args.len() {
+                output_format = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--output=") {
+            output_format = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --root flag (for filesystem operations like get-default, set-default)
+        if arg == "--root" {
+            if i + 1 < args.len() {
+                root_path = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--root=") {
+            root_path = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --preset-mode flag (for preset command)
+        if arg == "--preset-mode" {
+            if i + 1 < args.len() {
+                preset_mode = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--preset-mode=") {
+            preset_mode = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --value flag (for `show --value -p Prop`)
+        if arg == "--value" {
+            value_only = true;
+            i += 1;
+            continue;
+        }
+
+        // Check known long flags (exact match).
+        if KNOWN_FLAGS.contains(&arg.as_str()) {
+            if arg == "--quiet" || arg == "-q" {
+                quiet = true;
+            }
+            if arg == "--no-block" {
+                no_block = true;
+            }
+            if arg == "--force" {
+                force = true;
+            }
+            if arg == "--wait" {
+                wait = true;
+            }
+            if arg == "--runtime" {
+                runtime = true;
+            }
+            if arg == "--dry-run" {
+                dry_run = true;
+            }
+            if arg == "--now" {
+                now = true;
+            }
+            if arg == "--mkdir" {
+                bind_mkdir = true;
+            }
+            if arg == "--read-only" {
+                bind_read_only = true;
+            }
+            if arg == "--no-legend" {
+                no_legend = true;
+            }
+            if arg == "--global" {
+                global = true;
+            }
+            if arg == "--full" {
+                full = true;
+            }
+            if arg == "--failed" {
+                state_filter = Some("failed".to_string());
+            }
+            i += 1;
+            continue;
+        }
+
+        // Check known short flags.
+        if KNOWN_SHORT_FLAGS.contains(&arg.as_str()) {
+            if arg == "-q" {
+                quiet = true;
+            }
+            if arg == "-f" {
+                force = true;
+            }
+            i += 1;
+            continue;
+        }
+
+        // -P PROP is shorthand for --value --property=PROP
+        if arg == "-P" {
+            value_only = true;
+            if i + 1 < args.len() {
+                for part in args[i + 1].split(',') {
+                    let trimmed = part.trim();
+                    if !trimmed.is_empty() {
+                        property_filter.push(trimmed.to_owned());
+                    }
+                }
+            }
+            i += 2;
+            continue;
+        }
+
+        // Capture -p / --property values for `show` filtering.
+        if arg == "-p" || arg == "--property" {
+            if i + 1 < args.len() {
+                // Value may be comma-separated: -p MainPID,ActiveState
+                for part in args[i + 1].split(',') {
+                    let trimmed = part.trim();
+                    if !trimmed.is_empty() {
+                        property_filter.push(trimmed.to_owned());
+                    }
+                }
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--property=") {
+            for part in rest.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    property_filter.push(trimmed.to_owned());
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        // Capture --timestamp=STYLE.  Only "unix" changes the output
+        // (timestamps become @<epoch-seconds>); other styles keep the
+        // default formatting.
+        if let Some(style) = arg.strip_prefix("--timestamp=") {
+            timestamp_unix = style == "unix";
+            i += 1;
+            continue;
+        }
+        if arg == "--timestamp" {
+            if i + 1 < args.len() {
+                timestamp_unix = args[i + 1] == "unix";
+            }
+            i += 2;
+            continue;
+        }
+
+        // Capture --state value for list-units filtering.
+        if arg == "--state" {
+            if i + 1 < args.len() {
+                if args[i + 1] == "help" {
+                    print_state_help();
+                    std::process::exit(0);
+                }
+                state_filter = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--state=") {
+            if rest == "help" {
+                print_state_help();
+                std::process::exit(0);
+            }
+            state_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // Capture --job-mode value
+        if arg == "--job-mode" {
+            if i + 1 < args.len() {
+                job_mode = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--job-mode=") {
+            job_mode = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --type / -t: capture the value for list-units filtering
+        if arg == "--type" || arg == "-t" {
+            if i + 1 < args.len() {
+                if args[i + 1] == "help" {
+                    print_type_help();
+                    std::process::exit(0);
+                }
+                type_filter = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg
+            .strip_prefix("--type=")
+            .or_else(|| arg.strip_prefix("-t="))
+        {
+            if rest == "help" {
+                print_type_help();
+                std::process::exit(0);
+            }
+            type_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // Check long flags with value (--type=foo or --type foo).
+        let mut matched_long = false;
+        for flag in LONG_FLAGS_WITH_VALUE {
+            if arg == *flag {
+                // Consumes next argument.
+                i += 2;
+                matched_long = true;
+                break;
+            }
+            if arg.starts_with(&format!("{}=", flag)) {
+                i += 1;
+                matched_long = true;
+                break;
+            }
+        }
+        if matched_long {
+            continue;
+        }
+
+        // Check short flags with value (-t service).
+        if SHORT_FLAGS_WITH_VALUE.contains(&arg.as_str()) {
+            // Skip this flag and its value.
+            i += 2;
+            continue;
+        }
+
+        // Not a flag — it's a positional argument.
+        positional.push(arg.clone());
+        i += 1;
+    }
+
+    // When no command is given, real systemd defaults to `list-units`.
+    if positional.is_empty() {
+        positional.push("list-units".to_string());
+    }
+
+    // Path-to-unit translation: systemctl accepts absolute paths like
+    // `/sys/devices/virtual/net/eth0` or `/dev/sda1` and resolves them
+    // to the corresponding `.device` unit name using the systemd path-
+    // escape convention (each `/` → `-`, and other specials → `\xNN`).
+    // Matches upstream systemd's `unit_name_mangle_with_suffix`.
+    // Skip positional[0] since that's the subcommand.
+    for arg in positional.iter_mut().skip(1) {
+        let suffix = if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
+            ".device"
+        } else if arg.starts_with('/') {
+            // Any other absolute path is a mount point: resolve it to the
+            // corresponding `.mount` unit (e.g. `/tmp/x` -> `tmp-x.mount`), as
+            // upstream `systemctl show /tmp/x` does.
+            ".mount"
+        } else {
+            continue;
+        };
+        let name = format!(
+            "{}{suffix}",
+            libsystemd::unit_name::unit_name_path_escape(arg)
+        );
+        // Hash an over-long name exactly as the manager does (unit_name_from_path
+        // → unit_name_hash_long), so `systemctl show /very/long/path` resolves to
+        // the same hashed unit the mount monitor synthesized for that mount.
+        *arg = libsystemd::unit_name::unit_name_hash_long(&name).unwrap_or(name);
+    }
+
+    // Parse signal name from --signal / -s flag captured in first pass
+    let kill_signal: Option<i32> = kill_signal_str.as_deref().and_then(|name| {
+        if let Ok(sig) = name.parse::<i32>() {
+            return Some(sig);
+        }
+        let name_upper = name.to_uppercase();
+        if let Some(offset) = name_upper
+            .strip_prefix("SIGRTMIN+")
+            .or_else(|| name_upper.strip_prefix("RTMIN+"))
+            && let Ok(n) = offset.parse::<i32>()
+        {
+            return Some(34 + n); // SIGRTMIN = 34 on Linux
+        }
+        if let Some(offset) = name_upper
+            .strip_prefix("SIGRTMAX-")
+            .or_else(|| name_upper.strip_prefix("RTMAX-"))
+            && let Ok(n) = offset.parse::<i32>()
+        {
+            return Some(64 - n); // SIGRTMAX = 64 on Linux
+        }
+        match name_upper.as_str() {
+            "SIGTERM" | "TERM" => Some(15),
+            "SIGKILL" | "KILL" => Some(9),
+            "SIGHUP" | "HUP" => Some(1),
+            "SIGINT" | "INT" => Some(2),
+            "SIGUSR1" | "USR1" => Some(10),
+            "SIGUSR2" | "USR2" => Some(12),
+            "SIGCONT" | "CONT" => Some(18),
+            "SIGSTOP" | "STOP" => Some(19),
+            "SIGTSTP" | "TSTP" => Some(20),
+            "SIGQUIT" | "QUIT" => Some(3),
+            "SIGABRT" | "ABRT" => Some(6),
+            "SIGPIPE" | "PIPE" => Some(13),
+            "SIGALRM" | "ALRM" => Some(14),
+            "SIGCHLD" | "CHLD" => Some(17),
+            "SIGWINCH" | "WINCH" => Some(28),
+            _ => None,
+        }
+    });
+
+    // Extract --reverse, --after, --before, --plain flags for list-dependencies
+    let mut reverse = false;
+    let mut after = false;
+    let mut before = false;
+    let mut plain = false;
+    positional.retain(|arg| match arg.as_str() {
+        "--reverse" => {
+            reverse = true;
+            false
+        }
+        "--after" => {
+            after = true;
+            false
+        }
+        "--before" => {
+            before = true;
+            false
+        }
+        "--plain" => {
+            plain = true;
+            false
+        }
+        _ => true,
+    });
+
+    // Extract --marked flag
+    positional.retain(|arg| {
+        if arg == "--marked" {
+            marked = true;
+            false
+        } else {
+            true
+        }
+    });
+
+    // Map numeric arguments (PIDs) to unit names for status/show commands.
+    if (positional[0] == "status" || positional[0] == "show") && positional.len() >= 2 {
+        for arg in positional[1..].iter_mut() {
+            if arg.chars().all(|c| c.is_ascii_digit()) {
+                let cgroup_path = format!("/proc/{arg}/cgroup");
+                if let Ok(content) = std::fs::read_to_string(&cgroup_path) {
+                    for line in content.lines() {
+                        if let Some((_prefix, path)) = line.rsplit_once(':')
+                            && let Some(unit_name) = path.rsplit('/').next()
+                            && unit_name.contains('.')
+                        {
+                            *arg = unit_name.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Map command aliases.
+    let command = match positional[0].as_str() {
+        "poweroff" | "reboot" | "halt" | "kexec" => {
+            let verb = positional[0].clone();
+            positional[0] = "shutdown".to_string();
+            // Keep the original verb as a parameter so the server knows
+            // which action to perform (poweroff vs reboot vs halt vs kexec).
+            if positional.len() < 2 {
+                positional.push(verb);
+            } else {
+                positional.insert(1, verb);
+            }
+            &positional[0]
+        }
+        "daemon-reload" => {
+            positional[0] = "reload".to_string();
+            &positional[0]
+        }
+        "daemon-reexec" => {
+            // Pass through as-is — the control protocol handles it separately
+            // from daemon-reload, triggering a full re-execution of the binary.
+            &positional[0]
+        }
+        "condrestart" => {
+            positional[0] = "try-restart".to_string();
+            &positional[0]
+        }
+        "force-reload" | "try-reload-or-restart" => {
+            positional[0] = "try-restart".to_string();
+            &positional[0]
+        }
+        // Sleep commands — pass through as-is to PID 1
+        "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
+        // Timer, property, edit, revert, clean commands — pass through
+        "list-timers" | "list-sockets" | "list-paths" | "list-jobs" | "set-property" | "edit"
+        | "revert" | "clean" | "bind" | "switch-root" | "isolate" => &positional[0],
+        // log-level, log-target, service-watchdogs — get or set manager properties
+        "log-level" | "log-target" | "service-watchdogs" => &positional[0],
+        // is-failed with no unit = is-system-running (system state check)
+        "is-failed" if positional.len() < 2 => {
+            positional[0] = "is-system-running".to_string();
+            &positional[0]
+        }
+        _ => &positional[0],
+    };
+
+    // Handle `help` client-side: try to open the man page for the unit type.
+    if positional[0] == "help" {
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: help requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let unit_name = &positional[1];
+        // Determine man page from unit suffix
+        let man_page = if unit_name.ends_with(".service") || !unit_name.contains('.') {
+            "systemd.service"
+        } else if unit_name.ends_with(".socket") {
+            "systemd.socket"
+        } else if unit_name.ends_with(".timer") {
+            "systemd.timer"
+        } else if unit_name.ends_with(".mount") {
+            "systemd.mount"
+        } else if unit_name.ends_with(".target") {
+            "systemd.target"
+        } else if unit_name.ends_with(".path") {
+            "systemd.path"
+        } else if unit_name.ends_with(".slice") {
+            "systemd.slice"
+        } else if unit_name.ends_with(".scope") {
+            "systemd.scope"
+        } else if unit_name.ends_with(".swap") {
+            "systemd.swap"
+        } else if unit_name.ends_with(".automount") {
+            "systemd.automount"
+        } else if unit_name.ends_with(".device") {
+            "systemd.device"
+        } else {
+            "systemd.service"
+        };
+        let status = std::process::Command::new("man").arg(man_page).status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => {
+                // man not available or failed; not an error for our purposes
+            }
+        }
+        return;
+    }
+
+    // Handle `whoami` client-side: map PIDs to their owning unit via /proc/{pid}/cgroup.
+    if positional[0] == "whoami" {
+        let pids: Vec<u32> = if positional.len() > 1 {
+            positional[1..]
+                .iter()
+                .map(|s| {
+                    s.parse::<u32>().unwrap_or_else(|_| {
+                        eprintln!("Invalid PID: {s}");
+                        std::process::exit(1);
+                    })
+                })
+                .collect()
+        } else {
+            // Default to own PID
+            vec![std::process::id()]
+        };
+
+        for pid in &pids {
+            let cgroup_file = format!("/proc/{pid}/cgroup");
+            let unit_name = match std::fs::read_to_string(&cgroup_file) {
+                Ok(contents) => {
+                    // cgroupv2 format: "0::/path/to/unit"
+                    // cgroupv1 format: "N:name:/path/to/unit"
+                    // We want the last component of the path that looks like a unit name.
+                    let mut name = None;
+                    for line in contents.lines() {
+                        let parts: Vec<&str> = line.splitn(3, ':').collect();
+                        if parts.len() == 3 {
+                            let path = parts[2];
+                            // Extract the last path component as the unit name
+                            if let Some(last) = path.rsplit('/').next()
+                                && !last.is_empty()
+                            {
+                                name = Some(last.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    name.unwrap_or_else(|| {
+                        if *pid == 1 {
+                            "init.scope".to_string()
+                        } else {
+                            format!("unknown (PID {pid})")
+                        }
+                    })
+                }
+                Err(_) => {
+                    if *pid == 1 {
+                        "init.scope".to_string()
+                    } else {
+                        eprintln!("Failed to read cgroup for PID {pid}");
+                        std::process::exit(1);
+                    }
+                }
+            };
+            println!("{unit_name}");
+        }
+        return;
+    }
+
+    // Handle `cat --global` client-side: look in user unit directories.
+    if positional[0] == "cat" && global {
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: cat requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let unit_name = &positional[1];
+        let search_dirs: &[&str] = &[
+            "/etc/systemd/user",
+            "/run/systemd/user",
+            "/usr/lib/systemd/user",
+        ];
+        let mut found = false;
+        for dir in search_dirs {
+            let unit_path = std::path::Path::new(dir).join(unit_name);
+            if unit_path.is_symlink()
+                && let Ok(target) = std::fs::read_link(&unit_path)
+                && target == std::path::Path::new("/dev/null")
+            {
+                eprintln!("Unit {unit_name} is masked.");
+                found = true;
+                break;
+            }
+            if unit_path.exists() {
+                println!("# {}", unit_path.display());
+                if let Ok(content) = std::fs::read_to_string(&unit_path) {
+                    print!("{}", content);
+                }
+                found = true;
+                // Also check for drop-in directories
+                let dropin_dir = format!("{dir}/{unit_name}.d");
+                if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+                    let mut confs: Vec<_> = entries
+                        .flatten()
+                        .filter(|e| {
+                            e.path()
+                                .extension()
+                                .map(|ext| ext == "conf")
+                                .unwrap_or(false)
+                        })
+                        .collect();
+                    confs.sort_by_key(|e| e.file_name());
+                    for entry in confs {
+                        println!("\n# {}", entry.path().display());
+                        if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                            print!("{}", content);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        if !found {
+            if !quiet {
+                eprintln!("No files found for {unit_name}.");
+            }
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+
+    // Handle `edit` client-side: query PID 1 for unit info, open editor, then daemon-reload.
+    if positional[0] == "edit" {
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: edit requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let unit_names: Vec<String> = positional[1..].to_vec();
+
+        // Read stdin content if --stdin mode.
+        let stdin_content = if stdin_mode {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf).ok();
+            Some(buf)
+        } else {
+            None
+        };
+
+        // Base directory: depends on --global and --runtime flags.
+        let base_dir = match (global, runtime) {
+            (true, true) => "/run/systemd/user",
+            (true, false) => "/etc/systemd/user",
+            (false, true) => "/run/systemd/system",
+            (false, false) => "/etc/systemd/system",
+        };
+
+        for unit_name in &unit_names {
+            // Check if the unit is masked (symlinked to /dev/null)
+            let unit_path = std::path::Path::new(base_dir).join(unit_name);
+            if unit_path.is_symlink()
+                && let Ok(target) = std::fs::read_link(&unit_path)
+                && target == std::path::Path::new("/dev/null")
+            {
+                eprintln!("Unit {unit_name} is masked (linked to /dev/null).");
+                std::process::exit(1);
+            }
+
+            if full {
+                // --full mode: write a full copy of the unit file.
+                let dest_path = std::path::Path::new(base_dir).join(unit_name);
+                // Ensure the parent directory exists
+                if let Some(parent) = dest_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+
+                if let Some(ref content) = stdin_content {
+                    // --stdin --full: write content directly
+                    let mut final_content = content.trim().to_owned();
+                    if !final_content.is_empty() && !final_content.ends_with('\n') {
+                        final_content.push('\n');
+                    }
+                    if let Err(e) = std::fs::write(&dest_path, &final_content) {
+                        if !quiet {
+                            eprintln!("Failed to write {}: {e}", dest_path.display());
+                        }
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Interactive editor mode for --full
+                    // Query PID 1 for original content if not --force
+                    if !force {
+                        let query_arr = vec![
+                            Value::String(unit_name.clone()),
+                            Value::String("--full".to_owned()),
+                        ];
+                        let query_call = Call {
+                            method: "edit".to_string(),
+                            params: Some(Value::Array(query_arr)),
+                            id: None,
+                        };
+                        let query_str = serde_json::to_string(&query_call.to_json()).unwrap();
+                        let query_result = if addr.starts_with('/') {
+                            send_unix(&addr, &query_str)
+                        } else {
+                            send_tcp(&addr, &query_str)
+                        };
+                        if let Ok(resp) = query_result {
+                            let info = resp.get("result").cloned().unwrap_or(Value::Null);
+                            let original = info
+                                .get("original_content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if !dest_path.exists() && !original.is_empty() {
+                                let _ = std::fs::write(&dest_path, original);
+                            }
+                        }
+                    }
+
+                    let editor = std::env::var("SYSTEMD_EDITOR")
+                        .or_else(|_| std::env::var("EDITOR"))
+                        .or_else(|_| std::env::var("VISUAL"))
+                        .unwrap_or_else(|_| "vi".to_owned());
+
+                    let status = std::process::Command::new(&editor).arg(&dest_path).status();
+                    match status {
+                        Ok(s) if s.success() => {}
+                        Ok(s) => {
+                            if !quiet {
+                                eprintln!("Editor exited with status {}", s.code().unwrap_or(-1));
+                            }
+                            std::process::exit(1);
+                        }
+                        Err(e) => {
+                            if !quiet {
+                                eprintln!("Failed to run editor '{}': {e}", editor);
+                            }
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            } else {
+                // Drop-in mode
+                let dropin_filename = dropin_name.as_deref().unwrap_or("override.conf");
+                let dropin_dir = format!("{base_dir}/{unit_name}.d");
+                let override_path = format!("{dropin_dir}/{dropin_filename}");
+
+                if let Err(e) = std::fs::create_dir_all(&dropin_dir) {
+                    if !quiet {
+                        eprintln!("Failed to create {dropin_dir}: {e}");
+                    }
+                    std::process::exit(1);
+                }
+
+                if let Some(ref content) = stdin_content {
+                    // --stdin mode: write content directly
+                    let mut final_content = content.trim().to_owned();
+                    if !final_content.is_empty() && !final_content.ends_with('\n') {
+                        final_content.push('\n');
+                    }
+                    if final_content.trim().is_empty() {
+                        let _ = std::fs::remove_file(&override_path);
+                    } else if let Err(e) = std::fs::write(&override_path, &final_content) {
+                        if !quiet {
+                            eprintln!("Failed to write {override_path}: {e}");
+                        }
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Interactive editor mode
+                    let existing = std::fs::read_to_string(&override_path).unwrap_or_default();
+
+                    let tmp_path = format!("{override_path}.tmp");
+                    let initial_content = if existing.is_empty() {
+                        dropin_edit_scaffold(unit_name)
+                    } else {
+                        existing
+                    };
+                    if let Err(e) = std::fs::write(&tmp_path, &initial_content) {
+                        if !quiet {
+                            eprintln!("Failed to write {tmp_path}: {e}");
+                        }
+                        std::process::exit(1);
+                    }
+
+                    let editor = std::env::var("SYSTEMD_EDITOR")
+                        .or_else(|_| std::env::var("EDITOR"))
+                        .or_else(|_| std::env::var("VISUAL"))
+                        .unwrap_or_else(|_| "vi".to_owned());
+
+                    // Invoke the editor as `$EDITOR +<line> <path>`, matching
+                    // upstream `run_editor` (edit-util.c: e->line == 4 for a
+                    // fresh drop-in, the first line of the content area between
+                    // the markers). A real editor opens at that line; the
+                    // `EDITOR=mv` test hack relies on the `+4` positional (it
+                    // runs `mv +4 <path>` to swap in a prepared "+4" file).
+                    let status = std::process::Command::new(&editor)
+                        .arg("+4")
+                        .arg(&tmp_path)
+                        .status();
+
+                    match status {
+                        Ok(s) if s.success() => {
+                            match std::fs::read_to_string(&tmp_path) {
+                                Ok(edited) => match dropin_edit_extract(&edited) {
+                                    None => {
+                                        let _ = std::fs::remove_file(&override_path);
+                                        if !quiet {
+                                            eprintln!("Removed empty override for {unit_name}.");
+                                        }
+                                    }
+                                    Some(final_content) => {
+                                        if let Err(e) =
+                                            std::fs::write(&override_path, &final_content)
+                                        {
+                                            if !quiet {
+                                                eprintln!("Failed to write {override_path}: {e}");
+                                            }
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    if !quiet {
+                                        eprintln!("Failed to read {tmp_path}: {e}");
+                                    }
+                                    std::process::exit(1);
+                                }
+                            }
+                            let _ = std::fs::remove_file(&tmp_path);
+                        }
+                        Ok(s) => {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            if !quiet {
+                                eprintln!("Editor exited with status {}", s.code().unwrap_or(-1));
+                            }
+                            std::process::exit(1);
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            if !quiet {
+                                eprintln!("Failed to run editor '{}': {e}", editor);
+                            }
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Trigger daemon-reload after editing.
+        let reload_call = Call {
+            method: "reload".to_string(),
+            params: None,
+            id: None,
+        };
+        let reload_str = serde_json::to_string(&reload_call.to_json()).unwrap();
+        let _ = if addr.starts_with('/') {
+            send_unix(&addr, &reload_str)
+        } else {
+            send_tcp(&addr, &reload_str)
+        };
+        return;
+    }
+
+    // Handle get-default/set-default locally (filesystem operations).
+    if positional[0] == "get-default" {
+        let root = root_path.as_deref().unwrap_or("");
+        let link_path = format!("{root}/etc/systemd/system/default.target");
+        match std::fs::read_link(&link_path) {
+            Ok(target) => {
+                let name = target
+                    .file_name()
+                    .unwrap_or(target.as_os_str())
+                    .to_string_lossy();
+                println!("{name}");
+            }
+            Err(_) => {
+                // Fallback: check /usr/lib/systemd/system/default.target
+                let fallback = format!("{root}/usr/lib/systemd/system/default.target");
+                match std::fs::read_link(&fallback) {
+                    Ok(target) => {
+                        let name = target
+                            .file_name()
+                            .unwrap_or(target.as_os_str())
+                            .to_string_lossy();
+                        println!("{name}");
+                    }
+                    Err(_) => {
+                        // Default to multi-user.target if no symlink exists
+                        println!("multi-user.target");
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    if positional[0] == "set-default" {
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: set-default requires a target unit name.");
+            }
+            std::process::exit(1);
+        }
+        let target_name = &positional[1];
+        let root = root_path.as_deref().unwrap_or("");
+        let dir_path = format!("{root}/etc/systemd/system");
+        let link_path = format!("{dir_path}/default.target");
+
+        // Ensure the directory exists
+        if let Err(e) = std::fs::create_dir_all(&dir_path) {
+            if !quiet {
+                eprintln!("Failed to create directory {dir_path}: {e}");
+            }
+            std::process::exit(1);
+        }
+
+        // Remove existing symlink
+        let _ = std::fs::remove_file(&link_path);
+
+        // Resolve to full path if not absolute
+        let target_path = if target_name.contains('/') {
+            target_name.to_string()
+        } else {
+            format!("/usr/lib/systemd/system/{target_name}")
+        };
+
+        if let Err(e) = std::os::unix::fs::symlink(&target_path, &link_path) {
+            if !quiet {
+                eprintln!("Failed to create symlink {link_path} -> {target_path}: {e}");
+            }
+            std::process::exit(1);
+        }
+
+        if !quiet {
+            eprintln!("Created symlink {link_path} -> {target_path}.");
+        }
+        return;
+    }
+
+    // --dry-run: print what would happen and exit
+    if dry_run {
+        let verb = command;
+        if !quiet {
+            eprintln!("Would execute operation: {verb}");
+        }
+        return;
+    }
+
+    let method = command.clone();
+    let mut params = if method == "list-units" {
+        // list-units [pattern] — optional type, state, and pattern filters.
+        let mut obj = serde_json::Map::new();
+        if let Some(ref tf) = type_filter {
+            obj.insert("type".to_string(), Value::String(tf.clone()));
+        }
+        if let Some(ref state) = state_filter {
+            obj.insert("state".to_string(), Value::String(state.clone()));
+        }
+        // Remaining positional args are glob patterns
+        if positional.len() >= 2 {
+            obj.insert("pattern".to_string(), Value::String(positional[1].clone()));
+        }
+        if obj.is_empty() {
+            None
+        } else {
+            Some(Value::Object(obj))
+        }
+    } else if method == "list-timers"
+        || method == "list-sockets"
+        || method == "list-paths"
+        || method == "list-jobs"
+        || method == "is-system-running"
+        || method == "show-environment"
+    {
+        // These commands take no parameters
+        None
+    } else if method == "set-environment" || method == "unset-environment" {
+        // set-environment KEY=VALUE... / unset-environment KEY...
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: {method} requires at least one argument.");
+            }
+            std::process::exit(1);
+        }
+        let arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        Some(Value::Array(arr))
+    } else if method == "import-environment" {
+        // import-environment KEY... — send KEY=VALUE pairs from our own env
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: import-environment requires at least one variable name.");
+            }
+            std::process::exit(1);
+        }
+        let arr: Vec<Value> = positional[1..]
+            .iter()
+            .map(|name| {
+                if let Ok(val) = std::env::var(name) {
+                    Value::String(format!("{name}={val}"))
+                } else {
+                    Value::String(name.clone())
+                }
+            })
+            .collect();
+        Some(Value::Array(arr))
+    } else if method == "set-property" {
+        // set-property <unit> <prop=val>...
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: set-property requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        if positional.len() < 3 {
+            if !quiet {
+                eprintln!(
+                    "Error: set-property requires at least one property assignment (e.g. CPUWeight=200)."
+                );
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        Some(Value::Array(arr))
+    } else if method == "isolate" {
+        // isolate TARGET — forward the target to PID 1.
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: isolate requires a target unit.");
+            }
+            std::process::exit(1);
+        }
+        Some(Value::String(positional[1].clone()))
+    } else if method == "switch-root" {
+        // switch-root [NEWROOT [INIT]] — forward the (optional) args to PID 1,
+        // which performs the mount moves + chroot + exec of the new init.
+        Some(Value::Array(
+            positional[1..].iter().cloned().map(Value::String).collect(),
+        ))
+    } else if method == "revert" {
+        // revert <unit>
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: revert requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        Some(Value::String(positional[1].clone()))
+    } else if method == "list-unit-files" {
+        // list-unit-files [--type=TYPE] — optional type filter extracted from -t flag
+        // Check if there's a type filter passed as a positional argument
+        if positional.len() >= 2 {
+            Some(Value::String(positional[1].clone()))
+        } else {
+            None
+        }
+    } else if method == "list-dependencies" {
+        // list-dependencies <unit> [--reverse]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: list-dependencies requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr = vec![Value::String(positional[1].clone())];
+        if reverse {
+            arr.push(Value::String("--reverse".to_owned()));
+        }
+        if after {
+            arr.push(Value::String("--after".to_owned()));
+        }
+        if before {
+            arr.push(Value::String("--before".to_owned()));
+        }
+        if plain {
+            arr.push(Value::String("--plain".to_owned()));
+        }
+        Some(Value::Array(arr))
+    } else if method == "kill" {
+        // kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: kill requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr = vec![Value::String(positional[1].clone())];
+        if let Some(sig) = kill_signal {
+            arr.push(Value::String(sig.to_string()));
+        } else {
+            arr.push(Value::String("15".to_string())); // SIGTERM default
+        }
+        // Upstream defaults --kill-whom to "cgroup" once a subgroup is named,
+        // and to "all" otherwise.
+        arr.push(Value::String(kill_whom.unwrap_or_else(|| {
+            if kill_subgroup.is_some() {
+                "cgroup".to_string()
+            } else {
+                "all".to_string()
+            }
+        })));
+        if let Some(val) = kill_value {
+            arr.push(Value::String(val.to_string()));
+        }
+        if wait {
+            arr.push(Value::String("--wait".to_string()));
+        }
+        if let Some(sub) = kill_subgroup {
+            arr.push(Value::String(format!("--subgroup={sub}")));
+        }
+        Some(Value::Array(arr))
+    } else if method == "suspend"
+        || method == "hibernate"
+        || method == "hybrid-sleep"
+        || method == "suspend-then-hibernate"
+    {
+        // Sleep commands take no parameters.
+        None
+    } else if method == "enable" || method == "reenable" {
+        // enable <unit>... [--runtime] [--root=PATH]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: enable requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
+        Some(Value::Array(arr))
+    } else if method == "disable" {
+        // disable <unit>... [--runtime] [--root=PATH]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: disable requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
+        Some(Value::Array(arr))
+    } else if method == "preset" {
+        // preset <unit>... [--preset-mode=MODE] [--runtime] [--root=PATH]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: preset requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        if let Some(ref mode) = preset_mode {
+            arr.push(Value::String(format!("--preset-mode={mode}")));
+        }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
+        Some(Value::Array(arr))
+    } else if method == "freeze" || method == "thaw" {
+        // freeze/thaw <unit> — freeze or thaw a unit's cgroup
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: {method} requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        Some(Value::String(positional[1].clone()))
+    } else if method == "bind" {
+        // bind <unit> <source> <destination> [--read-only] [--mkdir]
+        if positional.len() < 4 {
+            if !quiet {
+                eprintln!("Error: bind requires <unit> <source> <destination> arguments.");
+            }
+            std::process::exit(1);
+        }
+        let mut obj = serde_json::Map::new();
+        obj.insert("unit".to_string(), Value::String(positional[1].clone()));
+        obj.insert("source".to_string(), Value::String(positional[2].clone()));
+        obj.insert(
+            "destination".to_string(),
+            Value::String(positional[3].clone()),
+        );
+        obj.insert("read_only".to_string(), Value::Bool(bind_read_only));
+        obj.insert("mkdir".to_string(), Value::Bool(bind_mkdir));
+        Some(Value::Object(obj))
+    } else if method == "reset-failed" {
+        // reset-failed [unit] — optional unit name
+        if positional.len() >= 2 {
+            Some(Value::String(positional[1].clone()))
+        } else {
+            None
+        }
+    } else if method == "clean" {
+        // clean <unit> [--what=WHAT]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: clean requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr = vec![Value::String(positional[1].clone())];
+        if let Some(ref what) = what_filter {
+            arr.push(Value::String(what.clone()));
+        }
+        Some(Value::Array(arr))
+    } else if method == "show" {
+        // show [unit] [property-filter...] — send unit name + optional filter
+        // If no unit is specified, query manager-level properties
+        if positional.len() < 2 {
+            // Manager-level show — send special "__manager__" marker
+            let mut arr = vec![Value::String("__manager__".to_string())];
+            for prop in &property_filter {
+                arr.push(Value::String(prop.clone()));
+            }
+            Some(Value::Array(arr))
+        } else {
+            let mut arr = vec![Value::String(positional[1].clone())];
+            for prop in &property_filter {
+                arr.push(Value::String(prop.clone()));
+            }
+            Some(Value::Array(arr))
+        }
+    } else if method == "mask" || method == "unmask" {
+        // mask/unmask <unit>... [--runtime]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: {method} requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
+        Some(Value::Array(arr))
+    } else if marked && (method == "reload-or-restart" || method == "restart") {
+        // --marked: operate on all units with needs-restart marker
+        Some(Value::String("--marked".to_string()))
+    } else if root_path.is_some()
+        && (method == "is-enabled" || method == "list-unit-files" || method == "revert")
+    {
+        // Commands that need --root passed to the server
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
+        Some(Value::Array(arr))
+    } else if positional.len() == 2 {
+        Some(Value::String(positional[1].clone()))
+    } else if positional.len() > 2 {
+        Some(positional[1..].iter().cloned().map(Value::String).collect())
+    } else {
+        None
+    };
+
+    // --no-block: use a separate method so the server can run it asynchronously
+    // --wait: use a separate method so the server blocks until units deactivate
+    let method = if no_block
+        && (method == "start"
+            || method == "restart"
+            || method == "stop"
+            || method == "isolate"
+            || method == "switch-root")
+    {
+        format!("{method}-noblock")
+    } else if wait && method == "start" {
+        "start-wait".to_string()
+    } else {
+        method.to_string()
+    };
+
+    // Commands that only accept a single unit on the server side.
+    // When multiple units are given, iterate client-side (like real systemctl).
+    let single_unit_methods = [
+        "restart",
+        "restart-noblock",
+        "status",
+        "show",
+        "reload",
+        "reload-or-restart",
+        "try-restart",
+    ];
+    if single_unit_methods.contains(&method.as_str()) && positional.len() > 2 {
+        let units: Vec<String> = positional[1..].to_vec();
+        let mut any_failed = false;
+        for unit in &units {
+            let unit_params = if method == "show" && !property_filter.is_empty() {
+                let mut arr = vec![Value::String(unit.clone())];
+                for prop in &property_filter {
+                    arr.push(Value::String(prop.clone()));
+                }
+                Some(Value::Array(arr))
+            } else {
+                Some(Value::String(unit.clone()))
+            };
+            let call = Call {
+                method: method.clone(),
+                params: unit_params,
+                id: None,
+            };
+            let str_call = serde_json::to_string(&call.to_json()).unwrap();
+            let result = send_with_retry(&addr, &str_call, positional[0] != "daemon-reexec");
+            match result {
+                Ok(resp) => {
+                    handle_response(
+                        &positional[0],
+                        &resp,
+                        quiet,
+                        value_only,
+                        force,
+                        no_legend,
+                        output_format.as_deref(),
+                        &property_filter,
+                        true,
+                        timestamp_unix,
+                    );
+                }
+                Err(e) => {
+                    if !quiet {
+                        eprintln!("Error communicating with rust-systemd: {e}");
+                    }
+                    any_failed = true;
+                }
+            }
+        }
+        if any_failed {
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // Append --job-mode to params so the server can use it
+    if let Some(ref jm) = job_mode {
+        let jm_param = Value::String(format!("--job-mode={jm}"));
+        match params {
+            Some(Value::Array(ref mut arr)) => arr.push(jm_param),
+            Some(ref v) => params = Some(Value::Array(vec![v.clone(), jm_param])),
+            None => params = Some(Value::Array(vec![jm_param])),
+        }
+    }
+
+    let method_name = method.clone();
+    let call = Call {
+        method,
+        params,
+        id: None,
+    };
+    let str_call = serde_json::to_string(&call.to_json()).unwrap();
+
+    let result = send_with_retry(&addr, &str_call, positional[0] != "daemon-reexec");
+
+    match result {
+        Ok(resp) => {
+            let has_unit_args = positional.len() >= 2;
+            handle_response(
+                &positional[0],
+                &resp,
+                quiet,
+                value_only,
+                force,
+                no_legend,
+                output_format.as_deref(),
+                &property_filter,
+                has_unit_args,
+                timestamp_unix,
+            );
+            // --now: after enable → start units, after disable → stop units
+            if now
+                && (method_name == "enable"
+                    || method_name == "reenable"
+                    || method_name == "disable")
+            {
+                let action = if method_name == "disable" {
+                    "stop"
+                } else {
+                    "start"
+                };
+                // For template units (e.g. foo@.service), find and act on all instances
+                let mut units_to_act_on: Vec<String> = Vec::new();
+                for unit in &positional[1..] {
+                    if unit.contains("@.") {
+                        // Template unit — query for active instances by listing units
+                        let prefix = unit.split("@.").next().unwrap_or("");
+                        let list_call = serde_json::json!({
+                            "method": "list-units",
+                        });
+                        if let Ok(list_resp) = send_unix(&addr, &list_call.to_string())
+                            && let Some(result) = list_resp.get("result")
+                            && let Some(arr) = result.as_array()
+                        {
+                            for entry in arr {
+                                // list-units returns plain strings or objects with "UNIT" key
+                                let name = entry
+                                    .as_str()
+                                    .or_else(|| entry.get("UNIT").and_then(|v| v.as_str()));
+                                if let Some(name) = name
+                                    && name.starts_with(&format!("{prefix}@"))
+                                    && !name.contains("@.")
+                                {
+                                    units_to_act_on.push(name.to_string());
+                                }
+                            }
+                        }
+                    } else {
+                        units_to_act_on.push(unit.clone());
+                    }
+                }
+                for unit in &units_to_act_on {
+                    let call = serde_json::json!({
+                        "method": action,
+                        "params": unit,
+                    });
+                    let _ = send_unix(&addr, &call.to_string());
+                }
+            }
+            // --now with mask: stop the units after masking
+            if now && method_name == "mask" {
+                for unit in &positional[1..] {
+                    let call = serde_json::json!({
+                        "method": "stop",
+                        "params": unit,
+                    });
+                    let _ = send_unix(&addr, &call.to_string());
+                }
+            }
+        }
+        Err(e) => {
+            // daemon-reexec causes the server to execve(), dropping the connection.
+            // This is expected — treat it as success.
+            if positional[0] == "daemon-reexec" {
+                return;
+            }
+            if !quiet {
+                eprintln!("Error communicating with rust-systemd: {e}");
+            }
+            // For is-active, connection failure means the unit is not active.
+            if positional[0] == "is-active" {
+                if !quiet {
+                    println!("inactive");
+                }
+                std::process::exit(3);
+            }
+            // For is-system-running, connection failure means offline.
+            if positional[0] == "is-system-running" {
+                if !quiet {
+                    println!("offline");
+                }
+                std::process::exit(1);
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Handle the JSON-RPC response, with special exit code logic for
+/// `is-active`, `is-enabled`, and `is-failed`.
+#[allow(clippy::too_many_arguments)]
+/// With `--timestamp=unix`, convert a formatted UTC timestamp property value
+/// ("Sat 2026-07-18 00:00:00 UTC") to upstream's `@<epoch-seconds>` form.
+/// Non-timestamp values pass through unchanged.
+fn maybe_unix_timestamp(val: &str, enabled: bool) -> String {
+    if !enabled {
+        return val.to_owned();
+    }
+    let parts: Vec<&str> = val.split_whitespace().collect();
+    // Accept "Dow YYYY-MM-DD HH:MM:SS UTC" and "YYYY-MM-DD HH:MM:SS UTC".
+    let (date, time, tz) = match parts.as_slice() {
+        [_dow, date, time, tz] => (*date, *time, *tz),
+        [date, time, tz] => (*date, *time, *tz),
+        _ => return val.to_owned(),
+    };
+    if tz != "UTC" {
+        return val.to_owned();
+    }
+    let mut d = date.split('-');
+    let (Some(y), Some(mo), Some(da)) = (d.next(), d.next(), d.next()) else {
+        return val.to_owned();
+    };
+    let mut t = time.split(':');
+    let (Some(h), Some(mi), Some(sec)) = (t.next(), t.next(), t.next()) else {
+        return val.to_owned();
+    };
+    let (Ok(y), Ok(mo), Ok(da), Ok(h), Ok(mi), Ok(sec)) = (
+        y.parse::<i64>(),
+        mo.parse::<i64>(),
+        da.parse::<i64>(),
+        h.parse::<i64>(),
+        mi.parse::<i64>(),
+        sec.parse::<i64>(),
+    ) else {
+        return val.to_owned();
+    };
+    // days_from_civil (Hinnant): days since 1970-01-01 in the proleptic
+    // Gregorian calendar.
+    let y_adj = if mo <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+    let yoe = y_adj - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + da - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    format!("@{}", days * 86400 + h * 3600 + mi * 60 + sec)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_response(
+    command: &str,
+    resp: &Value,
+    quiet: bool,
+    value_only: bool,
+    force: bool,
+    no_legend: bool,
+    output_format: Option<&str>,
+    property_filter: &[String],
+    has_unit_args: bool,
+    timestamp_unix: bool,
+) {
+    // Check for JSON-RPC error responses.
+    if let Some(error) = resp.get("error") {
+        let message = error
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
+
+        match command {
+            "is-active" => {
+                // Exit 4 for "not found", 3 for other errors (inactive)
+                let code = if message.contains("not found") { 4 } else { 3 };
+                if !quiet {
+                    println!("inactive");
+                }
+                std::process::exit(code);
+            }
+            "is-enabled" => {
+                // Exit 4 for "not found", 1 for other errors
+                let code = if message.contains("not found") { 4 } else { 1 };
+                if !quiet {
+                    println!("disabled");
+                }
+                std::process::exit(code);
+            }
+            "is-failed" => {
+                // Exit 4 for "not found", 1 for other errors
+                let code = if message.contains("not found") { 4 } else { 1 };
+                if !quiet {
+                    println!("inactive");
+                }
+                std::process::exit(code);
+            }
+            "cat" if force => {
+                // --force suppresses errors for missing units
+                std::process::exit(0);
+            }
+            _ => {
+                if !quiet {
+                    eprintln!("{}", message);
+                }
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Success response.
+    let result = resp.get("result");
+
+    match command {
+        "is-active" => {
+            // A success response whose result field is missing or not a
+            // string means the unit's state could not be read (e.g. a
+            // contended control-socket reply after a just-edited unit's
+            // daemon-reload). is-active must fail closed there: an
+            // unreadable state is not active, so default to inactive
+            // (exit 3), never active (exit 0), matching upstream's
+            // conservative answer. The old "active" default surfaced as
+            // the load-sensitive 26-SYSTEMCTL is-active flake.
+            let state = result.and_then(|v| v.as_str()).unwrap_or("inactive");
+            if !quiet {
+                println!("{}", state);
+            }
+            match state {
+                "active" | "reloading" => std::process::exit(0),
+                _ => std::process::exit(3),
+            }
+        }
+        "is-enabled" => {
+            let state = result.and_then(|v| v.as_str()).unwrap_or("enabled");
+            if !quiet {
+                println!("{}", state);
+            }
+            match state {
+                "enabled" | "enabled-runtime" | "static" | "indirect" | "generated" => {
+                    std::process::exit(0)
+                }
+                // Matching upstream: "not-found" is exit 4 (distinct from
+                // exit 1 for "disabled" etc.) so shell scripts can branch
+                // on it.  TEST-17-UDEV.credentials relies on this.
+                "not-found" => std::process::exit(4),
+                _ => std::process::exit(1),
+            }
+        }
+        "is-failed" => {
+            let state = result.and_then(|v| v.as_str()).unwrap_or("inactive");
+            if !quiet {
+                println!("{}", state);
+            }
+            match state {
+                "failed" => std::process::exit(0),
+                _ => std::process::exit(1),
+            }
+        }
+        "show-environment" => {
+            if let Some(result) = result
+                && let Some(env_lines) = result.get("environment").and_then(|v| v.as_array())
+                && !quiet
+            {
+                if output_format == Some("json") {
+                    // JSON output: {"KEY":"VALUE", ...}
+                    let mut obj = serde_json::Map::new();
+                    for line in env_lines {
+                        if let Some(s) = line.as_str()
+                            && let Some((k, v)) = s.split_once('=')
+                        {
+                            obj.insert(k.to_owned(), Value::String(v.to_owned()));
+                        }
+                    }
+                    println!("{}", serde_json::to_string(&obj).unwrap_or_default());
+                } else {
+                    for line in env_lines {
+                        if let Some(s) = line.as_str() {
+                            println!("{s}");
+                        }
+                    }
+                }
+            }
+        }
+        "set-environment" | "unset-environment" | "import-environment" => {
+            // No output needed on success
+        }
+        "is-system-running" => {
+            let state = result.and_then(|v| v.as_str()).unwrap_or("offline");
+            if !quiet {
+                println!("{}", state);
+            }
+            match state {
+                "running" | "initializing" | "starting" => std::process::exit(0),
+                _ => std::process::exit(1),
+            }
+        }
+        "show" => {
+            // The result contains { "show": "Key=Value\n..." }
+            if let Some(result) = result
+                && let Some(text) = result.get("show").and_then(|v| v.as_str())
+                && !quiet
+            {
+                if value_only && !property_filter.is_empty() {
+                    // --value mode: print only the values, one per line
+                    for line in text.lines() {
+                        if let Some((_key, val)) = line.split_once('=') {
+                            println!("{}", maybe_unix_timestamp(val, timestamp_unix));
+                        }
+                    }
+                } else if timestamp_unix {
+                    for line in text.lines() {
+                        if let Some((key, val)) = line.split_once('=') {
+                            println!("{key}={}", maybe_unix_timestamp(val, timestamp_unix));
+                        } else {
+                            println!("{line}");
+                        }
+                    }
+                } else {
+                    print!("{text}");
+                }
+            }
+        }
+        "cat" => {
+            // The result contains { "cat": "# /path/to/unit\n[Unit]\n..." }
+            if let Some(result) = result
+                && let Some(text) = result.get("cat").and_then(|v| v.as_str())
+                && !quiet
+            {
+                print!("{text}");
+            }
+        }
+        "list-unit-files" => {
+            if let Some(result) = result
+                && let Some(text) = result.get("list-unit-files").and_then(|v| v.as_str())
+                && !quiet
+            {
+                print!("{text}");
+            }
+        }
+        "enable" | "reenable" => {
+            if let Some(result) = result
+                && let Some(arr) = result.get("enabled").and_then(|v| v.as_array())
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("Created symlink for {s}.");
+                    }
+                }
+            }
+        }
+        "disable" => {
+            if let Some(result) = result
+                && let Some(arr) = result.get("disabled").and_then(|v| v.as_array())
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("Removed /etc/systemd/system/multi-user.target.wants/{s}.");
+                    }
+                }
+            }
+        }
+        "reset-failed"
+        | "kill"
+        | "freeze"
+        | "thaw"
+        | "suspend"
+        | "hibernate"
+        | "hybrid-sleep"
+        | "suspend-then-hibernate"
+        | "shutdown"
+        | "poweroff"
+        | "reboot"
+        | "halt" => {
+            // These return null on success — nothing to print.
+        }
+        "set-property" => {
+            if let Some(result) = result
+                && !quiet
+                && let Some(dropin) = result.get("dropin").and_then(|v| v.as_str())
+            {
+                println!("Created drop-in file: {dropin}");
+            }
+        }
+        "revert" => {
+            if let Some(result) = result
+                && !quiet
+                && let Some(unit) = result.get("reverted").and_then(|v| v.as_str())
+                && let Some(arr) = result.get("removed").and_then(|v| v.as_array())
+            {
+                if arr.is_empty() {
+                    println!("No overrides found for {unit}.");
+                } else {
+                    for path in arr {
+                        if let Some(s) = path.as_str() {
+                            println!("Removed {s}.");
+                        }
+                    }
+                }
+            }
+        }
+        "list-timers" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                format_timer_table(arr, no_legend);
+            }
+        }
+        "list-sockets" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                if arr.is_empty() {
+                    if !no_legend {
+                        println!("0 sockets listed.");
+                    }
+                } else {
+                    if !no_legend {
+                        println!("{:<40} {:<8} {:<40}", "LISTEN", "TYPE", "UNIT");
+                    }
+                    for socket in arr {
+                        let listen = socket.get("LISTEN").and_then(|v| v.as_str()).unwrap_or("");
+                        let stype = socket.get("TYPE").and_then(|v| v.as_str()).unwrap_or("");
+                        let unit = socket.get("UNIT").and_then(|v| v.as_str()).unwrap_or("");
+                        println!("{:<40} {:<8} {:<40}", listen, stype, unit);
+                    }
+                    if !no_legend {
+                        println!("\n{} sockets listed.", arr.len());
+                    }
+                }
+            }
+        }
+        "list-paths" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                if arr.is_empty() {
+                    if !no_legend {
+                        println!("0 paths listed.");
+                    }
+                } else {
+                    for path_entry in arr {
+                        let path = path_entry
+                            .get("PATH")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let unit = path_entry
+                            .get("UNIT")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        println!("{:<40} {:<40}", path, unit);
+                    }
+                    if !no_legend {
+                        println!("\n{} paths listed.", arr.len());
+                    }
+                }
+            }
+        }
+        "list-jobs" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+            {
+                for job in arr {
+                    let id = job.get("JOB").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let unit = job
+                        .get("UNIT")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let jtype = job.get("TYPE").and_then(|v| v.as_str()).unwrap_or("start");
+                    let state = job
+                        .get("STATE")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("running");
+                    println!("{id:>6} {unit:<48} {jtype:<15} {state}");
+                }
+                if !no_legend {
+                    if arr.is_empty() {
+                        // Mirror upstream systemctl-list-jobs.c: an empty job
+                        // list prints "No jobs running." rather than a count.
+                        println!("No jobs running.");
+                    } else {
+                        println!("\n{} jobs listed.", arr.len());
+                    }
+                }
+            }
+        }
+        "list-units" => {
+            // list-units returns an array of unit name strings.
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("{s}");
+                    }
+                }
+            }
+        }
+        "list-dependencies" => {
+            if let Some(result) = result
+                && let Some(text) = result.get("list-dependencies").and_then(|v| v.as_str())
+                && !quiet
+            {
+                print!("{text}");
+            }
+        }
+        "service-watchdogs" | "log-level" | "log-target" => {
+            // Manager property get/set: print raw string value
+            if let Some(result) = result
+                && !quiet
+                && let Some(s) = result.as_str()
+            {
+                println!("{s}");
+            }
+        }
+        "help" | "reload" => {
+            // systemctl help <unit> / daemon-reload — success, nothing to print
+        }
+        "mask" => {
+            if let Some(result) = result
+                && let Some(arr) = result.get("masked").and_then(|v| v.as_array())
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("Created symlink /etc/systemd/system/{s} → /dev/null.");
+                    }
+                }
+            }
+        }
+        "unmask" => {
+            if let Some(result) = result
+                && let Some(arr) = result.get("unmasked").and_then(|v| v.as_array())
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("Removed /etc/systemd/system/{s}.");
+                    }
+                }
+            }
+        }
+        "status" => {
+            // Print the result as systemd's human-readable status block (or as
+            // JSON when --output=json was requested).
+            if !quiet && let Some(result) = result {
+                let is_empty = result.is_null() || result.as_array().is_some_and(|a| a.is_empty());
+                if !is_empty {
+                    if output_format == Some("json") {
+                        println!("{}", serde_json::to_string_pretty(result).unwrap());
+                    } else if let Some(arr) = result.as_array() {
+                        for (i, unit) in arr.iter().enumerate() {
+                            if i > 0 {
+                                println!();
+                            }
+                            print_status_block(unit);
+                        }
+                    }
+                }
+            }
+            // Exit 3 if the service is not active (matching C systemd behavior).
+            // Only check when a single specific unit was requested (no globs, not bare status).
+            if has_unit_args
+                && let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && arr.len() == 1
+            {
+                let is_active = arr[0]
+                    .get("Status")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s.starts_with("Started("));
+                if !is_active {
+                    std::process::exit(3);
+                }
+            }
+        }
+        _ => {
+            // For all other commands, print the result if non-null and non-empty.
+            if !quiet && let Some(result) = result {
+                let is_empty = result.is_null() || result.as_array().is_some_and(|a| a.is_empty());
+                if !is_empty {
+                    println!("{}", serde_json::to_string_pretty(result).unwrap());
+                }
+            }
+        }
+    }
+}
+
+/// Render one unit's `systemctl status` header block, human-readable, from the
+/// fields the status query returns. Mirrors the head of real systemd output:
+///   ● name - Description
+///        Loaded: loaded
+///        Active: active (running)
+fn print_status_block(unit: &Value) {
+    let name = unit.get("Name").and_then(|v| v.as_str()).unwrap_or("");
+    let raw_status = unit.get("Status").and_then(|v| v.as_str()).unwrap_or("");
+    let (active, sub) = status_to_active_sub(raw_status);
+    let bullet = match active {
+        "active" | "activating" => "●",
+        "failed" => "×",
+        _ => "○",
+    };
+    let desc = unit
+        .get("Description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if desc.is_empty() {
+        println!("{bullet} {name}");
+    } else {
+        println!("{bullet} {name} - {desc}");
+    }
+    println!("     Loaded: loaded");
+    println!("     Active: {active} ({sub})");
+}
+
+/// Map rust-systemd's internal unit Status string (the Debug form of
+/// UnitStatus, e.g. "Started(Running)") to systemd's ActiveState/SubState
+/// vocabulary shown by `systemctl status`.
+fn status_to_active_sub(status: &str) -> (&'static str, &'static str) {
+    if status.starts_with("Started") {
+        ("active", "running")
+    } else if status.starts_with("Starting") {
+        ("activating", "start")
+    } else if status.starts_with("Stopping") {
+        ("deactivating", "stop")
+    } else if status.contains("Failed") || status.contains("failed") {
+        ("failed", "failed")
+    } else {
+        ("inactive", "dead")
+    }
+}
+
+fn format_timer_table(timers: &[Value], no_legend: bool) {
+    if timers.is_empty() {
+        if !no_legend {
+            println!("0 timers listed.");
+        }
+        return;
+    }
+    if !no_legend {
+        // Print header
+        println!(
+            "{:<40} {:<8} {:<40} TRIGGERS",
+            "UNIT", "ACTIVE", "ACTIVATES"
+        );
+    }
+    for timer in timers {
+        let unit = timer.get("UNIT").and_then(|v| v.as_str()).unwrap_or("");
+        let active = timer.get("ACTIVE").and_then(|v| v.as_str()).unwrap_or("");
+        let activates = timer
+            .get("ACTIVATES")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let triggers = timer.get("TRIGGERS").and_then(|v| v.as_str()).unwrap_or("");
+        println!("{:<40} {:<8} {:<40} {}", unit, active, activates, triggers);
+    }
+    if !no_legend {
+        println!("\n{} timers listed.", timers.len());
+    }
+}
+
+fn print_help() {
+    println!(
+        "\
+systemctl — control tool for the rust-systemd service manager
+
+Usage:
+    systemctl [OPTIONS] <command> [args...]
+
+The control socket defaults to /run/systemd/rust-systemd-notify/control.socket.
+You can also set the SYSTEMCTL_ADDR environment variable, or pass a socket
+path or TCP address as the first positional argument.
+
+Commands:
+    list-units                  List all loaded units
+    list-unit-files [TYPE]      List all unit files on disk with their state
+    list-dependencies <unit>    Show dependency tree for a unit
+    disable <unit>...           Disable one or more units
+    reset-failed [unit]         Reset the failed state of a unit (or all)
+    kill <unit>                 Send a signal to a unit's processes
+    suspend                     Suspend the system
+    hibernate                   Hibernate the system
+    hybrid-sleep                Hybrid suspend (RAM + disk)
+    suspend-then-hibernate      Suspend, then hibernate after a delay
+    status <unit>               Show status of a unit
+    show <unit>                 Show properties of a unit (key=value format)
+    cat <unit>                  Show the unit file source
+    edit <unit>                 Edit a unit file drop-in override (or --full for full copy)
+    set-property <unit> <P=V>   Set runtime properties on a unit (creates drop-in)
+    revert <unit>               Revert a unit to its vendor configuration
+    start <unit>                Start a unit
+    stop <unit>                 Stop a unit
+    restart <unit>              Restart a unit
+    try-restart <unit>          Restart a unit if it is active
+    reload-or-restart <unit>    Reload or restart a unit
+    is-active <unit>            Check if a unit is active (exit 0=yes, 3=no)
+    is-enabled <unit>           Check if a unit is enabled
+    is-failed <unit>            Check if a unit is in failed state
+    enable <unit>               Enable (load) a unit
+    mask <unit>...              Mask (symlink to /dev/null) one or more units
+    unmask <unit>...            Unmask (remove /dev/null symlinks) one or more units
+    daemon-reload               Reload the service manager configuration
+    poweroff                    Power off the system
+    reboot                      Reboot the system
+    halt                        Halt the system
+    shutdown                    Shut down the service manager
+
+Options:
+    --no-block                  Do not wait for the operation to complete
+    --quiet, -q                 Suppress output
+    --no-wall                   Do not send wall message before shutdown
+    --force, -f                 Force the operation
+    --no-pager                  Do not pipe output into a pager
+    --no-ask-password           Do not ask for password
+    --no-legend                 Do not print legend (column headers)
+    --system                    Connect to system manager (default)
+    --full                      Edit full unit file instead of drop-in (for edit)
+    --all, -a                   Show all units, including inactive
+    --reverse                   Show reverse dependencies (for list-dependencies)
+    -s, --signal <SIG>          Signal to send (for kill, default: SIGTERM)
+    -t, --type <TYPE>           Filter by unit type
+    -p, --property <PROP>       Show only specified property (for show)
+    --value                     Show only property values (with -p)
+    --help, -h                  Show this help
+    --version                   Show version
+
+Examples:
+    systemctl list-units
+    systemctl status sshd.service
+    systemctl show sshd.service
+    systemctl show -p MainPID,ActiveState sshd.service
+    systemctl show --value -p MainPID sshd.service
+    systemctl cat sshd.service
+    systemctl edit sshd.service
+    systemctl edit --full sshd.service
+    systemctl set-property sshd.service CPUWeight=200
+    systemctl revert sshd.service
+    systemctl restart nginx.service
+    systemctl --no-block try-restart nscd.service
+    systemctl is-active sshd.service
+    systemctl list-unit-files
+    systemctl list-unit-files service
+    systemctl disable tmp.mount
+    systemctl reset-failed sshd.service
+    systemctl kill --signal=SIGKILL sshd.service
+    systemctl suspend
+    systemctl hibernate
+    systemctl list-dependencies multi-user.target
+    systemctl list-dependencies --reverse sshd.service
+    systemctl mask tmp.mount
+    systemctl unmask tmp.mount"
+    );
+}
+
+/// Send an RPC call with retry on connection refused.
+fn send_with_retry(
+    addr: &str,
+    str_call: &str,
+    retry: bool,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut result = if addr.starts_with('/') {
+        send_unix(addr, str_call)
+    } else {
+        send_tcp(addr, str_call)
+    };
+    if result.is_err() && retry {
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            result = if addr.starts_with('/') {
+                send_unix(addr, str_call)
+            } else {
+                send_tcp(addr, str_call)
+            };
+            if result.is_ok() {
+                break;
+            }
+        }
+    }
+    result
+}
+
+fn send_unix(path: &str, payload: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    // Retry on EAGAIN/WouldBlock/Interrupted — PID 1's listen backlog may be
+    // temporarily full when many commands are processed concurrently, or the
+    // control socket may be briefly unavailable during daemon-reload.
+    let mut stream = {
+        let mut last_err = None;
+        let mut connected = None;
+        for _ in 0..50 {
+            match std::os::unix::net::UnixStream::connect(path) {
+                Ok(s) => {
+                    connected = Some(s);
+                    break;
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::Interrupted
+                            | std::io::ErrorKind::ConnectionRefused
+                    ) || e.raw_os_error() == Some(libc::EAGAIN) =>
+                {
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        match connected {
+            Some(s) => s,
+            None => return Err(last_err.unwrap().into()),
+        }
+    };
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(60)))?;
+    stream.write_all(payload.as_bytes())?;
+    stream.shutdown(std::net::Shutdown::Write)?;
+    let resp: Value = serde_json::from_reader(&mut stream)?;
+    Ok(resp)
+}
+
+fn send_tcp(addr: &str, payload: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut stream = std::net::TcpStream::connect(addr)?;
+    stream.write_all(payload.as_bytes())?;
+    stream.shutdown(std::net::Shutdown::Write)?;
+    let resp: Value = serde_json::from_reader(&mut stream)?;
+    Ok(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dropin_edit_scaffold_noop_is_discarded() {
+        // A no-op interactive edit (e.g. `EDITOR=true`) leaves the scaffold
+        // byte-for-byte. Feeding it back through the marker strip must yield
+        // None (== upstream "file is empty, no real changes"), so `systemctl
+        // edit` writes no override.conf. Regression for TEST-26 line 49-50: the
+        // scaffold used to seed a `[Service]` header that survived the strip.
+        let scaffold = dropin_edit_scaffold("systemctl-test.service");
+        assert!(
+            !scaffold.contains("[Service]"),
+            "scaffold must not pre-seed a section header: {scaffold:?}"
+        );
+        assert_eq!(dropin_edit_extract(&scaffold), None);
+    }
+
+    #[test]
+    fn test_dropin_edit_extract_keeps_real_content() {
+        // A real edit (content typed into the marked area) is kept verbatim,
+        // marker lines dropped, and normalized to a single trailing newline.
+        let edited = "### Editing drop-in override for foo.service\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\nExecStart=\nExecStart=sleep 10d\n\n### Lines below this comment will be discarded\n";
+        assert_eq!(
+            dropin_edit_extract(edited).as_deref(),
+            Some("[Service]\nExecStart=\nExecStart=sleep 10d\n")
+        );
+    }
+
+    #[test]
+    fn test_unit_types_help_matches_c_enum_order() {
+        // C `systemctl --type=help` dumps the unit-type string table in UnitType
+        // enum order (unit-def.h). Pin that exact order so it cannot drift back
+        // to an arbitrary sequence.
+        assert_eq!(
+            UNIT_TYPES_IN_ENUM_ORDER,
+            [
+                "service",
+                "mount",
+                "swap",
+                "socket",
+                "target",
+                "device",
+                "automount",
+                "timer",
+                "path",
+                "slice",
+                "scope",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_signal_to_string_matches_c() {
+        // Bare short names for the standard signals (no "SIG" prefix).
+        assert_eq!(signal_to_string(1), "HUP");
+        assert_eq!(signal_to_string(9), "KILL");
+        assert_eq!(signal_to_string(15), "TERM");
+        assert_eq!(signal_to_string(31), "SYS");
+        // Signal 0 and the glibc-reserved slots render as raw numbers.
+        assert_eq!(signal_to_string(0), "0");
+        assert_eq!(signal_to_string(32), "32");
+        assert_eq!(signal_to_string(33), "33");
+        // Realtime range renders as RTMIN+n from SIGRTMIN upward.
+        let rtmin = libc::SIGRTMIN();
+        let rtmax = libc::SIGRTMAX();
+        assert_eq!(signal_to_string(rtmin), "RTMIN+0");
+        assert_eq!(signal_to_string(rtmin + 1), "RTMIN+1");
+        assert_eq!(signal_to_string(rtmax), format!("RTMIN+{}", rtmax - rtmin));
+    }
+
+    #[test]
+    fn test_state_help_groups_match_c() {
+        // C `systemctl --state=help` prints 14 groups: load/active/file states
+        // then per-type substates. Pin the group order, the members that rust
+        // had previously omitted, and the exact rendered line count.
+        assert_eq!(STATE_HELP_GROUPS.len(), 14);
+
+        // Load states come first (rust used to print active first) with `stub`
+        // leading the UnitLoadState enum.
+        assert_eq!(STATE_HELP_GROUPS[0].0, "Available unit load states:");
+        assert_eq!(STATE_HELP_GROUPS[0].1[0], "stub");
+        assert_eq!(STATE_HELP_GROUPS[1].0, "Available unit active states:");
+        assert!(STATE_HELP_GROUPS[1].1.contains(&"refreshing"));
+
+        let group = |header: &str| {
+            STATE_HELP_GROUPS
+                .iter()
+                .find(|(h, _)| *h == header)
+                .unwrap()
+                .1
+        };
+        // Service substates rust had been missing (all real systemd 260 states).
+        let service = group("Available service unit substates:");
+        for s in [
+            "refresh-extensions",
+            "refresh-credentials",
+            "reload-signal",
+            "reload-notify",
+            "reload-post",
+            "mounting",
+            "failed-before-auto-restart",
+            "auto-restart-queued",
+        ] {
+            assert!(service.contains(&s), "service substates missing {s}");
+        }
+        // Socket substates rust had been missing.
+        let socket = group("Available socket unit substates:");
+        assert!(socket.contains(&"start-open"));
+        assert!(socket.contains(&"deferred"));
+
+        // The full render is 14 headers + 13 inter-group blanks + all members,
+        // which must equal the 148 lines C emits.
+        let members: usize = STATE_HELP_GROUPS.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(14 + 13 + members, 148);
+    }
+
+    #[test]
+    fn test_signal_help_list_shape() {
+        // The full --signal=help list is numbers 0..=SIGRTMAX, no "SIG" prefix,
+        // no header, no "N)" numbering (the old rust format had all three).
+        let list: Vec<String> = (0..=libc::SIGRTMAX()).map(signal_to_string).collect();
+        assert_eq!(list.len(), (libc::SIGRTMAX() + 1) as usize);
+        assert_eq!(list[0], "0");
+        assert_eq!(list[1], "HUP");
+        for entry in &list {
+            assert!(!entry.starts_with("SIG"), "no SIG prefix: {entry:?}");
+            assert!(!entry.contains(')'), "no N) numbering: {entry:?}");
+            assert!(!entry.is_empty());
+        }
+        // Last entry is the top of the realtime range.
+        let rtmin = libc::SIGRTMIN();
+        let rtmax = libc::SIGRTMAX();
+        assert_eq!(list[rtmax as usize], format!("RTMIN+{}", rtmax - rtmin));
+    }
+}

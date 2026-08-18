@@ -1,0 +1,5 @@
+id: mojo-external-call-banned-c
+valid:
+  - "fn ok():\n    var t = external_call[\"clock_gettime\", Int]()\n"
+invalid:
+  - "fn bad(dst: UnsafePointer[UInt8, _], src: UnsafePointer[UInt8, _]):\n    _ = external_call[\"strcpy\", UnsafePointer[UInt8, MutExternalOrigin]](dst, src)\n"

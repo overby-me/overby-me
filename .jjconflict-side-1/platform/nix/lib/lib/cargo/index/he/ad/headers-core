@@ -1,0 +1,1 @@
+{"name":"headers-core","vers":"0.3.0","deps":[{"name":"http","req":"^1.0.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4","features":{},"yanked":false,"pubtime":"2023-11-24T19:13:05Z"}

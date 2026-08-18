@@ -1,0 +1,3 @@
+{
+  programs.tealdeer.enable = true;
+}

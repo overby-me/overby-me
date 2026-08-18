@@ -1,0 +1,1 @@
+{"name":"minimal-lexical","vers":"0.2.1","deps":[],"cksum":"68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a","features":{"alloc":[],"compact":[],"default":["std"],"lint":[],"nightly":[],"std":[]},"yanked":false,"pubtime":"2021-10-04T10:48:13Z"}

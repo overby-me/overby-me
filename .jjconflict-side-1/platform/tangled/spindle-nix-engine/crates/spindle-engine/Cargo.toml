@@ -1,0 +1,22 @@
+[package]
+name = "spindle-engine"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Engine trait and nix engine implementation for tangled-spindle-nix"
+
+[dependencies]
+async-trait = { workspace = true }
+hakoniwa = "1.3.1"
+hex = "0.4"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = "0.10"
+shell-escape = "0.1.5"
+spindle-models = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

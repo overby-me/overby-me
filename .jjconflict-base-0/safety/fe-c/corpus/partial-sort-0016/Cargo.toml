@@ -1,0 +1,23 @@
+[package]
+name = "partial-sort-0016"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "partial-sort-0016"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }
+partial_sort = "=0.1.1"
+
+# The bug (RUSTSEC-2023-0016) only manifests with debug-assertions OFF: the
+# `last` bound is validated by a debug_assert, elided in release. Optimize so
+# core's get_unchecked inlines into partial_sort's MIR (where the point-1 ensure
+# can see the out-of-bounds reborrow).
+[profile.dev]
+opt-level = 3
+debug-assertions = false

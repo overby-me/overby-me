@@ -1,0 +1,27 @@
+[package]
+name = "systemd-timesyncd"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-timesyncd"
+path = "src/main.rs"
+
+[dependencies]
+aead = "0.5"
+aes-siv = "0.7"
+libc = "0.2"
+log = "0.4"
+nix = { version = "0.31", features = ["process", "signal", "time"] }
+rand = "0.10"
+rustls = { version = "0.23", default-features = false, features = [
+  "ring",
+  "std",
+  "tls12",
+] }
+webpki-roots = "1"
+zbus = "5"
+
+[dev-dependencies]
+tempfile = "3"

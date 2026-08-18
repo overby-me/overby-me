@@ -1,0 +1,22 @@
+[package]
+name = "rust-grep"
+version = "0.1.0"
+edition = "2024"
+description = "A GNU grep-compatible pattern matching tool written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "grep"
+path = "src/main.rs"
+
+[dependencies]
+fancy-regex = "0.17"
+libc = "0.2"
+memmap2 = "0.9"
+regex = "1"
+rust-pcre2 = { package = "rust-pcre2", path = "../pcre2" }
+walkdir = "2"
+
+[profile.release]
+strip = true
+lto = true

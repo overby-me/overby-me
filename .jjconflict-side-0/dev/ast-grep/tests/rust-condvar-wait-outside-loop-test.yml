@@ -1,0 +1,5 @@
+id: rust-condvar-wait-outside-loop
+valid:
+  - "while !*ready { guard = cv.wait(guard).unwrap(); }"
+invalid:
+  - "let g = cv.wait(guard).unwrap();"

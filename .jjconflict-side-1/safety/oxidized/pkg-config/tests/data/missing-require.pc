@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: missing-require
+Description: A test library that depends on a non-existent package
+Version: 1.0.0
+Requires: this-package-does-not-exist >= 1.0
+Libs: -L${libdir} -lmissing-require
+Cflags: -I${includedir}/missing-require

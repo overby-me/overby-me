@@ -1,0 +1,1065 @@
+//! GraphQL subscriptions over the Hasura WebSocket endpoint
+//! (the `graphql-transport-ws` protocol), so views update live instead of
+//! polling.
+//!
+//! **One socket per client, not per subscription.** The protocol multiplexes by
+//! design — every frame carries an `id` — and this app has 13 subscribing views,
+//! so a delegate reading a motion with an open poll used to hold four to six
+//! sockets. A congress of several hundred people made that a couple of thousand
+//! connections against one Hasura, each with its own reconnect loop firing at
+//! the same moment when the venue wifi dipped. Now it is one connection per
+//! device, and a dip costs one reconnect.
+//!
+//! The hub owns the socket; hooks own only their place in its registry. That
+//! registry is what survives a reconnect: on `connection_ack` every live
+//! subscription is re-sent, and Hasura answers each with the current result, so
+//! views recover without any bookkeeping of their own.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use dioxus::core::{Runtime, RuntimeGuard};
+use dioxus::prelude::*;
+use serde_json::json;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::{MessageEvent, WebSocket};
+
+use crate::nhost::graphql_url;
+use crate::session::use_session;
+
+/// Whether a pushed payload is news, or just the state on arrival.
+///
+/// A subscription with no cursor answers immediately with everything matching
+/// it, and that first answer is what the view has just finished querying. Acting
+/// on it fetched the same rows a second time about half a second after the
+/// first, on every live view: a folder opening measured two identical children
+/// queries, 500 ms apart, for one screen that never changed.
+///
+/// Only the first. A reconnect delivers the state again, and there this counts
+/// as news on purpose: the socket was down, and what arrived while it was down
+/// is exactly what the view does not have.
+fn push_is_a_change(pushes: u32) -> bool {
+    pushes > 1
+}
+
+/// Wire a subscription to a component's refresh counter: every pushed update
+/// bumps `refresh`, so a `use_resource` keyed on it re-fetches live. This is the
+/// common pattern — the payload itself is ignored; the query just needs to
+/// cover the rows whose change should trigger a refresh. Also refreshes when the
+/// window regains focus (#122), so a view recovers immediately if its socket was
+/// dropped while the tab was in the background.
+pub fn use_live(wire: crate::graphql::Wire, mut refresh: Signal<u32>) {
+    let sub = use_graphql_subscription(wire);
+    let coalescer = use_hook(|| Rc::new(RefCell::new(Coalescer::default())));
+    let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    let pushes = use_hook(|| Rc::new(std::cell::Cell::new(0u32)));
+    let runtime = Runtime::current();
+
+    use_effect({
+        let coalescer = coalescer.clone();
+        let timer = timer.clone();
+        let pushes = pushes.clone();
+        move || {
+            // Reading the subscription signal ties this effect to each push.
+            let pushed = sub.read().is_some();
+            // The effect also runs once at mount, before anything has arrived.
+            // Refreshing then re-fetches data the view has only just loaded —
+            // two round trips per live view per device, for the same rows.
+            if !pushed {
+                return;
+            }
+            pushes.set(pushes.get() + 1);
+            if !push_is_a_change(pushes.get()) {
+                return;
+            }
+            let now = js_sys::Date::now();
+            let Some(delay) = coalescer.borrow_mut().on_push(now, js_sys::Math::random()) else {
+                // A refresh is already pending; this push rides along with it.
+                return;
+            };
+            let coalescer = coalescer.clone();
+            let runtime = runtime.clone();
+            let cb = Closure::once_into_js(move || {
+                coalescer.borrow_mut().on_fire(js_sys::Date::now());
+                let _guard = RuntimeGuard::new(runtime);
+                refresh += 1;
+            });
+            if let Some(win) = web_sys::window() {
+                if let Ok(id) = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    cb.unchecked_ref(),
+                    delay as i32,
+                ) {
+                    if let Some(old) = timer.borrow_mut().replace(id) {
+                        win.clear_timeout_with_handle(old);
+                    }
+                }
+            }
+        }
+    });
+
+    use_drop(move || {
+        if let (Some(win), Some(id)) = (web_sys::window(), timer.borrow_mut().take()) {
+            win.clear_timeout_with_handle(id);
+        }
+    });
+
+    use_focus_refresh(refresh);
+}
+
+/// A burst of pushes becomes ONE refresh, and no two devices refresh together.
+///
+/// Every push used to re-run each query the view keyed on the counter. That is
+/// fine for a document three people are editing and ruinous for a ballot: with
+/// 500 delegates on one poll, each vote cast pushed to all 500, and each push
+/// re-ran three queries — 750,000 requests for a single vote, all inside the
+/// couple of minutes people are voting, and arriving in synchronised bursts
+/// because the push reaches every device at the same instant.
+///
+/// So pushes inside a window fold into one refresh, and each refresh is spread
+/// over a random slice of the window. The result a voter sees lags by at most
+/// [`COALESCE_MS`] + [`SPREAD_MS`], which is not perceptible on a tally that
+/// changes continuously — and the server meets a trickle instead of a stampede.
+const COALESCE_MS: f64 = 1_500.0;
+
+/// How wide the herd is spread. Jitter matters more than the window: 500 devices
+/// refreshing 1.5 s apart but all at the same moment is still a burst of 500.
+const SPREAD_MS: f64 = 1_000.0;
+
+#[derive(Default)]
+struct Coalescer {
+    /// Earliest time a refresh may fire, so a settled view is not re-queried
+    /// more often than the window allows.
+    next_allowed_ms: f64,
+    /// A refresh is already scheduled; further pushes need no timer of their own.
+    scheduled: bool,
+}
+
+impl Coalescer {
+    /// The delay to schedule a refresh at, or `None` if one is already pending.
+    fn on_push(&mut self, now_ms: f64, rand: f64) -> Option<f64> {
+        if self.scheduled {
+            return None;
+        }
+        self.scheduled = true;
+        let wait = (self.next_allowed_ms - now_ms).max(0.0);
+        Some(wait + rand.clamp(0.0, 1.0) * SPREAD_MS)
+    }
+
+    fn on_fire(&mut self, now_ms: f64) {
+        self.scheduled = false;
+        self.next_allowed_ms = now_ms + COALESCE_MS;
+    }
+}
+
+/// Refresh only when a streamed row belongs to YOU.
+///
+/// A change token can only say "something under this filter changed", so every
+/// watcher of a shared scope wakes: one comment in a context refetched the post's
+/// comment list AND every open thread's replies, on every device. A stream
+/// carries the rows, so a watcher can compare `parentId` with its own and ignore
+/// the rest.
+///
+/// The list is still re-fetched rather than merged. That keeps the server as the
+/// single authority on order and contents — hand-applied deltas drift, and a
+/// comment thread is the wrong place to discover that.
+///
+/// Every watcher of the same scope sends the SAME query, so the hub folds them
+/// into one server-side subscription however many are on screen.
+pub fn use_live_children(
+    where_clause: crate::graphql::NodesBoolExp,
+    mine: String,
+    mut refresh: Signal<u32>,
+) {
+    let since = use_hook(crate::session::server_now_iso);
+    let stream = use_graphql_subscription(crate::graphql::parent_stream(where_clause, &since, 100));
+    use_effect(move || {
+        let Some(payload) = stream.read().clone() else {
+            return;
+        };
+        let touched = payload
+            .get("nodes_stream")
+            .and_then(|r| r.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .any(|r| r.get("parentId").and_then(|p| p.as_str()) == Some(mine.as_str()))
+            })
+            .unwrap_or(false);
+        if touched {
+            refresh += 1;
+        }
+    });
+}
+
+/// Bump `refresh` whenever the window regains focus (and the tab is visible), so
+/// data re-fetches on return to the app (#122). The listener is removed when the
+/// component unmounts.
+pub fn use_focus_refresh(mut refresh: Signal<u32>) {
+    let runtime = Runtime::current();
+    #[allow(clippy::type_complexity)]
+    let handle: Option<(web_sys::Window, Rc<Closure<dyn FnMut()>>)> = use_hook(move || {
+        let window = web_sys::window()?;
+        let cb = Rc::new(Closure::<dyn FnMut()>::new(move || {
+            // Skip if the tab is hidden (focus can fire on a background tab).
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .map(|d| d.hidden())
+                .unwrap_or(false);
+            if !hidden {
+                let _guard = RuntimeGuard::new(runtime.clone());
+                refresh += 1;
+            }
+        }));
+        window
+            .add_event_listener_with_callback("focus", (*cb).as_ref().unchecked_ref())
+            .ok()?;
+        Some((window, cb))
+    });
+    use_drop(move || {
+        if let Some((window, cb)) = &handle {
+            let _ = window
+                .remove_event_listener_with_callback("focus", (**cb).as_ref().unchecked_ref());
+        }
+    });
+}
+
+/// Subscribe to `query` and return a signal holding the latest `data` payload.
+///
+/// The hub connects on the first subscription and closes after the last one
+/// goes, so a signed-out reader with no live views holds no socket at all.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the wire moves into the subscription task spawned inside; the capture is through hook macros the lint cannot see"
+)]
+pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<serde_json::Value>> {
+    // Subscribing to the session hook keeps this component in the reactive
+    // graph; the fresh token itself is re-read at each (re)connect below.
+    let _session = use_session();
+    let data = use_signal(|| None::<serde_json::Value>);
+
+    let handle = use_hook(|| {
+        Hub::subscribe(
+            wire.query.clone(),
+            wire.variables.clone(),
+            data,
+            Runtime::current(),
+        )
+    });
+
+    use_drop(move || {
+        // Deregister BEFORE anything else: a frame already in flight for this id
+        // must not find a signal whose scope is being torn down.
+        Hub::unsubscribe(&handle);
+    });
+
+    data
+}
+
+/// One live subscription: the query text, the variables it was started with, and
+/// every listener waiting on it paired with its own id.
+type LiveSub<S> = (String, serde_json::Value, Vec<(u64, S)>);
+
+/// Which subscriptions exist on the socket, and who is listening to each.
+///
+/// Two components asking the same question cost ONE subscription. Hasura runs a
+/// live query per registration and re-executes it on a timer, so a document with
+/// forty comments — each reaction bar watching the same context — meant forty
+/// live queries per device, and five hundred devices in a hall meant twenty
+/// thousand against one server. Identical queries share, which is exactly what
+/// makes a context-wide watch cheaper than a per-row one rather than the same.
+///
+/// Generic over the sink so the bookkeeping can be tested without a renderer.
+struct Registry<S> {
+    /// Server-side subscription id -> the query, its variables, and everyone
+    /// waiting on it.
+    subs: HashMap<String, LiveSub<S>>,
+    /// Query text AND variables -> the id already carrying it. Both, because two
+    /// components can now send the same query for different rows: one canvas and
+    /// another are the same operation with a different id in the variables, and
+    /// folding them together would cross their traffic.
+    by_query: HashMap<String, String>,
+    next_id: u64,
+    next_sink: u64,
+}
+
+impl<S> Default for Registry<S> {
+    fn default() -> Self {
+        Registry {
+            subs: HashMap::new(),
+            by_query: HashMap::new(),
+            next_id: 0,
+            next_sink: 0,
+        }
+    }
+}
+
+/// One listener's place in the registry.
+#[derive(Clone, Debug, PartialEq)]
+struct Handle {
+    id: String,
+    sink: u64,
+}
+
+impl<S> Registry<S> {
+    /// Add a listener. Returns its handle, and the query to SEND if this is the
+    /// first listener for it — `None` means the socket already carries it.
+    fn register(
+        &mut self,
+        query: String,
+        variables: serde_json::Value,
+        sink: S,
+    ) -> (Handle, Option<(String, serde_json::Value)>) {
+        self.next_sink += 1;
+        let sink_id = self.next_sink;
+        let key = format!("{query}\u{1}{variables}");
+        if let Some(id) = self.by_query.get(&key).cloned() {
+            if let Some((_, _, sinks)) = self.subs.get_mut(&id) {
+                sinks.push((sink_id, sink));
+                return (Handle { id, sink: sink_id }, None);
+            }
+        }
+        self.next_id += 1;
+        let id = self.next_id.to_string();
+        self.subs.insert(
+            id.clone(),
+            (query.clone(), variables.clone(), vec![(sink_id, sink)]),
+        );
+        self.by_query.insert(key, id.clone());
+        (Handle { id, sink: sink_id }, Some((query, variables)))
+    }
+
+    /// Remove a listener. Returns the id to send `complete` for once the last
+    /// listener for that query is gone.
+    fn deregister(&mut self, handle: &Handle) -> Option<String> {
+        let (key, empty) = {
+            let (query, variables, sinks) = self.subs.get_mut(&handle.id)?;
+            sinks.retain(|(s, _)| *s != handle.sink);
+            (format!("{query}\u{1}{variables}"), sinks.is_empty())
+        };
+        if !empty {
+            return None;
+        }
+        self.subs.remove(&handle.id);
+        self.by_query.remove(&key);
+        Some(handle.id.clone())
+    }
+
+    /// Every live (id, query), for re-sending after a reconnect.
+    fn live(&self) -> Vec<(String, String, serde_json::Value)> {
+        self.subs
+            .iter()
+            .map(|(id, (q, v, _))| (id.clone(), q.clone(), v.clone()))
+            .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.subs.is_empty()
+    }
+}
+
+/// The single connection, and every subscription riding on it.
+#[derive(Default)]
+struct HubState {
+    ws: Option<WebSocket>,
+    /// Set on `connection_ack`. Subscribe frames sent before that are dropped by
+    /// the server, so they wait for it and go out together.
+    acked: bool,
+    /// Consecutive failed attempts since the last ack (drives the backoff);
+    /// reset to 0 once a connection acks.
+    attempts: u32,
+    /// Handle of a scheduled reconnect, so it can be cancelled.
+    timeout: Option<i32>,
+    /// Set while a connect is waiting on a token refresh, i.e. after it has
+    /// committed to opening a socket but before the socket exists.
+    ///
+    /// Without it that gap reads as "no socket, no reconnect pending", which is
+    /// exactly the condition [`Hub::ensure_connected`] treats as its cue to open
+    /// one. A view mounting during the refresh would open a second connection.
+    connecting: bool,
+    /// Handle of the scheduled pre-emptive reconnect, so it can be cancelled
+    /// when the socket goes down for any other reason.
+    renew: Option<i32>,
+    subs: Registry<Signal<Option<serde_json::Value>>>,
+    runtime: Option<Rc<Runtime>>,
+}
+
+thread_local! {
+    static HUB: Rc<RefCell<HubState>> = Rc::new(RefCell::new(HubState::default()));
+}
+
+/// Namespace for the hub's operations; the state itself is thread-local, since
+/// wasm is single-threaded and there is exactly one connection per document.
+struct Hub;
+
+impl Hub {
+    fn with<R>(f: impl FnOnce(&mut HubState) -> R) -> R {
+        HUB.with(|h| f(&mut h.borrow_mut()))
+    }
+
+    /// Register a listener, connecting if this is the first one. A query the
+    /// socket already carries costs nothing but a place in its listener list.
+    fn subscribe(
+        query: String,
+        variables: serde_json::Value,
+        sink: Signal<Option<serde_json::Value>>,
+        runtime: Rc<Runtime>,
+    ) -> Handle {
+        let (handle, to_send, acked) = Self::with(|st| {
+            st.runtime.get_or_insert(runtime);
+            let (handle, to_send) = st.subs.register(query, variables, sink);
+            (handle, to_send, st.acked)
+        });
+        match (to_send, acked) {
+            // New to the socket, and the socket is ready for it.
+            (Some((query, variables)), true) => {
+                Self::send_subscribe(&handle.id, &query, &variables)
+            }
+            // New, but the socket is not up yet: `connection_ack` sends it.
+            (Some(_), false) => Self::ensure_connected(),
+            // Already carried; the existing subscription feeds this sink too.
+            (None, _) => {}
+        }
+        handle
+    }
+
+    /// Drop a listener, ending the subscription once its last one goes, and
+    /// closing the socket once no subscriptions are left.
+    fn unsubscribe(handle: &Handle) {
+        let (ended, idle) = Self::with(|st| {
+            let ended = st.subs.deregister(handle);
+            let idle = st.subs.is_empty();
+            (ended, idle)
+        });
+        if let Some(id) = ended {
+            Self::send(&json!({ "id": id, "type": "complete" }));
+        }
+        if idle {
+            Self::with(|st| {
+                if let (Some(win), Some(t)) = (web_sys::window(), st.timeout.take()) {
+                    win.clear_timeout_with_handle(t);
+                }
+                st.acked = false;
+                st.attempts = 0;
+                st.ws.take()
+            })
+            .map(|ws| ws.close());
+        }
+    }
+
+    fn send(msg: &serde_json::Value) {
+        let ws = Self::with(|st| st.ws.clone());
+        if let Some(ws) = ws {
+            let _ = ws.send_with_str(&msg.to_string());
+        }
+    }
+
+    fn send_subscribe(id: &str, query: &str, variables: &serde_json::Value) {
+        Self::send(&json!({
+            "id": id,
+            "type": "subscribe",
+            "payload": { "query": query, "variables": variables },
+        }));
+    }
+
+    /// Open the socket unless one is already open, a reconnect is pending, or a
+    /// connect is mid-refresh.
+    fn ensure_connected() {
+        let needed = Self::with(|st| st.ws.is_none() && st.timeout.is_none() && !st.connecting);
+        if needed {
+            Self::connect();
+        }
+    }
+
+    /// The stored access token, when it is too near expiry to open a socket
+    /// with. `None` means go ahead: either it is good for a while yet, or there
+    /// is no session and this connection is anonymous.
+    fn token_past_use() -> Option<String> {
+        let runtime = Self::with(|st| st.runtime.clone())?;
+        // Sync, so the guard never spans an await.
+        let _guard = RuntimeGuard::new(runtime);
+        let session = crate::session::SESSION.peek();
+        let token = session.access_token.clone()?;
+        past_use(session.access_token_expires_at, js_sys::Date::now()).then_some(token)
+    }
+
+    /// Connect, replacing the access token first if it has nothing left.
+    ///
+    /// NEVER PRESENT A TOKEN THAT HAS ALREADY LAPSED. Hasura answers one with
+    /// `conn_err: JWTExpired` and closes; `on_close` schedules another attempt;
+    /// that attempt re-reads the SAME dead token from the session and is closed
+    /// on in turn. The socket then retries on backoff until something entirely
+    /// unrelated (a failed query, or the background loop's next pass up to 45s
+    /// later) happens to refresh it. In the server log this is a `conn_err` four
+    /// seconds ahead of the HTTP queries that eventually fixed it.
+    ///
+    /// EXACTLY ONE REFRESH PER ATTEMPT, by construction: the refreshed path goes
+    /// straight to `open_socket`, which never looks again. A refresh that fails
+    /// still opens the socket, and a rejected handshake is then handled the way
+    /// it always was, with backoff. So this cannot spin even if the refresh
+    /// never produces a usable token.
+    fn connect() {
+        let Some(stale) = Self::token_past_use() else {
+            Self::open_socket();
+            return;
+        };
+        let Some(runtime) = Self::with(|st| st.runtime.clone()) else {
+            Self::open_socket();
+            return;
+        };
+        Self::with(|st| st.connecting = true);
+        log::info!("subscription hub: refreshing a lapsed token before connecting");
+        // The guard covers the SPAWN, not the await. `spawn_forever` hands the
+        // future to Dioxus, which polls it with the runtime already entered, so
+        // the SESSION reads and writes inside `ensure_fresh_token` are legal
+        // without a guard being held across a suspension point.
+        let _guard = RuntimeGuard::new(runtime);
+        dioxus::core::spawn_forever(async move {
+            crate::session::ensure_fresh_token(Some(&stale)).await;
+            Self::open_socket();
+        });
+    }
+
+    fn open_socket() {
+        Self::with(|st| st.connecting = false);
+        let ws_url = graphql_url()
+            .replacen("https://", "wss://", 1)
+            .replacen("http://", "ws://", 1);
+        let Ok(ws) = WebSocket::new_with_str(&ws_url, "graphql-transport-ws") else {
+            // Could not even create the socket (e.g. offline): retry later.
+            Self::schedule_reconnect();
+            return;
+        };
+        Self::with(|st| st.ws = Some(ws.clone()));
+        log::info!("subscription hub: connecting");
+
+        // onopen -> connection_init. The bearer token is re-read from the session
+        // at every (re)connect: a token captured at mount goes stale within
+        // minutes (NHost tokens live ~15 min), so a reconnect hours in must not
+        // reuse it.
+        let on_open = {
+            let ws = ws.clone();
+            Closure::<dyn FnMut()>::new(move || {
+                let creds = Self::with(|st| st.runtime.clone()).map(|runtime| {
+                    // The callback runs outside the Dioxus runtime; the guard
+                    // makes reading the SESSION global legal here.
+                    let _guard = RuntimeGuard::new(runtime);
+                    let session = crate::session::SESSION.peek();
+                    (
+                        session.access_token.clone(),
+                        session.access_token_expires_at,
+                    )
+                });
+                let (token, expires_at) = creds.unwrap_or((None, None));
+                let payload = match token {
+                    Some(t) => json!({ "headers": { "Authorization": format!("Bearer {t}") } }),
+                    None => json!({}),
+                };
+                let init = json!({ "type": "connection_init", "payload": payload });
+                let _ = ws.send_with_str(&init.to_string());
+                // THE SOCKET'S EXPIRY, NOT THE SESSION'S. Hasura pins the
+                // connection to the token presented right here: refreshing later
+                // does the socket no good, because there is no way to hand it the
+                // new one. So the moment the token goes in, its deadline is
+                // recorded and the connection is replaced before it arrives.
+                Self::schedule_renew(expires_at);
+            })
+        };
+        ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+
+        let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
+            let Some(txt) = e.data().as_string() else {
+                return;
+            };
+            let Ok(msg) = serde_json::from_str::<serde_json::Value>(&txt) else {
+                return;
+            };
+            let id = msg.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            match msg.get("type").and_then(|t| t.as_str()) {
+                Some("connection_ack") => {
+                    // Every live subscription goes out now, including any that
+                    // were registered while the socket was down. Hasura answers
+                    // each with the current result, which is what makes a
+                    // reconnect self-healing for the views.
+                    let pending: Vec<(String, String, serde_json::Value)> = Self::with(|st| {
+                        st.acked = true;
+                        st.attempts = 0;
+                        st.subs.live()
+                    });
+                    for (id, query, variables) in pending {
+                        Self::send_subscribe(&id, &query, &variables);
+                    }
+                }
+                // Keepalive: the server pings, we pong (graphql-transport-ws).
+                Some("ping") => Self::send(&json!({ "type": "pong" })),
+                Some("next") => {
+                    let Some(d) = msg.get("payload").and_then(|p| p.get("data")) else {
+                        return;
+                    };
+                    let target = Self::with(|st| {
+                        let sinks: Vec<_> = st
+                            .subs
+                            .subs
+                            .get(id)
+                            .map(|(_, _, sinks)| sinks.iter().map(|(_, s)| *s).collect())
+                            .unwrap_or_default();
+                        st.runtime.clone().map(|rt| (sinks, rt))
+                    });
+                    if let Some((sinks, runtime)) = target {
+                        let _guard = RuntimeGuard::new(runtime);
+                        for mut sink in sinks {
+                            sink.set(Some(d.clone()));
+                        }
+                    }
+                }
+                // A subscription the server refuses or ends. Rare, and previously
+                // invisible: the view would simply stop updating with no trace.
+                Some("error") => {
+                    let detail = msg
+                        .get("payload")
+                        .map(|p| p.to_string())
+                        .unwrap_or_default();
+                    // `error`, not `warn`. A refused subscription is a view that
+                    // has silently stopped updating, and these queries are built
+                    // as strings with nothing to check them before the server
+                    // does. One shipped double-wrapped and every reader of the
+                    // feed lost live updates; it surfaced only because somebody
+                    // pasted a warning nobody was filtering for.
+                    //
+                    // EXCEPT the duplicate, which is the one refusal that costs
+                    // the reader nothing. "an operation already exists with this
+                    // id" says the server is ALREADY running that subscription,
+                    // so what it turned down is the second copy and the first is
+                    // still delivering. The view is live; only the extra frame
+                    // was refused.
+                    //
+                    // It reached the log as an error with a stack, from a reader
+                    // on 3g moving between two pages. Worth keeping on the
+                    // console, because sending a subscribe twice for one id is a
+                    // client-side race and this is the only sign of it -- but it
+                    // is not the thing the level above was written for, which is
+                    // a view that has gone dead.
+                    if detail.contains("already exists with this id") {
+                        log::info!("subscription {id} already running, duplicate refused");
+                    } else {
+                        log::error!("subscription {id} refused: {detail}");
+                    }
+                }
+                _ => {}
+            }
+        });
+        ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+
+        // onclose -> reconnect while anything still wants data. Errors also end
+        // in onclose, so scheduling only here avoids double reconnects.
+        let on_close = Closure::<dyn FnMut()>::new(move || {
+            // Whether this close was the renewal's doing or the network's, the
+            // timer belongs to a socket that no longer exists.
+            Self::cancel_renew();
+            let wanted = Self::with(|st| {
+                st.acked = false;
+                st.ws = None;
+                !st.subs.is_empty()
+            });
+            if wanted {
+                Self::schedule_reconnect();
+            }
+        });
+        ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
+
+        // The socket owns these callbacks for its lifetime; leak them (three
+        // small closures per connection, and there is now one connection).
+        on_open.forget();
+        on_message.forget();
+        on_close.forget();
+    }
+
+    /// Replace the connection shortly before the token it was opened with runs
+    /// out, instead of waiting to be closed on.
+    ///
+    /// Hasura evicts a socket the moment its token expires, and the client
+    /// cannot re-authenticate one in place: `graphql-transport-ws` has no frame
+    /// for it, and the credential is fixed at `connection_init`. Everything the
+    /// client could do until now happened AFTER the eviction, so every reader
+    /// produced one `conn_err` plus one reconnect per token lifetime. At a
+    /// congress that is several hundred of them every fifteen minutes, each
+    /// costing up to a backoff of stale tally, all of it avoidable by moving
+    /// first.
+    ///
+    /// Closing is the whole action: `on_close` schedules the reconnect, and
+    /// `connect` refreshes the token because [`past_use`] uses this same lead
+    /// time. The two constants have to agree, or the reconnect would re-present
+    /// the nearly-dead token and be back here immediately.
+    fn schedule_renew(expires_at: Option<f64>) {
+        Self::cancel_renew();
+        let Some(expires_at) = expires_at else {
+            return; // Anonymous connection: nothing expires, nothing to renew.
+        };
+        // Floored, so a token that could not be refreshed retries at a sane
+        // pace instead of spinning: without it an already-stale expiry gives a
+        // delay of zero and the socket reconnects as fast as it can.
+        Self::schedule_renew_in(
+            (expires_at - js_sys::Date::now() - RENEW_LEAD_MS).max(RENEW_MIN_MS),
+        );
+    }
+
+    /// Arm the renewal timer `delay` ms from now.
+    fn schedule_renew_in(delay: f64) {
+        let cb = Closure::once_into_js(move || {
+            Self::with(|st| st.renew = None);
+            // NOT WHILE THE PAGE IS HIDDEN. Renewing ends in a token refresh,
+            // and `run_token_refresh` refuses to start one on the way into the
+            // background for a reason it states plainly: NHost rotates the token
+            // server-side BEFORE it answers, so a request iOS kills in flight
+            // leaves this tab holding a dead one and the next attempt signs a
+            // perfectly good session out. This timer was a second way in with no
+            // such guard, and a phone is exactly where it fires unseen.
+            //
+            // Nothing is lost by waiting. A socket nobody is watching carries
+            // rows to a screen nobody is looking at; the reconnect that follows
+            // the tab coming back delivers the current state anyway. So try
+            // again shortly rather than closing now.
+            if page_hidden() {
+                Self::schedule_renew_in(RENEW_MIN_MS);
+                return;
+            }
+            let ws = Self::with(|st| st.ws.clone());
+            if let Some(ws) = ws {
+                log::info!("subscription hub: renewing the connection before its token expires");
+                // `on_close` takes it from here, which keeps one path for every
+                // way a socket ends.
+                let _ = ws.close();
+            }
+        });
+        if let Some(win) = web_sys::window() {
+            if let Ok(id) = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.unchecked_ref(),
+                delay as i32,
+            ) {
+                Self::with(|st| st.renew = Some(id));
+            }
+        }
+    }
+
+    fn cancel_renew() {
+        let old = Self::with(|st| st.renew.take());
+        if let (Some(win), Some(id)) = (web_sys::window(), old) {
+            win.clear_timeout_with_handle(id);
+        }
+    }
+
+    /// Schedule the next [`Self::connect`] with capped exponential backoff plus
+    /// jitter, storing the handle so an idle hub can cancel it.
+    fn schedule_reconnect() {
+        let delay = Self::with(|st| {
+            let d = backoff_delay_ms(st.attempts, js_sys::Math::random());
+            st.attempts = st.attempts.saturating_add(1);
+            d
+        });
+        let cb = Closure::once_into_js(move || {
+            let wanted = Self::with(|st| {
+                st.timeout = None;
+                !st.subs.is_empty()
+            });
+            if wanted {
+                Self::connect();
+            }
+        });
+        if let Some(win) = web_sys::window() {
+            if let Ok(id) =
+                win.set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), delay)
+            {
+                Self::with(|st| st.timeout = Some(id));
+            }
+        }
+    }
+}
+
+/// Whether the page is backgrounded.
+///
+/// `session.rs` keeps its own copy for the same purpose; this is the second
+/// place that must not start a token refresh on the way into the background.
+fn page_hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| d.hidden())
+}
+
+/// How much life a token must have left to be worth opening a socket with, and
+/// equally how long before expiry a live connection is replaced.
+///
+/// ONE CONSTANT FOR BOTH, deliberately. [`Hub::schedule_renew`] closes the
+/// socket this far ahead of its token's expiry, and the reconnect that follows
+/// asks [`past_use`] whether to refresh first. If the renewal fired earlier than
+/// this threshold, the reconnect would decide the token was still fine, present
+/// the same nearly-dead credential, and be closed on again a minute later. Two
+/// numbers drifting apart would turn the fix into the loop it removes.
+///
+/// A minute is long next to the handshake it must cover and short next to the
+/// ~15 minutes a token lives, so it costs one extra refresh per token at most.
+const RENEW_LEAD_MS: f64 = 60_000.0;
+
+/// Never schedule a renewal sooner than this. A token that could not be
+/// refreshed has an expiry already in the past, which would otherwise compute a
+/// delay of zero and spin the socket as fast as the browser allows.
+const RENEW_MIN_MS: f64 = 30_000.0;
+
+/// Whether a token expiring at `expires_at` is too far gone to open a socket
+/// with.
+///
+/// No recorded expiry is NOT past use. It means nobody knows, and the honest
+/// move is to try the token rather than refresh on every single connect, which
+/// would put an auth round trip in front of every reconnect in a dropout.
+fn past_use(expires_at: Option<f64>, now: f64) -> bool {
+    expires_at.is_some_and(|exp| now + RENEW_LEAD_MS >= exp)
+}
+
+/// Backoff for the nth consecutive failure: 1s, 2s, 4s … capped at 30s, spread
+/// by ±25%.
+///
+/// The jitter is the point at scale. Everyone in a hall shares one access point,
+/// so a dip drops every device at the same instant; without spreading, they all
+/// come back at the same instant too, and the server meets one synchronised
+/// stampede after another. `rand` is a 0..1 sample, passed in so this is pure and
+/// testable.
+fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
+    let exp = attempts.min(5); // 2^5 * 1s = 32s pre-cap
+    let base = ((1u32 << exp) * 1_000).min(30_000) as f64;
+    let jitter = 0.75 + rand.clamp(0.0, 1.0) * 0.5;
+    (base * jitter) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        backoff_delay_ms, past_use, push_is_a_change, Coalescer, Registry, COALESCE_MS,
+        RENEW_LEAD_MS, SPREAD_MS,
+    };
+
+    /// The reconnect loop this exists to break: a token that expired while the
+    /// socket was open must not be presented to the next attempt.
+    #[test]
+    fn a_token_that_has_already_lapsed_is_never_worth_connecting_with() {
+        let now = 1_000_000.0;
+
+        assert!(past_use(Some(now - 1.0), now), "expired a moment ago");
+        assert!(past_use(Some(now), now), "expiring exactly now");
+        // Still nominally alive, but not for long enough to be worth a socket.
+        assert!(past_use(Some(now + RENEW_LEAD_MS - 1.0), now));
+    }
+
+    /// The renewal and the connect check must read the same threshold.
+    ///
+    /// `schedule_renew` closes the socket `RENEW_LEAD_MS` before its token
+    /// expires, and the reconnect that follows asks `past_use` whether to
+    /// refresh first. Were the renewal to fire while `past_use` still called the
+    /// token good, the reconnect would present the same dying credential and be
+    /// evicted again a minute later: the exact loop this replaced, rebuilt out
+    /// of two constants that disagree.
+    #[test]
+    fn a_renewed_connection_always_refreshes_before_it_reconnects() {
+        let now = 1_000_000.0;
+        let expires_at = now + 900_000.0;
+        // The instant the renewal fires for a token expiring at `expires_at`.
+        let at_renewal = expires_at - RENEW_LEAD_MS;
+
+        assert!(
+            past_use(Some(expires_at), at_renewal),
+            "the renewal must hand the reconnect a token it considers spent"
+        );
+    }
+
+    /// The other half: refreshing when there is no need would put an auth round
+    /// trip in front of every reconnect, and a dropout is many reconnects.
+    #[test]
+    fn a_token_with_life_left_is_used_as_it_is() {
+        let now = 1_000_000.0;
+
+        assert!(!past_use(Some(now + RENEW_LEAD_MS + 1.0), now));
+        assert!(
+            !past_use(Some(now + 900_000.0), now),
+            "fresh from a refresh"
+        );
+        // Nobody recorded an expiry, so nobody knows it is dead. Try it.
+        assert!(!past_use(None, now));
+    }
+
+    /// The state on arrival is not a change to it.
+    ///
+    /// A cursorless subscription answers with everything it matches the moment
+    /// it connects, and the view has just queried exactly those rows. Treating
+    /// that as news meant every live view fetched twice on open. A reconnect
+    /// delivers the state again and DOES count: what changed while the socket
+    /// was down is what the view is missing.
+    #[test]
+    fn the_first_payload_is_the_state_not_a_change() {
+        assert!(!push_is_a_change(0), "nothing has arrived yet");
+        assert!(!push_is_a_change(1), "the state the view just fetched");
+        assert!(push_is_a_change(2), "something actually changed");
+        assert!(push_is_a_change(9));
+    }
+
+    /// A burst of pushes costs one refresh, not one per push.
+    ///
+    /// This is the ballot case: 500 votes cast in two minutes, each pushing to
+    /// every device on the poll. Without folding, each device ran three queries
+    /// per vote.
+    #[test]
+    fn a_burst_of_pushes_schedules_exactly_one_refresh() {
+        let mut c = Coalescer::default();
+        let scheduled: Vec<f64> = (0..100)
+            .filter_map(|i| c.on_push(1_000.0 + i as f64 * 5.0, 0.5))
+            .collect();
+        assert_eq!(scheduled.len(), 1, "a burst must fold into one refresh");
+        // ...and once it fires, the view is live again for the next burst.
+        c.on_fire(2_000.0);
+        assert!(c.on_push(4_000.0, 0.5).is_some());
+    }
+
+    /// Two devices given different random draws refresh at different moments.
+    ///
+    /// The window alone does not help when a push reaches 500 devices at the
+    /// same instant: they would simply burst 1.5 s later, together.
+    #[test]
+    fn refreshes_are_spread_across_the_herd() {
+        let delay = |rand| {
+            Coalescer::default()
+                .on_push(0.0, rand)
+                .expect("first push schedules")
+        };
+        assert_eq!(delay(0.0), 0.0);
+        assert_eq!(delay(1.0), SPREAD_MS);
+        assert!(
+            delay(0.25) < delay(0.75),
+            "the draw must actually spread devices"
+        );
+    }
+
+    /// A refresh always arrives, and always within the promised window.
+    #[test]
+    fn a_refresh_is_never_delayed_beyond_the_window() {
+        let mut c = Coalescer::default();
+        c.on_fire(0.0); // a refresh just happened: the next one waits out the window
+        let d = c
+            .on_push(1.0, 1.0)
+            .expect("a push after a fire still schedules");
+        assert!(d <= COALESCE_MS + SPREAD_MS, "delay {d} exceeds the window");
+        assert!(d >= COALESCE_MS - 1.0, "must respect the cooldown, got {d}");
+    }
+
+    /// The same question asked twice costs one subscription.
+    ///
+    /// Forty reaction bars on one document each watched the same context. Every
+    /// registration is a live query Hasura re-runs on a timer, so sharing is the
+    /// difference between one and forty per device — and between 500 and 20,000
+    /// in a hall.
+    #[test]
+    fn identical_queries_share_one_subscription() {
+        let mut r: Registry<u32> = Registry::default();
+        let v = serde_json::json!({"whereClause": {"parentId": {"_eq": "a"}}});
+        let (h1, send1) = r.register("sub A".into(), v.clone(), 1);
+        let (h2, send2) = r.register("sub A".into(), v.clone(), 2);
+        assert!(send1.is_some(), "the first must go to the server");
+        assert_eq!(send2, None, "the second must ride along");
+        assert_eq!(h1.id, h2.id, "both listen to the same subscription");
+        assert_eq!(r.live().len(), 1);
+        let sinks: Vec<u32> = r.subs[&h1.id].2.iter().map(|(_, s)| *s).collect();
+        assert_eq!(sinks, vec![1, 2]);
+    }
+
+    /// The same query with DIFFERENT variables is a different subscription.
+    ///
+    /// This is what typed operations changed: the filter used to be baked into
+    /// the query string, so two canvases were two strings. Now they are one
+    /// string and two variable sets, and folding them together would have crossed
+    /// their traffic — one canvas painting the other.
+    #[test]
+    fn the_same_query_with_other_variables_does_not_share() {
+        let mut r: Registry<u32> = Registry::default();
+        let (h1, send1) = r.register(
+            "sub A".into(),
+            serde_json::json!({"whereClause": {"parentId": {"_eq": "canvas-1"}}}),
+            1,
+        );
+        let (h2, send2) = r.register(
+            "sub A".into(),
+            serde_json::json!({"whereClause": {"parentId": {"_eq": "canvas-2"}}}),
+            2,
+        );
+        assert!(
+            send1.is_some() && send2.is_some(),
+            "both must reach the server"
+        );
+        assert_ne!(h1.id, h2.id, "two canvases are two subscriptions");
+        assert_eq!(r.live().len(), 2);
+    }
+
+    /// A shared subscription ends only when its LAST listener goes.
+    #[test]
+    fn a_shared_subscription_outlives_its_first_listener() {
+        let mut r: Registry<u32> = Registry::default();
+        let v = serde_json::json!({"x": 1});
+        let (h1, _) = r.register("sub A".into(), v.clone(), 1);
+        let (h2, _) = r.register("sub A".into(), v.clone(), 2);
+        assert_eq!(
+            r.deregister(&h1),
+            None,
+            "one listener leaving must not end it"
+        );
+        assert!(!r.is_empty());
+        assert_eq!(r.deregister(&h2).as_deref(), Some(h1.id.as_str()));
+        assert!(
+            r.is_empty(),
+            "the socket may close once nothing is listening"
+        );
+        // And the query is free to be registered afresh afterwards.
+        let (_, send) = r.register("sub A".into(), v, 3);
+        assert!(send.is_some());
+    }
+
+    /// Deregistering twice (or an unknown handle) is harmless.
+    #[test]
+    fn deregistering_an_unknown_listener_is_a_no_op() {
+        let mut r: Registry<u32> = Registry::default();
+        let (h, _) = r.register("sub A".into(), serde_json::Value::Null, 1);
+        assert!(r.deregister(&h).is_some());
+        assert_eq!(r.deregister(&h), None);
+    }
+
+    /// A bad random sample cannot produce a negative delay (setTimeout would
+    /// fire immediately, re-creating the stampede it exists to prevent).
+    #[test]
+    fn a_bad_random_draw_is_clamped() {
+        assert_eq!(Coalescer::default().on_push(0.0, -3.0), Some(0.0));
+        assert_eq!(Coalescer::default().on_push(0.0, 9.0), Some(SPREAD_MS));
+    }
+
+    #[test]
+    fn backoff_doubles_then_caps() {
+        // Mid-jitter (rand 0.5) is the base delay exactly.
+        assert_eq!(backoff_delay_ms(0, 0.5), 1_000);
+        assert_eq!(backoff_delay_ms(1, 0.5), 2_000);
+        assert_eq!(backoff_delay_ms(2, 0.5), 4_000);
+        assert_eq!(backoff_delay_ms(5, 0.5), 30_000);
+        // Beyond the cap it stays there rather than growing without bound.
+        assert_eq!(backoff_delay_ms(50, 0.5), 30_000);
+    }
+
+    #[test]
+    fn jitter_spreads_the_stampede() {
+        // A hall full of devices dropped at the same instant must not return at
+        // the same instant: the window is ±25% and never zero.
+        let lo = backoff_delay_ms(3, 0.0);
+        let hi = backoff_delay_ms(3, 1.0);
+        assert_eq!(lo, 6_000);
+        assert_eq!(hi, 10_000);
+        assert!(lo < hi, "jitter must actually spread the retries");
+    }
+
+    #[test]
+    fn jitter_input_is_clamped() {
+        // A bad sample cannot produce a negative or absurd delay.
+        assert_eq!(backoff_delay_ms(0, -5.0), 750);
+        assert_eq!(backoff_delay_ms(0, 5.0), 1_250);
+    }
+}

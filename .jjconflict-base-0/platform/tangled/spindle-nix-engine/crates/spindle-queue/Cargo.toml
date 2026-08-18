@@ -1,0 +1,14 @@
+[package]
+name = "spindle-queue"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded job queue with configurable workers for tangled-spindle-nix"
+
+[dependencies]
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }

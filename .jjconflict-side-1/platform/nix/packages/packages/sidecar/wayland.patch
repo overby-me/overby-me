@@ -1,0 +1,41 @@
+diff --git a/crates/sidecar/src/main.rs b/crates/sidecar/src/main.rs
+index 4b9759d..c526d8e 100644
+--- a/crates/sidecar/src/main.rs
++++ b/crates/sidecar/src/main.rs
+@@ -17,6 +17,8 @@ use tao::{
+     event::{Event, WindowEvent},
+     event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
+     window::{Window, WindowBuilder},
+ };
++#[cfg(target_os = "linux")]
++use tao::platform::unix::WindowExtUnix;
+ use wry::{
+     http::{Method, Request, Response},
+@@ -166,7 +168,7 @@ async fn run(
+     })
+     .detach();
+ 
+-    let webview = WebViewBuilder::new()
++    let webview_builder = WebViewBuilder::new()
+         .with_devtools(true)
+         .with_asynchronous_custom_protocol("sidecar".into(), move |_webview_id, req, responder| {
+             if let (&Method::POST, "/message") = (req.method(), req.uri().path()) {
+@@ -207,8 +209,16 @@ async fn run(
+                 }
+             }
+         })
+-        .with_url("sidecar://localhost")
+-        .build(&window)?;
++        .with_url("sidecar://localhost");
++
++    #[cfg(target_os = "linux")]
++    let webview = {
++        use wry::WebViewBuilderExtUnix;
++        webview_builder.build_gtk(window.default_vbox().unwrap())?
++    };
++
++    #[cfg(not(target_os = "linux"))]
++    let webview = webview_builder.build(&window)?;
+ 
+     let event_loop_proxy = event_loop.create_proxy();
+ 

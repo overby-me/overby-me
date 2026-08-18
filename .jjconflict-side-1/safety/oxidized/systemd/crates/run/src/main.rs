@@ -1,0 +1,1320 @@
+//! systemd-run — Run a command as a transient service or scope unit.
+//!
+//! A drop-in replacement for `systemd-run(1)`. This tool creates a
+//! transient `.service` or `.scope` unit and runs the specified command
+//! within it.
+//!
+//! When full D-Bus/control-socket integration with the service manager is
+//! not yet available, systemd-run falls back to direct execution with the
+//! requested properties applied at the process level (user/group switching,
+//! environment setup, etc.).
+//!
+//! Supported options:
+//!
+//! - `--scope`            — Run as a scope unit instead of a service unit
+//! - `--unit=NAME`        — Use NAME as the transient unit name
+//! - `--description=TEXT` — Set a description for the transient unit
+//! - `--slice=SLICE`      — Place the unit in the specified slice
+//! - `--property=PROP`    — Set a unit property (can be specified multiple times)
+//! - `--service-type=TYPE`— Set the service type (simple, forking, oneshot, etc.)
+//! - `--uid=USER`         — Run the command as the specified user
+//! - `--gid=GROUP`        — Run the command with the specified group
+//! - `-t`, `--pty`        — Request a pseudo-TTY for the command
+//! - `--pipe`             — Use pipe for stdin/stdout/stderr
+//! - `-S`, `--shell`      — Start a shell if no command is given
+//! - `--wait`             — Wait for the unit to finish and show its result
+//! - `--collect`          — Unload the unit after it finished (even if failed)
+//! - `--working-directory`— Set the working directory for the command
+//! - `-E`, `--setenv`     — Set environment variables for the command
+//! - `--remain-after-exit`— Keep the unit around after the process exits
+//! - `--send-sighup`      — Send SIGHUP to remaining processes after main exits
+//! - `--no-block`         — Do not wait for the unit to start
+//! - `--on-active=`       — Define a timer that activates after a delay
+//! - `--on-boot=`         — Define a timer relative to boot
+//! - `--on-calendar=`     — Define a calendar timer
+//! - `--timer-property=`  — Set a property on the timer unit
+
+use clap::Parser;
+use std::ffi::CString;
+use std::os::unix::process::CommandExt;
+use std::process;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "systemd-run",
+    about = "Run programs in transient scope or service units",
+    version,
+    trailing_var_arg = true
+)]
+struct Cli {
+    /// Run as a scope unit instead of a service unit.
+    #[arg(long)]
+    scope: bool,
+
+    /// Use the specified unit name for the transient unit.
+    #[arg(short = 'u', long, value_name = "NAME")]
+    unit: Option<String>,
+
+    /// Set a human-readable description for the unit. Can be specified multiple times; the last value wins.
+    #[arg(long, value_name = "TEXT")]
+    description: Vec<String>,
+
+    /// Place the transient unit in the specified slice.
+    #[arg(long, value_name = "SLICE")]
+    slice: Option<String>,
+
+    /// Inherit the slice from the caller, prefixing any --slice= value.
+    #[arg(long)]
+    slice_inherit: bool,
+
+    /// Set a unit property. Can be specified multiple times.
+    /// Format: NAME=VALUE
+    #[arg(short = 'p', long, value_name = "NAME=VALUE")]
+    property: Vec<String>,
+
+    /// Set the service type (simple, forking, oneshot, exec, notify, idle, dbus).
+    /// Can be specified multiple times; the last value wins.
+    #[arg(long, value_name = "TYPE")]
+    service_type: Vec<String>,
+
+    /// Run the command as the specified user.
+    #[arg(long, value_name = "USER")]
+    uid: Option<String>,
+
+    /// Run the command with the specified group.
+    #[arg(long, value_name = "GROUP")]
+    gid: Option<String>,
+
+    /// Request a pseudo-TTY for the command.
+    #[arg(short = 't', long)]
+    pty: bool,
+
+    /// Use pipe for stdin/stdout/stderr (standard I/O forwarding).
+    #[arg(short = 'P', long)]
+    pipe: bool,
+
+    /// Invoke a shell if no command is specified.
+    #[arg(short = 'S', long)]
+    shell: bool,
+
+    /// Wait for the service to finish and show its result.
+    #[arg(long)]
+    wait: bool,
+
+    /// Unload the transient unit after it finished, even if it failed.
+    ///
+    /// The short form matters beyond brevity: busctl builds a `unixexec:` bus
+    /// address containing `argv2=-PGq`, and a missing `-G` makes the whole
+    /// short-flag cluster fail to parse rather than just that one flag.
+    #[arg(short = 'G', long)]
+    collect: bool,
+
+    /// Set the working directory for the spawned process.
+    #[arg(long, value_name = "DIR")]
+    /// Repeatable: an empty value RESETS it and the last value wins, matching
+    /// upstream. Kept as String rather than PathBuf because clap's PathBuf
+    /// parser rejects an empty value outright ("a value is required ... but
+    /// none was supplied"), which made `--working-directory=` a hard error
+    /// instead of a reset.
+    working_directory: Vec<String>,
+
+    /// Run in the caller's current directory (upstream `-d`).
+    #[arg(short = 'd', long)]
+    same_dir: bool,
+
+    /// Control expansion of $FOO/${FOO} in the command line (default yes).
+    /// --expand-environment=no maps to the same "no-env-expand" flag as the
+    /// `:` ExecStart prefix: the variables are still passed to the service,
+    /// they are just not substituted into its argv.
+    #[arg(long, value_name = "BOOL")]
+    expand_environment: Option<String>,
+
+    /// Set an environment variable for the spawned process. Can be
+    /// specified multiple times. Format: NAME=VALUE
+    #[arg(short = 'E', long = "setenv", value_name = "NAME=VALUE")]
+    setenv: Vec<String>,
+
+    /// Keep the unit loaded after the main process exits.
+    #[arg(short = 'r', long)]
+    remain_after_exit: bool,
+
+    /// Send SIGHUP to remaining processes when the main process exits.
+    #[arg(long)]
+    send_sighup: bool,
+
+    /// Set the nice level of the spawned process.
+    #[arg(long, value_name = "NICE", allow_hyphen_values = true)]
+    nice: Option<i32>,
+
+    /// Suppress informational messages, only show errors.
+    #[arg(short = 'q', long)]
+    quiet: bool,
+
+    /// Do not query the user for authentication.
+    #[arg(long)]
+    no_ask_password: bool,
+
+    /// Do not pipe output into a pager.
+    #[arg(long)]
+    no_pager: bool,
+
+    /// Do not synchronously wait for the unit to start.
+    #[arg(long)]
+    no_block: bool,
+
+    /// Define a relative timer: run the command after the specified delay.
+    /// Accepts a time span like "5min" or "2h 30min". Can be specified multiple times.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_active: Vec<String>,
+
+    /// Define a timer relative to system boot.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_boot: Option<String>,
+
+    /// Define a timer relative to when the service manager was first started.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_startup: Option<String>,
+
+    /// Define a timer relative to when the unit was last activated.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_unit_active: Option<String>,
+
+    /// Define a timer relative to when the unit was last deactivated.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_unit_inactive: Option<String>,
+
+    /// Define a calendar-based timer (e.g. "Mon *-*-* 03:00:00").
+    #[arg(long, value_name = "SPEC")]
+    on_calendar: Option<String>,
+
+    /// Run the command when the system clock (CLOCK_REALTIME) jumps
+    /// relative to the monotonic clock.
+    #[arg(long, action = clap::ArgAction::Count)]
+    on_clock_change: u8,
+
+    /// Run the command when the system timezone changes.
+    #[arg(long, action = clap::ArgAction::Count)]
+    on_timezone_change: u8,
+
+    /// Set a property on the timer unit. Can be specified multiple times.
+    #[arg(long, value_name = "NAME=VALUE")]
+    timer_property: Vec<String>,
+
+    /// Set a property on the path unit. Can be specified multiple times.
+    #[arg(long, value_name = "NAME=VALUE")]
+    path_property: Vec<String>,
+
+    /// Set a property on the socket unit. Can be specified multiple times.
+    #[arg(long, value_name = "NAME=VALUE")]
+    socket_property: Vec<String>,
+
+    /// Shortcut for --pipe --wait --service-type=exec. Shows command output.
+    #[arg(short = 'v')]
+    verbose: bool,
+
+    /// Connect to the user service manager instead of the system one.
+    #[arg(long)]
+    user: bool,
+
+    /// Connect to the system service manager (default).
+    #[arg(long)]
+    system: bool,
+
+    /// Execute operation on a local container or on the host.
+    /// Format: [user@]machine. Accepted for compatibility.
+    #[arg(short = 'M', long, value_name = "MACHINE")]
+    machine: Option<String>,
+
+    /// The command and its arguments to run.
+    #[arg(trailing_var_arg = true)]
+    command: Vec<String>,
+}
+
+/// Generate a transient unit name from the command if --unit was not given.
+fn generate_unit_name(command: &[String], scope: bool) -> String {
+    let suffix = if scope { ".scope" } else { ".service" };
+    // Use a unique identifier: PID + monotonic clock to avoid collisions
+    // when multiple systemd-run invocations run concurrently.
+    let unique = {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe {
+            libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+        }
+        // Combine PID + nanoseconds for uniqueness
+        format!(
+            "{}{}",
+            std::process::id(),
+            (ts.tv_sec as u64)
+                .wrapping_mul(1_000_000_000)
+                .wrapping_add(ts.tv_nsec as u64)
+        )
+    };
+
+    if command.is_empty() {
+        return format!("run-u{unique}{suffix}");
+    }
+
+    // Use the basename of the command as the unit name
+    let cmd = &command[0];
+    let basename = std::path::Path::new(cmd)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "run".to_string());
+
+    // Sanitize: replace any character that's not alphanumeric, dash, or
+    // underscore with an underscore.
+    let sanitized: String = basename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    format!("run-u{unique}-{sanitized}{suffix}")
+}
+
+/// Look up a username and return (uid, gid, home, shell).
+fn lookup_user(username: &str) -> Result<(u32, u32, String, String), String> {
+    // Try numeric UID first
+    if let Ok(uid) = username.parse::<u32>() {
+        return Ok((uid, uid, "/".to_string(), "/bin/sh".to_string()));
+    }
+
+    let c_name = CString::new(username).map_err(|e| format!("Invalid username: {e}"))?;
+
+    unsafe {
+        let pwd = libc::getpwnam(c_name.as_ptr());
+        if pwd.is_null() {
+            return Err(format!("User not found: {username}"));
+        }
+
+        let uid = (*pwd).pw_uid;
+        let gid = (*pwd).pw_gid;
+
+        let home = if (*pwd).pw_dir.is_null() {
+            "/".to_string()
+        } else {
+            std::ffi::CStr::from_ptr((*pwd).pw_dir)
+                .to_string_lossy()
+                .to_string()
+        };
+
+        let shell = if (*pwd).pw_shell.is_null() {
+            "/bin/sh".to_string()
+        } else {
+            std::ffi::CStr::from_ptr((*pwd).pw_shell)
+                .to_string_lossy()
+                .to_string()
+        };
+
+        Ok((uid, gid, home, shell))
+    }
+}
+
+/// Look up a group name and return its GID.
+fn lookup_group(groupname: &str) -> Result<u32, String> {
+    // Try numeric GID first
+    if let Ok(gid) = groupname.parse::<u32>() {
+        return Ok(gid);
+    }
+
+    let c_name = CString::new(groupname).map_err(|e| format!("Invalid group name: {e}"))?;
+
+    unsafe {
+        let grp = libc::getgrnam(c_name.as_ptr());
+        if grp.is_null() {
+            return Err(format!("Group not found: {groupname}"));
+        }
+        Ok((*grp).gr_gid)
+    }
+}
+
+/// Determine the default shell for the current user.
+fn default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+}
+
+/// Print information about the transient unit that would be created.
+fn print_unit_info(cli: &Cli, unit_name: &str) {
+    if cli.quiet {
+        return;
+    }
+    eprintln!("Running as unit: {unit_name}");
+
+    if let Some(desc) = cli.description.last() {
+        eprintln!("Description: {desc}");
+    }
+
+    if let Some(ref slice) = effective_slice(cli.slice.as_deref(), cli.slice_inherit) {
+        eprintln!("Slice: {slice}");
+    }
+
+    if let Some(stype) = cli.service_type.last() {
+        eprintln!("Service type: {stype}");
+    }
+
+    for prop in &cli.property {
+        eprintln!("Property: {prop}");
+    }
+
+    if let Some(ref uid) = cli.uid {
+        eprintln!("User: {uid}");
+    }
+
+    if let Some(ref gid) = cli.gid {
+        eprintln!("Group: {gid}");
+    }
+
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        eprintln!("Working directory: {wd}");
+    }
+
+    for env in &cli.setenv {
+        eprintln!("Environment: {env}");
+    }
+
+    if let Some(nice) = cli.nice {
+        eprintln!("Nice: {nice}");
+    }
+
+    if cli.remain_after_exit {
+        eprintln!("RemainAfterExit: yes");
+    }
+
+    if cli.scope {
+        eprintln!("Mode: scope");
+    }
+
+    if cli.wait {
+        eprintln!("Wait: yes");
+    }
+
+    for on_active in &cli.on_active {
+        eprintln!("OnActiveSec: {on_active}");
+    }
+
+    if let Some(ref on_boot) = cli.on_boot {
+        eprintln!("OnBootSec: {on_boot}");
+    }
+
+    if let Some(ref on_calendar) = cli.on_calendar {
+        eprintln!("OnCalendar: {on_calendar}");
+    }
+}
+
+/// Apply per-process properties before exec'ing the command.
+///
+/// This is the "fallback" execution mode that applies what we can at the
+/// process level without needing to talk to the service manager via D-Bus.
+fn apply_process_properties(cli: &Cli) -> Result<(), String> {
+    // Apply GID first (needs to happen before dropping root)
+    if let Some(ref gid_str) = cli.gid {
+        let gid = lookup_group(gid_str)?;
+        let ret = unsafe { libc::setgid(gid) };
+        if ret != 0 {
+            return Err(format!(
+                "Failed to set GID to {gid}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
+    // Apply UID
+    if let Some(ref uid_str) = cli.uid {
+        let (uid, default_gid, home, _shell) = lookup_user(uid_str)?;
+
+        // If no explicit --gid was given, use the user's primary group
+        if cli.gid.is_none() {
+            let ret = unsafe { libc::setgid(default_gid) };
+            if ret != 0 {
+                return Err(format!(
+                    "Failed to set GID to {default_gid}: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+        }
+
+        let ret = unsafe { libc::setuid(uid) };
+        if ret != 0 {
+            return Err(format!(
+                "Failed to set UID to {uid}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        // Update HOME environment variable
+        unsafe { std::env::set_var("HOME", &home) };
+    }
+
+    // Apply nice level
+    if let Some(nice) = cli.nice {
+        let ret = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, nice) };
+        if ret != 0 {
+            return Err(format!(
+                "Failed to set nice level to {nice}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
+    // Apply working directory
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        std::env::set_current_dir(&wd)
+            .map_err(|e| format!("Failed to change directory to {wd}: {e}"))?;
+    }
+
+    // Apply environment variables
+    for env_spec in &cli.setenv {
+        if let Some((key, value)) = env_spec.split_once('=') {
+            unsafe { std::env::set_var(key, value) };
+        } else {
+            // If no '=' is present, interpret as just a key to pass through
+            // from the current environment (matching systemd-run behavior)
+            if let Ok(val) = std::env::var(env_spec) {
+                unsafe { std::env::set_var(env_spec, &val) };
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Try to connect to the rust-systemd control socket and create a
+/// transient unit. Returns `Ok(Some(response))` if successful, `Ok(None)` if
+/// the control socket is not available (falling back to direct exec).
+fn try_create_transient_unit(
+    cli: &Cli,
+    unit_name: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    use libsystemd::control::jsonrpc2::Call;
+    use serde_json::Value;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    // `--user` connects to the per-user manager's control socket under
+    // $XDG_RUNTIME_DIR (see run_user_manager); the system manager uses its own
+    // fixed path.
+    //
+    // When a target user is named, as `-M someuser@.host` and `--uid=someuser`
+    // both do, the manager to talk to is THAT user's, not the caller's. Using
+    // the caller's $XDG_RUNTIME_DIR here meant `systemd-run --user -M
+    // someuser@.host` looked for root's socket, never found one, and silently
+    // fell back to running the command directly, so the target user's manager
+    // was never involved at all.
+    let user_socket_path;
+    let socket_path: &str = if cli.user {
+        let target_uid = cli.uid.as_deref().and_then(|u| match u.parse::<u32>() {
+            Ok(n) => Some(n),
+            Err(_) => lookup_user(u).ok().map(|(uid, _, _, _)| uid),
+        });
+        let runtime_dir = match target_uid {
+            Some(uid) => format!("/run/user/{uid}"),
+            None => std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() })),
+        };
+        user_socket_path = format!("{runtime_dir}/systemd/control.socket");
+        &user_socket_path
+    } else {
+        "/run/systemd/rust-systemd-notify/control.socket"
+    };
+
+    let stream = match UnixStream::connect(socket_path) {
+        Ok(s) => s,
+        Err(_) => return Ok(None), // Control socket not available
+    };
+
+    // Build the transient unit creation request.
+    // The rust-systemd control protocol uses JSON-RPC 2.0.
+    let mut properties = serde_json::Map::new();
+    properties.insert("unit".into(), Value::String(unit_name.to_string()));
+
+    if let Some(desc) = cli.description.last() {
+        properties.insert("description".into(), Value::String(desc.clone()));
+    }
+
+    // --expand-environment=no becomes the ':' ExecStart prefix on the transient
+    // unit. Anything unparseable is treated as the default (expand), matching
+    // upstream's parse_boolean_argument fallback rather than failing the run.
+    if cli.expand_environment.as_deref().and_then(parse_tristate) == Some(false) {
+        properties.insert("no_env_expand".into(), Value::Bool(true));
+    }
+
+    if !cli.command.is_empty() {
+        let cmd_array: Vec<Value> = cli
+            .command
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("command".into(), Value::Array(cmd_array));
+    }
+
+    if let Some(ref uid) = cli.uid {
+        properties.insert("user".into(), Value::String(uid.clone()));
+    }
+
+    if let Some(ref gid) = cli.gid {
+        properties.insert("group".into(), Value::String(gid.clone()));
+    }
+
+    if let Some(nice) = cli.nice {
+        properties.insert("nice".into(), Value::Number(nice.into()));
+    }
+
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        properties.insert("working_directory".into(), Value::String(wd));
+    }
+
+    if cli.scope {
+        properties.insert("scope".into(), Value::Bool(true));
+    }
+
+    // --scope implies --wait: scope units run in the caller's context and
+    // systemd-run must block until the command finishes (matching real
+    // systemd behaviour).
+    if cli.wait || cli.pipe || cli.scope {
+        properties.insert("wait".into(), Value::Bool(true));
+    }
+
+    if cli.pipe {
+        properties.insert("pipe".into(), Value::Bool(true));
+    }
+
+    if let Some(slice) = effective_slice(cli.slice.as_deref(), cli.slice_inherit) {
+        properties.insert("slice".into(), Value::String(slice));
+    }
+
+    if let Some(service_type) = cli.service_type.last() {
+        properties.insert("service_type".into(), Value::String(service_type.clone()));
+    }
+
+    if cli.remain_after_exit {
+        properties.insert("remain_after_exit".into(), Value::Bool(true));
+    }
+
+    // Pass -p / --property overrides, plus --collect (maps to CollectMode=).
+    {
+        let mut props: Vec<Value> = cli
+            .property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        if cli.collect {
+            props.push(Value::String("CollectMode=inactive-or-failed".to_string()));
+        }
+        if !props.is_empty() {
+            properties.insert("properties".into(), Value::Array(props));
+        }
+    }
+
+    // Pass environment variables (resolve pass-through vars client-side)
+    {
+        let mut envs: Vec<Value> = Vec::new();
+
+        // For --scope, inherit the caller's full environment (real systemd
+        // scopes run in the caller's process tree and naturally inherit it).
+        if cli.scope {
+            for (key, val) in std::env::vars() {
+                envs.push(Value::String(format!("{key}={val}")));
+            }
+        }
+
+        // Explicit --setenv overrides (applied after inherited env)
+        for s in &cli.setenv {
+            if s.contains('=') {
+                envs.push(Value::String(s.clone()));
+            } else {
+                // Pass-through: resolve from current environment
+                if let Ok(val) = std::env::var(s) {
+                    envs.push(Value::String(format!("{s}={val}")));
+                }
+            }
+        }
+
+        if !envs.is_empty() {
+            properties.insert("environment".into(), Value::Array(envs));
+        }
+    }
+
+    // Pass timer properties
+    if let Some(ref on_calendar) = cli.on_calendar {
+        properties.insert("on_calendar".into(), Value::String(on_calendar.clone()));
+    }
+    if !cli.on_active.is_empty() {
+        let vals: Vec<Value> = cli
+            .on_active
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("on_active".into(), Value::Array(vals));
+    }
+    if let Some(ref on_boot) = cli.on_boot {
+        properties.insert("on_boot".into(), Value::String(on_boot.clone()));
+    }
+    if let Some(ref on_startup) = cli.on_startup {
+        properties.insert("on_startup".into(), Value::String(on_startup.clone()));
+    }
+    if let Some(ref on_unit_active) = cli.on_unit_active {
+        properties.insert(
+            "on_unit_active".into(),
+            Value::String(on_unit_active.clone()),
+        );
+    }
+    if let Some(ref on_unit_inactive) = cli.on_unit_inactive {
+        properties.insert(
+            "on_unit_inactive".into(),
+            Value::String(on_unit_inactive.clone()),
+        );
+    }
+    if cli.on_clock_change > 0 {
+        properties.insert("on_clock_change".into(), Value::Bool(true));
+    }
+    if cli.on_timezone_change > 0 {
+        properties.insert("on_timezone_change".into(), Value::Bool(true));
+    }
+    if !cli.timer_property.is_empty() {
+        let tprops: Vec<Value> = cli
+            .timer_property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("timer_properties".into(), Value::Array(tprops));
+    }
+    if !cli.path_property.is_empty() {
+        let pprops: Vec<Value> = cli
+            .path_property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("path_properties".into(), Value::Array(pprops));
+    }
+    if !cli.socket_property.is_empty() {
+        let sprops: Vec<Value> = cli
+            .socket_property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("socket_properties".into(), Value::Array(sprops));
+    }
+
+    let params = Value::Object(properties);
+
+    let call = Call {
+        method: "start-transient".to_string(),
+        params: Some(params),
+        id: None,
+    };
+
+    let payload = serde_json::to_string(&call.to_json())
+        .map_err(|e| format!("Failed to serialize request: {e}"))?;
+
+    let mut stream = stream;
+    stream
+        .write_all(payload.as_bytes())
+        .map_err(|e| format!("Failed to send to control socket: {e}"))?;
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .map_err(|e| format!("Failed to shutdown write end: {e}"))?;
+
+    let resp: Value = serde_json::from_reader(&mut stream)
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    // Check for errors in the JSON-RPC response
+    if let Some(error) = resp.get("error") {
+        let msg = error
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
+        return Err(format!("Service manager error: {msg}"));
+    }
+
+    // Return the "result" field from the JSON-RPC response
+    let result = resp
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Ok(Some(result))
+}
+
+/// The effective working directory, honouring upstream's reset semantics.
+///
+/// `--working-directory` may be repeated; the last occurrence wins and an empty
+/// value means "unset", so `--working-directory= --working-directory=/tmp`
+/// yields /tmp. `--same-dir` (`-d`) means the caller's own cwd, which is what
+/// run.c does with safe_getcwd().
+///
+/// Upstream parses both in one getopt loop, so strictly the last of the two
+/// wins. Here an explicit --working-directory takes precedence whenever it is
+/// given at all, and --same-dir applies only when it is not; the two are not
+/// combined in practice and this avoids depending on clap occurrence ordering.
+fn effective_working_directory(values: &[String], same_dir: bool) -> Option<String> {
+    if !values.is_empty() {
+        return values.last().filter(|s| !s.is_empty()).cloned();
+    }
+    if same_dir {
+        return std::env::current_dir()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
+    }
+    None
+}
+
+/// The slice the calling process itself lives in, e.g. `system.slice`.
+///
+/// Read from the cgroup v2 line in /proc/self/cgroup, taking the LAST path
+/// component ending in `.slice` so a nested slice wins over its parent.
+fn caller_slice() -> Option<String> {
+    let content = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = content.lines().find_map(|l| l.strip_prefix("0::"))?;
+    path.split('/')
+        .filter(|c| c.ends_with(".slice"))
+        .next_back()
+        .map(str::to_owned)
+}
+
+/// Resolve the effective `Slice=` for the transient unit.
+///
+/// Mirrors run.c: with --slice-inherit the caller's slice has its `.slice`
+/// suffix stripped and becomes a prefix, an explicit --slice= is appended after
+/// a `-`, and the result is re-suffixed. So `--slice-inherit --slice=foo` from
+/// inside system.slice gives `system-foo.slice`, which is how slice nesting is
+/// spelled. Without --slice-inherit the value is passed through untouched and
+/// PID 1 mangles it.
+fn effective_slice(slice: Option<&str>, inherit: bool) -> Option<String> {
+    if !inherit {
+        return slice.map(str::to_owned);
+    }
+    let Some(caller) = caller_slice() else {
+        eprintln!("Failed to determine the caller's slice for --slice-inherit");
+        std::process::exit(1);
+    };
+    let base = caller.strip_suffix(".slice").unwrap_or(&caller);
+    Some(match slice.filter(|s| !s.is_empty()) {
+        Some(extra) => {
+            let extra = extra.strip_suffix(".slice").unwrap_or(extra);
+            format!("{base}-{extra}.slice")
+        }
+        None => format!("{base}.slice"),
+    })
+}
+
+/// Parse a `yes`/`no`/`auto` tristate the way upstream's
+/// `parse_tristate_argument_with_auto()` does: `auto` (and anything
+/// unrecognised) leaves the decision to the caller's default.
+fn parse_tristate(v: &str) -> Option<bool> {
+    match v {
+        "1" | "yes" | "true" | "on" => Some(true),
+        "0" | "no" | "false" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Translate a `run0 [OPTIONS] COMMAND...` invocation into the equivalent
+/// `systemd-run` argument vector.  `run0` is upstream a multi-call alias of
+/// systemd-run that elevates: it runs COMMAND as the target user (root by
+/// default, or `--user`/`-u USER`) in a transient unit and forwards its stdio.
+/// We map that onto our existing systemd-run machinery: `--uid=USER` plus
+/// `--pipe --wait` so the command's output is streamed back to the caller.
+/// Options that run0 and systemd-run share (`--property`, `--slice`,
+/// `--setenv`, `--description`, `--working-directory`, `--nice`) pass through
+/// unchanged; the first non-option token begins COMMAND and everything after
+/// it is forwarded verbatim after a `--` separator.
+fn translate_run0(raw: &[String]) -> Vec<String> {
+    let mut out = vec![
+        "systemd-run".to_string(),
+        "--pipe".to_string(),
+        "--wait".to_string(),
+    ];
+
+    // run0 runs its command under a PAM stack so logind registers a session for
+    // it (upstream run.c: `PAMName=systemd-run0`). Without this no session is
+    // created at all and the session class below would have nothing to apply to.
+    out.push("--property".to_string());
+    out.push("PAMName=systemd-run0".to_string());
+
+    // Pre-scan for the target user and for an explicit XDG_SESSION_CLASS: both
+    // decide the session class below, and either can appear after the flag that
+    // needs it.
+    let mut target_user: Option<String> = None;
+    let mut class_preset = false;
+    let mut lightweight: Option<bool> = None;
+    {
+        let mut j = 1;
+        while j < raw.len() {
+            let a = raw[j].as_str();
+            let next = raw.get(j + 1).map(String::as_str);
+            match a {
+                "-u" | "--user" => {
+                    if let Some(v) = next {
+                        target_user = Some(v.to_string());
+                    }
+                }
+                "-E" | "--setenv" => {
+                    if next.is_some_and(|v| v.starts_with("XDG_SESSION_CLASS=")) {
+                        class_preset = true;
+                    }
+                }
+                s if s.starts_with("--user=") => {
+                    target_user = Some(s["--user=".len()..].to_string())
+                }
+                s if s.starts_with("--setenv=") => {
+                    if s["--setenv=".len()..].starts_with("XDG_SESSION_CLASS=") {
+                        class_preset = true;
+                    }
+                }
+                s if s.starts_with("--lightweight=") => {
+                    lightweight = parse_tristate(&s["--lightweight=".len()..]);
+                }
+                "--lightweight" => {
+                    if let Some(v) = next {
+                        lightweight = parse_tristate(v);
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+    }
+
+    // run0 with no --user targets root.
+    let become_root = target_user
+        .as_deref()
+        .is_none_or(|u| u == "root" || u == "0");
+
+    // Mirrors run.c: escalating to root should NOT pull in a full user service
+    // manager by default, because logind cannot tell run0-style escalation on a
+    // TTY apart from a getty-style login. A regular user transitioning to
+    // another regular user keeps the full environment, so no default there.
+    if lightweight.is_none() && become_root {
+        lightweight = Some(true);
+    }
+
+    if let Some(lw) = lightweight
+        && !class_preset
+    {
+        // Upstream keys the interactive variants off ARG_STDIO_PTY; we allocate
+        // a pty only when stdin is a terminal.
+        let pty = unsafe { libc::isatty(0) } == 1;
+        let class = match (lw, pty, become_root) {
+            (true, true, true) => "user-early-light",
+            (true, true, false) => "user-light",
+            (true, false, _) => "background-light",
+            (false, true, true) => "user-early",
+            (false, true, false) => "user",
+            (false, false, _) => "background",
+        };
+        out.push("--setenv".to_string());
+        out.push(format!("XDG_SESSION_CLASS={class}"));
+    }
+
+    let mut cmd: Vec<String> = Vec::new();
+    let mut i = 1;
+    while i < raw.len() {
+        let a = &raw[i];
+        match a.as_str() {
+            // Consumed by the pre-scan above; never forwarded to systemd-run,
+            // which has no such option.
+            "--lightweight" => {
+                i += if raw.get(i + 1).is_some() { 2 } else { 1 };
+                continue;
+            }
+            s if s.starts_with("--lightweight=") => {
+                i += 1;
+                continue;
+            }
+            "-u" | "--user" => {
+                if i + 1 < raw.len() {
+                    out.push(format!("--uid={}", raw[i + 1]));
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            s if s.starts_with("--user=") => {
+                out.push(format!("--uid={}", &s["--user=".len()..]));
+                i += 1;
+                continue;
+            }
+            // Value-bearing options shared with systemd-run: keep the flag and
+            // its argument together.
+            "-p"
+            | "--property"
+            | "--slice"
+            | "--description"
+            | "--setenv"
+            | "-E"
+            | "--working-directory"
+            | "-D"
+            | "--nice" => {
+                out.push(a.clone());
+                if i + 1 < raw.len() {
+                    out.push(raw[i + 1].clone());
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            s if s.starts_with('-') => {
+                // Other leading flags overlap with systemd-run; pass through.
+                out.push(a.clone());
+                i += 1;
+                continue;
+            }
+            _ => {
+                // First bare token: COMMAND starts here, forward the rest.
+                cmd.extend_from_slice(&raw[i..]);
+                break;
+            }
+        }
+    }
+    if !cmd.is_empty() {
+        out.push("--".to_string());
+        out.extend(cmd);
+    }
+    out
+}
+
+fn main() {
+    // Ignore SIGPIPE so piping output to grep/head/etc. doesn't panic.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
+    // `run0` is a multi-call alias of systemd-run that elevates privileges.
+    // Detect it by argv[0] and rewrite the argument vector before parsing.
+    let raw: Vec<String> = std::env::args().collect();
+    let invoked_as_run0 = raw
+        .first()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|n| n == "run0");
+
+    let mut cli = if invoked_as_run0 {
+        Cli::parse_from(translate_run0(&raw))
+    } else {
+        Cli::parse()
+    };
+
+    // -v is shorthand for --pipe --wait --service-type=exec
+    if cli.verbose {
+        cli.pipe = true;
+        cli.wait = true;
+        if cli.service_type.is_empty() {
+            cli.service_type.push("exec".to_string());
+        }
+    }
+
+    // Handle -M/--machine: parse "user@machine" format.
+    // Only ".host" (local machine) is supported — translate to --uid for
+    // the user part, allowing `systemd-run --user -M testuser@.host cmd`
+    // to work without machined.
+    if let Some(ref machine_spec) = cli.machine {
+        let (user, machine) = if let Some(at_pos) = machine_spec.find('@') {
+            (
+                Some(machine_spec[..at_pos].to_string()),
+                machine_spec[at_pos + 1..].to_string(),
+            )
+        } else {
+            (None, machine_spec.clone())
+        };
+
+        if !machine.is_empty() && machine != ".host" {
+            eprintln!(
+                "Error: Machine '{machine}' is not supported. Only '.host' (local) is supported."
+            );
+            process::exit(1);
+        }
+
+        if let Some(user) = user
+            && !user.is_empty()
+            && cli.uid.is_none()
+        {
+            cli.uid = Some(user);
+        }
+    }
+
+    // Ensure the target user's manager is running before we try to reach it.
+    //
+    // run0 needs this because it approximates a login session: real run0 gets
+    // there via PAM/logind (pam_systemd -> logind -> user@<uid>.service), and
+    // we start the unit directly instead. `systemd-run --user -M someuser@.host`
+    // needs exactly the same thing, since that user has no session and so no
+    // manager of their own; without it the connect below finds no socket and
+    // silently falls back to running the command directly.
+    //
+    // This must run AFTER the -M parsing above: that is what populates cli.uid
+    // for the -M form, so doing it earlier saw None and started nothing.
+    // Best-effort, and skipped for root, who is served by the system manager.
+    if (invoked_as_run0 || cli.user)
+        && let Some(user) = cli.uid.as_deref()
+        && !matches!(user, "0" | "root")
+        && let Ok((uid, _, _, _)) = lookup_user(user)
+    {
+        let _ = std::process::Command::new("systemctl")
+            .args(["start", &format!("user@{uid}.service")])
+            .status();
+    }
+
+    // Determine the command to run
+    let command = if cli.command.is_empty() && cli.shell {
+        vec![default_shell()]
+    } else {
+        cli.command.clone()
+    };
+
+    // If a timer/path/socket is requested but no command, that's an error
+    let has_timer = !cli.on_active.is_empty()
+        || cli.on_boot.is_some()
+        || cli.on_startup.is_some()
+        || cli.on_unit_active.is_some()
+        || cli.on_unit_inactive.is_some()
+        || cli.on_calendar.is_some()
+        || cli.on_clock_change > 0
+        || cli.on_timezone_change > 0
+        || !cli.timer_property.is_empty()
+        || !cli.path_property.is_empty()
+        || !cli.socket_property.is_empty();
+
+    if command.is_empty() && !has_timer {
+        eprintln!("Error: No command specified. Use --shell to start a shell.");
+        process::exit(1);
+    }
+
+    // Reject empty command strings (e.g. `systemd-run ""`)
+    if let Some(first) = command.first()
+        && first.is_empty()
+    {
+        eprintln!("Error: Empty command specified.");
+        process::exit(1);
+    }
+
+    // Generate or use the given unit name
+    let mut unit_name = cli
+        .unit
+        .clone()
+        .unwrap_or_else(|| generate_unit_name(&command, cli.scope));
+    // Ensure the unit name has a type suffix.
+    if !unit_name.contains('.') {
+        unit_name.push_str(if cli.scope { ".scope" } else { ".service" });
+    }
+
+    // Print unit info to stderr (matching systemd-run behavior)
+    print_unit_info(&cli, &unit_name);
+
+    // Try to create a transient unit via the control socket first
+    match try_create_transient_unit(&cli, &unit_name) {
+        Ok(Some(resp)) => {
+            // When --wait/--scope was set, the control socket blocked until
+            // the unit finished and the response contains the exit code.
+            if cli.wait || cli.pipe || cli.scope {
+                // When --pipe, relay captured stdout/stderr to the caller.
+                if cli.pipe {
+                    if let Some(data) = resp.get("stdout").and_then(|v| v.as_str()) {
+                        use std::io::Write;
+                        let _ = std::io::stdout().write_all(data.as_bytes());
+                    }
+                    if let Some(data) = resp.get("stderr").and_then(|v| v.as_str()) {
+                        use std::io::Write;
+                        let _ = std::io::stderr().write_all(data.as_bytes());
+                    }
+                }
+                let exit_code = resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let result = resp
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("success");
+                if result != "success" {
+                    // Match systemd-run behavior: non-zero exit propagated
+                    process::exit(if exit_code != 0 { exit_code } else { 1 });
+                }
+                process::exit(exit_code);
+            }
+
+            process::exit(0);
+        }
+        Ok(None) => {
+            // Control socket not available — fall back to direct execution
+            if command.is_empty() {
+                eprintln!("Error: No command to execute and cannot connect to service manager.");
+                process::exit(1);
+            }
+
+            if !cli.quiet {
+                eprintln!(
+                    "Note: rust-systemd control socket not available, executing command directly."
+                );
+            }
+        }
+        Err(e) => {
+            // If the error indicates that the service manager rejected the
+            // request (as opposed to a socket-not-found error), exit with
+            // failure rather than falling through to direct execution.
+            if e.starts_with("Service manager error:") {
+                eprintln!("Failed to start transient unit: {e}");
+                process::exit(1);
+            }
+            if !cli.quiet {
+                eprintln!("Warning: Failed to create transient unit: {e}");
+            }
+            if command.is_empty() {
+                process::exit(1);
+            }
+            if !cli.quiet {
+                eprintln!("Falling back to direct execution.");
+            }
+        }
+    }
+
+    // === Fallback: Direct execution ===
+
+    // Apply process-level properties
+    if let Err(e) = apply_process_properties(&cli) {
+        eprintln!("Error: {e}");
+        process::exit(1);
+    }
+
+    // Build the command
+    let cmd = &command[0];
+    let args = &command[1..];
+
+    let mut child_cmd = process::Command::new(cmd);
+    child_cmd.args(args);
+
+    if cli.wait || cli.pty || cli.pipe {
+        // In wait/pty/pipe mode, we spawn and wait
+        match child_cmd.spawn() {
+            Ok(mut child) => match child.wait() {
+                Ok(status) => {
+                    process::exit(status.code().unwrap_or(1));
+                }
+                Err(e) => {
+                    eprintln!("Error waiting for {cmd}: {e}");
+                    process::exit(1);
+                }
+            },
+            Err(e) => {
+                eprintln!("Error executing {cmd}: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        // Default: exec into the command (replaces the current process)
+        let err = child_cmd.exec();
+        // exec() only returns on error
+        eprintln!("Error executing {cmd}: {err}");
+        process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_unit_name_service() {
+        let cmd = vec!["echo".to_string(), "hello".to_string()];
+        let name = generate_unit_name(&cmd, false);
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-echo"));
+        assert!(name.ends_with(".service"));
+    }
+
+    #[test]
+    fn test_generate_unit_name_scope() {
+        let cmd = vec!["/usr/bin/sleep".to_string(), "10".to_string()];
+        let name = generate_unit_name(&cmd, true);
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-sleep"));
+        assert!(name.ends_with(".scope"));
+    }
+
+    #[test]
+    fn test_generate_unit_name_empty_command() {
+        let cmd: Vec<String> = vec![];
+        let name = generate_unit_name(&cmd, false);
+        assert!(name.starts_with("run-"));
+        assert!(name.ends_with(".service"));
+    }
+
+    #[test]
+    fn test_generate_unit_name_sanitizes() {
+        let cmd = vec!["my program!.sh".to_string()];
+        let name = generate_unit_name(&cmd, false);
+        // Spaces and exclamation marks should be replaced with underscores
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-my_program__sh"));
+        assert!(!name.contains(' '));
+        assert!(!name.contains('!'));
+    }
+
+    #[test]
+    fn test_generate_unit_name_path_command() {
+        let cmd = vec!["/usr/local/bin/my-daemon".to_string()];
+        let name = generate_unit_name(&cmd, false);
+        // Should use only the basename
+        assert!(name.starts_with("run-u"));
+        assert!(name.contains("-my-daemon"));
+        assert!(!name.contains("usr"));
+    }
+
+    #[test]
+    fn test_default_shell() {
+        let shell = default_shell();
+        assert!(!shell.is_empty());
+        // Should be a path
+        assert!(shell.starts_with('/') || shell.contains("sh"));
+    }
+
+    #[test]
+    fn test_lookup_user_numeric() {
+        let result = lookup_user("0");
+        assert!(result.is_ok());
+        let (uid, _, _, _) = result.unwrap();
+        assert_eq!(uid, 0);
+    }
+
+    #[test]
+    fn test_lookup_user_root() {
+        let result = lookup_user("root");
+        // root should exist on any Linux system
+        assert!(result.is_ok());
+        let (uid, _, _, _) = result.unwrap();
+        assert_eq!(uid, 0);
+    }
+
+    #[test]
+    fn test_lookup_user_nonexistent() {
+        let result = lookup_user("nonexistent_user_zzz_xyz_12345");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_lookup_group_numeric() {
+        let result = lookup_group("0");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_lookup_group_root() {
+        let result = lookup_group("root");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_lookup_group_nonexistent() {
+        let result = lookup_group("nonexistent_group_zzz_xyz_12345");
+        assert!(result.is_err());
+    }
+}

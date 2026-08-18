@@ -1,0 +1,2 @@
+{"name":"openssl-probe","vers":"0.1.6","deps":[],"cksum":"d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e","features":{},"yanked":false,"rust_version":"1.60.0","pubtime":"2025-01-23T16:14:49Z"}
+{"name":"openssl-probe","vers":"0.2.1","deps":[],"cksum":"7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe","features":{},"yanked":false,"rust_version":"1.60.0","pubtime":"2026-01-20T19:53:29Z"}

@@ -1,0 +1,93 @@
+diff --git a/grammar.js b/grammar.js
+index 07efb72..6d4e011 100644
+--- a/grammar.js
++++ b/grammar.js
+@@ -564,6 +564,12 @@ module.exports = grammar({
+         $.function_definition,
+         $.struct_definition,
+         $.trait_definition,
++        // `@parameter if` / `@parameter for` are Mojo's compile-time
++        // conditional and loop-unroll forms; the decorator attaches to a
++        // statement rather than a definition.
++        $.if_statement,
++        $.for_statement,
++        $.while_statement,
+       )),
+     ),
+ 
+@@ -856,9 +862,12 @@ module.exports = grammar({
+         [prec.right, '**', PREC.power],
+         [prec.left, '|', PREC.bitwise_or],
+         [prec.left, '&', PREC.bitwise_and],
+-        // '^' XOR removed: Mojo uses '^' as the postfix ownership-transfer
+-        // operator (transfer_expression below). Bitwise XOR in Mojo is done
+-        // via stdlib functions, not the '^' operator.
++        // '^' stays out of the binary set. It is Mojo's postfix
++        // ownership-transfer sigil, which this tree uses at 2431 sites
++        // against 2 uses as binary XOR; admitting both needs a GLR conflict
++        // between binary_operator, unary_operator and transfer_expression,
++        // and losing that bet would break the 2431. The two XOR sites parse
++        // as ERROR, which costs a missed match there and nothing else.
+         [prec.left, '<<', PREC.shift],
+         [prec.left, '>>', PREC.shift],
+       ];
+@@ -975,6 +984,7 @@ module.exports = grammar({
+     ),
+ 
+     _right_hand_side: $ => choice(
++      $.fn_type,
+       $.expression,
+       $.expression_list,
+       $.assignment,
+@@ -1008,7 +1018,9 @@ module.exports = grammar({
+     subscript: $ => prec(PREC.call, seq(
+       field('value', $.primary_expression),
+       '[',
+-      commaSep1(field('subscript', choice($.expression, $.slice, $.keyword_argument))),
++      // $.fn_type: a parametric call may take a function signature as its
++      // parameter, as in `lib.get_function[fn(EnginePtr) -> None](...)`.
++      commaSep1(field('subscript', choice($.fn_type, $.expression, $.slice, $.keyword_argument))),
+       optional(','),
+       ']',
+     )),
+@@ -1042,6 +1054,7 @@ module.exports = grammar({
+ 
+     type: $ => choice(
+       prec(1, $.expression),
++      $.fn_type,
+       $.splat_type,
+       $.generic_type,
+       $.union_type,
+@@ -1049,6 +1062,19 @@ module.exports = grammar({
+       $.member_type,
+       $.ref_type,
+     ),
++    // A function signature used as a type, as in
++    // `lib.get_function[fn(EnginePtr) -> None]("wasm_engine_delete")`.
++    // prec.right: after `fn(...)`, a following `raises` binds to this
++    // signature rather than to an enclosing definition.
++    fn_type: $ => prec.right(2, seq(
++      choice('fn', 'def'),
++      '(',
++      optional(commaSep1($.type)),
++      optional(','),
++      ')',
++      optional('raises'),
++      optional(seq('->', field('return_type', $.type))),
++    )),
+     splat_type: $ => prec(1, seq(choice('*', '**'), $.identifier)),
+     ref_type: $ => prec(1, seq(
+       'ref',
+@@ -1277,7 +1303,11 @@ module.exports = grammar({
+       ));
+     },
+ 
+-    identifier: _ => /[_\p{XID_Start}][_\p{XID_Continue}]*/,
++    // The backtick form is Mojo's raw identifier, which lets a keyword be
++    // used as a name: `fn global_get_i32(context: ContextPtr, `global`: ...)`.
++    // `word` must stay a single terminal, so the raw form is an alternation
++    // inside the one regex rather than a choice() of two.
++    identifier: _ => /[_\p{XID_Start}][_\p{XID_Continue}]*|`[^`\n]+`/,
+ 
+     keyword_identifier: $ => choice(
+       prec(-3, alias(

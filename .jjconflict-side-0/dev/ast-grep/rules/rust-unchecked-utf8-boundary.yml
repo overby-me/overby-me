@@ -1,0 +1,25 @@
+id: rust-unchecked-utf8-boundary
+language: rust
+severity: warning
+message: "Unchecked UTF-8 conversion: prove the bytes are UTF-8, or use from_utf8"
+note: |
+  from_utf8_unchecked is undefined behaviour on bytes that are not UTF-8, and
+  nothing in the type says where these came from. At an FFI or deserialization
+  boundary the caller supplies them and cannot be taken at its word.
+
+  This found real UB in the Mojo XR shim, where read_str took bytes straight
+  from Mojo across the C ABI. If the bytes are genuinely known good, say so in
+  a SAFETY comment and allow the rule at that site.
+ignores:
+  # Upstream code held at a pinned commit, and the ports governed by
+  # safety/oxidized/PORTING.md. Neither is ours to answer for; both are
+  # excluded from the clippy hook for the same reason. The vendored ooxml
+  # parsers even carry ast-grep-ignore comments from their own upstream
+  # ruleset, which is not this one.
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: std::str::from_utf8_unchecked($$$)
+    - pattern: str::from_utf8_unchecked($$$)
+    - pattern: String::from_utf8_unchecked($$$)

@@ -1,0 +1,26 @@
+#!/usr/bin/env nu
+def --wrapped main [...vargs: string] {
+  mut args = ["--wait"]
+  mut files = []
+  mut line = 0
+  for arg in $vargs {
+    if ($arg | str starts-with "+") {
+      $line = ($arg | str substring 1..)
+    } else if ($arg | str starts-with "-") {
+      $args = ($args | append $arg)
+    } else {
+      $files = ($files | append $arg)
+    }
+  }
+
+  let fileCount = ($files | length)
+  for file in $files {
+    let type = $file | path expand | path type
+    match [$fileCount, $type] {
+      [1, "file"] => (zeditor ...$args $"($file):($line)")
+      [_, "file"] => (zeditor ...$args $file)
+      [_, "dir"] => (zeditor --new ...$args $file)
+      [_, null] => (touch $file; zeditor ...$args $file)
+    }
+  }
+}

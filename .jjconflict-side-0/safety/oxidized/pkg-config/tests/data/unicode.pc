@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: unicode
+Description: Ünïcödé tëst lîbräry — supporting «multi-language» descriptions (日本語・中文)
+Version: 1.0.0
+URL: https://example.com/ünïcödé
+Libs: -L${libdir} -lunicode
+Cflags: -I${includedir}/unicode

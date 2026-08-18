@@ -1,0 +1,33 @@
+# Ratchet: zero first-party sites.
+#
+# block_on inside an async fn parks the worker thread the future is running on.
+# On a current-thread runtime it deadlocks outright; on a multi-thread one it
+# burns a worker and starves the rest under load. The sync-to-async boundary
+# this tree does use - `fn resolve(..) { self.runtime.block_on(..) }` in
+# plugin-tramp - is correct and is not matched, because the caller is sync.
+#
+# clippy has no lint for this.
+id: rust-block-on-inside-async
+language: rust
+severity: warning
+message: >-
+  block_on inside an async fn blocks the runtime worker: a deadlock on a
+  current-thread runtime, a starved pool on a multi-thread one. Await the future
+  instead, or move the blocking part behind spawn_blocking.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: $RECV.block_on($$$ARGS)
+    - pattern: $RECV.block_in_place($$$ARGS)
+    - pattern: block_on($$$ARGS)
+    - pattern: block_in_place($$$ARGS)
+  inside:
+    kind: function_item
+    stopBy: end
+    has:
+      kind: function_modifiers
+      regex: async

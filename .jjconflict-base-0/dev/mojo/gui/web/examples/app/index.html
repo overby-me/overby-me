@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔥 Mojo App</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding-top: 6vh;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #e0e0e0;
+    }
+
+    #root {
+      width: 100%;
+      max-width: 560px;
+      padding: 0 1rem;
+    }
+
+    /* App shell: div > nav + div(content) */
+    #root > div {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 2rem 2.5rem;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Nav bar */
+    #root nav {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    #root nav button {
+      flex: 1;
+      padding: 0.6rem 1.5rem;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #ccc;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+    }
+
+    #root nav button:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #f0f0f0;
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateY(-1px);
+    }
+
+    #root nav button:active {
+      transform: translateY(0);
+    }
+
+    /* Content area */
+    #root > div > div:last-child {
+      min-height: 200px;
+    }
+
+    /* Counter view */
+    #root h1 {
+      font-size: 2.4rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      color: #f0f0f0;
+    }
+
+    /* Counter / Todo buttons */
+    #root > div > div button {
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding: 0.5rem 1.8rem;
+      margin: 0 0.4rem 0.5rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+      color: #fff;
+    }
+
+    /* Counter +1 / Todo Add */
+    #root > div > div button:first-of-type {
+      background: linear-gradient(135deg, #e94560, #c23152);
+      box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
+    }
+
+    /* Counter -1 */
+    #root > div > div button:nth-of-type(2) {
+      background: linear-gradient(135deg, #533483, #3b1f6e);
+      box-shadow: 0 4px 15px rgba(83, 52, 131, 0.4);
+    }
+
+    #root > div > div button:hover {
+      transform: translateY(-2px);
+    }
+
+    #root > div > div button:active {
+      transform: translateY(0);
+    }
+
+    /* Center counter buttons */
+    #root > div > div > div {
+      text-align: center;
+    }
+
+    /* Todo view */
+    #root h2 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      text-align: center;
+      color: #f0f0f0;
+    }
+
+    #root p {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 0.95rem;
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+
+    .loading {
+      color: #888;
+      font-size: 1.2rem;
+      text-align: center;
+    }
+
+    .error {
+      color: #e94560;
+      font-size: 1.2rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <p class="loading">Loading WASM…</p>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

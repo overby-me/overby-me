@@ -1,0 +1,5 @@
+id: rust-static-mut
+valid:
+  - "static COUNT: AtomicU64 = AtomicU64::new(0);"
+invalid:
+  - "static mut COUNT: u64 = 0;"

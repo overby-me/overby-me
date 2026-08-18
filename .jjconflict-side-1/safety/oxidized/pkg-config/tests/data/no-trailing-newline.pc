@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: no-trailing-newline
+Description: A test library with no trailing newline
+Version: 1.0.0
+Libs: -L${libdir} -lno-trailing-newline
+Cflags: -I${includedir}/no-trailing-newline

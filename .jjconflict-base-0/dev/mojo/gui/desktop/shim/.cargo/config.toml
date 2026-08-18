@@ -1,0 +1,10 @@
+# Cross-compilation configuration for Windows target (via MinGW-w64).
+#
+# The x86_64-w64-mingw32-gcc linker is provided by the Nix dev shell
+# (pkgs.pkgsCross.mingwW64.stdenv.cc). Used by:
+#   just build-shim-windows
+#   just test-desktop-wine
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+runner = "wine64"

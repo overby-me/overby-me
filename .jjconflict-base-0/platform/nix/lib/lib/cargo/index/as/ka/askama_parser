@@ -1,0 +1,1 @@
+{"name":"askama_parser","vers":"0.2.1","deps":[{"name":"nom","req":"^7","features":["alloc"],"optional":false,"default_features":false,"target":null,"kind":"normal"}],"cksum":"acb1161c6b64d1c3d83108213c2a2533a342ac225aabd0bda218278c2ddb00c0","features":{},"yanked":false,"rust_version":"1.65","pubtime":"2024-01-18T10:31:11Z"}

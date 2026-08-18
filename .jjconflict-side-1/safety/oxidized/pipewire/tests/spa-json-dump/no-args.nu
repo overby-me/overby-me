@@ -1,0 +1,5 @@
+source ../helpers.nu
+
+try { "" | ^$env.REF o+e> ($env.TMPDIR | path join expected) }
+try { "" | ^$env.RUST o+e> ($env.TMPDIR | path join actual) }
+compare "spa-json-dump (no args, default stdin)"

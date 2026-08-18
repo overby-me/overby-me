@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: circular-2
+Description: Second package in a circular dependency chain
+Version: 1.0.0
+Requires: circular-1
+Libs: -L${libdir} -lcircular-2
+Cflags: -I${includedir}/circular-2

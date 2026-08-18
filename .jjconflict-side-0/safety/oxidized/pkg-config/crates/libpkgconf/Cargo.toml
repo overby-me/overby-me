@@ -1,0 +1,18 @@
+[package]
+name = "libpkgconf"
+version = "0.1.0"
+edition = "2024"
+description = "A pure Rust implementation of the pkg-config/pkgconf library"
+readme = "README.md"
+license = "ISC"
+
+[[bench]]
+harness = false
+name = "benchmarks"
+
+[dependencies]
+thiserror = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"

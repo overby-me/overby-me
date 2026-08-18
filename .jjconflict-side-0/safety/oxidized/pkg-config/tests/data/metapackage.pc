@@ -1,0 +1,9 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: metapackage
+Description: A metapackage that only pulls in dependencies
+Version: 1.0.0
+Requires: simple >= 1.0, zlib

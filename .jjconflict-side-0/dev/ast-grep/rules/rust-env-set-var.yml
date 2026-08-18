@@ -1,0 +1,23 @@
+# set_var mutates process-global state with no synchronisation: a concurrent
+# getenv in another thread, including one inside libc, can read a freed pointer.
+# Rust 2024 makes it unsafe for this reason.
+#
+# The one site here sets a variable before spawning a Nickel subprocess, which
+# is the shape that is usually fine - but "usually" depends on nothing else
+# running yet, which is worth saying at the call rather than assuming.
+id: rust-env-set-var
+language: rust
+severity: warning
+message: >-
+  set_var mutates process-global state unsynchronised; a getenv on another
+  thread can read freed memory. Pass the value to the child explicitly
+  (Command::env), or set it before any thread is spawned and say so here.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: env::set_var($$$ARGS)
+    - pattern: std::env::set_var($$$ARGS)

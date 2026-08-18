@@ -1,0 +1,23 @@
+# The MitM switches, by API name. reqwest is in 11 manifests here with zero
+# current calls, and the one rustls dangerous-verifier install lives in the
+# curl port (its -k flag), outside this hook's scope - a clean ratchet on a
+# large live surface. The bare always-true closure form was measured and
+# dropped: 11/11 hits were Dioxus UI predicates, nowhere near TLS.
+id: rust-tls-verification-disabled
+language: rust
+severity: warning
+message: >-
+  This disables certificate or hostname verification, accepting any peer.
+  If a test needs a self-signed cert, scope the exception to the test and
+  say so here.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  any:
+    - pattern: $R.danger_accept_invalid_certs(true)
+    - pattern: $R.danger_accept_invalid_hostnames(true)
+    - pattern: $C.dangerous().set_certificate_verifier($V)
+    - pattern: SslVerifyMode::NONE

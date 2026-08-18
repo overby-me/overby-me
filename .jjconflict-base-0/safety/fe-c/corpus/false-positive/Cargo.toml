@@ -1,0 +1,24 @@
+[package]
+name = "fec-fp"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# False-positive fixture (Task B4): a workload that hammers hashbrown's
+# SwissTable unsafe (insert / grow / probe / remove / iterate) under Fe-C
+# instrumentation with FecAlloc tracking every allocation. A checker that
+# aborted on legitimate unsafe code would trap here; it must run clean.
+#
+# Its own workspace. cementite is a path dependency (this leaf binary installs
+# FecAlloc); the injected checks are symbol-level and add no edge (A4b / I11).
+# The fe-c-false-positive check builds it with
+# FEC_INSTRUMENT_ONLY=hashbrown,fec_fp so hashbrown itself is instrumented.
+[workspace]
+
+[[bin]]
+name = "fec-fp"
+path = "src/main.rs"
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }
+hashbrown = "0.14"

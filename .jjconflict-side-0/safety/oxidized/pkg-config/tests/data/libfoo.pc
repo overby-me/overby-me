@@ -1,0 +1,17 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libfoo
+Description: A test library for rust-pkg-config integration tests
+URL: https://example.com/libfoo
+Version: 1.2.3
+Requires: libbar >= 1.0
+Requires.private: zlib
+Conflicts: libfoo-legacy < 1.0
+Provides: libfoo-compat = 1.2.3
+Libs: -L${libdir} -lfoo
+Libs.private: -lm -lpthread
+Cflags: -I${includedir}/libfoo -DLIBFOO_VERSION=123
+License: MIT

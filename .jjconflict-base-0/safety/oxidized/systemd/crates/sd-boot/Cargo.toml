@@ -1,0 +1,9 @@
+[package]
+name = "sd-boot"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[dependencies]
+log = "0.4"
+uefi = { version = "0.36", features = ["global_allocator", "panic_handler"] }

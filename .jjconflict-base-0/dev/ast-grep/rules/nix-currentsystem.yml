@@ -1,0 +1,14 @@
+# builtins.currentSystem does not exist under pure flake evaluation, and
+# code that reaches it either throws there or silently builds for the
+# evaluator's platform elsewhere. The one in-tree use guards itself with
+# `or` as a bootstrap fallback, which the rule deliberately still flags:
+# the fallback is the part worth a comment at the site.
+id: nix-currentsystem
+language: nix
+severity: warning
+message: >-
+  currentSystem is impure and absent under pure evaluation. Take the system
+  as an argument (flake outputs pass it); if this is a guarded bootstrap
+  fallback, say so where it stands.
+rule:
+  pattern: builtins.currentSystem

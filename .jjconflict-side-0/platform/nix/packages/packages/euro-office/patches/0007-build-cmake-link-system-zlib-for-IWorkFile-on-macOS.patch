@@ -1,0 +1,30 @@
+Subject: [PATCH] build(cmake): link system zlib for IWorkFile on macOS
+
+Apple/IWorkFile compiles zlib_addon.c (which calls inflate/inflateEnd/
+inflateInit2_) but does not build zlib itself; it relies on the linked kernel
+library re-exporting those zlib symbols. On macOS (Mach-O two-level namespace +
+-fvisibility=hidden) kernel does not re-export them, so the IWorkFile link fails
+with undefined zlib symbols. Link the system zlib directly on Apple.
+
+---
+
+diff --git a/Apple/CMakeLists.txt b/Apple/CMakeLists.txt
+index 5a16948f1..a493600fb 100644
+--- a/Apple/CMakeLists.txt
++++ b/Apple/CMakeLists.txt
+@@ -469,6 +469,15 @@ target_link_libraries(IWorkFile PUBLIC
+     UnicodeConverter
+ )
+ 
++if(APPLE)
++    # IWorkFile compiles zlib_addon.c (inflate/inflateEnd/inflateInit2_) but not
++    # zlib itself, relying on kernel re-exporting those symbols. With Mach-O's
++    # two-level namespace + hidden visibility kernel does not re-export them, so
++    # link the system zlib directly.
++    find_package(ZLIB REQUIRED)
++    target_link_libraries(IWorkFile PRIVATE ZLIB::ZLIB)
++endif()
++
+ copy_artifacts_to_folder("IWorkFile" "${EO_CORE_OUTPUT_DIR}")
+ 
+ declare_victory( IWorkFile )

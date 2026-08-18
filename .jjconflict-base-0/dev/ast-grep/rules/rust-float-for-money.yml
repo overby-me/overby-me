@@ -1,0 +1,20 @@
+id: rust-float-for-money
+language: rust
+severity: warning
+message: "Money in a float loses cents"
+note: |
+  Binary floating point cannot represent 0.1, so sums of currency drift. Hold
+  minor units in an integer, or a decimal type. If this field is a rate or a
+  ratio rather than an amount, its name is what made it look otherwise.
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  kind: field_declaration
+  all:
+    - has:
+        field: type
+        regex: '^f(32|64)$'
+    - has:
+        field: name
+        regex: '^(price|amount|cost|fee|salary|payment)(_[a-z]+)?$'

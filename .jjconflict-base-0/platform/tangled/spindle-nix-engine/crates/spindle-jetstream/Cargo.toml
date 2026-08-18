@@ -1,0 +1,23 @@
+[package]
+name = "spindle-jetstream"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Jetstream client for AT Protocol event ingestion in tangled-spindle-nix"
+
+[dependencies]
+async-trait = { workspace = true }
+futures-util = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+spindle-db = { workspace = true }
+spindle-models = { workspace = true }
+spindle-rbac = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-util = "0.7"
+tracing = { workspace = true }
+url = "2"

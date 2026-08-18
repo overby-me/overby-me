@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔥 Mojo Todo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding-top: 8vh;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #e0e0e0;
+    }
+
+    #root {
+      width: 100%;
+      max-width: 520px;
+      padding: 0 1rem;
+    }
+
+    /* App shell: div > input + button + ul */
+    #root > div {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 2rem 2.5rem;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    #root > div::before {
+      content: '🔥 Mojo Todo';
+      display: block;
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+      text-align: center;
+      color: #f0f0f0;
+    }
+
+    /* Input row */
+    #root > div > input {
+      width: calc(100% - 5rem);
+      padding: 0.65rem 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px 0 0 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #f0f0f0;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    #root > div > input:focus {
+      border-color: rgba(233, 69, 96, 0.6);
+    }
+
+    #root > div > input::placeholder {
+      color: rgba(255, 255, 255, 0.35);
+    }
+
+    #root > div > button {
+      width: 5rem;
+      padding: 0.65rem 0;
+      border: 1px solid rgba(233, 69, 96, 0.5);
+      border-left: none;
+      border-radius: 0 8px 8px 0;
+      background: linear-gradient(135deg, #e94560, #c23152);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+
+    #root > div > button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
+    }
+
+    #root > div > button:active {
+      transform: translateY(0);
+    }
+
+    /* Item list */
+    #root ul {
+      list-style: none;
+      margin-top: 1.5rem;
+    }
+
+    #root ul:empty {
+      margin-top: 0;
+    }
+
+    #root ul:empty::after {
+      content: '';
+      display: none;
+    }
+
+    /* Single item: li > span + button(✓) + button(✕) */
+    #root li {
+      display: flex;
+      align-items: center;
+      padding: 0.6rem 0.4rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      transition: background 0.15s;
+    }
+
+    #root li:last-child {
+      border-bottom: none;
+    }
+
+    #root li:hover {
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 6px;
+    }
+
+    #root li > span {
+      flex: 1;
+      font-size: 1rem;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    #root li.completed > span {
+      text-decoration: line-through;
+      opacity: 0.5;
+    }
+
+    #root li > button {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      margin-left: 0.3rem;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    /* Toggle button */
+    #root li > button:first-of-type:hover {
+      background: rgba(76, 175, 80, 0.2);
+      color: #4caf50;
+    }
+
+    #root li.completed > button:first-of-type {
+      color: #4caf50;
+    }
+
+    /* Remove button */
+    #root li > button:last-of-type:hover {
+      background: rgba(233, 69, 96, 0.2);
+      color: #e94560;
+    }
+
+    .loading {
+      color: #888;
+      font-size: 1.2rem;
+      text-align: center;
+    }
+
+    .error {
+      color: #e94560;
+      font-size: 1.2rem;
+      text-align: center;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 2rem 0 0.5rem;
+      color: rgba(255, 255, 255, 0.25);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <p class="loading">Loading WASM…</p>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

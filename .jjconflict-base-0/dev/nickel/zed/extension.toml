@@ -1,0 +1,15 @@
+id = "nickel"
+name = "Nickel"
+version = "0.0.1"
+schema_version = 1
+authors = ["Artur Chakhvadze <norpadon@gmail.com>"]
+description = "Support for the Nickel configuration language."
+repository = "https://github.com/norpadon/zed-nickel-extension"
+
+[grammars.nickel]
+repository = "https://github.com/nickel-lang/tree-sitter-nickel"
+commit = "88d836a24b3b11c8720874a1a9286b8ae838d30a"
+
+[language_servers.nls]
+name = "nls"
+language = "Nickel"

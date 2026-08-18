@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: sysroot-test
+Description: A test library for sysroot path rewriting
+Version: 1.0.0
+Libs: -L${libdir} -lsysroot-test
+Cflags: -I${includedir}/sysroot-test

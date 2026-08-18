@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: flag-order-1
+Description: A test library for verifying flag ordering
+Version: 1.0.0
+Requires: simple
+Libs: -L${libdir} -lflag-order-1 -lutil
+Cflags: -I${includedir}/flag-order-1 -DFLAG_ORDER=1

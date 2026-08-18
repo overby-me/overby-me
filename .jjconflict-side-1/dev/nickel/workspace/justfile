@@ -1,0 +1,8 @@
+build:
+    cargo build -p nix-workspace
+
+test:
+    cargo test -p nix-workspace
+
+run *args:
+    cargo run -p nix-workspace -- {{ args }}

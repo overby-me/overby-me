@@ -1,0 +1,58 @@
+From ced398b443e4fb24f3b5b7fba23e87d1b57540ca Mon Sep 17 00:00:00 2001
+From: Niclas Overby <niclas@overby.me>
+Date: Mon, 29 Jun 2026 13:07:26 +0200
+Subject: [PATCH 4/5] fix(common): use _MAC consistently in Directory.cpp
+
+Directory.cpp used a bare "MAC" both to guard its POSIX includes (#elif MAC)
+and in two GetFiles paths, while every other platform check in the codebase
+uses _MAC. A bare MAC define is fragile (it collides with template parameters
+named MAC, e.g. in the vendored Crypto++). Standardize on _MAC and fold the
+identical __linux__/_MAC/_IOS include blocks together.
+---
+ DesktopEditor/common/Directory.cpp | 16 +++-------------
+ 1 file changed, 3 insertions(+), 13 deletions(-)
+
+diff --git a/DesktopEditor/common/Directory.cpp b/DesktopEditor/common/Directory.cpp
+index 792fdbb8a..f534d7965 100644
+--- a/DesktopEditor/common/Directory.cpp
++++ b/DesktopEditor/common/Directory.cpp
+@@ -28,17 +28,7 @@
+ #include "windef.h"
+ #include <shlobj.h>
+ #include <Rpc.h>
+-#elif __linux__
+-#include <sys/types.h>
+-#include <sys/stat.h>
+-#include <unistd.h>
+-#include <dirent.h>
+-#elif MAC
+-#include <sys/types.h>
+-#include <sys/stat.h>
+-#include <unistd.h>
+-#include <dirent.h>
+-#elif _IOS
++#elif defined(__linux__) || defined(_MAC) || defined(_IOS)
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+@@ -164,7 +154,7 @@ namespace NSDirectory
+ 		delete [] pUtf8;
+ #endif
+ 
+-#if defined(MAC) || defined (_IOS)
++#if defined(_MAC) || defined (_IOS)
+ 		BYTE* pUtf8 = NULL;
+ 		LONG lLen = 0;
+ 		NSFile::CUtf8Converter::GetUtf8StringFromUnicode(strDirectory.c_str(), strDirectory.length(), pUtf8, lLen, false);
+@@ -443,7 +433,7 @@ namespace NSDirectory
+ 		return true;
+ #endif
+ 
+-#if defined(MAC) || defined (_IOS)
++#if defined(_MAC) || defined (_IOS)
+ 		BYTE* pUtf8 = NULL;
+ 		LONG lLen = 0;
+ 		NSFile::CUtf8Converter::GetUtf8StringFromUnicode(strSrc.c_str(), strSrc.length(), pUtf8, lLen, false);
+-- 
+2.54.0
+

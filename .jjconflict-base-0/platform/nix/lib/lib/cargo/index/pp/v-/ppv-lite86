@@ -1,0 +1,1 @@
+{"name":"ppv-lite86","vers":"0.2.21","deps":[{"name":"zerocopy","req":"^0.8.23","features":["simd"],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9","features":{"default":["std"],"no_simd":[],"simd":[],"std":[]},"yanked":false,"rust_version":"1.61","pubtime":"2025-03-09T20:01:40Z"}

@@ -1,0 +1,6 @@
+# Build artifacts
+build/
+
+# Nix build results
+result
+result-*

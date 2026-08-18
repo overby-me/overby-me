@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: framework
+Description: A test library using macOS-style framework flags
+Version: 1.0.0
+Libs: -L${libdir} -lframework -framework CoreFoundation -framework Security
+Cflags: -I${includedir}/framework -F/Library/Frameworks

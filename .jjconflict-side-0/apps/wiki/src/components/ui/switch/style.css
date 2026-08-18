@@ -1,0 +1,97 @@
+.dx-switch-example {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  gap: 15px;
+}
+
+/* DESIGN (M3 Expressive switch): a full-size 52x32 switch whose thumb grows
+   from a small dot (off) to a large knob (on) with a spatial spring — the M3 2025
+   switch feel — instead of the compact dx default. */
+.dx-switch {
+  all: unset;
+  position: relative;
+  width: 3.25rem;
+  height: 2rem;
+  border-radius: 9999px;
+  background-color: var(--md-sys-color-surface-container-highest, var(--primary-color-6));
+  border: 2px solid var(--md-sys-color-outline);
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+
+.dx-switch[data-state="checked"] {
+  background-color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+}
+
+.dx-switch:focus-visible {
+  box-shadow: 0 0 0 3px
+    color-mix(in oklab, var(--md-sys-color-primary) 45%, transparent);
+}
+
+.dx-switch-thumb {
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: 0.4rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background-color: var(--md-sys-color-outline);
+  transform: translateY(-50%);
+  transition:
+    left 260ms var(--md-sys-motion-spring-spatial-default, ease),
+    width 260ms var(--md-sys-motion-spring-spatial-default, ease),
+    height 260ms var(--md-sys-motion-spring-spatial-default, ease),
+    background-color 200ms ease;
+}
+
+.dx-switch[data-state="checked"] .dx-switch-thumb {
+  width: 1.5rem;
+  height: 1.5rem;
+  left: calc(3.25rem - 1.5rem - 0.4rem);
+  background-color: var(--md-sys-color-on-primary);
+}
+
+/* The two Expressive behaviours the sizes above were missing.
+
+   Pressed, the handle goes to 28dp — bigger than the selected 24dp, so the
+   switch answers the finger before it answers the state. It is pinned 2px off
+   the track edge rather than kept concentric, because at 28dp inside a 32dp
+   track there is nowhere else for it to be.
+
+   And a state layer, which every other control here has: 8% on-surface on
+   hover, 10% pressed, drawn as a ring on the handle so it reads on both halves
+   of the track. Not transitioned — a state layer that fades in lags the press
+   it is meant to acknowledge. */
+.dx-switch:active .dx-switch-thumb,
+.dx-switch[data-state="checked"]:active .dx-switch-thumb {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+.dx-switch:active .dx-switch-thumb {
+  left: 0.125rem;
+}
+.dx-switch[data-state="checked"]:active .dx-switch-thumb {
+  left: calc(3.25rem - 1.75rem - 0.125rem);
+}
+
+.dx-switch:hover .dx-switch-thumb {
+  box-shadow: 0 0 0 0.5rem
+    color-mix(in oklab, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.dx-switch:active .dx-switch-thumb {
+  box-shadow: 0 0 0 0.5rem
+    color-mix(in oklab, var(--md-sys-color-on-surface) 10%, transparent);
+}
+.dx-switch[data-disabled="true"]:hover .dx-switch-thumb {
+  box-shadow: none;
+}
+
+/* Only apply disabled styles when data-disabled is "true" */
+.dx-switch[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

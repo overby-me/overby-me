@@ -1,0 +1,68 @@
+[package]
+name = "mojo-xr-shim"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.90.0"
+description = "C FFI shim exposing Blitz + OpenXR for mojo-gui XR renderer — multi-panel DOM rendering to offscreen textures composited via OpenXR quad layers"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "mojo_xr"
+
+[dependencies]
+# Blitz packages — pinned to v0.2.0 release (same rev as desktop shim)
+blitz = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0", features = [
+  "net",
+] }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "2f83df96220561316611ecf857e20cd1feed8ca0" }
+
+# Rendering backend (must match Blitz v0.2.0's pinned versions exactly)
+anyrender = { version = "0.6" }
+anyrender_vello = { version = "0.6" }
+
+# GPU abstraction — used for offscreen texture rendering (Vello → wgpu texture)
+# and OpenXR swapchain interop. Must match vello 0.6's wgpu version exactly.
+wgpu = { version = "26" }
+
+# Vello 2D rendering engine — used directly for offscreen render_to_texture().
+# anyrender_vello provides the PaintScene trait impl (VelloScenePainter) that
+# bridges blitz-paint's paint_scene() to a vello::Scene, but we need vello
+# directly for Scene, Renderer, RenderParams, and AaConfig/AaSupport types.
+vello = { version = "0.6" }
+
+# Blocking executor for async wgpu adapter/device creation.
+# Already a transitive dependency (via anyrender_vello) — pinned here for clarity.
+pollster = { version = "0.4" }
+
+# OpenXR bindings — session management, frame loop, input, reference spaces.
+# The "loaded" feature uses dlopen at runtime to find the OpenXR loader
+# (libopenxr_loader.so). This means the cdylib can always be loaded by Mojo
+# even on systems without an OpenXR runtime — `Entry::load()` returns an error
+# which we handle by falling back to headless mode. The loader dispatches to
+# the active runtime (Monado, SteamVR, etc.) when available.
+openxr = { version = "0.19", features = ["loaded"] }
+
+# Vulkan bindings — used to create the Vulkan instance and device that OpenXR
+# requires for its graphics binding. The version must match wgpu-hal's ash
+# dependency exactly (0.38) to avoid type conflicts when wrapping raw Vulkan
+# handles in wgpu via the HAL API.
+ash = { version = "0.38", default-features = false, features = [
+  "debug",
+  "linked",
+] }
+
+# Note: markup5ever types (QualName, LocalName, etc.) are re-exported by blitz-dom.
+# Do NOT add a direct markup5ever dependency — version mismatches cause type errors.
+
+# Note: winit is NOT included — the XR shim does not create a desktop window.
+# The OpenXR runtime owns the display output; we only render to offscreen textures.
+
+[profile.release]
+opt-level = 2
+strip = "symbols"
+lto = "thin"

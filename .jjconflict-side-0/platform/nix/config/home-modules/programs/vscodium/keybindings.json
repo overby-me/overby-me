@@ -1,0 +1,1513 @@
+[
+	{
+		"args": {
+			"menu": "cmd-hx"
+		},
+		"command": "dance.openMenu",
+		"key": "shift+;",
+		"when": "editorTextFocus && (dance.mode != 'insert')"
+	},
+	{
+		"args": {
+			"menu": "cmd-hx"
+		},
+		"command": "dance.openMenu",
+		"key": "shift+.",
+		"when": "editorTextFocus && dance.mode == 'normal'"
+	},
+	{
+		"command": "noop",
+		"key": "shift+,",
+		"when": "editorTextFocus && dance.mode == 'normal'"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+b"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+d"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+e"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+f"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+g"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+h"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+i"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+j"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+k"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+l"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+m"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+n"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+o"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+q"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+r"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+t"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+u"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+w"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+x"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+y"
+	},
+	{
+		"command": "noop",
+		"key": "ctrl+z"
+	},
+	{
+		"command": "workbench.action.quickOpenSelectPrevious",
+		"key": "ctrl+p",
+		"when": "!editorTextFocus"
+	},
+	{
+		"command": "workbench.action.quickOpenSelectNext",
+		"key": "ctrl+n",
+		"when": "!editorTextFocus"
+	},
+	{
+		"command": "workbench.action.quickOpenSelectPrevious",
+		"key": "shift+tab",
+		"when": "!editorTextFocus"
+	},
+	{
+		"command": "workbench.action.quickOpenSelectNext",
+		"key": "tab",
+		"when": "!editorTextFocus"
+	},
+	{
+		"command": "selectPrevCodeAction",
+		"key": "ctrl+p",
+		"when": "codeActionMenuVisible"
+	},
+	{
+		"command": "selectNextCodeAction",
+		"key": "ctrl+n",
+		"when": "codeActionMenuVisible"
+	},
+	{
+		"command": "selectPrevCodeAction",
+		"key": "shift+tab",
+		"when": "codeActionMenuVisible"
+	},
+	{
+		"command": "selectNextCodeAction",
+		"key": "tab",
+		"when": "codeActionMenuVisible"
+	},
+	{
+		"command": "workbench.action.focusActiveEditorGroup",
+		"key": "escape",
+		"when": "sideBarFocus || panelFocus"
+	},
+	{
+		"command": "workbench.view.explorer",
+		"key": "alt+1"
+	},
+	{
+		"command": "workbench.action.closeSidebar",
+		"key": "alt+1",
+		"when": "sideBarFocus && activeViewlet == 'workbench.view.explorer'"
+	},
+	{
+		"command": "workbench.view.debug",
+		"key": "alt+shift+,"
+	},
+	{
+		"command": "workbench.action.closeSidebar",
+		"key": "alt+shift+,",
+		"when": "sideBarFocus && activeViewlet == 'workbench.view.debug'"
+	},
+	{
+		"command": "workbench.view.scm",
+		"key": "alt+shift+."
+	},
+	{
+		"command": "workbench.action.closeSidebar",
+		"key": "alt+shift+.",
+		"when": "sideBarFocus && activeViewlet == 'workbench.view.scm'"
+	},
+	{
+		"command": "workbench.view.remote",
+		"key": "alt+="
+	},
+	{
+		"command": "workbench.action.closeSidebar",
+		"key": "alt+=",
+		"when": "sideBarFocus && activeViewlet == 'workbench.view.remote'"
+	},
+	{
+		"command": "search.action.focusSearchList",
+		"key": "enter",
+		"when": "activeViewlet == 'workbench.view.search' && searchInputBoxFocus"
+	},
+	{
+		"command": "workbench.action.closeSidebar",
+		"key": "escape",
+		"when": "activeViewlet == 'workbench.view.search' && searchInputBoxFocus"
+	},
+	{
+		"command": "workbench.action.findInFiles",
+		"key": "escape",
+		"when": "activeViewlet == 'workbench.view.search' && searchViewletFocus && !searchInputBoxFocus"
+	},
+	{
+		"command": "search.action.focusNextSearchResult",
+		"key": "enter",
+		"when": "inSearchEditor && searchInputBoxFocus"
+	},
+	{
+		"command": "editor.action.revealDefinition",
+		"key": "enter",
+		"when": "inSearchEditor && !searchInputBoxFocus && dance.mode == 'normal'"
+	},
+	{
+		"command": "workbench.action.closeActiveEditor",
+		"key": "escape",
+		"when": "inSearchEditor && searchInputBoxFocus"
+	},
+	{
+		"command": "search.action.openEditor",
+		"key": "escape",
+		"when": "inSearchEditor && !searchInputBoxFocus"
+	},
+	{
+		"command": "renameFile",
+		"key": "enter",
+		"when": "filesExplorerFocus && !explorerResourceIsRoot && !explorerResourceReadonly"
+	},
+	{
+		"command": "cancelRenameInput",
+		"key": "escape",
+		"when": "filesExplorerFocus && !listFocus"
+	},
+	{
+		"command": "moveFileToTrash",
+		"key": "alt+backspace",
+		"when": "filesExplorerFocus && !explorerResourceIsRoot"
+	},
+	{
+		"command": "workbench.action.closeSidebar",
+		"key": "q",
+		"when": "filesExplorerFocus && !inputFocus"
+	},
+	{
+		"args": {
+			"input": "file-explorer"
+		},
+		"command": "dance.openMenu",
+		"key": "m",
+		"when": "filesExplorerFocus && !inputFocus"
+	},
+	{
+		"command": "list.collapse",
+		"key": "h",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.select",
+		"key": "l",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.focusDown",
+		"key": "j",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.focusUp",
+		"key": "k",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.toggleExpand",
+		"key": "shift+l",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.focusPageDown",
+		"key": "ctrl+d",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.focusPageUp",
+		"key": "ctrl+u",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.focusFirst",
+		"key": "g g",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.focusLast",
+		"key": "g e",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.toggleSelection",
+		"key": "space",
+		"when": "listFocus && !inputFocus"
+	},
+	{
+		"command": "list.toggleKeyboardNavigation",
+		"key": "-",
+		"when": "listFocus && !inputFocus && listSupportsKeyboardNavigation"
+	},
+	{
+		"command": "workbench.action.debug.start",
+		"key": "f9",
+		"when": "debuggersAvailable && debugState == 'inactive'"
+	},
+	{
+		"command": "workbench.action.debug.continue",
+		"key": "f9",
+		"when": "debugState == 'stopped'"
+	},
+	{
+		"command": "workbench.action.debug.restart",
+		"key": "ctrl+shift+f9",
+		"when": "inDebugMode"
+	},
+	{
+		"command": "workbench.action.debug.stop",
+		"key": "ctrl+shift+f2",
+		"when": "inDebugMode"
+	},
+	{
+		"command": "workbench.action.debug.pause",
+		"key": "shift+f9",
+		"when": "debugState == 'running'"
+	},
+	{
+		"command": "workbench.action.debug.stepInto",
+		"key": "f7",
+		"when": "debugState != 'inactive'"
+	},
+	{
+		"command": "workbench.action.debug.stepOver",
+		"key": "f8",
+		"when": "debugState == 'stopped'"
+	},
+	{
+		"command": "workbench.action.debug.stepOut",
+		"key": "ctrl+shift+f8",
+		"when": "debugState == 'stopped'"
+	},
+	{
+		"command": "editor.debug.action.toggleBreakpoint",
+		"key": "f2",
+		"when": "debuggersAvailable && editorTextFocus"
+	},
+	{
+		"command": "workbench.debug.action.focusBreakpointsView",
+		"key": "shift+f2",
+		"when": "inDebugMode && !focusedSessionIsAttach"
+	},
+	{
+		"command": "dance.select.left.jump",
+		"key": "h",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.down.jump",
+		"key": "j",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.up.jump",
+		"key": "k",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [".selections.reduce", ".select.right.jump"]
+		},
+		"command": "dance.run",
+		"key": "l",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek",
+		"key": "t",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.included",
+		"key": "f",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.backward",
+		"key": "shift+t",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.included.backward",
+		"key": "shift+f",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.replaceCharacters",
+		"key": "r",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [
+				[
+					".selections.saveText",
+					{
+						"register": "tmp"
+					}
+				],
+				[
+					".edit.insert",
+					{
+						"register": "\""
+					}
+				],
+				[
+					".updateRegister",
+					{
+						"copyFrom": "tmp"
+					}
+				]
+			]
+		},
+		"command": "dance.run",
+		"key": "shift+r",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.repeat.seek",
+		"key": "alt+.",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.case.swap",
+		"key": "shift+`",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.case.toLower",
+		"key": "`",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.case.toUpper",
+		"key": "alt+`",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"shift": "jump"
+		},
+		"command": "dance.select.lineStart",
+		"key": "home",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"shift": "jump"
+		},
+		"command": "dance.select.lineEnd",
+		"key": "end",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.word",
+		"key": "w",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.word.backward",
+		"key": "b",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.wordEnd",
+		"key": "e",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.word",
+		"key": "shift+w",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.word.backward",
+		"key": "shift+b",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.wordEnd",
+		"key": "shift+e",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"mode": "select"
+		},
+		"command": "dance.modes.set",
+		"key": "v",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"shift": "jump"
+		},
+		"command": "dance.select.lineStart",
+		"key": "shift+g",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "goto-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "g",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.modes.insert.before",
+		"key": "i",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [".modes.insert.after", ".select.right.jump"]
+		},
+		"command": "dance.run",
+		"key": "a",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [".selections.reduce", ".edit.newLine.below.insert"]
+		},
+		"command": "dance.run",
+		"key": "o",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.modes.insert.lineStart",
+		"key": "shift+i",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [
+				[
+					".select.lineEnd",
+					{
+						"shift": "jump"
+					}
+				],
+				".select.right.jump",
+				".modes.insert.before"
+			]
+		},
+		"command": "dance.run",
+		"key": "shift+a",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.newLine.above.insert",
+		"key": "shift+o",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.edit.yank-delete",
+		"key": "d",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.edit.delete",
+		"key": "alt+d",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.edit.yank-delete-insert",
+		"key": "c",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.edit.delete-insert",
+		"key": "alt+c",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"direction": 1
+		},
+		"command": "dance.selections.copy",
+		"key": "shift+c",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"direction": -1
+		},
+		"command": "dance.selections.copy",
+		"key": "alt+shift+c",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.select",
+		"key": "s",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.splitLines",
+		"key": "alt+s",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.merge",
+		"key": "alt+shift+-",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.split",
+		"key": "shift+s",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.reduce",
+		"key": ";",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.changeDirection",
+		"key": "alt+;",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "editor.action.smartSelect.expand",
+		"key": "alt+o",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "editor.action.smartSelect.shrink",
+		"key": "alt+i",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.buffer",
+		"key": "shift+5",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.line.below.extend",
+		"key": "x",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.expandToLines",
+		"key": "shift+x",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.trimLines",
+		"key": "alt+x",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "match-hx"
+		},
+		"command": "dance.openMenu",
+		"key": "m",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "left-bracket-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "[",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "right-bracket-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "]",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search",
+		"key": "-",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.backward",
+		"key": "_",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.next",
+		"key": "n",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.previous",
+		"key": "shift+n",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.selection.smart",
+		"key": "shift+8",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.selection",
+		"key": "alt+shift+8",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.undo",
+		"key": "u",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.redo",
+		"key": "shift+u",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.undo.selections",
+		"key": "alt+u",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.redo.selections",
+		"key": "alt+shift+u",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.selections.saveText",
+		"key": "y",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.edit.paste.after",
+		"key": "p",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"register": "\""
+		},
+		"command": "dance.edit.paste.before",
+		"key": "shift+p",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.recording.play",
+		"key": "q",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.recording.start",
+		"key": "shift+q",
+		"when": "editorTextFocus && dance.mode == 'normal' && !dance.isRecording || editorTextFocus && dance.mode == 'select' && !dance.isRecording"
+	},
+	{
+		"command": "dance.history.recording.stop",
+		"key": "shift+q",
+		"when": "editorTextFocus && dance.mode == 'normal' &&  dance.isRecording || editorTextFocus && dance.mode == 'select' &&  dance.isRecording"
+	},
+	{
+		"command": "editor.action.formatSelection",
+		"key": "=",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.join",
+		"key": "shift+j",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.join.select",
+		"key": "alt+shift+j",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.filter.regexp",
+		"key": "shift+k",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.filter.regexp.inverse",
+		"key": "alt+shift+k",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.clear.secondary",
+		"key": ",",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.clear.main",
+		"key": "alt+,",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.edit.align",
+		"key": "shift+7",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.trimWhitespace",
+		"key": "shift+-",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.rotate.selections",
+		"key": "shift+9",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.rotate.selections.reverse",
+		"key": "shift+0",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.rotate.both",
+		"key": "alt+shift+9",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.rotate.both.reverse",
+		"key": "alt+shift+0",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.faceForward",
+		"key": "alt+shift+;",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.history.repeat.edit",
+		"key": ".",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.modes.set.normal",
+		"key": "escape",
+		"when": "editorTextFocus && dance.mode != 'normal'"
+	},
+	{
+		"args": {
+			"by": "page",
+			"direction": -1,
+			"shift": "jump"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+b",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "page",
+			"direction": 1,
+			"shift": "jump"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+f",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "halfPage",
+			"direction": -1,
+			"shift": "jump"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+u",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "halfPage",
+			"direction": 1,
+			"shift": "jump"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+d",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "window-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "ctrl+w",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "editor.action.commentLine",
+		"key": "ctrl+c",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "workbench.action.navigateForward",
+		"key": "ctrl+i",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "workbench.action.navigateForward",
+		"key": "tab",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "workbench.action.navigateBack",
+		"key": "ctrl+o",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "leader-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "space",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "view-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "z",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"locked": true,
+			"menu": "view-hx",
+			"pass": [
+				{
+					"shift": "jump"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "shift+z",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selectRegister",
+		"key": "shift+'",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.pipe.prepend",
+		"key": "shift+1",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.pipe.append",
+		"key": "alt+shift+1",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.selections.filter",
+		"key": "shift+4",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"code": [
+				"let cmd = await prompt({ prompt: 'pipe:' })",
+				"await vscode.commands.executeCommand('dance.selections.pipe.replace', { expression: '#' + cmd});"
+			]
+		},
+		"command": "dance.run",
+		"key": "shift+\\",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "workbench.action.terminal.toggleTerminal",
+		"key": "ctrl+z"
+	},
+	{
+		"command": "editor.emmet.action.incrementNumberByOne",
+		"key": "ctrl+a",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "editor.emmet.action.decrementNumberByOne",
+		"key": "ctrl+x",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "\\",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "'",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+y",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+[",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+]",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+d",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+h",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+l",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+v",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.ignore",
+		"key": "shift+m",
+		"when": "editorTextFocus && dance.mode == 'normal' || editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.left.extend",
+		"key": "h",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.down.extend",
+		"key": "j",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.up.extend",
+		"key": "k",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.select.right.extend",
+		"key": "l",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"code": [
+				"const oldAnchor = Selections.mapByIndex((_i, sel) => sel.anchor);",
+				"await vscode.commands.executeCommand('dance.seek.word.extend');",
+				"Selections.updateWithFallbackByIndex((i, sel) => sel.isReversed && oldAnchor[i].character >= sel.anchor.character ? new vscode.Selection(Positions.at(sel.anchor.line, sel.anchor.character+1), sel.active) : sel);"
+			]
+		},
+		"command": "dance.run",
+		"key": "w",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"code": [
+				"const oldAnchor = Selections.mapByIndex((_i, sel) => sel.anchor);",
+				"await vscode.commands.executeCommand('dance.seek.word.extend.backward');",
+				"Selections.updateWithFallbackByIndex((i, sel) => !sel.isReversed && oldAnchor[i].character < sel.anchor.character ? new vscode.Selection(Positions.at(sel.anchor.line, sel.anchor.character-1), sel.active) : sel);"
+			]
+		},
+		"command": "dance.run",
+		"key": "b",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"code": [
+				"const oldAnchor = Selections.mapByIndex((_i, sel) => sel.anchor);",
+				"await vscode.commands.executeCommand('dance.seek.wordEnd.extend');",
+				"Selections.updateWithFallbackByIndex((i, sel) => sel.isReversed && oldAnchor[i].character >= sel.anchor.character ? new vscode.Selection(Positions.at(sel.anchor.line, sel.anchor.character+1), sel.active) : sel);"
+			]
+		},
+		"command": "dance.run",
+		"key": "e",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.word",
+		"key": "shift+w",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.word.backward",
+		"key": "shift+b",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.wordEnd",
+		"key": "shift+e",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.extend",
+		"key": "-",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.backward.extend",
+		"key": "_",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.next.add",
+		"key": "n",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.search.previous.add",
+		"key": "shift+n",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.extend",
+		"key": "t",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.included.extend",
+		"key": "f",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.backward",
+		"key": "shift+t",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.seek.included.backward",
+		"key": "shift+f",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": [
+			{
+				"shift": "extend"
+			}
+		],
+		"command": "dance.select.lineStart",
+		"key": "home",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": [
+			{
+				"shift": "extend"
+			}
+		],
+		"command": "dance.select.lineEnd",
+		"key": "end",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "page",
+			"direction": -1,
+			"shift": "extend"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+b",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "page",
+			"direction": 1,
+			"shift": "extend"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+f",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "halfPage",
+			"direction": -1,
+			"shift": "extend"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+u",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"by": "halfPage",
+			"direction": 1,
+			"shift": "extend"
+		},
+		"command": "dance.select.vertically",
+		"key": "ctrl+d",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "dance.modes.set.normal",
+		"key": "v",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "goto-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "g",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "match-hx"
+		},
+		"command": "dance.openMenu",
+		"key": "m",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "view-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "z",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"locked": true,
+			"menu": "view-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "shift+z",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "window-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "ctrl+w",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "left-bracket-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "[",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "right-bracket-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "]",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"menu": "leader-hx",
+			"pass": [
+				{
+					"shift": "extend"
+				}
+			]
+		},
+		"command": "dance.openMenu",
+		"key": "space",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [".edit.replaceCharacters", ".modes.set.normal"]
+		},
+		"command": "dance.run",
+		"key": "r",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [
+				[
+					".selections.saveText",
+					{
+						"register": "tmp"
+					}
+				],
+				[
+					".edit.insert",
+					{
+						"register": "\""
+					}
+				],
+				[
+					".updateRegister",
+					{
+						"copyFrom": "tmp"
+					}
+				],
+				".modes.set.normal"
+			]
+		},
+		"command": "dance.run",
+		"key": "shift+r",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [
+				[
+					".edit.yank-delete",
+					{
+						"register": "\""
+					}
+				],
+				".modes.set.normal"
+			]
+		},
+		"command": "dance.run",
+		"key": "d",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"args": {
+			"commands": [
+				[
+					".selections.changeDirection",
+					{
+						"direction": 1
+					}
+				],
+				".select.line.below.extend",
+				".selections.expandToLines"
+			]
+		},
+		"command": "dance.run",
+		"key": "x",
+		"when": "editorTextFocus && dance.mode == 'select'"
+	},
+	{
+		"command": "selectNextQuickFix",
+		"key": "tab",
+		"when": "editorFocus && quickFixWidgetVisible"
+	},
+	{
+		"command": "selectNextSuggestion",
+		"key": "tab",
+		"when": "editorTextFocus && suggestWidgetMultipleSuggestions && suggestWidgetVisible"
+	},
+	{
+		"command": "selectPrevQuickFix",
+		"key": "shift+tab",
+		"when": "editorFocus && quickFixWidgetVisible"
+	},
+	{
+		"command": "selectPrevSuggestion",
+		"key": "shift+tab",
+		"when": "editorTextFocus && suggestWidgetMultipleSuggestions && suggestWidgetVisible"
+	},
+	{
+		"command": "editor.action.triggerSuggest",
+		"key": "ctrl+x",
+		"when": "!suggestWidgetVisible && editorHasCompletionItemProvider && textInputFocus && !editorReadonly"
+	},
+	{
+		"command": "dance.edit.selectRegister-insert",
+		"key": "ctrl+r",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "deleteWordLeft",
+		"key": "ctrl+w",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "deleteWordRight",
+		"key": "alt+d",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "deleteAllLeft",
+		"key": "ctrl+u",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "deleteAllRight",
+		"key": "ctrl+k",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "deleteLeft",
+		"key": "ctrl+h",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "deleteRight",
+		"key": "ctrl+d",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "dance.edit.newLine.below.insert",
+		"key": "ctrl+j",
+		"when": "editorTextFocus && dance.mode == 'insert'"
+	},
+	{
+		"command": "-showPrevParameterHint",
+		"key": "up",
+		"when": "editorFocus && parameterHintsMultipleSignatures && parameterHintsVisible"
+	},
+	{
+		"command": "-showNextParameterHint",
+		"key": "down",
+		"when": "editorFocus && parameterHintsMultipleSignatures && parameterHintsVisible"
+	}
+]

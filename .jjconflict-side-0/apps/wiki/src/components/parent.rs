@@ -1,0 +1,181 @@
+use dioxus::prelude::*;
+
+use crate::graphql::{self};
+use crate::i18n::t;
+use crate::model::ContextNodeFields;
+use crate::session::use_session;
+
+use super::loader::icon_el;
+
+/// ParentApp — the "Missing parent" admin view (#149): lists nodes that have
+/// lost their parent, so they can be inspected and purged. The single legitimate
+/// root (the home node) is filtered out, so anything shown is an orphan worth
+/// investigating. Reachable via `?app=parent`.
+///
+/// "Lost its parent" is mostly NOT a null `parentId`. There is no foreign key on
+/// that column, so deleting a node leaves its children pointing at an id that is
+/// no longer there — a reaction outlives the comment it sat on exactly this way.
+/// [`graphql::query_orphans`] looks for both shapes; before it did, this view was
+/// permanently empty while hundreds of orphans existed.
+#[component]
+pub fn ParentApp() -> Element {
+    let session = use_session();
+    let access_token = session.read().access_token.clone();
+
+    let orphans = crate::use_data_resource!(move || {
+        let token = access_token.clone();
+        async move {
+            graphql::query_orphans(token.as_deref())
+                .await
+                .map(|nodes| nodes.into_iter().filter(is_orphan).collect::<Vec<_>>())
+        }
+    });
+
+    // Purge (#149): delete a selected orphan (its members first, then the node);
+    // the server RLS still gates whether this caller may actually delete it.
+    let mut confirm = use_signal(|| None::<(String, String)>);
+    let mut busy = use_signal(|| false);
+
+    rsx! {
+        div { class: "card app-card",
+            div { class: "card-header",
+                div { class: "avatar", {icon_el("app/parent")} }
+                div {
+                    h3 { class: "title-medium", "{t(\"parent.title\")}" }
+                    p {
+                        class: "body-small",
+                        class: "text-muted",
+                        "{t(\"parent.description\")}"
+                    }
+                }
+            }
+            match &*orphans.read() {
+                Some(Ok(list)) if !list.is_empty() => rsx! {
+                    div { class: "list",
+                        for node in list.iter() {
+                            div { class: "list-item", key: "{node.id.0}",
+                                div { class: "avatar small", {super::loader::node_icon_el(node.mime_id.as_deref().unwrap_or(""), node.data.as_ref().map(|d| &d.0))} }
+                                div { class: "list-item-text",
+                                    div { class: "list-item-primary", "{node.name}" }
+                                    div {
+                                        class: "list-item-secondary",
+                                        class: "text-muted",
+                                        "{node.mime_id.clone().unwrap_or_default()} · {node.id.0}"
+                                    }
+                                }
+                                div { class: "flex-grow" }
+                                button {
+                                    class: "btn-icon",
+                                    aria_label: t("parent.purge"),
+                                    title: t("parent.purge"),
+                                    onclick: {
+                                        let id = node.id.0.clone();
+                                        let name = node.name.clone();
+                                        move |_| confirm.set(Some((id.clone(), name.clone())))
+                                    },
+                                    span { class: "material-icons", "delete" }
+                                }
+                            }
+                        }
+                    }
+                },
+                Some(Ok(_)) => rsx! {
+                    // DESIGN: a celebratory orb empty state for the all-healthy case.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "verified" }
+                        }
+                        p { class: "empty-state-body", "{t(\"parent.none\")}" }
+                    }
+                },
+                Some(Err(e)) => rsx! {
+                    div { class: "card-content",
+                        p { class: "body-medium", "{t(\"error.somethingWentWrong\")}" }
+                        pre { class: "error-fallback", "{e}" }
+                    }
+                },
+                None => rsx! { super::widgets::Spinner {} },
+            }
+
+            if let Some((id, name)) = confirm() {
+                super::widgets::Dialog {
+                    open: true,
+                    on_dismiss: move |_| confirm.set(None),
+                    headline: t("content.confirmDelete"),
+                    icon: "delete".to_string(),
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm.set(None),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            disabled: busy(),
+                            onclick: {
+                                let id = id.clone();
+                                move |_| {
+                                    let token = session.read().access_token.clone();
+                                    let id = id.clone();
+                                    busy.set(true);
+                                    spawn(async move {
+                                        // Recursive, or purging an orphan folder
+                                        // would just orphan everything filed under
+                                        // it — this view creating its own work.
+                                        match graphql::delete_node_deep(token, id).await {
+                                            Ok(()) => {
+                                                crate::session::bump_data_version();
+                                                confirm.set(None);
+                                            }
+                                            _ => crate::snackbar::show_snackbar(
+                                                &t("error.somethingWentWrong"),
+                                            ),
+                                        }
+                                        busy.set(false);
+                                    });
+                                }
+                            },
+                            if busy() {
+                                div { class: "spinner spinner-xs" }
+                            }
+                            "{t(\"common.delete\")}"
+                        }
+                    },
+                    p { class: "body-medium", "{t(\"parent.purgeWarning\")}" }
+                    p { class: "body-small text-muted", "{name}" }
+                }
+            }
+        }
+    }
+}
+
+/// Whether a parent-less node is a genuine orphan rather than the legitimate
+/// root (the home node, conventionally keyed `root`).
+fn is_orphan(node: &ContextNodeFields) -> bool {
+    node.mime_id.as_deref() != Some("wiki/home") && node.key != "root"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Uuid;
+
+    fn node(key: &str, mime: &str) -> ContextNodeFields {
+        ContextNodeFields {
+            id: Uuid("id".to_string()),
+            name: key.to_string(),
+            key: key.to_string(),
+            mime_id: Some(mime.to_string()),
+            parent_id: None,
+            created_at: None,
+            data: None,
+        }
+    }
+
+    #[test]
+    fn root_and_home_are_not_orphans() {
+        assert!(!is_orphan(&node("root", "wiki/folder")));
+        assert!(!is_orphan(&node("home", "wiki/home")));
+        assert!(is_orphan(&node("stray", "wiki/folder")));
+    }
+}

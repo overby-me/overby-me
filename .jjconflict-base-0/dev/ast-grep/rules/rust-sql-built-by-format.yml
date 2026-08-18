@@ -1,0 +1,25 @@
+# Query text assembled by format! cannot be parameterized after the fact.
+# The 17 in-tree sites are all DDL assembly in wiki's migration-loader and
+# appview store, where identifiers cannot be bound parameters - those two
+# crates are ignored below, and the rule guards RUNTIME query construction
+# everywhere else.
+id: rust-sql-built-by-format
+language: rust
+severity: warning
+message: >-
+  This builds query text with format!. Bind values as parameters; if the
+  dynamic part is an identifier, allowlist it explicitly and say so here.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+  - "apps/wiki/crates/migration-loader/**"
+  - "apps/wiki/crates/appview/**"
+rule:
+  any:
+    - pattern: $C.execute(&format!($$$F), $$$R)
+    - pattern: $C.execute(&format!($$$F))
+    - pattern: $C.query(&format!($$$F), $$$R)
+    - pattern: $C.query(&format!($$$F))
+    - pattern: sqlx::query(&format!($$$F))

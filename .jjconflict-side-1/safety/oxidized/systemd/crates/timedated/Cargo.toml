@@ -1,0 +1,18 @@
+[package]
+name = "systemd-timedated"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-timedated"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+log = "0.4"
+nix = { version = "0.31", features = ["process", "signal"] }
+zbus = "5"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,1 @@
+{"name":"document-features","vers":"0.2.12","deps":[{"name":"litrs","req":"^1.0.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61","features":{"default":[],"self-test":[]},"yanked":false,"rust_version":"1.56","pubtime":"2025-10-24T09:43:31Z"}

@@ -1,0 +1,12 @@
+{
+	"diagnostics": [
+		{
+			"code": "NW002",
+			"severity": "error",
+			"field": "dependencies.bad",
+			"message": "expected a string (module name or path), got Number",
+			"hint": "Dependency references must be strings — the name of a sibling subworkspace directory.",
+			"contract": "DependencyRef"
+		}
+	]
+}

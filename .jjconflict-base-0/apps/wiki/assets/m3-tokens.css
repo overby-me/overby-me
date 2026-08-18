@@ -1,0 +1,299 @@
+/* Material Design 3 system tokens (non-colour) — hand-authored from the M3
+ * spec (https://m3.material.io/): the type scale, shape (corner) scale,
+ * elevation levels, state-layer opacities and motion easing/duration.
+ * Colour tokens live in the generated m3-theme.css. Components consume these
+ * so the whole UI stays on-spec and consistent.
+ */
+:root {
+	/* ── Shape: corner-radius scale ─────────────────────────────────────── */
+	--md-sys-shape-corner-none: 0;
+	--md-sys-shape-corner-extra-small: 4px;
+	--md-sys-shape-corner-small: 8px;
+	--md-sys-shape-corner-medium: 12px;
+	--md-sys-shape-corner-large: 16px;
+	--md-sys-shape-corner-extra-large: 28px;
+	--md-sys-shape-corner-full: 9999px;
+
+	/* ── Elevation: tonal shadows (M3 levels 0–5) ───────────────────────── */
+	--md-sys-elevation-0: none;
+	--md-sys-elevation-1:
+		0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+	--md-sys-elevation-2:
+		0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+	--md-sys-elevation-3:
+		0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 4px 8px 3px rgba(0, 0, 0, 0.15);
+	--md-sys-elevation-4:
+		0 2px 3px 0 rgba(0, 0, 0, 0.3), 0 6px 10px 4px rgba(0, 0, 0, 0.15);
+	--md-sys-elevation-5:
+		0 4px 4px 0 rgba(0, 0, 0, 0.3), 0 8px 12px 6px rgba(0, 0, 0, 0.15);
+
+	/* ── State-layer opacities (overlay of the on-colour) ───────────────── */
+	--md-sys-state-hover-opacity: 0.08;
+	--md-sys-state-focus-opacity: 0.1;
+	--md-sys-state-pressed-opacity: 0.1;
+	--md-sys-state-dragged-opacity: 0.16;
+
+	/* ── Motion: easing + duration ──────────────────────────────────────── */
+	--md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+	--md-sys-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+	--md-sys-motion-easing-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+	--md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+	--md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+	--md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+	--md-sys-motion-duration-short1: 50ms;
+	--md-sys-motion-duration-short2: 100ms;
+	--md-sys-motion-duration-short3: 150ms;
+	--md-sys-motion-duration-short4: 200ms;
+	--md-sys-motion-duration-medium1: 250ms;
+	--md-sys-motion-duration-medium2: 300ms;
+	--md-sys-motion-duration-long1: 400ms;
+	--md-sys-motion-duration-long2: 500ms;
+
+	/* ── Type scale ─────────────────────────────────────────────────────── */
+	/* Each role: font-size / line-height / weight / letter-spacing. The app
+       face is Atkinson Hyperlegible (#37); the M3 metrics still apply. */
+	/* ── Emphasized type styles (Expressive) ─────────────────────────────
+       M3's scale carries two sets of 15: baseline and EMPHASIZED. The
+       emphasized set "has a higher weight and other minor adjustments" and is
+       for "selection, actions, headlines, and other editorial treatments" —
+       the two sets are meant to be used together.
+
+       This app ships Atkinson Hyperlegible at 400 and 700 only, so emphasized
+       is the 700 cut with slightly tighter tracking, which is what the weight
+       axis would give at these sizes anyway. Sizes are deliberately NOT
+       duplicated: an emphasized style is the same step of the scale said more
+       firmly, not a bigger one. */
+	--md-sys-typescale-emphasized-weight: 700;
+	--md-sys-typescale-emphasized-tracking: -0.01em;
+
+	--md-sys-typescale-display-large-size: 3.5625rem; /* 57px */
+	--md-sys-typescale-display-large-line: 4rem; /* 64px */
+	--md-sys-typescale-display-medium-size: 2.8125rem; /* 45px */
+	--md-sys-typescale-display-medium-line: 3.25rem; /* 52px */
+	--md-sys-typescale-display-small-size: 2.25rem; /* 36px */
+	--md-sys-typescale-display-small-line: 2.75rem; /* 44px */
+
+	--md-sys-typescale-headline-large-size: 2rem; /* 32px */
+	--md-sys-typescale-headline-large-line: 2.5rem; /* 40px */
+	--md-sys-typescale-headline-medium-size: 1.75rem; /* 28px */
+	--md-sys-typescale-headline-medium-line: 2.25rem; /* 36px */
+	--md-sys-typescale-headline-small-size: 1.5rem; /* 24px */
+	--md-sys-typescale-headline-small-line: 2rem; /* 32px */
+
+	--md-sys-typescale-title-large-size: 1.375rem; /* 22px */
+	--md-sys-typescale-title-large-line: 1.75rem; /* 28px */
+	--md-sys-typescale-title-medium-size: 1rem; /* 16px */
+	--md-sys-typescale-title-medium-line: 1.5rem; /* 24px */
+	--md-sys-typescale-title-medium-tracking: 0.009375em; /* 0.15px */
+	--md-sys-typescale-title-small-size: 0.875rem; /* 14px */
+	--md-sys-typescale-title-small-line: 1.25rem; /* 20px */
+	--md-sys-typescale-title-small-tracking: 0.00714em; /* 0.1px */
+
+	--md-sys-typescale-body-large-size: 1rem; /* 16px */
+	--md-sys-typescale-body-large-line: 1.5rem; /* 24px */
+	--md-sys-typescale-body-large-tracking: 0.03125em; /* 0.5px */
+	--md-sys-typescale-body-medium-size: 0.875rem; /* 14px */
+	--md-sys-typescale-body-medium-line: 1.25rem; /* 20px */
+	--md-sys-typescale-body-medium-tracking: 0.01786em; /* 0.25px */
+	--md-sys-typescale-body-small-size: 0.75rem; /* 12px */
+	--md-sys-typescale-body-small-line: 1rem; /* 16px */
+	--md-sys-typescale-body-small-tracking: 0.03333em; /* 0.4px */
+
+	--md-sys-typescale-label-large-size: 0.875rem; /* 14px */
+	--md-sys-typescale-label-large-line: 1.25rem; /* 20px */
+	--md-sys-typescale-label-large-tracking: 0.00714em; /* 0.1px */
+	--md-sys-typescale-label-medium-size: 0.75rem; /* 12px */
+	--md-sys-typescale-label-medium-line: 1rem; /* 16px */
+	--md-sys-typescale-label-medium-tracking: 0.03333em; /* 0.5px */
+	--md-sys-typescale-label-small-size: 0.6875rem; /* 11px */
+	--md-sys-typescale-label-small-line: 1rem; /* 16px */
+	--md-sys-typescale-label-small-tracking: 0.03333em; /* 0.5px */
+}
+
+/* The type-scale utility classes that apply these roles (.md-body-large and its
+   short alias .body-large, h1…h6, and the EMPHASIZED tier) live in style.css's
+   TYPOGRAPHY section — one rule per role, so a role can never drift between two
+   definitions. This file stays what its name says: tokens only. */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Material 3 EXPRESSIVE (2025) additions + the adaptive-layout token layer.
+ * These extend the baseline M3 tokens above; components consume them so the
+ * redesign stays token-driven. "The Assembly Canvas" redesign.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+	/* ── Expressive corner scale (adds the "increased" + xxl steps) ─────── */
+	--md-sys-shape-corner-large-increased: 20px;
+	--md-sys-shape-corner-extra-large-increased: 32px;
+	--md-sys-shape-corner-extra-extra-large: 48px;
+
+	/* ── Disabled-state opacities (were missing) ────────────────────────── */
+	--md-sys-state-disabled-container-opacity: 0.12;
+	--md-sys-state-disabled-content-opacity: 0.38;
+
+	/* ── Spacing: a real 4dp-grid scale + adaptive pane/rail metrics ─────
+       The pane/rail/margin values below are the COMPACT defaults; style.css
+       steps them up per window-size class at 600 / 840 / 1200 / 1600. */
+	--md-sys-spacing-0: 0;
+	--md-sys-spacing-1: 4px;
+	--md-sys-spacing-2: 8px;
+	--md-sys-spacing-3: 12px;
+	--md-sys-spacing-4: 16px;
+	--md-sys-spacing-5: 20px;
+	--md-sys-spacing-6: 24px;
+	--md-sys-spacing-8: 32px;
+	--md-sys-spacing-10: 40px;
+	--md-sys-spacing-12: 48px;
+	/* Half-steps (a 2dp sub-grid the dense Expressive UI uses) and extended stops,
+	   so every spacing literal in style.css can flow through a token. Naming stays
+	   consistent with the scale above: token-N == N * 4px. */
+	--md-sys-spacing-0-25: 1px;
+	--md-sys-spacing-0-5: 2px;
+	--md-sys-spacing-1-5: 6px;
+	--md-sys-spacing-2-5: 10px;
+	--md-sys-spacing-3-5: 14px;
+	--md-sys-spacing-4-5: 18px;
+	--md-sys-spacing-7: 28px;
+	--md-sys-spacing-9: 36px;
+	--md-sys-spacing-16: 64px;
+	--md-sys-spacing-30: 120px;
+
+	/* How much of the screen the software keyboard covers, kept up to date from
+	   the visual viewport (see components/back_to_top.rs). 0 whenever there is
+	   no keyboard, which is every desktop and every idle phone. Bottom-fixed
+	   chrome adds it so iOS does not bury it behind the keyboard. */
+	--md-sys-keyboard-inset: 0px;
+	--md-sys-margin: 16px; /* body/side margin (compact) */
+	--md-sys-gutter: 16px; /* space between grid columns (compact) */
+	--md-sys-pane-spacer: 24px; /* gap between list + detail panes */
+	--md-sys-pane-padding: 16px; /* inner padding of a pane */
+	--md-sys-list-pane-width: 360px; /* fixed list pane in list-detail */
+	--md-sys-rail-width: 88px; /* collapsed navigation rail */
+	--md-sys-rail-expanded: 384px; /* rail (88) + tree pane (~296) total */
+	/* Centred cap on the content column (and, deliberately, on the top app bar's
+	   inner row, so the two stay aligned). Wider than the A4 page width it used
+	   to mirror: the column carries tables, carousels, rosters and file previews
+	   as often as prose, and those were the ones being squeezed. */
+	--md-sys-body-max: 60rem;
+	--md-sys-tools-width: 360px; /* docked tools side sheet (extra-large screens) */
+
+	/* ── Motion: spring tokens (Expressive) ──────────────────────────────
+       Spatial springs (position/size/corner/rotation) OVERSHOOT slightly;
+       effects springs (colour/opacity) settle without overshoot. cubic-bezier
+       here is the universal fallback; the @supports block below upgrades the
+       spatial ones to physically-accurate CSS linear() where available.
+
+       NEVER spring a border-radius that starts or ends at corner-full. That
+       token is 9999px, a "clamp to half the height" idiom rather than a real
+       radius, so a morph to (say) 16px interpolates across ~9983px and the
+       spring's ~10% undershoot lands near -1000px, which clamps to 0: the
+       control flashes fully square mid-press. Use easing-emphasized for radius,
+       which is monotonic, and keep the springs for transform, where the
+       overshoot is the point and the range is small. */
+	/* The curves and durations are M3's OWN spring-to-curve conversion table
+	   (Motion > Specs > "Web: Convert springs to curves"), not an approximation
+	   of one. These were hand-fitted before that table was read, and three of
+	   the six were noticeably off — the spatial ones overshot harder and settled
+	   later than the system intends. */
+	--md-sys-motion-spring-spatial-fast: cubic-bezier(0.42, 1.67, 0.21, 0.9);
+	--md-sys-motion-spring-spatial-default: cubic-bezier(0.38, 1.21, 0.22, 1);
+	--md-sys-motion-spring-spatial-slow: cubic-bezier(0.39, 1.29, 0.35, 0.98);
+	--md-sys-motion-spring-effects-fast: cubic-bezier(0.31, 0.94, 0.34, 1);
+	--md-sys-motion-spring-effects-default: cubic-bezier(0.34, 0.8, 0.34, 1);
+	--md-sys-motion-spring-effects-slow: cubic-bezier(0.34, 0.88, 0.34, 1);
+	/* Each spring has a duration it is fitted to; using one with any other
+	   duration is using a different curve than the system specifies. */
+	--md-sys-motion-spring-spatial-fast-duration: 350ms;
+	--md-sys-motion-spring-spatial-default-duration: 500ms;
+	--md-sys-motion-spring-spatial-slow-duration: 650ms;
+	--md-sys-motion-spring-effects-fast-duration: 150ms;
+	--md-sys-motion-spring-effects-default-duration: 200ms;
+	--md-sys-motion-spring-effects-slow-duration: 300ms;
+}
+
+/* Upgrade the springs (and fix the emphasized easing, which was wrongly a copy
+   of standard) to true multi-segment curves via CSS linear() where supported. */
+@supports (transition-timing-function: linear(0, 1)) {
+	:root {
+		/* True M3 emphasized easing: fast start, long decelerate tail. */
+		--md-sys-motion-easing-emphasized: linear(
+			0,
+			0.002,
+			0.01 3.6%,
+			0.034,
+			0.074 9.1%,
+			0.128 11.4%,
+			0.194 13.4%,
+			0.271 15%,
+			0.544 18.3%,
+			0.66 20.6%,
+			0.717 22.4%,
+			0.765 24.6%,
+			0.808 27.3%,
+			0.845 30.4%,
+			0.883 35.1%,
+			0.914 40.6%,
+			0.939 47.2%,
+			0.966 58.7%,
+			0.991 76.3%,
+			1
+		);
+		/* Damped springs: rise, overshoot (~1.05 / 1.10 / 1.18), settle to 1. */
+		--md-sys-motion-spring-spatial-fast: linear(
+			0,
+			0.063,
+			0.227,
+			0.44,
+			0.644,
+			0.918,
+			1.017,
+			1.05,
+			1.06,
+			1.052,
+			1.032,
+			1.011,
+			0.998,
+			0.996,
+			1
+		);
+		--md-sys-motion-spring-spatial-default: linear(
+			0,
+			0.055,
+			0.2,
+			0.395,
+			0.59,
+			0.868,
+			1.02,
+			1.078,
+			1.1,
+			1.092,
+			1.06,
+			1.025,
+			1,
+			0.99,
+			0.992,
+			0.998,
+			1
+		);
+		--md-sys-motion-spring-spatial-slow: linear(
+			0,
+			0.045,
+			0.17,
+			0.34,
+			0.52,
+			0.8,
+			0.98,
+			1.09,
+			1.15,
+			1.18,
+			1.17,
+			1.13,
+			1.07,
+			1.02,
+			0.99,
+			0.984,
+			0.99,
+			0.998,
+			1
+		);
+	}
+}

@@ -1,0 +1,14 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: private-deps
+Description: A test library with private dependencies
+Version: 1.5.0
+Requires: simple >= 1.0
+Requires.private: zlib >= 1.2
+Libs: -L${libdir} -lprivate-deps
+Libs.private: -lm -lpthread
+Cflags: -I${includedir}/private-deps
+Cflags.private: -DPRIVATE_INTERNAL

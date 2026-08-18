@@ -1,0 +1,36 @@
+# A ratchet: zero findings today, because the only consumer of these bindings
+# holds its handles as struct fields. It exists to catch the first person who
+# writes the shorter, natural-looking form, which segfaults.
+#
+#     var e = Engine()
+#     var l = Linker(e.ptr())    # e's last use, so e is destroyed here
+#
+# `ptr()` returns a pointer carrying MutExternalOrigin, which tells the compiler
+# it does not borrow self. Mojo therefore destroys a local owner at its last
+# use, and `e.ptr()` IS that last use, so `wasm_engine_delete` runs before
+# `wasmtime_linker_new` reads the pointer. The crash lands inside libwasmtime
+# with no Mojo frame naming the cause, which is what makes it worth a rule.
+#
+# The rule keys on the receiver being a bare identifier rather than a field:
+# `self._engine.ptr()` is an attribute access and lives as long as the struct,
+# so it is not matched.
+#
+# Known limit: a local IS safe if the owner is used again afterwards, and this
+# cannot see that. If it fires on code that is fine, the honest fix is to say
+# so on the line rather than to widen the rule, since liveness is not something
+# a syntactic matcher can decide.
+id: mojo-wasmtime-owner-is-a-local
+language: mojo
+severity: warning
+message: >-
+  This takes a raw pointer from a local owner. `ptr()` does not borrow, so the
+  owner is destroyed at its last use - which is this call - and wasmtime then
+  reads freed memory. Hold the owner in a struct field, or use it again after
+  this line.
+rule:
+  pattern: $CLS($OWNER.ptr())
+constraints:
+  OWNER:
+    kind: identifier
+  CLS:
+    regex: '^(Store|Linker|Module)$'

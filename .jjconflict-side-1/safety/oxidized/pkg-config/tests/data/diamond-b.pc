@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: diamond-b
+Description: Left branch of diamond dependency pattern
+Version: 1.0.0
+Requires: diamond-d >= 1.0
+Libs: -L${libdir} -ldiamond-b
+Cflags: -I${includedir}/diamond-b

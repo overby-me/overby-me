@@ -1,0 +1,44 @@
+id: nix-prefer-lib
+language: nix
+severity: warning
+message: "Use lib.$FN rather than builtins.$FN"
+note: |
+  nixpkgs 26.05 re-exports nearly all of builtins through lib, and a file that
+  reaches for both reads as two dialects at once. `ast-grep scan --update-all`
+  rewrites these.
+
+  Four are deliberately not matched. storePath, fetchTarball and currentSystem
+  have no lib form at all. throw is a primop already in scope unqualified, so
+  the fix there is to drop the prefix rather than to reach for lib.
+
+  The pure-evaluation libraries under platform/nix/lib/lib are excluded by
+  path: they take no lib argument on purpose, because buildBuck2Project runs
+  them through `nix-instantiate --eval --strict --json --readonly-mode` inside
+  a derivation, where nixpkgs lib does not exist.
+files:
+  - "**/*.nix"
+ignores:
+  # The pure-evaluation libraries, and their tests. Neither takes a lib
+  # argument: buildBuck2Project runs the libraries through `nix-instantiate
+  # --eval --strict --json --readonly-mode` inside a derivation, and each test
+  # file says at the top that it is run with a bare `nix eval -f`. In both
+  # places nixpkgs lib does not exist to be called.
+  - "platform/nix/lib/lib/skylark/**"
+  - "platform/nix/lib/lib/buck2/lib/**"
+  - "platform/nix/lib/lib/buck2/tests/**"
+  - "platform/nix/lib/lib/cargo/lib/**"
+  - "platform/nix/lib/lib/cargo/tests/**"
+  - "dev/nickel/workspace/tests/integration/**"
+
+  # The oxidized ports are governed by safety/oxidized/PORTING.md and follow
+  # upstream's shape rather than this tree's conventions. The two sites there
+  # sit in scopes with no lib bound at all, so the rule cannot be applied
+  # without threading one in.
+  - "safety/oxidized/**"
+rule:
+  pattern: builtins.$FN
+constraints:
+  FN:
+    not:
+      regex: '^(throw|storePath|fetchTarball|currentSystem)$'
+fix: lib.$FN

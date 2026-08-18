@@ -1,0 +1,246 @@
+# Tangled CLI
+
+<!-- publish:begin -->
+> Part of the [overby.me monorepo](https://tangled.org/overby.me/overby.me), where this lives in
+> [`platform/tangled/cli`](https://tangled.org/overby.me/overby.me/tree/main/platform/tangled/cli) and where all development happens.
+>
+> It is also published on its own, as
+> [tangled.org/overby.me/tangled-cli](https://tangled.org/overby.me/tangled-cli) and
+> [github.com/overby-me/tangled-cli](https://github.com/overby-me/tangled-cli). Both
+> are read-only mirrors, rebuilt from the monorepo with
+> [josh](https://github.com/josh-project/josh): a commit made to either is
+> overwritten by the next sync, so please open issues and pull requests on the
+> monorepo.
+<!-- publish:end -->
+
+A Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol.
+
+## Features
+
+Tangled CLI is a fully functional tool for managing repositories, issues, pull requests, and CI/CD workflows on the Tangled platform.
+
+### Implemented Commands
+
+- **Authentication** (`auth`)
+  - `login` - Authenticate with AT Protocol credentials
+  - `status` - Show current authentication status
+  - `logout` - Clear stored session
+
+- **Repositories** (`repo`)
+  - `list` - List your repositories or another user's repos
+  - `create` - Create a new repository on a knot
+  - `clone` - Clone a repository to your local machine
+  - `info` - Show detailed repository information
+  - `delete` - Delete a repository
+  - `star` / `unstar` - Star or unstar repositories
+
+- **Issues** (`issue`)
+  - `list` - List issues for a repository
+  - `create` - Create a new issue
+  - `show` - Show issue details and comments
+  - `edit` - Edit issue title, body, or state
+  - `comment` - Add a comment to an issue
+
+- **Pull Requests** (`pr`)
+  - `list` - List pull requests for a repository
+  - `create` - Create a pull request from a branch
+  - `show` - Show pull request details and diff
+  - `review` - Review a pull request (approve/request changes)
+  - `merge` - Merge a pull request
+
+- **Knot Management** (`knot`)
+  - `migrate` - Migrate a repository to another knot
+
+- **CI/CD with Spindle** (`spindle`)
+  - `config` - Enable/disable or configure spindle for a repository
+  - `list` - List pipeline runs for a repository
+  - `logs` - Stream logs from a workflow execution
+  - `secret` - Manage secrets for CI/CD workflows
+    - `list` - List secrets for a repository
+    - `add` - Add or update a secret
+    - `remove` - Remove a secret
+  - `run` - Manually trigger a workflow (not yet implemented)
+
+## Installation
+
+### Build from Source
+
+Requires Rust toolchain (1.70+) and network access to fetch dependencies.
+
+```sh
+cargo build --release
+```
+
+The binary will be available at `target/release/tangled-cli`.
+
+### Install from AUR (Arch Linux)
+
+Community-maintained package:
+
+```sh
+yay -S tangled-cli-git
+```
+
+## Quick Start
+
+1. **Login to Tangled**:
+
+   ```sh
+   tangled auth login --handle your.handle.bsky.social
+   ```
+
+2. **List your repositories**:
+
+   ```sh
+   tangled repo list
+   ```
+
+3. **Create a new repository**:
+
+   ```sh
+   tangled repo create myproject --description "My cool project"
+   ```
+
+4. **Clone a repository**:
+
+   ```sh
+   tangled repo clone username/reponame
+   ```
+
+## Workspace Structure
+
+- `crates/tangled-cli` - CLI binary with clap-based argument parsing
+- `crates/tangled-config` - Configuration and session management (keyring-backed)
+- `crates/tangled-api` - XRPC client wrapper for AT Protocol and Tangled APIs
+- `crates/tangled-git` - Git operation helpers
+
+## Configuration
+
+The CLI stores session credentials securely in your system keyring and configuration in:
+
+- Linux: `~/.config/tangled/config.toml`
+- macOS: `~/Library/Application Support/tangled/config.toml`
+- Windows: `%APPDATA%\tangled\config.toml`
+
+### Environment Variables
+
+- `TANGLED_PDS_BASE` - Override the PDS base URL (default: `https://bsky.social`)
+- `TANGLED_API_BASE` - Override the Tangled API base URL (default: `https://tngl.sh`)
+- `TANGLED_SPINDLE_BASE` - Override the Spindle base URL (default: `wss://spindle.tangled.sh`)
+
+## Examples
+
+### Working with Issues
+
+```sh
+# Create an issue
+tangled issue create --repo myrepo --title "Bug: Fix login" --body "Description here"
+
+# List issues
+tangled issue list --repo myrepo
+
+# Comment on an issue
+tangled issue comment <issue-id> --body "I'll fix this"
+```
+
+### Working with Pull Requests
+
+```sh
+# Create a PR from a branch
+tangled pr create --repo myrepo --base main --head feature-branch --title "Add new feature"
+
+# Review a PR
+tangled pr review <pr-id> --approve --comment "LGTM!"
+
+# Merge a PR
+tangled pr merge <pr-id>
+```
+
+### CI/CD with Spindle
+
+```sh
+# Enable spindle for your repo
+tangled spindle config --repo myrepo --enable
+
+# List pipeline runs
+tangled spindle list --repo myrepo
+
+# Stream logs from a workflow
+tangled spindle logs knot:rkey:workflow-name --follow
+
+# Manage secrets
+tangled spindle secret add --repo myrepo --key API_KEY --value "secret-value"
+tangled spindle secret list --repo myrepo
+```
+
+## Development
+
+Run tests:
+
+```sh
+cargo test
+```
+
+Run with debug output:
+
+```sh
+cargo run -p tangled-cli -- --verbose <command>
+```
+
+Format code:
+
+```sh
+cargo fmt
+```
+
+Check for issues:
+
+```sh
+cargo clippy
+```
+
+## Lexicon audit
+
+This tree is a vendored fork, and Tangled's lexicons move. Auditing it against
+[`aly.codes/tg`](https://tangled.org/aly.codes/tg), which tracks them closely,
+found **nine** defects that all looked like working code:
+
+| What | Symptom |
+|-|-|
+| `sh.tangled.spindle.listRuns` no longer exists | `spindle runs`/`logs` died with a bare 404; the namespace is `sh.tangled.ci` |
+| `sh.tangled.repo.pull.state` renamed to `.status` | closing a pull wrote a record nothing reads; `merged` was inexpressible |
+| Records missing required `createdAt`/`$type` | written with `validate: false`, so the PDS accepted them and the appview ignored them |
+| Listing by scanning a PDS | one undeserialisable record failed the whole response; capped at 100; could not see another account's repos |
+| `cancel` parsed an empty body as JSON | every cancel failed with `EOF while parsing a value` |
+| `sh.tangled.pipeline` is dead | `spindle list` read a collection with zero records |
+| Star subject written flat | `repo star` wrote records `countStars` never counted |
+| `get_repo_info` scanned the caller's PDS | another owner's repo was `Could not find repo` |
+| `pr diff` read a `patch` field | the field does not exist: the patch is a gzipped blob CID under `rounds[]`, so every diff printed "(no patch attached)" |
+
+Re-run the audit by diffing both surfaces:
+
+```sh
+# every lexicon each side calls
+grep -rhoE '"(sh\.tangled|com\.atproto)[a-zA-Z.#]+"' <tg>  --include='*.go' | tr -d '"' | sort -u
+grep -rhoE '"(sh\.tangled|com\.atproto)[a-zA-Z.#]+"' crates --include='*.rs' | tr -d '"' | sort -u
+```
+
+Known differences that are deliberate, as of the last audit:
+
+- `com.atproto.sync.getBlob` is used, but built into a URL rather than named
+  as a literal, so the grep above will not see it. Do not "re-add" it.
+- `sh.tangled.ci.trigger#push` and `#pullRequest` are match arms in tg for
+  display. Triggers are kept as raw JSON here, so an unknown trigger kind
+  cannot fail a response.
+- `com.atproto.server.getSession` is unused: `auth status` reports the stored
+  session without a round trip.
+- `sh.tangled.knot` records are unused: only `knot migrate` exists, not a
+  listing of registered knots.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+## License
+
+MIT OR Apache-2.0

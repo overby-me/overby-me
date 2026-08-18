@@ -1,0 +1,1 @@
+{"name":"langtag","vers":"0.3.4","deps":[{"name":"serde","req":"^1.0","features":["derive"],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"ed60c85f254d6ae8450cec15eedd921efbc4d1bdf6fcf6202b9a58b403f6f805","features":{},"yanked":false,"pubtime":"2023-05-22T19:38:27Z"}

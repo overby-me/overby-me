@@ -1,0 +1,1521 @@
+use log::error;
+use log::trace;
+use log::warn;
+use which::which;
+
+use super::fork_child;
+use crate::fd_store::FDStore;
+use crate::services::RunCmdError;
+use crate::services::Service;
+use crate::units::{CommandlinePrefix, ServiceConfig, StandardInput, StdIoOption};
+
+use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Dynamic UID range used by systemd: 61184 (0xEF00) to 65519 (0xFFEF).
+const DYNAMIC_UID_MIN: u32 = 61184;
+const DYNAMIC_UID_MAX: u32 = 65519;
+
+/// Next dynamic UID to allocate. Wraps around within the valid range.
+static NEXT_DYNAMIC_UID: AtomicU32 = AtomicU32::new(DYNAMIC_UID_MIN);
+
+/// Decode `\xHH` hex escapes in an OpenFile= path segment.
+fn openfile_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+            && let (Some(h), Some(l)) = (
+                (bytes[i + 2] as char).to_digit(16),
+                (bytes[i + 3] as char).to_digit(16),
+            )
+        {
+            out.push((h * 16 + l) as u8 as char);
+            i += 4;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Open an OpenFile= entry and return (FD, FDNAME). Format: "PATH:IDENTIFIER:OPTIONS".
+/// Returns Ok(None) if file is missing and "graceful" option is set.
+fn open_openfile_entry(entry: &str) -> Result<Option<(std::os::fd::OwnedFd, String)>, String> {
+    // Split on unescaped ':' into three fields.
+    let mut fields: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let bytes = entry.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+        {
+            current.push(bytes[i] as char);
+            current.push(bytes[i + 1] as char);
+            current.push(bytes[i + 2] as char);
+            current.push(bytes[i + 3] as char);
+            i += 4;
+            continue;
+        }
+        if bytes[i] == b':' {
+            fields.push(std::mem::take(&mut current));
+            i += 1;
+            continue;
+        }
+        current.push(bytes[i] as char);
+        i += 1;
+    }
+    fields.push(current);
+    if fields.is_empty() || fields.len() > 3 {
+        return Err("invalid OpenFile syntax (expected PATH[:IDENT[:OPTS]])".to_owned());
+    }
+    let path_raw = fields.first().cloned().unwrap_or_default();
+    let ident_raw = fields.get(1).cloned().unwrap_or_default();
+    let opts_raw = fields.get(2).cloned().unwrap_or_default();
+    let path = openfile_unescape(&path_raw);
+
+    let mut is_socket = false;
+    let mut read_only = false;
+    let mut append = false;
+    let mut truncate = false;
+    let mut graceful = false;
+    for opt in opts_raw.split(',').filter(|s| !s.is_empty()) {
+        match opt {
+            "read-only" => read_only = true,
+            "append" => append = true,
+            "truncate" => truncate = true,
+            "graceful" => graceful = true,
+            "socket" => is_socket = true,
+            other => return Err(format!("unknown OpenFile option: {other}")),
+        }
+    }
+
+    let identifier = if ident_raw.is_empty() {
+        std::path::Path::new(&path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&path)
+            .to_owned()
+    } else {
+        openfile_unescape(&ident_raw)
+    };
+
+    // systemd distinguishes a socket from a regular file by stat()ing the
+    // path (S_ISSOCK), not via an option — in `OpenFile=PATH:NAME:OPTIONS`
+    // the middle field is the fd NAME (e.g. the ":socket:" in the test), not a
+    // flag.  Detect an AF_UNIX socket here so it is connect()ed rather than
+    // open()ed (open() on a socket inode returns ENXIO).
+    if !is_socket
+        && let Ok(md) = std::fs::metadata(&path)
+        && std::os::unix::fs::FileTypeExt::is_socket(&md.file_type())
+    {
+        is_socket = true;
+    }
+
+    if is_socket {
+        // Connect to a UNIX stream socket at `path`.
+        use std::os::unix::net::UnixStream;
+        match UnixStream::connect(&path) {
+            Ok(stream) => {
+                use std::os::fd::{FromRawFd, IntoRawFd};
+                let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(stream.into_raw_fd()) };
+                return Ok(Some((fd, identifier)));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && graceful => {
+                return Ok(None);
+            }
+            Err(e) => return Err(format!("connect {path}: {e}")),
+        }
+    }
+
+    // Regular file. Default is O_RDWR unless read-only is set.
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let mut flags = libc::O_CLOEXEC;
+    if read_only {
+        flags |= libc::O_RDONLY;
+    } else {
+        flags |= libc::O_RDWR;
+    }
+    if append {
+        flags |= libc::O_APPEND;
+    }
+    if truncate {
+        flags |= libc::O_TRUNC;
+    }
+    let cpath = std::ffi::CString::new(path.as_str()).map_err(|e| format!("path nul: {e}"))?;
+    let fd = unsafe { libc::open(cpath.as_ptr(), flags) };
+    if fd < 0 {
+        let errno = std::io::Error::last_os_error();
+        if errno.kind() == std::io::ErrorKind::NotFound && graceful {
+            return Ok(None);
+        }
+        return Err(format!("open {path}: {errno}"));
+    }
+    Ok(Some((unsafe { OwnedFd::from_raw_fd(fd) }, identifier)))
+}
+
+/// Allocate a dynamic UID from the systemd dynamic range (61184-65519).
+/// Returns both UID and GID (they are the same value for dynamic users).
+fn allocate_dynamic_uid() -> u32 {
+    loop {
+        let current = NEXT_DYNAMIC_UID.load(Ordering::Relaxed);
+        let next = if current >= DYNAMIC_UID_MAX {
+            DYNAMIC_UID_MIN
+        } else {
+            current + 1
+        };
+        if NEXT_DYNAMIC_UID
+            .compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            return current;
+        }
+    }
+}
+
+/// Resolve a User= value (name or numeric UID) to a raw `uid_t`.
+/// Falls back to the current process UID if `user` is `None`.
+/// Resolve a `RootDirectory=` value that points at a versioned (`NAME.v/`)
+/// directory to the concrete, newest matching subdirectory. Non-`.v` paths are
+/// returned unchanged. When a `.v` path has no valid entry we leave the
+/// original path in place: the subsequent chroot + exec then fails naturally,
+/// which is the desired outcome for a service whose root cannot be resolved.
+fn resolve_root_directory(root_directory: &Option<String>) -> Option<String> {
+    let orig = root_directory.as_ref()?;
+    let p = Path::new(orig);
+    if !vpick_core::path_uses_vpick(p) {
+        return Some(orig.clone());
+    }
+
+    let filter = vpick_core::PickFilter {
+        type_mask: vpick_core::dt_bit(libc::DT_DIR as u32),
+        ..Default::default()
+    };
+    match vpick_core::path_pick(
+        p,
+        &filter,
+        vpick_core::PICK_DEFAULT | vpick_core::PICK_RESOLVE,
+    ) {
+        Ok(Some(r)) => {
+            let resolved = r.path.to_string_lossy().into_owned();
+            trace!("Resolved RootDirectory .v path '{orig}' to '{resolved}'");
+            Some(resolved)
+        }
+        _ => Some(orig.clone()),
+    }
+}
+
+pub fn resolve_uid(user: &Option<String>) -> Result<libc::uid_t, String> {
+    match user {
+        Some(user_str) => {
+            if let Ok(uid) = user_str.parse::<u32>() {
+                Ok(uid)
+            } else {
+                let pwentry = crate::platform::pwnam::getpwnam_r(user_str)
+                    .map_err(|_| format!("Couldn't resolve uid for username: {user_str}"))?;
+                Ok(pwentry.uid.as_raw())
+            }
+        }
+        None => Ok(nix::unistd::getuid().as_raw()),
+    }
+}
+
+/// Resolve a Group= value (name or numeric GID) to a raw `gid_t`.
+/// Falls back to the current process GID if `group` is `None`.
+pub fn resolve_gid(group: &Option<String>) -> Result<libc::gid_t, String> {
+    match group {
+        Some(group_str) => {
+            if let Ok(gid) = group_str.parse::<u32>() {
+                Ok(gid)
+            } else {
+                let grentry = crate::platform::grnam::getgrnam_r(group_str)
+                    .map_err(|_| format!("Couldn't resolve gid for groupname: {group_str}"))?;
+                Ok(grentry.gid.as_raw())
+            }
+        }
+        None => Ok(nix::unistd::getgid().as_raw()),
+    }
+}
+
+/// Resolve a Group= value, falling back to the User='s primary group if
+/// `group` is `None` but `user` is `Some`. This matches systemd behavior
+/// where setting User= without Group= runs the service with the user's
+/// primary group.
+fn resolve_gid_with_user_fallback(
+    group: &Option<String>,
+    user: &Option<String>,
+) -> Result<libc::gid_t, String> {
+    if group.is_some() {
+        return resolve_gid(group);
+    }
+    if let Some(user_str) = user {
+        // Look up the user's primary group from the passwd database. systemd
+        // resolves it from the user record whether User= is a name or a bare
+        // numeric UID (e.g. user@%i.service sets User=%i to the UID) — in both
+        // cases an unset Group= means "the User='s primary group", never the
+        // manager's GID.
+        if let Ok(uid) = user_str.parse::<u32>() {
+            // Numeric User=: resolve pw_gid via the UID. If the UID has no
+            // passwd entry, fall through to the current-GID behavior below
+            // rather than failing the exec.
+            if let Ok(pwentry) = crate::platform::pwnam::getpwuid_r(uid) {
+                return Ok(pwentry.gid.as_raw());
+            }
+        } else {
+            let pwentry = crate::platform::pwnam::getpwnam_r(user_str)
+                .map_err(|_| format!("Couldn't resolve user for group fallback: {user_str}"))?;
+            return Ok(pwentry.gid.as_raw());
+        }
+    }
+    resolve_gid(group)
+}
+
+/// Resolve a list of SupplementaryGroups= values to raw `gid_t` values.
+fn resolve_supplementary_gids(groups: &[String]) -> Result<Vec<libc::gid_t>, String> {
+    groups
+        .iter()
+        .map(|g| {
+            if let Ok(gid) = g.parse::<u32>() {
+                Ok(gid)
+            } else {
+                let grentry = crate::platform::grnam::getgrnam_r(g)
+                    .map_err(|_| format!("Couldn't resolve gid for supplementary group: {g}"))?;
+                Ok(grentry.gid.as_raw())
+            }
+        })
+        .collect()
+}
+
+/// Parse a systemd-style environment file into (key, value) pairs.
+///
+/// Rules (matching systemd's `load-env-file.c`):
+/// - Lines starting with `#` or `;` (after leading whitespace) are comments.
+/// - Empty lines are skipped.
+/// - Lines have the form `KEY=VALUE` or `export KEY=VALUE`.
+/// - Double-quoted values: C-style escapes are interpreted (`\n`, `\t`, `\\`,
+///   `\"`) and the value may span multiple lines until the closing `"`.
+/// - Single-quoted values: taken literally (no escapes, no multi-line).
+/// - Unquoted values: trailing whitespace and comments are stripped.
+fn parse_environment_file(contents: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut chars = contents.chars().peekable();
+
+    loop {
+        // Skip leading whitespace on a line
+        while chars.peek().is_some_and(|&c| c == ' ' || c == '\t') {
+            chars.next();
+        }
+
+        match chars.peek() {
+            None => break,
+            Some(&'\n') => {
+                chars.next();
+                continue;
+            }
+            Some(&'#') | Some(&';') => {
+                // Comment line — skip to end of line
+                while chars.peek().is_some_and(|&c| c != '\n') {
+                    chars.next();
+                }
+                continue;
+            }
+            _ => {}
+        }
+
+        // Read key (and optional `export ` prefix)
+        let mut key = String::new();
+        while let Some(&c) = chars.peek() {
+            if c == '=' || c == '\n' {
+                break;
+            }
+            key.push(c);
+            chars.next();
+        }
+
+        // Strip `export ` prefix
+        let key = if let Some(stripped) = key.strip_prefix("export ") {
+            stripped.trim().to_owned()
+        } else {
+            key.trim().to_owned()
+        };
+
+        if key.is_empty() {
+            // Skip to next line
+            while chars.peek().is_some_and(|&c| c != '\n') {
+                chars.next();
+            }
+            continue;
+        }
+
+        // Expect '='
+        if chars.peek() != Some(&'=') {
+            // No '=' found — skip line
+            while chars.peek().is_some_and(|&c| c != '\n') {
+                chars.next();
+            }
+            continue;
+        }
+        chars.next(); // consume '='
+
+        // Parse value
+        let value = match chars.peek() {
+            Some(&'"') => {
+                // Double-quoted value: interpret C-style escapes, allow multi-line
+                chars.next(); // consume opening "
+                let mut val = String::new();
+                loop {
+                    match chars.next() {
+                        None | Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some('n') => val.push('\n'),
+                            Some('t') => val.push('\t'),
+                            Some('r') => val.push('\r'),
+                            Some('\\') => val.push('\\'),
+                            Some('"') => val.push('"'),
+                            Some('a') => val.push('\x07'),
+                            Some('b') => val.push('\x08'),
+                            Some('f') => val.push('\x0C'),
+                            Some(c) => {
+                                val.push('\\');
+                                val.push(c);
+                            }
+                            None => {
+                                val.push('\\');
+                                break;
+                            }
+                        },
+                        Some(c) => val.push(c),
+                    }
+                }
+                val
+            }
+            Some(&'\'') => {
+                // Single-quoted value: literal (no escapes)
+                chars.next(); // consume opening '
+                let mut val = String::new();
+                for c in chars.by_ref() {
+                    if c == '\'' {
+                        break;
+                    }
+                    val.push(c);
+                }
+                val
+            }
+            _ => {
+                // Unquoted value: read to end of line, strip trailing whitespace/comments
+                let mut val = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c == '\n' {
+                        break;
+                    }
+                    val.push(c);
+                    chars.next();
+                }
+                val.trim_end().to_owned()
+            }
+        };
+
+        result.push((key, value));
+
+        // Skip to end of line (past any trailing content after closing quote)
+        while chars.peek().is_some_and(|&c| c != '\n') {
+            chars.next();
+        }
+    }
+
+    result
+}
+
+fn start_service_with_filedescriptors(
+    self_path: &Path,
+    srvc: &mut Service,
+    conf: &ServiceConfig,
+    name: &str,
+    fd_store: &FDStore,
+) -> Result<(), RunCmdError> {
+    let exec = conf.exec.last().ok_or_else(|| {
+        RunCmdError::SpawnError(
+            name.to_owned(),
+            "Service has no ExecStart command".to_string(),
+        )
+    })?;
+
+    // check if executable even exists. ExecSearchPath= (when set) supplies the
+    // colon-joined directories that a bare command name is resolved against,
+    // instead of the inherited $PATH — mirroring systemd's find_executable_full
+    // with the unit's exec_search_path. An absolute ExecStart= path is returned
+    // unchanged either way.
+    let resolved = if conf.exec_config.exec_search_path.is_empty() {
+        which(&exec.cmd)
+    } else {
+        let joined = conf.exec_config.exec_search_path.join(":");
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        which::which_in(&exec.cmd, Some(joined), cwd)
+    };
+    let cmd = resolved.map_err(|err| {
+        RunCmdError::SpawnError(
+            name.to_owned(),
+            format!("Could not resolve command to an executable file: {err:?}"),
+        )
+    })?;
+    if !cmd.exists() {
+        error!(
+            "The service {} specified an executable that does not exist: {:?}",
+            name, &exec.cmd
+        );
+        return Err(RunCmdError::SpawnError(
+            exec.cmd.clone(),
+            "Executable does not exist".to_string(),
+        ));
+    }
+    if !cmd.is_file() {
+        error!(
+            "The service {} specified an executable that is not a file: {:?}",
+            name, &cmd
+        );
+        return Err(RunCmdError::SpawnError(
+            exec.cmd.clone(),
+            "Executable does not exist (is a directory)".to_string(),
+        ));
+    }
+
+    // 1. fork
+    // 1. in fork use dup2 to map all relevant file desrciptors to 3..x
+    // 1. in fork mark all other file descriptors with FD_CLOEXEC
+    // 1. in fork set relevant env variables $LISTEN_FDS $LISTEN_PID
+    // 1. in fork execve the cmd with the args
+    // 1. in parent set pid and return. Waiting will be done afterwards if necessary
+
+    let notifications_path = {
+        if let Some(p) = &srvc.notifications_path {
+            p.to_str().unwrap().to_owned()
+        } else {
+            return Err(RunCmdError::Generic(format!(
+                "Tried to start service: {name} without a notifications path",
+            )));
+        }
+    };
+
+    // Allocate the DynamicUser=yes UID/GID once, up front, so cgroup
+    // delegation (in pre_fork_os_specific) chowns the delegated files to the
+    // service's dynamic user rather than root, and the exec-helper config
+    // below reuses the same value instead of allocating a second UID.
+    let dynamic_uid: Option<u32> =
+        if conf.exec_config.dynamic_user && conf.exec_config.user.is_none() {
+            Some(allocate_dynamic_uid())
+        } else {
+            None
+        };
+    srvc.dynamic_uid = dynamic_uid;
+
+    super::fork_os_specific::pre_fork_os_specific(conf, dynamic_uid)
+        .map_err(RunCmdError::Generic)?;
+
+    let mut fds = Vec::new();
+    let mut names = Vec::new();
+
+    // For Accept=yes service instances, use the accepted connection fd
+    // instead of the listening socket fds.
+    if let Some(accepted_fd) = srvc.accepted_fd {
+        fds.push(accepted_fd);
+        // Use the socket's FileDescriptorName if available, otherwise "connection"
+        let fd_name = if !conf.sockets.is_empty() {
+            if let Some(global_fds) = fd_store.get_global(&conf.sockets[0].name) {
+                if let Some((_, name, _)) = global_fds.first() {
+                    name.clone()
+                } else {
+                    "connection".to_string()
+                }
+            } else {
+                "connection".to_string()
+            }
+        } else {
+            "connection".to_string()
+        };
+        names.push(fd_name);
+    } else {
+        for socket in &conf.sockets {
+            // Skip sockets whose FDs aren't in the store — this can happen when
+            // a socket unit's conditions failed (e.g. ConditionSecurity=audit on
+            // systemd-journald-audit.socket) and the socket was never opened.
+            let Some(global_fds) = fd_store.get_global(&socket.name) else {
+                log::trace!(
+                    "Socket {} has no FDs in store (condition-skipped?), skipping for service {name}",
+                    socket.name
+                );
+                continue;
+            };
+
+            let sock_fds = global_fds
+                .iter()
+                .map(|(_, _, fd)| fd.as_raw_fd())
+                .collect::<Vec<_>>();
+
+            let sock_names = global_fds
+                .iter()
+                .map(|(_, name, _)| name.clone())
+                .collect::<Vec<_>>();
+
+            fds.extend(sock_fds);
+            names.extend(sock_names);
+        }
+    }
+
+    // Also pass any file descriptors stored via FDSTORE=1 sd_notify messages.
+    // These are FDs the service asked PID 1 to hold across restarts.
+    // They are appended after socket-activation FDs, matching real systemd
+    // behavior where sd_listen_fds() returns socket FDs first, then stored FDs.
+    if !srvc.stored_fds.is_empty() {
+        trace!(
+            "Service {name}: passing {} stored fd(s) from FDSTORE",
+            srvc.stored_fds.len()
+        );
+        for (fd_name, raw_fd) in &srvc.stored_fds {
+            fds.push(*raw_fd);
+            names.push(fd_name.clone());
+        }
+    }
+
+    // User/group resolution and OpenFile= failures are deferred to the child
+    // process (the parent returns success, matching real systemd, where the
+    // executor handles them and they surface as an ExecMainStatus exit code).
+    let mut deferred_exec_error: Option<i32> = None;
+
+    // Process OpenFile= entries: "PATH:IDENTIFIER:OPTIONS".  Path may contain
+    // \x3A for escaped colons; identifier defaults to the basename.  Options
+    // (comma-separated): read-only, append, truncate, graceful.  A path that
+    // stat()s as an AF_UNIX socket is connect()ed rather than opened.  The
+    // graceful option skips a missing file.
+    let mut openfile_fds: Vec<std::os::fd::OwnedFd> = Vec::new();
+    for entry in &conf.open_file {
+        match open_openfile_entry(entry) {
+            Ok(Some((fd, identifier))) => {
+                use std::os::fd::AsRawFd;
+                fds.push(fd.as_raw_fd());
+                names.push(identifier);
+                openfile_fds.push(fd);
+            }
+            Ok(None) => {
+                // graceful + missing file — skip silently
+                trace!("Service {name}: OpenFile={entry} — file missing, skipping (graceful)");
+            }
+            Err(e) => {
+                // A non-graceful OpenFile= failure must fail the service with
+                // EXIT_FDS (202), like the executor in real systemd — defer it
+                // to the child (which exits 202) rather than failing the start.
+                trace!("Service {name}: OpenFile={entry} failed: {e}");
+                deferred_exec_error = Some(202); // EXIT_FDS
+                break;
+            }
+        }
+    }
+
+    // RestrictFileSystems= and RestrictNetworkInterfaces= are parsed and reported
+    // over D-Bus but not enforced yet (no LSM-BPF filter is applied). Warn once
+    // so the running security posture is not silently weaker than the unit's
+    // config implies.
+    {
+        let mut unenforced: Vec<&str> = Vec::new();
+        if !conf.exec_config.restrict_file_systems.is_empty() {
+            unenforced.push("RestrictFileSystems=");
+        }
+        if !conf.restrict_network_interfaces.is_empty() {
+            unenforced.push("RestrictNetworkInterfaces=");
+        }
+        if !unenforced.is_empty() {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            let joined = unenforced.join(", ");
+            WARNED.call_once(|| {
+                log::warn!(
+                    "{joined} is set (e.g. on {name}) but is not enforced yet; \
+                     no LSM-BPF restriction is applied"
+                );
+            });
+        }
+    }
+
+    // We first exec into our own executable again and apply this config
+    // We transfer the config via a anonymous shared memory file
+    let mut exec_helper_conf = crate::entrypoints::ExecHelperConfig {
+        name: name.to_owned(),
+        // Pass the manager's current log level to the exec helper, mirroring
+        // real systemd's `--log-level` argument to sd-executor.  The exec
+        // helper uses this as the default for its KmsgLogger; the unit's
+        // SYSTEMD_LOG_LEVEL env var (if set) takes final precedence.
+        log_level: Some(
+            match log::max_level() {
+                log::LevelFilter::Off => "error",
+                log::LevelFilter::Error => "error",
+                log::LevelFilter::Warn => "warn",
+                log::LevelFilter::Info => "info",
+                log::LevelFilter::Debug => "debug",
+                log::LevelFilter::Trace => "trace",
+            }
+            .to_owned(),
+        ),
+        cmd,
+        args: exec.args.clone(),
+        use_first_arg_as_argv0: exec.prefixes.contains(&CommandlinePrefix::AtSign),
+        privileged_prefix: exec.prefixes.contains(&CommandlinePrefix::Plus)
+            || exec.prefixes.contains(&CommandlinePrefix::Exclamation)
+            || exec
+                .prefixes
+                .contains(&CommandlinePrefix::DoubleExclamation),
+        no_env_expand: exec.prefixes.contains(&CommandlinePrefix::Colon),
+        login_shell: exec.prefixes.contains(&CommandlinePrefix::Pipe),
+        env: {
+            let default_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+            // Base environment from DefaultEnvironment= (system.conf).  systemd
+            // applies these variables to every spawned service before
+            // EnvironmentFile=/Environment= overrides.  NixOS sets a PATH here
+            // that reaches /nix/store binaries via /run/current-system/sw/bin,
+            // which is why service scripts can find coreutils (stty, sleep, ...).
+            let mut env: Vec<(String, String)> = crate::control::read_default_environment_vars();
+            // Ensure PATH is set: prefer DefaultEnvironment's PATH, then the
+            // manager's inherited PATH (important for NixOS where executables
+            // live in /nix/store), then the systemd default FHS PATH (see man
+            // systemd.exec).
+            if !env.iter().any(|(k, _)| k == "PATH") {
+                env.push((
+                    "PATH".to_owned(),
+                    std::env::var("PATH").unwrap_or_else(|_| default_path.to_owned()),
+                ));
+            }
+            // ExecSearchPath= overrides the default $PATH with the joined search
+            // path (systemd.exec(5): "overrides $PATH if $PATH is not supplied by
+            // the user through Environment=/EnvironmentFile="). Applied here, before
+            // the EnvironmentFile=/Environment= steps below, so a user-supplied
+            // PATH from those still wins.
+            if !conf.exec_config.exec_search_path.is_empty() {
+                let joined = conf.exec_config.exec_search_path.join(":");
+                env.retain(|(k, _)| k != "PATH");
+                env.push(("PATH".to_owned(), joined));
+            }
+            // Set HOME, USER, LOGNAME, SHELL from the User= setting.
+            // systemd populates these automatically when User= is set,
+            // resolving the passwd record whether User= is a name (getpwnam)
+            // or a bare numeric UID (getpwuid) -- user@%i.service's User=%i is
+            // the numeric UID, so a name-only lookup would leave the per-user
+            // manager (and everything it spawns) without $HOME.
+            let mut set_login_env = false;
+            if let Some(ref user_str) = conf.exec_config.user {
+                let pwentry = if let Ok(uid) = user_str.parse::<u32>() {
+                    crate::platform::pwnam::getpwuid_r(uid)
+                } else {
+                    crate::platform::pwnam::getpwnam_r(user_str)
+                };
+                if let Ok(pw) = pwentry {
+                    // Upstream always exports $USER when the user record resolves
+                    // (carrying the resolved name, not the raw UID); $LOGNAME,
+                    // $HOME and $SHELL are gated on SetLoginEnvironment=
+                    // (exec-invoke.c exec_context_get_set_login_environment). The
+                    // tristate defaults to true when User=/DynamicUser= is set,
+                    // which it is here, so an unset directive keeps the old
+                    // behaviour; only SetLoginEnvironment=no suppresses them.
+                    env.push(("USER".to_owned(), pw.name.clone()));
+                    if conf.exec_config.set_login_environment.unwrap_or(true) {
+                        env.push(("LOGNAME".to_owned(), pw.name.clone()));
+                        env.push(("HOME".to_owned(), pw.home.clone()));
+                        env.push(("SHELL".to_owned(), pw.shell.clone()));
+                    }
+                    set_login_env = true;
+                }
+            }
+            if !set_login_env && conf.exec_config.dynamic_user {
+                // Dynamic users have no real passwd entry; upstream's
+                // nss-systemd synthesizes their record with "/" as the home
+                // directory, which is what WorkingDirectory=~ resolves to.
+                env.push(("HOME".to_owned(), "/".to_owned()));
+            }
+            // Load EnvironmentFile= files first (lower priority than Environment=).
+            // Parsing follows systemd's rules: double-quoted values may span
+            // multiple lines, C-style escapes (\n, \t, \\, \") are interpreted
+            // inside double quotes, single-quoted values are literal, and
+            // unquoted values are trimmed.
+            for (path, optional) in &conf.exec_config.environment_files {
+                match std::fs::read_to_string(path) {
+                    Ok(contents) => {
+                        for (key, value) in parse_environment_file(&contents) {
+                            env.retain(|(ek, _)| *ek != key);
+                            env.push((key, value));
+                        }
+                    }
+                    Err(e) => {
+                        if *optional {
+                            trace!(
+                                "Optional EnvironmentFile not found for {}: {:?}: {}",
+                                name, path, e
+                            );
+                        } else {
+                            warn!(
+                                "Failed to read EnvironmentFile for {}: {:?}: {}",
+                                name, path, e
+                            );
+                        }
+                    }
+                }
+            }
+            // Apply the service's Environment= settings (may override PATH
+            // and EnvironmentFile= values)
+            if let Some(ref vars) = conf.exec_config.environment {
+                for (k, v) in &vars.vars {
+                    // Remove any prior entry with the same key so the unit's
+                    // value takes precedence over the defaults above.
+                    env.retain(|(ek, _)| ek != k);
+                    env.push((k.clone(), v.clone()));
+                }
+            }
+            // PassEnvironment= — import listed variable names from the system
+            // manager's (PID 1) environment. Variables that are not set in the
+            // manager's environment are silently ignored. Applied after
+            // Environment= so they can override unit-level settings, but
+            // before internal variables and UnsetEnvironment=.
+            for var_name in &conf.exec_config.pass_environment {
+                if let Ok(value) = std::env::var(var_name) {
+                    env.retain(|(ek, _)| ek != var_name);
+                    env.push((var_name.clone(), value));
+                }
+            }
+            // Internal variables added last — these must not be overridden.
+            // Only set LISTEN_FDS/LISTEN_FDNAMES when there are actual FDs to
+            // pass. Real systemd does not set these for services without
+            // sockets, and some services (e.g. systemd-logind) call
+            // sd_listen_fds_with_names() which returns -EINVAL when
+            // LISTEN_FDNAMES is present but mismatches LISTEN_FDS.
+            if !names.is_empty() {
+                env.push(("LISTEN_FDS".to_owned(), format!("{}", names.len())));
+                env.push(("LISTEN_FDNAMES".to_owned(), names.join(":")));
+            }
+            env.push(("NOTIFY_SOCKET".to_owned(), notifications_path));
+
+            // WATCHDOG_USEC — the runtime watchdog interval in microseconds,
+            // exported when WatchdogSec= is set so a service can discover its
+            // keep-alive deadline via sd_watchdog_enabled(). The companion
+            // WATCHDOG_PID is stamped with the exec'd PID in exec_helper
+            // (post-fork), mirroring LISTEN_PID.
+            if let Some(crate::units::Timeout::Duration(d)) = &conf.watchdog_sec {
+                let usec = d.as_micros();
+                if usec > 0 {
+                    env.push(("WATCHDOG_USEC".to_owned(), usec.to_string()));
+                }
+            }
+
+            // FDSTORE — the file descriptor store capacity, exported when
+            // FileDescriptorStoreMax > 0 so a service can discover how many fds
+            // it may push via FDSTORE=1 sd_notify (upstream exec_context sets
+            // FDSTORE=n_fd_store_max).
+            if conf.file_descriptor_store_max > 0 {
+                env.push((
+                    "FDSTORE".to_owned(),
+                    conf.file_descriptor_store_max.to_string(),
+                ));
+            }
+
+            // INVOCATION_ID — a unique 128-bit identifier for each service
+            // invocation, formatted as lowercase hex without dashes.
+            {
+                use std::io::Read;
+                let mut buf = [0u8; 16];
+                if let Ok(mut f) = std::fs::File::open("/dev/urandom")
+                    && f.read_exact(&mut buf).is_ok()
+                {
+                    // Set version 4 (random) UUID variant bits
+                    buf[6] = (buf[6] & 0x0f) | 0x40;
+                    buf[8] = (buf[8] & 0x3f) | 0x80;
+                    let id = buf.iter().map(|b| format!("{b:02x}")).collect::<String>();
+                    srvc.invocation_id = Some(id.clone());
+                    env.push(("INVOCATION_ID".to_owned(), id));
+                }
+            }
+
+            // TRIGGER_PATH / TRIGGER_UNIT — set by path watcher when a .path
+            // unit triggers this service. Cleared after use (one-shot).
+            if let Some(ref tp) = srvc.trigger_path {
+                env.push(("TRIGGER_PATH".to_owned(), tp.clone()));
+            }
+            if let Some(ref tu) = srvc.trigger_unit {
+                env.push(("TRIGGER_UNIT".to_owned(), tu.clone()));
+            }
+            if let Some(usec) = srvc.trigger_timer_realtime_usec {
+                env.push(("TRIGGER_TIMER_REALTIME_USEC".to_owned(), usec.to_string()));
+            }
+            if let Some(usec) = srvc.trigger_timer_monotonic_usec {
+                env.push(("TRIGGER_TIMER_MONOTONIC_USEC".to_owned(), usec.to_string()));
+            }
+
+            // MONITOR_* env vars for OnSuccess=/OnFailure= handler services.
+            if let Some(ref mon) = srvc.monitor_env {
+                env.push((
+                    "MONITOR_SERVICE_RESULT".to_owned(),
+                    mon.service_result.clone(),
+                ));
+                env.push(("MONITOR_EXIT_CODE".to_owned(), mon.exit_code.clone()));
+                env.push(("MONITOR_EXIT_STATUS".to_owned(), mon.exit_status.clone()));
+                env.push(("MONITOR_UNIT".to_owned(), mon.unit.clone()));
+                env.push(("MONITOR_INVOCATION_ID".to_owned(), "0".to_owned()));
+            }
+
+            // MEMORY_PRESSURE_WATCH — set the path to the service's cgroup
+            // memory.pressure file if MemoryPressureWatch= is enabled.
+            // See systemd.exec(5) and sd_notify(3).
+            {
+                use crate::units::MemoryPressureWatch;
+                let should_set = match conf.memory_pressure_watch {
+                    MemoryPressureWatch::On => true,
+                    MemoryPressureWatch::Auto => {
+                        // Auto: enable if cgroup path exists and PSI is available
+                        let pressure_file =
+                            conf.platform_specific.cgroup_path.join("memory.pressure");
+                        pressure_file.exists()
+                            || std::path::Path::new("/proc/pressure/memory").exists()
+                    }
+                    MemoryPressureWatch::Off | MemoryPressureWatch::Skip => false,
+                };
+                if should_set {
+                    // When ProtectControlGroupsEx=private or strict, the service
+                    // runs in a new cgroup namespace where it sees itself at the
+                    // cgroup root. Use /sys/fs/cgroup/memory.pressure instead of
+                    // the full host cgroup path.
+                    let pressure_path = if matches!(
+                        conf.exec_config.protect_control_groups_ex,
+                        crate::units::ProtectControlGroupsEx::Private
+                            | crate::units::ProtectControlGroupsEx::Strict
+                    ) {
+                        std::path::PathBuf::from("/sys/fs/cgroup/memory.pressure")
+                    } else {
+                        conf.platform_specific.cgroup_path.join("memory.pressure")
+                    };
+                    env.push((
+                        "MEMORY_PRESSURE_WATCH".to_owned(),
+                        pressure_path.to_string_lossy().into_owned(),
+                    ));
+                    // MEMORY_PRESSURE_WRITE — the base64-encoded PSI trigger the
+                    // service writes to memory.pressure to register its stall
+                    // threshold: "some <threshold_us> <window_us>\0". threshold_us
+                    // is MemoryPressureThresholdSec= (systemd's default is 200ms);
+                    // window is systemd's fixed MEMORY_PRESSURE_DEFAULT_WINDOW_USEC
+                    // (2s). See systemd.exec(5) / sd_notify(3).
+                    let threshold_us = match conf.memory_pressure_threshold_sec {
+                        Some(crate::units::Timeout::Duration(d)) => d.as_micros() as u64,
+                        _ => 200_000,
+                    };
+                    let trigger = format!("some {threshold_us} 2000000\0");
+                    use base64::Engine;
+                    let encoded =
+                        base64::engine::general_purpose::STANDARD.encode(trigger.as_bytes());
+                    env.push(("MEMORY_PRESSURE_WRITE".to_owned(), encoded));
+                } else if matches!(conf.memory_pressure_watch, MemoryPressureWatch::Off) {
+                    // Off: explicitly set to empty string (different from Skip which omits it)
+                    env.push(("MEMORY_PRESSURE_WATCH".to_owned(), String::new()));
+                }
+                // Skip: don't set the variable at all
+            }
+
+            // UnsetEnvironment= is applied as the final step (see systemd.exec(5)).
+            // It can undo assignments from any source, including Environment=,
+            // EnvironmentFile=, PassEnvironment=, and even internal variables.
+            // If an entry contains '=' it is a VAR=VALUE match (only exact match
+            // is removed). Otherwise it is a plain variable name and any
+            // assignment with that name is removed regardless of value.
+            for entry in &conf.exec_config.unset_environment {
+                if let Some((key, value)) = entry.split_once('=') {
+                    // Remove only the exact VAR=VALUE match
+                    env.retain(|(ek, ev)| !(ek == key && ev == value));
+                } else {
+                    // Remove any assignment with this variable name
+                    env.retain(|(ek, _)| ek != entry);
+                }
+            }
+
+            env
+        },
+        group: if conf.exec_config.dynamic_user
+            && conf.exec_config.user.is_none()
+            && conf.exec_config.group.is_none()
+        {
+            // DynamicUser=yes: UID/GID are set together below
+            0 // placeholder, overwritten below
+        } else {
+            match resolve_gid_with_user_fallback(&conf.exec_config.group, &conf.exec_config.user) {
+                Ok(gid) => gid,
+                Err(e) => {
+                    // For Type=simple/idle, defer the error to the child process
+                    // so the parent returns success (matching real systemd).
+                    if matches!(
+                        conf.srcv_type,
+                        crate::units::ServiceType::Simple | crate::units::ServiceType::Idle
+                    ) {
+                        deferred_exec_error = Some(216); // EXIT_GROUP
+                        0
+                    } else {
+                        return Err(RunCmdError::SpawnError(name.to_owned(), e));
+                    }
+                }
+            }
+        },
+        supplementary_groups: resolve_supplementary_gids(&conf.exec_config.supplementary_groups)
+            .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
+        user: if conf.exec_config.dynamic_user && conf.exec_config.user.is_none() {
+            0 // placeholder, overwritten below
+        } else {
+            match resolve_uid(&conf.exec_config.user) {
+                Ok(uid) => uid,
+                Err(e) => {
+                    if matches!(
+                        conf.srcv_type,
+                        crate::units::ServiceType::Simple | crate::units::ServiceType::Idle
+                    ) {
+                        deferred_exec_error = Some(217); // EXIT_USER
+                        0
+                    } else {
+                        return Err(RunCmdError::SpawnError(name.to_owned(), e));
+                    }
+                }
+            }
+        },
+        deferred_exec_error,
+
+        working_directory: conf.exec_config.working_directory.clone(),
+        root_directory: resolve_root_directory(&conf.exec_config.root_directory),
+        state_directory: conf.exec_config.state_directory.clone(),
+        logs_directory: conf.exec_config.logs_directory.clone(),
+        logs_directory_mode: conf.exec_config.logs_directory_mode,
+        runtime_directory: conf.exec_config.runtime_directory.clone(),
+
+        oom_score_adjust: conf.exec_config.oom_score_adjust,
+
+        platform_specific: conf.platform_specific.clone(),
+
+        limit_nofile: conf.limit_nofile,
+
+        stdin_option: conf.exec_config.stdin_option.clone(),
+        stdin_data: {
+            // StandardInputText=/StandardInputData= -> the bytes to feed on stdin.
+            let bytes =
+                crate::units::unit_parsing::reconstruct_stdin_data(&conf.exec_config.stdin_inputs);
+            if bytes.is_empty() { None } else { Some(bytes) }
+        },
+        tty_path: conf.exec_config.tty_path.clone(),
+        tty_columns: conf.exec_config.tty_columns,
+        tty_rows: conf.exec_config.tty_rows,
+        tty_reset: conf.exec_config.tty_reset,
+        tty_vhangup: conf.exec_config.tty_vhangup,
+        tty_vt_disallocate: conf.exec_config.tty_vt_disallocate,
+        ignore_sigpipe: conf.exec_config.ignore_sigpipe,
+        utmp_identifier: conf.exec_config.utmp_identifier.clone(),
+        utmp_mode: conf.exec_config.utmp_mode,
+        import_credentials: conf.exec_config.import_credentials.clone(),
+        load_credentials: conf.exec_config.load_credentials.clone(),
+        load_credentials_encrypted: conf.exec_config.load_credentials_encrypted.clone(),
+        set_credentials: conf.exec_config.set_credentials.clone(),
+        set_credentials_encrypted: conf.exec_config.set_credentials_encrypted.clone(),
+        stdout_is_inherit: matches!(
+            conf.exec_config.stdout_path,
+            None | Some(StdIoOption::Inherit)
+                | Some(StdIoOption::Journal)
+                | Some(StdIoOption::Kmsg)
+                | Some(StdIoOption::Tty)
+        ),
+        stderr_is_inherit: matches!(
+            conf.exec_config.stderr_path,
+            None | Some(StdIoOption::Inherit)
+                | Some(StdIoOption::Journal)
+                | Some(StdIoOption::Kmsg)
+                | Some(StdIoOption::Tty)
+        ),
+        stdout_is_tty: matches!(conf.exec_config.stdout_path, Some(StdIoOption::Tty)),
+        stderr_is_tty: matches!(conf.exec_config.stderr_path, Some(StdIoOption::Tty)),
+        stdout_file_path: match &conf.exec_config.stdout_path {
+            Some(StdIoOption::File(p)) | Some(StdIoOption::AppendFile(p)) => {
+                Some(p.to_string_lossy().into_owned())
+            }
+            _ => None,
+        },
+        stdout_file_append: matches!(
+            conf.exec_config.stdout_path,
+            Some(StdIoOption::AppendFile(_))
+        ),
+        stderr_file_path: match &conf.exec_config.stderr_path {
+            Some(StdIoOption::File(p)) | Some(StdIoOption::AppendFile(p)) => {
+                Some(p.to_string_lossy().into_owned())
+            }
+            _ => None,
+        },
+        stderr_file_append: matches!(
+            conf.exec_config.stderr_path,
+            Some(StdIoOption::AppendFile(_))
+        ),
+        // StandardOutput/StandardError=inherit: when not explicitly set,
+        // inherit from stdin. If StandardInput=socket, stdout/stderr also
+        // connect to the socket (matching real systemd behavior).
+        stdout_is_socket: match &conf.exec_config.stdout_path {
+            Some(StdIoOption::Socket) => true,
+            None => conf.exec_config.stdin_option == StandardInput::Socket,
+            _ => false,
+        },
+        stderr_is_socket: match &conf.exec_config.stderr_path {
+            Some(StdIoOption::Socket) => true,
+            // stderr inherits from stdout when not set
+            None => match &conf.exec_config.stdout_path {
+                Some(StdIoOption::Socket) => true,
+                None => conf.exec_config.stdin_option == StandardInput::Socket,
+                _ => false,
+            },
+            _ => false,
+        },
+        stdout_is_journal: match &conf.exec_config.stdout_path {
+            None => conf.exec_config.stdin_option != StandardInput::Socket,
+            Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg) => true,
+            _ => false,
+        },
+        stderr_is_journal: match &conf.exec_config.stderr_path {
+            // None = StandardError=inherit: stderr inherits from stdout,
+            // so stderr_is_journal should match stdout_is_journal.
+            None => match &conf.exec_config.stdout_path {
+                None => conf.exec_config.stdin_option != StandardInput::Socket,
+                Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg) => true,
+                _ => false,
+            },
+            Some(p) => matches!(p, StdIoOption::Journal | StdIoOption::Kmsg),
+        },
+        ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
+
+        // Security & sandboxing directives
+        dynamic_user: conf.exec_config.dynamic_user,
+        no_new_privileges: conf.exec_config.no_new_privileges,
+        umask: conf.exec_config.umask,
+        nice: conf.exec_config.nice,
+        cpu_scheduling_policy: conf.exec_config.cpu_scheduling_policy.clone(),
+        cpu_scheduling_priority: conf.exec_config.cpu_scheduling_priority,
+        cpu_scheduling_reset_on_fork: conf.exec_config.cpu_scheduling_reset_on_fork,
+        io_scheduling_class: match conf.exec_config.io_scheduling_class {
+            crate::units::IOSchedulingClass::None => 0,
+            crate::units::IOSchedulingClass::Realtime => 1,
+            crate::units::IOSchedulingClass::BestEffort => 2,
+            crate::units::IOSchedulingClass::Idle => 3,
+        },
+        io_scheduling_priority: conf.exec_config.io_scheduling_priority,
+        capability_bounding_set: conf.exec_config.capability_bounding_set.clone(),
+        protect_system: match conf.exec_config.protect_system {
+            crate::units::ProtectSystem::No => "no".to_owned(),
+            crate::units::ProtectSystem::Yes => "yes".to_owned(),
+            crate::units::ProtectSystem::Full => "full".to_owned(),
+            crate::units::ProtectSystem::Strict => "strict".to_owned(),
+        },
+        memory_thp: match conf.exec_config.memory_thp {
+            crate::units::MemoryThp::Inherit => "inherit".to_owned(),
+            crate::units::MemoryThp::Disable => "disable".to_owned(),
+            crate::units::MemoryThp::Madvise => "madvise".to_owned(),
+            crate::units::MemoryThp::System => "system".to_owned(),
+        },
+        protect_home: match conf.exec_config.protect_home {
+            crate::units::ProtectHome::No => "no".to_owned(),
+            crate::units::ProtectHome::Yes => "yes".to_owned(),
+            crate::units::ProtectHome::ReadOnly => "read-only".to_owned(),
+            crate::units::ProtectHome::Tmpfs => "tmpfs".to_owned(),
+        },
+        private_tmp: conf.exec_config.private_tmp,
+        private_devices: conf.exec_config.private_devices,
+        private_network: conf.exec_config.private_network,
+        // DelegateNamespaces= implies PrivateUsers=self when PrivateUsers= is not
+        // explicitly set (systemd exec_context_get_effective_private_users):
+        // delegating a namespace requires an owned user namespace.
+        private_users: conf.exec_config.private_users
+            || !conf.exec_config.delegate_namespaces.is_empty(),
+        private_users_mode: if !conf.exec_config.private_users
+            && !conf.exec_config.delegate_namespaces.is_empty()
+        {
+            "self".to_owned()
+        } else {
+            conf.exec_config.private_users_mode.clone()
+        },
+        private_mounts: conf.exec_config.private_mounts,
+        join_namespace_pid: srvc.join_namespace_pid,
+        mount_flags: conf.exec_config.mount_flags.clone(),
+        private_ipc: conf.exec_config.private_ipc.unwrap_or(false),
+        network_namespace_path: conf.exec_config.network_namespace_path.clone(),
+        user_namespace_path: conf.exec_config.user_namespace_path.clone(),
+        pam_name: conf.exec_config.pam_name.clone(),
+        ipc_namespace_path: conf.exec_config.ipc_namespace_path.clone(),
+        timer_slack_nsec: conf
+            .exec_config
+            .timer_slack_nsec
+            .as_deref()
+            .and_then(|s| s.parse::<u64>().ok()),
+        coredump_filter: conf.exec_config.coredump_filter.clone(),
+        cpu_affinity: conf.exec_config.cpu_affinity.clone(),
+        numa_policy: conf.exec_config.numa_policy.clone(),
+        numa_mask: conf.exec_config.numa_mask.clone(),
+        private_pids: conf.exec_config.private_pids.unwrap_or(false),
+        protect_kernel_tunables: conf.exec_config.protect_kernel_tunables,
+        protect_kernel_modules: conf.exec_config.protect_kernel_modules,
+        protect_kernel_logs: conf.exec_config.protect_kernel_logs,
+        protect_control_groups: conf.exec_config.protect_control_groups,
+        protect_control_groups_ex: match conf.exec_config.protect_control_groups_ex {
+            crate::units::ProtectControlGroupsEx::No => "no",
+            crate::units::ProtectControlGroupsEx::Yes => "yes",
+            crate::units::ProtectControlGroupsEx::Private => "private",
+            crate::units::ProtectControlGroupsEx::Strict => "strict",
+        }
+        .to_owned(),
+        protect_clock: conf.exec_config.protect_clock,
+        protect_hostname: conf.exec_config.protect_hostname,
+        protect_hostname_mode: conf.exec_config.protect_hostname_mode.clone(),
+        protect_hostname_name: conf.exec_config.protect_hostname_name.clone(),
+        personality: conf.exec_config.personality.clone(),
+        lock_personality: conf.exec_config.lock_personality,
+        keyring_mode: Some(match conf.keyring_mode {
+            crate::units::KeyringMode::Inherit => "inherit".to_owned(),
+            crate::units::KeyringMode::Private => "private".to_owned(),
+            crate::units::KeyringMode::Shared => "shared".to_owned(),
+        }),
+        secure_bits: conf.exec_config.secure_bits.clone(),
+        memory_deny_write_execute: conf.exec_config.memory_deny_write_execute,
+        restrict_realtime: conf.exec_config.restrict_realtime,
+        restrict_suid_sgid: conf.exec_config.restrict_suid_sgid,
+        read_write_paths: conf.exec_config.read_write_paths.clone(),
+        memory_pressure_path: {
+            use crate::units::MemoryPressureWatch;
+            let should = match conf.memory_pressure_watch {
+                MemoryPressureWatch::On => true,
+                MemoryPressureWatch::Auto => {
+                    conf.platform_specific
+                        .cgroup_path
+                        .join("memory.pressure")
+                        .exists()
+                        || std::path::Path::new("/proc/pressure/memory").exists()
+                }
+                MemoryPressureWatch::Off | MemoryPressureWatch::Skip => false,
+            };
+            should.then(|| {
+                if matches!(
+                    conf.exec_config.protect_control_groups_ex,
+                    crate::units::ProtectControlGroupsEx::Private
+                        | crate::units::ProtectControlGroupsEx::Strict
+                ) {
+                    "/sys/fs/cgroup/memory.pressure".to_owned()
+                } else {
+                    conf.platform_specific
+                        .cgroup_path
+                        .join("memory.pressure")
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            })
+        },
+        restrict_namespaces: match conf.exec_config.restrict_namespaces {
+            crate::units::RestrictNamespaces::No => "no".to_owned(),
+            crate::units::RestrictNamespaces::Yes => "yes".to_owned(),
+            crate::units::RestrictNamespaces::Allow(ref v) => v.join(" "),
+            crate::units::RestrictNamespaces::Deny(ref v) => format!("~{}", v.join(" ")),
+        },
+        delegate_namespaces: conf.exec_config.delegate_namespaces.clone(),
+        system_call_architectures: conf.exec_config.system_call_architectures.clone(),
+        restrict_address_families: conf.exec_config.restrict_address_families.clone(),
+        system_call_filter: conf.exec_config.system_call_filter.clone(),
+        system_call_log: conf.exec_config.system_call_log.clone(),
+        system_call_error_number: conf.exec_config.system_call_error_number.clone(),
+        restrict_file_systems: conf.exec_config.restrict_file_systems.clone(),
+        protect_proc: match conf.exec_config.protect_proc {
+            crate::units::ProtectProc::Default => "default".to_owned(),
+            crate::units::ProtectProc::Noaccess => "noaccess".to_owned(),
+            crate::units::ProtectProc::Invisible => "invisible".to_owned(),
+            crate::units::ProtectProc::Ptraceable => "ptraceable".to_owned(),
+        },
+        proc_subset: match conf.exec_config.proc_subset {
+            crate::units::ProcSubset::All => "all".to_owned(),
+            crate::units::ProcSubset::Pid => "pid".to_owned(),
+        },
+
+        // Resource limits
+        limit_cpu: conf.exec_config.limit_cpu,
+        limit_core: conf.exec_config.limit_core,
+        limit_fsize: conf.exec_config.limit_fsize,
+        limit_data: conf.exec_config.limit_data,
+        limit_stack: conf.exec_config.limit_stack,
+        limit_rss: conf.exec_config.limit_rss,
+        limit_nproc: conf.exec_config.limit_nproc,
+        limit_memlock: conf.exec_config.limit_memlock,
+        limit_as: conf.exec_config.limit_as,
+        limit_locks: conf.exec_config.limit_locks,
+        limit_sigpending: conf.exec_config.limit_sigpending,
+        limit_msgqueue: conf.exec_config.limit_msgqueue,
+        limit_nice: conf.exec_config.limit_nice,
+        limit_rtprio: conf.exec_config.limit_rtprio,
+        limit_rttime: conf.exec_config.limit_rttime,
+
+        // Directory management
+        cache_directory: conf.exec_config.cache_directory.clone(),
+        cache_directory_mode: conf.exec_config.cache_directory_mode,
+        configuration_directory: conf.exec_config.configuration_directory.clone(),
+        configuration_directory_mode: conf.exec_config.configuration_directory_mode,
+        state_directory_mode: conf.exec_config.state_directory_mode,
+        runtime_directory_mode: conf.exec_config.runtime_directory_mode,
+
+        // Path-based mount namespace directives
+        read_only_paths: conf.exec_config.read_only_paths.clone(),
+        inaccessible_paths: conf.exec_config.inaccessible_paths.clone(),
+        bind_paths: conf.exec_config.bind_paths.clone(),
+        bind_read_only_paths: conf.exec_config.bind_read_only_paths.clone(),
+        temporary_file_system: conf.exec_config.temporary_file_system.clone(),
+
+        // Logging directives
+        syslog_identifier: conf.exec_config.syslog_identifier.clone(),
+        syslog_level: conf.exec_config.syslog_level.clone(),
+        syslog_level_prefix: conf.exec_config.syslog_level_prefix,
+        log_namespace: conf.exec_config.log_namespace.clone(),
+        // Both computed by the exec helper itself once the directories exist.
+        exec_dir_binds: Vec::new(),
+        exec_dir_paths: Vec::new(),
+        private_dir_tmpfs: Vec::new(),
+        invocation_id: srvc.invocation_id.clone(),
+    };
+
+    // DynamicUser=yes: allocate a dynamic UID/GID when no explicit User=/Group= is set.
+    // The UID and GID are the same value, allocated from the 61184-65519 range.
+    // Also apply implied security settings (see systemd.exec(5)).
+    if conf.exec_config.dynamic_user {
+        if conf.exec_config.user.is_none() {
+            // Reuse the UID allocated before pre_fork_os_specific so cgroup
+            // delegation and the service process share the same dynamic user.
+            let dynamic_id =
+                dynamic_uid.expect("dynamic_uid is allocated when dynamic_user && user is unset");
+            exec_helper_conf.user = dynamic_id;
+            if conf.exec_config.group.is_none() {
+                exec_helper_conf.group = dynamic_id;
+            }
+            trace!("DynamicUser=yes for {name}: allocated UID/GID {dynamic_id}");
+        }
+        // DynamicUser=yes implies NoNewPrivileges=yes, ProtectSystem=strict,
+        // ProtectHome=yes (see systemd.exec(5) DynamicUser= documentation).
+        // Only apply if not explicitly overridden by the unit configuration.
+        if !exec_helper_conf.no_new_privileges {
+            exec_helper_conf.no_new_privileges = true;
+        }
+        if exec_helper_conf.protect_system == "no" {
+            exec_helper_conf.protect_system = "strict".to_owned();
+        }
+        if exec_helper_conf.protect_home == "no" {
+            exec_helper_conf.protect_home = "yes".to_owned();
+        }
+    }
+
+    let marshalled_config = serde_json::to_string(&exec_helper_conf).unwrap();
+
+    // crate the shared memory file
+    let exec_helper_conf_fd = shmemfdrs::create_shmem(
+        std::ffi::CString::new(name).unwrap(),
+        marshalled_config.len() + 1,
+    );
+    if exec_helper_conf_fd < 0 {
+        return Err(RunCmdError::CreatingShmemFailed(
+            name.to_owned(),
+            std::io::Error::from_raw_os_error(exec_helper_conf_fd).kind(),
+        ));
+    }
+    use std::os::unix::io::FromRawFd;
+    let mut exec_helper_conf_file = unsafe { std::fs::File::from_raw_fd(exec_helper_conf_fd) };
+
+    // write the config to the file
+    use std::io::Write;
+    exec_helper_conf_file
+        .write_all(marshalled_config.as_bytes())
+        .unwrap();
+    exec_helper_conf_file.write_all(b"\n").unwrap();
+    use std::io::Seek;
+    exec_helper_conf_file
+        .seek(std::io::SeekFrom::Start(0))
+        .unwrap();
+
+    // need to allocate this before forking. Currently this is just static info, we could only do this once...
+    let self_path_cstr = std::ffi::CString::new(self_path.to_str().unwrap()).unwrap();
+    let name_arg = std::ffi::CString::new("exec_helper").unwrap();
+    let self_args = [name_arg.as_ptr(), std::ptr::null()];
+
+    trace!(
+        "Start main executable for service: {name}: {:?} {:?}",
+        exec_helper_conf.cmd, exec_helper_conf.args
+    );
+    // When PrivatePIDs= is set (and pid is NOT delegated), clone(CLONE_NEWPID)
+    // so the child is PID 1 in a new PID namespace from the start, no extra fork
+    // needed in exec_helper. For DelegateNamespaces=pid the PID namespace must
+    // instead be owned by the service's user namespace, so it is created later
+    // in exec_helper (after the user namespace); use a plain fork here.
+    let pid_delegated = exec_helper_conf
+        .delegate_namespaces
+        .iter()
+        .any(|n| n == "pid");
+    let fork_result = if exec_helper_conf.private_pids && !pid_delegated {
+        let pid = unsafe {
+            libc::syscall(
+                libc::SYS_clone,
+                (libc::SIGCHLD | libc::CLONE_NEWPID) as libc::c_ulong,
+                std::ptr::null::<libc::c_void>(),
+                std::ptr::null::<libc::c_int>(),
+                std::ptr::null::<libc::c_int>(),
+                0 as libc::c_ulong,
+            )
+        };
+        if pid < 0 {
+            Err(nix::errno::Errno::last())
+        } else if pid == 0 {
+            Ok(nix::unistd::ForkResult::Child)
+        } else {
+            Ok(nix::unistd::ForkResult::Parent {
+                child: nix::unistd::Pid::from_raw(pid as i32),
+            })
+        }
+    } else {
+        unsafe { nix::unistd::fork() }
+    };
+    match fork_result {
+        Ok(nix::unistd::ForkResult::Parent { child, .. }) => {
+            // make sure the file exists until after we fork before closing it
+            drop(exec_helper_conf_file);
+            srvc.pid = Some(child);
+            srvc.process_group = Some(nix::unistd::Pid::from_raw(-child.as_raw()));
+            // Clear the previous invocation's exit status: the deferred start
+            // completion handler uses main_exit_status as the race-free
+            // "main process exited" signal (set by the service exit handler),
+            // so a stale value from an earlier run would make a restarted
+            // oneshot/forking service appear instantly completed.
+            srvc.main_exit_status = None;
+            srvc.main_exit_termination = None;
+            let now = crate::units::UnitTimestamps::now_usec();
+            srvc.exec_main_start_timestamp = Some(now);
+            srvc.exec_main_handoff_timestamp = Some(now);
+
+            // For Accept=yes, release the parent's reference to the
+            // accepted connection fd.  The child inherited a duplicate
+            // via fork and dup2'd it onto stdin — if the parent keeps
+            // its own copy open, the kernel won't signal EOF on the
+            // peer socket when the child exits, so clients like
+            // `ncat -w1` hang waiting for the server to close.
+            if let Some(fd) = srvc.accepted_fd.take() {
+                unsafe { libc::close(fd) };
+            }
+        }
+        Ok(nix::unistd::ForkResult::Child) => {
+            let stdout = {
+                if let Some(stdio) = &srvc.stdout {
+                    stdio.write_fd()
+                } else {
+                    unreachable!();
+                }
+            };
+            let stderr = {
+                if let Some(stdio) = &srvc.stderr {
+                    stdio.write_fd()
+                } else {
+                    unreachable!();
+                }
+            };
+
+            fork_child::after_fork_child(
+                &self_path_cstr,
+                self_args.as_slice(),
+                &mut fds,
+                stdout,
+                stderr,
+                exec_helper_conf_fd,
+            );
+        }
+        Err(e) => {
+            error!("Fork for service: {name} failed with: {e}");
+            // If fork failed, release the accepted fd (no child will own it).
+            if let Some(fd) = srvc.accepted_fd.take() {
+                unsafe { libc::close(fd) };
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn start_service(
+    self_path: &Path,
+    srvc: &mut Service,
+    conf: &ServiceConfig,
+    name: &str,
+    fd_store: &FDStore,
+) -> Result<(), super::RunCmdError> {
+    start_service_with_filedescriptors(self_path, srvc, conf, name, fd_store)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod env_file_fuzz {
+    use super::parse_environment_file;
+
+    #[test]
+    fn fuzz_parse_environment_file_never_panics_or_hangs() {
+        // parse_environment_file reads EnvironmentFile= content (KEY=VALUE with
+        // quoting, escapes, comments and an `export` prefix). Malformed content
+        // must not panic, and its hand-rolled peekable char loop must not spin
+        // forever on an input that fails to advance.
+        const TOKENS: &[&str] = &[
+            "KEY=",
+            "=",
+            "export ",
+            "FOO=bar",
+            "\"",
+            "'",
+            "\\",
+            "\\\n",
+            "#c",
+            ";c",
+            "\n",
+            "\n\n",
+            " ",
+            "\t",
+            "=val",
+            "A=\"unbalanced",
+            "B='",
+            "C=a b c",
+            "%",
+            "€",
+            "\\x",
+            "==",
+            "KEY",
+            "\r",
+        ];
+        let handle = std::thread::spawn(|| {
+            let mut state: u64 = 0xe0f1_1e5f_1234_5678;
+            let mut next = || {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 33) as u32
+            };
+            for _ in 0..50_000u32 {
+                let mut content = String::new();
+                for _ in 0..(next() % 24) {
+                    if next() % 5 == 0 {
+                        content.push(char::from_u32(next() % 0x100).unwrap_or('?'));
+                    } else {
+                        content.push_str(TOKENS[(next() as usize) % TOKENS.len()]);
+                    }
+                }
+                let buf = content.clone();
+                let res = std::panic::catch_unwind(move || {
+                    let _ = parse_environment_file(&content);
+                });
+                assert!(res.is_ok(), "parse_environment_file panicked on: {buf:?}");
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "env-file fuzz did not finish in 30s -- an input hangs the parser"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        handle.join().expect("fuzz worker panicked");
+    }
+}

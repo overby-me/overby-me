@@ -1,0 +1,1 @@
+{"name":"httpdate","vers":"1.0.3","deps":[{"name":"criterion","req":"^0.5","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2023-08-13T10:55:54Z"}

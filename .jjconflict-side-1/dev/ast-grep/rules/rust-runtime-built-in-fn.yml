@@ -1,0 +1,29 @@
+# Building a tokio Runtime inside an ordinary function panics if the caller
+# is already async ("Cannot start a runtime from within a runtime") and
+# churns a thread pool per call otherwise. main and designated constructors
+# are the two legitimate homes.
+id: rust-runtime-built-in-fn
+language: rust
+severity: warning
+message: >-
+  A Runtime built here is a runtime per call, and a panic if any caller is
+  already async. Build it once in main (or one named constructor) and pass a
+  Handle down.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+  - "**/tests/**"
+rule:
+  any:
+    - pattern: Runtime::new()
+    - pattern: tokio::runtime::Runtime::new()
+    - pattern: runtime::Builder::new_multi_thread()
+    - pattern: tokio::runtime::Builder::new_multi_thread()
+    - pattern: tokio::runtime::Builder::new_current_thread()
+  inside:
+    kind: function_item
+    stopBy: end
+    not:
+      has: {field: name, regex: '^(main|build_runtime|new(_.*)?|runtime)$'}

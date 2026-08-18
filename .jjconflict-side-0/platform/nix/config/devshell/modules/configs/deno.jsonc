@@ -1,0 +1,9 @@
+// Run `direnv reload` to apply changes to the repository.
+{
+	"lint": {
+		"rules": {
+			"tags": ["recommended"],
+			"exclude": ["no-process-global", "no-window", "no-sloppy-imports"]
+		}
+	}
+}

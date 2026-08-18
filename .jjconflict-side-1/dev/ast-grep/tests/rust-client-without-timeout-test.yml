@@ -1,0 +1,6 @@
+id: rust-client-without-timeout
+valid:
+  - "mod tests { fn t() { let c = reqwest::Client::new(); } }"
+  - "let c = reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?;"
+invalid:
+  - "let c = reqwest::Client::new();"

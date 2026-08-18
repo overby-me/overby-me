@@ -1,0 +1,1334 @@
+//! Timer unit scheduling — fires associated service units when timers elapse.
+//!
+//! After PID 1 finishes activating units, the timer scheduler thread wakes up
+//! periodically and checks all active `.timer` units to see if any of their
+//! trigger conditions have been met.  When a timer elapses, the scheduler
+//! starts (or restarts) the associated service unit via the control interface.
+//!
+//! `OnCalendar=` expressions are evaluated using the [`CalendarSpec`] parser
+//! which supports the full systemd calendar expression syntax including
+//! weekday filters, ranges, lists, and repetitions.
+
+use log::{debug, info, trace, warn};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant, SystemTime};
+
+use crate::calendar_spec::CalendarSpec;
+use crate::lock_ext::RwLockExt;
+use crate::runtime_info::ArcMutRuntimeInfo;
+use crate::units::{ActivationSource, Specific, StatusStarted, TimerConfig, UnitId, UnitStatus};
+
+/// Threshold in seconds for detecting a wall-clock jump.
+/// If wall-clock advances by more or less than monotonic time by this amount,
+/// we consider it a clock change event (OnClockChange=).
+const CLOCK_JUMP_THRESHOLD_SECS: i64 = 2;
+
+/// Tracked state for a single localtime path (mtime + symlink target).
+struct LocaltimeState {
+    path: std::path::PathBuf,
+    last_mtime: Option<std::time::SystemTime>,
+    last_target: Option<std::path::PathBuf>,
+}
+
+impl LocaltimeState {
+    fn new(path: std::path::PathBuf) -> Self {
+        let last_mtime = std::fs::symlink_metadata(&path)
+            .and_then(|m| m.modified())
+            .ok();
+        let last_target = std::fs::read_link(&path).ok();
+        Self {
+            path,
+            last_mtime,
+            last_target,
+        }
+    }
+
+    fn changed(&mut self) -> bool {
+        let current_mtime = std::fs::symlink_metadata(&self.path)
+            .and_then(|m| m.modified())
+            .ok();
+        let current_target = std::fs::read_link(&self.path).ok();
+        let mtime_changed = match (&self.last_mtime, &current_mtime) {
+            (Some(old), Some(new)) => old != new,
+            (None, Some(_)) => true,
+            (Some(_), None) => true,
+            (None, None) => false,
+        };
+        let target_changed = self.last_target != current_target;
+        let changed = mtime_changed || target_changed;
+        if changed {
+            self.last_mtime = current_mtime;
+            self.last_target = current_target;
+        }
+        changed
+    }
+}
+
+/// State for detecting clock and timezone changes between scheduler ticks.
+struct ChangeDetector {
+    /// Tracked localtime paths — always includes `/etc/localtime`, plus any
+    /// `SYSTEMD_ETC_LOCALTIME` override from the manager environment.
+    localtime_states: Vec<LocaltimeState>,
+    /// Last wall-clock reading (for clock jump detection).
+    last_wallclock: Option<SystemTime>,
+    /// Last monotonic reading corresponding to last_wallclock.
+    last_monotonic: Option<Instant>,
+}
+
+/// Get the `SYSTEMD_ETC_LOCALTIME` override from the manager environment, if set.
+fn manager_localtime_override(run_info: &ArcMutRuntimeInfo) -> Option<std::path::PathBuf> {
+    let ri = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return None,
+    };
+    if let Ok(env) = ri.manager_environment.lock()
+        && let Some(path) = env.get("SYSTEMD_ETC_LOCALTIME")
+    {
+        let p = std::path::PathBuf::from(path);
+        if p != std::path::Path::new("/etc/localtime") {
+            return Some(p);
+        }
+    }
+    None
+}
+
+impl ChangeDetector {
+    fn new(run_info: &ArcMutRuntimeInfo) -> Self {
+        let mut states = vec![LocaltimeState::new("/etc/localtime".into())];
+        if let Some(alt) = manager_localtime_override(run_info) {
+            states.push(LocaltimeState::new(alt));
+        }
+        Self {
+            localtime_states: states,
+            last_wallclock: Some(SystemTime::now()),
+            last_monotonic: Some(Instant::now()),
+        }
+    }
+
+    /// Check if the timezone has changed since the last call.
+    /// Monitors both `/etc/localtime` and any `SYSTEMD_ETC_LOCALTIME` override.
+    /// Using symlink_metadata avoids following symlinks, so we detect when
+    /// the symlink itself is replaced (even if target zoneinfo files have
+    /// identical mtimes).
+    fn timezone_changed(&mut self, run_info: &ArcMutRuntimeInfo) -> bool {
+        // Check if the override path changed (e.g. after daemon-reload)
+        let current_override = manager_localtime_override(run_info);
+        let have_override = self.localtime_states.len() > 1;
+        match (&current_override, have_override) {
+            (Some(new_path), false) => {
+                // New override appeared — start tracking it
+                self.localtime_states
+                    .push(LocaltimeState::new(new_path.clone()));
+            }
+            (Some(new_path), true) if *new_path != self.localtime_states[1].path => {
+                // Override path changed — replace tracker
+                self.localtime_states[1] = LocaltimeState::new(new_path.clone());
+            }
+            (None, true) => {
+                // Override removed
+                self.localtime_states.truncate(1);
+            }
+            _ => {}
+        }
+
+        // Check all tracked paths
+        self.localtime_states.iter_mut().any(|s| s.changed())
+    }
+
+    /// Check if the system clock has jumped since the last call.
+    /// Detects jumps by comparing wall-clock delta vs monotonic delta.
+    /// Returns `(changed, previous_wallclock)` so callers can use the
+    /// pre-jump wall-clock time for OnCalendar re-evaluation.
+    fn clock_changed(&mut self) -> (bool, Option<SystemTime>) {
+        let now_wall = SystemTime::now();
+        let now_mono = Instant::now();
+        let prev_wall = self.last_wallclock;
+
+        let changed = if let (Some(pw), Some(prev_mono)) = (prev_wall, self.last_monotonic) {
+            let mono_delta = now_mono.duration_since(prev_mono);
+            let wall_delta = now_wall.duration_since(pw).unwrap_or(Duration::ZERO);
+            let diff = (wall_delta.as_secs() as i64) - (mono_delta.as_secs() as i64);
+            diff.abs() > CLOCK_JUMP_THRESHOLD_SECS
+        } else {
+            false
+        };
+
+        self.last_wallclock = Some(now_wall);
+        self.last_monotonic = Some(now_mono);
+        (changed, if changed { prev_wall } else { None })
+    }
+}
+
+/// Compute the randomized delay for a timer.
+///
+/// If `FixedRandomDelay=true`, the delay is deterministic based on the unit name
+/// (stable across reboots — same timer always gets the same offset).
+/// If `FixedRandomDelay=false`, the delay uses a per-boot seed combined with the
+/// unit name (changes each boot but stable within a boot).
+fn compute_randomized_delay(
+    conf: &TimerConfig,
+    timer_name: &str,
+    boot_instant: Instant,
+) -> Duration {
+    if conf.randomized_delay_sec.is_zero() {
+        return Duration::ZERO;
+    }
+    let max_micros = conf.randomized_delay_sec.as_micros() as u64;
+    if max_micros == 0 {
+        return Duration::ZERO;
+    }
+    let mut hasher = DefaultHasher::new();
+    timer_name.hash(&mut hasher);
+    if !conf.fixed_random_delay {
+        // Per-boot variation: include the boot instant's debug representation
+        // as entropy that changes each boot.
+        format!("{:?}", boot_instant).hash(&mut hasher);
+    }
+    let hash_val = hasher.finish();
+    let delay_micros = hash_val % max_micros;
+    Duration::from_micros(delay_micros)
+}
+
+/// Boot instant — captured once when the scheduler starts.
+/// Used for OnBootSec= / OnStartupSec= calculations.
+pub static BOOT_INSTANT: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+/// Start the background timer scheduler thread.
+///
+/// This should be called after the initial unit activation is complete
+/// (or at least after all timer units have been loaded and started).
+pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
+    let boot_instant = *BOOT_INSTANT.get_or_init(Instant::now);
+
+    std::thread::Builder::new()
+        .name("timer-scheduler".into())
+        .spawn(move || {
+            info!("Timer scheduler started");
+
+            // Initialize the change detector BEFORE the initial sleep so it
+            // captures the pre-sleep timezone/clock state. This way, changes
+            // that occur during the initial sleep are detected on the first tick.
+            let mut change_detector = ChangeDetector::new(&run_info);
+
+            // Give the system a moment to finish initial activation before
+            // checking timers for the first time.  This avoids firing
+            // OnBootSec=0 timers before their target services are loaded.
+            std::thread::sleep(Duration::from_secs(2));
+
+            // Track when each timer last fired so we can implement
+            // OnUnitActiveSec= and avoid re-firing within the same period.
+            let mut last_fired: std::collections::HashMap<String, Instant> =
+                std::collections::HashMap::new();
+
+            // For DeferReactivation= timers: track whether the triggered unit
+            // was seen active since the last fire, so we can re-anchor the
+            // calendar reference to its deactivation time.
+            let mut defer_seen_active: std::collections::HashMap<String, bool> =
+                std::collections::HashMap::new();
+
+            loop {
+                // Detect clock/timezone changes before checking timers
+                let tz_changed = change_detector.timezone_changed(&run_info);
+                let (clock_changed, pre_jump_wallclock) = change_detector.clock_changed();
+
+                if tz_changed {
+                    info!("Timezone change detected");
+                }
+                if clock_changed {
+                    info!("Clock change detected");
+                }
+
+                check_and_fire_timers(
+                    &run_info,
+                    boot_instant,
+                    &mut last_fired,
+                    &mut defer_seen_active,
+                    tz_changed,
+                    clock_changed,
+                    pre_jump_wallclock,
+                );
+                // Use a short interval (250ms) to detect clock/timezone changes
+                // promptly. The original 15s interval is too slow for tests that
+                // wait for OnClockChange/OnTimezoneChange timers to fire.
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        })
+        .expect("Failed to spawn timer-scheduler thread");
+}
+
+/// One pass of the timer check loop.
+fn check_and_fire_timers(
+    run_info: &ArcMutRuntimeInfo,
+    boot_instant: Instant,
+    last_fired: &mut std::collections::HashMap<String, Instant>,
+    defer_seen_active: &mut std::collections::HashMap<String, bool>,
+    timezone_changed: bool,
+    clock_changed: bool,
+    pre_jump_wallclock: Option<SystemTime>,
+) {
+    let now = Instant::now();
+    let elapsed_since_boot = now.duration_since(boot_instant);
+
+    // Collect timer units that need to fire.
+    // We collect first, then fire, to avoid holding the read lock during activation.
+    let mut timers_to_fire: Vec<(UnitId, String)> = Vec::new();
+
+    {
+        let ri = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return, // retry next tick
+        };
+        for unit in ri.unit_table.values() {
+            if let Specific::Timer(timer_specific) = &unit.specific {
+                // Only check timers that are started/running
+                let status = unit.common.status.read_poisoned().clone();
+                if !matches!(status, UnitStatus::Started(StatusStarted::Running)) {
+                    continue;
+                }
+
+                let conf = &timer_specific.conf;
+                let timer_name = &unit.id.name;
+                let target_unit = &conf.unit;
+
+                // Persistent= timers whose saved last-trigger predates this boot
+                // must rebase their reference to boot time, so RandomizedDelaySec=
+                // still applies during boot and the timer does not fire
+                // immediately for the elapsed-while-off run (matches upstream).
+                // Seed last_fired to boot the first time we see such a timer so
+                // should_fire_timer computes the next elapse from boot rather
+                // than from the ancient stamp (which would elapse at once).
+                if conf.persistent && !last_fired.contains_key(timer_name) {
+                    let stamp_usec = timer_specific.state.read_poisoned().last_trigger_usec;
+                    if let Some(usec) = stamp_usec {
+                        let boot_wall = SystemTime::now()
+                            .checked_sub(elapsed_since_boot)
+                            .unwrap_or(SystemTime::UNIX_EPOCH);
+                        let stamp_wall =
+                            SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(usec);
+                        if stamp_wall < boot_wall {
+                            last_fired.insert(timer_name.clone(), boot_instant);
+                        }
+                    }
+                }
+
+                // DeferReactivation=: gate a repeating timer on the triggered
+                // unit's lifecycle. The next elapse is re-anchored to when the
+                // triggered unit deactivates rather than when the timer fired,
+                // and the timer will not fire again while it is still active.
+                if conf.defer_reactivation {
+                    let target_active = ri
+                        .unit_table
+                        .values()
+                        .find(|u| u.id.name == *target_unit)
+                        .map(|u| {
+                            !matches!(
+                                &*u.common.status.read_poisoned(),
+                                UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                            )
+                        })
+                        .unwrap_or(false);
+
+                    if !defer_seen_active.contains_key(timer_name) {
+                        // First time we see this armed timer: anchor the
+                        // calendar reference to now so the first elapse is the
+                        // next calendar boundary rather than an immediate,
+                        // boot-referenced fire.
+                        defer_seen_active.insert(timer_name.clone(), false);
+                        last_fired.insert(timer_name.clone(), now);
+                        continue;
+                    }
+                    if target_active {
+                        // Triggered unit still running — defer the next elapse.
+                        defer_seen_active.insert(timer_name.clone(), true);
+                        continue;
+                    }
+                    if defer_seen_active.get(timer_name).copied().unwrap_or(false) {
+                        // Triggered unit just deactivated — re-anchor the
+                        // calendar reference to now so the next elapse is
+                        // measured from the deactivation.
+                        last_fired.insert(timer_name.clone(), now);
+                        defer_seen_active.insert(timer_name.clone(), false);
+                        continue;
+                    }
+                }
+
+                let fire = should_fire_timer(
+                    conf,
+                    timer_name,
+                    elapsed_since_boot,
+                    now,
+                    last_fired,
+                    timezone_changed,
+                    clock_changed,
+                    pre_jump_wallclock,
+                );
+                if fire {
+                    timers_to_fire.push((unit.id.clone(), target_unit.clone()));
+                }
+            }
+        }
+    }
+
+    // Fire the collected timers
+    for (timer_id, target_unit_name) in timers_to_fire {
+        info!(
+            "Timer {} elapsed, activating {}",
+            timer_id.name, target_unit_name
+        );
+        last_fired.insert(timer_id.name.clone(), now);
+
+        // Record LastTriggerUSec on the timer unit's state and write stamp file
+        {
+            let ri = run_info.read_poisoned();
+            if let Some(unit) = ri.unit_table.values().find(|u| u.id == timer_id)
+                && let Specific::Timer(ref tmr) = unit.specific
+            {
+                let trigger_usec = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_micros() as u64)
+                    .unwrap_or(0);
+                tmr.state.write_poisoned().last_trigger_usec = Some(trigger_usec);
+
+                // Write persistent stamp file so the last trigger time
+                // survives reboots.
+                if tmr.conf.persistent {
+                    let stamp_dir = "/var/lib/systemd/timers";
+                    let stamp_path = format!("{}/stamp-{}", stamp_dir, timer_id.name);
+                    let _ = std::fs::create_dir_all(stamp_dir);
+                    if let Err(e) = std::fs::write(&stamp_path, "") {
+                        warn!(
+                            "Timer {}: failed to write stamp file {}: {}",
+                            timer_id.name, stamp_path, e
+                        );
+                    }
+                }
+
+                // RemainAfterElapse=no: a one-shot timer (only OnActiveSec=/
+                // OnBootSec=/OnStartupSec=, which fire exactly once) deactivates
+                // once it has elapsed. Timers with a recurring source
+                // (OnCalendar=/OnUnitActiveSec=/OnUnitInactiveSec=) keep waiting
+                // and stay active regardless.
+                let recurring = !tmr.conf.on_calendar.is_empty()
+                    || !tmr.conf.on_unit_active_sec.is_empty()
+                    || !tmr.conf.on_unit_inactive_sec.is_empty();
+                if !recurring && !tmr.conf.remain_after_elapse {
+                    let mut status = unit.common.status.write_poisoned();
+                    if status.is_started() {
+                        trace!(
+                            "Timer {}: RemainAfterElapse=no and elapsed, deactivating",
+                            timer_id.name
+                        );
+                        *status =
+                            UnitStatus::Stopped(crate::units::StatusStopped::StoppedFinal, vec![]);
+                    }
+                }
+            }
+        }
+
+        fire_timer_target(run_info, &target_unit_name, &timer_id.name);
+    }
+}
+
+/// Determine if a timer should fire based on its configuration and current state.
+#[allow(clippy::too_many_arguments)]
+fn should_fire_timer(
+    conf: &TimerConfig,
+    timer_name: &str,
+    elapsed_since_boot: Duration,
+    now: Instant,
+    last_fired: &std::collections::HashMap<String, Instant>,
+    timezone_changed: bool,
+    clock_changed: bool,
+    pre_jump_wallclock: Option<SystemTime>,
+) -> bool {
+    let last = last_fired.get(timer_name).copied();
+
+    // Compute the randomized delay for this timer (stable within a boot).
+    let boot_instant = BOOT_INSTANT.get().copied().unwrap_or_else(Instant::now);
+    let random_delay = compute_randomized_delay(conf, timer_name, boot_instant);
+
+    // OnBootSec= / OnStartupSec= — fire once after boot + duration
+    for dur in conf.on_boot_sec.iter().chain(conf.on_startup_sec.iter()) {
+        if elapsed_since_boot >= *dur + random_delay {
+            // Should have fired by now. Check if we already did.
+            if last.is_none() {
+                trace!(
+                    "Timer {}: OnBootSec/OnStartupSec {:?} elapsed (boot+{:?})",
+                    timer_name, dur, elapsed_since_boot
+                );
+                return true;
+            }
+        }
+    }
+
+    // OnActiveSec= — fire once after timer activation + duration
+    // Since we don't track when the timer was activated separately, we
+    // approximate by using boot time (timers are activated during boot).
+    for dur in &conf.on_active_sec {
+        if elapsed_since_boot >= *dur + random_delay && last.is_none() {
+            trace!("Timer {}: OnActiveSec {:?} elapsed", timer_name, dur);
+            return true;
+        }
+    }
+
+    // OnUnitActiveSec= — repeating timer relative to last activation
+    for dur in &conf.on_unit_active_sec {
+        if dur.is_zero() {
+            continue;
+        }
+        match last {
+            Some(last_time) => {
+                let since_last = now.duration_since(last_time);
+                if since_last >= *dur + random_delay {
+                    trace!(
+                        "Timer {}: OnUnitActiveSec {:?} elapsed ({:?} since last fire)",
+                        timer_name, dur, since_last
+                    );
+                    return true;
+                }
+            }
+            None => {
+                // First run after boot — fire if boot elapsed >= dur
+                if elapsed_since_boot >= *dur + random_delay {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // OnUnitInactiveSec= — repeating timer relative to last deactivation
+    // We approximate this the same as OnUnitActiveSec for now.
+    for dur in &conf.on_unit_inactive_sec {
+        if dur.is_zero() {
+            continue;
+        }
+        match last {
+            Some(last_time) => {
+                if now.duration_since(last_time) >= *dur + random_delay {
+                    return true;
+                }
+            }
+            None => {
+                if elapsed_since_boot >= *dur + random_delay {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // OnClockChange= — fire when the system clock jumps
+    if conf.on_clock_change && clock_changed {
+        trace!(
+            "Timer {}: OnClockChange triggered (clock jump detected)",
+            timer_name
+        );
+        return true;
+    }
+
+    // OnTimezoneChange= — fire when the system timezone changes
+    if conf.on_timezone_change && timezone_changed {
+        trace!(
+            "Timer {}: OnTimezoneChange triggered (timezone change detected)",
+            timer_name
+        );
+        return true;
+    }
+
+    // OnCalendar= — calendar event expressions
+    // Parse the expression using CalendarSpec and check if the next elapse
+    // time is at or before the current wall-clock time.
+    for expr in &conf.on_calendar {
+        match CalendarSpec::parse(expr) {
+            Ok(spec) => {
+                let now_system = SystemTime::now();
+                let now_dt = CalendarSpec::system_time_to_datetime(now_system);
+
+                // Determine the reference time: if we fired before, the reference
+                // is one second after the last fire time (so we don't re-trigger
+                // for the same calendar tick). If we haven't fired, the reference
+                // is boot time (or epoch if Persistent=true to catch missed runs).
+                //
+                // When a clock change (jump) is detected: use the pre-jump
+                // wall-clock time as reference so that any calendar events that
+                // were skipped over by the jump are caught.
+                let reference_dt = if clock_changed {
+                    if let Some(pre_jump) = pre_jump_wallclock {
+                        // Use the wall-clock time from before the jump so the
+                        // calendar spec finds events between the old time and now.
+                        let pre_dt = CalendarSpec::system_time_to_datetime(pre_jump);
+                        let pre_unix = CalendarSpec::datetime_to_unix(&pre_dt);
+                        crate::calendar_spec::unix_to_datetime(pre_unix + 1)
+                    } else {
+                        // Fallback: use boot time
+                        let boot_unix = CalendarSpec::datetime_to_unix(&now_dt)
+                            - elapsed_since_boot.as_secs() as i64;
+                        crate::calendar_spec::unix_to_datetime(boot_unix)
+                    }
+                } else if let Some(last_instant) = last {
+                    // Convert the last-fired Instant to a wall-clock DateTime.
+                    // We do this by computing the offset from `now` Instant to
+                    // `now` SystemTime, then applying that offset.
+                    let elapsed_since_last = now.duration_since(last_instant);
+                    let last_unix = CalendarSpec::datetime_to_unix(&now_dt)
+                        - elapsed_since_last.as_secs() as i64;
+                    // One second after last fire so we skip the same slot
+                    crate::calendar_spec::unix_to_datetime(last_unix + 1)
+                } else if conf.persistent {
+                    // Persistent=true and first check: fire immediately for any
+                    // missed calendar events by using epoch as reference.
+                    crate::calendar_spec::DateTime {
+                        year: 1970,
+                        month: 1,
+                        day: 1,
+                        hour: 0,
+                        minute: 0,
+                        second: 0,
+                    }
+                } else {
+                    // Not persistent, first check: use boot time as reference.
+                    let boot_unix = CalendarSpec::datetime_to_unix(&now_dt)
+                        - elapsed_since_boot.as_secs() as i64;
+                    crate::calendar_spec::unix_to_datetime(boot_unix)
+                };
+
+                if let Some(next) = spec.next_elapse(reference_dt) {
+                    let next_unix =
+                        CalendarSpec::datetime_to_unix(&next) + random_delay.as_secs() as i64;
+                    let now_unix = CalendarSpec::datetime_to_unix(&now_dt);
+                    if next_unix <= now_unix {
+                        trace!(
+                            "Timer {}: OnCalendar={} next elapse {:?} + {:?} delay <= now {:?}",
+                            timer_name, expr, next, random_delay, now_dt
+                        );
+                        return true;
+                    }
+                }
+            }
+            Err(e) => {
+                debug!(
+                    "Timer {}: OnCalendar={} parse error: {}",
+                    timer_name, expr, e
+                );
+            }
+        }
+    }
+
+    false
+}
+
+/// Re-export `unix_to_datetime` so the scheduler helper above can use it
+/// without a fully-qualified path in tests.
+pub use crate::calendar_spec::unix_to_datetime;
+
+/// Fire a timer's target unit by starting it via the activation system.
+/// Set TRIGGER_UNIT and TRIGGER_TIMER_*_USEC on the target service's state.
+fn set_timer_trigger_info(unit: &crate::units::Unit, timer_name: &str) {
+    if let Specific::Service(specific) = &unit.specific {
+        let mut state = specific.state.write_poisoned();
+        state.srvc.trigger_unit = Some(timer_name.to_owned());
+        let now = SystemTime::now();
+        if let Ok(dur) = now.duration_since(SystemTime::UNIX_EPOCH) {
+            state.srvc.trigger_timer_realtime_usec = Some(dur.as_micros() as u64);
+        }
+        let boot_instant = BOOT_INSTANT.get().copied().unwrap_or_else(Instant::now);
+        let mono = Instant::now().duration_since(boot_instant);
+        state.srvc.trigger_timer_monotonic_usec = Some(mono.as_micros() as u64);
+    }
+}
+
+fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer_name: &str) {
+    let ri = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return, // retry on next timer tick
+    };
+
+    // Find the target unit
+    let target_unit = ri
+        .unit_table
+        .values()
+        .find(|u| u.id.name == target_unit_name);
+
+    match target_unit {
+        Some(unit) => {
+            set_timer_trigger_info(unit, timer_name);
+            let status = unit.common.status.read_poisoned().clone();
+            match status {
+                UnitStatus::Started(_) => {
+                    // Service is already running — try to restart it
+                    debug!(
+                        "Timer target {} is already running, attempting restart",
+                        target_unit_name
+                    );
+                    let id = unit.id.clone();
+                    match unit.reactivate(&ri, ActivationSource::TriggerActivation) {
+                        Ok(()) => {
+                            info!("Timer fired: restarted {}", target_unit_name);
+                            // The restarted service's start wait may have been
+                            // deferred (unit left Starting) — hand completion
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
+                        }
+                        Err(e) => {
+                            warn!("Timer failed to restart {}: {}", target_unit_name, e);
+                        }
+                    }
+                }
+                _ => {
+                    // Service is not running — start it
+                    let id = unit.id.clone();
+                    drop(ri);
+                    match crate::units::activate_unit(
+                        id.clone(),
+                        &run_info.read_poisoned(),
+                        ActivationSource::TriggerActivation,
+                    ) {
+                        Ok(_) => {
+                            info!("Timer fired: started {}", target_unit_name);
+                            // If the start wait was deferred (unit left
+                            // Starting), hand completion + timeout enforcement
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
+                        }
+                        Err(e) => {
+                            warn!("Timer failed to start {}: {}", target_unit_name, e);
+                        }
+                    }
+                }
+            }
+        }
+        None => {
+            // Unit not in the boot dependency graph — try on-demand loading
+            debug!(
+                "Timer target {} not found in unit table, attempting on-demand load",
+                target_unit_name
+            );
+            drop(ri);
+
+            // Use the control interface's find_or_load_unit logic by sending
+            // a start command through the internal path.
+            let ri = run_info.read_poisoned();
+            if let Some(unit) = ri
+                .unit_table
+                .values()
+                .find(|u| u.id.name == target_unit_name)
+            {
+                let id = unit.id.clone();
+                drop(ri);
+                match crate::units::activate_unit(
+                    id.clone(),
+                    &run_info.read_poisoned(),
+                    ActivationSource::TriggerActivation,
+                ) {
+                    Ok(_) => {
+                        info!("Timer fired: started {} (on-demand)", target_unit_name);
+                        crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
+                    }
+                    Err(e) => warn!(
+                        "Timer failed to start {} (on-demand): {}",
+                        target_unit_name, e
+                    ),
+                }
+            } else {
+                debug!(
+                    "Timer target {} not found and could not be loaded",
+                    target_unit_name
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calendar_spec_parse_hourly() {
+        let spec = CalendarSpec::parse("hourly").unwrap();
+        assert_eq!(spec.normalized(), "*-*-* *:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_daily() {
+        let spec = CalendarSpec::parse("daily").unwrap();
+        assert_eq!(spec.normalized(), "*-*-* 00:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_weekly() {
+        let spec = CalendarSpec::parse("weekly").unwrap();
+        assert_eq!(spec.normalized(), "Mon *-*-* 00:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_monthly() {
+        let spec = CalendarSpec::parse("monthly").unwrap();
+        assert_eq!(spec.normalized(), "*-*-01 00:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_yearly() {
+        let spec = CalendarSpec::parse("yearly").unwrap();
+        assert_eq!(spec.normalized(), "*-01-01 00:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_complex_expression() {
+        let spec = CalendarSpec::parse("*-*-* 06:00:00").unwrap();
+        assert_eq!(spec.normalized(), "*-*-* 06:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_minutely() {
+        let spec = CalendarSpec::parse("minutely").unwrap();
+        assert_eq!(spec.normalized(), "*-*-* *:*:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_parse_quarterly() {
+        let spec = CalendarSpec::parse("quarterly").unwrap();
+        assert_eq!(spec.normalized(), "*-01,04,07,10-01 00:00:00");
+    }
+
+    #[test]
+    fn test_calendar_spec_next_elapse_daily() {
+        use crate::calendar_spec::DateTime;
+        let spec = CalendarSpec::parse("daily").unwrap();
+        let after = DateTime {
+            year: 2025,
+            month: 6,
+            day: 15,
+            hour: 0,
+            minute: 0,
+            second: 1,
+        };
+        let next = spec.next_elapse(after).unwrap();
+        assert_eq!(next.day, 16);
+        assert_eq!(next.hour, 0);
+    }
+
+    #[test]
+    fn test_calendar_spec_next_elapse_complex() {
+        use crate::calendar_spec::DateTime;
+        let spec = CalendarSpec::parse("Mon..Fri *-*-* 09:00:00").unwrap();
+        // 2025-06-14 is Saturday
+        let after = DateTime {
+            year: 2025,
+            month: 6,
+            day: 14,
+            hour: 10,
+            minute: 0,
+            second: 0,
+        };
+        let next = spec.next_elapse(after).unwrap();
+        // Next Mon..Fri is Monday June 16
+        assert_eq!(next.day, 16);
+        assert_eq!(next.hour, 9);
+    }
+
+    #[test]
+    fn test_should_fire_on_boot_sec_not_yet() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(3600)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // Only 5 minutes since boot — shouldn't fire yet
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(300),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_fire_on_boot_sec_elapsed() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(300)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // 10 minutes since boot, timer is 5 min — should fire
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(600),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_should_fire_on_boot_sec_already_fired() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(300)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let mut last_fired = std::collections::HashMap::new();
+        last_fired.insert("test.timer".into(), Instant::now());
+        // Already fired — shouldn't fire again
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(600),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_fire_on_unit_active_sec_repeating() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![Duration::from_secs(60)],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let now = Instant::now();
+        let mut last_fired = std::collections::HashMap::new();
+        // Last fired 120s ago, interval is 60s — should fire
+        last_fired.insert(
+            "test.timer".into(),
+            now.checked_sub(Duration::from_secs(120)).unwrap(),
+        );
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(300),
+            now,
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_should_fire_on_unit_active_sec_too_soon() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![Duration::from_secs(3600)],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let now = Instant::now();
+        let mut last_fired = std::collections::HashMap::new();
+        // Last fired 30s ago, interval is 1h — shouldn't fire
+        last_fired.insert(
+            "test.timer".into(),
+            now.checked_sub(Duration::from_secs(30)).unwrap(),
+        );
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(300),
+            now,
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_fire_calendar_hourly() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec!["hourly".into()],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let now = Instant::now();
+        let mut last_fired = std::collections::HashMap::new();
+        // Last fired 2 hours ago — should fire
+        last_fired.insert(
+            "test.timer".into(),
+            now.checked_sub(Duration::from_secs(7200)).unwrap(),
+        );
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(10000),
+            now,
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_should_fire_calendar_hourly_too_soon() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec!["hourly".into()],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let now = Instant::now();
+        let mut last_fired = std::collections::HashMap::new();
+        // Last fired 1 second ago — shouldn't fire yet (using a very short
+        // interval avoids flakiness: with 10 minutes, if we happen to be in
+        // the first 10 minutes of the hour a new hourly boundary has been
+        // crossed since last fire, so should_fire_timer correctly returns true).
+        last_fired.insert(
+            "test.timer".into(),
+            now.checked_sub(Duration::from_secs(1)).unwrap(),
+        );
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(10000),
+            now,
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_fire_empty_config() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // No triggers configured — should never fire
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(999999),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_should_fire_persistent_calendar_first_boot() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec!["weekly".into()],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: true,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // Persistent=true and never fired — should fire on first check
+        // (even though we just booted, Persistent=true means "catch up on missed runs")
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(60),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_calendar_spec_every_two_hours() {
+        use crate::calendar_spec::DateTime;
+        let spec = CalendarSpec::parse("*-*-* */2:00:00").unwrap();
+        let after = DateTime {
+            year: 2025,
+            month: 1,
+            day: 1,
+            hour: 3,
+            minute: 0,
+            second: 0,
+        };
+        let next = spec.next_elapse(after).unwrap();
+        assert_eq!(next.hour, 4);
+    }
+
+    #[test]
+    fn test_parse_timespan_via_from_parsed_config() {
+        use crate::units::from_parsed_config::parse_timespan;
+        assert_eq!(parse_timespan("15min"), Some(Duration::from_secs(900)));
+        assert_eq!(parse_timespan("1h"), Some(Duration::from_secs(3600)));
+        assert_eq!(parse_timespan("1d"), Some(Duration::from_secs(86400)));
+        assert_eq!(parse_timespan("1h 30min"), Some(Duration::from_secs(5400)));
+        assert_eq!(parse_timespan("500ms"), Some(Duration::from_millis(500)));
+        assert_eq!(parse_timespan("100min"), Some(Duration::from_secs(6000)));
+        assert_eq!(parse_timespan("2s"), Some(Duration::from_secs(2)));
+        assert_eq!(parse_timespan("2secs"), Some(Duration::from_secs(2)));
+        assert_eq!(parse_timespan("2hrs"), Some(Duration::from_secs(7200)));
+        assert_eq!(parse_timespan("1hr"), Some(Duration::from_secs(3600)));
+        assert_eq!(parse_timespan(""), None);
+        assert_eq!(parse_timespan("30"), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn test_randomized_delay_sec_defers_boot_timer() {
+        // A timer with OnBootSec=5min and RandomizedDelaySec=10min should not
+        // fire at 6 minutes since boot (5 + up-to-10 delay might push it out).
+        // We can't predict the exact delay, but with a 10min random window the
+        // probability of the hash-based delay being < 1min is low (~10%).
+        // Instead, test with a very large delay that guarantees deferral.
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(300)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::from_secs(86400), // 1 day delay
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // 10 minutes since boot, but with up to 1 day of random delay,
+        // it definitely should NOT fire yet.
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(600),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_randomized_delay_zero_does_not_defer() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(300)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            defer_reactivation: false,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // 10 minutes since boot, no delay — should fire
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(600),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_fixed_random_delay_is_deterministic() {
+        let boot = Instant::now();
+        let delay1 = compute_randomized_delay(
+            &TimerConfig {
+                on_boot_sec: vec![],
+                on_startup_sec: vec![],
+                on_active_sec: vec![],
+                on_unit_active_sec: vec![],
+                on_unit_inactive_sec: vec![],
+                on_calendar: vec![],
+                accuracy_sec: Duration::from_secs(60),
+                randomized_delay_sec: Duration::from_secs(3600),
+                fixed_random_delay: true,
+                persistent: false,
+                wake_system: false,
+                remain_after_elapse: true,
+                defer_reactivation: false,
+                on_clock_change: false,
+                on_timezone_change: false,
+                unit: "test.service".into(),
+            },
+            "my-timer.timer",
+            boot,
+        );
+        let delay2 = compute_randomized_delay(
+            &TimerConfig {
+                on_boot_sec: vec![],
+                on_startup_sec: vec![],
+                on_active_sec: vec![],
+                on_unit_active_sec: vec![],
+                on_unit_inactive_sec: vec![],
+                on_calendar: vec![],
+                accuracy_sec: Duration::from_secs(60),
+                randomized_delay_sec: Duration::from_secs(3600),
+                fixed_random_delay: true,
+                persistent: false,
+                wake_system: false,
+                remain_after_elapse: true,
+                defer_reactivation: false,
+                on_clock_change: false,
+                on_timezone_change: false,
+                unit: "test.service".into(),
+            },
+            "my-timer.timer",
+            boot,
+        );
+        // FixedRandomDelay=true means same name → same delay
+        assert_eq!(delay1, delay2);
+        // Delay should be within range
+        assert!(delay1 < Duration::from_secs(3600));
+    }
+}

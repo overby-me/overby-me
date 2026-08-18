@@ -1,0 +1,16 @@
+[package]
+name = "systemd-localectl"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "localectl"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

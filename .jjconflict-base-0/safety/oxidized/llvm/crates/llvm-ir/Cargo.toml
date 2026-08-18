@@ -1,0 +1,13 @@
+[package]
+name = "llvm-ir"
+version.workspace = true
+edition.workspace = true
+description = "LLVM IR data model: context, module, types, constants, instructions, metadata"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+llvm-support.workspace = true
+
+[lints]
+workspace = true

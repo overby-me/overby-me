@@ -1,0 +1,11 @@
+load("//cpp:rules.bzl", "cpp_binary")
+
+oncall("build_infra")
+
+cpp_binary(
+    name = "main",
+    srcs = glob(["*.cpp"]),
+    headers = glob(["*.hpp"]),
+    toolchain = "toolchains//:cpp",
+    deps = [],
+)

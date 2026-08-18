@@ -1,0 +1,1 @@
+{"name":"id-arena","vers":"2.3.0","deps":[{"name":"rayon","req":"^1.0.3","features":[],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954","features":{"default":["std"],"std":[]},"yanked":false,"pubtime":"2026-01-14T21:40:46Z"}

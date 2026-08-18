@@ -1,0 +1,22 @@
+# Condvar wakeups are allowed to be spurious; a wait that is not re-checked
+# in a loop treats one wakeup as the predicate holding. wait_while carries
+# the loop internally and does not match.
+id: rust-condvar-wait-outside-loop
+language: rust
+severity: warning
+message: >-
+  Condvar::wait can wake spuriously; outside a loop the predicate is never
+  re-checked. Wrap it in `while !cond` or use wait_while.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  pattern: $CV.wait($G)
+  not:
+    inside:
+      any:
+        - {kind: while_expression}
+        - {kind: loop_expression}
+      stopBy: end

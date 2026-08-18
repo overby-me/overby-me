@@ -1,0 +1,4 @@
+/.well-known/matrix/server https://matrix.overby.me/.well-known/matrix/server 301
+/.well-known/matrix/client https://matrix.overby.me/.well-known/matrix/client 301
+/.well-known/matrix/support https://matrix.overby.me/.well-known/matrix/support 301
+/* /index.html 200

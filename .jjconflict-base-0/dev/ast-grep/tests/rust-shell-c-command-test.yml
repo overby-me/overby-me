@@ -1,0 +1,5 @@
+id: rust-shell-c-command
+valid:
+  - "let out = Command::new(\"git\").arg(\"status\").output()?;"
+invalid:
+  - "let out = Command::new(\"sh\").arg(\"-c\").arg(cmd).output()?;"

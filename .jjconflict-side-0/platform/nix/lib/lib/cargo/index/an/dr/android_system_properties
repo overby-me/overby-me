@@ -1,0 +1,1 @@
+{"name":"android_system_properties","vers":"0.1.5","deps":[{"name":"libc","req":"^0.2.126","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311","features":{},"yanked":false,"pubtime":"2022-08-30T10:42:28Z"}

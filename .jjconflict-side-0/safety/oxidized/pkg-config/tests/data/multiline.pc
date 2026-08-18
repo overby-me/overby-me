@@ -1,0 +1,14 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: multiline
+Description: A test library with \
+multiline field values
+Version: 1.0.0
+Libs: -L${libdir} \
+  -lmultiline
+Cflags: -I${includedir}/multiline \
+  -DMULTILINE=1 \
+  -DEXTRA=2
