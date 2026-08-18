@@ -83,18 +83,16 @@ fn instance_get_export(
     var name_ptr = _as_ext(name_bytes.unsafe_ptr())
     var name_len = len(name)
 
-    var found = wasmtime_instance_export_get(
-        context, _as_ext(inst_buf), name_ptr, name_len, _as_ext(ext_buf)
-    )
-
-    inst_buf.free()
-    if not found:
+    try:
+        var found = wasmtime_instance_export_get(
+            context, _as_ext(inst_buf), name_ptr, name_len, _as_ext(ext_buf)
+        )
+        if not found:
+            raise Error("Export not found: '" + name + "'")
+        return ext_buf[]
+    finally:
+        inst_buf.free()
         ext_buf.free()
-        raise Error("Export not found: '" + name + "'")
-
-    var ext = ext_buf[]
-    ext_buf.free()
-    return ext
 
 
 fn instance_get_func(
@@ -200,11 +198,12 @@ fn global_get_i32(
     g_buf[] = `global`
     var val_buf = alloc[WasmtimeVal](1)
     val_buf[] = WasmtimeVal()
-    wasmtime_global_get(context, _as_ext(g_buf), _as_ext(val_buf))
-    g_buf.free()
-    var val = val_buf[]
-    val_buf.free()
-    return val.get_i32()
+    try:
+        wasmtime_global_get(context, _as_ext(g_buf), _as_ext(val_buf))
+        return val_buf[].get_i32()
+    finally:
+        g_buf.free()
+        val_buf.free()
 
 
 fn global_get_i64(
@@ -215,11 +214,12 @@ fn global_get_i64(
     g_buf[] = `global`
     var val_buf = alloc[WasmtimeVal](1)
     val_buf[] = WasmtimeVal()
-    wasmtime_global_get(context, _as_ext(g_buf), _as_ext(val_buf))
-    g_buf.free()
-    var val = val_buf[]
-    val_buf.free()
-    return val.get_i64()
+    try:
+        wasmtime_global_get(context, _as_ext(g_buf), _as_ext(val_buf))
+        return val_buf[].get_i64()
+    finally:
+        g_buf.free()
+        val_buf.free()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -265,41 +265,38 @@ fn func_call(
     var trap_buf = alloc[UnsafePointer[NoneType, MutExternalOrigin]](1)
     trap_buf[] = UnsafePointer[NoneType, MutExternalOrigin]()
 
-    var err = wasmtime_func_call(
-        context,
-        _as_ext(f_buf),
-        args_buf,
-        nargs,
-        results_buf,
-        nresults,
-        _as_ext(trap_buf),
-    )
-    f_buf.free()
+    try:
+        var err = wasmtime_func_call(
+            context,
+            _as_ext(f_buf),
+            args_buf,
+            nargs,
+            results_buf,
+            nresults,
+            _as_ext(trap_buf),
+        )
 
-    var trap = trap_buf[]
-    trap_buf.free()
+        var trap = trap_buf[]
 
-    if err:
-        var msg = error_message(err)
+        if err:
+            var msg = error_message(err)
+            if trap:
+                _ = trap_message(trap)
+            raise Error("Function call failed: " + msg)
+
         if trap:
-            _ = trap_message(trap)
+            raise Error("Function call trapped: " + trap_message(trap))
+
+        var results = List[WasmtimeVal]()
+        for i in range(nresults):
+            results.append(results_buf[i])
+
+        return results^
+    finally:
+        f_buf.free()
+        trap_buf.free()
         args_buf.free()
         results_buf.free()
-        raise Error("Function call failed: " + msg)
-
-    if trap:
-        var msg = trap_message(trap)
-        args_buf.free()
-        results_buf.free()
-        raise Error("Function call trapped: " + msg)
-
-    var results = List[WasmtimeVal]()
-    for i in range(nresults):
-        results.append(results_buf[i])
-
-    args_buf.free()
-    results_buf.free()
-    return results^
 
 
 fn func_call_0(
@@ -429,9 +426,10 @@ fn memory_data_ptr(
     """
     var m_buf = alloc[WasmtimeMemory](1)
     m_buf[] = memory
-    var result = wasmtime_memory_data(context, _as_ext(m_buf))
-    m_buf.free()
-    return result
+    try:
+        return wasmtime_memory_data(context, _as_ext(m_buf))
+    finally:
+        m_buf.free()
 
 
 fn memory_data_size(context: ContextPtr, memory: WasmtimeMemory) raises -> Int:
@@ -446,9 +444,10 @@ fn memory_data_size(context: ContextPtr, memory: WasmtimeMemory) raises -> Int:
     """
     var m_buf = alloc[WasmtimeMemory](1)
     m_buf[] = memory
-    var result = wasmtime_memory_data_size(context, _as_ext(m_buf))
-    m_buf.free()
-    return result
+    try:
+        return wasmtime_memory_data_size(context, _as_ext(m_buf))
+    finally:
+        m_buf.free()
 
 
 fn memory_read_bytes(

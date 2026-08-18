@@ -199,30 +199,28 @@ struct Linker:
         var trap_buf = alloc[TrapPtr](1)
         trap_buf[] = TrapPtr()
 
-        var err = wasmtime_linker_instantiate(
-            self._ptr,
-            context,
-            module_ptr,
-            _as_ext(instance_buf),
-            _as_ext(trap_buf),
-        )
+        try:
+            var err = wasmtime_linker_instantiate(
+                self._ptr,
+                context,
+                module_ptr,
+                _as_ext(instance_buf),
+                _as_ext(trap_buf),
+            )
 
-        var trap = trap_buf[]
-        trap_buf.free()
+            var trap = trap_buf[]
 
-        if err:
-            var msg = error_message(err)
+            if err:
+                var msg = error_message(err)
+                if trap:
+                    # Also consume the trap if both are set
+                    _ = trap_message(trap)
+                raise Error("Instantiation failed: " + msg)
+
             if trap:
-                # Also consume the trap if both are set
-                _ = trap_message(trap)
-            instance_buf.free()
-            raise Error("Instantiation failed: " + msg)
+                raise Error("Instantiation trapped: " + trap_message(trap))
 
-        if trap:
-            var msg = trap_message(trap)
+            return instance_buf[]
+        finally:
+            trap_buf.free()
             instance_buf.free()
-            raise Error("Instantiation trapped: " + msg)
-
-        var instance = instance_buf[]
-        instance_buf.free()
-        return instance

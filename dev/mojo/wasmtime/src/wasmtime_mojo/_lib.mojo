@@ -634,10 +634,12 @@ fn make_functype(
         wasm_valtype_vec_new_empty(params_ptr)
     else:
         var ptypes = alloc[ValTypePtr](len(param_kinds))
-        for i in range(len(param_kinds)):
-            ptypes[i] = wasm_valtype_new(param_kinds[i])
-        wasm_valtype_vec_new(params_ptr, len(param_kinds), ptypes)
-        ptypes.free()
+        try:
+            for i in range(len(param_kinds)):
+                ptypes[i] = wasm_valtype_new(param_kinds[i])
+            wasm_valtype_vec_new(params_ptr, len(param_kinds), ptypes)
+        finally:
+            ptypes.free()
 
     # Build results vec
     var results = WasmValtypeVec()
@@ -646,10 +648,12 @@ fn make_functype(
         wasm_valtype_vec_new_empty(results_ptr)
     else:
         var rtypes = alloc[ValTypePtr](len(result_kinds))
-        for i in range(len(result_kinds)):
-            rtypes[i] = wasm_valtype_new(result_kinds[i])
-        wasm_valtype_vec_new(results_ptr, len(result_kinds), rtypes)
-        rtypes.free()
+        try:
+            for i in range(len(result_kinds)):
+                rtypes[i] = wasm_valtype_new(result_kinds[i])
+            wasm_valtype_vec_new(results_ptr, len(result_kinds), rtypes)
+        finally:
+            rtypes.free()
 
     # wasm_functype_new takes ownership of both vecs
     return wasm_functype_new(params_ptr, results_ptr)
@@ -664,46 +668,55 @@ fn error_message(error: ErrorPtr) raises -> String:
     """Extract the message from a wasmtime_error_t, delete it, and return
     the message as a Mojo String."""
     # Heap-allocate the output buffer so the FFI write is visible.
-    # (WasmByteVec is @register_passable("trivial"); a stack local
-    # may stay in registers after a write through a cast pointer.)
+    # (WasmByteVec is TrivialRegisterPassable; a stack local may stay in
+    # registers after a write through a cast pointer.)
     var msg_buf = alloc[WasmByteVec](1)
     msg_buf[] = WasmByteVec()
+    # _as_ext is an address cast, so msg_ext aliases msg_buf: the vec has to be
+    # deleted through it while the buffer is still live, and the buffer freed
+    # only on the way out.
     var msg_ext = _as_ext(msg_buf)
-    wasmtime_error_message(error, msg_ext)
-    var msg = msg_buf[]
-    msg_buf.free()
-    var result = String("")
-    if msg.size > 0 and msg.data:
-        var buf = List[UInt8](capacity=msg.size + 1)
-        for i in range(msg.size):
-            buf.append(msg.data[i])
-        buf.append(0)  # null-terminate
-        result = String(unsafe_from_utf8=buf)
-    wasm_byte_vec_delete(msg_ext)
-    wasmtime_error_delete(error)
-    return result
+    try:
+        wasmtime_error_message(error, msg_ext)
+        var msg = msg_buf[]
+        var result = String("")
+        if msg.size > 0 and msg.data:
+            var buf = List[UInt8](capacity=msg.size + 1)
+            for i in range(msg.size):
+                buf.append(msg.data[i])
+            buf.append(0)  # null-terminate
+            result = String(unsafe_from_utf8=buf)
+        wasm_byte_vec_delete(msg_ext)
+        wasmtime_error_delete(error)
+        return result
+    finally:
+        msg_buf.free()
 
 
 fn trap_message(trap: TrapPtr) raises -> String:
     """Extract the message from a wasm_trap_t, delete it, and return
     the message as a Mojo String."""
-    # Heap-allocate the output buffer so the FFI write is visible.
+    # Heap-allocate the output buffer so the FFI write is visible. As in
+    # error_message, msg_ext aliases msg_buf, so the vec is deleted through it
+    # before the buffer goes.
     var msg_buf = alloc[WasmByteVec](1)
     msg_buf[] = WasmByteVec()
     var msg_ext = _as_ext(msg_buf)
-    wasm_trap_message(trap, msg_ext)
-    var msg = msg_buf[]
-    msg_buf.free()
-    var result = String("")
-    if msg.size > 0 and msg.data:
-        var buf = List[UInt8](capacity=msg.size + 1)
-        for i in range(msg.size):
-            buf.append(msg.data[i])
-        buf.append(0)  # null-terminate
-        result = String(unsafe_from_utf8=buf)
-    wasm_byte_vec_delete(msg_ext)
-    wasm_trap_delete(trap)
-    return result
+    try:
+        wasm_trap_message(trap, msg_ext)
+        var msg = msg_buf[]
+        var result = String("")
+        if msg.size > 0 and msg.data:
+            var buf = List[UInt8](capacity=msg.size + 1)
+            for i in range(msg.size):
+                buf.append(msg.data[i])
+            buf.append(0)  # null-terminate
+            result = String(unsafe_from_utf8=buf)
+        wasm_byte_vec_delete(msg_ext)
+        wasm_trap_delete(trap)
+        return result
+    finally:
+        msg_buf.free()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

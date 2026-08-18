@@ -60,20 +60,22 @@ struct Module:
         module_out[] = ModulePtr()
 
         var data_ptr = _as_ext(wasm_bytes.unsafe_ptr())
-        var err = wasmtime_module_new(
-            engine_ptr,
-            data_ptr,
-            len(wasm_bytes),
-            module_out,
-        )
+        try:
+            var err = wasmtime_module_new(
+                engine_ptr,
+                data_ptr,
+                len(wasm_bytes),
+                module_out,
+            )
 
-        if err:
-            var msg = error_message(err)
+            if err:
+                raise Error(
+                    "Failed to compile WASM module: " + error_message(err)
+                )
+
+            self._ptr = module_out[]
+        finally:
             module_out.free()
-            raise Error("Failed to compile WASM module: " + msg)
-
-        self._ptr = module_out[]
-        module_out.free()
 
     fn __init__(out self, *, var _ptr: ModulePtr):
         """Create a Module from a raw pointer (takes ownership).
@@ -120,20 +122,21 @@ struct Module:
             Error: If serialization fails.
         """
         # Heap-allocate the output buffer so the FFI write is visible.
-        # (WasmByteVec is @register_passable("trivial"); a stack local
-        # may stay in registers after a write through a cast pointer.)
+        # (WasmByteVec is TrivialRegisterPassable; a stack local may stay in
+        # registers after a write through a cast pointer.)
         var bv_buf = alloc[WasmByteVec](1)
         bv_buf[] = WasmByteVec()
-        var bv_ext = _as_ext(bv_buf)
-        var err = wasmtime_module_serialize(self._ptr, bv_ext)
-        if err:
-            bv_buf.free()
-            var msg = error_message(err)
-            raise Error("Failed to serialize module: " + msg)
+        var byte_vec: WasmByteVec
+        try:
+            var bv_ext = _as_ext(bv_buf)
+            var err = wasmtime_module_serialize(self._ptr, bv_ext)
+            if err:
+                raise Error("Failed to serialize module: " + error_message(err))
 
-        # Read back the filled-in byte vec from the heap buffer
-        var byte_vec = bv_buf[]
-        bv_buf.free()
+            # Read back the filled-in byte vec from the heap buffer
+            byte_vec = bv_buf[]
+        finally:
+            bv_buf.free()
 
         # Write the serialized bytes to a file
         var data = List[UInt8](capacity=byte_vec.size)
@@ -173,18 +176,20 @@ struct Module:
         var module_out = alloc[ModulePtr](1)
         module_out[] = ModulePtr()
 
-        var err = wasmtime_module_deserialize_file(
-            engine_ptr, c_path, module_out
-        )
-        c_path.free()
-
-        if err:
-            var msg = error_message(err)
-            module_out.free()
-            raise Error(
-                "Failed to deserialize module from '" + path + "': " + msg
+        try:
+            var err = wasmtime_module_deserialize_file(
+                engine_ptr, c_path, module_out
             )
 
-        var ptr = module_out[]
-        module_out.free()
-        return Module(_ptr=ptr)
+            if err:
+                raise Error(
+                    "Failed to deserialize module from '"
+                    + path
+                    + "': "
+                    + error_message(err)
+                )
+
+            return Module(_ptr=module_out[])
+        finally:
+            c_path.free()
+            module_out.free()
