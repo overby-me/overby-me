@@ -23,7 +23,7 @@
 
   nameOf = tgt:
     "buck2-"
-    + builtins.replaceStrings
+    + lib.replaceStrings
     ["/" ":" "#" "!" "." " " "+" "@" ","]
     ["-" "-" "-" "-" "-" "-" "-" "-" "-"]
     tgt;
@@ -38,7 +38,7 @@
   # ---- IFD analysis ------------------------------------------------------
   # The buck2 + skylark lib subtrees, so the nested eval can import analyze.nix.
   libRoot = toString ../..;
-  libStore = builtins.path {
+  libStore = lib.path {
     path = ../..;
     name = "buck2-analysis-libs";
     filter = p: _t: let
@@ -49,18 +49,18 @@
       top =
         if rel == ""
         then ""
-        else builtins.head (lib.splitString "/" rel);
+        else lib.head (lib.splitString "/" rel);
     in
       rel == "" || top == "buck2" || top == "skylark";
   };
 
   isBuildFile = p:
     lib.hasSuffix ".bzl" p
-    || builtins.elem (builtins.baseNameOf p) ["BUCK" "BUCK.v2" "PACKAGE" ".buckconfig" ".buckroot"];
+    || lib.elem (lib.baseNameOf p) ["BUCK" "BUCK.v2" "PACKAGE" ".buckconfig" ".buckroot"];
   # Relative paths of every file under src (no contents read), so the analysis
   # input changes only on add/remove or build-file edits.
   walk = dir: prefix: let
-    entries = builtins.readDir dir;
+    entries = lib.readDir dir;
   in
     lib.concatLists (map (
         name: let
@@ -73,13 +73,13 @@
           then walk (dir + "/${name}") rel
           else [rel]
       )
-      (builtins.attrNames entries));
+      (lib.attrNames entries));
   allFiles = walk src "";
-  buildFiles = builtins.filter isBuildFile allFiles;
+  buildFiles = lib.filter isBuildFile allFiles;
   manifest = pkgs.writeText "buck2-file-manifest" (lib.concatStringsSep "\n" allFiles);
   # Real content for each build file (content-addressed, so this input changes
   # only when a build file changes).
-  copyBuild = lib.concatMapStringsSep "\n" (rel: ''cp ${builtins.path {
+  copyBuild = lib.concatMapStringsSep "\n" (rel: ''cp ${lib.path {
       path = src + "/${rel}";
       name = "bf";
     }} "$out/${rel}"'')
@@ -95,7 +95,7 @@
     done < ${manifest}
     ${copyBuild}
   '';
-  analysisExpr = builtins.toFile "buck2-analyze-expr.nix" ''
+  analysisExpr = lib.toFile "buck2-analyze-expr.nix" ''
     {src, lib, target, system}:
       import (lib + "/buck2/lib/analyze.nix") {inherit src target system;}
   '';
@@ -111,7 +111,7 @@
         ${analysisExpr} > $out
     '';
   in
-    builtins.fromJSON (builtins.readFile drv);
+    lib.fromJSON (lib.readFile drv);
 
   graphOf = tgt:
     if ifdAnalysis

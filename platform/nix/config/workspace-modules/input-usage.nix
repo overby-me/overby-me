@@ -19,22 +19,22 @@
     # the consumer by setting one, so that set holds entries nobody declared
     # here and nothing here reads.
     declared =
-      builtins.attrNames
-      (builtins.fromJSON (builtins.readFile "${src}/flake.lock")).nodes.root.inputs;
+      lib.attrNames
+      (lib.fromJSON (lib.readFile "${src}/flake.lock")).nodes.root.inputs;
 
     # An input exporting a module is consumed by the workspace taking it, which
     # no grep can see. Recognised by the predicate the workspace itself uses.
     integrations =
-      builtins.attrNames
+      lib.attrNames
       (lib.filterAttrs
-        (_: i: builtins.isAttrs i && (i ? workspaceModule || i ? workspaceModules.default))
+        (_: i: lib.isAttrs i && (i ? workspaceModule || i ? workspaceModules.default))
         config.inputs);
     names = lib.subtractLists integrations declared;
   in
     pkgs.runCommand "check-input-usage" {} ''
       cd ${src}
       unused=""
-      for name in ${builtins.concatStringsSep " " names}; do
+      for name in ${lib.concatStringsSep " " names}; do
         # `self` is nix's own, not ours to justify.
         [ "$name" = "self" ] && continue
 

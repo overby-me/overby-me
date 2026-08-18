@@ -895,7 +895,7 @@ in {
 
             ${lib.concatMapStringsSep "\n" (specName: ''
               - ${specName}
-            '') (builtins.attrNames badSpecs)}
+            '') (lib.attrNames badSpecs)}
           '';
         }
       )

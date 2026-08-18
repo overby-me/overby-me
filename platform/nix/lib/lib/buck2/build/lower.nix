@@ -27,18 +27,18 @@
 
   sanDrv = s:
     "buck2-"
-    + builtins.replaceStrings
+    + lib.replaceStrings
     ["/" ":" "#" "!" "." " " "+" "@" "," "(" ")" "[" "]" "="]
     ["-" "-" "-" "-" "-" "-" "-" "-" "-" "-" "-" "-" "-" "-"]
     s;
-  sanLabel = builtins.replaceStrings ["/" ":"] ["_" "_"];
+  sanLabel = lib.replaceStrings ["/" ":"] ["_" "_"];
 
   # ---- path helpers ------------------------------------------------------
-  segsOf = p: filter (x: x != "" && x != "." && isString x) (builtins.split "/" p);
+  segsOf = p: filter (x: x != "" && x != "." && isString x) (lib.split "/" p);
   joinSegs = xs:
     if xs == []
     then "."
-    else builtins.concatStringsSep "/" xs;
+    else lib.concatStringsSep "/" xs;
   dropLast = n: xs: let
     keep = length xs - n;
   in
@@ -121,20 +121,20 @@
       else raw;
     formatted =
       if (cav.opts.format or null) != null
-      then map (x: builtins.replaceStrings ["{}"] [x] cav.opts.format) withPrepend
+      then map (x: lib.replaceStrings ["{}"] [x] cav.opts.format) withPrepend
       else withPrepend;
   in
     if (cav.opts.delimiter or null) != null
-    then [(builtins.concatStringsSep cav.opts.delimiter formatted)]
+    then [(lib.concatStringsSep cav.opts.delimiter formatted)]
     else formatted;
 
   renderWriteContent = c:
     if isString c
     then c
     else if isAttrs c && c ? __sk && c.__sk == "cmd_args"
-    then builtins.concatStringsSep " " (argStrings c)
+    then lib.concatStringsSep " " (argStrings c)
     else if isAttrs c && c ? __sk && (c.__sk == "list" || c.__sk == "tuple")
-    then builtins.concatStringsSep "\n" (map renderWriteContent c.items)
+    then lib.concatStringsSep "\n" (map renderWriteContent c.items)
     else if c == null
     then ""
     else toString c;
@@ -175,7 +175,7 @@
     else [];
 
   srcStorePath = art:
-    builtins.path {
+    lib.path {
       path = root + "/${art.srcRel}";
       inherit (art) name;
     };
@@ -225,7 +225,7 @@
     # download (e.g. untars the Go toolchain): its direct input is a download.
     # Consumers symlink to the already-patched tree, so they never re-scan.
     # Skipping this for from-source builds (cpp/rust) keeps them fast.
-    stagesDownload = a: builtins.any (id: actionById.${id}.kind == "download") (runDepIds a);
+    stagesDownload = a: lib.any (id: actionById.${id}.kind == "download") (runDepIds a);
 
     # ---- per-action derivations ----------------------------------------
     mkRun = a: let
@@ -235,19 +235,19 @@
       depOuts = filter (x: x.kind != "source") ins;
       depIds = lib.unique (map producerId depOuts);
       outs = collectOutputs all;
-      argv = builtins.concatStringsSep " " (map esc (argStrings a.cmd));
+      argv = lib.concatStringsSep " " (map esc (argStrings a.cmd));
       strings = litStrings a.cmd.parts;
-      tcPkgs = map (k: toolchainPackages.${k}) (filter (k: builtins.elem k strings) (builtins.attrNames toolchainPackages));
+      tcPkgs = map (k: toolchainPackages.${k}) (filter (k: lib.elem k strings) (lib.attrNames toolchainPackages));
       patch = stagesDownload a;
       # The working tree is built directly in $out. Dependency trees come in
       # through cp -rs, giving real dirs and file symlinks into the producer's
       # store path, so a large toolchain is never copied and its patched binaries
       # and symlink targets are reached through the link.
-      stageDeps = builtins.concatStringsSep "\n" (map (id: "cp -rsf --no-preserve=mode ${drvById.${id}}/. ./") depIds);
+      stageDeps = lib.concatStringsSep "\n" (map (id: "cp -rsf --no-preserve=mode ${drvById.${id}}/. ./") depIds);
       # Sources are copied (real files) so relative #include / sibling lookups
       # resolve within the staged package directory.
-      stageSrcs = builtins.concatStringsSep "\n" (map (s: "install -Dm644 ${srcStorePath s} ${esc (artPath s)}") srcs);
-      mkOutDirs = builtins.concatStringsSep "\n" (map (o: ''mkdir -p "$(dirname ${esc (artPath o)})"'') outs);
+      stageSrcs = lib.concatStringsSep "\n" (map (s: "install -Dm644 ${srcStorePath s} ${esc (artPath s)}") srcs);
+      mkOutDirs = lib.concatStringsSep "\n" (map (o: ''mkdir -p "$(dirname ${esc (artPath o)})"'') outs);
       # autoPatchelf makes freshly-materialized downloaded binaries runnable on
       # Nix by fixing their ELF interpreter (runs once, in the untar action).
       # No extra buildInputs: glibc here would pollute the C++ header path, and
@@ -295,13 +295,13 @@
         lib.unique (map producerId (filter (x: x.kind != "source")
             (collectInputs (map (e: e.src) a.entries))));
       stageDeps =
-        builtins.concatStringsSep "\n"
+        lib.concatStringsSep "\n"
         (map (id: "cp -rsf --no-preserve=mode ${drvById.${id}}/. ./staged/") depIds);
       stageSrcs =
-        builtins.concatStringsSep "\n"
+        lib.concatStringsSep "\n"
         (map (x: "install -Dm644 ${srcStorePath x} ./staged/${artPath x}") srcs);
-      linkEntries = builtins.concatStringsSep "\n" (map (e: let
-          from = artPath (builtins.head (collectInputs [e.src]));
+      linkEntries = lib.concatStringsSep "\n" (map (e: let
+          from = artPath (lib.head (collectInputs [e.src]));
         in ''
           mkdir -p "$out/${outRel}/$(dirname ${esc e.path})"
           cp -a --no-preserve=mode "./staged/${from}" "$out/${outRel}/${e.path}"
@@ -319,7 +319,7 @@
     mkCopy = a: let
       outRel = artPath a.output;
       ins = collectInputs [a.src];
-      src = builtins.head ins;
+      src = lib.head ins;
       srcPath =
         if src.kind == "source"
         then srcStorePath src

@@ -92,7 +92,7 @@ in
     cratesIoPkgs =
       filter (p: p.sourceInfo.type == "registry" && (p.sourceInfo.cratesIo or false))
       lock.packages;
-    indexManifest = writeText "cargo-index-manifest.json" (builtins.toJSON (map (p: {
+    indexManifest = writeText "cargo-index-manifest.json" (lib.toJSON (map (p: {
         inherit (p) name version;
         cksum = p.checksum;
         tar = fetchCrate p;
@@ -217,7 +217,7 @@ in
         "${id}:${concatStringsSep "," node.features}:${effectiveRustcVersion}:v1");
 
     filterSrc = dir:
-      builtins.filterSource (
+      lib.filterSource (
         path: _type: let
           bn = baseNameOf path;
         in
@@ -240,7 +240,7 @@ in
           map (b: {inherit (b) name path;}) (filter (
               b:
                 (bins == null || elem b.name bins)
-                && (b.requiredFeatures == [] || builtins.all (f: elem f node.features) b.requiredFeatures)
+                && (b.requiredFeatures == [] || lib.all (f: elem f node.features) b.requiredFeatures)
             )
             node.meta.bins);
     };
@@ -257,7 +257,7 @@ in
 
     mkHostCrate = id: node: let
       dedupeByName = edges:
-        builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+        lib.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
     in
       buildCrate {
         crateName = "${node.pkg.name}-host";
@@ -314,7 +314,7 @@ in
 
     mkRmeta = id: node: let
       dedupeByName = edges:
-        builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+        lib.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
     in
       buildCrate {
         crateName = "${node.pkg.name}-rmeta";
@@ -355,7 +355,7 @@ in
     mkCrate = id: node: let
       isRoot = node.isWorkspaceMember && elem node.pkg.name rootNames;
       dedupeByName = edges:
-        builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+        lib.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
     in
       buildCrate {
         crateName = node.pkg.name;
@@ -469,7 +469,7 @@ in
       then {}
       else let
         tnodes = resolvedTests.nodes;
-        dedupeByName = edges: builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+        dedupeByName = edges: lib.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
         tnormal = node: filter (e: e.kind == "normal") node.edges;
         tbuild = node: filter (e: e.kind == "build") node.edges;
         # Test targets link normal + dev deps.

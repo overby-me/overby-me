@@ -48,7 +48,7 @@
   rustNinja ? let
     # A path, because fileset takes paths: the input is an attribute set, and
     # `input + "/src"` on one is a string, which unions rejects.
-    ninja = /. + (builtins.unsafeDiscardStringContext pkgs.inputs.oxidized-ninja.outPath);
+    ninja = /. + (pkgs.lib.unsafeDiscardStringContext pkgs.inputs.oxidized-ninja.outPath);
   in
     pkgs.lib.buildCargoProject {
       pname = "rust-ninja";
@@ -74,7 +74,7 @@
   cmakeSrcStore =
     if cmakeSource != null
     then
-      builtins.path {
+      lib.path {
         path = cmakeSource;
         name = "cmake-src";
       }
@@ -117,7 +117,7 @@
   configuredCA =
     if cmakeSource != null && !perFileIncremental
     then
-      builtins.path {
+      lib.path {
         path = configured;
         name = "cmake-configured";
       }
@@ -151,7 +151,7 @@
   # and that context on every parsed string is illegal in derivation names and
   # other non-command positions. The paths edges really need come back through
   # `extraInputs` and `toolchain`.
-  graph = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile graphDrv));
+  graph = lib.fromJSON (lib.unsafeDiscardStringContext (lib.readFile graphDrv));
 
   # CMake's archive/link rules shell out to `cmake -E ...`, so edges need the
   # same cmake on PATH (its baked absolute path resolves once cmake is mounted).
@@ -173,7 +173,7 @@
 
   sanOut = s:
     "ninja-out-"
-    + lib.strings.sanitizeDerivationName (builtins.unsafeDiscardStringContext s);
+    + lib.strings.sanitizeDerivationName (lib.unsafeDiscardStringContext s);
 
   # Copy the requested target out of its producing edge's tree. A phony aggregate
   # such as the top-level `all`, which `target = null` reaches through `default`,

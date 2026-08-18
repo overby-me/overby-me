@@ -25,7 +25,7 @@
       # targets at all rather than failing as a type error. The context has to
       # go with it, as it does for the graph JSON in the ninja library: a store
       # path is what this already is, and a path cannot carry the reference.
-      inputPath = i: /. + (builtins.unsafeDiscardStringContext i.outPath);
+      inputPath = i: /. + (pkgs.lib.unsafeDiscardStringContext i.outPath);
       sources = {
         wclipSrc = inputPath pkgs.inputs.wclip;
         xzSrc = inputPath pkgs.inputs.oxidized-xz;
@@ -33,13 +33,13 @@
       run = n: let
         t = import (./tests + "/${n}.nix");
       in
-        if builtins.isFunction t
+        if pkgs.lib.isFunction t
         then t sources
         else t;
 
       results = map (n: "${n}: ${run n}") names;
     in
-      pkgs.writeText "cargo-lib-tests" (builtins.concatStringsSep "\n" results);
+      pkgs.writeText "cargo-lib-tests" (pkgs.lib.concatStringsSep "\n" results);
 
     # End-to-end: wclip built with per-crate derivations, binary smoke test.
     cargo-build-wclip = pkgs: let

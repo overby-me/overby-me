@@ -15,7 +15,7 @@
   in
     lib.mapAttrs' (name: _:
       lib.nameValuePair ".claude/skills/${name}" {source = dir + "/${name}";})
-    (lib.filterAttrs (_: type: type == "directory") (builtins.readDir dir));
+    (lib.filterAttrs (_: type: type == "directory") (lib.readDir dir));
 
   inherit (pkgs.pkgsUnstable) rtk;
 

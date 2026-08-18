@@ -36,11 +36,11 @@
   # recorded for it. One from outside any project - the workspace autoloading
   # packages/ by filename - is nobody's to answer for.
   projectOf = file: let
-    hits = builtins.filter (l: lib.hasSuffix "/${l.path}" file || lib.hasInfix "/${l.path}/" file) projects;
+    hits = lib.filter (l: lib.hasSuffix "/${l.path}" file || lib.hasInfix "/${l.path}/" file) projects;
   in
     if hits == []
     then null
-    else builtins.head hits;
+    else lib.head hits;
 
   owns = l: name:
     name == l.short || lib.hasPrefix "${l.short}-" name;
@@ -49,15 +49,15 @@
     l = projectOf (toString d.file);
     allowed = exports.${l.path or ""} or [];
   in
-    if l == null || builtins.isFunction d.value
+    if l == null || lib.isFunction d.value
     then []
     else
       map (n: "${l.label} defines ${n}, which is outside ${l.short}")
-      (builtins.filter (n: !(owns l n) && !(builtins.elem n allowed))
-        (builtins.attrNames d.value));
+      (lib.filter (n: !(owns l n) && !(lib.elem n allowed))
+        (lib.attrNames d.value));
 
   violations =
-    builtins.concatMap violationsOf
+    lib.concatMap violationsOf
     (options.packages.definitionsWithLocations or []);
 in {
   checks.namespace-ownership = pkgs:
@@ -65,7 +65,7 @@ in {
     then
       throw ''
         packages named outside their project's namespace:
-          ${builtins.concatStringsSep "\n  " violations}
+          ${lib.concatStringsSep "\n  " violations}
         Rename them into the project's namespace, or add the name to `exports`
         in platform/nix/config/workspace-modules/namespaces.nix if it is published under
         an identity of its own.

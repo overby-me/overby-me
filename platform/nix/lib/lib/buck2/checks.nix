@@ -10,7 +10,7 @@
       names = ["labels" "load" "analysis"];
       results = map (n: "${n}: ${import (./tests + "/${n}.nix")}") names;
     in
-      pkgs.writeText "buck2-lib-tests" (builtins.concatStringsSep "\n" results);
+      pkgs.writeText "buck2-lib-tests" (pkgs.lib.concatStringsSep "\n" results);
 
     # End-to-end: build the no_prelude C++ binary (one derivation per action,
     # no IFD) and run it.
@@ -33,8 +33,8 @@
       };
     in
       pkgs.runCommand "buck2-build-cpp-library" {} ''
-        test -f ${drv}/lib.so
-        grep -q print_hello ${drv}/lib.so
+        test -f ${drv}/pkgs.lib.so
+        grep -q print_hello ${drv}/pkgs.lib.so
         touch $out
       '';
 

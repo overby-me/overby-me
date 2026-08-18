@@ -59,7 +59,7 @@
   # crateOverrides merge (buildInputs, env, patches, ...).
   extraAttrs ? {},
 }: let
-  config = writeText "cargo-nix-config-${crateName}-${version}.json" (builtins.toJSON ({
+  config = writeText "cargo-nix-config-${crateName}-${version}.json" (lib.toJSON ({
       inherit plan features target profile capLints buildBins bins crateHash;
       rustcCfgFile =
         if rustcCfgFile == null

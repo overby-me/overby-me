@@ -66,8 +66,8 @@
   sanDrv = s:
     "ninja-"
     + lib.strings.sanitizeDerivationName
-    (builtins.replaceStrings ["/" ":"] ["-" "-"]
-      (builtins.unsafeDiscardStringContext s));
+    (lib.replaceStrings ["/" ":"] ["-" "-"]
+      (lib.unsafeDiscardStringContext s));
 
   indices = xs: genList (i: i) (length xs);
 
@@ -75,7 +75,7 @@
   # Turn it into a content-addressed store path so edits re-key only its
   # consumers.
   srcStorePath = rel:
-    builtins.path {
+    lib.path {
       path = src + "/${rel}";
       name = "ninja-src-" + lib.strings.sanitizeDerivationName rel;
     };
@@ -131,7 +131,7 @@ in {
     # recurses through alias chains with a per-level lib.unique and is recomputed
     # at each of its dozen call sites, which on the 17e3-edge Darling graph never
     # finished. One cached thunk per produced path makes it linear.
-    realProducersMemo = builtins.mapAttrs (_p: i: let
+    realProducersMemo = lib.mapAttrs (_p: i: let
       e = elemAt edges i;
     in
       if isNoOp e
@@ -177,7 +177,7 @@ in {
         lib.optionals (underAnyRoot t && isProduced t && !(elem prev cmdMetaFlags)) (realProducers t))
       toks;
     in
-      builtins.concatLists kept;
+      lib.concatLists kept;
 
     # Relative source inputs to stage, flattening through no-op edges.
     realSources = p:
@@ -198,19 +198,19 @@ in {
     in
       if hits == []
       then null
-      else builtins.head hits;
+      else lib.head hits;
     underAnyRoot = p: rootFor p != null;
     relUnder = p: lib.removePrefix (toString (rootFor p) + "/") p;
 
     # An individual content-addressed copy of the file/dir at absolute path `p`,
     # so an edge depends only on the specific inputs it reads.
     indivOf = p:
-      builtins.path {
+      lib.path {
         # The context of the rewrite root this is built from would otherwise ride
         # along into the copy, making the whole source tree an input of every edge
         # and defeating the per-input isolation this exists for. The file is there
         # at eval time, so it imports fresh with no reference back.
-        path = builtins.unsafeDiscardStringContext (toString (rootFor p) + "/" + relUnder p);
+        path = lib.unsafeDiscardStringContext (toString (rootFor p) + "/" + relUnder p);
         name = "src-" + lib.strings.sanitizeDerivationName (relUnder p);
       };
 
@@ -227,15 +227,15 @@ in {
         if ps == []
         then false
         else let
-          h = builtins.head ps;
-          entries = builtins.readDir dir;
+          h = lib.head ps;
+          entries = lib.readDir dir;
         in
           if !(entries ? ${h})
           then false # missing; pathExists handles it
           else if entries.${h} == "symlink"
           then true
           else if entries.${h} == "directory"
-          then walk (dir + "/${h}") (builtins.tail ps)
+          then walk (dir + "/${h}") (lib.tail ps)
           else false; # regular file component
     in
       if root == null
@@ -244,8 +244,8 @@ in {
 
     # Stageable via `builtins.path` only if it exists and neither it nor any
     # ancestor is a symlink; `safeRegular` additionally requires a regular file.
-    safeNotSymlink = p: builtins.pathExists p && !(hasSymlinkComponent p);
-    safeRegular = p: safeNotSymlink p && builtins.readFileType p == "regular";
+    safeNotSymlink = p: lib.pathExists p && !(hasSymlinkComponent p);
+    safeRegular = p: safeNotSymlink p && lib.readFileType p == "regular";
 
     # The Mach/kernel RPC interface directories in an SDK `usr/include`: their
     # `.defs` and `.h` are symlinks into the tree's osfmk, which a mig edge reads
@@ -261,7 +261,7 @@ in {
     ifaceSymlinksUnder = base: let
       collectAll = sub: let
         dir = toString base + "/${sub}";
-        entries = builtins.readDir dir;
+        entries = lib.readDir dir;
       in
         concatMap (
           n: let
@@ -274,8 +274,8 @@ in {
             then collectAll rel
             else []
         )
-        (builtins.attrNames entries);
-      top = builtins.readDir (toString base);
+        (lib.attrNames entries);
+      top = lib.readDir (toString base);
     in
       concatMap (
         n:
@@ -283,7 +283,7 @@ in {
           then collectAll n
           else []
       )
-      (builtins.attrNames top);
+      (lib.attrNames top);
 
     # Rewrite every root prefix in a command to the edge's own `$out` (the
     # merged working tree the edge runs in): `<root>/x` -> `$out/x`, and a bare
@@ -295,7 +295,7 @@ in {
     # output resolved against the subdirectory and doubled
     # (`sub/dir/sub/dir/out`). `$out`-absolute paths are immune to the `cd`.
     stripRoots = cmd:
-      builtins.replaceStrings
+      lib.replaceStrings
       (concatMap (r: [(toString r + "/") (toString r)]) rewriteRoots)
       (concatMap (_: ["$out/" "$out"]) rewriteRoots)
       cmd;
@@ -349,26 +349,26 @@ in {
           skip = false;
         };
       kept =
-        (builtins.foldl' step {
+        (lib.foldl' step {
             out = [];
             skip = false;
           }
           toks).out;
     in
-      builtins.concatStringsSep " " (kept ++ ["-M" "-MF" ''"$DEPS_OUT"'']);
+      lib.concatStringsSep " " (kept ++ ["-M" "-MF" ''"$DEPS_OUT"'']);
 
     # Parse a makefile-style depfile (`target.o: a.h b.h \` + continuations)
     # into its prerequisite paths. Assumes no spaces in paths (the common case).
     parseDepfile = content: let
-      joined = builtins.replaceStrings ["\\\n"] [" "] content;
+      joined = lib.replaceStrings ["\\\n"] [" "] content;
       parts = lib.splitString ":" joined;
       afterColon =
         if length parts < 2
         then ""
-        else builtins.concatStringsSep ":" (lib.drop 1 parts);
+        else lib.concatStringsSep ":" (lib.drop 1 parts);
       toks =
         lib.splitString " "
-        (builtins.replaceStrings ["\n" "\r" "\t"] [" " " " " "] afterColon);
+        (lib.replaceStrings ["\n" "\r" "\t"] [" " " " " "] afterColon);
     in
       lib.unique (filter (t: t != "" && t != "\\") toks);
 
@@ -413,7 +413,7 @@ in {
                 else o;
               dirs = lib.init (filter (x: x != "") (lib.splitString "/" rel));
               ancestors =
-                lib.genList (n: builtins.concatStringsSep "/" (lib.take n dirs))
+                lib.genList (n: lib.concatStringsSep "/" (lib.take n dirs))
                 (length dirs + 1);
             in
               map (a: "-I${pdrv}" + lib.optionalString (a != "") "/${a}") ancestors
@@ -448,7 +448,7 @@ in {
               # `<darlingserver/rpc.h>` produced at src/external/darlingserver/rpc.h needs
               # -I src/external (the parent), which only an ancestor supplies.
               dirs = lib.init (filter (x: x != "") (lib.splitString "/" rel));
-              ancestry = lib.genList (n: builtins.concatStringsSep "/" (lib.take n dirs)) (length dirs + 1);
+              ancestry = lib.genList (n: lib.concatStringsSep "/" (lib.take n dirs)) (length dirs + 1);
             in
               acc2 // {${mod} = lib.unique ((acc2.${mod} or []) ++ ancestry);}
           )
@@ -464,7 +464,7 @@ in {
         then ""
         else
           moduleKey (let
-            o = builtins.head outs;
+            o = lib.head outs;
           in
             if underAnyRoot o
             then relUnder o
@@ -483,7 +483,7 @@ in {
             else o;
           dirs = lib.init (filter (x: x != "") (lib.splitString "/" rel));
         in
-          lib.genList (n: builtins.concatStringsSep "/" (lib.take n dirs)) (length dirs + 1))
+          lib.genList (n: lib.concatStringsSep "/" (lib.take n dirs)) (length dirs + 1))
         (filter isHeaderPath (edgeOutputs (elemAt edges j))))
       (lib.unique (concatMap realProducers (edgeInputs e)));
     in
@@ -538,7 +538,7 @@ in {
                   ++ [
                     {
                       p = i;
-                      dir = builtins.dirOf rel;
+                      dir = lib.dirOf rel;
                     }
                   ];
               }
@@ -589,7 +589,7 @@ in {
         then ""
         else
           moduleKey (let
-            o = builtins.head outs;
+            o = lib.head outs;
           in
             if underAnyRoot o
             then relUnder o
@@ -625,7 +625,7 @@ in {
                   if underAnyRoot g
                   then relUnder g
                   else g;
-                pdrv = edgeDrvs.${toString (builtins.head ids)};
+                pdrv = edgeDrvs.${toString (lib.head ids)};
               }
             ]
         )
@@ -652,17 +652,17 @@ in {
         lib.unique (map (i: edgeDrvs.${toString i})
           (concatMap realProducers (filter isProduced (edgeInputs e))));
       genIncs = lib.unique (
-        (map (x: "-I${x.pdrv}/" + builtins.dirOf x.rel) genPairs)
+        (map (x: "-I${x.pdrv}/" + lib.dirOf x.rel) genPairs)
         ++ concatMap
         (pd: map (d: "-I${pd}/${relUnder d}") (filter underAnyRoot (incAbsDirs e.command)))
         genDrvs
       );
       scanCmd =
-        builtins.replaceStrings
+        lib.replaceStrings
         (map (s: s.from) genSubs) (map (s: s.to) genSubs)
         (scanCommand e.command);
       scanDrv =
-        pkgs.runCommand "ninja-scan-${sanDrv (builtins.head (edgeOutputs e))}" {
+        pkgs.runCommand "ninja-scan-${sanDrv (lib.head (edgeOutputs e))}" {
           nativeBuildInputs = toolchain ++ scanMounts;
         } ''
           export DEPS_OUT=$out
@@ -686,7 +686,7 @@ in {
     # consuming derivation, so an edit to any source rehashes every edge. indivOf
     # re-imports each header content-addressed, keeping the per-file dependency.
       filter underAnyRoot
-      (parseDepfile (builtins.unsafeDiscardStringContext (builtins.readFile (scanDrvOf i))));
+      (parseDepfile (lib.unsafeDiscardStringContext (lib.readFile (scanDrvOf i))));
 
     # ---- one derivation per (non-phony) edge -------------------------------
     mkEdge = i: let
@@ -709,7 +709,7 @@ in {
       # tolerates a missing `-I` dir, so anything gone is skipped.
       rootSrcs =
         if useScan
-        then filter builtins.pathExists (scanDepsOf i)
+        then filter lib.pathExists (scanDepsOf i)
         else
           # Declared under-root inputs, plus under-root files the command names
           # that CMake did not declare: custom commands reference a helper script
@@ -736,7 +736,7 @@ in {
       # target exists, so the followed content is staged at the reference's own
       # path; pathExists filters the broken ones, which would abort eval.
       symlinkTargets = lib.unique (filter
-        (p: underAnyRoot p && hasSymlinkComponent p && builtins.pathExists p)
+        (p: underAnyRoot p && hasSymlinkComponent p && lib.pathExists p)
         (incAbsDirs e.command
           ++ ins
           ++ concatMap (lib.splitString ",") (lib.splitString " " e.command)));
@@ -747,9 +747,9 @@ in {
           then e.command
           else stripRoots e.command;
         withSubs =
-          builtins.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
+          lib.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
         base =
-          builtins.replaceStrings
+          lib.replaceStrings
           (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs)
           withSubs;
       in
@@ -854,17 +854,17 @@ in {
       stageIfaceDeref =
         lib.concatMapStringsSep "\n"
         (p:
-          lib.optionalString (rewriteRoots != [] && rootFor p == builtins.head rewriteRoots)
+          lib.optionalString (rewriteRoots != [] && rootFor p == lib.head rewriteRoots)
           (lib.concatMapStringsSep "\n" (
               rel: let
                 orig = toString (rootFor p) + "/" + relUnder p + "/" + rel;
-                content = builtins.path {
+                content = lib.path {
                   path = orig;
                   name = "iref-" + lib.strings.sanitizeDerivationName rel;
                 };
               in
                 lib.optionalString
-                (builtins.pathExists orig && builtins.readFileType content == "regular")
+                (lib.pathExists orig && lib.readFileType content == "regular")
                 ''
                   rm -f ${esc (relUnder p + "/" + rel)}
                   install -Dm644 ${content} ${esc (relUnder p + "/" + rel)}
@@ -886,7 +886,7 @@ in {
           r = relUnder p;
           cp = indivOf p;
         in
-          lib.optionalString (builtins.readFileType cp == "regular") ''
+          lib.optionalString (lib.readFileType cp == "regular") ''
             if [ -L ${esc r} ]; then rm -f ${esc r}; fi
             install -Dm644 ${cp} ${esc r}
             if [ -x ${cp} ]; then chmod +x ${esc r}; ${shebangSed (esc r)} fi
@@ -952,7 +952,7 @@ in {
             if underAnyRoot o
             then relUnder o
             else o;
-          base = builtins.baseNameOf o;
+          base = lib.baseNameOf o;
           isFinal =
             lib.hasSuffix ".dylib" o
             || lib.hasSuffix ".a" o
@@ -966,7 +966,7 @@ in {
           '')
         e.outputs;
     in
-      pkgs.runCommand (sanDrv (builtins.head outs)) {
+      pkgs.runCommand (sanDrv (lib.head outs)) {
         nativeBuildInputs = toolchain ++ extraInputs;
         # Ninja commands are plain shell; keep the working tree as $out.
         preferLocalBuild = true;
@@ -1028,7 +1028,7 @@ in {
     in
       if ids == []
       then throw "nix-ninja: no edge produces '${p}'"
-      else edgeDrvs.${toString (builtins.head ids)};
+      else edgeDrvs.${toString (lib.head ids)};
 
     # Whether `p` is produced by a phony / no-op edge -- an aggregate alias
     # like the top-level `all`, which has no file of its own but transitively
@@ -1072,13 +1072,13 @@ in {
       # groupBy, one linear pass. A filter per group is O(groups*edges) and
       # lib.unique O(edges*distinct); at 1e3 groups over 38e3 edges either
       # quadratic form ran for tens of minutes.
-      rawIdsInGroup = builtins.groupBy rawGid realIds;
-      rawGroupIds = builtins.attrNames rawIdsInGroup;
+      rawIdsInGroup = lib.groupBy rawGid realIds;
+      rawGroupIds = lib.attrNames rawIdsInGroup;
       # Dedup by attrset key rather than lib.unique's O(n*distinct) elem-scan: the
       # lists deduped below are one per group and as long as that group's
       # (edges * inputs) before dedup. Insertion order is not meaningful for the
       # dep and reach sets this builds, so losing it costs nothing.
-      fastUniq = xs: builtins.attrNames (builtins.groupBy (x: x) xs);
+      fastUniq = xs: lib.attrNames (lib.groupBy (x: x) xs);
       # Groups staged into *every* group, so that a cross-cutting generated header
       # (darlingserver/rpc.h) reached only through a literal -I, with no declared
       # ninja dependency for realProducers to find, is always materialised in $out.
@@ -1116,7 +1116,7 @@ in {
         && lib.any isHeaderPath (edgeOutputs (elemAt edges i))
         && !(pureHdrGroupSet ? ${rawGid i}))
       (indices edges);
-      compDirToGids = builtins.groupBy (g: builtins.head (lib.splitString "::" g)) rawGroupIds;
+      compDirToGids = lib.groupBy (g: lib.head (lib.splitString "::" g)) rawGroupIds;
       # The longest ancestor directory of a produced header that names an actual compile group's
       # component directory (the group that "owns" and -I-includes that subtree).
       ownerCompDir = p: let
@@ -1127,7 +1127,7 @@ in {
         dirs = lib.init (filter (x: x != "") (lib.splitString "/" rel));
         ancestors =
           lib.genList
-          (n: builtins.concatStringsSep "/" (lib.take (length dirs - n) dirs))
+          (n: lib.concatStringsSep "/" (lib.take (length dirs - n) dirs))
           (length dirs);
       in
         lib.findFirst (a: compDirToGids ? ${a}) null ancestors;
@@ -1141,18 +1141,18 @@ in {
       srcRoot =
         if rewriteRoots == []
         then null
-        else builtins.head rewriteRoots;
+        else lib.head rewriteRoots;
       hasSourceVersion = o: let
         rel =
           if underAnyRoot o
           then relUnder o
           else o;
       in
-        srcRoot != null && builtins.pathExists (srcRoot + "/" + rel);
+        srcRoot != null && lib.pathExists (srcRoot + "/" + rel);
       # componentDir -> [ producer rawGid ] : mig-header producers targeted at that component.
       migByCompDir =
-        builtins.mapAttrs (_cd: lst: fastUniq (map (x: x.gid) lst))
-        (builtins.groupBy (x: x.compDir)
+        lib.mapAttrs (_cd: lst: fastUniq (map (x: x.gid) lst))
+        (lib.groupBy (x: x.compDir)
           (concatMap (i: let
             prodGid = rawGid i;
             owners = fastUniq (filter (x: x != null)
@@ -1175,7 +1175,7 @@ in {
                 (concatMap realProducers (edgeInputs (elemAt edges i))) ++ cmdProducersOf i)
               rawIdsInGroup.${g}))
               ++ rawHeaderProducerGroups
-              ++ (migByCompDir.${builtins.head (lib.splitString "::" g)} or [])));
+              ++ (migByCompDir.${lib.head (lib.splitString "::" g)} or [])));
         })
         rawGroupIds);
       # A group derivation depends on its external groups' derivations, so the
@@ -1200,7 +1200,7 @@ in {
         anyIn = set: xs: lib.any (x: set ? ${x}) xs;
         succ = rawGroupDeps;
         peel = aliveSet: let
-          alive = builtins.attrNames aliveSet;
+          alive = lib.attrNames aliveSet;
           liveTargetSet = toSet (concatMap (g: filter (h: aliveSet ? ${h}) (succ.${g} or [])) alive);
           alive' = filter (g: (liveTargetSet ? ${g}) && anyIn aliveSet (succ.${g} or [])) alive;
         in
@@ -1209,13 +1209,13 @@ in {
           else peel (toSet alive');
       in
         peel (toSet rawGroupIds);
-      cyclic = builtins.attrNames cyclicSet;
+      cyclic = lib.attrNames cyclicSet;
       # Reachability within the residual only (successors restricted to cyclic). Any mutual-
       # reachability path between two SCC members stays inside the residual (a peeled
       # intermediate is acyclic, so cannot close a cycle), so this is exact for them. norm =
       # sorted-unique so list equality is order-independent (else the fixpoint oscillates).
       sccRep = let
-        norm = xs: builtins.sort (a: b: a < b) (fastUniq xs);
+        norm = xs: lib.sort (a: b: a < b) (fastUniq xs);
         succ = rawGroupDeps;
         reachC = let
           seed = listToAttrs (map (g: {
@@ -1235,7 +1235,7 @@ in {
           if !(cyclicSet ? ${g})
           then g
           else
-            builtins.head (builtins.sort (a: b: a < b)
+            lib.head (lib.sort (a: b: a < b)
               ([g] ++ filter (h: h != g && elem h (reachC.${g} or []) && elem g (reachC.${h} or [])) cyclic));
       in
         listToAttrs (map (g: {
@@ -1246,8 +1246,8 @@ in {
       # Effective grouping = raw grouping condensed through SCC representatives.
       gid = i: sccRep.${rawGid i};
       # Single-pass O(edges) grouping (see rawIdsInGroup) -- keys are exactly groupIds.
-      idsInGroup = builtins.groupBy gid realIds;
-      groupIds = builtins.attrNames idsInGroup;
+      idsInGroup = lib.groupBy gid realIds;
+      groupIds = lib.attrNames idsInGroup;
       # Condensed groups that produce cross-cutting generated headers (rpc.h etc.), staged
       # into EVERY group. Group-independent, so computed once here -- not per mkGroup call.
       headerProducerReps = fastUniq (map (h: sccRep.${h}) rawHeaderProducerGroups);
@@ -1256,7 +1256,7 @@ in {
       in
         if ids == []
         then null
-        else gid (builtins.head ids);
+        else gid (lib.head ids);
       shebangSedG = p: ''
         if [ -f ${p} ] && [ "$(head -c2 ${p} 2>/dev/null)" = "#!" ]; then
           chmod u+w ${p} 2>/dev/null || true
@@ -1318,7 +1318,7 @@ in {
             # keeping them covers the ones under symlink dirs, like
             # libsyscall/mach/mach_traps.S, that per-file staging cannot reach.
             # 1. Source tree (bulk cpio): headers + all sources + assembly + the shim maze.
-            cd ${builtins.head rewriteRoots}
+            cd ${lib.head rewriteRoots}
             {
               find . -type d
               find . -type l
@@ -1334,7 +1334,7 @@ in {
             # makes a bulk cpio silently fail to write there -- so copy per file, de-symlinking
             # each parent first. The generated-header set is small, so per-file is cheap.
             ${lib.optionalString (length rewriteRoots > 1) ''
-              cd ${builtins.elemAt rewriteRoots 1}
+              cd ${lib.elemAt rewriteRoots 1}
               find . -type f \( ${findNames hdrExts} \) 2>/dev/null | while IFS= read -r f; do
                 rel=''${f#./}; d=$(dirname "$rel"); cur="$out"
                 if [ "$d" != "." ]; then
@@ -1360,7 +1360,7 @@ in {
         # merging, then mapped through sccRep like the reps below.
         migGids = map (h: sccRep.${h}) (fastUniq (concatMap
           (cd: migByCompDir.${cd} or [])
-          (fastUniq (map (i: builtins.head (lib.splitString "::" (rawGid i))) myIds))));
+          (fastUniq (map (i: lib.head (lib.splitString "::" (rawGid i))) myIds))));
         # Producers of this group's inputs that live in another condensed group,
         # plus the cross-cutting header-producer groups. Deduped at the group level:
         # lib.unique on the raw producer-edge list is O(n^2) in this group's total
@@ -1439,8 +1439,8 @@ in {
               if rewriteRoots == []
               then e.command
               else stripRoots e.command;
-            withSubs = builtins.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
-            base = builtins.replaceStrings (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs) withSubs;
+            withSubs = lib.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
+            base = lib.replaceStrings (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs) withSubs;
             # Append this compile's OWN-MODULE $out-relative generated-header -I dirs so a
             # `<generated.h>` reached via a cmake target-include (not a literal -I / declared
             # input) resolves from where topo/external staging materialised it in $out --
@@ -1530,7 +1530,7 @@ in {
         allIns = concatMap (i: edgeInputs (elemAt edges i)) myIds;
         migGids = map (h: sccRep.${h}) (fastUniq (concatMap
           (cd: migByCompDir.${cd} or [])
-          (fastUniq (map (i: builtins.head (lib.splitString "::" (rawGid i))) myIds))));
+          (fastUniq (map (i: lib.head (lib.splitString "::" (rawGid i))) myIds))));
         extGids =
           filter (h: h != g)
           (fastUniq ((map gid (concatMap realProducers allIns))
