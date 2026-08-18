@@ -21,7 +21,7 @@
 # a syntactic matcher can decide.
 id: mojo-wasmtime-owner-is-a-local
 language: mojo
-severity: warning
+severity: error
 message: >-
   This takes a raw pointer from a local owner. `ptr()` does not borrow, so the
   owner is destroyed at its last use - which is this call - and wasmtime then

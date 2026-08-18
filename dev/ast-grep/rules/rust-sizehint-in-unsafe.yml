@@ -5,7 +5,7 @@
 # whole discriminator.
 id: rust-sizehint-in-unsafe
 language: rust
-severity: warning
+severity: error
 message: >-
   This function trusts size_hint() near unsafe code. The contract allows any
   answer; write the loop so an over-yielding iterator cannot write past what

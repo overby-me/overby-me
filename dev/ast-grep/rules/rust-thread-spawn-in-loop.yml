@@ -4,7 +4,7 @@
 # creation rate - so this stays a warning to justify, not an error.
 id: rust-thread-spawn-in-loop
 language: rust
-severity: warning
+severity: error
 message: >-
   This spawns an OS thread per iteration. Bound the concurrency: a fixed pool,
   scoped threads over chunks, or async tasks.

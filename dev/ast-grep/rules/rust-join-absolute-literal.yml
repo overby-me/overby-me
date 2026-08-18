@@ -5,7 +5,7 @@
 # character class requires a real path character after the slash.
 id: rust-join-absolute-literal
 language: rust
-severity: warning
+severity: error
 message: >-
   join with an absolute path replaces the base entirely. If that is the
   intent, assign the absolute path directly; if not, strip the leading slash.

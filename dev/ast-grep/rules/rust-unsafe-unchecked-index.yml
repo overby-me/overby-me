@@ -5,7 +5,7 @@
 # undocumented_unsafe_blocks would only ask for a comment, not for the proof.
 id: rust-unsafe-unchecked-index
 language: rust
-severity: warning
+severity: error
 message: >-
   get_unchecked skips the bounds check. Write the argument that keeps the index
   in range next to the call, or use normal indexing and let the panic happen.

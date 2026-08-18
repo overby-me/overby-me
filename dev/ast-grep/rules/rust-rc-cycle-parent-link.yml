@@ -1,6 +1,6 @@
 id: rust-rc-cycle-parent-link
 language: rust
-severity: warning
+severity: error
 message: "A parent link held as Rc to the same type is a cycle; use Weak"
 note: |
   A child holding Rc to its parent while the parent holds Rc to the child is a

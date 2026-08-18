@@ -5,7 +5,7 @@
 # everywhere else.
 id: rust-sql-built-by-format
 language: rust
-severity: warning
+severity: error
 message: >-
   This builds query text with format!. Bind values as parameters; if the
   dynamic part is an identifier, allowlist it explicitly and say so here.

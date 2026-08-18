@@ -4,7 +4,7 @@
 # are the two legitimate homes.
 id: rust-runtime-built-in-fn
 language: rust
-severity: warning
+severity: error
 message: >-
   A Runtime built here is a runtime per call, and a panic if any caller is
   already async. Build it once in main (or one named constructor) and pass a

@@ -3,7 +3,7 @@
 # scoped to service code, where there are zero uses today - a ratchet.
 id: rust-shell-c-command
 language: rust
-severity: warning
+severity: error
 message: >-
   This spawns a shell. Run the target binary directly with args, or justify
   why shell interpretation is required here.

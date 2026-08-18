@@ -1,6 +1,6 @@
 id: rust-unchecked-utf8-boundary
 language: rust
-severity: warning
+severity: error
 message: "Unchecked UTF-8 conversion: prove the bytes are UTF-8, or use from_utf8"
 note: |
   from_utf8_unchecked is undefined behaviour on bytes that are not UTF-8, and

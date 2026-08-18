@@ -1,6 +1,6 @@
 id: rust-serde-untagged-boundary
 language: rust
-severity: warning
+severity: error
 message: "#[serde(untagged)] makes the wire format ambiguous"
 note: |
   An untagged enum is deserialized by trying each variant in order and taking

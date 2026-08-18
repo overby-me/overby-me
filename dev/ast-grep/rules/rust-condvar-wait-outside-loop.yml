@@ -3,7 +3,7 @@
 # the loop internally and does not match.
 id: rust-condvar-wait-outside-loop
 language: rust
-severity: warning
+severity: error
 message: >-
   Condvar::wait can wake spuriously; outside a loop the predicate is never
   re-checked. Wrap it in `while !cond` or use wait_while.

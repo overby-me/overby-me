@@ -3,7 +3,7 @@
 # than failing. Zero uses in the tree today; statix has no rule for it.
 id: nix-getenv-in-eval
 language: nix
-severity: warning
+severity: error
 message: >-
   getEnv returns "" under pure evaluation, so this reads as the empty string
   in any flake build. Pass the value through the flake's inputs or module

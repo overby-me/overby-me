@@ -3,7 +3,7 @@
 # struct exists to match an external layout, and that intent needs repr(C).
 id: rust-repr-packed-without-c
 language: rust
-severity: warning
+severity: error
 message: >-
   repr(packed) fixes padding but not field order; rustc may reorder fields.
   If this mirrors an external layout, it needs repr(C, packed).

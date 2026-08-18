@@ -1,6 +1,6 @@
 id: rust-float-for-money
 language: rust
-severity: warning
+severity: error
 message: "Money in a float loses cents"
 note: |
   Binary floating point cannot represent 0.1, so sums of currency drift. Hold

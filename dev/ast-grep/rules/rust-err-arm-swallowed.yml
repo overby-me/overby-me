@@ -8,7 +8,7 @@
 # below carry no such signal; they usually mean the arm was stubbed.
 id: rust-err-arm-swallowed
 language: rust
-severity: warning
+severity: error
 message: >-
   This Err arm does nothing, so every failure is silently absorbed. Handle
   it, log it, or make the intent visible with `let _ = ...` at the call.

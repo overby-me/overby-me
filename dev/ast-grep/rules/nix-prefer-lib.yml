@@ -1,6 +1,6 @@
 id: nix-prefer-lib
 language: nix
-severity: warning
+severity: error
 message: "Use lib.$FN rather than builtins.$FN"
 note: |
   nixpkgs 26.05 re-exports nearly all of builtins through lib, and a file that

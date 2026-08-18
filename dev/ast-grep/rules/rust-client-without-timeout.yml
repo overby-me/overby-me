@@ -6,7 +6,7 @@
 # findings at introduction.
 id: rust-client-without-timeout
 language: rust
-severity: warning
+severity: error
 message: >-
   A client built this way has no timeout; a hung peer pins the caller
   forever. Use Client::builder().timeout(...) - and reuse the client rather

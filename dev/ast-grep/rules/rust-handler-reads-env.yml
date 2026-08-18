@@ -13,7 +13,7 @@
 # extractor and std::path::Path share a name; the extractor is always Path<T>.
 id: rust-handler-reads-env
 language: rust
-severity: warning
+severity: error
 message: >-
   This reads the environment on the request path. Read it once at startup and
   pass it through state.

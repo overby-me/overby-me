@@ -6,7 +6,7 @@
 # shape independently (deslop-rust, deslop-python, deslop-go readers).
 id: rust-toctou-exists-then-open
 language: rust
-severity: warning
+severity: error
 message: >-
   This opens a path inside an if that checked exists() on the same path; the
   state can change between check and open. Open and handle NotFound instead -

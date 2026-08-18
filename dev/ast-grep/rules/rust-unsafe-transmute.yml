@@ -8,7 +8,7 @@
 # already enabled here) but not the general case.
 id: rust-unsafe-transmute
 language: rust
-severity: warning
+severity: error
 message: >-
   transmute reinterprets bytes with no validity check. Write down why the target
   type accepts every bit pattern the source can hold, or use a checked

@@ -10,7 +10,7 @@
 # so flag-for-audit is this rule's honest ceiling.
 id: rust-send-sync-missing-bounds
 language: rust
-severity: warning
+severity: error
 message: >-
   An unsafe Send/Sync impl on a generic type is a promise about every possible
   parameter. Bound the parameters (T: Send / T: Sync), or write down why any T

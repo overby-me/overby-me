@@ -12,7 +12,7 @@
 # looks at bodies that contain nothing to follow.
 id: rust-placeholder-test-body
 language: rust
-severity: warning
+severity: error
 message: >-
   This test has no body to fail. Give it an assertion, or delete it - a
   placeholder that passes is worse than a missing test, because the summary line

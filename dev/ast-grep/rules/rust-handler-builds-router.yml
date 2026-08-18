@@ -3,7 +3,7 @@
 # heuristic as rust-handler-reads-env.
 id: rust-handler-builds-router
 language: rust
-severity: warning
+severity: error
 message: >-
   This assembles a Router on the request path. Build it once at startup and
   share it.

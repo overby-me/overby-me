@@ -7,7 +7,7 @@
 # running yet, which is worth saying at the call rather than assuming.
 id: rust-env-set-var
 language: rust
-severity: warning
+severity: error
 message: >-
   set_var mutates process-global state unsynchronised; a getenv on another
   thread can read freed memory. Pass the value to the child explicitly

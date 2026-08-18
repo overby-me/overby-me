@@ -5,7 +5,7 @@
 # damage happens. CodeQL's weak-name lists (MIT) informed the set.
 id: rust-weak-hash-construction
 language: rust
-severity: warning
+severity: error
 message: >-
   This constructs a collision-broken hash. For integrity or identity use
   SHA-256+ or BLAKE3; if a legacy protocol mandates this, say which one here.

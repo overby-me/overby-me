@@ -9,7 +9,7 @@
 # clippy has no lint for this.
 id: rust-block-on-inside-async
 language: rust
-severity: warning
+severity: error
 message: >-
   block_on inside an async fn blocks the runtime worker: a deadlock on a
   current-thread runtime, a starved pool on a multi-thread one. Await the future

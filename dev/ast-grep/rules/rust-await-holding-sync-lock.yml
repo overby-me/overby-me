@@ -7,7 +7,7 @@
 # match.
 id: rust-await-holding-sync-lock
 language: rust
-severity: warning
+severity: error
 message: >-
   An await after taking a sync Mutex guard in this block parks the task with
   the lock held. Drop the guard first, or use tokio::sync::Mutex.

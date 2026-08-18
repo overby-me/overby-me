@@ -4,7 +4,7 @@
 # writes here.
 id: rust-walker-filters-disabled
 language: rust
-severity: warning
+severity: error
 message: >-
   This disables a walker safety filter. If scanning hidden or ignored files
   is the point, say so here; otherwise the filter is protecting you.

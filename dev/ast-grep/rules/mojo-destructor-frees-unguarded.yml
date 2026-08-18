@@ -8,7 +8,7 @@
 # than in a comment nobody reads.
 id: mojo-destructor-frees-unguarded
 language: mojo
-severity: warning
+severity: error
 message: >-
   This destructor frees a pointer without checking it first. `__del__` also runs
   when the constructor raised partway through, so the field may never have been

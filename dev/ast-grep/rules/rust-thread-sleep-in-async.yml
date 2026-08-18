@@ -5,7 +5,7 @@
 # excluded because spawn_blocking(|| thread::sleep(..)) is the correct escape.
 id: rust-thread-sleep-in-async
 language: rust
-severity: warning
+severity: error
 message: >-
   thread::sleep inside async blocks the runtime worker. Use
   tokio::time::sleep(...).await, or move the blocking section into

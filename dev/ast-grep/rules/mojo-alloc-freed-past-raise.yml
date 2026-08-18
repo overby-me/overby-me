@@ -1,6 +1,6 @@
 id: mojo-alloc-freed-past-raise
 language: mojo
-severity: warning
+severity: error
 message: >-
   This buffer is freed on the success path only. The enclosing function is
   `raises`, so anything that throws between the alloc and this `.free()` leaks

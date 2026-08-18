@@ -3,7 +3,7 @@
 # the flake inputs are where remote sources belong.
 id: nix-fetch-without-hash
 language: nix
-severity: warning
+severity: error
 message: >-
   This fetch has no content hash, so it is unpinned and fails pure
   evaluation. Add sha256/hash, or make it a flake input.

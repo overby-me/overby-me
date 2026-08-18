@@ -3,7 +3,7 @@
 # cleanly on older editions, which several workspaces here pin.
 id: rust-static-mut
 language: rust
-severity: warning
+severity: error
 message: >-
   static mut allows aliased mutation, which is UB. Use an atomic, a
   Mutex/RwLock, or OnceLock - or document the single-threaded argument at an

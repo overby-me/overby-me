@@ -5,7 +5,7 @@
 # (tests are globbed out). CodeQL's private-host exclusion list is folded in.
 id: rust-http-url-literal
 language: rust
-severity: warning
+severity: error
 message: >-
   Hardcoded plaintext URL. Use https, or note why this endpoint cannot
   offer it.

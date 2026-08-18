@@ -5,7 +5,7 @@
 # whose consumer is unsafe by construction.
 id: rust-unsafe-len-arithmetic
 language: rust
-severity: warning
+severity: error
 message: >-
   Unchecked arithmetic feeding an unsafe size. In release builds this wraps
   instead of panicking; use checked_mul/checked_add and handle the overflow.

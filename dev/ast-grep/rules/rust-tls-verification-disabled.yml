@@ -5,7 +5,7 @@
 # dropped: 11/11 hits were Dioxus UI predicates, nowhere near TLS.
 id: rust-tls-verification-disabled
 language: rust
-severity: warning
+severity: error
 message: >-
   This disables certificate or hostname verification, accepting any peer.
   If a test needs a self-signed cert, scope the exception to the test and

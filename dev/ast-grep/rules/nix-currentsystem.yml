@@ -5,7 +5,7 @@
 # the fallback is the part worth a comment at the site.
 id: nix-currentsystem
 language: nix
-severity: warning
+severity: error
 message: >-
   currentSystem is impure and absent under pure evaluation. Take the system
   as an argument (flake outputs pass it); if this is a guarded bootstrap

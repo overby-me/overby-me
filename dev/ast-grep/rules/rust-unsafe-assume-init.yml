@@ -7,7 +7,7 @@
 # actually happens.
 id: rust-unsafe-assume-init
 language: rust
-severity: warning
+severity: error
 message: >-
   assume_init claims every field is initialised. Write down what initialised
   them, or build the value with write() and assume_init() at the end.

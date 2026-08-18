@@ -5,7 +5,7 @@
 # One live hit at introduction: mxr_render_dirty_panels in the XR shim.
 id: rust-extern-c-fn-can-panic
 language: rust
-severity: warning
+severity: error
 message: >-
   This extern "C" fn can panic (unwrap/expect/panic!), and a panic across the
   C boundary aborts the process. Catch it with catch_unwind and return an

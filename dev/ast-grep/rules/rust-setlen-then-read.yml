@@ -6,7 +6,7 @@
 # because there the set_len comes after the write, not before the read.
 id: rust-setlen-then-read
 language: rust
-severity: warning
+severity: error
 message: >-
   set_len before read_exact hands uninitialised memory to a Read impl, which
   may observe it or under-fill it. Initialise with resize/vec-macro, or read

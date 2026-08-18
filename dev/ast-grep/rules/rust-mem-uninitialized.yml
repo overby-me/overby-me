@@ -6,7 +6,7 @@
 # that are wrong unconditionally.
 id: rust-mem-uninitialized
 language: rust
-severity: warning
+severity: error
 message: >-
   This conjures a value out of uninitialised memory - UB for any type with
   invalid bit patterns, and nothing initialised it in between. Use

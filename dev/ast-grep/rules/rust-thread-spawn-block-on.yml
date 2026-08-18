@@ -1,6 +1,6 @@
 id: rust-thread-spawn-block-on
 language: rust
-severity: warning
+severity: error
 message: "block_on inside thread::spawn: no runtime handoff"
 note: |
   A raw OS thread has no reactor, so a future driven with block_on there gets a

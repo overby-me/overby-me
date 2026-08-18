@@ -5,7 +5,7 @@
 # spot, recorded: a reassignment of $P between the frees is invisible.
 id: mojo-double-free
 language: mojo
-severity: warning
+severity: error
 message: >-
   This pointer was already freed above; freeing it again corrupts the
   allocator. If ownership moved, null the old binding or restructure so one
