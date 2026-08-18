@@ -77,9 +77,9 @@
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
-          lock = builtins.fromTOML (builtins.readFile lockFile);
+          lock = lib.fromTOML (lib.readFile lockFile);
         in
-          builtins.filter (p: p ? checksum) (lock.package or [])
+          lib.filter (p: p ? checksum) (lock.package or [])
       )
       locks);
     crateTar = p:

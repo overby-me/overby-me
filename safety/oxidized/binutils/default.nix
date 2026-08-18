@@ -25,7 +25,7 @@
   # Written once because the two packages differ only in optimisation, and a
   # list kept in two places is how they come to disagree.
   multicallLinks = ''
-    for tool in ${builtins.concatStringsSep " " tools}; do
+    for tool in ${lib.concatStringsSep " " tools}; do
       ln -s $out/bin/${multicall} $out/bin/$tool
     done
   '';

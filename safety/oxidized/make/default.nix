@@ -205,7 +205,7 @@
     ];
     # Flatten "features/comments" to attr "oxidized-make-test-features-comments".
     mkCheck = path: let
-      parts = builtins.split "/" path;
+      parts = lib.split "/" path;
       category = lib.elemAt parts 0;
       name = lib.elemAt parts 2;
     in {
