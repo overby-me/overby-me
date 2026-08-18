@@ -19,6 +19,12 @@
 //!   exposed to WASM code directly. The channel stores session
 //!   tokens in workspace state for subsequent API calls.
 
+// The component-model bindings wit_bindgen generates hand ownership to the
+// host with mem::forget, which is the ABI rather than anything this crate
+// wrote. The allow has to sit at crate level: an attribute on the macro
+// invocation does not reach the code it expands to.
+#![allow(clippy::mem_forget)]
+
 wit_bindgen::generate!({
     world: "sandboxed-channel",
     path: "wit/channel.wit",
@@ -273,7 +279,7 @@ impl Guest for BlueskyChannel {
 
     fn on_http_request(_req: IncomingHttpRequest) -> OutgoingHttpResponse {
         // Bluesky doesn't use webhooks; we rely on notification polling.
-        json_response(200, serde_json::json!({"ok": true}))
+        json_response(200, &serde_json::json!({"ok": true}))
     }
 
     fn on_poll() {
@@ -1114,8 +1120,8 @@ fn bsky_post_chat(
     )
 }
 
-fn json_response(status: u16, body: serde_json::Value) -> OutgoingHttpResponse {
-    let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+fn json_response(status: u16, body: &serde_json::Value) -> OutgoingHttpResponse {
+    let body_bytes = serde_json::to_vec(body).unwrap_or_default();
     OutgoingHttpResponse {
         status,
         headers_json: serde_json::json!({"Content-Type": "application/json"}).to_string(),

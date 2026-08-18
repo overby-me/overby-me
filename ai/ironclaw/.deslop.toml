@@ -1,0 +1,47 @@
+# deslop configuration for the IronClaw channels.
+#
+# Each channel is a WASM component that talks to one third-party service over
+# its own HTTP API, so nearly everything here follows from deserializing
+# someone else's JSON inside a sandbox.
+
+disabled_rules = [
+  # These are other people's wire formats. A Bluesky or Matrix response gains
+  # fields without warning, and refusing to deserialize one that has grown
+  # would break the channel on their release schedule rather than ours.
+  # #[serde(default)] is how an optional field arrives.
+  "rust_serde_unknown_fields_allowed",
+  "rust_serde_default_on_required_field",
+
+  # The credentials these carry are session tokens the host injects and the
+  # component never sees in the clear; they deserialize because they arrive in
+  # the response body, and they are redacted at the host boundary.
+  "rust_serde_sensitive_deserialize",
+  "rust_serde_sensitive_serialize",
+  "rust_debug_secret",
+  "rust_secret_equality_compare",
+
+  # Timestamps and counts cross the component-model ABI at fixed widths.
+  "rust_narrowing_numeric_cast",
+
+  # A channel is one lib.rs by design: it is a single WASM component with one
+  # exported world, and splitting it would not reduce what the host links.
+  "rust_oversized_module_file",
+
+  # Response bodies are read a line at a time as they stream in.
+  "rust_lines_allocate_per_line",
+  "rust_aos_hot_path",
+
+  # Handles, DIDs and room ids are the strings the remote API uses.
+  "rust_domain_raw_primitive",
+
+  # Channel config is optional because most of it has a default; the host
+  # validates what it sends before the component starts.
+  "rust_option_bag_config",
+
+  # The offset comes from a Matrix pagination token the server issued, and the
+  # slice it indexes is the response we just received whole.
+  "rust_split_at_unchecked_external_input",
+
+  # Decoding an HTTP response body is what a channel does, once per poll.
+  "rust_utf8_validate_hot_path",
+]
