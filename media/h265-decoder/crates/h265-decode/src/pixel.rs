@@ -436,11 +436,13 @@ mod tests {
 
     #[test]
     fn test_clamp_does_not_overflow() {
-        // Edge-case values that would produce out-of-range intermediates
-        let (r, g, b) = yuv_to_rgb_bt601(0, 0, 255);
-        assert!(r <= 255);
-        assert!(g <= 255);
-        assert!(b <= 255);
+        // Y=0, Cb=0, Cr=255 drives green to -72 and blue to -277 before the
+        // clamp, so both must come back as 0 while red stays untouched at 184.
+        //
+        // This asserted `r <= 255` on a u8 before, which is true of every
+        // possible return value: the test could not fail, and would not have
+        // noticed the clamp being dropped altogether.
+        assert_eq!(yuv_to_rgb_bt601(0, 0, 255), (184, 0, 0));
     }
 
     #[test]

@@ -14,6 +14,8 @@
 //! are skipped rather than rejected, and missing optional fields fall back
 //! to spec defaults.
 
+use std::cmp::Reverse;
+
 use crate::bitstream::BitstreamReader;
 use crate::error::{DecodeError, DecodeResult};
 
@@ -540,8 +542,8 @@ impl ShortTermRefPicSet {
 
             // Sort: negative POCs descending (closest to 0 first),
             // positive ascending.
-            neg_pocs.sort_by(|a, b| b.0.cmp(&a.0));
-            pos_pocs.sort_by(|a, b| a.0.cmp(&b.0));
+            neg_pocs.sort_by_key(|p| Reverse(p.0));
+            pos_pocs.sort_by_key(|a| a.0);
 
             rps.num_negative_pics = neg_pocs.len() as u32;
             rps.num_positive_pics = pos_pocs.len() as u32;
@@ -858,6 +860,10 @@ impl Default for SpsStore {
 }
 
 /// Parse an SPS NAL unit from RBSP data.
+// Long because the sequence parameter set is long: the fields are read in the
+// order H.265 lists them, and splitting the run would only make it harder to
+// check against the specification.
+#[allow(clippy::too_many_lines)]
 pub fn parse_sps(rbsp: &[u8]) -> DecodeResult<Sps> {
     let mut r = BitstreamReader::new(rbsp);
 

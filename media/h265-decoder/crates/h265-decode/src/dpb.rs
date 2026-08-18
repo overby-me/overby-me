@@ -21,6 +21,8 @@
 //! picture is also not used for reference, it is removed from the DPB
 //! entirely.
 
+use std::cmp::Reverse;
+
 use crate::error::{DecodeError, DecodeResult};
 use crate::frame::{DecodedFrame, PictureType};
 
@@ -364,7 +366,7 @@ impl Dpb {
             .iter()
             .filter(|e| e.is_short_term_ref() && e.pic_order_cnt < current_poc)
             .collect();
-        st_before.sort_by(|a, b| b.pic_order_cnt.cmp(&a.pic_order_cnt));
+        st_before.sort_by_key(|f| Reverse(f.pic_order_cnt));
 
         // Short-term references with POC > current_poc, sorted ascending.
         let mut st_after: Vec<&DpbEntry> = self
@@ -372,7 +374,7 @@ impl Dpb {
             .iter()
             .filter(|e| e.is_short_term_ref() && e.pic_order_cnt > current_poc)
             .collect();
-        st_after.sort_by(|a, b| a.pic_order_cnt.cmp(&b.pic_order_cnt));
+        st_after.sort_by_key(|a| a.pic_order_cnt);
 
         // Long-term references.
         let lt: Vec<&DpbEntry> = self
@@ -406,7 +408,7 @@ impl Dpb {
             .iter()
             .filter(|e| e.is_short_term_ref() && e.pic_order_cnt > current_poc)
             .collect();
-        st_after.sort_by(|a, b| a.pic_order_cnt.cmp(&b.pic_order_cnt));
+        st_after.sort_by_key(|a| a.pic_order_cnt);
 
         // Short-term references with POC < current_poc, sorted descending.
         let mut st_before: Vec<&DpbEntry> = self
@@ -414,7 +416,7 @@ impl Dpb {
             .iter()
             .filter(|e| e.is_short_term_ref() && e.pic_order_cnt < current_poc)
             .collect();
-        st_before.sort_by(|a, b| b.pic_order_cnt.cmp(&a.pic_order_cnt));
+        st_before.sort_by_key(|f| Reverse(f.pic_order_cnt));
 
         // Long-term references.
         let lt: Vec<&DpbEntry> = self
