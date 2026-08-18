@@ -15,38 +15,16 @@
 #   - Two subworkspaces producing the same namespaced output name
 #   - A subworkspace output colliding with a root workspace output
 #   - Invalid derivation names after namespacing
-#
 {lib}: let
   # ── Name resolution ─────────────────────────────────────────────
-  # Resolve a single output name within a subworkspace context.
-  #
-  # Type: String -> String -> String
-  #
-  # Arguments:
-  #   subworkspaceName — The subworkspace directory name (e.g. "mojo-zed")
-  #   outputName       — The original output name (e.g. "default", "lsp")
-  #
-  # Returns:
-  #   The namespaced name:
-  #     "default" → subworkspaceName
-  #     other     → "${subworkspaceName}-${outputName}"
-  #
+  #   "default" → subworkspaceName
+  #   other     → "${subworkspaceName}-${outputName}"
   namespacedName = subworkspaceName: outputName:
     if outputName == "default"
     then subworkspaceName
     else "${subworkspaceName}-${outputName}";
 
-  # Namespace all outputs in a flat { name = value; } attrset for a subworkspace.
-  #
-  # Type: String -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   subworkspaceName — The subworkspace directory name
-  #   outputs          — { outputName = value; ... }
-  #
-  # Returns:
-  #   { namespacedName = value; ... }
-  #
+  # A flat { name = value; } attrset, renamed.
   namespaceOutputs = subworkspaceName: outputs:
     lib.mapAttrs' (
       name: value: {
@@ -56,16 +34,10 @@
     )
     outputs;
 
-  # Namespace all convention directories for a subworkspace.
-  #
-  # Type: String -> AttrSet -> AttrSet
-  #
-  # Given a subworkspace name and a discovered config tree like:
+  # Every convention directory of a subworkspace, so
   #   { packages = { default = ...; lsp = ...; }; shells = { default = ...; }; }
-  #
-  # Returns:
+  # becomes
   #   { packages = { mojo-zed = ...; mojo-zed-lsp = ...; }; shells = { mojo-zed = ...; }; }
-  #
   namespaceDiscovered = subworkspaceName: discovered:
     lib.mapAttrs (
       _conventionName: outputs:
@@ -75,25 +47,10 @@
 
   # ── Conflict detection ──────────────────────────────────────────
 
-  # Check for naming conflicts between the root workspace and all subworkspaces,
-  # and between subworkspaces themselves.
-  #
-  # Type: AttrSet -> [AttrSet] -> AttrSet
-  #
-  # Arguments:
-  #   rootOutputs       — { conventionName = { outputName = ...; }; ... } from root
-  #   subworkspaceOutputs — [{ name = "sub-name"; outputs = { conventionName = { ... }; }; }]
-  #
-  # Returns:
-  #   {
-  #     conflicts = [ { code, severity, convention, name, sources, message, hint } ];
-  #     hasConflicts = Bool;
-  #   }
-  #
+  # Conflicts between root and subworkspaces, and between subworkspaces.
   detectConflicts = rootOutputs: subworkspaceOutputs: let
-    # Collect all output registrations: { convention.name = [source1, source2, ...] }
-    # where source is a string like "root" or "subworkspace:mojo-zed"
-    # Register root outputs
+    # { convention.name = [source, ...] }, where a source is "root" or
+    # "subworkspace:mojo-zed".
     registryWithRoot =
       lib.mapAttrs (
         _convention: outputs:
@@ -104,7 +61,6 @@
       )
       rootOutputs;
 
-    # Register subworkspace outputs into the registry
     registryWithAll =
       builtins.foldl' (
         registry: sub: let
@@ -114,7 +70,6 @@
           lib.mapAttrs (
             convention: existingNames: let
               newNames = subOutputs.${convention} or {};
-              # For each new name, append the source
               merged =
                 existingNames
                 // (lib.mapAttrs (
@@ -132,7 +87,7 @@
       registryWithRoot
       subworkspaceOutputs;
 
-    # Find all entries with more than one source — those are conflicts
+    # More than one source is a conflict.
     conflictsList = lib.concatLists (
       lib.mapAttrsToList (
         convention: names:
@@ -161,24 +116,11 @@
     hasConflicts = conflictsList != [];
   };
 
-  # Validate that a namespaced output name is a valid Nix derivation name.
-  #
-  # Type: String -> Bool
-  #
-  # Valid names match: [a-zA-Z_][a-zA-Z0-9_-]*
+  # A valid Nix derivation name is [a-zA-Z_][a-zA-Z0-9_-]*.
   isValidOutputName = name:
     builtins.match "[a-zA-Z_][a-zA-Z0-9_-]*" name != null;
 
-  # Validate all namespaced output names and return diagnostics for invalid ones.
-  #
-  # Type: String -> AttrSet -> [AttrSet]
-  #
-  # Arguments:
-  #   subworkspaceName — The subworkspace name (for error context)
-  #   outputs          — { namespacedName = value; ... }
-  #
-  # Returns: List of diagnostic records for invalid names
-  #
+  # Diagnostics for every namespaced name that is not one.
   validateOutputNames = subworkspaceName: outputs:
     lib.concatLists (
       lib.mapAttrsToList (
@@ -201,25 +143,9 @@
 
   # ── Merging ─────────────────────────────────────────────────────
 
-  # Merge root workspace outputs with namespaced subworkspace outputs.
-  #
-  # This is the main entry point for combining outputs. It:
-  #   1. Namespaces each subworkspace's outputs
-  #   2. Checks for conflicts
-  #   3. Throws if conflicts are found
-  #   4. Returns the merged output tree
-  #
-  # Type: AttrSet -> [AttrSet] -> AttrSet
-  #
-  # Arguments:
-  #   rootOutputs         — { convention = { name = config; }; ... } from root workspace
-  #   subworkspaceEntries — [{ name = "dir-name"; outputs = { convention = { name = config; }; }; }]
-  #
-  # Returns:
-  #   Merged { convention = { name = config; }; ... } with namespaced subworkspace outputs
-  #
+  # The entry point for combining outputs: namespace each subworkspace, throw on
+  # any conflict, and return the merged { convention = { name = config; }; ... }.
   mergeOutputs = rootOutputs: subworkspaceEntries: let
-    # Namespace each subworkspace's outputs
     namespacedEntries =
       map (
         sub: {
@@ -229,10 +155,8 @@
       )
       subworkspaceEntries;
 
-    # Detect conflicts
     conflictResult = detectConflicts rootOutputs namespacedEntries;
 
-    # Validate all namespaced output names
     nameValidationErrors = lib.concatLists (
       map (
         sub:
@@ -249,7 +173,6 @@
 
     allDiagnostics = conflictResult.conflicts ++ nameValidationErrors;
 
-    # Format diagnostics for error output
     formatDiagnostic = d:
       "[${d.code}] ${d.message}"
       + (
@@ -261,7 +184,6 @@
     diagnosticMessages =
       builtins.concatStringsSep "\n\n" (map formatDiagnostic allDiagnostics);
 
-    # Merge all namespaced outputs into the root
     merged =
       builtins.foldl' (
         acc: sub:
@@ -287,21 +209,8 @@
 
   # ── Dependency resolution ───────────────────────────────────────
 
-  # Resolve cross-subworkspace dependencies.
-  #
-  # Given a dependency map { alias = "subworkspace-name"; ... } from a subworkspace
-  # and the set of all subworkspace names, validate that all referenced
-  # subworkspaces exist.
-  #
-  # Type: String -> AttrSet -> [String] -> [AttrSet]
-  #
-  # Arguments:
-  #   subworkspaceName — The subworkspace declaring dependencies
-  #   dependencies     — { alias = "target-subworkspace"; ... }
-  #   knownSubworkspaces — List of all known subworkspace names
-  #
-  # Returns: List of diagnostic records for unresolved dependencies
-  #
+  # Given a subworkspace's { alias = "subworkspace-name"; ... } and the set of
+  # all subworkspace names, diagnose the references that resolve to nothing.
   validateDependencies = subworkspaceName: dependencies: knownSubworkspaces:
     lib.concatLists (
       lib.mapAttrsToList (
@@ -316,7 +225,6 @@
               inherit alias target;
               message = "Subworkspace '${subworkspaceName}' declares dependency '${alias}' → '${target}', but no subworkspace named '${target}' exists.";
               hint = let
-                # Simple suggestion: find names that share a prefix
                 suggestions =
                   builtins.filter (
                     name: lib.hasPrefix (builtins.substring 0 3 target) name
@@ -332,23 +240,11 @@
       dependencies
     );
 
-  # Detect circular dependencies between subworkspaces.
-  #
-  # Type: AttrSet -> [AttrSet]
-  #
-  # Arguments:
-  #   dependencyGraph — { subworkspaceName = [targetNames]; ... }
-  #
-  # Returns: List of diagnostic records for cycles detected
-  #
-  # Uses a simple DFS-based cycle detection. Since workspace dependency
-  # graphs are typically very small, this is sufficient.
-  #
+  # DFS, which is enough: a workspace dependency graph is tiny.
   detectCycles = dependencyGraph: let
     allNames = builtins.attrNames dependencyGraph;
 
-    # For each node, do a DFS and check if we revisit it
-    # Returns true if `target` is reachable from `start` following edges
+    # Whether `target` is reachable from `start`.
     isReachable = start: target: visited: let
       neighbors = dependencyGraph.${start} or [];
       unvisited = builtins.filter (n: !builtins.elem n visited) neighbors;
@@ -360,7 +256,6 @@
       )
       unvisited;
 
-    # A node is in a cycle if it can reach itself
     nodesInCycles =
       builtins.filter (
         name: isReachable name name []
@@ -379,16 +274,7 @@
       }
     ];
 
-  # Build the full dependency graph from subworkspace configs.
-  #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   subworkspaceConfigs — { name = { dependencies = { alias = "target"; }; ... }; ... }
-  #
-  # Returns:
-  #   { name = ["target1" "target2"]; ... }
-  #
+  # { name = ["target1" "target2"]; ... }
   buildDependencyGraph = subworkspaceConfigs:
     lib.mapAttrs (
       _name: config:
@@ -396,19 +282,10 @@
     )
     subworkspaceConfigs;
 
-  # Perform full dependency validation: check all references exist and no cycles.
-  #
-  # Type: AttrSet -> [AttrSet]
-  #
-  # Arguments:
-  #   subworkspaceConfigs — { name = { dependencies = { ... }; ... }; ... }
-  #
-  # Returns: List of all dependency-related diagnostics
-  #
+  # Every reference resolves, and no cycles.
   validateAllDependencies = subworkspaceConfigs: let
     knownNames = builtins.attrNames subworkspaceConfigs;
 
-    # Validate each subworkspace's dependency references
     refErrors = lib.concatLists (
       lib.mapAttrsToList (
         name: config:
@@ -417,7 +294,6 @@
       subworkspaceConfigs
     );
 
-    # Check for cycles
     graph = buildDependencyGraph subworkspaceConfigs;
     cycleErrors = detectCycles graph;
   in
@@ -425,18 +301,8 @@
 
   # ── Structured diagnostics ──────────────────────────────────────
 
-  # Convert a list of diagnostic records to the structured JSON format
-  # described in the SPEC for programmatic consumption.
-  #
-  # Type: String -> [AttrSet] -> AttrSet
-  #
-  # Arguments:
-  #   workspaceName — The root workspace name (for context)
-  #   diagnostics   — List of diagnostic records
-  #
-  # Returns:
+  # The structured form the SPEC defines for programmatic consumers:
   #   { diagnostics = [{ code, severity, message, hint, context }]; }
-  #
   toStructuredDiagnostics = workspaceName: diagnostics: {
     diagnostics =
       map (

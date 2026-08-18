@@ -1,32 +1,19 @@
-# nix-workspace library — main entry point
-#
-# This module exports the `mkWorkspace` function that serves as the primary
-# interface for nix-workspace. It is designed to be called from a flake.nix:
+# The nix-workspace entry point: `mkWorkspace`, called from a flake.nix as
 #
 #   outputs = inputs:
 #     inputs.nix-workspace ./. {
 #       inherit inputs;
 #     };
 #
-# The function orchestrates the full pipeline:
-#   1. Discovery  — scan convention directories for .ncl files
-#   2. Subworkspace discovery — find subdirectories with workspace.ncl
-#   3. Evaluation — run Nickel to validate and export configs as JSON (IFD)
-#   4. Namespacing — prefix subworkspace outputs with directory names
-#   5. Conflict detection — check for naming collisions (NW2xx diagnostics)
-#   6. Dependency validation — check cross-subworkspace references (NW3xx)
-#   7. Building   — construct flake outputs from the validated config
-#
-# Updated for v0.4 to support plugins with contract extensions,
-# custom convention directories, and plugin-provided builders.
-#
+# and running the pipeline the phase headers below mark out: discovery, then
+# Nickel evaluation through IFD, then namespacing with conflict (NW2xx) and
+# dependency (NW3xx) detection, then the flake outputs themselves.
 {
   nixpkgs,
   nix-workspace,
 }: let
   inherit (nixpkgs) lib;
 
-  # Import sub-modules, passing the shared `lib`.
   discover = import ./discover.nix {inherit lib;};
   evalNickel = import ./eval-nickel.nix {inherit lib;};
   systemsLib = import ./systems.nix {inherit lib;};
@@ -45,25 +32,11 @@
   pluginsDir = nix-workspace.plugins;
 
   # ── mkWorkspace ─────────────────────────────────────────────────
-  #
-  # Type: Path -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot — Path to the workspace directory (typically ./.)
-  #   config        — Configuration attrset, must contain at least `inputs`
-  #     config.inputs       — The flake inputs (must include `nixpkgs`)
-  #     config.systems      — Optional list of systems (overrides workspace.ncl)
-  #     config.nixpkgs      — Optional nixpkgs config overrides
-  #
-  # Returns: A standard flake outputs attrset.
-  #
   mkWorkspace = workspaceRoot: config: let
     inputs = config.inputs or {};
     userNixpkgs = inputs.nixpkgs or nixpkgs;
 
     # ── Phase 1: Discovery ──────────────────────────────────────
-    #
-    # Scan the workspace root for convention directories and .ncl files.
     discovered = discover.discoverAll workspaceRoot (config.conventions or null);
 
     discoveredPackages = discovered.packages or {};
@@ -88,25 +61,16 @@
 
     # ── Phase 1c: Plugin resolution ─────────────────────────────
     #
-    # Peek at workspace.ncl to determine which plugins are requested.
-    # We need the plugin list BEFORE full Nickel evaluation because
-    # plugin .ncl paths must be passed to the wrapper generator.
-    #
-    # Strategy: do a lightweight Nickel eval of just the plugins field,
-    # or read it from the config. For simplicity, we support plugins
-    # declared in the Nix-side config as well as in workspace.ncl.
-    #
-    # The Nix-side `config.plugins` takes precedence if provided.
-    # Otherwise, we'll pass plugin paths to the Nickel evaluator and
-    # let it handle validation.
+    # Which plugins are wanted has to be known BEFORE the full Nickel
+    # evaluation, because their .ncl paths go into the wrapper generator. So
+    # plugins may be declared Nix-side as well as in workspace.ncl, and the
+    # Nix-side `config.plugins` wins where both do.
     requestedPlugins = config.plugins or [];
 
-    # Resolve plugin names to their .ncl definition file paths
     pluginNclPaths =
       map (name: pluginsLib.resolvePluginNcl pluginsDir name)
       requestedPlugins;
 
-    # Load plugin Nix-side builders and shell extras
     loadedPlugins =
       if requestedPlugins != []
       then pluginsLib.loadPlugins pluginsDir requestedPlugins
@@ -116,7 +80,6 @@
         pluginNames = [];
       };
 
-    # Validate plugins (check for duplicates, etc.)
     pluginValidation = pluginsLib.validatePlugins requestedPlugins;
     pluginsValid =
       if pluginValidation != []
@@ -133,26 +96,22 @@
         throw "nix-workspace: plugin errors:\n\n${msg}"
       else true;
 
-    # Discover .nix implementation files alongside .ncl configs for modules.
-    # Modules have a dual structure: .ncl for Nickel config, .nix for NixOS implementation.
+    # A module is two files: .ncl for the Nickel config, .nix for the NixOS
+    # implementation.
     discoveredModuleNixFiles = moduleBuilder.discoverNixFiles workspaceRoot "modules";
     discoveredHomeNixFiles = moduleBuilder.discoverNixFiles workspaceRoot "home";
 
     # ── Phase 1b: Subworkspace discovery ────────────────────────
     #
-    # Scan for subdirectories containing workspace.ncl files.
-    # This is VCS-agnostic: git submodules, jj checkouts, plain dirs,
-    # and symlinks all work identically.
+    # A subdirectory holding a workspace.ncl. VCS-agnostic: git submodules, jj
+    # checkouts, plain directories and symlinks all behave the same.
     subworkspaceMap = discover.discoverAllSubworkspaces workspaceRoot;
     hasSubworkspaces = subworkspaceMap != {};
 
     # ── Phase 2: Nickel evaluation ──────────────────────────────
     #
-    # Evaluate workspace.ncl (and discovered .ncl files) through Nickel
-    # using IFD. This produces a fully validated JSON configuration tree.
-    #
-    # We need a "bootstrap" pkgs to obtain the `nickel` binary for IFD.
-    # Use builtins.currentSystem when available, otherwise default to x86_64-linux.
+    # A bootstrap pkgs, only to get the `nickel` binary the IFD needs.
+    # builtins.currentSystem where it is available, x86_64-linux otherwise.
     bootstrapSystem = builtins.currentSystem or "x86_64-linux";
     bootstrapPkgs = import userNixpkgs {system = bootstrapSystem;};
 
@@ -178,9 +137,6 @@
       else evalNickel.emptyConfig;
 
     # ── Phase 2c: Plugin config evaluation ──────────────────────
-    #
-    # Evaluate each plugin's plugin.ncl through Nickel to extract
-    # convention mappings and builder metadata as JSON.
     evaluatedPluginConfigs =
       if requestedPlugins != []
       then
@@ -196,13 +152,11 @@
         }
       else {};
 
-    # Extract plugin convention directory mappings
     pluginConventions =
       if evaluatedPluginConfigs != {}
       then pluginsLib.extractConventions evaluatedPluginConfigs
       else {};
 
-    # Discover items from plugin convention directories
     pluginDiscovered =
       if pluginConventions != {}
       then
@@ -214,8 +168,7 @@
 
     # ── Phase 2b: Subworkspace Nickel evaluation ────────────────
     #
-    # Each subworkspace gets its own Nickel evaluation pass.
-    # This produces independent validated config trees.
+    # One pass each, producing independent validated config trees.
     subworkspaceConfigs =
       if hasSubworkspaces
       then
@@ -225,11 +178,7 @@
       else {};
 
     # ── Phase 3: Namespacing and conflict detection ─────────────
-    #
-    # Apply automatic namespacing to subworkspace outputs and check
-    # for naming collisions.
 
-    # Build the subworkspace entries for the namespacing module
     subworkspaceEntries =
       lib.mapAttrsToList (
         name: subConfig: {
@@ -259,7 +208,6 @@
       templates = workspaceConfig.templates or {};
     };
 
-    # Merge root + subworkspace outputs with namespacing and conflict detection
     mergedOutputs =
       if hasSubworkspaces
       then namespacingLib.mergeOutputs rootOutputsForConflictCheck subworkspaceEntries
@@ -267,9 +215,8 @@
 
     # ── Phase 3b: Dependency validation ─────────────────────────
     #
-    # Validate cross-subworkspace dependency declarations.
-    # Throws if any dependency references a nonexistent subworkspace or
-    # if there are circular dependencies.
+    # Throws on a dependency naming a subworkspace that does not exist, and on
+    # a cycle.
     dependenciesValid =
       if hasSubworkspaces
       then let
@@ -297,19 +244,16 @@
         else true
       else true;
 
-    # Allow the Nix-side config to override certain fields from workspace.ncl.
-    # Merge plugin-discovered items into the effective outputs.
-    # Items from plugin convention directories (e.g. crates/) are added
-    # to the packages config with their plugin builder defaults applied.
+    # The Nix-side config may override fields from workspace.ncl, and items
+    # found under a plugin convention directory (crates/, say) join the packages
+    # config carrying their plugin builder defaults.
     pluginPackageConfigs = let
-      # Flatten all plugin convention discoveries that map to "packages"
       pkgConventions =
         lib.filterAttrs (
           _name: conv: conv.output == "packages"
         )
         pluginConventions;
 
-      # Collect all discovered items from package-targeting conventions
       allPluginPkgs =
         builtins.foldl' (
           acc: convName: let
@@ -341,8 +285,6 @@
       (lib.optionalAttrs (ncl ? allow-unfree) {allowUnfree = ncl.allow-unfree;})
       // (ncl.config or {});
 
-    # Use merged outputs (root + namespaced subworkspaces) for all config maps,
-    # plus items discovered from plugin convention directories.
     packageConfigs = (mergedOutputs.packages or {}) // pluginPackageConfigs;
     shellConfigs = mergedOutputs.shells or {};
     machineConfigs = mergedOutputs.machines or {};
@@ -353,8 +295,6 @@
     templateConfigs = mergedOutputs.templates or {};
 
     # ── Phase 4: Build outputs ──────────────────────────────────
-    #
-    # Construct standard flake outputs with system multiplexing.
 
     # ── Per-system outputs (packages, devShells) ────────────────
     perSystemOutputs = systemsLib.eachSystem systems (
@@ -364,22 +304,18 @@
           config = nixpkgsConfig;
         };
 
-        # Core builders — these are always available
         coreBuilders = {
           generic = packageBuilder.buildGeneric;
           rust = packageBuilder.buildRust;
           go = packageBuilder.buildGo;
         };
 
-        # Build packages for this system, routing to plugin builders when available
         builtPackages =
           lib.mapAttrs (
             name: cfg: let
-              # Apply plugin builder defaults to the config
               effectiveCfg = pluginsLib.applyBuilderDefaults loadedPlugins.builders cfg;
 
-              # Resolve the workspace root for this package:
-              # if it came from a subworkspace, use that subworkspace's root.
+              # A package from a subworkspace resolves against that root.
               effectiveRoot = resolvePackageRoot name;
             in
               pluginsLib.routeBuilder
@@ -398,10 +334,8 @@
             packageConfigs
           );
 
-        # Collect extra shell packages from loaded plugins
         pluginShellExtras = pluginsLib.collectShellExtras loadedPlugins.shellExtras pkgs;
 
-        # Build dev shells for this system
         builtShells =
           lib.mapAttrs (
             name: cfg:
@@ -457,7 +391,6 @@
     # Build a mapping: namespacedOutputName → subworkspaceRoot
     # for all subworkspace outputs across all conventions
     subworkspaceOutputRoots = let
-      # For each subworkspace, compute its namespaced output names
       subEntries = lib.concatLists (
         lib.mapAttrsToList (
           subName: subConfig: let
@@ -485,11 +418,10 @@
 
     # ── Non-per-system outputs (nixosConfigurations, modules) ───
     #
-    # NixOS configurations are not per-system in the flake output schema —
-    # each configuration declares its own system internally.
+    # The flake schema has these outside the per-system tree: a NixOS
+    # configuration declares its own system internally.
 
-    # Merge discovered .nix files with any paths declared in Nickel module configs.
-    # For root workspace modules:
+    # The discovered .nix files, plus any paths the Nickel module configs name.
     resolvedModulePaths = let
       nixPaths = discoveredModuleNixFiles;
       nclPaths =
@@ -524,14 +456,12 @@
     in
       nixPaths // nclResolvedPaths;
 
-    # Also discover and resolve module paths from subworkspaces
     subworkspaceModulePaths = let
       allSubModulePaths = lib.concatLists (
         lib.mapAttrsToList (
           subName: subInfo: let
             subRoot = subInfo.path;
             subNixFiles = moduleBuilder.discoverNixFiles subRoot "modules";
-            # Namespace the module names
             namespacedNixFiles =
               lib.mapAttrs' (
                 name: path: {
@@ -570,11 +500,9 @@
     in
       builtins.listToAttrs allSubHomePaths;
 
-    # Combine root and subworkspace module paths
     allModulePaths = resolvedModulePaths // subworkspaceModulePaths;
     allHomePaths = resolvedHomePaths // subworkspaceHomePaths;
 
-    # Build NixOS machine configurations
     nixosConfigurations =
       if machineConfigs != {}
       then
@@ -587,7 +515,6 @@
         }
       else {};
 
-    # Build NixOS module flake outputs
     nixosModules =
       if moduleConfigs != {} || allModulePaths != {}
       then let
@@ -602,7 +529,6 @@
         }
       else {};
 
-    # Build home-manager module flake outputs
     homeModules =
       if homeConfigs != {} || allHomePaths != {}
       then let
@@ -617,7 +543,6 @@
         }
       else {};
 
-    # Build overlay flake outputs
     overlays =
       if overlayConfigs != {}
       then
@@ -626,7 +551,6 @@
         }
       else {};
 
-    # Build template flake outputs
     templates =
       if templateConfigs != {}
       then
@@ -652,7 +576,6 @@
       inherit templates;
     })
     // (lib.optionalAttrs (requestedPlugins != []) {
-      # Expose loaded plugin metadata for debugging/introspection
       _pluginMeta =
         lib.mapAttrs (
           _name: cfg: {
@@ -666,6 +589,5 @@
 in {
   inherit mkWorkspace;
 
-  # Re-export sub-modules for advanced usage / testing
   inherit discover systemsLib namespacingLib packageBuilder shellBuilder machineBuilder moduleBuilder evalNickel;
 }

@@ -9,7 +9,6 @@
 #
 # Or via the flake check:
 #   nix flake check
-#
 let
   pkgs = import <nixpkgs> {};
   inherit (pkgs) lib;

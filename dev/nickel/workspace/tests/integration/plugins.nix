@@ -12,7 +12,6 @@
 #
 # Run with:
 #   nix eval --file tests/integration/plugins.nix
-#
 let
   nixpkgs = import <nixpkgs> {};
   inherit (nixpkgs) lib;

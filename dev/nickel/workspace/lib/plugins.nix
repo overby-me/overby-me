@@ -1,42 +1,11 @@
-# Plugin loading and merging for nix-workspace
-#
-# This module handles the Nix-side of the plugin system:
-#   1. Resolving plugin names to their definition files
-#   2. Loading plugin builder.nix files
-#   3. Extracting convention mappings from evaluated plugin configs
-#   4. Merging plugin conventions into the discovery system
-#   5. Routing packages to plugin-provided builders
-#   6. Validating plugin configurations and detecting conflicts
-#
-# The Nickel-side of plugins (contracts, extensions) is handled in
-# eval-nickel.nix via the wrapper generation. This module handles
-# everything that happens after Nickel evaluation — the Nix build layer.
-#
-# Plugin resolution:
-#   - Built-in plugins are shipped in nix-workspace's plugins/ directory
-#   - Plugin names are mapped to directories: "nix-workspace-rust" → plugins/rust/
-#   - Each plugin directory contains:
-#       plugin.ncl  — Nickel contract/convention definitions (used by eval-nickel.nix)
-#       builder.nix — Nix build functions (used by this module)
-#
-# Updated for v0.4 — Plugin system milestone.
-#
+# The Nix side of the plugin system: everything after Nickel evaluation, where
+# eval-nickel.nix handles the Nickel side (contracts and extensions) through its
+# wrapper generation. Plugins resolve to a directory by name convention,
+# "nix-workspace-rust" → plugins/rust/, holding a plugin.ncl that eval-nickel.nix
+# reads and a builder.nix that this module does.
 {lib}: let
   # ── Plugin resolution ─────────────────────────────────────────
-  #
-  # Map plugin names to their directories. Built-in plugins use a
-  # naming convention: "nix-workspace-<shortname>" → plugins/<shortname>/
-  #
-  # Type: Path -> String -> Path
-  #
-  # Arguments:
-  #   pluginsDir — Path to the nix-workspace plugins/ directory
-  #   pluginName — Plugin name string (e.g. "nix-workspace-rust")
-  #
-  # Returns: Path to the plugin directory
-  #
   resolvePluginDir = pluginsDir: pluginName: let
-    # Strip the "nix-workspace-" prefix to get the short name
     shortName =
       if lib.hasPrefix "nix-workspace-" pluginName
       then lib.removePrefix "nix-workspace-" pluginName
@@ -54,9 +23,6 @@
         Hint: check the plugin name in your workspace.ncl plugins list.
       '';
 
-  # Resolve the path to a plugin's .ncl definition file.
-  #
-  # Type: Path -> String -> Path
   resolvePluginNcl = pluginsDir: pluginName: let
     dir = resolvePluginDir pluginsDir pluginName;
     nclPath = dir + "/plugin.ncl";
@@ -69,12 +35,7 @@
         Expected at: ${toString nclPath}
       '';
 
-  # Resolve the path to a plugin's Nix builder file.
-  #
-  # Type: Path -> String -> Path | null
-  #
-  # Returns the path if builder.nix exists, or null if the plugin
-  # has no Nix-side builder (Nickel-only plugin).
+  # Null for a Nickel-only plugin, which has no Nix-side builder.
   resolvePluginBuilder = pluginsDir: pluginName: let
     dir = resolvePluginDir pluginsDir pluginName;
     builderPath = dir + "/builder.nix";
@@ -85,16 +46,6 @@
 
   # ── Plugin loading ────────────────────────────────────────────
   #
-  # Load all requested plugins and return their builder functions
-  # and convention mappings.
-  #
-  # Type: Path -> [String] -> AttrSet
-  #
-  # Arguments:
-  #   pluginsDir  — Path to the nix-workspace plugins/ directory
-  #   pluginNames — List of plugin name strings from workspace config
-  #
-  # Returns:
   #   {
   #     builders = { builderName = builderFn; ... };
   #     conventions = { conventionName = { path, output, builder, autoDiscover }; ... };
@@ -102,9 +53,7 @@
   #     pluginConfigs = { pluginName = evaluatedConfig; ... };
   #     pluginNames = [ "nix-workspace-rust" ... ];
   #   }
-  #
   loadPlugins = pluginsDir: pluginNames: let
-    # Load each plugin's builder.nix (if it exists) and extract its exports
     loadedPlugins =
       map (
         pluginName: let
@@ -121,18 +70,10 @@
       )
       pluginNames;
 
-    # Collect all builder functions keyed by build-system name.
-    #
-    # Each plugin builder.nix is expected to export functions named
-    # like `buildRustPackage`, `buildGo`, etc. The plugin system
-    # registers these under the build-system name from the plugin's
-    # meta (or inferred from the plugin short name).
-    #
-    # The convention is:
-    #   plugins/rust/builder.nix exports: { buildRustPackage, meta.buildSystem = "rust" }
-    #   plugins/go/builder.nix exports:   { buildGo, meta.buildSystem = "go" }
-    #
-    # We key the builder by meta.buildSystem (or meta.name).
+    # Keyed by meta.buildSystem, falling back to meta.name. A builder.nix
+    # exports its build function plus that meta:
+    #   plugins/rust/builder.nix: { buildRustPackage, meta.buildSystem = "rust" }
+    #   plugins/go/builder.nix:   { buildGo, meta.buildSystem = "go" }
     allBuilders =
       builtins.foldl' (
         acc: plugin:
@@ -148,13 +89,9 @@
       ) {}
       loadedPlugins;
 
-    # Collect shell extras functions from plugins.
-    #
-    # A plugin builder.nix can export a `shellExtras` function:
-    #   shellExtras : Pkgs -> ShellConfig -> [Derivation]
-    #
-    # These are called when building dev shells to add plugin-specific
-    # packages (e.g. Rust toolchain components).
+    # A builder.nix may export `shellExtras : Pkgs -> ShellConfig -> [Derivation]`,
+    # called while building a dev shell to add the plugin's own packages, a Rust
+    # toolchain's components say.
     allShellExtras =
       builtins.foldl' (
         acc: plugin:
@@ -171,23 +108,10 @@
 
   # ── Convention extraction ─────────────────────────────────────
   #
-  # Extract convention directory mappings from evaluated plugin configs
-  # (the JSON output of Nickel evaluation).
-  #
-  # This is called after Nickel evaluation has produced the workspace
-  # config including plugin data. The conventions from plugins need to
-  # be fed into the discovery system.
-  #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   evaluatedPluginConfigs — { pluginName = { conventions = { ... }; ... }; ... }
-  #                            from Nickel evaluation of each plugin.ncl
-  #
-  # Returns:
+  # The plugins' convention directories, read off the evaluated plugin configs
+  # once Nickel has produced them, as
   #   { conventionName = { dir, output, autoDiscover }; ... }
-  #   suitable for merging into discover.defaultConventions
-  #
+  # ready to merge into discover.defaultConventions.
   extractConventions = evaluatedPluginConfigs:
     builtins.foldl' (
       acc: pluginConfig: let
@@ -208,32 +132,16 @@
     (builtins.attrValues evaluatedPluginConfigs);
 
   # ── Builder routing ───────────────────────────────────────────
-  #
-  # Route a package to the correct builder function based on its
-  # build-system field, considering both core and plugin builders.
-  #
-  # Type: AttrSet -> Pkgs -> Path -> String -> AttrSet -> Derivation
-  #
-  # Arguments:
-  #   pluginBuilders — { buildSystemName = builderModule; ... } from loadPlugins
-  #   pkgs           — The nixpkgs package set
-  #   workspaceRoot  — Path to the workspace root
-  #   name           — Package name
-  #   cfg            — Evaluated package config
-  #
-  # Returns: A derivation
-  #
   routeBuilder = pluginBuilders: coreBuilders: pkgs: workspaceRoot: name: cfg: let
     buildSystem = cfg.build-system or "generic";
 
-    # Check plugin builders first, then fall back to core builders.
-    # Plugin builders take priority to allow overriding core behavior.
+    # Plugins first, so one can override core behaviour.
     builderFn =
       if builtins.hasAttr buildSystem pluginBuilders
       then let
         pluginModule = pluginBuilders.${buildSystem};
-        # Convention: the main build function is named build<BuildSystem>
-        # e.g. buildRustPackage, buildGo
+        # The main build function is named build<BuildSystem>: buildRustPackage,
+        # buildGo.
         fnName =
           if buildSystem == "rust"
           then "buildRustPackage"
@@ -248,18 +156,6 @@
     builderFn pkgs workspaceRoot name cfg;
 
   # ── Shell extras application ──────────────────────────────────
-  #
-  # Collect extra packages from all loaded plugins for a given shell config.
-  #
-  # Type: AttrSet -> Pkgs -> AttrSet -> [Derivation]
-  #
-  # Arguments:
-  #   pluginShellExtras — { pluginName = shellExtrasFn; ... } from loadPlugins
-  #   pkgs              — The nixpkgs package set
-  #   shellConfig       — The evaluated shell config
-  #
-  # Returns: A flat list of extra packages to add to the shell
-  #
   collectShellExtras = pluginShellExtras: pkgs: shellConfig:
     lib.concatLists (
       lib.mapAttrsToList (
@@ -271,22 +167,9 @@
 
   # ── Convention discovery ──────────────────────────────────────
   #
-  # Discover .ncl files from plugin convention directories.
-  #
-  # This extends the core discovery to also scan directories registered
-  # by plugins. Items discovered from plugin conventions inherit the
-  # plugin's builder setting.
-  #
-  # Type: (Path -> String -> AttrSet) -> Path -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   discoverNclFiles    — The core discovery function from discover.nix
-  #   workspaceRoot       — Path to the workspace root
-  #   pluginConventions   — Convention mappings extracted from plugins
-  #
-  # Returns:
+  # Core discovery extended over the directories plugins registered, as
   #   { conventionName = { name = { path, builder }; ... }; ... }
-  #
+  # where each item inherits its plugin's builder setting.
   discoverPluginConventions = discoverNclFiles: workspaceRoot: pluginConventions:
     lib.mapAttrs (
       _convName: conv: let
@@ -303,15 +186,7 @@
     (lib.filterAttrs (_: conv: conv.autoDiscover) pluginConventions);
 
   # ── Plugin validation ─────────────────────────────────────────
-  #
-  # Validate that loaded plugins don't conflict with each other.
-  #
-  # Type: [String] -> [AttrSet]
-  #
-  # Returns: List of diagnostic records for any conflicts found.
-  #
   validatePlugins = pluginNames: let
-    # Check for duplicate plugin names
     uniqueNames = lib.unique pluginNames;
     hasDuplicates = builtins.length uniqueNames != builtins.length pluginNames;
 
@@ -348,14 +223,7 @@
   # configuration values are merged in with lower priority (the user's
   # explicit values always win).
   #
-  # Type: AttrSet -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   pluginBuilders — { buildSystem = { meta.defaults = { ... }; ... }; ... }
-  #   packageConfig  — The package config from Nickel evaluation
-  #
   # Returns: The package config with plugin defaults applied.
-  #
   applyBuilderDefaults = pluginBuilders: packageConfig: let
     buildSystem = packageConfig.build-system or "generic";
     pluginModule = pluginBuilders.${buildSystem} or null;

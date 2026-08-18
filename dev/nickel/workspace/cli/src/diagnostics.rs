@@ -192,7 +192,6 @@ impl Diagnostic {
             self.message
         ));
 
-        // Location
         if let Some(ref file) = self.file {
             out.push_str(&format!("  {} {}", "-->".blue().bold(), file.bold()));
             if let Some(line) = self.line {
@@ -204,7 +203,6 @@ impl Diagnostic {
             out.push('\n');
         }
 
-        // Field
         if let Some(ref field) = self.field {
             out.push_str(&format!(
                 "  {} {}: {field}\n",
@@ -213,7 +211,6 @@ impl Diagnostic {
             ));
         }
 
-        // Contract
         if let Some(ref contract) = self.contract {
             out.push_str(&format!(
                 "  {} {}: {contract}\n",
@@ -222,7 +219,6 @@ impl Diagnostic {
             ));
         }
 
-        // Context
         if let Some(ref ctx) = self.context {
             if let Some(ref ws) = ctx.workspace {
                 out.push_str(&format!(
@@ -420,9 +416,7 @@ pub fn parse_nickel_error(stderr: &str) -> DiagnosticReport {
         return report;
     }
 
-    // Try to extract structured information from Nickel's error output.
-    //
-    // Nickel errors typically look like:
+    // Nickel errors look like
     //   error: contract broken by a value
     //     ┌─ <source>:LINE:COL
     //     │
@@ -432,7 +426,7 @@ pub fn parse_nickel_error(stderr: &str) -> DiagnosticReport {
     //     = expected: ...
     //     = ...
     //
-    // We do a line-by-line best-effort parse.
+    // so this is a best-effort line-by-line parse.
 
     let mut current_message: Option<String> = None;
     let mut current_file: Option<String> = None;
@@ -447,7 +441,6 @@ pub fn parse_nickel_error(stderr: &str) -> DiagnosticReport {
 
         // "error: ..." — start of a new error block
         if let Some(msg) = trimmed.strip_prefix("error:") {
-            // Flush previous diagnostic if any
             if let Some(ref msg_text) = current_message {
                 let full_message = if details.is_empty() {
                     msg_text.clone()
@@ -521,7 +514,6 @@ pub fn parse_nickel_error(stderr: &str) -> DiagnosticReport {
         }
     }
 
-    // Flush the last diagnostic
     if let Some(ref msg_text) = current_message {
         let full_message = if details.is_empty() {
             msg_text.clone()
@@ -547,7 +539,7 @@ pub fn parse_nickel_error(stderr: &str) -> DiagnosticReport {
         report.push(diag);
     }
 
-    // If we couldn't parse anything meaningful, wrap the whole stderr as a generic error
+    // Nothing parsed: the whole stderr becomes one generic error.
     if report.is_empty() {
         report.push(Diagnostic::error(
             codes::CONTRACT_VIOLATION,

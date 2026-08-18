@@ -1,0 +1,51 @@
+# deslop configuration for the nickel-workspace CLI.
+#
+# This is an end-user binary, not a library: it shells out to `nickel` and
+# `nix`, renders their diagnostics, and exits. Most of what deslop flags here
+# follows from that.
+
+disabled_rules = [
+  # anyhow is this crate's error type on purpose. It is a binary whose errors
+  # end up in a terminal with context attached, not a library whose callers
+  # match on variants; a domain error enum would be ceremony with one consumer.
+  "rust_public_anyhow_result",
+  "rust_internal_anyhow_result",
+
+  # The workspace config comes from Nickel, which has already validated it
+  # against the contracts. `#[serde(default)]` on the Nix side is how a field
+  # the contract makes optional arrives, and unknown fields are how a newer
+  # workspace.ncl stays readable by an older CLI.
+  "rust_serde_default_on_required_field",
+  "rust_serde_unknown_fields_allowed",
+
+  # Generated flake.nix and workspace.ncl text is written a line at a time as
+  # it is built; these files are tens of lines.
+  "rust_unbuffered_file_writes",
+  "rust_lines_allocate_per_line",
+
+  # deslop indexes one file at a time, so a call into a sibling module of the
+  # same crate has no local symbol to resolve against.
+  "hallucinated_import_call",
+
+  # Fields carried for a subcommand that does not read them yet.
+  "rust_broad_allow_dead_code",
+
+  # The convention table is a fixed handful of entries built once at startup.
+  "rust_hashmap_default_hasher",
+
+  # `DiscoveredWorkspace` is assembled as each convention directory is scanned,
+  # and is complete before anything reads it.
+  "rust_partial_init_escape",
+
+  # A CLI binary has no release profile of its own; it is built through the
+  # workspace flake, which sets one.
+  "rust_release_profile_missing_overflow_checks",
+
+  # One `unsafe` block, setting an environment variable before the Nickel
+  # subprocess is spawned.
+  "unsafe_without_safety_comment",
+
+  # The doc comments deslop reads as tutorial narration are the `--help` text
+  # clap renders.
+  "comment_style_tutorial",
+]

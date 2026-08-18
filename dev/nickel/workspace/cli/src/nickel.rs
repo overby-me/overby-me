@@ -213,8 +213,6 @@ pub fn validate_workspace(workspace_root: &Path, contracts_dir: &Path) -> Result
 
     let workspace_ncl_abs = workspace_ncl.canonicalize()?;
 
-    // Generate a wrapper that imports the workspace config and applies
-    // the WorkspaceConfig contract.
     let wrapper_source = format!(
         r#"let {{ WorkspaceConfig, .. }} = import "{contracts}/workspace.ncl" in
 (import "{workspace}") | WorkspaceConfig
@@ -267,10 +265,8 @@ pub fn validate_workspace_with_plugins(
 
     let workspace_ncl_abs = workspace_ncl.canonicalize()?;
 
-    // Build the plugin preamble: import each plugin and build extended contracts
     let mut source = String::new();
 
-    // Import base contracts
     source.push_str(&format!(
         "let {{ WorkspaceConfig, mkWorkspaceConfig, .. }} = import \"{}/workspace.ncl\" in\n",
         contracts_dir.display()
@@ -288,9 +284,8 @@ pub fn validate_workspace_with_plugins(
         contracts_dir.display()
     ));
 
-    // Import each plugin
     for (i, plugin_name) in plugin_names.iter().enumerate() {
-        // Plugin names are like "nix-workspace-rust" → directory is "rust"
+        // "nix-workspace-rust" → the "rust" directory.
         let short_name = plugin_name
             .strip_prefix("nix-workspace-")
             .unwrap_or(plugin_name);
@@ -310,21 +305,18 @@ pub fn validate_workspace_with_plugins(
         ));
     }
 
-    // Build extended package contract by merging plugin extensions
     source.push_str("let ExtPkg = PackageConfig");
     for (i, _) in plugin_names.iter().enumerate() {
         source.push_str(&format!(" & (plugin_{i}.extend.PackageConfig)"));
     }
     source.push_str(" in\n");
 
-    // Build extended shell contract
     source.push_str("let ExtShell = ShellConfig");
     for (i, _) in plugin_names.iter().enumerate() {
         source.push_str(&format!(" & (plugin_{i}.extend.ShellConfig)"));
     }
     source.push_str(" in\n");
 
-    // Build the extended workspace contract and apply it
     source.push_str("let ExtWorkspaceConfig = mkWorkspaceConfig ExtPkg ExtShell in\n");
     source.push_str(&format!(
         "(import \"{}\") | ExtWorkspaceConfig\n",
@@ -394,7 +386,7 @@ pub fn find_contracts_dir() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(exe_dir) = exe.parent()
     {
-        // Check ../contracts (if CLI is in cli/target/debug or similar)
+        // ../contracts, for a CLI in cli/target/debug or similar.
         for ancestor in exe_dir.ancestors().take(5) {
             let candidate = ancestor.join("contracts");
             if candidate.is_dir() && candidate.join("workspace.ncl").is_file() {

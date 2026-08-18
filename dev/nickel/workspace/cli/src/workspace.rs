@@ -241,18 +241,15 @@ fn discover_ncl_files(convention_dir: &Path) -> Result<Vec<DiscoveredEntry>> {
         let dir_entry = dir_entry?;
         let path = dir_entry.path();
 
-        // Only regular files (or symlinks to files)
         if !path.is_file() {
             continue;
         }
 
-        // Only .ncl files
         let ext = path.extension().and_then(|e| e.to_str());
         if ext != Some("ncl") {
             continue;
         }
 
-        // Derive the output name from the filename
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -323,7 +320,6 @@ fn discover_subworkspaces(root: &Path) -> Result<Vec<DiscoveredSubworkspace>> {
         let dir_entry = dir_entry?;
         let path = dir_entry.path();
 
-        // Must be a directory (or symlink to one)
         if !path.is_dir() {
             continue;
         }
@@ -333,28 +329,24 @@ fn discover_subworkspaces(root: &Path) -> Result<Vec<DiscoveredSubworkspace>> {
             None => continue,
         };
 
-        // Skip hidden directories
         if name.starts_with('.') {
             continue;
         }
 
-        // Skip well-known non-workspace directories
         if SKIP_DIRS.contains(&name.as_str()) {
             continue;
         }
 
-        // Skip convention directories — they are not subworkspaces
+        // A convention directory is not a subworkspace.
         if is_convention_dir(&name) {
             continue;
         }
 
-        // Must contain workspace.ncl
         let workspace_ncl = path.join("workspace.ncl");
         if !workspace_ncl.is_file() {
             continue;
         }
 
-        // Discover convention outputs within the subworkspace
         let conventions = discover_conventions(&path)?;
 
         subworkspaces.push(DiscoveredSubworkspace {

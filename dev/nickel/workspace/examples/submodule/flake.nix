@@ -21,7 +21,6 @@
 #   nix build .#external-tool
 #   nix build .#external-tool-lib
 #   nix develop
-#
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

@@ -1,13 +1,6 @@
-# Shell builder for nix-workspace
-#
-# Transforms ShellConfig records (from Nickel evaluation) into
-# mkShell derivations that become devShells flake outputs.
-#
-# Updated for v0.4 to support plugin shell extras. When plugins are
-# loaded, they can contribute extra packages to dev shells (e.g. the
-# Rust plugin adds cargo/rustc/clippy when `rust-toolchain` is set).
-#
-# Input shape (from evaluated workspace.ncl):
+# ShellConfig records into the mkShell derivations behind devShells. A loaded
+# plugin may contribute extra packages of its own: the Rust plugin adds
+# cargo/rustc/clippy when `rust-toolchain` is set. A ShellConfig looks like
 #   {
 #     packages = ["cargo" "rustc" "rust-analyzer"];
 #     env = { RUST_LOG = "debug"; };
@@ -16,22 +9,10 @@
 #     inputs-from = ["my-tool"];
 #     systems = null;  # optional override
 #   }
-#
 {lib}: let
   # Build a single devShell derivation from a ShellConfig.
-  #
-  # Type: Pkgs -> String -> AttrSet -> AttrSet -> [Derivation] -> Derivation
-  #
-  # Arguments:
-  #   pkgs              — The nixpkgs package set for the target system
-  #   name              — The shell name (e.g. "default")
-  #   shellConfig       — The evaluated ShellConfig from Nickel
-  #   workspacePackages — Built packages from this workspace (for inputs-from)
-  #   pluginExtras      — Extra packages from loaded plugins (default [])
-  #
   buildShell = pkgs: name: shellConfig: workspacePackages: pluginExtras: let
-    # Resolve package names to actual nixpkgs derivations.
-    # Names are dot-path attribute lookups into pkgs (e.g. "cargo" → pkgs.cargo).
+    # A name is a dot-path attribute lookup into pkgs: "cargo" → pkgs.cargo.
     resolvePackage = attrName: let
       parts = lib.splitString "." attrName;
     in
@@ -42,25 +23,21 @@
     shellPackages =
       map resolvePackage (shellConfig.packages or []);
 
-    # Resolve tools: { name = version; } pairs.
-    # For now, version is ignored (always latest from nixpkgs).
-    # This provides a forward-compatible interface for version pinning.
+    # { name = version; } pairs. The version is ignored - nixpkgs' is always
+    # what is used - so the field is only there for pinning later.
     toolPackages = lib.mapAttrsToList (
       toolName: _version:
         resolvePackage toolName
     ) (shellConfig.tools or {});
 
-    # Resolve inputs-from: include build inputs from named workspace packages.
     inputsFromPackages = map (
       pkgName:
         workspacePackages.${pkgName}
           or (throw "nix-workspace: shell '${name}' has inputs-from '${pkgName}' but no such package exists in the workspace")
     ) (shellConfig.inputs-from or []);
 
-    # Environment variables from the config
     envVars = shellConfig.env or {};
 
-    # Shell hook script
     shellHook = shellConfig.shell-hook or "";
   in
     pkgs.mkShell (
@@ -78,17 +55,8 @@
 
   # Build all shells for a given system.
   #
-  # Type: Pkgs -> AttrSet -> AttrSet -> [Derivation] -> AttrSet
-  #
-  # Arguments:
-  #   pkgs              — The nixpkgs package set for the target system
-  #   shellConfigs      — { name = ShellConfig; ... } from workspace evaluation
-  #   workspacePackages — { name = derivation; ... } built packages for inputs-from
-  #   pluginExtras      — Extra packages from loaded plugins (default [])
-  #
   # Returns:
   #   { name = derivation; ... } suitable for devShells.${system}
-  #
   buildShells = pkgs: shellConfigs: workspacePackages: pluginExtras:
     lib.mapAttrs (
       name: cfg:

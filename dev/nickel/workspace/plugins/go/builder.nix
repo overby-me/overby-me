@@ -12,11 +12,8 @@
 # has build-system = "go" and the nix-workspace-go plugin is loaded.
 # It falls back gracefully to the base Go builder behavior when
 # plugin-specific fields are absent.
-#
 {lib}: let
   # Resolve the Go toolchain package based on the go-version field.
-  #
-  # Type: Pkgs -> String|Null -> Derivation
   #
   # The version string comes from the Nickel enum after JSON export,
   # so it arrives as a plain string like "1_23".
@@ -30,8 +27,6 @@
     or (builtins.throw "nix-workspace-go: Go version '${versionAttr}' not found in nixpkgs. Available: go, go_1_21, go_1_22, go_1_23, go_1_24.");
 
   # Resolve a list of package attribute names to actual packages from nixpkgs.
-  #
-  # Type: Pkgs -> [String] -> [Derivation]
   resolvePkgList = pkgs: names:
     map (
       name:
@@ -41,14 +36,6 @@
     names;
 
   # Build a Go package with full plugin support.
-  #
-  # Type: Pkgs -> Path -> String -> AttrSet -> Derivation
-  #
-  # Arguments:
-  #   pkgs          — The nixpkgs package set for the target system
-  #   workspaceRoot — Path to the workspace (or subworkspace) root
-  #   name          — Package name
-  #   cfg           — The evaluated package config (from Nickel JSON)
   #
   # This builder understands all fields from the GoPackage contract
   # in addition to the base PackageConfig fields.
@@ -137,8 +124,6 @@
   #
   # This mirrors the interface of the base package builder's buildAllPackages
   # but routes everything through the enhanced Go builder.
-  #
-  # Type: AttrSet -> AttrSet
   buildAllGoPackages = {
     nixpkgs,
     nixpkgsConfig ? {},

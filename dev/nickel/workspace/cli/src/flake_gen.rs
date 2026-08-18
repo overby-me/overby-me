@@ -85,16 +85,13 @@ impl Default for FlakeGenConfig {
 pub fn generate_flake_nix(_workspace_root: &Path, config: &FlakeGenConfig) -> String {
     let mut inputs = String::new();
 
-    // nixpkgs is always included
     inputs.push_str("    nixpkgs.url = \"github:NixOS/nixpkgs/nixos-unstable\";\n");
 
-    // nix-workspace input
     inputs.push_str(&format!(
         "    nix-workspace.url = \"{}\";\n",
         config.nix_workspace_ref
     ));
 
-    // Extra inputs
     for (name, url) in &config.extra_inputs {
         inputs.push_str(&format!("    {name}.url = \"{url}\";\n"));
     }
@@ -204,8 +201,7 @@ pub fn create_temp_flake(workspace_root: &Path, config: &FlakeGenConfig) -> Resu
 
     let flake_root = temp_dir.path().to_path_buf();
 
-    // Symlink all workspace contents into the temp directory.
-    // This allows Nix to find workspace.ncl, packages/, etc.
+    // So Nix can find workspace.ncl, packages/ and the rest.
     let read_dir = std::fs::read_dir(&workspace_root).with_context(|| {
         format!(
             "Failed to read workspace directory: {}",
@@ -218,7 +214,7 @@ pub fn create_temp_flake(workspace_root: &Path, config: &FlakeGenConfig) -> Resu
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        // Skip flake.nix and flake.lock if they exist (we generate our own)
+        // A generated flake.nix and lock go in instead.
         if name_str == "flake.nix" || name_str == "flake.lock" {
             continue;
         }
@@ -232,8 +228,7 @@ pub fn create_temp_flake(workspace_root: &Path, config: &FlakeGenConfig) -> Resu
 
         #[cfg(not(unix))]
         {
-            // On non-Unix, fall back to copying (Windows doesn't have
-            // symlinks without elevated privileges).
+            // Windows has no symlinks without elevated privileges.
             if src.is_dir() {
                 copy_dir_recursive(&src, &dst)?;
             } else {
@@ -244,7 +239,6 @@ pub fn create_temp_flake(workspace_root: &Path, config: &FlakeGenConfig) -> Resu
         }
     }
 
-    // Write the generated flake.nix
     let flake_content = generate_flake_nix(&workspace_root, config);
     let flake_nix_path = flake_root.join("flake.nix");
     std::fs::write(&flake_nix_path, &flake_content)
@@ -309,19 +303,15 @@ impl Default for InitOptions {
 pub fn generate_workspace_ncl(opts: &InitOptions) -> String {
     let mut fields = Vec::new();
 
-    // name
     fields.push(format!("  name = \"{}\",", opts.name));
 
-    // description
     if let Some(ref desc) = opts.description {
         fields.push(format!("  description = \"{desc}\","));
     }
 
-    // systems
     let systems_str: Vec<String> = opts.systems.iter().map(|s| format!("\"{s}\"")).collect();
     fields.push(format!("  systems = [{}],", systems_str.join(", ")));
 
-    // plugins
     if !opts.plugins.is_empty() {
         let plugins_str: Vec<String> = opts.plugins.iter().map(|p| format!("\"{p}\"")).collect();
         fields.push(format!("\n  plugins = [{}],", plugins_str.join(", ")));
@@ -384,7 +374,6 @@ pub fn generate_sample_package_ncl(name: &str) -> String {
 pub fn init_workspace(root: &Path, opts: &InitOptions) -> Result<Vec<PathBuf>> {
     let mut created = Vec::new();
 
-    // Refuse to overwrite an existing workspace
     let workspace_ncl = root.join("workspace.ncl");
     if workspace_ncl.exists() {
         anyhow::bail!(
@@ -394,19 +383,16 @@ pub fn init_workspace(root: &Path, opts: &InitOptions) -> Result<Vec<PathBuf>> {
         );
     }
 
-    // Create the root directory if needed
     if !root.exists() {
         std::fs::create_dir_all(root)
             .with_context(|| format!("Failed to create directory: {}", root.display()))?;
     }
 
-    // Write workspace.ncl
     let workspace_content = generate_workspace_ncl(opts);
     std::fs::write(&workspace_ncl, &workspace_content)
         .with_context(|| format!("Failed to write {}", workspace_ncl.display()))?;
     created.push(PathBuf::from("workspace.ncl"));
 
-    // Write flake.nix
     if opts.with_flake {
         let flake_path = root.join("flake.nix");
         if !flake_path.exists() {
@@ -418,7 +404,6 @@ pub fn init_workspace(root: &Path, opts: &InitOptions) -> Result<Vec<PathBuf>> {
         }
     }
 
-    // Create convention directories and sample files
     for conv in &opts.conventions {
         let dir = root.join(conv);
         if !dir.exists() {
@@ -427,7 +412,6 @@ pub fn init_workspace(root: &Path, opts: &InitOptions) -> Result<Vec<PathBuf>> {
             created.push(PathBuf::from(conv));
         }
 
-        // Create sample files
         match conv.as_str() {
             "shells" => {
                 let default_shell = dir.join("default.ncl");
@@ -446,7 +430,6 @@ pub fn init_workspace(root: &Path, opts: &InitOptions) -> Result<Vec<PathBuf>> {
                 }
             }
             _ => {
-                // Create a .gitkeep so the directory is tracked by git
                 let gitkeep = dir.join(".gitkeep");
                 if !gitkeep.exists() {
                     std::fs::write(&gitkeep, "")
@@ -457,7 +440,6 @@ pub fn init_workspace(root: &Path, opts: &InitOptions) -> Result<Vec<PathBuf>> {
         }
     }
 
-    // Write .gitignore if it doesn't exist (ignore result/ directory)
     let gitignore = root.join(".gitignore");
     if !gitignore.exists() {
         std::fs::write(&gitignore, "# Nix build result symlink\nresult\nresult-*\n")

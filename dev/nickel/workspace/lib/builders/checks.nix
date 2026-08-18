@@ -1,14 +1,6 @@
-# Check builder for nix-workspace
-#
-# Converts validated CheckConfig records into check derivations.
-# Checks are discovered from the checks/ convention directory
-# or declared explicitly in workspace.ncl.
-#
-# Each check config maps to a checks.<system>.<name> flake output.
-# Checks are derivations that succeed (exit 0) when the check passes
-# and fail (non-zero exit) when it doesn't. They are run by `nix flake check`.
-#
-# Input shape (from evaluated workspace.ncl):
+# CheckConfig records into checks.<system>.<name>: derivations that exit 0 when
+# the check passes and non-zero when it does not, which is what `nix flake check`
+# runs. A CheckConfig looks like
 #   {
 #     description = "Run unit tests";
 #     command = "cargo test --workspace";
@@ -19,11 +11,8 @@
 #     inputs-from = ["my-tool"];
 #     extra-config = {};
 #   }
-#
 {lib}: let
   # Resolve a list of package attribute names to actual packages from nixpkgs.
-  #
-  # Type: Pkgs -> [String] -> [Derivation]
   resolvePkgList = pkgs: names:
     map (
       name:
@@ -43,16 +32,6 @@
   #   2. `path` mode — The config provides a path to a .nix file that
   #      evaluates to a derivation. We import it directly, passing pkgs
   #      and the workspace root.
-  #
-  # Type: Pkgs -> Path -> String -> AttrSet -> AttrSet -> Derivation
-  #
-  # Arguments:
-  #   pkgs              — The nixpkgs package set for the target system
-  #   workspaceRoot     — Path to the workspace root directory
-  #   name              — Check name (e.g. "test", "lint")
-  #   checkConfig       — The evaluated CheckConfig from Nickel
-  #   workspacePackages — Built packages for inputs-from resolution
-  #
   buildCheck = pkgs: workspaceRoot: name: checkConfig: workspacePackages: let
     hasPath = checkConfig ? path;
     hasCommand = checkConfig ? command && checkConfig.command != "";
@@ -136,20 +115,8 @@
 
   # Build all checks for a given system.
   #
-  # Type: Pkgs -> Path -> AttrSet -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   pkgs              — The nixpkgs package set for the target system
-  #   workspaceRoot     — Path to the workspace root
-  #   system            — Current system string
-  #   workspaceSystems  — Workspace-level systems list
-  #   checkConfigs      — { name = CheckConfig; ... } from workspace evaluation
-  #   workspacePackages — { name = derivation; ... } built packages for inputs-from
-  #   discoveredPaths   — { name = /path/to/check.nix; ... } from auto-discovery
-  #
   # Returns:
   #   { name = derivation; ... } suitable for checks.${system}
-  #
   buildAllChecks = {
     pkgs,
     workspaceRoot,

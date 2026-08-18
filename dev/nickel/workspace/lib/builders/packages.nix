@@ -1,18 +1,9 @@
-# Package builder for nix-workspace
-#
-# Converts validated package configuration records into Nix derivations.
-# Each package config (from workspace.ncl or discovered .ncl files) is
-# mapped to a concrete derivation using the appropriate build system.
-#
-# Supported build systems (v0.1):
-#   - "generic"  → stdenv.mkDerivation
-#   - "rust"     → rustPlatform.buildRustPackage
-#   - "go"       → buildGoModule
-#
+# Package configuration records into derivations, by build system:
+#   "generic" → stdenv.mkDerivation
+#   "rust"    → rustPlatform.buildRustPackage
+#   "go"      → buildGoModule
 {lib}: let
   # Resolve a list of package attribute names to actual packages from nixpkgs.
-  #
-  # Type: Pkgs -> [String] -> [Derivation]
   resolvePkgList = pkgs: names:
     map (
       name:
@@ -21,10 +12,7 @@
     )
     names;
 
-  # Build a generic package using stdenv.mkDerivation.
-  #
-  # This is the fallback builder for packages that don't specify a
-  # build system, or explicitly set build-system = "generic".
+  # The fallback, for a package naming no build system.
   buildGeneric = pkgs: workspaceRoot: name: cfg:
     pkgs.stdenv.mkDerivation (
       {
@@ -53,9 +41,7 @@
       // (cfg.override or {})
     );
 
-  # Build a Rust package using rustPlatform.buildRustPackage.
-  #
-  # Expects a Cargo.lock to exist at the package source root.
+  # Expects a Cargo.lock at the package source root.
   buildRust = pkgs: workspaceRoot: name: cfg: let
     src =
       if cfg ? src
@@ -80,9 +66,7 @@
       // (cfg.override or {})
     );
 
-  # Build a Go package using buildGoModule.
-  #
-  # Expects a go.sum to exist at the package source root.
+  # Expects a go.sum at the package source root.
   buildGo = pkgs: workspaceRoot: name: cfg: let
     src =
       if cfg ? src
@@ -96,7 +80,6 @@
 
         inherit src;
 
-        # Users must provide a vendorHash or use vendoring
         vendorHash = cfg.vendor-hash or null;
 
         buildInputs = resolvePkgList pkgs (cfg.build-inputs or []);
@@ -110,8 +93,6 @@
     );
 
   # Route a package config to the correct builder based on build-system.
-  #
-  # Type: Pkgs -> Path -> String -> AttrSet -> Derivation
   buildPackage = pkgs: workspaceRoot: name: cfg: let
     buildSystem = cfg.build-system or "generic";
     builder =
@@ -127,19 +108,6 @@
   in
     builder pkgs workspaceRoot name cfg;
 
-  # Build all packages from a config attrset for a given system.
-  #
-  # Type: Nixpkgs -> Path -> [String] -> String -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   nixpkgs         — The nixpkgs input (for import)
-  #   nixpkgsConfig   — Config to apply when importing nixpkgs (e.g. { allowUnfree })
-  #   workspaceRoot   — Path to the workspace root directory
-  #   workspaceSystems — The workspace-level systems list
-  #   system          — The current system string
-  #   packageConfigs  — Attrset of { name = packageConfig; ... }
-  #
-  # Returns: Attrset of { name = derivation; ... } for this system.
   buildAllPackages = {
     nixpkgs,
     nixpkgsConfig ? {},
@@ -153,7 +121,6 @@
       config = nixpkgsConfig;
     };
 
-    # Filter packages that should be built for this system
     relevantPackages =
       lib.filterAttrs (
         _name: cfg: let

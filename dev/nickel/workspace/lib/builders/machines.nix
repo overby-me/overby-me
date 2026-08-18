@@ -1,11 +1,5 @@
-# Machine builder for nix-workspace
-#
-# Converts validated MachineConfig records into NixOS system configurations.
-# Each machine config (from workspace.ncl or discovered machines/*.ncl files)
-# is mapped to a nixosConfigurations.<name> flake output using
-# nixpkgs.lib.nixosSystem.
-#
-# Input shape (from evaluated workspace.ncl):
+# MachineConfig records into nixosConfigurations.<name>, through
+# nixpkgs.lib.nixosSystem. A MachineConfig looks like
 #   {
 #     system = "x86_64-linux";
 #     state-version = "25.05";
@@ -20,21 +14,8 @@
 #     locale = "en_US.UTF-8";
 #     extra-config = {};
 #   }
-#
 {lib}: let
   # Build a single NixOS configuration from a MachineConfig.
-  #
-  # Type: Nixpkgs -> Path -> String -> AttrSet -> AttrSet -> AttrSet -> AttrSet -> Derivation
-  #
-  # Arguments:
-  #   nixpkgs          — The nixpkgs flake input (for nixpkgs.lib.nixosSystem)
-  #   workspaceRoot    — Path to the workspace root directory
-  #   name             — Machine name (becomes the hostname if not overridden)
-  #   machineConfig    — The evaluated MachineConfig from Nickel
-  #   workspaceModules — { name = path; } of NixOS modules from the workspace
-  #   homeModules      — { name = path; } of home-manager modules from the workspace
-  #   extraInputs      — Additional flake inputs to pass as specialArgs
-  #
   buildMachine = {
     nixpkgs,
     workspaceRoot,
@@ -160,7 +141,6 @@
     #   - A name matching a key in workspaceModules (e.g. "desktop")
     #   - A relative path to a .nix file (e.g. "./modules/custom.nix")
     #   - An absolute path to a .nix file
-    #
     resolveModuleRef = ref:
       if builtins.hasAttr ref workspaceModules
       then workspaceModules.${ref}
@@ -190,7 +170,6 @@
     #
     # If any user has home-manager enabled, we need to include the
     # home-manager NixOS module and configure per-user home configs.
-    #
     hmUsers = lib.filterAttrs (
       _: userCfg: userCfg.home-manager or true
     ) (machineConfig.users or {});
@@ -251,19 +230,8 @@
 
   # Build all machine configurations from the workspace config.
   #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   nixpkgs          — The nixpkgs flake input
-  #   workspaceRoot    — Path to the workspace root
-  #   machineConfigs   — { name = MachineConfig; ... } from workspace evaluation
-  #   workspaceModules — { name = /path/to/module.nix; ... } discovered NixOS modules
-  #   homeModules      — { name = /path/to/module.nix; ... } discovered home-manager modules
-  #   extraInputs      — Additional flake inputs
-  #
   # Returns:
   #   { name = nixosConfiguration; ... } suitable for nixosConfigurations
-  #
   buildAllMachines = {
     nixpkgs,
     workspaceRoot,

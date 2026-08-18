@@ -17,15 +17,6 @@
 # and plugin extension merging) and produces a derivation.
 {lib}: let
   # Build a Rust package with full plugin support.
-  #
-  # Type: Pkgs -> Path -> String -> AttrSet -> Derivation
-  #
-  # Arguments:
-  #   pkgs          — The nixpkgs package set for the target system
-  #   workspaceRoot — Path to the workspace (or subworkspace) root
-  #   name          — Package name
-  #   cfg           — Evaluated package config (with plugin extensions)
-  #
   buildRustPackage = pkgs: workspaceRoot: name: cfg: let
     src =
       if cfg ? src
@@ -121,14 +112,7 @@
   # has a `rust-toolchain` field, this function adds the appropriate
   # Rust toolchain packages to the shell.
   #
-  # Type: Pkgs -> AttrSet -> [Derivation]
-  #
-  # Arguments:
-  #   pkgs        — The nixpkgs package set
-  #   shellConfig — The evaluated shell config (with plugin extensions)
-  #
   # Returns: A list of extra packages to add to the shell
-  #
   shellExtras = pkgs: shellConfig: let
     toolchain = shellConfig.rust-toolchain or null;
   in

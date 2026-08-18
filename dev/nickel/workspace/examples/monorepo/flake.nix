@@ -18,7 +18,6 @@
 #   nix build .#app-b
 #   nix build .#app-b-cli
 #   nix develop
-#
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

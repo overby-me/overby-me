@@ -7,7 +7,6 @@
 # Usage:
 #   nix build .#hello
 #   nix develop
-#
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

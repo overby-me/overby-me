@@ -1,21 +1,13 @@
-# Template builder for nix-workspace
+# TemplateConfig records into templates.<name>, the outputs
+# `nix flake init -t <flake>#<name>` scaffolds from. Nix specifies their shape:
 #
-# Converts validated TemplateConfig records into flake template outputs.
-# Templates are discovered from the templates/ convention directory
-# or declared explicitly in workspace.ncl.
-#
-# Each template config maps to a templates.<name> flake output.
-# Templates are used by `nix flake init -t <flake>#<name>` to scaffold
-# new projects from a template directory.
-#
-# Flake template output shape (per Nix specification):
 #   templates.<name> = {
 #     description = "Human-readable description";
 #     path = /nix/store/...-template-dir;
 #     welcomeText = "Optional post-init message";  # optional
 #   };
 #
-# Input shape (from evaluated workspace.ncl):
+# and a TemplateConfig looks like
 #   {
 #     description = "Minimal Rust workspace";
 #     path = "./templates/rust-minimal";
@@ -23,23 +15,10 @@
 #     tags = ["rust" "minimal"];
 #     extra-config = {};
 #   }
-#
 {lib}: let
-  # Build a single flake template output from a TemplateConfig.
-  #
-  # The template output is a simple attribute set with `description`,
-  # `path`, and optionally `welcomeText`. The `path` must point to
-  # a directory that will be copied when a user runs `nix flake init`.
-  #
-  # Type: Path -> String -> AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot   — Path to the workspace root directory
-  #   name            — Template name (e.g. "rust-minimal")
-  #   templateConfig  — The evaluated TemplateConfig from Nickel
+  # `path` must name a directory, which is what `nix flake init` copies.
   #
   # Returns: A flake template attribute set { description, path, welcomeText? }
-  #
   buildTemplate = workspaceRoot: name: templateConfig: let
     description =
       templateConfig.description
@@ -79,13 +58,6 @@
 
   # Build all templates from the workspace config.
   #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot    — Path to the workspace root
-  #   templateConfigs  — { name = TemplateConfig; ... } from workspace evaluation
-  #   discoveredPaths  — { name = /path/to/template-dir; ... } from auto-discovery
-  #
   # Note on discovery: Template discovery works slightly differently from
   # other convention types. The templates/ directory contains subdirectories
   # (not .ncl files) that are the template content. If a template has a
@@ -95,7 +67,6 @@
   #
   # Returns:
   #   { name = templateOutput; ... } suitable for the templates flake output
-  #
   buildAllTemplates = {
     workspaceRoot,
     templateConfigs,
@@ -127,14 +98,8 @@
   # directories. A template is a subdirectory of templates/ that can be
   # copied by `nix flake init`.
   #
-  # Type: Path -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot — Path to the workspace root
-  #
   # Returns:
   #   { name = /path/to/templates/name; ... }
-  #
   discoverTemplateDirs = workspaceRoot: let
     templatesDir = workspaceRoot + "/templates";
   in

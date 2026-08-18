@@ -1,18 +1,11 @@
-# Module builder for nix-workspace
+# ModuleConfig and HomeConfig records into nixosModules.<name> and
+# homeModules.<name>.
 #
-# Converts validated ModuleConfig and HomeConfig records into flake outputs.
+# Unlike packages and machines these are not derivations but module functions,
+# `{ config, lib, pkgs, ... }: { ... }`, so the work is resolving each module's
+# path and wrapping the discovered .nix file with the extra configuration its
+# Nickel config carries. A ModuleConfig looks like
 #
-# NixOS modules   → nixosModules.<name>
-# Home modules    → homeModules.<name>
-#
-# Unlike packages and machines, modules are not derivations — they are
-# NixOS/home-manager module functions ({ config, lib, pkgs, ... }: { ... }).
-# The builder's job is to:
-#   1. Resolve module paths from the workspace
-#   2. Wrap discovered .nix files with any extra configuration from the Nickel config
-#   3. Produce properly-shaped flake output attributes
-#
-# Input shape for ModuleConfig (from evaluated workspace.ncl):
 #   {
 #     description = "Desktop environment module";
 #     imports = ["base"];
@@ -22,39 +15,16 @@
 #     extra-config = {};
 #   }
 #
-# Input shape for HomeConfig:
-#   {
-#     description = "Shell configuration";
-#     imports = ["base"];
-#     options-namespace = "programs.my-tool";
-#     platforms = ["x86_64-linux"];
-#     path = "./home/shell.nix";
-#     state-version = "25.05";
-#     extra-config = {};
-#   }
-#
+# and a HomeConfig the same plus `state-version`.
 {lib}: let
-  # Build a single NixOS module from a ModuleConfig.
-  #
-  # If the config has a `path`, we import that .nix file and wrap it
-  # with any extra-config. If no path is set (e.g. inline module in
-  # workspace.ncl), we construct a module from the config fields.
-  #
-  # Type: Path -> AttrSet -> AttrSet -> NixOS Module
-  #
-  # Arguments:
-  #   workspaceRoot    — Path to the workspace root directory
-  #   name             — Module name (e.g. "desktop")
-  #   moduleConfig     — The evaluated ModuleConfig from Nickel
-  #   allModulePaths   — { name = /path/to/module.nix; ... } for resolving imports
-  #
+  # A `path` is imported and wrapped with extra-config; without one, the module
+  # is built from the config fields alone, which is the inline case.
   buildNixosModule = {
     workspaceRoot,
     name,
     moduleConfig,
     allModulePaths ? {},
   }: let
-    # Resolve a module reference to an importable path
     resolveImportRef = ref:
       if builtins.hasAttr ref allModulePaths
       then allModulePaths.${ref}
@@ -76,8 +46,7 @@
 
     hasPath = moduleConfig ? path;
 
-    # The primary module source — either from a discovered .nix file or
-    # from the allModulePaths mapping using the module name.
+    # A discovered .nix file, or the allModulePaths entry for this name.
     modulePath =
       if hasPath
       then
@@ -90,8 +59,6 @@
       then allModulePaths.${name}
       else null;
   in
-    # If we have a concrete .nix file, produce a module that imports it
-    # plus any resolved imports and extra-config.
     if modulePath != null
     then
       {lib, ...}: {
@@ -102,19 +69,13 @@
         config = lib.mkIf true extraConfig;
       }
     else
-      # No file path — produce a module from just imports + extra-config.
-      # This covers the case where a module is declared purely in workspace.ncl.
       {lib, ...}: {
         imports = resolvedImports;
 
         config = lib.mkIf true extraConfig;
       };
 
-  # Build a single home-manager module from a HomeConfig.
-  #
-  # Similar to buildNixosModule but for the home-manager module system.
-  #
-  # Type: Path -> AttrSet -> AttrSet -> Home-Manager Module
+  # buildNixosModule for the home-manager module system.
   buildHomeModule = {
     workspaceRoot,
     name,
@@ -170,18 +131,6 @@
         config = lib.mkIf true extraConfig;
       };
 
-  # Build all NixOS modules from the workspace config.
-  #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot  — Path to the workspace root
-  #   moduleConfigs  — { name = ModuleConfig; ... } from workspace evaluation
-  #   discoveredPaths — { name = /path/to/module.nix; ... } from auto-discovery
-  #
-  # Returns:
-  #   { name = nixosModule; ... } suitable for nixosModules flake output
-  #
   buildAllNixosModules = {
     workspaceRoot,
     moduleConfigs,
@@ -196,18 +145,6 @@
     )
     moduleConfigs;
 
-  # Build all home-manager modules from the workspace config.
-  #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot  — Path to the workspace root
-  #   homeConfigs    — { name = HomeConfig; ... } from workspace evaluation
-  #   discoveredPaths — { name = /path/to/module.nix; ... } from auto-discovery
-  #
-  # Returns:
-  #   { name = homeModule; ... } suitable for homeModules flake output
-  #
   buildAllHomeModules = {
     workspaceRoot,
     homeConfigs,
@@ -222,18 +159,9 @@
     )
     homeConfigs;
 
-  # Discover .nix files (not .ncl) in a convention directory.
-  #
-  # This complements the Nickel discovery — modules may also have
-  # plain .nix implementation files alongside their .ncl configuration.
-  # For example:
-  #   modules/desktop.ncl  — Nickel config (options, description, imports)
-  #   modules/desktop.nix  — Actual NixOS module implementation
-  #
-  # Type: Path -> String -> AttrSet
-  #
-  # Returns: { name = /path/to/name.nix; ... }
-  #
+  # The .nix half of a module, alongside the .ncl the Nickel discovery finds:
+  #   modules/desktop.ncl  — options, description, imports
+  #   modules/desktop.nix  — the NixOS module itself
   discoverNixFiles = workspaceRoot: relativeDir: let
     dirPath = workspaceRoot + "/${relativeDir}";
   in

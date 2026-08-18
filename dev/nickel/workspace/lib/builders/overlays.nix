@@ -1,14 +1,5 @@
-# Overlay builder for nix-workspace
-#
-# Converts validated OverlayConfig records into flake overlay outputs.
-# Overlays are discovered from the overlays/ convention directory
-# or declared explicitly in workspace.ncl.
-#
-# Each overlay config maps to an overlays.<name> flake output.
-# Overlays are Nix functions (final: prev: { ... }) that extend or
-# override packages in nixpkgs.
-#
-# Input shape (from evaluated workspace.ncl):
+# OverlayConfig records into overlays.<name>, the `final: prev: { ... }`
+# functions that extend or override nixpkgs. An OverlayConfig looks like
 #   {
 #     description = "Custom packages overlay";
 #     path = "./overlays/custom.nix";
@@ -16,25 +7,10 @@
 #     packages = ["my-tool" "my-lib"];
 #     extra-config = {};
 #   }
-#
 {lib}: let
-  # Build a single overlay from an OverlayConfig.
-  #
-  # If the config has a `path`, we import that .nix file directly.
-  # The .nix file must evaluate to a function `final: prev: { ... }`.
-  #
-  # If no path is provided, the overlay is constructed from the
-  # extra-config escape hatch (or is a no-op).
-  #
-  # Type: Path -> String -> AttrSet -> (AttrSet -> AttrSet -> AttrSet)
-  #
-  # Arguments:
-  #   workspaceRoot  — Path to the workspace root directory
-  #   name           — Overlay name (e.g. "custom-packages")
-  #   overlayConfig  — The evaluated OverlayConfig from Nickel
-  #
-  # Returns: A nixpkgs overlay function (final: prev: { ... })
-  #
+  # A `path` is imported directly and must evaluate to `final: prev: { ... }`.
+  # Without one, the overlay comes from the extra-config escape hatch, or is a
+  # no-op.
   buildOverlay = workspaceRoot: name: overlayConfig: let
     hasPath = overlayConfig ? path;
 
@@ -59,23 +35,12 @@
           nix-workspace: overlay '${name}' at '${toString resolvedPath}' does not evaluate to a function.
           Overlays must be functions of the form: final: prev: { ... }
         ''
-    else
-      # No path — produce a no-op overlay. This covers the case where
-      # an overlay is declared purely in workspace.ncl as metadata.
-      _final: _prev: {};
+    else _final: _prev: {};
 
   # Build all overlays from the workspace config.
   #
-  # Type: AttrSet -> AttrSet
-  #
-  # Arguments:
-  #   workspaceRoot   — Path to the workspace root
-  #   overlayConfigs  — { name = OverlayConfig; ... } from workspace evaluation
-  #   discoveredPaths — { name = /path/to/overlay.nix; ... } from auto-discovery
-  #
   # Returns:
   #   { name = overlayFn; ... } suitable for the overlays flake output
-  #
   buildAllOverlays = {
     workspaceRoot,
     overlayConfigs,
@@ -106,14 +71,8 @@
 
   # Sort overlays by priority for application order.
   #
-  # Type: AttrSet -> [(String, AttrSet)]
-  #
-  # Arguments:
-  #   overlayConfigs — { name = OverlayConfig; ... }
-  #
   # Returns: List of (name, config) pairs sorted by priority (ascending),
   #          then alphabetically by name for equal priorities.
-  #
   sortByPriority = overlayConfigs: let
     entries =
       lib.mapAttrsToList (name: cfg: {
@@ -132,14 +91,7 @@
 
   # Compose all overlays into a single overlay function, respecting priority order.
   #
-  # Type: Path -> AttrSet -> (AttrSet -> AttrSet -> AttrSet)
-  #
-  # Arguments:
-  #   workspaceRoot  — Path to the workspace root
-  #   overlayConfigs — { name = OverlayConfig; ... }
-  #
   # Returns: A single composed overlay function
-  #
   composeOverlays = workspaceRoot: overlayConfigs: let
     sorted = sortByPriority overlayConfigs;
     overlayFns =

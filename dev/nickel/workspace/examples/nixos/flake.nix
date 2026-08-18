@@ -11,7 +11,6 @@
 # Usage:
 #   nixos-rebuild switch --flake .#my-machine
 #   nix build .#nixosConfigurations.my-machine.config.system.build.toplevel
-#
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
