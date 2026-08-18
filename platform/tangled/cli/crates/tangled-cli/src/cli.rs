@@ -227,7 +227,7 @@ pub struct AuthSwitchArgs {
     pub profile: String,
 }
 
-#[derive(Args, Debug, Clone)]
+#[derive(Args, Clone)]
 pub struct AuthLoginArgs {
     /// Bluesky handle (e.g. user.bsky.social)
     #[arg(long)]
@@ -238,6 +238,19 @@ pub struct AuthLoginArgs {
     /// PDS URL (default: https://bsky.social)
     #[arg(long)]
     pub pds: Option<String>,
+}
+
+// Debug is written out rather than derived: `--password` on the command line
+// is already visible in the process table, and deriving Debug would put it in
+// the log as well the first time anything dumps the parsed arguments.
+impl std::fmt::Debug for AuthLoginArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthLoginArgs")
+            .field("handle", &self.handle)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("pds", &self.pds)
+            .finish()
+    }
 }
 
 #[derive(Args, Debug, Clone)]

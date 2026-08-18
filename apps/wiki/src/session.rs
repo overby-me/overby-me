@@ -15,7 +15,7 @@ pub struct User {
     pub avatar_url: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Session {
     pub user: Option<User>,
     pub access_token: Option<String>,
@@ -25,6 +25,28 @@ pub struct Session {
     /// sessions persisted before this field existed (treated as "refresh now").
     #[serde(default)]
     pub access_token_expires_at: Option<f64>,
+}
+
+// Debug is written out rather than derived so the tokens cannot reach a log
+// through a `{:?}` that never mentions them - a wrapping error, a tracing
+// span, a dioxus hook dump. Serialize still emits them, which is what the
+// session store needs.
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("user", &self.user)
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("node_id", &self.node_id)
+            .field("access_token_expires_at", &self.access_token_expires_at)
+            .finish()
+    }
 }
 
 impl Session {

@@ -25,19 +25,41 @@ pub fn storage_url() -> String {
 // `backend_api.rs`; this module keeps only the NHost auth + storage glue that
 // dies with NHost at cutover.
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct SignInRequest {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignUpRequest {
     pub email: String,
     pub password: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<SignUpOptions>,
+}
+
+// Debug is written out for these two so a failed sign-in cannot log the
+// password through a `{:?}` on the request. Serialize is untouched: emitting
+// the password is the whole point of the request body.
+impl std::fmt::Debug for SignInRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignInRequest")
+            .field("email", &self.email)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for SignUpRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignUpRequest")
+            .field("email", &self.email)
+            .field("password", &"<redacted>")
+            .field("options", &self.options)
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize)]
