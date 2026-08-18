@@ -1,0 +1,19 @@
+# Ratchet: zero sites.
+#
+# set_len tells Vec that elements exist without writing them, so reading or
+# dropping them afterwards is UB. It is the one Vec method whose misuse is
+# invisible at the call: the length is simply wrong from then on.
+id: rust-vec-set-len
+language: rust
+severity: warning
+message: >-
+  set_len claims elements are initialised without writing them; reading or
+  dropping them is UB. Write the elements first, or use resize / extend /
+  spare_capacity_mut.
+files:
+  - "**/*.rs"
+ignores:
+  - "apps/wiki/vendor/**"
+  - "safety/oxidized/**"
+rule:
+  pattern: $VEC.set_len($$$ARGS)
