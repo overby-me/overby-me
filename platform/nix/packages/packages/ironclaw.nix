@@ -66,12 +66,11 @@
 
       # Set up vendored deps
       mkdir -p .cargo
-      cat > .cargo/config.toml <<EOF
-      [source.crates-io]
-      replace-with = "vendored-sources"
-      [source.vendored-sources]
-      directory = "${telegramChannelDeps}"
-      EOF
+      # The vendor's own config, which names <vendor>/source-registry-0 -
+      # where fetchCargoVendor actually puts the crates. Pointing cargo at
+      # the vendor root instead found no crates at all.
+      sed 's|@vendor@|${telegramChannelDeps}|g' \
+        ${telegramChannelDeps}/.cargo/config.toml > .cargo/config.toml
 
       cargo build --release --target wasm32-wasip2 --offline
 
