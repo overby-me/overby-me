@@ -3124,7 +3124,7 @@ fn mem_test_scope_cycle(rt_ptr: Int64, count: Int32) -> Int32:
     """
     var rt = _get[Runtime](rt_ptr)
     var ids = List[UInt32]()
-    for i in range(Int(count)):
+    for _ in range(Int(count)):
         ids.append(rt[0].create_scope(0, -1))
     for i in range(Int(count)):
         rt[0].destroy_scope(ids[i])

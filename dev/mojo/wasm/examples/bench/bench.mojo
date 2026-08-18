@@ -643,9 +643,9 @@ struct BenchmarkApp(Movable):
 
     fn _generate_label(mut self) -> String:
         """Generate a random "adjective colour noun" label."""
-        var a = Int(self._next_random() % _ADJ_COUNT)
-        var c = Int(self._next_random() % _COL_COUNT)
-        var n = Int(self._next_random() % _NOUN_COUNT)
+        var a = Int(self._next_random() % UInt32(_ADJ_COUNT))
+        var c = Int(self._next_random() % UInt32(_COL_COUNT))
+        var n = Int(self._next_random() % UInt32(_NOUN_COUNT))
         return _adjective(a) + " " + _colour(c) + " " + _noun(n)
 
     fn _bump_version(mut self):

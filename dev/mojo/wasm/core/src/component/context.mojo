@@ -2098,7 +2098,7 @@ struct ComponentContext(Movable):
 
         Useful for testing and introspection.
         """
-        return self.shell.runtime[0].handler_count()
+        return UInt32(self.shell.runtime[0].handler_count())
 
     fn view_events(self) -> List[EventBinding]:
         """Return a copy of the registered view event bindings.
