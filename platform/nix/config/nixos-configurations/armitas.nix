@@ -196,7 +196,10 @@
           wireless.enable = true;
           # wireless.macAddress = "XX:XX:XX:XX:XX:XX";
           bluetooth.enable = true;
-          # bluetooth.macAddress = "XX:XX:XX:XX:XX:XX";
+          # No EEPROM address and no local-bd-address in the devicetree, so
+          # the controller registers unconfigured.  Invented, since Windows
+          # is gone: locally administered and unicast.
+          bluetooth.macAddress = "02:1F:3B:9C:44:7E";
         };
       };
 
