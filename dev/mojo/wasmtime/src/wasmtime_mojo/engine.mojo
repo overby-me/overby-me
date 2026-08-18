@@ -81,5 +81,17 @@ struct Engine(Movable):
         self._ptr = take._ptr
 
     fn ptr(self) -> EnginePtr:
-        """Return the raw engine pointer for FFI calls."""
+        """Return the raw engine pointer for FFI calls.
+
+        The returned pointer carries MutExternalOrigin, which tells the
+        compiler it does NOT borrow self. A Engine held in a local is therefore
+        destroyed at its last use, so
+
+            var e = Engine()
+            var l = Linker(e.ptr())   # e dies here; wasmtime reads freed memory
+
+        segfaults inside wasmtime. Keep the owner alive for at least as long as
+        anything derived from it - a struct field, or a later use of the owner
+        in the same scope.
+        """
         return self._ptr
