@@ -198,7 +198,11 @@ fn main() -> anyhow::Result<()> {
 
     let elapsed = start.elapsed();
     let fps = if elapsed.as_secs_f64() > 0.0 {
-        total_frames as f64 / elapsed.as_secs_f64()
+        // A frame count large enough to lose f64 precision is 2^53 frames,
+        // which at 30fps is nine million years of video.
+        #[allow(clippy::cast_precision_loss)]
+        let frames = total_frames as f64;
+        frames / elapsed.as_secs_f64()
     } else {
         0.0
     };

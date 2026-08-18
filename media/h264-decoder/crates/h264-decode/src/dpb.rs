@@ -11,6 +11,8 @@
 //! process defined in the H.264 specification (sub-clauses 8.2.5.3 and
 //! 8.2.5.4).
 
+use std::cmp::Reverse;
+
 use crate::error::{DecodeError, DecodeResult};
 use crate::frame::DecodedFrame;
 
@@ -361,7 +363,7 @@ impl Dpb {
             .iter()
             .filter(|e| e.reference == ReferenceStatus::ShortTerm && e.pic_order_cnt <= current_poc)
             .collect();
-        before.sort_by(|a, b| b.pic_order_cnt.cmp(&a.pic_order_cnt));
+        before.sort_by_key(|f| Reverse(f.pic_order_cnt));
 
         let mut long_term: Vec<&DpbEntry> = self
             .entries

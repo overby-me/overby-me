@@ -449,7 +449,11 @@ impl Decoder {
         }
 
         // Keep the data from the last start code onward (incomplete NAL).
-        let last_pos = *positions.last().unwrap();
+        // The len < 2 guard above means there is always a last one; taking it
+        // this way keeps the function total rather than resting on that.
+        let Some(&last_pos) = positions.last() else {
+            return nals;
+        };
         // Find the start of this last start code so we keep the prefix too.
         let keep_from = if last_pos >= 4
             && buf[last_pos - 4] == 0
