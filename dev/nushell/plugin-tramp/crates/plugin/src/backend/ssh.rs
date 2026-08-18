@@ -172,6 +172,8 @@ impl SshBackend {
     // -----------------------------------------------------------------------
 
     /// Classify an SFTP error into the appropriate `TrampError`.
+    // Takes the error by value because it converts it; that is the shape From has.
+    #[allow(clippy::needless_pass_by_value)]
     fn classify_sftp_error(err: openssh_sftp_client::Error, path: &str) -> TrampError {
         let msg = err.to_string();
         if msg.contains("No such file")

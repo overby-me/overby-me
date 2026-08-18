@@ -13,6 +13,10 @@
 //! 3. **Remote path** — when the user has typed `/ssh:host:/some/pa…`,
 //!    list the parent directory on the remote and offer matching entries.
 
+// Byte counts become f64 to be rendered as human-readable sizes; a file large
+// enough to lose f64 precision is sixteen exabytes.
+#![allow(clippy::cast_precision_loss)]
+
 use std::sync::Mutex;
 
 use nu_protocol::{DynamicSuggestion, Span, SuggestionKind, ast};

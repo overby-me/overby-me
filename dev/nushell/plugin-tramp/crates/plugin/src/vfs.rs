@@ -480,8 +480,9 @@ impl Vfs {
             current = Some(Self::connect_hop(hop, current.as_ref()).await?);
         }
 
-        // Safety: we checked that hops is non-empty above.
-        Ok(current.unwrap())
+        // hops is non-empty, checked above, so the loop always ran; taking the
+        // value this way says so without a panic path.
+        current.ok_or_else(|| TrampError::Internal("no hops to connect".into()))
     }
 
     /// Get or create a backend connection for the given hop chain.
@@ -948,6 +949,9 @@ impl Vfs {
 
 impl Default for Vfs {
     fn default() -> Self {
+        // Default cannot report failure, and a VFS that will not construct
+        // leaves the plugin with nothing to serve.
+        #[allow(clippy::expect_used)]
         Self::new().expect("failed to create VFS")
     }
 }

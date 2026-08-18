@@ -76,6 +76,8 @@ fn gid_to_name(gid: u32) -> Option<String> {
 }
 
 /// Map an `std::io::Error` to an appropriate RPC error response.
+// Takes the error by value because it converts it; that is the shape From has.
+#[allow(clippy::needless_pass_by_value)]
 fn io_err_to_response(id: u64, path: &str, err: std::io::Error) -> Response {
     let (code, msg) = match err.kind() {
         std::io::ErrorKind::NotFound => (

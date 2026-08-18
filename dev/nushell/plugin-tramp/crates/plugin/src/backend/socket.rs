@@ -449,6 +449,9 @@ pub async fn start_k8s_tcp_agent(
                 // the plugin exits or when the connection is dropped.
                 // A proper implementation would track and clean up these
                 // processes, but for now this is acceptable.
+                // Deliberate: dropping the handle would reap the port-forward child,
+                // and it has to outlive this scope for the socket to stay up.
+                #[allow(clippy::mem_forget)]
                 std::mem::forget(pf_child);
                 return Some(backend);
             }

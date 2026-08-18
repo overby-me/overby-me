@@ -144,7 +144,7 @@ mod unix {
                     match guard.try_io(|inner| {
                         let fd = inner.get_ref().as_raw_fd();
                         let n = unsafe {
-                            libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+                            libc::read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len())
                         };
                         if n < 0 {
                             Err(io::Error::last_os_error())
@@ -184,7 +184,7 @@ mod unix {
                     let n = unsafe {
                         libc::write(
                             fd,
-                            remaining.as_ptr() as *const libc::c_void,
+                            remaining.as_ptr().cast::<libc::c_void>(),
                             remaining.len(),
                         )
                     };

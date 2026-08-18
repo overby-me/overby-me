@@ -26,6 +26,15 @@
 //! - stdin reaches EOF (the SSH connection was closed)
 //! - it receives SIGTERM or SIGINT
 
+// The agent is a thin layer over libc: each unsafe block is one syscall whose
+// arguments have to be set up and read back together, so splitting them per
+// operation would separate a call from the buffer it fills. Safety is argued
+// per function, which is what .deslop.toml records too.
+//
+// It is also a daemon binary, so it reports failure by exit code rather than
+// unwinding a Result to say the same thing.
+#![allow(clippy::multiple_unsafe_ops_per_block, clippy::exit)]
+
 mod ops;
 mod rpc;
 
@@ -333,6 +342,8 @@ async fn run_tcp_listener(addr: std::net::SocketAddr) {
         }
     };
 
+    // The listener bound successfully just above, so it has an address.
+    #[allow(clippy::expect_used)]
     let local_addr = listener
         .local_addr()
         .expect("failed to get local address from TCP listener");
@@ -453,8 +464,8 @@ async fn main() {
         .map(|w| w[1].clone())
         .or_else(|| {
             args.iter()
-                .find(|a| a.starts_with("--listen="))
-                .map(|a| a.strip_prefix("--listen=").unwrap().to_string())
+                .find_map(|a| a.strip_prefix("--listen="))
+                .map(ToString::to_string)
         });
 
     // Log to stderr so it doesn't interfere with the MsgPack protocol on

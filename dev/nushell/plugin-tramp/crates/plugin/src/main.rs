@@ -27,6 +27,10 @@
 //! /ssh:myvm|sudo:root:/etc/shadow
 //! ```
 
+// The pty and fd plumbing here is libc, and each unsafe block is one syscall
+// with its argument setup; see the agent crate for the same reasoning.
+#![allow(clippy::multiple_unsafe_ops_per_block)]
+
 mod backend;
 mod completion;
 mod errors;
@@ -68,6 +72,9 @@ struct TrampPlugin {
 }
 
 impl TrampPlugin {
+    // A plugin whose VFS will not construct has nothing to answer with, and
+    // this runs once at startup before nushell sends anything.
+    #[allow(clippy::expect_used)]
     fn new() -> Self {
         Self {
             vfs: Arc::new(Vfs::new().expect("failed to initialise tramp VFS")),
@@ -256,6 +263,8 @@ fn serde_like_json(text: &str, span: Span) -> Result<Value, ()> {
 }
 
 /// Convert a `TrampError` into a `LabeledError` with the call's span.
+// Takes the error by value because it converts it; that is the shape From has.
+#[allow(clippy::needless_pass_by_value)]
 fn tramp_err(e: TrampError, span: Span) -> LabeledError {
     LabeledError::new(e.to_string()).with_label("tramp error", span)
 }
@@ -269,7 +278,10 @@ fn tramp_err(e: TrampError, span: Span) -> LabeledError {
 ///
 /// Extracts the partial string from the AST, calls into the completion module,
 /// and returns the suggestions (or `None` to fall back to defaults).
-#[allow(deprecated)]
+// `call` and `arg_type` come from nushell's completion callback as owned
+// values and are only read here; taking references would put the borrow at
+// every call site for nothing.
+#[allow(deprecated, clippy::needless_pass_by_value)]
 fn complete_tramp_arg(
     plugin: &TrampPlugin,
     call: DynamicCompletionCall,
@@ -829,9 +841,8 @@ impl PluginCommand for TrampLs {
 fn chrono_from_nanos(nanos: i64) -> chrono::DateTime<chrono::FixedOffset> {
     let secs = nanos / 1_000_000_000;
     let nsecs = (nanos % 1_000_000_000) as u32;
-    let dt = chrono::DateTime::from_timestamp(secs, nsecs)
-        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
-    dt.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
+    let dt = chrono::DateTime::from_timestamp(secs, nsecs).unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    dt.fixed_offset()
 }
 
 // ---------------------------------------------------------------------------
