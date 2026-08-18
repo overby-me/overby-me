@@ -7,7 +7,7 @@ The OwnedDLHandle is loaded lazily on first use via `get_lib()`.
 """
 
 from os import getenv
-from sys.ffi import OwnedDLHandle
+from std.ffi import OwnedDLHandle
 from memory import UnsafePointer, alloc
 
 from ._types import (
@@ -60,7 +60,7 @@ fn _find_lib_in_nix_ldflags() raises -> OwnedDLHandle:
     for i in range(len(parts)):
         var part = parts[i]
         if part.startswith("-L") and "wasmtime" in part:
-            var dir_path = part[2:]
+            var dir_path = part.removeprefix("-L")
             var full = dir_path + "/libwasmtime.so"
             try:
                 return OwnedDLHandle(full)

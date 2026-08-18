@@ -107,8 +107,7 @@ comptime ExternTypePtr = UnsafePointer[NoneType, MutExternalOrigin]
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmtimeVal:
+struct WasmtimeVal(TrivialRegisterPassable):
     """Mirrors wasmtime_val_t (32 bytes, 8-byte aligned)."""
 
     var _w0: UInt64  # kind (byte 0) + 7 bytes padding
@@ -220,8 +219,7 @@ struct WasmtimeVal:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmtimeFunc:
+struct WasmtimeFunc(TrivialRegisterPassable):
     """Mirrors wasmtime_func_t (16 bytes, 8-byte aligned)."""
 
     var _w0: UInt64
@@ -246,8 +244,7 @@ struct WasmtimeFunc:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmtimeInstance:
+struct WasmtimeInstance(TrivialRegisterPassable):
     """Mirrors wasmtime_instance_t (16 bytes, 8-byte aligned)."""
 
     var _w0: UInt64
@@ -275,8 +272,7 @@ struct WasmtimeInstance:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmtimeGlobal:
+struct WasmtimeGlobal(TrivialRegisterPassable):
     """Mirrors wasmtime_global_t (24 bytes, 8-byte aligned)."""
 
     var _w0: UInt64
@@ -303,8 +299,7 @@ struct WasmtimeGlobal:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmtimeMemory:
+struct WasmtimeMemory(TrivialRegisterPassable):
     """Mirrors wasmtime_memory_t (24 bytes, 8-byte aligned)."""
 
     var _w0: UInt64
@@ -334,8 +329,7 @@ struct WasmtimeMemory:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmtimeExtern:
+struct WasmtimeExtern(TrivialRegisterPassable):
     """Mirrors wasmtime_extern_t (32 bytes, 8-byte aligned)."""
 
     var _w0: UInt64  # kind (byte 0) + 7 bytes padding
@@ -398,8 +392,7 @@ struct WasmtimeExtern:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmByteVec:
+struct WasmByteVec(TrivialRegisterPassable):
     """Mirrors wasm_byte_vec_t (16 bytes)."""
 
     var size: Int
@@ -422,8 +415,7 @@ struct WasmByteVec:
 # ---------------------------------------------------------------------------
 
 
-@register_passable("trivial")
-struct WasmValtypeVec:
+struct WasmValtypeVec(TrivialRegisterPassable):
     """Mirrors wasm_valtype_vec_t (16 bytes)."""
 
     var size: Int

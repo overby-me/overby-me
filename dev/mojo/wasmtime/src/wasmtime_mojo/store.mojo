@@ -57,10 +57,10 @@ struct Store:
             except:
                 pass
 
-    fn __moveinit__(out self, deinit other: Self):
+    fn __moveinit__(out self, deinit take: Self):
         """Move constructor — transfers ownership of the store pointer."""
-        self._ptr = other._ptr
-        self._context = other._context
+        self._ptr = take._ptr
+        self._context = take._context
 
     fn context(self) -> ContextPtr:
         """Return the wasmtime_context_t for this store.

@@ -76,9 +76,9 @@ struct Engine:
             except:
                 pass
 
-    fn __moveinit__(out self, deinit other: Self):
+    fn __moveinit__(out self, deinit take: Self):
         """Move constructor — transfers ownership of the engine pointer."""
-        self._ptr = other._ptr
+        self._ptr = take._ptr
 
     fn ptr(self) -> EnginePtr:
         """Return the raw engine pointer for FFI calls."""

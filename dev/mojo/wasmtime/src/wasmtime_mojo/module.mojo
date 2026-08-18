@@ -92,9 +92,9 @@ struct Module:
             except:
                 pass
 
-    fn __moveinit__(out self, deinit other: Self):
+    fn __moveinit__(out self, deinit take: Self):
         """Move constructor — transfers ownership of the module pointer."""
-        self._ptr = other._ptr
+        self._ptr = take._ptr
 
     fn ptr(self) -> ModulePtr:
         """Return the raw module pointer for FFI calls."""
