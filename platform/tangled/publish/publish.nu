@@ -177,18 +177,17 @@ def derive-filter [p: record, --current]: nothing -> string {
     })
   )
   let mapped = ($artifacts | each {|a|
-    let terms = (
-      ($eras | each {|era| $"::($a.dest)=($era.path)/($a.then)" })
-      | append [$"::($a.dest)=($a.now)"]
-    )
     # A project that ships the artifact itself overrides the generated one:
-    # appended last, where josh lets it win. Anchored to the repo root,
-    # because filters are also derived from other working directories.
-    if ($env.FILE_PWD | path join "../../.." $p.path $a.then | path expand | path exists) {
-      $terms | append [$"::($a.dest)=($p.path)/($a.then)"]
-    } else {
-      $terms
-    }
+    # its current-path term moves after the generated term, where josh lets
+    # it win. Moved rather than appended, because josh normalises the
+    # filter and a duplicated term collapses back to its first position.
+    # Anchored to the repo root, because filters are also derived from
+    # other working directories.
+    let shipped = ($env.FILE_PWD | path join "../../.." $p.path $a.then | path expand | path exists)
+    let former = ($eras | where {|era| (not $shipped) or $era.path != $p.path })
+    ($former | each {|era| $"::($a.dest)=($era.path)/($a.then)" })
+    | append [$"::($a.dest)=($a.now)"]
+    | append (if $shipped { [$"::($a.dest)=($p.path)/($a.then)"] } else { [] })
   } | flatten)
   $":[(($terms | append $mapped) | str join ',')]:unsign"
 }
