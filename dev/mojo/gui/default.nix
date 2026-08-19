@@ -19,8 +19,6 @@
         # Web renderer (WASM + TypeScript)
         deno
         wabt
-        llvmPackages_latest.llvm
-        llvmPackages_latest.lld
         wasmtime.lib
         wasmtime.dev
         jq
@@ -210,8 +208,6 @@
         just
         mojo
         nushell
-        llvmPackages_latest.llvm # llc
-        llvmPackages_latest.lld # wasm-ld
         wabt # wasm-objdump etc.
         wasmtime # wasmtime CLI (compile)
       ];
@@ -238,8 +234,10 @@
         cd web
         mkdir -p build
         mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
-        sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
-        sed -i 's/ nocreateundeforpoison//g' build/out.ll
+        # Strip the host CPU attributes before retargeting: their presence
+        # overrides the wasm target's default features (losing bulk-memory, so
+        # memmove lowers to an unresolved import) and the emptied attribute
+        # groups do not parse.
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
         sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
         llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
@@ -277,8 +275,6 @@
         just
         mojo
         deno
-        llvmPackages_latest.llvm # llc
-        llvmPackages_latest.lld # wasm-ld
         wabt # wasm-objdump etc.
       ];
 
@@ -300,8 +296,10 @@
         cd web
         mkdir -p build
         mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
-        sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
-        sed -i 's/ nocreateundeforpoison//g' build/out.ll
+        # Strip the host CPU attributes before retargeting: their presence
+        # overrides the wasm target's default features (losing bulk-memory, so
+        # memmove lowers to an unresolved import) and the emptied attribute
+        # groups do not parse.
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
         sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
         llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
@@ -365,10 +363,7 @@
 
       nativeBuildInputs = with pkgs; [
         mojo
-        llvmPackages_latest.llvm # llc
-        llvmPackages_latest.lld # wasm-ld
         wabt # wasm-objdump etc.
-        gnused # sed -i
       ];
 
       buildInputs = mojoLinkInputs;
@@ -382,8 +377,10 @@
         mojo build --emit llvm \
           -I core/src -I examples \
           -o web/build/out.ll web/src/main.mojo
-        sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' web/build/out.ll
-        sed -i 's/ nocreateundeforpoison//g' web/build/out.ll
+        # Strip the host CPU attributes before retargeting: their presence
+        # overrides the wasm target's default features (losing bulk-memory, so
+        # memmove lowers to an unresolved import) and the emptied attribute
+        # groups do not parse.
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' web/build/out.ll
         sed -i '/^attributes #[0-9]* = { }$/d' web/build/out.ll
         llc --mtriple=wasm64-wasi -filetype=obj web/build/out.ll

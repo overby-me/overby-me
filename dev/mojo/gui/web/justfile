@@ -2,8 +2,10 @@ build:
     mkdir -p build
     rm -f build/out.cwasm
     mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
-    sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
-    sed -i 's/ nocreateundeforpoison//g' build/out.ll
+    # Strip the host CPU attributes before retargeting: their presence
+    # overrides the wasm target's default features (losing bulk-memory, so
+    # memmove lowers to an unresolved import) and the emptied attribute
+    # groups do not parse.
     sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
     sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
     llc --mtriple=wasm64-wasi -filetype=obj build/out.ll

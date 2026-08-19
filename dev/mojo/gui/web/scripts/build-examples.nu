@@ -113,21 +113,19 @@ def main [...examples: string] {
     # Compile Mojo → LLVM IR
     mojo build ...$mojo_flags --emit llvm -I ($core_dir | path join src) -I $examples_dir -o $out_ll ($web_dir | path join src main.mojo)
 
-    # Patch LLVM IR for WASM compatibility
-    # - Remove lifetime intrinsics (not supported by wasm backend)
-    # - Remove nocreateundeforpoison (not recognized by older LLVM)
-    # - Strip target-cpu/target-features (native CPU attrs break WASM)
-    # - Remove empty attribute groups
+    # Strip the host CPU attributes before retargeting: their presence
+    # overrides the wasm target's default features (losing bulk-memory, so
+    # memmove lowers to an unresolved import) and the emptied attribute
+    # groups do not parse.
     open --raw $out_ll
-    | str replace -a " nocreateundeforpoison" ""
     | str replace -a -r ' "target-cpu"="[^"]*"' ""
     | str replace -a -r ' "target-features"="[^"]*"' ""
     | lines
-    | where {|line| $line !~ 'call void @llvm\.lifetime\.(start|end)' }
     | where {|line| $line !~ '^attributes #\d+ = \{ \}$' }
     | str join "\n"
     | $"($in)\n"
     | save -f --raw $out_ll
+
 
     # LLVM IR → WASM object
     llc --mtriple=wasm64-wasi -filetype=obj $out_ll
